@@ -62,12 +62,29 @@ Use the lookup_metric tool to get the SQL definition before computing any KPI.
 
 ### 3. `lookup_metric` fuzzy fallback
 
+**New dependency:** `thefuzz` (backed by `rapidfuzz` C++ for performance). Added to core dependencies.
+
 Current: exact match only, returns `None` on miss.
 
 New behavior in `SemanticSource` implementations:
 1. Try exact match on `name`
-2. If no match, search all metrics where `query` appears as substring in `name` or `description` (case-insensitive)
-3. Return top matches (up to 5)
+2. If no match, fuzzy search using `thefuzz.process.extractBests` over `"{name} {description}"` strings with `scorer=fuzz.token_set_ratio`, `score_cutoff=50`, `limit=5`
+3. Return top matches
+
+```python
+from thefuzz import process, fuzz
+
+def search_metrics(self, query: str) -> list[MetricDefinition]:
+    choices = {
+        metric.name: f"{metric.name} {metric.description}"
+        for metric in self._metrics
+    }
+    results = process.extractBests(
+        query, choices, scorer=fuzz.token_set_ratio,
+        score_cutoff=50, limit=5,
+    )
+    return [self.get_metric(key) for _, _, key in results if self.get_metric(key)]
+```
 
 Add method to `SemanticSource` protocol:
 ```python

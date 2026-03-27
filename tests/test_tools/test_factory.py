@@ -222,3 +222,14 @@ async def test_preview_table_limit_invalid(
     )
     text = result["content"][0]["text"]
     assert "100" in text or "acme" in text
+
+
+@pytest.mark.asyncio
+async def test_describe_table_rejects_non_allowed_table(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "describe_table")
+    result = await tool.callable({"schema": "secret", "table": "data"})
+    text = result["content"][0]["text"]
+    assert "not in the allowed" in text.lower()

@@ -70,19 +70,24 @@ def create_tools(
 
     # ── Tool 3: describe_table ────────────────────────────────────────────────
     async def describe_table(args: dict[str, Any]) -> dict[str, Any]:
-        schema = args.get("schema", "")
-        table = args.get("table", "")
+        schema_name = args.get("schema", "")
+        table_name = args.get("table", "")
+        qualified = f"{schema_name}.{table_name}"
+        if qualified not in contract.allowed_table_names():
+            return _text_response(
+                f"Table {qualified} is not in the allowed tables list."
+            )
         if adapter is None:
             return _text_response(
                 f"No database adapter configured — table description unavailable"
-                f" for {schema}.{table}."
+                f" for {qualified}."
             )
-        ts = adapter.describe_table(schema, table)
+        ts = adapter.describe_table(schema_name, table_name)
         cols = [
             {"name": c.name, "type": c.type, "nullable": c.nullable} for c in ts.columns
         ]
         return _text_response(
-            json.dumps({"schema": schema, "table": table, "columns": cols})
+            json.dumps({"schema": schema_name, "table": table_name, "columns": cols})
         )
 
     # ── Tool 4: preview_table ─────────────────────────────────────────────────
@@ -103,6 +108,8 @@ def create_tools(
             return _text_response(
                 "No database adapter configured — preview unavailable."
             )
+        # preview_table intentionally uses SELECT * — it's a discovery tool
+        # and the table has already been verified against the allowlist above.
         result = adapter.execute(f"SELECT * FROM {qualified} LIMIT {limit}")
         rows = [dict(zip(result.columns, row)) for row in result.rows]
         return _text_response(

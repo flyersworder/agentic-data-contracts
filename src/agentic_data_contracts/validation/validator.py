@@ -23,10 +23,6 @@ class Checker(Protocol):
     ) -> CheckResult: ...
 
 
-# Keep backward-compatible alias
-_Checker = Checker
-
-
 @dataclass
 class ValidationResult:
     blocked: bool

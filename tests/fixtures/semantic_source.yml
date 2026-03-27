@@ -1,0 +1,31 @@
+metrics:
+  - name: total_revenue
+    description: "Total revenue from completed orders"
+    sql_expression: "SUM(amount) FILTER (WHERE status = 'completed')"
+    source_model: analytics.orders
+    filters:
+      - "status = 'completed'"
+
+  - name: active_customers
+    description: "Count of customers with at least one order in the last 90 days"
+    sql_expression: "COUNT(DISTINCT customer_id)"
+    source_model: analytics.customers
+    filters:
+      - "last_order_date >= CURRENT_DATE - INTERVAL '90 days'"
+
+tables:
+  - schema: analytics
+    table: orders
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Primary key"
+      - name: amount
+        type: DECIMAL
+        description: "Order total in USD"
+      - name: tenant_id
+        type: VARCHAR
+        description: "Tenant identifier for multi-tenancy"
+      - name: status
+        type: VARCHAR
+        description: "Order status: pending, completed, cancelled"

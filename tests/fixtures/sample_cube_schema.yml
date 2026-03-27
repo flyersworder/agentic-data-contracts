@@ -1,0 +1,25 @@
+cubes:
+  - name: Orders
+    sql_table: analytics.orders
+    measures:
+      - name: total_revenue
+        sql: "SUM(amount)"
+        type: sum
+        description: "Total revenue from all orders"
+    dimensions:
+      - name: tenant_id
+        sql: "tenant_id"
+        type: string
+      - name: status
+        sql: "status"
+        type: string
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Primary key"
+      - name: amount
+        type: DECIMAL
+        description: "Order total"
+      - name: tenant_id
+        type: VARCHAR
+        description: "Tenant identifier"

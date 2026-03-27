@@ -43,6 +43,7 @@ class TableAllowlistChecker:
 
     def _extract_tables(self, expression: exp.Expr) -> set[str]:
         tables: set[str] = set()
+        cte_names = {cte.alias for cte in expression.find_all(exp.CTE) if cte.alias}
         for table in expression.find_all(exp.Table):
             if isinstance(table.parent, exp.CTE):
                 continue
@@ -52,7 +53,6 @@ class TableAllowlistChecker:
             if table.name:
                 parts.append(table.name)
             full_name = ".".join(parts)
-            cte_names = {cte.alias for cte in expression.find_all(exp.CTE) if cte.alias}
             if full_name and full_name not in cte_names:
                 tables.add(full_name)
         return tables
@@ -111,7 +111,7 @@ class NoSelectStarChecker:
                 passed=False, severity="block", message=f"SQL parse error: {e}"
             )
 
-        for star in parsed.find_all(exp.Star):
+        if any(parsed.find_all(exp.Star)):
             return CheckResult(
                 passed=False,
                 severity="block",

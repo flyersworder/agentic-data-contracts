@@ -89,7 +89,10 @@ def create_tools(
     async def preview_table(args: dict[str, Any]) -> dict[str, Any]:
         schema = args.get("schema", "")
         table = args.get("table", "")
-        limit = int(args.get("limit", 5))
+        try:
+            limit = max(1, min(int(args.get("limit", 5)), 100))
+        except (ValueError, TypeError):
+            limit = 5
         allowed = contract.allowed_table_names()
         qualified = f"{schema}.{table}"
         if qualified not in allowed:

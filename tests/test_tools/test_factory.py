@@ -194,3 +194,31 @@ async def test_preview_table(
     result = await tool.callable({"schema": "analytics", "table": "orders"})
     text = result["content"][0]["text"]
     assert "100" in text or "acme" in text
+
+
+@pytest.mark.asyncio
+async def test_preview_table_limit_clamped(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "preview_table")
+    # limit > 100 should be clamped to 100, no error
+    result = await tool.callable(
+        {"schema": "analytics", "table": "orders", "limit": 9999}
+    )
+    text = result["content"][0]["text"]
+    assert "rows" in text.lower() or "acme" in text
+
+
+@pytest.mark.asyncio
+async def test_preview_table_limit_invalid(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "preview_table")
+    # Non-numeric limit should fall back to 5 without error
+    result = await tool.callable(
+        {"schema": "analytics", "table": "orders", "limit": "bad"}
+    )
+    text = result["content"][0]["text"]
+    assert "100" in text or "acme" in text

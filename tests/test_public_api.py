@@ -34,9 +34,11 @@ def test_validation_imports() -> None:
     )
     from agentic_data_contracts.validation.explain import ExplainAdapter, ExplainResult  # noqa: F401
     from agentic_data_contracts.validation.validator import ValidationResult, Validator  # noqa: F401
+    from agentic_data_contracts.validation import Checker  # noqa: F401
 
     assert CheckResult is not None
     assert Validator is not None
+    assert Checker is not None
 
 
 def test_adapter_imports() -> None:

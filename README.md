@@ -1,6 +1,35 @@
 # agentic-data-contracts
 
-YAML-first data contract governance for AI agents. Define what tables an agent may query, which operations are forbidden, and what resource limits apply — then enforce those rules automatically at query time.
+[![PyPI version](https://img.shields.io/pypi/v/agentic-data-contracts.svg)](https://pypi.org/project/agentic-data-contracts/)
+[![CI](https://github.com/flyersworder/agentic-data-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/flyersworder/agentic-data-contracts/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**Stop your AI agents from running wild on your data.**
+
+`agentic-data-contracts` lets data engineers define governance contracts in YAML — what tables an agent may query, which operations are forbidden, what resource limits apply — and enforces them automatically at query time via SQL validation powered by [sqlglot](https://github.com/tobymao/sqlglot).
+
+**Why?** AI agents querying databases face two problems: **resource runaway** (unbounded compute, endless retries, cost overruns) and **semantic inconsistency** (wrong tables, missing filters, ad-hoc metric definitions). This library addresses both with a single YAML contract.
+
+**Works with:** [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) (primary target), or any Python agent framework. Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
+
+## How It Works
+
+```
+Agent: "SELECT * FROM analytics.orders"
+  -> BLOCKED (no SELECT * — specify explicit columns)
+
+Agent: "SELECT order_id, amount FROM analytics.orders"
+  -> BLOCKED (missing required filter: tenant_id)
+
+Agent: "SELECT order_id, amount FROM analytics.orders WHERE tenant_id = 'acme'"
+  -> PASSED + WARN (consider using semantic revenue definition)
+
+Agent: "DELETE FROM analytics.orders WHERE id = 1"
+  -> BLOCKED (forbidden operation: DELETE)
+```
+
+The contract defines the rules. The library enforces them — before the query ever reaches the database.
 
 ## Installation
 

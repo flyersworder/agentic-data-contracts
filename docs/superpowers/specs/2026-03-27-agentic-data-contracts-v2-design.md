@@ -148,9 +148,16 @@ from agentic_data_contracts import DataContract
 
 dc = DataContract.from_yaml("data_contract.yml")
 
-# Generate system prompt for the agent
-system_prompt = dc.to_system_prompt()
-# Lists allowed tables, forbidden operations, active rules, semantic guidance
+# Generate contract section for the system prompt
+contract_prompt = dc.to_system_prompt()
+# Returns a section listing allowed tables, forbidden operations, active rules, semantic guidance
+
+# Users compose their own system prompt and append the contract section:
+system_prompt = f"""You are an analytics assistant for Acme Corp.
+Always be concise and include methodology notes.
+
+{contract_prompt}
+"""
 ```
 
 ### ContractSession (Lightweight Enforcement)
@@ -280,9 +287,12 @@ Tools are returned as Claude Agent SDK `@tool`-decorated async functions. Each t
 from claude_agent_sdk import create_sdk_mcp_server, ClaudeAgentOptions
 
 server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=tools)
+user_prompt = "You are an analytics assistant for Acme Corp."
+system_prompt = f"{user_prompt}\n\n{dc.to_system_prompt()}"
+
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
-    system_prompt=dc.to_system_prompt(),
+    system_prompt=system_prompt,
     mcp_servers={"dc": server},
     allowed_tools=[f"mcp__dc__{t.name}" for t in tools],
 )
@@ -524,9 +534,13 @@ server = create_sdk_mcp_server(
     name="data-contracts", version="1.0.0", tools=sdk_tools
 )
 
+# User's own system prompt + contract rules appended
+user_prompt = """You are a revenue analytics assistant for Acme Corp.
+Always be concise and include methodology notes in your answers."""
+
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
-    system_prompt=dc.to_system_prompt(),
+    system_prompt=f"{user_prompt}\n\n{dc.to_system_prompt()}",
     mcp_servers={"dc": server},
     allowed_tools=[f"mcp__dc__{t.name}" for t in sdk_tools],
 )

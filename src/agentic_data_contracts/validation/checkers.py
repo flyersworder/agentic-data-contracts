@@ -87,13 +87,19 @@ class OperationBlocklistChecker:
                     message=f"Forbidden operation: {op_name}",
                 )
 
-        if "TRUNCATE" in forbidden and isinstance(parsed, exp.Command):
-            if parsed.this and str(parsed.this).upper() == "TRUNCATE":
-                return CheckResult(
-                    passed=False,
-                    severity="block",
-                    message="Forbidden operation: TRUNCATE",
-                )
+        if "TRUNCATE" in forbidden and (
+            isinstance(parsed, exp.TruncateTable)
+            or (
+                isinstance(parsed, exp.Command)
+                and parsed.this
+                and str(parsed.this).upper() == "TRUNCATE"
+            )
+        ):
+            return CheckResult(
+                passed=False,
+                severity="block",
+                message="Forbidden operation: TRUNCATE",
+            )
 
         return CheckResult(passed=True, severity="block", message="")
 

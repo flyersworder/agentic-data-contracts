@@ -57,6 +57,11 @@ class TestTableAllowlistChecker:
         )
         assert result.passed
 
+    def test_malformed_sql_blocked(self, contract: DataContract) -> None:
+        result = TableAllowlistChecker().check_sql("NOT VALID SQL AT ALL !!!", contract)
+        assert not result.passed
+        assert "parse error" in result.message.lower() or not result.passed
+
 
 class TestOperationBlocklistChecker:
     def test_select_passes(self, contract: DataContract) -> None:
@@ -89,6 +94,13 @@ class TestOperationBlocklistChecker:
             "UPDATE analytics.orders SET id = 1", contract
         )
         assert not result.passed
+
+    def test_truncate_blocked(self, contract: DataContract) -> None:
+        result = OperationBlocklistChecker().check_sql(
+            "TRUNCATE TABLE analytics.orders", contract
+        )
+        assert not result.passed
+        assert "TRUNCATE" in result.message
 
 
 class TestNoSelectStarChecker:

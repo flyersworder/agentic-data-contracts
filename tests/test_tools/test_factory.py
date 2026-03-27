@@ -233,3 +233,61 @@ async def test_describe_table_rejects_non_allowed_table(
     result = await tool.callable({"schema": "secret", "table": "data"})
     text = result["content"][0]["text"]
     assert "not in the allowed" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_query_cost_estimate_with_adapter(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "query_cost_estimate")
+    result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
+    text = result["content"][0]["text"]
+    assert "schema_valid" in text
+
+
+@pytest.mark.asyncio
+async def test_query_cost_estimate_without_adapter(
+    contract: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "query_cost_estimate")
+    result = await tool.callable({"sql": "SELECT 1"})
+    text = result["content"][0]["text"]
+    assert "unavailable" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_with_source(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+    result = await tool.callable({})
+    text = result["content"][0]["text"]
+    assert "total_revenue" in text
+
+
+@pytest.mark.asyncio
+async def test_run_query_session_limit_exceeded(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    from agentic_data_contracts.core.session import ContractSession
+
+    session = ContractSession(contract)
+    session.record_retry()
+    session.record_retry()
+    session.record_retry()
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, session=session
+    )
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable(
+        {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'x'"}
+    )
+    text = result["content"][0]["text"]
+    assert (
+        "blocked" in text.lower()
+        or "limit" in text.lower()
+        or "exceeded" in text.lower()
+    )

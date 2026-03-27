@@ -1,0 +1,51 @@
+metrics:
+  - name: total_revenue
+    description: "Total revenue from completed orders"
+    sql_expression: "SUM(amount) FILTER (WHERE status = 'completed')"
+    source_model: analytics.orders
+    filters:
+      - "status = 'completed'"
+  - name: revenue_by_region
+    description: "Revenue broken down by customer region"
+    sql_expression: "SUM(o.amount) GROUP BY c.region"
+    source_model: analytics.orders
+    filters:
+      - "o.status = 'completed'"
+
+tables:
+  - schema: analytics
+    table: orders
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Order ID"
+      - name: customer_id
+        type: INTEGER
+        description: "FK to customers"
+      - name: amount
+        type: DECIMAL
+        description: "Order total in USD"
+      - name: status
+        type: VARCHAR
+        description: "pending, completed, cancelled"
+      - name: tenant_id
+        type: VARCHAR
+        description: "Tenant identifier"
+      - name: created_at
+        type: DATE
+        description: "Order date"
+  - schema: analytics
+    table: customers
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Customer ID"
+      - name: name
+        type: VARCHAR
+        description: "Customer name"
+      - name: region
+        type: VARCHAR
+        description: "Geographic region"
+      - name: tenant_id
+        type: VARCHAR
+        description: "Tenant identifier"

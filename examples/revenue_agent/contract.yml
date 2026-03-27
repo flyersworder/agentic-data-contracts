@@ -1,0 +1,29 @@
+version: "1.0"
+name: revenue-analysis
+
+semantic:
+  source:
+    type: yaml
+    path: "./semantic.yml"
+  allowed_tables:
+    - schema: analytics
+      tables: [orders, customers, subscriptions]
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  rules:
+    - name: tenant_isolation
+      description: "All queries must filter by tenant_id"
+      enforcement: block
+    - name: use_semantic_revenue
+      description: "Revenue calculations must use the dbt metric definition"
+      enforcement: warn
+    - name: no_select_star
+      description: "Must specify explicit columns"
+      enforcement: block
+
+resources:
+  cost_limit_usd: 5.00
+  max_retries: 3
+  token_budget: 50000
+
+temporal:
+  max_duration_seconds: 300

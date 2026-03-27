@@ -26,10 +26,12 @@ class DuckDBAdapter:
 
     def explain(self, sql: str) -> ExplainResult:
         try:
-            self.connection.execute(f"EXPLAIN {sql}")
+            result = self.connection.execute(f"EXPLAIN {sql}")
+            rows = result.fetchall()
+            estimated_rows = self._parse_row_estimate(rows)
             return ExplainResult(
                 estimated_cost_usd=None,
-                estimated_rows=None,
+                estimated_rows=estimated_rows,
                 schema_valid=True,
                 errors=[],
             )
@@ -40,6 +42,22 @@ class DuckDBAdapter:
                 schema_valid=False,
                 errors=[str(e)],
             )
+
+    def _parse_row_estimate(self, explain_rows: list[tuple]) -> int | None:
+        """Parse DuckDB EXPLAIN output for estimated row count.
+
+        DuckDB EXPLAIN includes lines with ~N indicating estimated cardinality.
+        We take the last ~N in the output (top-level node estimate).
+        """
+        import re
+
+        last_estimate = None
+        for row in explain_rows:
+            text = str(row[1]) if len(row) > 1 else str(row[0])
+            match = re.search(r"~(\d+)", text)
+            if match:
+                last_estimate = int(match.group(1))
+        return last_estimate
 
     def describe_table(self, schema: str, table: str) -> TableSchema:
         rows = self.connection.execute(

@@ -47,6 +47,14 @@ def test_explain(adapter: DuckDBAdapter) -> None:
     assert result.errors == []
 
 
+def test_explain_returns_row_estimate(adapter: DuckDBAdapter) -> None:
+    result = adapter.explain("SELECT id FROM analytics.orders")
+    assert result.schema_valid
+    # DuckDB should provide a row estimate
+    assert result.estimated_rows is not None
+    assert result.estimated_rows >= 0
+
+
 def test_explain_invalid_sql(adapter: DuckDBAdapter) -> None:
     result = adapter.explain("SELECT nonexistent FROM analytics.orders")
     assert not result.schema_valid

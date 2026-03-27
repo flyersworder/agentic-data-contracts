@@ -270,7 +270,22 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
-# Returns all 10 tools as plain Python functions
+# Returns all 10 tools as @tool-decorated async functions
+# compatible with claude_agent_sdk.create_sdk_mcp_server()
+```
+
+Tools are returned as Claude Agent SDK `@tool`-decorated async functions. Each tool accepts `args: dict` and returns `{"content": [{"type": "text", "text": ...}]}`. The caller bundles them into an MCP server:
+
+```python
+from claude_agent_sdk import create_sdk_mcp_server, ClaudeAgentOptions
+
+server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=tools)
+options = ClaudeAgentOptions(
+    model="claude-sonnet-4-6",
+    system_prompt=dc.to_system_prompt(),
+    mcp_servers={"dc": server},
+    allowed_tools=[f"mcp__dc__{t.name}" for t in tools],
+)
 ```
 
 ### Middleware
@@ -279,11 +294,13 @@ tools = create_tools(dc, adapter=adapter)
 from agentic_data_contracts import contract_middleware
 
 @contract_middleware(contract, adapter=adapter)
-def my_custom_query_tool(sql: str) -> dict:
+async def my_custom_query_tool(args: dict) -> dict:
     """Existing query tool with custom logic."""
-    return my_database.execute(sql)
+    result = await my_database.execute(args["sql"])
+    return {"content": [{"type": "text", "text": str(result)}]}
 
 # Middleware: intercept sql → validate → block/warn → call wrapped → track session
+# Returns a @tool-decorated async function compatible with create_sdk_mcp_server()
 ```
 
 ### Graceful Degradation Without Adapter
@@ -490,21 +507,41 @@ DuckDB for integration tests — zero setup, runs in CI without credentials.
 
 ```python
 # examples/revenue_agent/agent.py
+import asyncio
 from agentic_data_contracts import DataContract, create_tools
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
-from claude_agent_sdk import Agent
+from claude_agent_sdk import (
+    query, ClaudeAgentOptions, create_sdk_mcp_server,
+    AssistantMessage, TextBlock,
+)
 
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("sample_data.duckdb")
-tools = create_tools(dc, adapter=adapter)
 
-agent = Agent(
-    model="claude-sonnet-4-6",
-    tools=tools,
-    instructions=dc.to_system_prompt(),
+# Create contract-aware tools and bundle into MCP server
+sdk_tools = create_tools(dc, adapter=adapter)
+server = create_sdk_mcp_server(
+    name="data-contracts", version="1.0.0", tools=sdk_tools
 )
 
-result = agent.run("What was total revenue by region in Q1 2025?")
+options = ClaudeAgentOptions(
+    model="claude-sonnet-4-6",
+    system_prompt=dc.to_system_prompt(),
+    mcp_servers={"dc": server},
+    allowed_tools=[f"mcp__dc__{t.name}" for t in sdk_tools],
+)
+
+async def main():
+    async for message in query(
+        prompt="What was total revenue by region in Q1 2025?",
+        options=options,
+    ):
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    print(block.text)
+
+asyncio.run(main())
 ```
 
 **Runtime behavior:**

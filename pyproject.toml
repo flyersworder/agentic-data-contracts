@@ -4,12 +4,40 @@ version = "0.1.0"
 description = "YAML-first data contract governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
+authors = [{ name = "Qing", email = "qingye779@gmail.com" }]
+license = { text = "MIT" }
+keywords = [
+    "ai-agents",
+    "data-contracts",
+    "data-governance",
+    "sql-validation",
+    "llm",
+    "claude",
+    "analytics",
+    "dbt",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+]
 dependencies = [
     "sqlglot>=23.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/flyersworder/agentic-data-contracts"
+Repository = "https://github.com/flyersworder/agentic-data-contracts"
+Issues = "https://github.com/flyersworder/agentic-data-contracts/issues"
+Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/main/docs/architecture.md"
 
 [project.optional-dependencies]
 agent-sdk = ["claude-agent-sdk"]
@@ -21,6 +49,7 @@ duckdb = ["duckdb"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=6.0",
     "duckdb",
 ]
 all = [

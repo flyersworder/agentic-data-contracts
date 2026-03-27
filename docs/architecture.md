@@ -1,9 +1,8 @@
-# Agentic Data Contracts v2 — Design Spec
+# Agentic Data Contracts — Architecture
 
 **Date:** 2026-03-27
-**Status:** Draft
+**Status:** Implemented (v0.1.0)
 **Author:** Qing Ye + Claude
-**Supersedes:** 2026-03-26-agentic-data-contracts-design.md
 
 ## Problem Statement
 

@@ -220,3 +220,11 @@ See [`examples/revenue_agent/`](examples/revenue_agent/) for a complete working 
 uv run python examples/revenue_agent/setup_db.py
 uv run python examples/revenue_agent/agent.py "What was Q1 revenue by region?"
 ```
+
+## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for the full design spec covering the layered architecture, YAML schema, validation pipeline, tool design, semantic sources, database adapters, and the optional `ai-agent-contracts` bridge.
+
+## License
+
+MIT

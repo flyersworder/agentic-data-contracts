@@ -15,6 +15,7 @@ semantic:
     - name: tenant_isolation
       description: "All queries must include a WHERE tenant_id = filter"
       enforcement: block
+      filter_column: tenant_id
     - name: use_approved_metrics
       description: "Revenue calculations must use the semantic layer definition"
       enforcement: warn

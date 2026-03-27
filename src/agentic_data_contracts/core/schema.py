@@ -29,6 +29,7 @@ class SemanticRule(BaseModel):
     name: str
     description: str
     enforcement: Enforcement
+    filter_column: str | None = None  # explicit column for required filter rules
 
 
 class SemanticConfig(BaseModel):

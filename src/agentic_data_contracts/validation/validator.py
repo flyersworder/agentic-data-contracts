@@ -62,11 +62,14 @@ class Validator:
         # Build required filters from block rules that mention filter patterns
         required_filters: list[str] = []
         for rule in self.contract.block_rules():
-            name_lower = rule.name.lower()
-            if "isolation" in name_lower or "filter" in name_lower:
-                col = self._extract_filter_column(rule.description)
-                if col:
-                    required_filters.append(col)
+            if rule.filter_column:
+                required_filters.append(rule.filter_column)
+            else:
+                name_lower = rule.name.lower()
+                if "isolation" in name_lower or "filter" in name_lower:
+                    col = self._extract_filter_column(rule.description)
+                    if col:
+                        required_filters.append(col)
 
         if required_filters:
             checkers.append(

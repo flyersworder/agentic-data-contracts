@@ -117,3 +117,38 @@ def test_explain_within_limits_passes(contract: DataContract) -> None:
     validator = Validator(contract, explain_adapter=adapter)
     result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
     assert not result.blocked
+
+
+def test_explicit_filter_column() -> None:
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["users"]})
+            ],
+            rules=[
+                SemanticRule(
+                    name="org_filter",
+                    description="Must filter by organization",
+                    enforcement=Enforcement.BLOCK,
+                    filter_column="org_id",
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+    result = validator.validate("SELECT id FROM public.users")
+    assert result.blocked
+    assert any("org_id" in r for r in result.reasons)
+
+    result = validator.validate("SELECT id FROM public.users WHERE org_id = 'x'")
+    assert not result.blocked

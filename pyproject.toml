@@ -1,0 +1,52 @@
+[project]
+name = "agentic-data-contracts"
+version = "0.1.0"
+description = "YAML-first data contract governance for AI agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "sqlglot>=23.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+agent-sdk = ["claude-agent-sdk"]
+agent-contracts = ["ai-agent-contracts>=0.2.0"]
+bigquery = ["google-cloud-bigquery"]
+snowflake = ["snowflake-connector-python"]
+postgres = ["psycopg2-binary"]
+duckdb = ["duckdb"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "duckdb",
+]
+all = [
+    "agentic-data-contracts[agent-sdk,agent-contracts,bigquery,snowflake,postgres,duckdb]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_data_contracts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+src = ["src"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+unresolved-import = "ignore"

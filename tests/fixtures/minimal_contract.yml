@@ -1,0 +1,9 @@
+version: "1.0"
+name: basic-query
+
+semantic:
+  allowed_tables:
+    - schema: public
+      tables: [users]
+  forbidden_operations: [DELETE, DROP]
+  rules: []

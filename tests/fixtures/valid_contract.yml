@@ -1,0 +1,41 @@
+version: "1.0"
+name: revenue-analysis
+
+semantic:
+  source:
+    type: dbt
+    path: "./dbt/manifest.json"
+  allowed_tables:
+    - schema: analytics
+      tables: [orders, customers, subscriptions]
+    - schema: raw
+      tables: []
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  rules:
+    - name: tenant_isolation
+      description: "All queries must include a WHERE tenant_id = filter"
+      enforcement: block
+    - name: use_approved_metrics
+      description: "Revenue calculations must use the semantic layer definition"
+      enforcement: warn
+    - name: no_select_star
+      description: "Queries must specify explicit columns, no SELECT *"
+      enforcement: block
+
+resources:
+  cost_limit_usd: 5.00
+  max_query_time_seconds: 30
+  max_retries: 3
+  max_rows_scanned: 1000000
+  token_budget: 50000
+
+temporal:
+  max_duration_seconds: 300
+
+success_criteria:
+  - name: query_uses_semantic_definitions
+    weight: 0.4
+  - name: results_are_reproducible
+    weight: 0.3
+  - name: output_includes_methodology
+    weight: 0.3

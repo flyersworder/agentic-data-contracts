@@ -22,7 +22,7 @@ def contract_middleware(
         session = ContractSession(contract)
 
     dialect = adapter.dialect if adapter else None
-    validator = Validator(contract, dialect=dialect)
+    validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
 
     def decorator(fn):
         @functools.wraps(fn)

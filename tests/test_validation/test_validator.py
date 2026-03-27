@@ -3,7 +3,16 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation.explain import ExplainResult
 from agentic_data_contracts.validation.validator import Validator
+
+
+class FakeExplainAdapter:
+    def __init__(self, result: ExplainResult) -> None:
+        self._result = result
+
+    def explain(self, sql: str) -> ExplainResult:
+        return self._result
 
 
 @pytest.fixture
@@ -64,4 +73,47 @@ def test_minimal_contract_permissive(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "minimal_contract.yml")
     validator = Validator(dc)
     result = validator.validate("SELECT * FROM public.users")
+    assert not result.blocked
+
+
+def test_explain_cost_exceeds_limit(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=10.0, estimated_rows=100, schema_valid=True)
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.blocked
+    assert any("cost" in r.lower() for r in result.reasons)
+
+
+def test_explain_rows_exceeds_limit(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=1.0, estimated_rows=2000000, schema_valid=True)
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.blocked
+    assert any("rows" in r.lower() for r in result.reasons)
+
+
+def test_explain_schema_invalid_blocks(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=None,
+            estimated_rows=None,
+            schema_valid=False,
+            errors=["Column not found"],
+        )
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.blocked
+
+
+def test_explain_within_limits_passes(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=1.0, estimated_rows=500, schema_valid=True)
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
     assert not result.blocked

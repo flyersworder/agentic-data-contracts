@@ -14,12 +14,17 @@ from agentic_data_contracts.validation.checkers import (
     RequiredFilterChecker,
     TableAllowlistChecker,
 )
+from agentic_data_contracts.validation.explain import ExplainAdapter
 
 
-class _Checker(Protocol):
+class Checker(Protocol):
     def check_sql(
         self, sql: str, contract: DataContract, dialect: str | None = None
     ) -> CheckResult: ...
+
+
+# Keep backward-compatible alias
+_Checker = Checker
 
 
 @dataclass
@@ -33,13 +38,19 @@ class ValidationResult:
 class Validator:
     """Runs all applicable checkers against a SQL query."""
 
-    def __init__(self, contract: DataContract, dialect: str | None = None) -> None:
+    def __init__(
+        self,
+        contract: DataContract,
+        dialect: str | None = None,
+        explain_adapter: ExplainAdapter | None = None,
+    ) -> None:
         self.contract = contract
         self.dialect = dialect
+        self.explain_adapter = explain_adapter
         self._checkers = self._build_checkers()
 
-    def _build_checkers(self) -> list[tuple[str, _Checker]]:
-        checkers: list[tuple[str, _Checker]] = []
+    def _build_checkers(self) -> list[tuple[str, Checker]]:
+        checkers: list[tuple[str, Checker]] = []
         semantic = self.contract.schema.semantic
 
         if semantic.allowed_tables:
@@ -100,6 +111,37 @@ class Validator:
                     warnings.append(result.message)
                 else:
                     log_messages.append(result.message)
+
+        # Layer 2: EXPLAIN checks (only when Layer 1 passes and adapter is provided)
+        if not reasons and self.explain_adapter is not None:
+            explain_result = self.explain_adapter.explain(sql)
+            if not explain_result.schema_valid:
+                reasons.append(
+                    f"Schema validation failed: {', '.join(explain_result.errors)}"
+                )
+            else:
+                res = self.contract.schema.resources
+                if res:
+                    if (
+                        res.cost_limit_usd is not None
+                        and explain_result.estimated_cost_usd is not None
+                        and explain_result.estimated_cost_usd > res.cost_limit_usd
+                    ):
+                        cost = explain_result.estimated_cost_usd
+                        limit = res.cost_limit_usd
+                        reasons.append(
+                            f"Estimated cost ${cost:.2f} exceeds limit ${limit:.2f}"
+                        )
+                    if (
+                        res.max_rows_scanned is not None
+                        and explain_result.estimated_rows is not None
+                        and explain_result.estimated_rows > res.max_rows_scanned
+                    ):
+                        rows = explain_result.estimated_rows
+                        max_rows = res.max_rows_scanned
+                        reasons.append(
+                            f"Estimated rows {rows:,} exceeds limit {max_rows:,}"
+                        )
 
         return ValidationResult(
             blocked=len(reasons) > 0,

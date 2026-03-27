@@ -38,7 +38,7 @@ def create_tools(
         session = ContractSession(contract)
 
     dialect = adapter.dialect if adapter else None
-    validator = Validator(contract, dialect=dialect)
+    validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:

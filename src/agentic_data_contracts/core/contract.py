@@ -60,6 +60,38 @@ class DataContract:
             r for r in self.schema.semantic.rules if r.enforcement == Enforcement.LOG
         ]
 
+    def load_semantic_source(self) -> SemanticSource | None:
+        """Auto-load the semantic source from the contract's source config.
+
+        Returns None if no source is configured.
+        """
+        source_config = self.schema.semantic.source
+        if source_config is None:
+            return None
+
+        from agentic_data_contracts.semantic.cube import CubeSource
+        from agentic_data_contracts.semantic.dbt import DbtSource
+        from agentic_data_contracts.semantic.yaml_source import YamlSource
+
+        source_type = source_config.type.lower()
+        path = source_config.path
+
+        loaders: dict[str, type] = {
+            "yaml": YamlSource,
+            "dbt": DbtSource,
+            "cube": CubeSource,
+        }
+
+        loader_cls = loaders.get(source_type)
+        if loader_cls is None:
+            msg = (
+                f"Unknown semantic source type: '{source_type}'."
+                f" Supported: {list(loaders.keys())}"
+            )
+            raise ValueError(msg)
+
+        return loader_cls(path)
+
     def to_system_prompt(self, semantic_source: SemanticSource | None = None) -> str:
         sections: list[str] = []
         sections.append("## Data Contract: " + self.name)

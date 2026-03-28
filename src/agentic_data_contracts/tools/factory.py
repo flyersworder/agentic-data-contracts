@@ -37,6 +37,10 @@ def create_tools(
     if session is None:
         session = ContractSession(contract)
 
+    # Auto-load semantic source from contract config if not provided
+    if semantic_source is None:
+        semantic_source = contract.load_semantic_source()
+
     dialect = adapter.dialect if adapter else None
     validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
 

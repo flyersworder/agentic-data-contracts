@@ -59,6 +59,9 @@ version: "1.0"
 name: revenue-analysis
 
 semantic:
+  source:
+    type: yaml
+    path: "./semantic.yml"
   allowed_tables:
     - schema: analytics
       tables: [orders, customers, subscriptions]
@@ -86,13 +89,12 @@ temporal:
 ```python
 from agentic_data_contracts import DataContract, create_tools
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
-from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
-semantic = YamlSource("semantic.yml")
 
-tools = create_tools(dc, adapter=adapter, semantic_source=semantic)
+# Semantic source is auto-loaded from contract config (source.type + source.path)
+tools = create_tools(dc, adapter=adapter)
 ```
 
 ### 3. Use with the Claude Agent SDK

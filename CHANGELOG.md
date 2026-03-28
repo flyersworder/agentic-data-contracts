@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-28
+
+### Added
+
+- **Auto-load semantic source**: `DataContract.load_semantic_source()` reads `source.type` and `source.path` from the contract YAML and instantiates the correct `SemanticSource` (YamlSource, DbtSource, or CubeSource)
+- **Zero-config tools**: `create_tools()` auto-loads the semantic source from contract config when none is explicitly passed
+
 ## [0.2.0] - 2026-03-28
 
 ### Added

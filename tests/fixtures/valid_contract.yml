@@ -11,6 +11,9 @@ semantic:
     - schema: raw
       tables: []
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  domains:
+    revenue: [total_revenue]
+    engagement: [active_customers]
   rules:
     - name: tenant_isolation
       description: "All queries must include a WHERE tenant_id = filter"

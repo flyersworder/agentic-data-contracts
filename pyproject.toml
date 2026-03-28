@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.1.0"
+version = "0.2.0"
 description = "YAML-first data contract governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,7 @@ dependencies = [
     "sqlglot>=23.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "thefuzz>=0.22.1",
 ]
 
 [project.urls]

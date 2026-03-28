@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -11,6 +12,9 @@ from agentic_data_contracts.core.schema import (
     Enforcement,
     SemanticRule,
 )
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.semantic.base import SemanticSource
 
 
 class DataContract:
@@ -56,7 +60,7 @@ class DataContract:
             r for r in self.schema.semantic.rules if r.enforcement == Enforcement.LOG
         ]
 
-    def to_system_prompt(self) -> str:
+    def to_system_prompt(self, semantic_source: SemanticSource | None = None) -> str:
         sections: list[str] = []
         sections.append("## Data Contract: " + self.name)
 
@@ -90,6 +94,18 @@ class DataContract:
                 )
                 sections.append(line)
 
+        # Available metrics
+        metrics_section = self._build_metrics_section(semantic_source)
+        if metrics_section:
+            sections.append(metrics_section)
+        elif self.schema.semantic.source:
+            src = self.schema.semantic.source
+            line = (
+                f"\n### Semantic Source\nConsult {src.path} ({src.type})"
+                " for metric definitions before computing metrics."
+            )
+            sections.append(line)
+
         # Resource limits
         res = self.schema.resources
         if res:
@@ -110,13 +126,40 @@ class DataContract:
             dur = self.schema.temporal.max_duration_seconds
             sections.append(f"\n### Time Limit\n- Max session duration: {dur}s")
 
-        # Semantic source
-        if self.schema.semantic.source:
-            src = self.schema.semantic.source
-            line = (
-                f"\n### Semantic Source\nConsult {src.path} ({src.type})"
-                " for metric definitions before computing metrics."
-            )
-            sections.append(line)
-
         return "\n".join(sections)
+
+    def _build_metrics_section(
+        self, semantic_source: SemanticSource | None
+    ) -> str | None:
+        if semantic_source is None:
+            return None
+
+        metrics = semantic_source.get_metrics()
+        if not metrics:
+            return None
+
+        domains = self.schema.semantic.domains
+        lines: list[str] = []
+        lines.append(
+            "\n### Available Metrics (use lookup_metric for full SQL definitions)"
+        )
+
+        if domains:
+            metric_map = {m.name: m for m in metrics}
+            for domain, names in domains.items():
+                entries = []
+                for name in names:
+                    m = metric_map.get(name)
+                    if m:
+                        entries.append(f"{m.name} \u2014 {m.description}")
+                if entries:
+                    lines.append(f"**{domain}:** {', '.join(entries)}")
+        else:
+            for m in metrics:
+                lines.append(f"- {m.name} \u2014 {m.description}")
+
+        lines.append(
+            "\nUse the lookup_metric tool to get the SQL definition"
+            " before computing any KPI."
+        )
+        return "\n".join(lines)

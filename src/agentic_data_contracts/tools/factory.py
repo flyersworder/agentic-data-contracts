@@ -121,6 +121,17 @@ def create_tools(
         if semantic_source is None:
             return _text_response("No semantic source configured.")
         metrics = semantic_source.get_metrics()
+        domain_filter = args.get("domain")
+        if domain_filter:
+            domains = contract.schema.semantic.domains
+            allowed_names = set(domains.get(domain_filter, []))
+            if not allowed_names:
+                available = list(domains.keys()) if domains else []
+                return _text_response(
+                    f"Domain '{domain_filter}' not found."
+                    f" Available domains: {available}"
+                )
+            metrics = [m for m in metrics if m.name in allowed_names]
         data = [
             {
                 "name": m.name,
@@ -136,17 +147,40 @@ def create_tools(
         metric_name = args.get("metric_name", "")
         if semantic_source is None:
             return _text_response("No semantic source configured.")
+        # Try exact match first
         metric = semantic_source.get_metric(metric_name)
-        if metric is None:
+        if metric is not None:
+            data = {
+                "name": metric.name,
+                "description": metric.description,
+                "sql_expression": metric.sql_expression,
+                "source_model": metric.source_model,
+                "filters": metric.filters,
+            }
+            return _text_response(json.dumps(data))
+        # Fuzzy fallback
+        candidates = semantic_source.search_metrics(metric_name)
+        if not candidates:
             return _text_response(f"Metric '{metric_name}' not found.")
-        data = {
-            "name": metric.name,
-            "description": metric.description,
-            "sql_expression": metric.sql_expression,
-            "source_model": metric.source_model,
-            "filters": metric.filters,
-        }
-        return _text_response(json.dumps(data))
+        data = [
+            {
+                "name": m.name,
+                "description": m.description,
+                "sql_expression": m.sql_expression,
+                "source_model": m.source_model,
+                "filters": m.filters,
+            }
+            for m in candidates
+        ]
+        return _text_response(
+            json.dumps(
+                {
+                    "query": metric_name,
+                    "exact_match": False,
+                    "candidates": data,
+                }
+            )
+        )
 
     # ── Tool 7: validate_query ────────────────────────────────────────────────
     async def validate_query(args: dict[str, Any]) -> dict[str, Any]:
@@ -322,8 +356,20 @@ def create_tools(
         ),
         ToolDef(
             name="list_metrics",
-            description="List all metric definitions from the semantic source.",
-            input_schema={"type": "object", "properties": {}, "required": []},
+            description=(
+                "List metric definitions from the semantic source,"
+                " optionally filtered by domain."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "Optional domain to filter metrics by",
+                    }
+                },
+                "required": [],
+            },
             callable=list_metrics,
         ),
         ToolDef(

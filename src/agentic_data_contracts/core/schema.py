@@ -37,6 +37,7 @@ class SemanticConfig(BaseModel):
     allowed_tables: list[AllowedTable] = Field(default_factory=list)
     forbidden_operations: list[str] = Field(default_factory=list)
     rules: list[SemanticRule] = Field(default_factory=list)
+    domains: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ResourceConfig(BaseModel):

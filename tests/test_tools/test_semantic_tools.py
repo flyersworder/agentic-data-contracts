@@ -1,0 +1,119 @@
+"""Tests for enhanced lookup_metric (fuzzy) and list_metrics (domain filter)."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.schema import (
+    AllowedTable,
+    DataContractSchema,
+    SemanticConfig,
+)
+from agentic_data_contracts.semantic.yaml_source import YamlSource
+from agentic_data_contracts.tools.factory import create_tools
+
+
+@pytest.fixture
+def semantic(fixtures_dir: Path) -> YamlSource:
+    return YamlSource(fixtures_dir / "semantic_source.yml")
+
+
+@pytest.fixture
+def contract_with_domains(fixtures_dir: Path) -> DataContract:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            domains={
+                "revenue": ["total_revenue"],
+                "engagement": ["active_customers"],
+            },
+        ),
+    )
+    return DataContract(schema)
+
+
+@pytest.fixture
+def contract_no_domains(fixtures_dir: Path) -> DataContract:
+    return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+
+
+@pytest.mark.asyncio
+async def test_lookup_metric_exact_match(
+    contract_no_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_no_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    result = await tool.callable({"metric_name": "total_revenue"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert data["name"] == "total_revenue"
+    assert "SUM(amount)" in data["sql_expression"]
+
+
+@pytest.mark.asyncio
+async def test_lookup_metric_fuzzy_fallback(
+    contract_no_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_no_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    result = await tool.callable({"metric_name": "revenue from orders"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert data["exact_match"] is False
+    assert len(data["candidates"]) >= 1
+    names = [c["name"] for c in data["candidates"]]
+    assert "total_revenue" in names
+
+
+@pytest.mark.asyncio
+async def test_lookup_metric_no_match(
+    contract_no_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_no_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    result = await tool.callable({"metric_name": "xyznonexistent"})
+    text = result["content"][0]["text"]
+    assert "not found" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_no_domain(
+    contract_no_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_no_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+    result = await tool.callable({})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert len(data["metrics"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_with_domain(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+    result = await tool.callable({"domain": "revenue"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert len(data["metrics"]) == 1
+    assert data["metrics"][0]["name"] == "total_revenue"
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_unknown_domain(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+    result = await tool.callable({"domain": "nonexistent"})
+    text = result["content"][0]["text"]
+    assert "not found" in text.lower()

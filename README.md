@@ -111,11 +111,15 @@ from claude_agent_sdk import (
 
 server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=tools)
 
+# Contract limits map to SDK options (token_budget → task_budget, max_retries → max_turns)
+sdk_config = dc.to_sdk_config()
+
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
     system_prompt=f"You are a revenue analytics assistant.\n\n{dc.to_system_prompt()}",
     mcp_servers={"dc": server},
     allowed_tools=[f"mcp__dc__{t.name}" for t in tools],
+    **sdk_config,
 )
 
 async def run(prompt: str) -> None:

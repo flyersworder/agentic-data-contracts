@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-03-28
+
+### Added
+
+- **SDK config generation**: `DataContract.to_sdk_config()` maps contract limits to Claude Agent SDK options (`token_budget` → `task_budget`, `max_retries` → `max_turns`)
+
 ## [0.2.1] - 2026-03-28
 
 ### Added

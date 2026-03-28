@@ -60,6 +60,21 @@ class DataContract:
             r for r in self.schema.semantic.rules if r.enforcement == Enforcement.LOG
         ]
 
+    def to_sdk_config(self) -> dict[str, object]:
+        """Generate Claude Agent SDK configuration from contract limits.
+
+        Returns a dict of SDK options derived from contract resource/temporal
+        constraints, suitable for passing to ClaudeAgentOptions.
+        """
+        config: dict[str, object] = {}
+        res = self.schema.resources
+        if res:
+            if res.token_budget is not None:
+                config["task_budget"] = res.token_budget
+            if res.max_retries is not None:
+                config["max_turns"] = res.max_retries
+        return config
+
     def load_semantic_source(self) -> SemanticSource | None:
         """Auto-load the semantic source from the contract's source config.
 

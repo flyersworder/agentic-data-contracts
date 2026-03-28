@@ -97,7 +97,7 @@ adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
 ```
 
-### 3. Use with the Claude Agent SDK
+### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.51`)
 
 ```python
 import asyncio

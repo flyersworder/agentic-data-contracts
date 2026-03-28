@@ -41,7 +41,7 @@ Issues = "https://github.com/flyersworder/agentic-data-contracts/issues"
 Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/main/docs/architecture.md"
 
 [project.optional-dependencies]
-agent-sdk = ["claude-agent-sdk"]
+agent-sdk = ["claude-agent-sdk>=0.1.51"]
 agent-contracts = ["ai-agent-contracts>=0.2.0"]
 bigquery = ["google-cloud-bigquery"]
 snowflake = ["snowflake-connector-python"]

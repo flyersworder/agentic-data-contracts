@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-03-27
-**Status:** Implemented (v0.1.0)
+**Date:** 2026-03-28
+**Status:** Implemented (v0.2.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -100,11 +100,17 @@ semantic:
   # What the agent must NOT do
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
 
+  # Optional: group metrics by business domain for scalable discovery
+  domains:
+    revenue: [total_revenue, gross_margin]
+    engagement: [active_customers, churn_rate]
+
   # Governance rules (per-rule enforcement)
   rules:
     - name: tenant_isolation
       description: "All queries must include a WHERE tenant_id = filter"
       enforcement: block               # block | warn | log
+      filter_column: tenant_id         # explicit column for required filter
 
     - name: use_approved_metrics
       description: "Revenue calculations must use the semantic layer definition"
@@ -244,8 +250,8 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 2. **`list_tables(schema?)`** — Allowed tables with column summary
 3. **`describe_table(schema, table)`** — Full column details from database (name, type, description, partitioning)
 4. **`preview_table(schema, table, limit=5)`** — Sample rows from a table
-5. **`list_metrics()`** — All metrics from semantic source
-6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula
+5. **`list_metrics(domain?)`** — All metrics from semantic source, optionally filtered by domain
+6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula; fuzzy fallback when no exact match
 
 #### Execution tools (query with governance)
 
@@ -330,7 +336,10 @@ class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...
     def get_metric(self, name: str) -> MetricDefinition | None: ...
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
+    def search_metrics(self, query: str) -> list[MetricDefinition]: ...
 ```
+
+**Fuzzy metric search:** When `lookup_metric` receives a query that doesn't exactly match a metric name, it falls back to `search_metrics()` which uses `thefuzz` (`token_set_ratio` scorer, cutoff 50) to find the best matches by name + description. A shared `fuzzy_search_metrics()` helper in `base.py` provides this logic for all source implementations.
 
 **Built-in sources:**
 

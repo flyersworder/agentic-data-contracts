@@ -157,8 +157,8 @@ asyncio.run(demo())
 | `list_tables` | List allowed tables, optionally filtered by schema |
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
-| `list_metrics` | List all metric definitions from the semantic source |
-| `lookup_metric` | Get the full definition of a specific metric |
+| `list_metrics` | List metric definitions, optionally filtered by domain |
+| `lookup_metric` | Get a metric definition; fuzzy search fallback when no exact match |
 | `validate_query` | Validate a SQL query against contract rules without executing |
 | `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
 | `run_query` | Validate and execute a SQL query, returning results |
@@ -217,6 +217,26 @@ semantic:
   source:
     type: cube
     path: "./cube/schema.yml"
+```
+
+## Scalable Metric Discovery
+
+For large data lakes with hundreds of KPIs, group metrics by domain and let the agent discover them efficiently:
+
+```yaml
+semantic:
+  domains:
+    acquisition: [CAC, CPA, CPL, click_through_rate]
+    retention: [churn_rate, LTV, retention_30d]
+    attribution: [ROAS, first_touch_revenue]
+```
+
+The system prompt gets a compact index (names + descriptions grouped by domain). The agent uses `lookup_metric` for full SQL definitions — with fuzzy fallback when it doesn't know the exact name:
+
+```
+lookup_metric("CAC")                → exact match, full definition
+lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candidates
+list_metrics(domain="retention")    → only retention metrics
 ```
 
 ## Resource Limits

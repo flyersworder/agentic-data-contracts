@@ -7,7 +7,7 @@
 ## Tech Stack
 
 - Python 3.12+, uv for dependency management
-- Pydantic 2 for schema validation, sqlglot for SQL parsing
+- Pydantic 2 for schema validation, sqlglot for SQL parsing, thefuzz for fuzzy metric search
 - pytest + pytest-asyncio for testing, DuckDB for integration tests
 - ruff for linting/formatting, ty for type checking
 - prek for pre-commit hooks

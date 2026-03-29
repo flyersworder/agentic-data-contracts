@@ -23,6 +23,7 @@ class DataContract:
 
     def __init__(self, schema: DataContractSchema) -> None:
         self.schema = schema
+        self._tables_resolved: bool = False
 
     @property
     def name(self) -> str:
@@ -43,16 +44,18 @@ class DataContract:
         """Check if any schema uses wildcard ('*') for tables."""
         return any("*" in entry.tables for entry in self.schema.semantic.allowed_tables)
 
-    def resolve_tables(self, adapter: DatabaseAdapter) -> None:
+    def resolve_tables(self, adapter: DatabaseAdapter, *, force: bool = False) -> None:
         """Expand wildcard tables using the database adapter.
 
         Replaces ["*"] entries with actual table names from the database.
-        Call this once after creating the adapter. Results are cached
-        on the schema object.
+        Results are cached — subsequent calls are no-ops unless force=True.
         """
+        if self._tables_resolved and not force:
+            return
         for entry in self.schema.semantic.allowed_tables:
             if "*" in entry.tables:
                 entry.tables = adapter.list_tables(entry.schema_)
+        self._tables_resolved = True
 
     def allowed_table_names(self) -> list[str]:
         names: list[str] = []
@@ -204,6 +207,10 @@ class DataContract:
 
         return "\n".join(sections)
 
+    # Max metrics to list individually in system prompt before switching
+    # to compact domain-only summaries.
+    METRIC_DETAIL_THRESHOLD = 20
+
     def _build_metrics_section(
         self, semantic_source: SemanticSource | None
     ) -> str | None:
@@ -216,11 +223,27 @@ class DataContract:
 
         domains = self.schema.semantic.domains
         lines: list[str] = []
-        lines.append(
-            "\n### Available Metrics (use lookup_metric for full SQL definitions)"
-        )
+        compact = len(metrics) > self.METRIC_DETAIL_THRESHOLD
 
-        if domains:
+        if compact and domains:
+            # Large metric set with domains — show counts only
+            lines.append("\n### Available Metrics")
+            metric_names = {m.name for m in metrics}
+            domain_parts = []
+            for domain, names in domains.items():
+                count = sum(1 for n in names if n in metric_names)
+                if count:
+                    domain_parts.append(f"{domain} ({count})")
+            lines.append(f"Domains: {', '.join(domain_parts)}")
+            lines.append(
+                '\nUse list_metrics(domain="...") to browse,'
+                ' lookup_metric("...") to get SQL definitions.'
+            )
+        elif domains:
+            # Small metric set with domains — list with descriptions
+            lines.append(
+                "\n### Available Metrics (use lookup_metric for full SQL definitions)"
+            )
             metric_map = {m.name: m for m in metrics}
             for domain, names in domains.items():
                 entries = []
@@ -230,12 +253,27 @@ class DataContract:
                         entries.append(f"{m.name} \u2014 {m.description}")
                 if entries:
                     lines.append(f"**{domain}:** {', '.join(entries)}")
+            lines.append(
+                "\nUse the lookup_metric tool to get the SQL definition"
+                " before computing any KPI."
+            )
+        elif compact:
+            # Large metric set without domains — just show count
+            lines.append("\n### Available Metrics")
+            lines.append(f"{len(metrics)} metrics available.")
+            lines.append(
+                "\nUse list_metrics() to browse,"
+                ' lookup_metric("...") to get SQL definitions.'
+            )
         else:
+            # Small metric set without domains — list all
+            lines.append(
+                "\n### Available Metrics (use lookup_metric for full SQL definitions)"
+            )
             for m in metrics:
                 lines.append(f"- {m.name} \u2014 {m.description}")
-
-        lines.append(
-            "\nUse the lookup_metric tool to get the SQL definition"
-            " before computing any KPI."
-        )
+            lines.append(
+                "\nUse the lookup_metric tool to get the SQL definition"
+                " before computing any KPI."
+            )
         return "\n".join(lines)

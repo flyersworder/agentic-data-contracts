@@ -261,6 +261,18 @@ lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candi
 list_metrics(domain="retention")    → only retention metrics
 ```
 
+## Scaling to Large Organizations
+
+Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
+
+| Concern | How it scales |
+|---|---|
+| **System prompt size** | >20 metrics: auto-switches to compact domain counts (`acquisition (45)`) instead of listing every metric |
+| **Table discovery** | `list_tables` is paginated (default 50, with offset). Use `schema` filter for targeted browsing |
+| **Wildcard schemas** | `tables: ["*"]` discovers tables from the database. Resolution is cached — no repeated queries |
+| **Metric lookup** | Fuzzy search via `thefuzz` (C++ backed) — sub-millisecond even with 1000+ metrics |
+| **SQL validation** | Set-based allowlist check — O(1) per table reference regardless of allowlist size |
+
 ## Resource Limits
 
 ```yaml

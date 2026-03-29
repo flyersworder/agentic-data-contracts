@@ -60,14 +60,23 @@ def create_tools(
     # ── Tool 2: list_tables ───────────────────────────────────────────────────
     async def list_tables(args: dict[str, Any]) -> dict[str, Any]:
         schema_filter = args.get("schema")
-        tables: list[dict[str, Any]] = []
+        try:
+            limit = max(1, int(args.get("limit", 50)))
+        except (ValueError, TypeError):
+            limit = 50
+        try:
+            offset = max(0, int(args.get("offset", 0)))
+        except (ValueError, TypeError):
+            offset = 0
+        all_tables: list[dict[str, Any]] = []
         for entry in contract.schema.semantic.allowed_tables:
             if schema_filter and entry.schema_ != schema_filter:
                 continue
             if "*" in entry.tables:
                 return _text_response(
                     f"Schema '{entry.schema_}' uses wildcard tables"
-                    " but no database adapter is available to resolve them."
+                    " but no database adapter is available"
+                    " to resolve them."
                 )
             for table in entry.tables:
                 info: dict[str, Any] = {
@@ -78,8 +87,13 @@ def create_tools(
                     ts = semantic_source.get_table_schema(entry.schema_, table)
                     if ts is not None:
                         info["columns"] = [c.name for c in ts.columns]
-                tables.append(info)
-        return _text_response(json.dumps({"tables": tables}))
+                all_tables.append(info)
+        total = len(all_tables)
+        page = all_tables[offset : offset + limit]
+        result: dict[str, Any] = {"tables": page, "total": total}
+        if offset + limit < total:
+            result["next_offset"] = offset + limit
+        return _text_response(json.dumps(result))
 
     # ── Tool 3: describe_table ────────────────────────────────────────────────
     async def describe_table(args: dict[str, Any]) -> dict[str, Any]:
@@ -321,7 +335,8 @@ def create_tools(
             name="list_tables",
             description=(
                 "List allowed tables, optionally filtered by schema. "
-                "Includes column names when semantic source is available."
+                "Includes column names when semantic source is available. "
+                "Paginated \u2014 use limit/offset for large schemas."
             ),
             input_schema={
                 "type": "object",
@@ -329,7 +344,15 @@ def create_tools(
                     "schema": {
                         "type": "string",
                         "description": "Optional schema name to filter by",
-                    }
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max tables to return (default 50)",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Skip first N tables (default 0)",
+                    },
                 },
                 "required": [],
             },

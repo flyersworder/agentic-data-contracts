@@ -9,12 +9,15 @@ semantic:
     - schema: analytics
       tables: [orders, customers, subscriptions]
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  domains:
+    revenue: [total_revenue, revenue_by_region]
   rules:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
       enforcement: block
+      filter_column: tenant_id
     - name: use_semantic_revenue
-      description: "Revenue calculations must use the dbt metric definition"
+      description: "Revenue calculations must use the metric definitions"
       enforcement: warn
     - name: no_select_star
       description: "Must specify explicit columns"

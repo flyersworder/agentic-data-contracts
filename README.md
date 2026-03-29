@@ -295,6 +295,33 @@ resources:
 | `agent-sdk` | `claude-agent-sdk` | Claude Agent SDK integration |
 | `agent-contracts` | `ai-agent-contracts>=0.2.0` | ai-agent-contracts bridge |
 
+## Optional: Formal Governance with ai-agent-contracts
+
+The library works standalone with lightweight enforcement. Install [`ai-agent-contracts`](https://pypi.org/project/ai-agent-contracts/) to upgrade to the formal governance framework:
+
+```bash
+pip install "agentic-data-contracts[agent-contracts]"
+```
+
+```python
+from agentic_data_contracts.bridge.compiler import compile_to_contract
+
+contract = compile_to_contract(dc)  # YAML → formal 7-tuple Contract
+```
+
+**What you get with the bridge:**
+
+| Concern | Standalone | With ai-agent-contracts |
+|---|---|---|
+| Resource tracking | Manual counters | Formal `ResourceConstraints` with auto-enforcement |
+| Rule violations | Exception + retry | `TerminationCondition` with contract state machine |
+| Success evaluation | Log-based | Weighted `SuccessCriterion` scoring, LLM judge support |
+| Contract lifecycle | None | `DRAFTED → ACTIVE → FULFILLED / VIOLATED / TERMINATED` |
+| Framework support | Claude Agent SDK | + LiteLLM, LangChain, LangGraph, Google ADK |
+| Multi-agent | Single agent | Coordination patterns (sequential, parallel, hierarchical) |
+
+**When to use it:** formal audit trails, success scoring, multi-agent coordination, or integration with non-Claude agent frameworks.
+
 ## Example
 
 See [`examples/revenue_agent/`](examples/revenue_agent/) for a complete working example with a DuckDB database, YAML semantic source, and Claude Agent SDK integration.

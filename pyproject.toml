@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.2.2"
+version = "0.2.3"
 description = "YAML-first data contract governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -41,7 +41,7 @@ Issues = "https://github.com/flyersworder/agentic-data-contracts/issues"
 Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/main/docs/architecture.md"
 
 [project.optional-dependencies]
-agent-sdk = ["claude-agent-sdk>=0.1.51"]
+agent-sdk = ["claude-agent-sdk>=0.1.52"]
 agent-contracts = ["ai-agent-contracts>=0.2.0"]
 bigquery = ["google-cloud-bigquery"]
 snowflake = ["snowflake-connector-python"]

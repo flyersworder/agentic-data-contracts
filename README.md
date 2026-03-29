@@ -97,29 +97,26 @@ adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
 ```
 
-### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.51`)
+### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.52`)
 
 ```python
 import asyncio
+from agentic_data_contracts import create_sdk_mcp_server
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     TextBlock,
-    create_sdk_mcp_server,
     query,
 )
 
-server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=tools)
-
-# Contract limits map to SDK options (token_budget → task_budget, max_retries → max_turns)
-sdk_config = dc.to_sdk_config()
+# One-liner: wraps all 10 tools and bundles into an SDK MCP server
+server = create_sdk_mcp_server(dc, adapter=adapter)
 
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
     system_prompt=f"You are a revenue analytics assistant.\n\n{dc.to_system_prompt()}",
     mcp_servers={"dc": server},
-    allowed_tools=[f"mcp__dc__{t.name}" for t in tools],
-    **sdk_config,
+    **dc.to_sdk_config(),  # token_budget → task_budget, max_retries → max_turns
 )
 
 async def run(prompt: str) -> None:

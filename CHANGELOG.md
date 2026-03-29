@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-03-29
+
+### Added
+
+- **SDK MCP server convenience method**: `create_sdk_mcp_server(contract, adapter=...)` wraps all 10 tools with the SDK's `@tool` decorator and bundles them into a ready-to-use MCP server for `ClaudeAgentOptions.mcp_servers`
+- **Top-level export**: `from agentic_data_contracts import create_sdk_mcp_server`
+
+### Changed
+
+- **SDK dependency**: Bumped `claude-agent-sdk` minimum to `>=0.1.52`
+
 ## [0.2.2] - 2026-03-28
 
 ### Added

@@ -224,6 +224,23 @@ semantic:
     path: "./cube/schema.yml"
 ```
 
+## Table Relationships
+
+Define join paths so the agent knows how to combine tables correctly:
+
+```yaml
+# semantic.yml
+relationships:
+  - from: analytics.orders.customer_id
+    to: analytics.customers.id
+    type: many_to_one
+  - from: analytics.orders.product_id
+    to: analytics.products.id
+    type: many_to_one
+```
+
+The agent sees these in its system prompt and uses them to write correct JOINs instead of guessing from column names.
+
 ## Scalable Metric Discovery
 
 For large data lakes with hundreds of KPIs, group metrics by domain and let the agent discover them efficiently:

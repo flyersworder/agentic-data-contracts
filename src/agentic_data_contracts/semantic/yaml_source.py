@@ -7,7 +7,11 @@ from pathlib import Path
 import yaml
 
 from agentic_data_contracts.adapters.base import Column, TableSchema
-from agentic_data_contracts.semantic.base import MetricDefinition, fuzzy_search_metrics
+from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    Relationship,
+    fuzzy_search_metrics,
+)
 
 
 class YamlSource:
@@ -38,6 +42,14 @@ class YamlSource:
                     for c in t.get("columns", [])
                 ]
             )
+        self._relationships = [
+            Relationship(
+                from_=r["from"],
+                to=r["to"],
+                type=r.get("type", "many_to_one"),
+            )
+            for r in raw.get("relationships", [])
+        ]
 
     def get_metrics(self) -> list[MetricDefinition]:
         return list(self._metrics)
@@ -50,6 +62,9 @@ class YamlSource:
 
     def search_metrics(self, query: str) -> list[MetricDefinition]:
         return fuzzy_search_metrics(self._metrics, self.get_metric, query)
+
+    def get_relationships(self) -> list[Relationship]:
+        return list(self._relationships)
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")

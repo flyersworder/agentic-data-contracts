@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-03-29
+
+### Added
+
+- **Table relationship metadata**: `Relationship` dataclass and `get_relationships()` on `SemanticSource` protocol for declaring join paths between tables (from/to column + relationship type)
+- **Relationships in system prompt**: `to_system_prompt()` includes join paths so the agent knows how to combine tables correctly
+- **YamlSource relationships**: Parsed from `relationships` section in semantic YAML files
+- DbtSource and CubeSource return empty relationships (ready for future parsing of native join metadata)
+
 ## [0.2.4] - 2026-03-29
 
 ### Added

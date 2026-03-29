@@ -171,6 +171,17 @@ class DataContract:
             )
             sections.append(line)
 
+        # Table relationships
+        if semantic_source is not None:
+            rels = semantic_source.get_relationships()
+            if rels:
+                sections.append(
+                    "\n### Table Relationships\n"
+                    "Use these join paths when combining tables:"
+                )
+                for r in rels:
+                    sections.append(f"- {r.from_} \u2192 {r.to} ({r.type})")
+
         # Resource limits
         res = self.schema.resources
         if res:

@@ -29,3 +29,24 @@ tables:
       - name: status
         type: VARCHAR
         description: "Order status: pending, completed, cancelled"
+      - name: customer_id
+        type: INTEGER
+        description: "FK to customers"
+
+  - schema: analytics
+    table: customers
+    columns:
+      - name: id
+        type: INTEGER
+        description: "Primary key"
+      - name: name
+        type: VARCHAR
+        description: "Customer name"
+      - name: region
+        type: VARCHAR
+        description: "Geographic region"
+
+relationships:
+  - from: analytics.orders.customer_id
+    to: analytics.customers.id
+    type: many_to_one

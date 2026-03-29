@@ -7,7 +7,11 @@ from pathlib import Path
 import yaml
 
 from agentic_data_contracts.adapters.base import Column, TableSchema
-from agentic_data_contracts.semantic.base import MetricDefinition, fuzzy_search_metrics
+from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    Relationship,
+    fuzzy_search_metrics,
+)
 
 
 class CubeSource:
@@ -53,6 +57,9 @@ class CubeSource:
 
     def search_metrics(self, query: str) -> list[MetricDefinition]:
         return fuzzy_search_metrics(self._metrics, self.get_metric, query)
+
+    def get_relationships(self) -> list[Relationship]:
+        return []  # TODO: parse from Cube joins config
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")

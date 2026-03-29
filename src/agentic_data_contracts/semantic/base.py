@@ -20,12 +20,20 @@ class MetricDefinition:
     filters: list[str] = field(default_factory=list)
 
 
+@dataclass
+class Relationship:
+    from_: str  # "schema.table.column"
+    to: str  # "schema.table.column"
+    type: str = "many_to_one"  # many_to_one | one_to_one | many_to_many
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...
     def get_metric(self, name: str) -> MetricDefinition | None: ...
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
+    def get_relationships(self) -> list[Relationship]: ...
 
 
 def fuzzy_search_metrics(

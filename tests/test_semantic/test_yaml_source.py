@@ -39,7 +39,7 @@ def test_get_metric_not_found(source: YamlSource) -> None:
 def test_get_table_schema(source: YamlSource) -> None:
     schema = source.get_table_schema("analytics", "orders")
     assert schema is not None
-    assert len(schema.columns) == 4
+    assert len(schema.columns) == 5
     col_names = [c.name for c in schema.columns]
     assert "id" in col_names
     assert "amount" in col_names

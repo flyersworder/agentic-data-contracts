@@ -59,6 +59,18 @@ class DuckDBAdapter:
                 last_estimate = int(match.group(1))
         return last_estimate
 
+    def list_tables(self, schema: str) -> list[str]:
+        rows = self.connection.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = ?
+            ORDER BY table_name
+            """,
+            [schema],
+        ).fetchall()
+        return [row[0] for row in rows]
+
     def describe_table(self, schema: str, table: str) -> TableSchema:
         rows = self.connection.execute(
             """

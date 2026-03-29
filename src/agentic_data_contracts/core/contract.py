@@ -14,6 +14,7 @@ from agentic_data_contracts.core.schema import (
 )
 
 if TYPE_CHECKING:
+    from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.semantic.base import SemanticSource
 
 
@@ -38,10 +39,27 @@ class DataContract:
         schema = DataContractSchema.model_validate(raw)
         return cls(schema=schema)
 
+    def has_wildcard_tables(self) -> bool:
+        """Check if any schema uses wildcard ('*') for tables."""
+        return any("*" in entry.tables for entry in self.schema.semantic.allowed_tables)
+
+    def resolve_tables(self, adapter: DatabaseAdapter) -> None:
+        """Expand wildcard tables using the database adapter.
+
+        Replaces ["*"] entries with actual table names from the database.
+        Call this once after creating the adapter. Results are cached
+        on the schema object.
+        """
+        for entry in self.schema.semantic.allowed_tables:
+            if "*" in entry.tables:
+                entry.tables = adapter.list_tables(entry.schema_)
+
     def allowed_table_names(self) -> list[str]:
         names: list[str] = []
         for entry in self.schema.semantic.allowed_tables:
             for table in entry.tables:
+                if table == "*":
+                    continue  # unresolved wildcard — skip
                 names.append(f"{entry.schema_}.{table}")
         return names
 

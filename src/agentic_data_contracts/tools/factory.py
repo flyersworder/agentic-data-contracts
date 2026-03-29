@@ -41,6 +41,10 @@ def create_tools(
     if semantic_source is None:
         semantic_source = contract.load_semantic_source()
 
+    # Resolve wildcard tables if adapter is available
+    if adapter is not None and contract.has_wildcard_tables():
+        contract.resolve_tables(adapter)
+
     dialect = adapter.dialect if adapter else None
     validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
 
@@ -60,6 +64,11 @@ def create_tools(
         for entry in contract.schema.semantic.allowed_tables:
             if schema_filter and entry.schema_ != schema_filter:
                 continue
+            if "*" in entry.tables:
+                return _text_response(
+                    f"Schema '{entry.schema_}' uses wildcard tables"
+                    " but no database adapter is available to resolve them."
+                )
             for table in entry.tables:
                 info: dict[str, Any] = {
                     "schema": entry.schema_,

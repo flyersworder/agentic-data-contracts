@@ -64,7 +64,9 @@ semantic:
     path: "./semantic.yml"
   allowed_tables:
     - schema: analytics
-      tables: [orders, customers, subscriptions]
+      tables: ["*"]          # all tables in schema (discovered from database)
+    - schema: marketing
+      tables: [campaigns]    # or list specific tables
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   rules:
     - name: tenant_isolation

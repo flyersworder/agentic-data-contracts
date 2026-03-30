@@ -69,9 +69,9 @@ class ClaudePromptRenderer:
     # ------------------------------------------------------------------
 
     def _render_allowed_tables(self, contract: DataContract) -> list[str]:
-        lines = ["<allowed_tables>"]
+        lines = ["<allowed_tables>", "Only query these tables:"]
         for name in contract.allowed_table_names():
-            lines.append(f"  <table>{name}</table>")
+            lines.append(f"- {name}")
         lines.append("</allowed_tables>")
         return lines
 
@@ -223,26 +223,24 @@ class ClaudePromptRenderer:
         # Forbidden operations
         forbidden = contract.schema.semantic.forbidden_operations
         if forbidden:
-            lines.append("  <forbidden_operations>")
-            for op in forbidden:
-                lines.append(f"    <operation>{op}</operation>")
-            lines.append("  </forbidden_operations>")
+            ops = ", ".join(forbidden)
+            lines.append(f"Forbidden operations: {ops}")
 
         # Block rules
         block_rules = contract.block_rules()
         if block_rules:
-            lines.append("  <block_rules>")
+            lines.append("")
+            lines.append("Rules (violations block execution):")
             for rule in block_rules:
-                lines.append(f'    <rule name="{rule.name}">{rule.description}</rule>')
-            lines.append("  </block_rules>")
+                lines.append(f"- [{rule.name}] {rule.description}")
 
         # Warn rules
         warn_rules = contract.warn_rules()
         if warn_rules:
-            lines.append("  <warn_rules>")
+            lines.append("")
+            lines.append("Rules (violations produce warnings):")
             for rule in warn_rules:
-                lines.append(f'    <rule name="{rule.name}">{rule.description}</rule>')
-            lines.append("  </warn_rules>")
+                lines.append(f"- [{rule.name}] {rule.description}")
 
         lines.append("</constraints>")
         return lines

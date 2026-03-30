@@ -116,6 +116,7 @@ def test_claude_renderer_allowed_tables(fixtures_dir: Path) -> None:
     assert "</data_contract>" in output
     assert "<allowed_tables>" in output
     assert "</allowed_tables>" in output
+    assert "Only query these tables:" in output
     assert "analytics.orders" in output
     assert "analytics.customers" in output
     assert "analytics.subscriptions" in output
@@ -142,10 +143,12 @@ def test_claude_renderer_constraints(fixtures_dir: Path) -> None:
     assert "INSERT" in output
 
     # block rules
+    assert "violations block execution" in output
     assert "tenant_isolation" in output
     assert "no_select_star" in output
 
     # warn rules
+    assert "violations produce warnings" in output
     assert "use_approved_metrics" in output
 
 

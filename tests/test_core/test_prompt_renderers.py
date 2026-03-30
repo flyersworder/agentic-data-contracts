@@ -189,6 +189,15 @@ def test_claude_renderer_no_resources() -> None:
     assert "<resource_limits>" not in output
 
 
+def test_claude_renderer_no_constraints() -> None:
+    """Contracts with no forbidden ops or rules omit the constraints section."""
+    contract = _make_minimal_contract()
+    renderer = ClaudePromptRenderer()
+    output = renderer.render(contract)
+
+    assert "<constraints>" not in output
+
+
 # ---------------------------------------------------------------------------
 # Test 6 — small metric set with semantic_source.yml
 # ---------------------------------------------------------------------------

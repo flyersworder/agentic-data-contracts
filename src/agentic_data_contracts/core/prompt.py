@@ -218,16 +218,20 @@ class ClaudePromptRenderer:
         return lines
 
     def _render_constraints(self, contract: DataContract) -> list[str]:
+        forbidden = contract.schema.semantic.forbidden_operations
+        block_rules = contract.block_rules()
+        warn_rules = contract.warn_rules()
+        if not forbidden and not block_rules and not warn_rules:
+            return []
+
         lines = ["<constraints>"]
 
         # Forbidden operations
-        forbidden = contract.schema.semantic.forbidden_operations
         if forbidden:
             ops = ", ".join(forbidden)
             lines.append(f"Forbidden operations: {ops}")
 
         # Block rules
-        block_rules = contract.block_rules()
         if block_rules:
             lines.append("")
             lines.append("Rules (violations block execution):")
@@ -235,7 +239,6 @@ class ClaudePromptRenderer:
                 lines.append(f"- [{rule.name}] {rule.description}")
 
         # Warn rules
-        warn_rules = contract.warn_rules()
         if warn_rules:
             lines.append("")
             lines.append("Rules (violations produce warnings):")

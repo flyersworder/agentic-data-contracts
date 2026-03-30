@@ -15,6 +15,7 @@ from agentic_data_contracts.core.schema import (
 
 if TYPE_CHECKING:
     from agentic_data_contracts.adapters.base import DatabaseAdapter
+    from agentic_data_contracts.core.prompt import PromptRenderer
     from agentic_data_contracts.semantic.base import SemanticSource
 
 
@@ -128,152 +129,20 @@ class DataContract:
 
         return loader_cls(path)
 
-    def to_system_prompt(self, semantic_source: SemanticSource | None = None) -> str:
-        sections: list[str] = []
-        sections.append("## Data Contract: " + self.name)
+    def to_system_prompt(
+        self,
+        semantic_source: SemanticSource | None = None,
+        *,
+        renderer: PromptRenderer | None = None,
+    ) -> str:
+        """Generate a formatted system prompt section for an AI agent.
 
-        # Allowed tables
-        table_names = self.allowed_table_names()
-        if table_names:
-            sections.append("\n### Allowed Tables\nYou may ONLY query these tables:")
-            for name in table_names:
-                sections.append(f"- {name}")
+        Args:
+            semantic_source: Optional semantic source for metric/relationship data.
+            renderer: Optional custom prompt renderer. Defaults to ClaudePromptRenderer.
+        """
+        if renderer is None:
+            from agentic_data_contracts.core.prompt import ClaudePromptRenderer
 
-        # Forbidden operations
-        if self.schema.semantic.forbidden_operations:
-            ops = ", ".join(self.schema.semantic.forbidden_operations)
-            sections.append(f"\n### Forbidden Operations\nYou must NEVER use: {ops}")
-
-        # Rules
-        block = self.block_rules()
-        warn = self.warn_rules()
-        if block or warn:
-            sections.append("\n### Governance Rules")
-            for rule in block:
-                line = (
-                    f"- **MUST** [{rule.name}]"
-                    f" (violation blocks execution): {rule.description}"
-                )
-                sections.append(line)
-            for rule in warn:
-                line = (
-                    f"- **SHOULD** [{rule.name}]"
-                    f" (violation produces warning): {rule.description}"
-                )
-                sections.append(line)
-
-        # Available metrics
-        metrics_section = self._build_metrics_section(semantic_source)
-        if metrics_section:
-            sections.append(metrics_section)
-        elif self.schema.semantic.source:
-            src = self.schema.semantic.source
-            line = (
-                f"\n### Semantic Source\nConsult {src.path} ({src.type})"
-                " for metric definitions before computing metrics."
-            )
-            sections.append(line)
-
-        # Table relationships
-        if semantic_source is not None:
-            rels = semantic_source.get_relationships()
-            if rels:
-                sections.append(
-                    "\n### Table Relationships\n"
-                    "Use these join paths when combining tables:"
-                )
-                for r in rels:
-                    sections.append(f"- {r.from_} \u2192 {r.to} ({r.type})")
-
-        # Resource limits
-        res = self.schema.resources
-        if res:
-            sections.append("\n### Resource Limits")
-            if res.cost_limit_usd is not None:
-                sections.append(f"- Max cost: ${res.cost_limit_usd:.2f}")
-            if res.max_retries is not None:
-                sections.append(f"- Max retries: {res.max_retries}")
-            if res.token_budget is not None:
-                sections.append(f"- Token budget: {res.token_budget:,}")
-            if res.max_query_time_seconds is not None:
-                sections.append(f"- Max query time: {res.max_query_time_seconds}s")
-            if res.max_rows_scanned is not None:
-                sections.append(f"- Max rows scanned: {res.max_rows_scanned:,}")
-
-        # Temporal limits
-        if self.schema.temporal and self.schema.temporal.max_duration_seconds:
-            dur = self.schema.temporal.max_duration_seconds
-            sections.append(f"\n### Time Limit\n- Max session duration: {dur}s")
-
-        return "\n".join(sections)
-
-    # Max metrics to list individually in system prompt before switching
-    # to compact domain-only summaries.
-    METRIC_DETAIL_THRESHOLD = 20
-
-    def _build_metrics_section(
-        self, semantic_source: SemanticSource | None
-    ) -> str | None:
-        if semantic_source is None:
-            return None
-
-        metrics = semantic_source.get_metrics()
-        if not metrics:
-            return None
-
-        domains = self.schema.semantic.domains
-        lines: list[str] = []
-        compact = len(metrics) > self.METRIC_DETAIL_THRESHOLD
-
-        if compact and domains:
-            # Large metric set with domains — show counts only
-            lines.append("\n### Available Metrics")
-            metric_names = {m.name for m in metrics}
-            domain_parts = []
-            for domain, names in domains.items():
-                count = sum(1 for n in names if n in metric_names)
-                if count:
-                    domain_parts.append(f"{domain} ({count})")
-            lines.append(f"Domains: {', '.join(domain_parts)}")
-            lines.append(
-                '\nUse list_metrics(domain="...") to browse,'
-                ' lookup_metric("...") to get SQL definitions.'
-            )
-        elif domains:
-            # Small metric set with domains — list with descriptions
-            lines.append(
-                "\n### Available Metrics (use lookup_metric for full SQL definitions)"
-            )
-            metric_map = {m.name: m for m in metrics}
-            for domain, names in domains.items():
-                entries = []
-                for name in names:
-                    m = metric_map.get(name)
-                    if m:
-                        entries.append(f"{m.name} \u2014 {m.description}")
-                if entries:
-                    lines.append(f"**{domain}:** {', '.join(entries)}")
-            lines.append(
-                "\nUse the lookup_metric tool to get the SQL definition"
-                " before computing any KPI."
-            )
-        elif compact:
-            # Large metric set without domains — just show count
-            lines.append("\n### Available Metrics")
-            lines.append(f"{len(metrics)} metrics available.")
-            lines.append(
-                "\nUse list_metrics() to browse,"
-                ' lookup_metric("...") to get SQL definitions.'
-            )
-        else:
-            # Small metric set without domains — list all
-            lines.append(
-                "\n### Available Metrics (use lookup_metric for full SQL definitions)"
-            )
-            for m in metrics:
-                lines.append(f"- {m.name} \u2014 {m.description}")
-            lines.append(
-                "\nUse the lookup_metric tool to get the SQL definition"
-                " before computing any KPI."
-            )
-        return "\n".join(lines)
+            renderer = ClaudePromptRenderer()
+        return renderer.render(self, semantic_source)

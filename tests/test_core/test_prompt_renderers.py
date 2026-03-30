@@ -296,3 +296,28 @@ def test_claude_renderer_no_relationships() -> None:
     output = renderer.render(contract, semantic_source=source)
 
     assert "<table_relationships>" not in output
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — custom renderer via to_system_prompt
+# ---------------------------------------------------------------------------
+
+
+def test_custom_renderer_via_to_system_prompt(fixtures_dir: Path) -> None:
+    """Users can pass their own renderer to to_system_prompt."""
+
+    class MyRenderer:
+        def render(self, contract, semantic_source=None):
+            return f"CUSTOM: {contract.name}"
+
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    prompt = dc.to_system_prompt(renderer=MyRenderer())
+    assert prompt == "CUSTOM: revenue-analysis"
+
+
+def test_to_system_prompt_defaults_to_claude_renderer(fixtures_dir: Path) -> None:
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    prompt = dc.to_system_prompt()
+    assert '<data_contract name="revenue-analysis">' in prompt
+    assert "<constraints>" in prompt
+    assert "</data_contract>" in prompt

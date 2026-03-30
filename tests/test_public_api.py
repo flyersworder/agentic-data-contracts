@@ -3,7 +3,9 @@
 
 def test_top_level_imports() -> None:
     from agentic_data_contracts import (
+        ClaudePromptRenderer,
         DataContract,
+        PromptRenderer,
         contract_middleware,
         create_tools,
     )
@@ -11,6 +13,8 @@ def test_top_level_imports() -> None:
     assert DataContract is not None
     assert create_tools is not None
     assert contract_middleware is not None
+    assert PromptRenderer is not None
+    assert ClaudePromptRenderer is not None
 
 
 def test_core_imports() -> None:

@@ -22,7 +22,7 @@ def test_system_prompt_with_source_no_domains(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     source = YamlSource(fixtures_dir / "semantic_source.yml")
     prompt = dc.to_system_prompt(semantic_source=source)
-    assert "Available Metrics" in prompt
+    assert "available_metrics" in prompt
     assert "total_revenue" in prompt
     assert "active_customers" in prompt
     assert "lookup_metric" in prompt
@@ -44,8 +44,8 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
     )
     dc = DataContract(schema)
     prompt = dc.to_system_prompt(semantic_source=source)
-    assert "revenue:" in prompt.lower()
-    assert "engagement:" in prompt.lower()
+    assert 'name="revenue"' in prompt
+    assert 'name="engagement"' in prompt
     assert "total_revenue" in prompt
     assert "active_customers" in prompt
 
@@ -54,5 +54,5 @@ def test_system_prompt_backwards_compatible(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     # Calling without args should work exactly as before
     prompt_no_source = dc.to_system_prompt()
-    assert "Data Contract:" in prompt_no_source
+    assert "data_contract" in prompt_no_source
     assert "analytics.orders" in prompt_no_source

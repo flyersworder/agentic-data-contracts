@@ -58,7 +58,7 @@ def test_system_prompt_includes_relationships(
     )
     dc = DataContract(schema)
     prompt = dc.to_system_prompt(semantic_source=source)
-    assert "Table Relationships" in prompt
+    assert "table_relationships" in prompt
     assert "analytics.orders.customer_id" in prompt
     assert "analytics.customers.id" in prompt
     assert "many_to_one" in prompt

@@ -69,18 +69,18 @@ class TestCompactMetricPrompt:
         dc = _make_contract_with_domains([f"metric_{i}" for i in range(5)])
         prompt = dc.to_system_prompt(semantic_source=source)
         # Should list individual metric descriptions
-        assert "metric_0 \u2014" in prompt
-        assert "metric_4 \u2014" in prompt
+        assert 'name="metric_0"' in prompt
+        assert 'name="metric_4"' in prompt
 
     def test_large_set_shows_domain_counts(self) -> None:
         source = FakeSemanticSource(30)
         dc = _make_contract_with_domains([f"metric_{i}" for i in range(30)])
         prompt = dc.to_system_prompt(semantic_source=source)
         # Should NOT list individual metrics
-        assert "metric_0 \u2014" not in prompt
+        assert 'name="metric_0"' not in prompt
         # Should show domain counts
-        assert "domain_a (15)" in prompt
-        assert "domain_b (15)" in prompt
+        assert 'name="domain_a" count="15"' in prompt
+        assert 'name="domain_b" count="15"' in prompt
         assert "list_metrics" in prompt
 
     def test_large_set_no_domains_shows_count(self) -> None:
@@ -111,12 +111,12 @@ class TestCompactMetricPrompt:
         )
         dc = DataContract(schema)
         prompt = dc.to_system_prompt(semantic_source=source)
-        assert "metric_0 \u2014" in prompt
+        assert 'name="metric_0"' in prompt
 
         # One above threshold — compact mode
         source = FakeSemanticSource(21)
         prompt = dc.to_system_prompt(semantic_source=source)
-        assert "metric_0 \u2014" not in prompt
+        assert 'name="metric_0"' not in prompt
         assert "21 metrics available" in prompt
 
 

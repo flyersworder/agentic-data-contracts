@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Enforcement(StrEnum):
@@ -50,6 +50,15 @@ class SemanticRule(BaseModel):
     table: str | None = None
     query_check: QueryCheck | None = None
     result_check: ResultCheck | None = None
+
+    @field_validator("table")
+    @classmethod
+    def table_must_be_qualified(cls, v: str | None) -> str | None:
+        if v is not None and v != "*" and "." not in v:
+            raise ValueError(
+                f"table must be fully qualified as 'schema.table', got '{v}'"
+            )
+        return v
 
     @model_validator(mode="after")
     def at_most_one_check(self) -> Self:

@@ -139,6 +139,39 @@ def test_table_scoping_optional() -> None:
     assert rule.table is None
 
 
+def test_table_must_be_fully_qualified() -> None:
+    with pytest.raises(ValueError, match="fully qualified"):
+        SemanticRule(
+            name="bad",
+            description="bad",
+            enforcement=Enforcement.BLOCK,
+            table="orders",  # missing schema prefix
+            query_check=QueryCheck(require_limit=True),
+        )
+
+
+def test_table_wildcard_accepted() -> None:
+    rule = SemanticRule(
+        name="global",
+        description="all tables",
+        enforcement=Enforcement.BLOCK,
+        table="*",
+        query_check=QueryCheck(no_select_star=True),
+    )
+    assert rule.table == "*"
+
+
+def test_table_qualified_accepted() -> None:
+    rule = SemanticRule(
+        name="scoped",
+        description="scoped",
+        enforcement=Enforcement.BLOCK,
+        table="analytics.orders",
+        query_check=QueryCheck(required_filter="tenant_id"),
+    )
+    assert rule.table == "analytics.orders"
+
+
 def test_query_check_multiple_fields() -> None:
     qc = QueryCheck(
         required_filter="tenant_id",

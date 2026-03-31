@@ -269,7 +269,10 @@ def create_tools(
             )
             return _text_response(msg)
 
-        # Record estimated cost from EXPLAIN
+        # Record estimated cost from EXPLAIN — charged before execution because
+        # the cost budget tracks database resource consumption, not successful
+        # operations. Even if result checks later block the output, the database
+        # work was performed.
         if vresult.estimated_cost_usd is not None:
             session.record_cost(vresult.estimated_cost_usd)
 

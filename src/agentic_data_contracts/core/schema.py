@@ -44,6 +44,8 @@ class ResultCheck(BaseModel):
 
 
 class SemanticRule(BaseModel):
+    model_config = {"extra": "forbid"}
+
     name: str
     description: str
     enforcement: Enforcement

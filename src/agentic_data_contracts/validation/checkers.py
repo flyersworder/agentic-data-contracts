@@ -13,7 +13,6 @@ from agentic_data_contracts.core.contract import DataContract
 @dataclass
 class CheckResult:
     passed: bool
-    severity: str  # "block" | "warn" | "log"
     message: str
 
 
@@ -45,10 +44,9 @@ class TableAllowlistChecker:
         if disallowed:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=f"Tables not in allowlist: {', '.join(sorted(disallowed))}",
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class OperationBlocklistChecker:
@@ -68,7 +66,6 @@ class OperationBlocklistChecker:
             if isinstance(ast, expr_type) and op_name in forbidden:
                 return CheckResult(
                     passed=False,
-                    severity="block",
                     message=f"Forbidden operation: {op_name}",
                 )
 
@@ -82,11 +79,10 @@ class OperationBlocklistChecker:
         ):
             return CheckResult(
                 passed=False,
-                severity="block",
                 message="Forbidden operation: TRUNCATE",
             )
 
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class NoSelectStarChecker:
@@ -96,10 +92,9 @@ class NoSelectStarChecker:
         if any(ast.find_all(exp.Star)):
             return CheckResult(
                 passed=False,
-                severity="block",
                 message="SELECT * is not allowed — specify explicit columns",
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class RequiredFilterChecker:
@@ -117,10 +112,9 @@ class RequiredFilterChecker:
         if self.column.lower() not in where_columns:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=f"Missing required filter: {self.column}",
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class BlockedColumnsChecker:
@@ -138,7 +132,6 @@ class BlockedColumnsChecker:
         if any(ast.find_all(exp.Star)):
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=(
                     "SELECT * may expose blocked columns: "
                     f"{', '.join(sorted(self.blocked))}"
@@ -155,10 +148,9 @@ class BlockedColumnsChecker:
         if found:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=f"Blocked columns in SELECT: {', '.join(sorted(found))}",
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class RequireLimitChecker:
@@ -168,10 +160,9 @@ class RequireLimitChecker:
         if not list(ast.find_all(exp.Limit)):
             return CheckResult(
                 passed=False,
-                severity="block",
                 message="Query must include a LIMIT clause",
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class MaxJoinsChecker:
@@ -185,12 +176,11 @@ class MaxJoinsChecker:
         if join_count > self.max_joins:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=(
                     f"Query has {join_count} JOINs, exceeds maximum of {self.max_joins}"
                 ),
             )
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")
 
 
 class ResultCheckRunner:
@@ -219,7 +209,6 @@ class ResultCheckRunner:
         if self.min_rows is not None and row_count < self.min_rows:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=(
                     f"Rule '{self.rule_name}': query returned {row_count} rows, "
                     f"minimum is {self.min_rows}"
@@ -228,7 +217,6 @@ class ResultCheckRunner:
         if self.max_rows is not None and row_count > self.max_rows:
             return CheckResult(
                 passed=False,
-                severity="block",
                 message=(
                     f"Rule '{self.rule_name}': query returned {row_count} rows, "
                     f"maximum is {self.max_rows}"
@@ -239,7 +227,7 @@ class ResultCheckRunner:
             col_lower = {c.lower(): i for i, c in enumerate(columns)}
             idx = col_lower.get(self.column.lower())
             if idx is None:
-                return CheckResult(passed=True, severity="block", message="")
+                return CheckResult(passed=True, message="")
 
             values = [row[idx] for row in rows]
 
@@ -247,7 +235,6 @@ class ResultCheckRunner:
                 null_count = sum(1 for v in values if v is None)
                 return CheckResult(
                     passed=False,
-                    severity="block",
                     message=(
                         f"Rule '{self.rule_name}': column '{self.column}' "
                         f"contains {null_count} null values"
@@ -265,7 +252,6 @@ class ResultCheckRunner:
                     if actual_min < self.min_value:
                         return CheckResult(
                             passed=False,
-                            severity="block",
                             message=(
                                 f"Rule '{self.rule_name}': column '{self.column}' "
                                 f"min value {actual_min} "
@@ -277,11 +263,10 @@ class ResultCheckRunner:
                     if actual_max > self.max_value:
                         return CheckResult(
                             passed=False,
-                            severity="block",
                             message=(
                                 f"Rule '{self.rule_name}': column '{self.column}' "
                                 f"max value {actual_max} exceeds limit {self.max_value}"
                             ),
                         )
 
-        return CheckResult(passed=True, severity="block", message="")
+        return CheckResult(passed=True, message="")

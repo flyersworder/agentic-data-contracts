@@ -118,6 +118,19 @@ def test_rule_rejects_both_checks() -> None:
         )
 
 
+def test_old_filter_column_rejected() -> None:
+    """Old YAML with filter_column should fail loudly, not silently lose enforcement."""
+    with pytest.raises(ValueError, match="extra"):
+        SemanticRule.model_validate(
+            {
+                "name": "tenant_filter",
+                "description": "Must filter by tenant_id",
+                "enforcement": "block",
+                "filter_column": "tenant_id",
+            }
+        )
+
+
 def test_advisory_rule_no_checks() -> None:
     """Rules with neither check are advisory — shown in prompt only."""
     rule = SemanticRule(

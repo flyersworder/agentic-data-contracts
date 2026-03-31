@@ -30,7 +30,7 @@ rules:
     result_check: <ResultCheck>|null # post-execution check
 ```
 
-A rule must have exactly one of `query_check` or `result_check` (not both, not neither).
+A rule must have at most one of `query_check` or `result_check` (not both). Rules with neither are **advisory** — they appear in the system prompt as guidance but don't enforce anything.
 
 ### QueryCheck Fields
 
@@ -175,11 +175,9 @@ class SemanticRule(BaseModel):
     result_check: ResultCheck | None = None
 
     @model_validator(mode="after")
-    def exactly_one_check(self) -> Self:
-        has_query = self.query_check is not None
-        has_result = self.result_check is not None
-        if has_query == has_result:
-            raise ValueError("Rule must have exactly one of query_check or result_check")
+    def at_most_one_check(self) -> Self:
+        if self.query_check is not None and self.result_check is not None:
+            raise ValueError("Rule must not have both query_check and result_check")
         return self
 ```
 

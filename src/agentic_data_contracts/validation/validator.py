@@ -25,6 +25,14 @@ from agentic_data_contracts.validation.explain import ExplainAdapter
 
 
 class Checker(Protocol):
+    """Protocol for SQL AST checkers.
+
+    Two usage patterns:
+    - Structural checkers (TableAllowlist, OperationBlocklist) take (ast, contract)
+    - Rule-based checkers (RequiredFilter, NoSelectStar, etc.) take (ast) only
+    The Validator calls them through separate paths; *args bridges both.
+    """
+
     def check_ast(self, ast: exp.Expression, *args: Any) -> CheckResult: ...
 
 
@@ -127,6 +135,10 @@ class Validator:
                         runner,
                     )
                 )
+
+    def pending_result_check_names(self) -> list[str]:
+        """Return names of result checks that will run post-execution."""
+        return [runner.rule_name for _, _, runner in self._result_checkers]
 
     def _is_table_in_scope(
         self, table_scope: str | None, referenced_tables: set[str]

@@ -224,13 +224,11 @@ def create_tools(
             if result.warnings:
                 msg += "\nWarnings:\n" + "\n".join(f"- {w}" for w in result.warnings)
             # Note pending result checks
-            if validator._result_checkers:
-                names = [
-                    runner.rule_name for _, _, runner in validator._result_checkers
-                ]
+            pending = validator.pending_result_check_names()
+            if pending:
                 msg += (
-                    f"\nNote: {len(names)} result check(s) will run after execution: "
-                    + ", ".join(names)
+                    f"\nNote: {len(pending)} result check(s) will run after execution: "
+                    + ", ".join(pending)
                 )
         return _text_response(msg)
 
@@ -305,9 +303,10 @@ def create_tools(
         }
         response_text = json.dumps(data, default=str)
 
-        # Prepend warnings from result checks
-        if rresult.warnings:
-            warning_text = "WARNINGS:\n" + "\n".join(f"- {w}" for w in rresult.warnings)
+        # Prepend warnings from both query checks and result checks
+        all_warnings = vresult.warnings + rresult.warnings
+        if all_warnings:
+            warning_text = "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
             response_text = warning_text + "\n\n" + response_text
 
         return _text_response(response_text)

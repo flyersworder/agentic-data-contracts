@@ -124,7 +124,12 @@ class RequiredFilterChecker:
 
 
 class BlockedColumnsChecker:
-    """Checks that blocked columns don't appear in SELECT."""
+    """Checks that blocked columns don't appear in SELECT.
+
+    Only checks SELECT expressions — references in WHERE/ORDER BY/GROUP BY are
+    not blocked. The intent is to prevent data exposure in results, not to prevent
+    all SQL references to sensitive columns.
+    """
 
     def __init__(self, blocked: list[str]) -> None:
         self.blocked = {c.lower() for c in blocked}

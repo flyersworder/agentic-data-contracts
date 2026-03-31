@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlglot import exp
 
@@ -249,7 +250,9 @@ class ResultCheckRunner:
                 )
 
             numeric_values = [
-                v for v in values if v is not None and isinstance(v, (int, float))
+                v
+                for v in values
+                if v is not None and isinstance(v, (int, float, Decimal))
             ]
             if numeric_values:
                 if self.min_value is not None:

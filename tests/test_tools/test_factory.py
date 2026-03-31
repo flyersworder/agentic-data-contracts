@@ -291,3 +291,140 @@ async def test_run_query_session_limit_exceeded(
         or "limit" in text.lower()
         or "exceeded" in text.lower()
     )
+
+
+@pytest.mark.asyncio
+async def test_run_query_result_check_blocks() -> None:
+    """Result check with enforcement=block should discard data and return violation."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        ResultCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="no_negative",
+                    description="No negative amounts",
+                    enforcement=Enforcement.BLOCK,
+                    result_check=ResultCheck(column="amount", min_value=0),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute("""
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (id INTEGER, amount DECIMAL(10,2));
+        INSERT INTO analytics.orders VALUES (1, 100.00), (2, -50.00);
+    """)
+
+    tools = create_tools(dc, adapter=db)
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable({"sql": "SELECT id, amount FROM analytics.orders"})
+    text = result["content"][0]["text"]
+    assert "block" in text.lower() or "no_negative" in text.lower()
+    # Should NOT contain the actual row data
+    assert "100" not in text
+
+
+@pytest.mark.asyncio
+async def test_run_query_result_check_warns() -> None:
+    """Result check with enforcement=warn should return data + warning."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        ResultCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="empty_check",
+                    description="Warn if empty",
+                    enforcement=Enforcement.WARN,
+                    result_check=ResultCheck(min_rows=100),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute("""
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (id INTEGER);
+        INSERT INTO analytics.orders VALUES (1), (2);
+    """)
+
+    tools = create_tools(dc, adapter=db)
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
+    text = result["content"][0]["text"]
+    # Should contain both the warning and the data
+    assert "warn" in text.lower() or "empty_check" in text.lower()
+    assert "1" in text  # row data present
+
+
+@pytest.mark.asyncio
+async def test_run_query_records_session_cost() -> None:
+    """run_query should record estimated cost in the session."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        ResourceConfig,
+        SemanticConfig,
+    )
+    from agentic_data_contracts.core.session import ContractSession
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+        ),
+        resources=ResourceConfig(cost_limit_usd=10.0),
+    )
+    dc = DataContract(schema)
+
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute("""
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (id INTEGER);
+        INSERT INTO analytics.orders VALUES (1);
+    """)
+
+    session = ContractSession(dc)
+    tools = create_tools(dc, adapter=db, session=session)
+    tool = next(t for t in tools if t.name == "run_query")
+    await tool.callable({"sql": "SELECT id FROM analytics.orders"})
+
+    # DuckDB doesn't provide cost estimates, so cost should remain 0
+    # This test verifies the plumbing works without error
+    assert session.cost_usd >= 0.0

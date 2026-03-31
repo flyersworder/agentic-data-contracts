@@ -220,9 +220,18 @@ def create_tools(
             if result.warnings:
                 msg += "\nWarnings:\n" + "\n".join(f"- {w}" for w in result.warnings)
         else:
-            msg = "VALID — Query passed all checks."
+            msg = "VALID — Query passed all pre-execution checks."
             if result.warnings:
                 msg += "\nWarnings:\n" + "\n".join(f"- {w}" for w in result.warnings)
+            # Note pending result checks
+            if validator._result_checkers:
+                names = [
+                    runner.rule_name for _, _, runner in validator._result_checkers
+                ]
+                msg += (
+                    f"\nNote: {len(names)} result check(s) will run after execution: "
+                    + ", ".join(names)
+                )
         return _text_response(msg)
 
     # ── Tool 8: query_cost_estimate ───────────────────────────────────────────
@@ -253,7 +262,7 @@ def create_tools(
         except LimitExceededError as e:
             return _text_response(f"BLOCKED — Session limit exceeded: {e}")
 
-        # Validate the query
+        # Phase 1 + 2: query checks + EXPLAIN
         vresult = validator.validate(sql)
         if vresult.blocked:
             session.record_retry()
@@ -261,6 +270,10 @@ def create_tools(
                 f"- {r}" for r in vresult.reasons
             )
             return _text_response(msg)
+
+        # Record estimated cost from EXPLAIN
+        if vresult.estimated_cost_usd is not None:
+            session.record_cost(vresult.estimated_cost_usd)
 
         if adapter is None:
             return _text_response(
@@ -273,13 +286,31 @@ def create_tools(
             session.record_retry()
             return _text_response(f"BLOCKED — Query execution failed: {e}")
 
+        # Phase 3: result checks
+        rresult = validator.validate_results(
+            sql, qresult.columns, [tuple(r) for r in qresult.rows]
+        )
+        if rresult.blocked:
+            session.record_retry()
+            msg = "BLOCKED — Result check violations:\n" + "\n".join(
+                f"- {r}" for r in rresult.reasons
+            )
+            return _text_response(msg)
+
         rows = [dict(zip(qresult.columns, row)) for row in qresult.rows]
         data = {
             "columns": qresult.columns,
             "rows": rows,
             "row_count": qresult.row_count,
         }
-        return _text_response(json.dumps(data, default=str))
+        response_text = json.dumps(data, default=str)
+
+        # Prepend warnings from result checks
+        if rresult.warnings:
+            warning_text = "WARNINGS:\n" + "\n".join(f"- {w}" for w in rresult.warnings)
+            response_text = warning_text + "\n\n" + response_text
+
+        return _text_response(response_text)
 
     # ── Tool 10: get_contract_info ────────────────────────────────────────────
     async def get_contract_info(args: dict[str, Any]) -> dict[str, Any]:

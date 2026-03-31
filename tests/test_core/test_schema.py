@@ -7,6 +7,8 @@ from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
     Enforcement,
+    QueryCheck,
+    ResultCheck,
     SemanticRule,
     SuccessCriterionConfig,
 )
@@ -46,13 +48,23 @@ def test_minimal_contract_parses(fixtures_dir: Path) -> None:
 def test_invalid_enforcement_rejected() -> None:
     with pytest.raises(Exception):
         SemanticRule.model_validate(
-            {"name": "bad", "description": "bad rule", "enforcement": "crash"}
+            {
+                "name": "bad",
+                "description": "bad rule",
+                "enforcement": "crash",
+                "query_check": {"no_select_star": True},
+            }
         )
 
 
 def test_enforcement_values() -> None:
     for val in (Enforcement.BLOCK, Enforcement.WARN, Enforcement.LOG):
-        rule = SemanticRule(name="test", description="test", enforcement=val)
+        rule = SemanticRule(
+            name="test",
+            description="test",
+            enforcement=val,
+            query_check=QueryCheck(no_select_star=True),
+        )
         assert rule.enforcement == val
 
 
@@ -66,3 +78,87 @@ def test_success_criteria_weight_validation() -> None:
 def test_allowed_table_empty_tables() -> None:
     t = AllowedTable.model_validate({"schema": "raw", "tables": []})
     assert t.tables == []
+
+
+def test_query_check_rule() -> None:
+    rule = SemanticRule(
+        name="tenant_filter",
+        description="Must filter by tenant_id",
+        enforcement=Enforcement.BLOCK,
+        table="analytics.orders",
+        query_check=QueryCheck(required_filter="tenant_id"),
+    )
+    assert rule.table == "analytics.orders"
+    assert rule.query_check is not None
+    assert rule.query_check.required_filter == "tenant_id"
+    assert rule.result_check is None
+
+
+def test_result_check_rule() -> None:
+    rule = SemanticRule(
+        name="wau_sanity",
+        description="WAU must be reasonable",
+        enforcement=Enforcement.WARN,
+        table="analytics.user_metrics",
+        result_check=ResultCheck(column="wau", max_value=8_000_000_000),
+    )
+    assert rule.result_check is not None
+    assert rule.result_check.column == "wau"
+    assert rule.result_check.max_value == 8_000_000_000
+
+
+def test_rule_rejects_both_checks() -> None:
+    with pytest.raises(ValueError, match="must not have both"):
+        SemanticRule(
+            name="bad",
+            description="bad",
+            enforcement=Enforcement.BLOCK,
+            query_check=QueryCheck(no_select_star=True),
+            result_check=ResultCheck(min_rows=1),
+        )
+
+
+def test_advisory_rule_no_checks() -> None:
+    """Rules with neither check are advisory — shown in prompt only."""
+    rule = SemanticRule(
+        name="advisory",
+        description="Just a guideline",
+        enforcement=Enforcement.WARN,
+    )
+    assert rule.query_check is None
+    assert rule.result_check is None
+
+
+def test_table_scoping_optional() -> None:
+    rule = SemanticRule(
+        name="global_rule",
+        description="Applies everywhere",
+        enforcement=Enforcement.BLOCK,
+        query_check=QueryCheck(require_limit=True),
+    )
+    assert rule.table is None
+
+
+def test_query_check_multiple_fields() -> None:
+    qc = QueryCheck(
+        required_filter="tenant_id",
+        no_select_star=True,
+        max_joins=3,
+    )
+    assert qc.required_filter == "tenant_id"
+    assert qc.no_select_star is True
+    assert qc.max_joins == 3
+
+
+def test_result_check_row_bounds() -> None:
+    rc = ResultCheck(min_rows=1, max_rows=10000)
+    assert rc.min_rows == 1
+    assert rc.max_rows == 10000
+    assert rc.column is None
+
+
+def test_result_check_column_bounds() -> None:
+    rc = ResultCheck(column="revenue", min_value=0, not_null=True)
+    assert rc.column == "revenue"
+    assert rc.min_value == 0
+    assert rc.not_null is True

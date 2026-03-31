@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Enforcement(StrEnum):
@@ -25,11 +26,36 @@ class AllowedTable(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class QueryCheck(BaseModel):
+    required_filter: str | None = None
+    no_select_star: bool | None = None
+    blocked_columns: list[str] | None = None
+    require_limit: bool | None = None
+    max_joins: int | None = None
+
+
+class ResultCheck(BaseModel):
+    column: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    not_null: bool | None = None
+    min_rows: int | None = None
+    max_rows: int | None = None
+
+
 class SemanticRule(BaseModel):
     name: str
     description: str
     enforcement: Enforcement
-    filter_column: str | None = None  # explicit column for required filter rules
+    table: str | None = None
+    query_check: QueryCheck | None = None
+    result_check: ResultCheck | None = None
+
+    @model_validator(mode="after")
+    def at_most_one_check(self) -> Self:
+        if self.query_check is not None and self.result_check is not None:
+            raise ValueError("Rule must not have both query_check and result_check")
+        return self
 
 
 class SemanticConfig(BaseModel):

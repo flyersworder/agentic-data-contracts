@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol, cast
+
+import sqlglot
+from sqlglot import exp
 
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation.checkers import (
+    BlockedColumnsChecker,
     CheckResult,
+    MaxJoinsChecker,
     NoSelectStarChecker,
     OperationBlocklistChecker,
     RequiredFilterChecker,
+    RequireLimitChecker,
+    ResultCheckRunner,
     TableAllowlistChecker,
+    extract_tables,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter
 
 
 class Checker(Protocol):
-    def check_sql(
-        self, sql: str, contract: DataContract, dialect: str | None = None
-    ) -> CheckResult: ...
+    def check_ast(self, ast: exp.Expression, *args: Any) -> CheckResult: ...
 
 
 @dataclass
@@ -29,6 +34,7 @@ class ValidationResult:
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     log_messages: list[str] = field(default_factory=list)
+    estimated_cost_usd: float | None = None
 
 
 class Validator:
@@ -43,75 +49,127 @@ class Validator:
         self.contract = contract
         self.dialect = dialect
         self.explain_adapter = explain_adapter
-        self._checkers = self._build_checkers()
+        self._build_checkers()
 
-    def _build_checkers(self) -> list[tuple[str, Checker]]:
-        checkers: list[tuple[str, Checker]] = []
+    def _build_checkers(self) -> None:
         semantic = self.contract.schema.semantic
 
-        if semantic.allowed_tables:
-            checkers.append(("block", TableAllowlistChecker()))
+        self._table_checker = (
+            TableAllowlistChecker() if semantic.allowed_tables else None
+        )
+        self._operation_checker = (
+            OperationBlocklistChecker() if semantic.forbidden_operations else None
+        )
 
-        if semantic.forbidden_operations:
-            checkers.append(("block", OperationBlocklistChecker()))
+        self._query_checkers: list[tuple[str, str | None, Any]] = []
+        self._result_checkers: list[tuple[str, str | None, ResultCheckRunner]] = []
 
-        # Build required filters from block rules that mention filter patterns
-        required_filters: list[str] = []
-        for rule in self.contract.block_rules():
-            if rule.filter_column:
-                required_filters.append(rule.filter_column)
-            else:
-                name_lower = rule.name.lower()
-                if "isolation" in name_lower or "filter" in name_lower:
-                    col = self._extract_filter_column(rule.description)
-                    if col:
-                        required_filters.append(col)
+        for rule in semantic.rules:
+            table_scope = rule.table if rule.table and rule.table != "*" else None
 
-        if required_filters:
-            checkers.append(
-                ("block", RequiredFilterChecker(required_filters=required_filters))
-            )
+            if rule.query_check is not None:
+                qc = rule.query_check
+                if qc.required_filter is not None:
+                    self._query_checkers.append(
+                        (
+                            rule.enforcement.value,
+                            table_scope,
+                            RequiredFilterChecker(qc.required_filter),
+                        )
+                    )
+                if qc.no_select_star is True:
+                    self._query_checkers.append(
+                        (
+                            rule.enforcement.value,
+                            table_scope,
+                            NoSelectStarChecker(),
+                        )
+                    )
+                if qc.blocked_columns is not None:
+                    self._query_checkers.append(
+                        (
+                            rule.enforcement.value,
+                            table_scope,
+                            BlockedColumnsChecker(qc.blocked_columns),
+                        )
+                    )
+                if qc.require_limit is True:
+                    self._query_checkers.append(
+                        (
+                            rule.enforcement.value,
+                            table_scope,
+                            RequireLimitChecker(),
+                        )
+                    )
+                if qc.max_joins is not None:
+                    self._query_checkers.append(
+                        (
+                            rule.enforcement.value,
+                            table_scope,
+                            MaxJoinsChecker(qc.max_joins),
+                        )
+                    )
 
-        # Check if no_select_star rule exists
-        for rule in self.contract.schema.semantic.rules:
-            if (
-                "select_star" in rule.name.lower()
-                or "select *" in rule.description.lower()
-            ):
-                checkers.append((rule.enforcement.value, NoSelectStarChecker()))
-                break
+            elif rule.result_check is not None:
+                runner = ResultCheckRunner(
+                    column=rule.result_check.column,
+                    min_value=rule.result_check.min_value,
+                    max_value=rule.result_check.max_value,
+                    not_null=rule.result_check.not_null,
+                    min_rows=rule.result_check.min_rows,
+                    max_rows=rule.result_check.max_rows,
+                    rule_name=rule.name,
+                )
+                self._result_checkers.append(
+                    (
+                        rule.enforcement.value,
+                        table_scope,
+                        runner,
+                    )
+                )
 
-        return checkers
-
-    def _extract_filter_column(self, description: str) -> str | None:
-        """Extract column name from rule description like 'must filter by tenant_id'."""
-        patterns = [
-            r"filter\s+(?:by\s+)?(\w+)",
-            r"WHERE\s+(\w+)\s*=",
-            r"include\s+(?:a\s+)?(?:WHERE\s+)?(\w+)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None
+    def _is_table_in_scope(
+        self, table_scope: str | None, referenced_tables: set[str]
+    ) -> bool:
+        if table_scope is None:
+            return True
+        return table_scope in referenced_tables
 
     def validate(self, sql: str) -> ValidationResult:
         reasons: list[str] = []
         warnings: list[str] = []
         log_messages: list[str] = []
+        estimated_cost_usd: float | None = None
 
-        for severity, checker in self._checkers:
-            result: CheckResult = checker.check_sql(sql, self.contract, self.dialect)
+        try:
+            ast = cast(exp.Expression, sqlglot.parse_one(sql, dialect=self.dialect))
+        except sqlglot.errors.ParseError as e:
+            return ValidationResult(blocked=True, reasons=[f"SQL parse error: {e}"])
+
+        referenced_tables = extract_tables(ast)
+
+        if self._table_checker is not None:
+            result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
-                if severity == "block":
+                reasons.append(result.message)
+
+        if self._operation_checker is not None:
+            result = self._operation_checker.check_ast(ast, self.contract)
+            if not result.passed:
+                reasons.append(result.message)
+
+        for enforcement, table_scope, checker in self._query_checkers:
+            if not self._is_table_in_scope(table_scope, referenced_tables):
+                continue
+            result = checker.check_ast(ast)
+            if not result.passed:
+                if enforcement == "block":
                     reasons.append(result.message)
-                elif severity == "warn":
+                elif enforcement == "warn":
                     warnings.append(result.message)
                 else:
                     log_messages.append(result.message)
 
-        # Layer 2: EXPLAIN checks (only when Layer 1 passes and adapter is provided)
         if not reasons and self.explain_adapter is not None:
             explain_result = self.explain_adapter.explain(sql)
             if not explain_result.schema_valid:
@@ -119,6 +177,7 @@ class Validator:
                     f"Schema validation failed: {', '.join(explain_result.errors)}"
                 )
             else:
+                estimated_cost_usd = explain_result.estimated_cost_usd
                 res = self.contract.schema.resources
                 if res:
                     if (
@@ -141,6 +200,40 @@ class Validator:
                         reasons.append(
                             f"Estimated rows {rows:,} exceeds limit {max_rows:,}"
                         )
+
+        return ValidationResult(
+            blocked=len(reasons) > 0,
+            reasons=reasons,
+            warnings=warnings,
+            log_messages=log_messages,
+            estimated_cost_usd=estimated_cost_usd,
+        )
+
+    def validate_results(
+        self, sql: str, columns: list[str], rows: list[tuple]
+    ) -> ValidationResult:
+        reasons: list[str] = []
+        warnings: list[str] = []
+        log_messages: list[str] = []
+
+        try:
+            ast = cast(exp.Expression, sqlglot.parse_one(sql, dialect=self.dialect))
+        except sqlglot.errors.ParseError:
+            referenced_tables: set[str] = set()
+        else:
+            referenced_tables = extract_tables(ast)
+
+        for enforcement, table_scope, runner in self._result_checkers:
+            if not self._is_table_in_scope(table_scope, referenced_tables):
+                continue
+            result = runner.check_results(columns, rows)
+            if not result.passed:
+                if enforcement == "block":
+                    reasons.append(result.message)
+                elif enforcement == "warn":
+                    warnings.append(result.message)
+                else:
+                    log_messages.append(result.message)
 
         return ValidationResult(
             blocked=len(reasons) > 0,

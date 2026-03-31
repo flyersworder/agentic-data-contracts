@@ -16,8 +16,10 @@ from agentic_data_contracts.validation.checkers import (
 )
 
 
-def _parse(sql: str) -> sqlglot.exp.Expr:
-    return sqlglot.parse_one(sql)
+def _parse(sql: str) -> sqlglot.exp.Expression:
+    from typing import cast
+
+    return cast(sqlglot.exp.Expression, sqlglot.parse_one(sql))
 
 
 @pytest.fixture

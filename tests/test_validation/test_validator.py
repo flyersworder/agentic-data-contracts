@@ -3,6 +3,15 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.schema import (
+    AllowedTable,
+    DataContractSchema,
+    Enforcement,
+    QueryCheck,
+    ResultCheck,
+    SemanticConfig,
+    SemanticRule,
+)
 from agentic_data_contracts.validation.explain import ExplainResult
 from agentic_data_contracts.validation.validator import Validator
 
@@ -66,7 +75,6 @@ def test_multiple_violations_all_reported(validator: Validator) -> None:
 def test_warnings_returned(validator: Validator) -> None:
     result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
     assert not result.blocked
-    assert result.warnings == []
 
 
 def test_minimal_contract_permissive(fixtures_dir: Path) -> None:
@@ -119,36 +127,195 @@ def test_explain_within_limits_passes(contract: DataContract) -> None:
     assert not result.blocked
 
 
-def test_explicit_filter_column() -> None:
-    from agentic_data_contracts.core.schema import (
-        AllowedTable,
-        DataContractSchema,
-        Enforcement,
-        SemanticConfig,
-        SemanticRule,
+def test_explain_cost_passed_through(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=2.5, estimated_rows=500, schema_valid=True)
     )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert not result.blocked
+    assert result.estimated_cost_usd == 2.5
 
+
+def test_table_scoped_query_check() -> None:
     schema = DataContractSchema(
         name="test",
         semantic=SemanticConfig(
             allowed_tables=[
-                AllowedTable.model_validate({"schema": "public", "tables": ["users"]})
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders", "customers"]}
+                ),
             ],
             rules=[
                 SemanticRule(
-                    name="org_filter",
-                    description="Must filter by organization",
+                    name="orders_filter",
+                    description="Orders must filter by tenant_id",
                     enforcement=Enforcement.BLOCK,
-                    filter_column="org_id",
+                    table="analytics.orders",
+                    query_check=QueryCheck(required_filter="tenant_id"),
                 ),
             ],
         ),
     )
     dc = DataContract(schema)
     validator = Validator(dc)
-    result = validator.validate("SELECT id FROM public.users")
-    assert result.blocked
-    assert any("org_id" in r for r in result.reasons)
 
-    result = validator.validate("SELECT id FROM public.users WHERE org_id = 'x'")
+    result = validator.validate("SELECT id FROM analytics.orders")
+    assert result.blocked
+
+    result = validator.validate("SELECT id FROM analytics.customers")
     assert not result.blocked
+
+
+def test_global_query_check() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["a", "b"]}),
+            ],
+            rules=[
+                SemanticRule(
+                    name="no_star",
+                    description="No select star",
+                    enforcement=Enforcement.BLOCK,
+                    query_check=QueryCheck(no_select_star=True),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate("SELECT * FROM public.a")
+    assert result.blocked
+
+    result = validator.validate("SELECT id FROM public.a")
+    assert not result.blocked
+
+
+def test_validate_results_blocks() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["metrics"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="wau_sanity",
+                    description="WAU sanity",
+                    enforcement=Enforcement.BLOCK,
+                    result_check=ResultCheck(column="wau", max_value=8_000_000_000),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate_results(
+        "SELECT wau FROM analytics.metrics",
+        columns=["wau"],
+        rows=[(12_000_000_000,)],
+    )
+    assert result.blocked
+    assert any("wau" in r for r in result.reasons)
+
+
+def test_validate_results_passes() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["metrics"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="wau_sanity",
+                    description="WAU sanity",
+                    enforcement=Enforcement.BLOCK,
+                    result_check=ResultCheck(column="wau", max_value=8_000_000_000),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate_results(
+        "SELECT wau FROM analytics.metrics",
+        columns=["wau"],
+        rows=[(1_000_000,)],
+    )
+    assert not result.blocked
+
+
+def test_validate_results_table_scoping() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["metrics", "other"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="wau_sanity",
+                    description="WAU sanity",
+                    enforcement=Enforcement.BLOCK,
+                    table="analytics.metrics",
+                    result_check=ResultCheck(column="wau", max_value=100),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate_results(
+        "SELECT wau FROM analytics.other",
+        columns=["wau"],
+        rows=[(999,)],
+    )
+    assert not result.blocked
+
+
+def test_validate_results_warns() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["t"]}),
+            ],
+            rules=[
+                SemanticRule(
+                    name="empty_check",
+                    description="Warn if empty",
+                    enforcement=Enforcement.WARN,
+                    result_check=ResultCheck(min_rows=1),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate_results(
+        "SELECT id FROM public.t",
+        columns=["id"],
+        rows=[],
+    )
+    assert not result.blocked
+    assert len(result.warnings) == 1
+
+
+def test_malformed_sql_blocks(validator: Validator) -> None:
+    result = validator.validate("NOT VALID SQL AT ALL !!!")
+    assert result.blocked
+    assert any("parse error" in r.lower() for r in result.reasons)

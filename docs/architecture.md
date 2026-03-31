@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-03-28
-**Status:** Implemented (v0.2.2)
+**Date:** 2026-03-31
+**Status:** Implemented (v0.4.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -106,19 +106,24 @@ semantic:
     engagement: [active_customers, churn_rate]
 
   # Governance rules (per-rule enforcement)
+  # Each rule has a query_check (pre-execution) or result_check (post-execution)
+  # Rules with neither are advisory (shown in prompt only)
   rules:
     - name: tenant_isolation
       description: "All queries must include a WHERE tenant_id = filter"
       enforcement: block               # block | warn | log
-      filter_column: tenant_id         # explicit column for required filter
+      query_check:
+        required_filter: tenant_id
 
     - name: use_approved_metrics
       description: "Revenue calculations must use the semantic layer definition"
-      enforcement: warn
+      enforcement: warn                # advisory — no check block
 
     - name: no_select_star
       description: "Queries must specify explicit columns, no SELECT *"
       enforcement: block
+      query_check:
+        no_select_star: true
 
 # Resource governance
 resources:
@@ -180,31 +185,39 @@ When `ai-agent-contracts` IS installed, enforcement is delegated to the formal f
 
 ## Validation Layer
 
-Two-layer validation architecture. Dependencies: `sqlglot`.
+Three-phase validation architecture. Dependencies: `sqlglot`.
 
-### Layer 1: Static Validation (always available)
+### Phase 1: Query Checks (pre-execution, always available)
 
 ```python
 class Checker(Protocol):
-    def check(self, parsed_sql: Expression, contract: DataContract) -> CheckResult: ...
+    def check_ast(self, ast: Expression, *args) -> CheckResult: ...
 ```
 
-**Built-in checkers:**
+SQL is parsed once into a sqlglot AST. The Validator passes the AST to all applicable checkers, respecting table scoping.
+
+**Structural checkers** (from top-level config):
 
 | Checker | What it validates |
 |---|---|
 | `TableAllowlistChecker` | All referenced tables are in `allowed_tables` |
 | `OperationBlocklistChecker` | No forbidden SQL operations (DELETE, DROP, etc.) |
-| `RequiredFilterChecker` | Required WHERE clauses present (e.g., `tenant_id`) |
-| `NoSelectStarChecker` | No `SELECT *` statements |
+
+**Rule-based query checkers** (from `query_check` blocks):
+
+| Check | Checker | What it validates |
+|---|---|---|
+| `required_filter` | `RequiredFilterChecker` | Required WHERE clauses present |
+| `no_select_star` | `NoSelectStarChecker` | No `SELECT *` statements |
+| `blocked_columns` | `BlockedColumnsChecker` | Forbidden columns not in SELECT |
+| `require_limit` | `RequireLimitChecker` | LIMIT clause present |
+| `max_joins` | `MaxJoinsChecker` | JOIN count within limit |
 
 `CheckResult` contains: `passed: bool`, `severity: block | warn | log`, `message: str`.
 
 The validator runs all applicable checkers and aggregates results — any `block` result stops execution, `warn` results are surfaced to the agent, `log` results are recorded silently.
 
-Rules that cannot be statically checked (e.g., "use semantic layer definition for revenue") become:
-- An instruction injected into the agent's context via `to_system_prompt()`
-- A post-hoc `SuccessCriterion` for evaluation by LLM judge or human review
+Rules that cannot be statically checked (e.g., "use semantic layer definition for revenue") become advisory rules — they appear in the system prompt but don't enforce anything. They can also be used as `SuccessCriterion` for post-hoc evaluation.
 
 ### Layer 2: EXPLAIN Dry-Run (optional, requires database adapter)
 
@@ -226,16 +239,35 @@ class ExplainAdapter(Protocol):
 | Postgres | `EXPLAIN` (no ANALYZE) | Row estimates |
 | DuckDB | `EXPLAIN` | Row estimates |
 
+### Phase 3: Result Checks (post-execution, from `result_check` blocks)
+
+After a query executes successfully, `run_query` calls `validator.validate_results()` to check the actual output against `result_check` rules.
+
+**Built-in result checks:**
+
+| Check | What it validates |
+|---|---|
+| `min_value` / `max_value` | Numeric column values within bounds |
+| `not_null` | Column contains no null values |
+| `min_rows` / `max_rows` | Result set row count within bounds |
+
+If a result check with `enforcement: block` fails, the query data is **discarded** — the agent sees only the violation message (with actual violating values for debugging). If `enforcement: warn`, the data is returned with warnings prepended.
+
 ### Validation Flow
 
 ```
 SQL string
-  → sqlglot.parse(sql, dialect=contract.dialect)
-  → Layer 1: run all checkers
+  → sqlglot.parse(sql, dialect=contract.dialect) — parse once
+  → Phase 1: structural checkers + rule-based query_check checkers (table-scoped)
   → any block? → return ValidationResult(blocked=True, reasons=[...])
-  → Layer 2 available? → explain adapter
+  → Phase 2 available? → explain adapter
   → cost/rows exceed limits? → return ValidationResult(blocked=True, reasons=[...])
-  → return ValidationResult(blocked=False, warnings=[...])
+  → record estimated cost in session
+  → execute query
+  → Phase 3: result_check rules against actual output (table-scoped)
+  → any block? → discard data, return violation
+  → any warn? → prepend warnings to response
+  → return results
 ```
 
 ## Tools Layer (Claude Agent SDK Integration)
@@ -443,7 +475,7 @@ agentic-data-contracts/
 │   ├── validation/
 │   │   ├── __init__.py
 │   │   ├── validator.py         # Orchestrates checkers, aggregates results
-│   │   ├── checkers.py          # Built-in checkers (4 checkers)
+│   │   ├── checkers.py          # Built-in checkers (7 query checkers + ResultCheckRunner)
 │   │   └── explain.py           # EXPLAIN adapter orchestration
 │   ├── tools/
 │   │   ├── __init__.py

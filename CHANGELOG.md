@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-31
+
+### Added
+
+- **Unified rule engine**: Rules now support `query_check` (pre-execution) and `result_check` (post-execution) blocks, replacing the old `filter_column` shorthand. All rules live in one `rules` list; the engine determines execution phase automatically.
+- **Table scoping**: Every rule can be scoped to a specific table (`table: "schema.table"`) or apply globally (omitted or `"*"`). Pre-execution and post-execution rules both support scoping.
+- **5 built-in query checks**: `required_filter`, `no_select_star`, `blocked_columns`, `require_limit`, `max_joins` — all declarative in YAML, no Python needed.
+- **6 built-in result checks**: `min_value`/`max_value` (numeric column bounds), `not_null`, `min_rows`/`max_rows` — validated against actual query output post-execution.
+- **Advisory rules**: Rules with neither `query_check` nor `result_check` appear in the system prompt as guidance but don't enforce anything.
+- **Session cost enforcement**: `run_query` now records estimated cost from EXPLAIN and enforces cumulative `cost_limit_usd` across the session.
+- **`validate_results()` on Validator**: New method for post-execution result validation, used transparently inside `run_query`.
+- **`validate_query` result check notes**: Output now lists pending result checks that will run at execution time.
+- **New checker classes**: `BlockedColumnsChecker`, `RequireLimitChecker`, `MaxJoinsChecker`, `ResultCheckRunner` — all exported from `validation` module.
+
+### Changed
+
+- **Checker protocol**: All checkers now use `check_ast(ast)` instead of `check_sql(sql)`. SQL is parsed once by the Validator and the AST is passed to all checkers.
+- **`extract_tables()` utility**: Extracted from `TableAllowlistChecker` into a standalone function for shared use by the Validator's table scoping logic.
+- **`ValidationResult`**: Gains `estimated_cost_usd: float | None` field for session cost passthrough from EXPLAIN.
+- **Three-phase validation**: Validator now runs query checks (Phase 1) → EXPLAIN (Phase 2) → result checks (Phase 3), up from the previous two-phase pipeline.
+
+### Removed
+
+- **`SemanticRule.filter_column`**: Replaced by `query_check: { required_filter: <column> }`. No backward compatibility — the old field is removed entirely.
+- **Heuristic filter detection**: The regex-based `_extract_filter_column()` method that guessed filter columns from rule descriptions is gone. Filters are now explicit in `query_check`.
+
 ## [0.3.0] - 2026-03-30
 
 ### Added

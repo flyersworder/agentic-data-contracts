@@ -72,10 +72,13 @@ semantic:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
       enforcement: block
-      filter_column: tenant_id
+      query_check:
+        required_filter: tenant_id
     - name: no_select_star
       description: "Must specify explicit columns"
       enforcement: block
+      query_check:
+        no_select_star: true
 
 resources:
   cost_limit_usd: 5.00
@@ -177,11 +180,59 @@ Rules are enforced at three levels:
 - **`warn`** — query proceeds but a warning is included in the response
 - **`log`** — violation is recorded but not surfaced to the agent
 
-Built-in checkers enforce:
-- **Table allowlist** — only tables listed in `allowed_tables` may be queried
-- **Operation blocklist** — `forbidden_operations` (DELETE, DROP, etc.) are rejected
-- **Required filters** — rules with `filter_column` require a matching WHERE clause
-- **No SELECT \*** — queries must name explicit columns
+Each rule carries a `query_check` (pre-execution) or `result_check` (post-execution) block. Rules with neither are advisory — they appear in the system prompt but don't enforce anything. Every rule can be scoped to a specific table or applied globally.
+
+**Built-in query checks** (pre-execution, validated against SQL AST):
+
+| Check | Description |
+|-------|-------------|
+| `required_filter` | Require a column in WHERE clause (e.g., `tenant_id`) |
+| `no_select_star` | Forbid `SELECT *` — require explicit columns |
+| `blocked_columns` | Forbid specific columns in SELECT (e.g., PII) |
+| `require_limit` | Require a LIMIT clause |
+| `max_joins` | Cap the number of JOINs |
+
+**Built-in result checks** (post-execution, validated against query output):
+
+| Check | Description |
+|-------|-------------|
+| `min_value` / `max_value` | Numeric bounds on a column's values |
+| `not_null` | Column must not contain nulls |
+| `min_rows` / `max_rows` | Row count bounds on the result set |
+
+Example with table scoping and both check types:
+
+```yaml
+rules:
+  - name: tenant_isolation
+    description: "Orders must filter by tenant_id"
+    enforcement: block
+    table: "analytics.orders"      # only applies to this table
+    query_check:
+      required_filter: tenant_id
+
+  - name: hide_pii
+    description: "Do not select PII columns from customers"
+    enforcement: block
+    table: "analytics.customers"
+    query_check:
+      blocked_columns: [ssn, email, phone]
+
+  - name: wau_sanity
+    description: "WAU should not exceed world population"
+    enforcement: warn
+    table: "analytics.user_metrics"
+    result_check:
+      column: wau
+      max_value: 8_000_000_000
+
+  - name: no_negative_revenue
+    description: "Revenue must not be negative"
+    enforcement: block
+    result_check:
+      column: revenue
+      min_value: 0
+```
 
 ## Semantic Sources
 

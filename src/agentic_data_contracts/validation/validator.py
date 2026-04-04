@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 import sqlglot
 from sqlglot import exp
 
+from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation.checkers import (
     BlockedColumnsChecker,
@@ -53,10 +54,12 @@ class Validator:
         contract: DataContract,
         dialect: str | None = None,
         explain_adapter: ExplainAdapter | None = None,
+        sql_normalizer: SqlNormalizer | None = None,
     ) -> None:
         self.contract = contract
         self.dialect = dialect
         self.explain_adapter = explain_adapter
+        self.sql_normalizer = sql_normalizer
         self._build_checkers()
 
     def _build_checkers(self) -> None:
@@ -154,7 +157,12 @@ class Validator:
         estimated_cost_usd: float | None = None
 
         try:
-            ast = cast(exp.Expression, sqlglot.parse_one(sql, dialect=self.dialect))
+            normalized = (
+                self.sql_normalizer.normalize_sql(sql) if self.sql_normalizer else sql
+            )
+            ast = cast(
+                exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
+            )
         except sqlglot.errors.ParseError as e:
             return ValidationResult(blocked=True, reasons=[f"SQL parse error: {e}"])
 

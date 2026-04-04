@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-03-31
-**Status:** Implemented (v0.4.0)
+**Date:** 2026-04-04
+**Status:** Implemented (v0.5.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -393,7 +393,16 @@ class DatabaseAdapter(Protocol):
     def describe_table(self, schema: str, table: str) -> TableSchema: ...
     @property
     def dialect(self) -> str: ...  # "bigquery", "snowflake", "postgres", "duckdb"
+
+class SqlNormalizer(Protocol):
+    def normalize_sql(self, sql: str) -> str: ...
 ```
+
+### SQL Normalization for Non-Standard Dialects
+
+Adapters for databases with proprietary SQL extensions (Denodo VQL, Teradata, ClickHouse) can implement `SqlNormalizer` alongside `DatabaseAdapter`. The `Validator` calls `normalize_sql()` before `sqlglot.parse_one()` to rewrite non-standard syntax into a form sqlglot can parse. The original SQL is preserved for `execute()` and `explain()`.
+
+Detection is automatic: `create_tools()` and `contract_middleware()` check `isinstance(adapter, SqlNormalizer)` and wire it into the `Validator` if present. Standard-dialect adapters are unaffected.
 
 **`describe_table` maps to native commands:**
 
@@ -489,7 +498,8 @@ agentic-data-contracts/
 │   │   └── yaml_source.py       # YamlSource
 │   ├── adapters/
 │   │   ├── __init__.py
-│   │   ├── base.py              # DatabaseAdapter protocol
+│   │   ├── _normalizer.py       # SqlNormalizer protocol (avoids circular import)
+│   │   ├── base.py              # DatabaseAdapter protocol + SqlNormalizer re-export
 │   │   ├── bigquery.py          # BigQuery adapter
 │   │   ├── snowflake.py         # Snowflake adapter
 │   │   ├── postgres.py          # Postgres adapter

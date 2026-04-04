@@ -14,7 +14,10 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Enforcement,
+    ResultCheck,
     SemanticConfig,
+    SemanticRule,
 )
 from agentic_data_contracts.validation.explain import ExplainResult
 from agentic_data_contracts.validation.validator import Validator
@@ -157,3 +160,45 @@ def test_explain_receives_original_sql() -> None:
     original_sql = "SELECT CAST('varchar', id) FROM public.users"
     validator.validate(original_sql)
     assert received_sql == [original_sql]
+
+
+# --- validate_results applies normalization ---
+
+
+def test_validate_results_applies_normalization_for_table_scoping() -> None:
+    """Table-scoped result checks must fire even when SQL uses non-standard syntax."""
+    schema = DataContractSchema(
+        version="1.0",
+        name="normalizer-result-test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["users"]})
+            ],
+            forbidden_operations=[],
+            rules=[
+                SemanticRule(
+                    name="max-rows",
+                    description="Limit rows from public.users",
+                    enforcement=Enforcement.BLOCK,
+                    table="public.users",
+                    result_check=ResultCheck(max_rows=1),
+                ),
+            ],
+        ),
+    )
+    contract = DataContract(schema=schema)
+    adapter = VqlNormalizingAdapter()
+    validator = Validator(
+        contract,
+        dialect=adapter.dialect,
+        sql_normalizer=adapter,
+    )
+    # VQL syntax — without normalization, parse fails and table scoping
+    # can't match, so the result check would be silently skipped.
+    result = validator.validate_results(
+        "SELECT CAST('varchar', id) FROM public.users",
+        columns=["id"],
+        rows=[(1,), (2,), (3,)],  # 3 rows, limit is 1
+    )
+    assert result.blocked
+    assert any("max" in r.lower() or "row" in r.lower() for r in result.reasons)

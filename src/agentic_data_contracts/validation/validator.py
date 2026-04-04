@@ -237,7 +237,12 @@ class Validator:
         log_messages: list[str] = []
 
         try:
-            ast = cast(exp.Expression, sqlglot.parse_one(sql, dialect=self.dialect))
+            normalized = (
+                self.sql_normalizer.normalize_sql(sql) if self.sql_normalizer else sql
+            )
+            ast = cast(
+                exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
+            )
         except sqlglot.errors.ParseError:
             referenced_tables: set[str] = set()
         else:

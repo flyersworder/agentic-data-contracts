@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-04-04
+
+### Added
+
+- **`SqlNormalizer` protocol**: Optional pre-processing hook for adapters serving non-standard SQL dialects (e.g., Denodo VQL, Teradata). Adapters implement `normalize_sql(sql) -> str` to rewrite proprietary syntax into a form sqlglot can parse, while the original SQL is preserved for `execute()` and `explain()`.
+- **Auto-detection in factory and middleware**: When an adapter implements both `DatabaseAdapter` and `SqlNormalizer`, the factory and middleware automatically wire normalization into the `Validator` — no API changes needed.
+- **Normalization in `validate_results()`**: Table-scoped result checks now also benefit from SQL normalization, ensuring scoped checks fire correctly for non-standard dialects.
+- **Adapter package exports**: `adapters/__init__.py` now re-exports `Column`, `DatabaseAdapter`, `QueryResult`, `SqlNormalizer`, and `TableSchema`.
+- **Root export**: `SqlNormalizer` is available via `from agentic_data_contracts import SqlNormalizer`.
+
 ## [0.4.0] - 2026-03-31
 
 ### Added

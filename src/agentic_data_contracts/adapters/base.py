@@ -41,3 +41,15 @@ class DatabaseAdapter(Protocol):
 
     @property
     def dialect(self) -> str: ...
+
+
+# Re-export SqlNormalizer so consumers can import from adapters.base
+from agentic_data_contracts.adapters._normalizer import SqlNormalizer  # noqa: E402
+
+__all__ = [
+    "Column",
+    "DatabaseAdapter",
+    "QueryResult",
+    "SqlNormalizer",
+    "TableSchema",
+]

@@ -6,7 +6,7 @@ import functools
 from collections.abc import Callable
 from typing import Any
 
-from agentic_data_contracts.adapters.base import DatabaseAdapter
+from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.validation.validator import Validator
@@ -22,7 +22,13 @@ def contract_middleware(
         session = ContractSession(contract)
 
     dialect = adapter.dialect if adapter else None
-    validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
+    sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None
+    validator = Validator(
+        contract,
+        dialect=dialect,
+        explain_adapter=adapter,
+        sql_normalizer=sql_normalizer,
+    )
 
     def decorator(fn):
         @functools.wraps(fn)

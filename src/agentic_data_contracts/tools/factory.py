@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from agentic_data_contracts.adapters.base import DatabaseAdapter
+from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
@@ -46,7 +46,13 @@ def create_tools(
         contract.resolve_tables(adapter)
 
     dialect = adapter.dialect if adapter else None
-    validator = Validator(contract, dialect=dialect, explain_adapter=adapter)
+    sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None
+    validator = Validator(
+        contract,
+        dialect=dialect,
+        explain_adapter=adapter,
+        sql_normalizer=sql_normalizer,
+    )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:

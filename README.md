@@ -236,7 +236,7 @@ rules:
 
 ## Semantic Sources
 
-A semantic source provides metric and table schema metadata to the agent.
+A semantic source provides metric, table schema, and relationship metadata to the agent. Paths are resolved relative to the contract file's directory (not the process CWD).
 
 **YAML** (built-in):
 ```yaml
@@ -285,10 +285,23 @@ relationships:
   - from: analytics.orders.customer_id
     to: analytics.customers.id
     type: many_to_one
-  - from: analytics.orders.product_id
-    to: analytics.products.id
+    description: >
+      Join orders to customers for region-level breakdowns.
+      Every order has exactly one customer.
+
+  - from: analytics.bdg_attribution.contact_id
+    to: analytics.contacts.contact_id
     type: many_to_one
+    description: "Bridge table — filter to avoid fan-out from multiple attribution records."
+    required_filter: "attribution_model = 'last_touch_attribution'"
 ```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `from` / `to` | Yes | Fully qualified column references (`schema.table.column`) |
+| `type` | No | Cardinality: `many_to_one` (default), `one_to_one`, `many_to_many` |
+| `description` | No | Free-text context for the agent (join guidance, caveats, data quality notes) |
+| `required_filter` | No | SQL condition that **must** be applied when using this join (e.g., bridge table disambiguation) |
 
 The agent sees these in its system prompt and uses them to write correct JOINs instead of guessing from column names.
 

@@ -25,6 +25,8 @@ class Relationship:
     from_: str  # "schema.table.column"
     to: str  # "schema.table.column"
     type: str = "many_to_one"  # many_to_one | one_to_one | many_to_many
+    description: str = ""
+    required_filter: str | None = None
 
 
 @runtime_checkable

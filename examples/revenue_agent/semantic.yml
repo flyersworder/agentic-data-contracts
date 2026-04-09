@@ -20,3 +20,7 @@ relationships:
   - from: analytics.orders.customer_id
     to: analytics.customers.id
     type: many_to_one
+    description: >
+      Join orders to customers for region-level breakdowns.
+      Every order has exactly one customer.
+    required_filter: "status != 'cancelled'"

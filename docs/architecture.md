@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-04-04
-**Status:** Implemented (v0.5.0)
+**Date:** 2026-04-09
+**Status:** Implemented (v0.6.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -88,7 +88,7 @@ name: revenue-analysis
 semantic:
   source:
     type: dbt                          # dbt | cube | yaml | custom
-    path: "./dbt/manifest.json"        # local path or URL
+    path: "./dbt/manifest.json"        # resolved relative to contract file
 
   # What the agent is allowed to access
   allowed_tables:
@@ -369,6 +369,7 @@ class SemanticSource(Protocol):
     def get_metric(self, name: str) -> MetricDefinition | None: ...
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
+    def get_relationships(self) -> list[Relationship]: ...
 ```
 
 **Fuzzy metric search:** When `lookup_metric` receives a query that doesn't exactly match a metric name, it falls back to `search_metrics()` which uses `thefuzz` (`token_set_ratio` scorer, cutoff 50) to find the best matches by name + description. A shared `fuzzy_search_metrics()` helper in `base.py` provides this logic for all source implementations.
@@ -379,9 +380,10 @@ class SemanticSource(Protocol):
 |---|---|---|
 | `DbtSource` | `manifest.json` | Metrics, models, columns |
 | `CubeSource` | Cube meta API or schema files | Metrics, dimensions |
-| `YamlSource` | Inline YAML definitions | Simple metric/table definitions for teams not using dbt/Cube |
+| `YamlSource` | Inline YAML definitions | Simple metric/table/relationship definitions for teams not using dbt/Cube |
 
 `MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`.
+`Relationship`: `from_`, `to`, `type`, `description`, `required_filter`.
 `TableSchema`: `columns: list[Column]` with name, type, description.
 
 ## Database Adapters

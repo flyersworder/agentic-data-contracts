@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-04-09
+
+### Added
+
+- **Relationship `description` field**: Optional free-text description on `Relationship` for communicating join conditions, data quality caveats, or usage guidance to the agent. Rendered as an XML attribute in the system prompt when present.
+- **Relationship `required_filter` field**: Optional structured filter condition (e.g., `"attribution_model = 'last_touch'"`) that must be applied when using a relationship. Rendered as a `<required_filter>` element in the system prompt, giving agents a clear, unambiguous signal about mandatory join conditions — especially useful for bridge/junction tables.
+- **Contract-relative path resolution**: `DataContract.from_yaml()` now resolves `source.path` relative to the contract file's directory, not the process CWD. This means `path: "./semantic.yml"` in `contracts/contract.yml` correctly loads `contracts/semantic.yml` regardless of where the process runs. Absolute paths and `from_yaml_string()` are unaffected.
+
+### Fixed
+
+- **Example contract**: Removed invalid `filter_column` field from `examples/revenue_agent/contract.yml` (the field was removed in v0.4.0 in favor of `query_check.required_filter`).
+
 ## [0.5.0] - 2026-04-04
 
 ### Added

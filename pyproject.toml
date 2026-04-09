@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.5.0"
+version = "0.6.0"
 description = "YAML-first data contract governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"

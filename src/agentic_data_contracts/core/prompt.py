@@ -161,11 +161,18 @@ class ClaudePromptRenderer:
 
         lines = ["<table_relationships>"]
         for r in rels:
+            desc = r.description.strip()
+            desc_attr = f' description="{desc}"' if desc else ""
+            parts = [
+                f"<from>{r.from_}</from>",
+                f"<to>{r.to}</to>",
+            ]
+            if r.required_filter:
+                filt = r.required_filter.strip()
+                parts.append(f"<required_filter>{filt}</required_filter>")
+            inner = "".join(parts)
             lines.append(
-                f'  <relationship type="{r.type}">'
-                f"<from>{r.from_}</from>"
-                f"<to>{r.to}</to>"
-                "</relationship>"
+                f'  <relationship type="{r.type}"{desc_attr}>{inner}</relationship>'
             )
         lines.append("</table_relationships>")
         return lines

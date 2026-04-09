@@ -47,6 +47,8 @@ class YamlSource:
                 from_=r["from"],
                 to=r["to"],
                 type=r.get("type", "many_to_one"),
+                description=r.get("description", ""),
+                required_filter=r.get("required_filter"),
             )
             for r in raw.get("relationships", [])
         ]

@@ -15,7 +15,6 @@ semantic:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
       enforcement: block
-      filter_column: tenant_id
     - name: use_semantic_revenue
       description: "Revenue calculations must use the metric definitions"
       enforcement: warn

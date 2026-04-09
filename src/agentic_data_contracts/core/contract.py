@@ -25,6 +25,7 @@ class DataContract:
     def __init__(self, schema: DataContractSchema) -> None:
         self.schema = schema
         self._tables_resolved: bool = False
+        self._source_dir: Path | None = None
 
     @property
     def name(self) -> str:
@@ -32,8 +33,11 @@ class DataContract:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> DataContract:
-        text = Path(path).read_text()
-        return cls.from_yaml_string(text)
+        resolved = Path(path).resolve()
+        text = resolved.read_text()
+        contract = cls.from_yaml_string(text)
+        contract._source_dir = resolved.parent
+        return contract
 
     @classmethod
     def from_yaml_string(cls, text: str) -> DataContract:
@@ -112,6 +116,8 @@ class DataContract:
 
         source_type = source_config.type.lower()
         path = source_config.path
+        if self._source_dir is not None and not Path(path).is_absolute():
+            path = str(self._source_dir / path)
 
         loaders: dict[str, type] = {
             "yaml": YamlSource,

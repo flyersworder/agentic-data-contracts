@@ -50,3 +50,6 @@ relationships:
   - from: analytics.orders.customer_id
     to: analytics.customers.id
     type: many_to_one
+    description: >
+      Each order belongs to exactly one customer.
+      Use this join for customer-level aggregations.

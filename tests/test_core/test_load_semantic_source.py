@@ -99,3 +99,90 @@ def test_load_case_insensitive(fixtures_dir: Path) -> None:
     dc = DataContract(schema)
     source = dc.load_semantic_source()
     assert isinstance(source, YamlSource)
+
+
+def test_load_relative_path_resolves_from_contract_dir(
+    fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """Relative paths in source.path should resolve against the contract file's dir."""
+    # Copy the semantic source into tmp_path alongside the contract
+    import shutil
+
+    shutil.copy(fixtures_dir / "semantic_source.yml", tmp_path / "semantic_source.yml")
+    contract_yaml = (
+        "name: test\n"
+        "semantic:\n"
+        "  allowed_tables:\n"
+        "    - schema: analytics\n"
+        "      tables: [orders]\n"
+        "  source:\n"
+        "    type: yaml\n"
+        "    path: ./semantic_source.yml\n"
+    )
+    (tmp_path / "contract.yml").write_text(contract_yaml)
+    dc = DataContract.from_yaml(tmp_path / "contract.yml")
+    source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert len(source.get_metrics()) == 2
+
+
+def test_load_relative_path_from_subdirectory(
+    fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """Relative path with ../ resolves from contract dir."""
+    # Put a semantic file in tmp_path
+    semantic_content = (
+        "metrics:\n  - name: m1\n    description: test\n    sql_expression: '1'\n"
+    )
+    (tmp_path / "semantic.yml").write_text(semantic_content)
+
+    # Put a contract in a subdirectory that references ../semantic.yml
+    subdir = tmp_path / "contracts"
+    subdir.mkdir()
+    contract_yaml = (
+        "name: test\n"
+        "semantic:\n"
+        "  allowed_tables:\n"
+        "    - schema: s\n"
+        "      tables: [t]\n"
+        "  source:\n"
+        "    type: yaml\n"
+        "    path: ../semantic.yml\n"
+    )
+    (subdir / "contract.yml").write_text(contract_yaml)
+    dc = DataContract.from_yaml(subdir / "contract.yml")
+    source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert len(source.get_metrics()) == 1
+
+
+def test_load_absolute_path_unaffected_by_source_dir(
+    fixtures_dir: Path, tmp_path: Path
+) -> None:
+    """Absolute paths should work regardless of _source_dir."""
+    abs_path = str(fixtures_dir / "semantic_source.yml")
+    contract_yaml = (
+        "name: test\n"
+        "semantic:\n"
+        "  allowed_tables:\n"
+        "    - schema: analytics\n"
+        "      tables: [orders]\n"
+        "  source:\n"
+        "    type: yaml\n"
+        "    path: " + abs_path + "\n"
+    )
+    # Contract in tmp_path, but semantic source path is absolute
+    (tmp_path / "contract.yml").write_text(contract_yaml)
+    dc = DataContract.from_yaml(tmp_path / "contract.yml")
+    source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert len(source.get_metrics()) == 2
+
+
+def test_from_yaml_string_has_no_source_dir() -> None:
+    """Contracts loaded from strings have no _source_dir (backward compat)."""
+    contract_yaml = (
+        "name: test\nsemantic:\n  allowed_tables:\n    - schema: s\n      tables: [t]\n"
+    )
+    dc = DataContract.from_yaml_string(contract_yaml)
+    assert dc._source_dir is None

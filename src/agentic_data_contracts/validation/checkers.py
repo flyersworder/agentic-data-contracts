@@ -519,8 +519,13 @@ class RelationshipChecker:
         """Warn if matched relationships have required_filter but column is missing."""
         warnings: list[str] = []
         where_columns = RelationshipChecker._extract_where_columns(ast)
+        seen: set[int] = set()
 
         for rel in matched_rels:
+            rel_id = id(rel)
+            if rel_id in seen:
+                continue
+            seen.add(rel_id)
             if rel.required_filter is None:
                 continue
             filter_columns = RelationshipChecker._extract_filter_columns(

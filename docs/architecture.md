@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-04-09
-**Status:** Implemented (v0.6.0)
+**Date:** 2026-04-11
+**Status:** Implemented (v0.7.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement

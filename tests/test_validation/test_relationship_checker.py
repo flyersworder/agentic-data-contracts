@@ -27,6 +27,7 @@ class TestJoinKeyCorrectness:
         ast = _parse(
             "SELECT o.id, c.name FROM analytics.orders o"
             " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
         )
         warnings = checker.check_joins(ast)
         assert warnings == []
@@ -59,6 +60,7 @@ class TestJoinKeyCorrectness:
         checker = RelationshipChecker(rels)
         ast = _parse(
             "SELECT o.id, c.name FROM orders o JOIN customers c ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
         )
         warnings = checker.check_joins(ast)
         assert warnings == []
@@ -70,6 +72,7 @@ class TestJoinKeyCorrectness:
         ast = _parse(
             "SELECT c.name, o.id FROM analytics.customers c"
             " JOIN analytics.orders o ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
         )
         warnings = checker.check_joins(ast)
         assert warnings == []
@@ -80,6 +83,64 @@ class TestJoinKeyCorrectness:
         ast = _parse(
             "SELECT o.id FROM Analytics.Orders o"
             " JOIN Analytics.Customers c ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+
+class TestRequiredFilterEnforcement:
+    """Tests that the checker warns when a required_filter is missing."""
+
+    def test_required_filter_present_no_warning(self, fixtures_dir: Path) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_required_filter_absent_warns(self, fixtures_dir: Path) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+        assert (
+            "required_filter" in warnings[0].lower()
+            or "required filter" in warnings[0].lower()
+        )
+
+    def test_no_required_filter_on_relationship_no_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        """order_items relationship has no required_filter — should be silent."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, oi.quantity FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_required_filter_with_different_expression_no_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        """Status filtered with different value — no warning (column presence only)."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status = 'active'"
         )
         warnings = checker.check_joins(ast)
         assert warnings == []

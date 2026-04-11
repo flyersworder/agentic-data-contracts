@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import sqlglot
 from sqlglot import exp
 
 from agentic_data_contracts.core.contract import DataContract
@@ -360,6 +361,7 @@ class RelationshipChecker:
         """
         warnings: list[str] = []
         alias_map = self._build_alias_map(ast)
+        matched_rels: list[Relationship] = []
 
         for join in ast.find_all(exp.Join):
             join_cols = self._extract_join_columns(join, alias_map)
@@ -381,5 +383,76 @@ class RelationshipChecker:
                             f"`{l_col}`, `{r_col}` but declared relationship "
                             f"specifies `{from_col}` -> `{to_col}`"
                         )
+                    else:
+                        matched_rels.append(rel)
+
+        # Check required_filter for matched relationships
+        warnings.extend(self._check_required_filters(ast, matched_rels))
+
+        return warnings
+
+    @staticmethod
+    def _extract_where_columns(ast: exp.Expression) -> set[str]:
+        """Extract all column names referenced in WHERE clauses."""
+        columns: set[str] = set()
+        for where in ast.find_all(exp.Where):
+            for col in where.find_all(exp.Column):
+                columns.add(col.name.lower())
+        return columns
+
+    @staticmethod
+    def _extract_filter_columns(required_filter: str) -> set[str]:
+        """Extract column names from a required_filter expression string."""
+        try:
+            parsed = sqlglot.parse_one(f"SELECT 1 WHERE {required_filter}")
+            columns: set[str] = set()
+            for where in parsed.find_all(exp.Where):
+                for col in where.find_all(exp.Column):
+                    columns.add(col.name.lower())
+            return columns
+        except sqlglot.errors.ParseError:
+            import re
+
+            return {
+                w.lower()
+                for w in re.findall(r"[a-zA-Z_]\w*", required_filter)
+                if w.upper()
+                not in (
+                    "AND",
+                    "OR",
+                    "NOT",
+                    "NULL",
+                    "IS",
+                    "IN",
+                    "LIKE",
+                    "BETWEEN",
+                    "TRUE",
+                    "FALSE",
+                )
+            }
+
+    @staticmethod
+    def _check_required_filters(
+        ast: exp.Expression, matched_rels: list[Relationship]
+    ) -> list[str]:
+        """Warn if matched relationships have required_filter but column is missing."""
+        warnings: list[str] = []
+        where_columns = RelationshipChecker._extract_where_columns(ast)
+
+        for rel in matched_rels:
+            if rel.required_filter is None:
+                continue
+            filter_columns = RelationshipChecker._extract_filter_columns(
+                rel.required_filter
+            )
+            missing = filter_columns - where_columns
+            if missing:
+                from_table, _ = RelationshipChecker._parse_ref(rel.from_)
+                to_table, _ = RelationshipChecker._parse_ref(rel.to)
+                warnings.append(
+                    f"Join `{from_table}` -> `{to_table}` has required filter "
+                    f"`{rel.required_filter}` but query does not filter on: "
+                    f"{', '.join(sorted(missing))}"
+                )
 
         return warnings

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import sqlglot
 from sqlglot import exp
@@ -16,6 +16,7 @@ from agentic_data_contracts.validation.checkers import (
     MaxJoinsChecker,
     NoSelectStarChecker,
     OperationBlocklistChecker,
+    RelationshipChecker,
     RequiredFilterChecker,
     RequireLimitChecker,
     ResultCheckRunner,
@@ -23,6 +24,9 @@ from agentic_data_contracts.validation.checkers import (
     extract_tables,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.semantic.base import SemanticSource
 
 
 class Checker(Protocol):
@@ -55,11 +59,17 @@ class Validator:
         dialect: str | None = None,
         explain_adapter: ExplainAdapter | None = None,
         sql_normalizer: SqlNormalizer | None = None,
+        semantic_source: SemanticSource | None = None,
     ) -> None:
         self.contract = contract
         self.dialect = dialect
         self.explain_adapter = explain_adapter
         self.sql_normalizer = sql_normalizer
+        self._relationship_checker: RelationshipChecker | None = None
+        if semantic_source is not None:
+            rels = semantic_source.get_relationships()
+            if rels:
+                self._relationship_checker = RelationshipChecker(rels)
         self._build_checkers()
 
     def _build_checkers(self) -> None:
@@ -189,6 +199,11 @@ class Validator:
                     warnings.append(result.message)
                 else:
                     log_messages.append(result.message)
+
+        # Relationship advisory checks (warnings only, skip if already blocked)
+        if not reasons and self._relationship_checker is not None:
+            rel_warnings = self._relationship_checker.check_joins(ast)
+            warnings.extend(rel_warnings)
 
         if not reasons and self.explain_adapter is not None:
             explain_result = self.explain_adapter.explain(sql)

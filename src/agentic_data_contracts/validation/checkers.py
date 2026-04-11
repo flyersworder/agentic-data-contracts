@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
+import sqlglot
 from sqlglot import exp
 
 from agentic_data_contracts.core.contract import DataContract
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.semantic.base import Relationship
 
 
 @dataclass
@@ -270,3 +275,270 @@ class ResultCheckRunner:
                         )
 
         return CheckResult(passed=True, message="")
+
+
+class RelationshipChecker:
+    """Validates SQL JOINs against declared semantic relationships.
+
+    Produces warnings only — never blocks. Silent on undeclared joins.
+    """
+
+    def __init__(self, relationships: list[Relationship]) -> None:
+        self._relationships = relationships
+        self._relationship_map = self._build_map(relationships)
+
+    @staticmethod
+    def _parse_ref(ref: str) -> tuple[str, str]:
+        """Parse 'schema.table.column' into (table, column), case-insensitive."""
+        parts = ref.lower().split(".")
+        if len(parts) == 3:
+            return parts[1], parts[2]
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return parts[0], ""
+
+    @staticmethod
+    def _build_map(
+        relationships: list[Relationship],
+    ) -> dict[tuple[str, str], list[Relationship]]:
+        """Build bidirectional lookup: (table_a, table_b) -> [Relationship, ...]."""
+        result: dict[tuple[str, str], list[Relationship]] = {}
+        for rel in relationships:
+            from_table, _ = RelationshipChecker._parse_ref(rel.from_)
+            to_table, _ = RelationshipChecker._parse_ref(rel.to)
+            key_fwd = (from_table, to_table)
+            key_rev = (to_table, from_table)
+            result.setdefault(key_fwd, []).append(rel)
+            result.setdefault(key_rev, []).append(rel)
+        return result
+
+    @staticmethod
+    def _build_alias_map(ast: exp.Expression) -> dict[str, str]:
+        """Build alias -> table_name map from the AST, case-insensitive."""
+        alias_map: dict[str, str] = {}
+        for table in ast.find_all(exp.Table):
+            bare_name = table.name.lower()
+            alias_map[bare_name] = bare_name
+            if table.alias:
+                alias_map[table.alias.lower()] = bare_name
+        return alias_map
+
+    @staticmethod
+    def _resolve_join_table(join_expr: exp.Join, alias_map: dict[str, str]) -> str:
+        """Resolve the table being joined (the JOIN's 'this' arg) to a bare name."""
+        table_node = join_expr.this
+        if isinstance(table_node, exp.Table):
+            bare = table_node.name.lower()
+            return alias_map.get(bare, bare)
+        return ""
+
+    @staticmethod
+    def _extract_join_columns(
+        join_expr: exp.Join, alias_map: dict[str, str]
+    ) -> list[tuple[str, str, str, str]]:
+        """Extract join column pairs from a JOIN's ON or USING clause.
+
+        Returns (left_table, left_col, right_table, right_col) tuples.
+        For USING, both sides share the same column name; we pair the
+        FROM table with the joined table.
+        """
+        results: list[tuple[str, str, str, str]] = []
+
+        # Handle ON clause
+        on_clause = join_expr.args.get("on")
+        if on_clause is not None:
+            for eq in on_clause.find_all(exp.EQ):
+                left = eq.left
+                right = eq.right
+                if isinstance(left, exp.Column) and isinstance(right, exp.Column):
+                    l_table = (
+                        alias_map.get(left.table.lower(), left.table.lower())
+                        if left.table
+                        else ""
+                    )
+                    r_table = (
+                        alias_map.get(right.table.lower(), right.table.lower())
+                        if right.table
+                        else ""
+                    )
+                    results.append(
+                        (l_table, left.name.lower(), r_table, right.name.lower())
+                    )
+            return results
+
+        # Handle USING clause — USING(col) means both sides share the same
+        # column name, but we don't know which table is the "left" side.
+        # Generate a candidate pair for every other table in the query and
+        # let check_joins match against the relationship map.
+        using_clause = join_expr.args.get("using")
+        if using_clause is not None:
+            joined_table = RelationshipChecker._resolve_join_table(join_expr, alias_map)
+            other_tables = sorted({t for t in alias_map.values() if t != joined_table})
+            for ident in using_clause:
+                col_name = ident.name.lower()
+                for candidate in other_tables:
+                    results.append((candidate, col_name, joined_table, col_name))
+
+        return results
+
+    def check_joins(self, ast: exp.Expression) -> list[str]:
+        """Check all JOINs in the AST against declared relationships.
+
+        Returns a list of warning strings.
+        """
+        warnings: list[str] = []
+        alias_map = self._build_alias_map(ast)
+        matched_rels: list[Relationship] = []
+
+        for join in ast.find_all(exp.Join):
+            join_cols = self._extract_join_columns(join, alias_map)
+            for l_table, l_col, r_table, r_col in join_cols:
+                if not l_table or not r_table:
+                    continue
+                key = (l_table, r_table)
+                rels = self._relationship_map.get(key)
+                if rels is None:
+                    continue
+
+                for rel in rels:
+                    from_table, from_col = self._parse_ref(rel.from_)
+                    to_table, to_col = self._parse_ref(rel.to)
+                    correct = {l_col, r_col} == {from_col, to_col}
+                    if not correct:
+                        warnings.append(
+                            f"Join `{l_table}` -> `{r_table}` uses columns "
+                            f"`{l_col}`, `{r_col}` but declared relationship "
+                            f"specifies `{from_col}` -> `{to_col}`"
+                        )
+                    else:
+                        matched_rels.append(rel)
+
+        # Check required_filter for matched relationships
+        warnings.extend(self._check_required_filters(ast, matched_rels))
+
+        # Check fan-out risk for one_to_many matched relationships
+        warnings.extend(self._check_fan_out(ast, matched_rels))
+
+        return warnings
+
+    _AGG_TYPES: tuple[type[exp.Expression], ...] = (
+        exp.Sum,
+        exp.Avg,
+        exp.Count,
+        exp.Min,
+        exp.Max,
+    )
+
+    @staticmethod
+    def _has_aggregation(ast: exp.Expression) -> bool:
+        """Check if the top-level SELECT contains any aggregation functions.
+
+        Ignores aggregations inside subqueries to avoid false positives.
+        """
+        for select in ast.find_all(exp.Select):
+            if select.parent_select is not None:
+                continue
+            # Check only the SELECT's own expressions; skip aggregations
+            # that live inside scalar subqueries (e.g. SELECT (SELECT AVG(...)...))
+            for expr in select.expressions:
+                for agg in expr.find_all(*RelationshipChecker._AGG_TYPES):
+                    if not agg.find_ancestor(exp.Subquery):
+                        return True
+        return False
+
+    @staticmethod
+    def _check_fan_out(
+        ast: exp.Expression, matched_rels: list[Relationship]
+    ) -> list[str]:
+        """Warn if query aggregates across a one_to_many join."""
+        if not RelationshipChecker._has_aggregation(ast):
+            return []
+
+        warnings: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        for rel in matched_rels:
+            if rel.type != "one_to_many":
+                continue
+            from_table, _ = RelationshipChecker._parse_ref(rel.from_)
+            to_table, _ = RelationshipChecker._parse_ref(rel.to)
+            pair = (from_table, to_table)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            warnings.append(
+                f"Query aggregates across a one_to_many join "
+                f"(`{from_table}` -> `{to_table}`). "
+                f"Results may be inflated by row multiplication."
+            )
+        return warnings
+
+    @staticmethod
+    def _extract_where_columns(ast: exp.Expression) -> set[str]:
+        """Extract all column names referenced in WHERE clauses."""
+        columns: set[str] = set()
+        for where in ast.find_all(exp.Where):
+            for col in where.find_all(exp.Column):
+                columns.add(col.name.lower())
+        return columns
+
+    @staticmethod
+    def _extract_filter_columns(required_filter: str) -> set[str]:
+        """Extract column names from a required_filter expression string."""
+        try:
+            parsed = sqlglot.parse_one(f"SELECT 1 WHERE {required_filter}")
+            columns: set[str] = set()
+            for where in parsed.find_all(exp.Where):
+                for col in where.find_all(exp.Column):
+                    columns.add(col.name.lower())
+            return columns
+        except sqlglot.errors.ParseError:
+            import re
+
+            return {
+                w.lower()
+                for w in re.findall(r"[a-zA-Z_]\w*", required_filter)
+                if w.upper()
+                not in (
+                    "AND",
+                    "OR",
+                    "NOT",
+                    "NULL",
+                    "IS",
+                    "IN",
+                    "LIKE",
+                    "BETWEEN",
+                    "TRUE",
+                    "FALSE",
+                )
+            }
+
+    @staticmethod
+    def _check_required_filters(
+        ast: exp.Expression, matched_rels: list[Relationship]
+    ) -> list[str]:
+        """Warn if matched relationships have required_filter but column is missing."""
+        warnings: list[str] = []
+        where_columns = RelationshipChecker._extract_where_columns(ast)
+        seen: set[int] = set()
+
+        for rel in matched_rels:
+            rel_id = id(rel)
+            if rel_id in seen:
+                continue
+            seen.add(rel_id)
+            if rel.required_filter is None:
+                continue
+            filter_columns = RelationshipChecker._extract_filter_columns(
+                rel.required_filter
+            )
+            missing = filter_columns - where_columns
+            if missing:
+                from_table, _ = RelationshipChecker._parse_ref(rel.from_)
+                to_table, _ = RelationshipChecker._parse_ref(rel.to)
+                warnings.append(
+                    f"Join `{from_table}` -> `{to_table}` has required filter "
+                    f"`{rel.required_filter}` but query does not filter on: "
+                    f"{', '.join(sorted(missing))}"
+                )
+
+        return warnings

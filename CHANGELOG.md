@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-04-11
+
+### Added
+
+- **`RelationshipChecker`**: Advisory validation of SQL JOINs against declared semantic relationships. Produces warnings only — never blocks queries. Silent on undeclared joins. Three detection modes:
+  - **Join-key correctness**: Warns when an agent joins two tables that have a declared relationship but uses different columns than specified (e.g., joining on `email` instead of declared `customer_id → id`). Supports both `ON` and `USING` clause syntax.
+  - **Required-filter enforcement**: Warns when a join's declared `required_filter` condition is missing from the query's WHERE clause. Checks column presence only (not exact expression), so `status = 'active'` satisfies `required_filter: "status != 'cancelled'"`.
+  - **Fan-out risk detection**: Warns when the query aggregates (SUM, COUNT, AVG, etc.) across a `one_to_many` join, which may inflate results due to row multiplication. Only checks top-level SELECT aggregations — subquery aggregations are ignored.
+- **`Validator` accepts `semantic_source`**: Optional `SemanticSource` parameter on `Validator.__init__()` enables relationship checking when provided. Fully backward-compatible — omitting it preserves existing behavior.
+- **Relationship warnings skip blocked queries**: When a query is already blocked by structural checkers, relationship warnings are suppressed to reduce noise.
+
 ## [0.6.0] - 2026-04-09
 
 ### Added

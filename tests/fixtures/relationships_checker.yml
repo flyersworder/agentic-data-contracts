@@ -1,0 +1,14 @@
+relationships:
+  - from: analytics.orders.customer_id
+    to: analytics.customers.id
+    type: many_to_one
+    description: Each order belongs to one customer
+    required_filter: "status != 'cancelled'"
+  - from: analytics.orders.id
+    to: analytics.order_items.order_id
+    type: one_to_many
+    description: Each order has many line items
+  - from: analytics.customers.id
+    to: analytics.addresses.customer_id
+    type: one_to_one
+    description: Each customer has one address

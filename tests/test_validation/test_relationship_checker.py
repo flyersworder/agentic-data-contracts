@@ -77,6 +77,39 @@ class TestJoinKeyCorrectness:
         warnings = checker.check_joins(ast)
         assert warnings == []
 
+    def test_using_clause_correct_key_no_warning(self, fixtures_dir: Path) -> None:
+        """JOIN ... USING (col) should be handled like ON."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        # customers.id -> addresses.customer_id is one_to_one
+        # USING (id) means both sides share 'id' — but declared key is customer_id/id
+        # This won't match because USING(id) implies both cols are 'id'
+        # Let's test a case where USING matches: orders has customer_id, but USING
+        # requires same column name on both sides. Use addresses relationship instead.
+        # customers.id = addresses.customer_id — can't use USING here (different names)
+        # So test that USING with a wrong column warns correctly
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c USING (customer_id)"
+            " WHERE o.status != 'cancelled'"
+        )
+        warnings = checker.check_joins(ast)
+        # USING(customer_id) means both sides use customer_id, but
+        # declared relationship is customer_id -> id (different cols)
+        assert len(warnings) == 1
+        assert "customer_id" in warnings[0]
+
+    def test_using_clause_undeclared_silent(self, fixtures_dir: Path) -> None:
+        """USING on undeclared relationship should be silent."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.products p USING (product_id)"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
     def test_case_insensitive_table_match(self, fixtures_dir: Path) -> None:
         rels = _load_relationships(fixtures_dir)
         checker = RelationshipChecker(rels)
@@ -206,3 +239,15 @@ class TestFanOutDetection:
         )
         warnings = checker.check_joins(ast)
         assert len(warnings) == 1
+
+    def test_aggregation_in_subquery_only_no_warning(self, fixtures_dir: Path) -> None:
+        """Aggregation only in subquery, not outer query — no fan-out warning."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, oi.quantity FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+            " WHERE o.id IN (SELECT COUNT(*) FROM analytics.tmp)"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []

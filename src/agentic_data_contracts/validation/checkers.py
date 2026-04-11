@@ -324,34 +324,60 @@ class RelationshipChecker:
         return alias_map
 
     @staticmethod
+    def _resolve_join_table(join_expr: exp.Join, alias_map: dict[str, str]) -> str:
+        """Resolve the table being joined (the JOIN's 'this' arg) to a bare name."""
+        table_node = join_expr.this
+        if isinstance(table_node, exp.Table):
+            bare = table_node.name.lower()
+            return alias_map.get(bare, bare)
+        return ""
+
+    @staticmethod
     def _extract_join_columns(
         join_expr: exp.Join, alias_map: dict[str, str]
     ) -> list[tuple[str, str, str, str]]:
-        """Extract join column pairs from a JOIN ON clause.
+        """Extract join column pairs from a JOIN's ON or USING clause.
 
         Returns (left_table, left_col, right_table, right_col) tuples.
+        For USING, both sides share the same column name; we pair the
+        FROM table with the joined table.
         """
         results: list[tuple[str, str, str, str]] = []
+
+        # Handle ON clause
         on_clause = join_expr.args.get("on")
-        if on_clause is None:
+        if on_clause is not None:
+            for eq in on_clause.find_all(exp.EQ):
+                left = eq.left
+                right = eq.right
+                if isinstance(left, exp.Column) and isinstance(right, exp.Column):
+                    l_table = (
+                        alias_map.get(left.table.lower(), left.table.lower())
+                        if left.table
+                        else ""
+                    )
+                    r_table = (
+                        alias_map.get(right.table.lower(), right.table.lower())
+                        if right.table
+                        else ""
+                    )
+                    results.append(
+                        (l_table, left.name.lower(), r_table, right.name.lower())
+                    )
             return results
-        for eq in on_clause.find_all(exp.EQ):
-            left = eq.left
-            right = eq.right
-            if isinstance(left, exp.Column) and isinstance(right, exp.Column):
-                l_table = (
-                    alias_map.get(left.table.lower(), left.table.lower())
-                    if left.table
-                    else ""
-                )
-                r_table = (
-                    alias_map.get(right.table.lower(), right.table.lower())
-                    if right.table
-                    else ""
-                )
-                results.append(
-                    (l_table, left.name.lower(), r_table, right.name.lower())
-                )
+
+        # Handle USING clause
+        using_clause = join_expr.args.get("using")
+        if using_clause is not None:
+            joined_table = RelationshipChecker._resolve_join_table(join_expr, alias_map)
+            # Find the FROM table: first table in alias_map that isn't the joined table
+            from_tables = [t for t in alias_map.values() if t != joined_table]
+            from_table = from_tables[0] if from_tables else ""
+            for ident in using_clause:
+                col_name = ident.name.lower()
+                # USING means both sides use the same column name
+                results.append((from_table, col_name, joined_table, col_name))
+
         return results
 
     def check_joins(self, ast: exp.Expression) -> list[str]:
@@ -404,8 +430,18 @@ class RelationshipChecker:
 
     @staticmethod
     def _has_aggregation(ast: exp.Expression) -> bool:
-        """Check if the AST contains any aggregation functions."""
-        return any(ast.find_all(*RelationshipChecker._AGG_TYPES))
+        """Check if the top-level SELECT contains any aggregation functions.
+
+        Ignores aggregations inside subqueries to avoid false positives.
+        """
+        for select in ast.find_all(exp.Select):
+            if select.parent_select is not None:
+                continue
+            # Check only the SELECT's own expressions, not subqueries
+            for expr in select.expressions:
+                if any(expr.find_all(*RelationshipChecker._AGG_TYPES)):
+                    return True
+        return False
 
     @staticmethod
     def _check_fan_out(

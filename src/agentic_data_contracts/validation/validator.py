@@ -200,8 +200,8 @@ class Validator:
                 else:
                     log_messages.append(result.message)
 
-        # Relationship advisory checks (warnings only)
-        if self._relationship_checker is not None:
+        # Relationship advisory checks (warnings only, skip if already blocked)
+        if not reasons and self._relationship_checker is not None:
             rel_warnings = self._relationship_checker.check_joins(ast)
             warnings.extend(rel_warnings)
 

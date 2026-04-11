@@ -30,7 +30,7 @@ The RelationshipChecker closes this gap with an advisory approach — flagging p
 
 **Location:** `src/agentic_data_contracts/validation/checkers.py` (alongside existing checkers)
 
-**Protocol compliance:** Implements `Checker` protocol via `check_ast(ast, *args) -> CheckResult`
+**Interface:** Does NOT implement the `Checker` protocol. The `Checker` protocol returns a single pass/fail `CheckResult`, but this checker produces multiple independent warnings (one per problematic join). It exposes `check_joins(ast) -> list[str]` instead.
 
 **Constructor:**
 
@@ -38,6 +38,7 @@ The RelationshipChecker closes this gap with an advisory approach — flagging p
 class RelationshipChecker:
     def __init__(self, relationships: list[Relationship]) -> None:
         # Build lookup: (table_a, table_b) -> list[Relationship]
+        # Stored bidirectionally: both (orders, customers) and (customers, orders) point to same relationship
         self._relationship_map: dict[tuple[str, str], list[Relationship]] = ...
 ```
 
@@ -78,9 +79,9 @@ Note: The checker exposes a `check_joins(ast) -> list[str]` method for the Valid
 **Trigger:** Agent joins two tables that have a declared relationship, but uses different columns than declared.
 
 **Logic:**
-1. Extract all JOIN clauses from AST (including implicit joins in WHERE with `=`)
+1. Extract all explicit JOIN clauses from AST (implicit comma-joins in WHERE deferred to future iteration)
 2. For each join, identify the table pair and join columns
-3. Look up the table pair in `_relationship_map`
+3. Look up the table pair in `_relationship_map` (bidirectional — matches regardless of join order)
 4. If found, compare the join columns against `relationship.from_` and `relationship.to`
 5. If columns don't match → emit warning
 
@@ -128,6 +129,7 @@ The checker will:
 2. Resolve aliases in JOIN conditions to actual table names
 3. Match table names case-insensitively
 4. Match with or without schema prefix (strip schema from relationship definition for comparison)
+5. Bidirectional lookup — `FROM customers JOIN orders` matches a relationship defined as `orders.customer_id → customers.id`
 
 ## Data Flow
 
@@ -212,3 +214,4 @@ relationships:
 - No multi-hop path validation (single-edge only)
 - No exact expression matching for required_filter (column presence only)
 - No sophisticated fan-out analysis (simple detection only)
+- No implicit comma-join detection (explicit JOIN syntax only in v1)

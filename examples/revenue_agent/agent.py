@@ -43,8 +43,8 @@ def main() -> None:
 
     try:
         asyncio.run(_run_with_sdk(dc, tools, prompt))
-    except ImportError:
-        print("claude-agent-sdk not installed. Running demo mode.\n")
+    except (ImportError, AttributeError):
+        print("claude-agent-sdk not available or incompatible. Running demo mode.\n")
         asyncio.run(_run_demo(tools, prompt))
 
 
@@ -102,6 +102,17 @@ async def _run_demo(tools: list, prompt: str) -> None:
     tool = next(t for t in tools if t.name == "run_query")
     result = await tool.callable({"sql": sql})
     print("\n=== Query Results ===")
+    print(result["content"][0]["text"])
+
+    tool = next(t for t in tools if t.name == "validate_query")
+    join_sql = (
+        "SELECT o.id, c.name "
+        "FROM analytics.orders o "
+        "JOIN analytics.customers c ON o.customer_id = c.id "
+        "WHERE o.tenant_id = 'acme'"
+    )
+    result = await tool.callable({"sql": join_sql})
+    print("\n=== Relationship Warning (missing required filter) ===")
     print(result["content"][0]["text"])
 
     tool = next(t for t in tools if t.name == "validate_query")

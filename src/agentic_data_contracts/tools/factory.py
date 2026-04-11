@@ -52,6 +52,7 @@ def create_tools(
         dialect=dialect,
         explain_adapter=adapter,
         sql_normalizer=sql_normalizer,
+        semantic_source=semantic_source,
     )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────

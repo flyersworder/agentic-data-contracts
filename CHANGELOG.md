@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-04-11
+
+### Fixed
+
+- **Tools factory now passes `semantic_source` to the Validator**: `create_tools()` was creating the `Validator` without the `semantic_source` parameter, so `RelationshipChecker` never ran through `validate_query` or `run_query`. Relationship warnings now surface correctly in the tools layer.
+- **Example SDK fallback**: `agent.py` now catches `AttributeError` alongside `ImportError` when the installed `claude-agent-sdk` version is incompatible, falling back to demo mode instead of crashing.
+
+### Changed
+
+- **Example demo step**: Added a relationship warning demonstration — validates a JOIN query missing the declared `required_filter` to showcase the advisory warning.
+
 ## [0.7.0] - 2026-04-11
 
 ### Added

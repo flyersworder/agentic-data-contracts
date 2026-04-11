@@ -144,3 +144,65 @@ class TestRequiredFilterEnforcement:
         )
         warnings = checker.check_joins(ast)
         assert warnings == []
+
+
+class TestFanOutDetection:
+    """Tests that the checker warns when aggregating across a one_to_many join."""
+
+    def test_aggregation_with_one_to_many_warns(self, fixtures_dir: Path) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT SUM(o.amount) FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "one_to_many" in warnings[0]
+        assert "order_items" in warnings[0]
+
+    def test_no_aggregation_with_one_to_many_no_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, oi.quantity FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_aggregation_with_many_to_one_no_warning(self, fixtures_dir: Path) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT SUM(o.amount) FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status != 'cancelled'"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_aggregation_with_one_to_one_no_warning(self, fixtures_dir: Path) -> None:
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT COUNT(c.id) FROM analytics.customers c"
+            " JOIN analytics.addresses a ON c.id = a.customer_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_multiple_aggregation_functions_single_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        """Multiple agg functions with same 1:N join should produce one warning."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT SUM(o.amount), AVG(o.amount), COUNT(*) FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1

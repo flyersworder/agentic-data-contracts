@@ -389,6 +389,48 @@ class RelationshipChecker:
         # Check required_filter for matched relationships
         warnings.extend(self._check_required_filters(ast, matched_rels))
 
+        # Check fan-out risk for one_to_many matched relationships
+        warnings.extend(self._check_fan_out(ast, matched_rels))
+
+        return warnings
+
+    _AGG_TYPES: tuple[type[exp.Expression], ...] = (
+        exp.Sum,
+        exp.Avg,
+        exp.Count,
+        exp.Min,
+        exp.Max,
+    )
+
+    @staticmethod
+    def _has_aggregation(ast: exp.Expression) -> bool:
+        """Check if the AST contains any aggregation functions."""
+        return any(ast.find_all(*RelationshipChecker._AGG_TYPES))
+
+    @staticmethod
+    def _check_fan_out(
+        ast: exp.Expression, matched_rels: list[Relationship]
+    ) -> list[str]:
+        """Warn if query aggregates across a one_to_many join."""
+        if not RelationshipChecker._has_aggregation(ast):
+            return []
+
+        warnings: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        for rel in matched_rels:
+            if rel.type != "one_to_many":
+                continue
+            from_table, _ = RelationshipChecker._parse_ref(rel.from_)
+            to_table, _ = RelationshipChecker._parse_ref(rel.to)
+            pair = (from_table, to_table)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            warnings.append(
+                f"Query aggregates across a one_to_many join "
+                f"(`{from_table}` -> `{to_table}`). "
+                f"Results may be inflated by row multiplication."
+            )
         return warnings
 
     @staticmethod

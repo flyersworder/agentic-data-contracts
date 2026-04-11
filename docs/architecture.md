@@ -219,6 +219,20 @@ The validator runs all applicable checkers and aggregates results — any `block
 
 Rules that cannot be statically checked (e.g., "use semantic layer definition for revenue") become advisory rules — they appear in the system prompt but don't enforce anything. They can also be used as `SuccessCriterion` for post-hoc evaluation.
 
+### Relationship Advisory Checks (optional, requires semantic source)
+
+When a `SemanticSource` is passed to the `Validator`, the `RelationshipChecker` validates JOINs against declared relationships after Phase 1 completes (and only if the query is not already blocked).
+
+| Check | What it validates |
+|---|---|
+| `RelationshipChecker` (join-key) | JOIN columns match declared `from`/`to` references |
+| `RelationshipChecker` (required-filter) | `required_filter` column present in WHERE clause |
+| `RelationshipChecker` (fan-out) | No aggregation across `one_to_many` joins |
+
+All relationship checks produce **warnings only** — they never block queries. Undeclared joins (table pairs with no relationship definition) are silently ignored.
+
+The checker does not implement the `Checker` protocol. It exposes `check_joins(ast) -> list[str]` which returns multiple independent warnings rather than a single pass/fail `CheckResult`.
+
 ### Layer 2: EXPLAIN Dry-Run (optional, requires database adapter)
 
 ```python
@@ -260,6 +274,7 @@ SQL string
   → sqlglot.parse(sql, dialect=contract.dialect) — parse once
   → Phase 1: structural checkers + rule-based query_check checkers (table-scoped)
   → any block? → return ValidationResult(blocked=True, reasons=[...])
+  → Relationship checks (if semantic_source provided, warnings only)
   → Phase 2 available? → explain adapter
   → cost/rows exceed limits? → return ValidationResult(blocked=True, reasons=[...])
   → record estimated cost in session

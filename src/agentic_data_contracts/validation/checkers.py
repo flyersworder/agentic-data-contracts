@@ -366,17 +366,18 @@ class RelationshipChecker:
                     )
             return results
 
-        # Handle USING clause
+        # Handle USING clause — USING(col) means both sides share the same
+        # column name, but we don't know which table is the "left" side.
+        # Generate a candidate pair for every other table in the query and
+        # let check_joins match against the relationship map.
         using_clause = join_expr.args.get("using")
         if using_clause is not None:
             joined_table = RelationshipChecker._resolve_join_table(join_expr, alias_map)
-            # Find the FROM table: first table in alias_map that isn't the joined table
-            from_tables = [t for t in alias_map.values() if t != joined_table]
-            from_table = from_tables[0] if from_tables else ""
+            other_tables = sorted({t for t in alias_map.values() if t != joined_table})
             for ident in using_clause:
                 col_name = ident.name.lower()
-                # USING means both sides use the same column name
-                results.append((from_table, col_name, joined_table, col_name))
+                for candidate in other_tables:
+                    results.append((candidate, col_name, joined_table, col_name))
 
         return results
 
@@ -437,10 +438,12 @@ class RelationshipChecker:
         for select in ast.find_all(exp.Select):
             if select.parent_select is not None:
                 continue
-            # Check only the SELECT's own expressions, not subqueries
+            # Check only the SELECT's own expressions; skip aggregations
+            # that live inside scalar subqueries (e.g. SELECT (SELECT AVG(...)...))
             for expr in select.expressions:
-                if any(expr.find_all(*RelationshipChecker._AGG_TYPES)):
-                    return True
+                for agg in expr.find_all(*RelationshipChecker._AGG_TYPES):
+                    if not agg.find_ancestor(exp.Subquery):
+                        return True
         return False
 
     @staticmethod

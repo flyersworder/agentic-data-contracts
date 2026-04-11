@@ -110,6 +110,26 @@ class TestJoinKeyCorrectness:
         warnings = checker.check_joins(ast)
         assert warnings == []
 
+    def test_using_clause_three_table_query(self, fixtures_dir: Path) -> None:
+        """USING in a 3-table query should resolve to the correct from_table."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        # orders -> customers via ON, then customers -> addresses via USING
+        # The USING join should match (customers, addresses), not (orders, addresses)
+        ast = _parse(
+            "SELECT o.id, a.city FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " JOIN analytics.addresses a USING (customer_id)"
+            " WHERE o.status != 'cancelled'"
+        )
+        warnings = checker.check_joins(ast)
+        # customer_id is used on both sides (USING), but declared relationship
+        # is customers.id -> addresses.customer_id (different cols: id vs customer_id)
+        # So we expect a join-key warning for the customers->addresses pair
+        assert len(warnings) == 1
+        assert "addresses" in warnings[0]
+        # Crucially, should NOT warn about orders->addresses (undeclared)
+
     def test_case_insensitive_table_match(self, fixtures_dir: Path) -> None:
         rels = _load_relationships(fixtures_dir)
         checker = RelationshipChecker(rels)
@@ -251,3 +271,30 @@ class TestFanOutDetection:
         )
         warnings = checker.check_joins(ast)
         assert warnings == []
+
+    def test_scalar_subquery_aggregation_no_warning(self, fixtures_dir: Path) -> None:
+        """Scalar subquery with aggregation in SELECT should not trigger fan-out."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT (SELECT AVG(price) FROM analytics.tmp), o.id"
+            " FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_real_agg_with_scalar_subquery_still_warns(
+        self, fixtures_dir: Path
+    ) -> None:
+        """Real outer aggregation should still warn even if scalar subqueries exist."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT SUM(o.amount), (SELECT AVG(price) FROM analytics.tmp)"
+            " FROM analytics.orders o"
+            " JOIN analytics.order_items oi ON o.id = oi.order_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "one_to_many" in warnings[0]

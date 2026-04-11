@@ -12,6 +12,7 @@ from agentic_data_contracts.core.schema import (
     SemanticConfig,
     SemanticRule,
 )
+from agentic_data_contracts.semantic.yaml_source import YamlSource
 from agentic_data_contracts.validation.explain import ExplainResult
 from agentic_data_contracts.validation.validator import Validator
 
@@ -319,3 +320,44 @@ def test_malformed_sql_blocks(validator: Validator) -> None:
     result = validator.validate("NOT VALID SQL AT ALL !!!")
     assert result.blocked
     assert any("parse error" in r.lower() for r in result.reasons)
+
+
+class TestValidatorWithSemanticSource:
+    """Tests Validator integration with SemanticSource for relationship checking."""
+
+    def test_validator_without_semantic_source_works(self, fixtures_dir: Path) -> None:
+        contract = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+        validator = Validator(contract)
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"
+        )
+        assert not result.blocked
+
+    def test_validator_with_semantic_source_emits_warnings(
+        self, fixtures_dir: Path
+    ) -> None:
+        contract = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+        source = YamlSource(fixtures_dir / "relationships_checker.yml")
+        validator = Validator(contract, semantic_source=source)
+        # Join orders -> customers without required filter (status)
+        result = validator.validate(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.tenant_id = 'acme'"
+        )
+        assert not result.blocked  # warnings only, never blocks
+        assert any("status" in w for w in result.warnings)
+
+    def test_validator_with_semantic_source_no_warnings_when_correct(
+        self, fixtures_dir: Path
+    ) -> None:
+        contract = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+        source = YamlSource(fixtures_dir / "relationships_checker.yml")
+        validator = Validator(contract, semantic_source=source)
+        result = validator.validate(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.tenant_id = 'acme' AND o.status != 'cancelled'"
+        )
+        assert not result.blocked
+        assert result.warnings == []

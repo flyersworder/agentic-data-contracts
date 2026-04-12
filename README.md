@@ -114,7 +114,7 @@ from claude_agent_sdk import (
     query,
 )
 
-# One-liner: wraps all 10 tools and bundles into an SDK MCP server
+# One-liner: wraps all 11 tools and bundles into an SDK MCP server
 server = create_sdk_mcp_server(dc, adapter=adapter)
 
 options = ClaudeAgentOptions(
@@ -157,7 +157,7 @@ async def demo() -> None:
 asyncio.run(demo())
 ```
 
-## The 10 Tools
+## The 11 Tools
 
 | Tool | Description |
 |------|-------------|
@@ -167,6 +167,7 @@ asyncio.run(demo())
 | `preview_table` | Preview sample rows from an allowed table |
 | `list_metrics` | List metric definitions, optionally filtered by domain |
 | `lookup_metric` | Get a metric definition; fuzzy search fallback when no exact match |
+| `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `validate_query` | Validate a SQL query against contract rules without executing |
 | `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
 | `run_query` | Validate and execute a SQL query, returning results |
@@ -366,8 +367,9 @@ Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
 
 | Concern | How it scales |
 |---|---|
-| **System prompt size** | >20 metrics: auto-switches to compact domain counts (`acquisition (45)`) instead of listing every metric |
+| **System prompt size** | >20 metrics: auto-switches to compact domain counts (`acquisition (45)`). >30 relationships: switches to per-table join counts with `lookup_relationships` hint |
 | **Table discovery** | `list_tables` is paginated (default 50, with offset). Use `schema` filter for targeted browsing |
+| **Relationship lookup** | `lookup_relationships(table=...)` returns joins for a table on demand. With `target_table`, finds shortest multi-hop join path via BFS (up to 3 hops) |
 | **Wildcard schemas** | `tables: ["*"]` discovers tables from the database. Resolution is cached — no repeated queries |
 | **Metric lookup** | Fuzzy search via `thefuzz` (C++ backed) — sub-millisecond even with 1000+ metrics |
 | **SQL validation** | Set-based allowlist check — O(1) per table reference regardless of allowlist size |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -36,6 +37,7 @@ class SemanticSource(Protocol):
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
     def get_relationships(self) -> list[Relationship]: ...
+    def get_relationships_for_table(self, table: str) -> list[Relationship]: ...
 
 
 def fuzzy_search_metrics(
@@ -58,3 +60,55 @@ def fuzzy_search_metrics(
         limit=limit,
     )
     return [m for _, _, key in results if (m := get_metric(key)) is not None]
+
+
+def build_relationship_index(
+    relationships: list[Relationship],
+) -> dict[str, list[Relationship]]:
+    """Build a table-name -> relationships index for O(1) lookup.
+
+    Each relationship is indexed under both its ``from`` and ``to`` table
+    (the table portion of "schema.table.column"), unless they are the same
+    table (self-referencing FK).
+    """
+    index: dict[str, list[Relationship]] = {}
+    for r in relationships:
+        from_table = r.from_.rsplit(".", 1)[0]
+        to_table = r.to.rsplit(".", 1)[0]
+        index.setdefault(from_table, []).append(r)
+        if from_table != to_table:
+            index.setdefault(to_table, []).append(r)
+    return index
+
+
+def find_join_path(
+    index: dict[str, list[Relationship]],
+    from_table: str,
+    to_table: str,
+    *,
+    max_hops: int = 3,
+) -> list[Relationship] | None:
+    """BFS shortest path between two tables in the relationship graph.
+
+    Returns the list of Relationship edges forming the path, or ``None``
+    if no path exists within *max_hops*.  Returns ``[]`` when
+    *from_table* == *to_table*.
+    """
+    if from_table == to_table:
+        return []
+    visited: set[str] = {from_table}
+    queue: deque[tuple[str, list[Relationship]]] = deque([(from_table, [])])
+    while queue:
+        current, path = queue.popleft()
+        if len(path) >= max_hops:
+            continue
+        for rel in index.get(current, []):
+            from_t = rel.from_.rsplit(".", 1)[0]
+            to_t = rel.to.rsplit(".", 1)[0]
+            neighbor = to_t if from_t == current else from_t
+            if neighbor == to_table:
+                return path + [rel]
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, path + [rel]))
+    return None

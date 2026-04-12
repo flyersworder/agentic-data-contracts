@@ -53,6 +53,9 @@ class FakeSemanticSource:
     def get_relationships(self) -> list[Relationship]:
         return []
 
+    def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Helpers

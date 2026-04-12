@@ -37,18 +37,18 @@ def semantic(fixtures_dir: Path) -> YamlSource:
     return YamlSource(fixtures_dir / "semantic_source.yml")
 
 
-def test_create_tools_returns_10_tools(
+def test_create_tools_returns_11_tools(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    assert len(tools) == 10
+    assert len(tools) == 11
 
 
 def test_create_tools_without_adapter(
     contract: DataContract, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, semantic_source=semantic)
-    assert len(tools) == 10
+    assert len(tools) == 11
 
 
 def test_tool_names(

@@ -10,6 +10,7 @@ from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     Relationship,
+    build_relationship_index,
     fuzzy_search_metrics,
 )
 
@@ -52,6 +53,7 @@ class YamlSource:
             )
             for r in raw.get("relationships", [])
         ]
+        self._rel_index = build_relationship_index(self._relationships)
 
     def get_metrics(self) -> list[MetricDefinition]:
         return list(self._metrics)
@@ -67,6 +69,9 @@ class YamlSource:
 
     def get_relationships(self) -> list[Relationship]:
         return list(self._relationships)
+
+    def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return list(self._rel_index.get(table, []))
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")

@@ -25,6 +25,7 @@ class ClaudePromptRenderer:
 
     # Max metrics to list individually before switching to compact summaries.
     METRIC_DETAIL_THRESHOLD = 20
+    RELATIONSHIP_DETAIL_THRESHOLD = 30
 
     def render(
         self,
@@ -160,20 +161,38 @@ class ClaudePromptRenderer:
             return []
 
         lines = ["<table_relationships>"]
-        for r in rels:
-            desc = r.description.strip()
-            desc_attr = f' description="{desc}"' if desc else ""
-            parts = [
-                f"<from>{r.from_}</from>",
-                f"<to>{r.to}</to>",
-            ]
-            if r.required_filter:
-                filt = r.required_filter.strip()
-                parts.append(f"<required_filter>{filt}</required_filter>")
-            inner = "".join(parts)
+
+        if len(rels) > self.RELATIONSHIP_DETAIL_THRESHOLD:
+            table_counts: dict[str, int] = {}
+            for r in rels:
+                from_table = r.from_.rsplit(".", 1)[0]
+                to_table = r.to.rsplit(".", 1)[0]
+                table_counts[from_table] = table_counts.get(from_table, 0) + 1
+                if from_table != to_table:
+                    table_counts[to_table] = table_counts.get(to_table, 0) + 1
+            for table, count in sorted(table_counts.items()):
+                lines.append(f'  <table name="{table}" join_count="{count}" />')
             lines.append(
-                f'  <relationship type="{r.type}"{desc_attr}>{inner}</relationship>'
+                f"  <hint>{len(rels)} relationships defined."
+                ' Use lookup_relationships(table="schema.table")'
+                " to get join details and required filters.</hint>"
             )
+        else:
+            for r in rels:
+                desc = r.description.strip()
+                desc_attr = f' description="{desc}"' if desc else ""
+                parts = [
+                    f"<from>{r.from_}</from>",
+                    f"<to>{r.to}</to>",
+                ]
+                if r.required_filter:
+                    filt = r.required_filter.strip()
+                    parts.append(f"<required_filter>{filt}</required_filter>")
+                inner = "".join(parts)
+                lines.append(
+                    f'  <relationship type="{r.type}"{desc_attr}>{inner}</relationship>'
+                )
+
         lines.append("</table_relationships>")
         return lines
 

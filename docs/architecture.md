@@ -24,7 +24,7 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | `ai-agent-contracts` | Required dependency | Optional — upgrades enforcement when installed |
 | Dependency management | pip | uv |
 | Database interaction | Validation only | Full tool set: validate, execute, describe, preview |
-| Tool surface | Validator callback | 10 agent tools (factory + middleware) |
+| Tool surface | Validator callback | 11 agent tools (factory + middleware) |
 
 ## Design Decisions
 
@@ -67,7 +67,7 @@ Mode          ┌─────────────────┐
     │                  │
     ▼                  ▼
  ┌──────────────────────┐
- │ create_tools()        │  10 agent tools
+ │ create_tools()        │  11 agent tools
  │ contract_middleware()  │  BYO tool wrapper
  │ ContractSession       │  Enforcement tracking
  └──────────────────────┘
@@ -289,7 +289,7 @@ SQL string
 
 Two modes: tool factory for quick starts, middleware for BYO tools.
 
-### 10 Tools in Three Categories
+### 11 Tools in Three Categories
 
 #### Discovery tools (understand what's available)
 
@@ -299,22 +299,24 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 4. **`preview_table(schema, table, limit=5)`** — Sample rows from a table
 5. **`list_metrics(domain?)`** — All metrics from semantic source, optionally filtered by domain
 6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula; fuzzy fallback when no exact match
+7. **`lookup_relationships(table, target_table?)`** — Join paths involving a table; with `target_table`, finds shortest multi-hop path via BFS (up to 3 hops)
 
 #### Execution tools (query with governance)
 
-7. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
-8. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
-9. **`run_query(sql)`** — Validate → execute → return results
+8. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
+9. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
+10. **`run_query(sql)`** — Validate → execute → return results
 
 #### Meta tool (self-awareness)
 
-10. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time
+11. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time
 
 ### Natural Agent Workflow
 
 ```
 list_schemas → list_tables → describe_table → preview_table
     → lookup_metric (if needed)
+    → lookup_relationships (if joining tables)
     → write SQL → validate_query → query_cost_estimate
     → run_query
     → get_contract_info (check remaining budget)
@@ -329,7 +331,7 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
-# Returns all 10 tools as @tool-decorated async functions
+# Returns all 11 tools as @tool-decorated async functions
 # compatible with claude_agent_sdk.create_sdk_mcp_server()
 ```
 
@@ -505,7 +507,7 @@ agentic-data-contracts/
 │   │   └── explain.py           # EXPLAIN adapter orchestration
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   ├── factory.py           # create_tools() — returns 10 tools
+│   │   ├── factory.py           # create_tools() — returns 11 tools
 │   │   └── middleware.py        # contract_middleware decorator
 │   ├── semantic/
 │   │   ├── __init__.py

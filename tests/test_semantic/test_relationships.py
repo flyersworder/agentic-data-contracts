@@ -8,6 +8,11 @@ from agentic_data_contracts.core.schema import (
     DataContractSchema,
     SemanticConfig,
 )
+from agentic_data_contracts.semantic.base import (
+    Relationship,
+    build_relationship_index,
+    find_join_path,
+)
 from agentic_data_contracts.semantic.cube import CubeSource
 from agentic_data_contracts.semantic.dbt import DbtSource
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -135,3 +140,78 @@ def test_system_prompt_no_relationships_when_empty(
     dc = DataContract(schema)
     prompt = dc.to_system_prompt(semantic_source=source)
     assert "Table Relationships" not in prompt
+
+
+class TestBuildRelationshipIndex:
+    def test_indexes_from_and_to_tables(self) -> None:
+        rels = [
+            Relationship(from_="s.orders.customer_id", to="s.customers.id"),
+        ]
+        index = build_relationship_index(rels)
+        assert len(index["s.orders"]) == 1
+        assert len(index["s.customers"]) == 1
+        assert index["s.orders"][0] is rels[0]
+        assert index["s.customers"][0] is rels[0]
+
+    def test_self_referencing_not_duplicated(self) -> None:
+        rels = [
+            Relationship(from_="s.employees.manager_id", to="s.employees.id"),
+        ]
+        index = build_relationship_index(rels)
+        assert len(index["s.employees"]) == 1
+
+    def test_empty_relationships(self) -> None:
+        assert build_relationship_index([]) == {}
+
+    def test_hub_table_collects_all(self) -> None:
+        rels = [
+            Relationship(from_="s.orders.customer_id", to="s.customers.id"),
+            Relationship(from_="s.reviews.customer_id", to="s.customers.id"),
+            Relationship(from_="s.tickets.customer_id", to="s.customers.id"),
+        ]
+        index = build_relationship_index(rels)
+        assert len(index["s.customers"]) == 3
+
+
+class TestFindJoinPath:
+    def _make_index(self) -> dict[str, list[Relationship]]:
+        rels = [
+            Relationship(from_="s.orders.customer_id", to="s.customers.id"),
+            Relationship(from_="s.customers.region_id", to="s.regions.id"),
+            Relationship(from_="s.regions.country_id", to="s.countries.id"),
+        ]
+        return build_relationship_index(rels)
+
+    def test_direct_relationship(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.customers")
+        assert path is not None
+        assert len(path) == 1
+        assert path[0].from_ == "s.orders.customer_id"
+
+    def test_two_hop_path(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.regions")
+        assert path is not None
+        assert len(path) == 2
+
+    def test_three_hop_path(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.countries")
+        assert path is not None
+        assert len(path) == 3
+
+    def test_exceeds_max_hops_returns_none(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.countries", max_hops=2)
+        assert path is None
+
+    def test_no_path_returns_none(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.nonexistent")
+        assert path is None
+
+    def test_same_table_returns_empty(self) -> None:
+        index = self._make_index()
+        path = find_join_path(index, "s.orders", "s.orders")
+        assert path == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -96,9 +97,9 @@ def find_join_path(
     if from_table == to_table:
         return []
     visited: set[str] = {from_table}
-    queue: list[tuple[str, list[Relationship]]] = [(from_table, [])]
+    queue: deque[tuple[str, list[Relationship]]] = deque([(from_table, [])])
     while queue:
-        current, path = queue.pop(0)
+        current, path = queue.popleft()
         if len(path) >= max_hops:
             continue
         for rel in index.get(current, []):

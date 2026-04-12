@@ -84,5 +84,8 @@ class DbtSource:
     def get_relationships(self) -> list[Relationship]:
         return []  # TODO: parse from dbt manifest relationships/refs
 
+    def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []  # TODO: parse from dbt manifest relationships/refs
+
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")

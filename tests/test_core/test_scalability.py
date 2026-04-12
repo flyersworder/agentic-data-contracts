@@ -43,6 +43,9 @@ class FakeSemanticSource:
     def get_relationships(self) -> list[Relationship]:
         return []
 
+    def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []
+
 
 def _make_contract_with_domains(
     metric_names: list[str],

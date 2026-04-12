@@ -142,6 +142,23 @@ def test_system_prompt_no_relationships_when_empty(
     assert "Table Relationships" not in prompt
 
 
+def test_yaml_source_get_relationships_for_table(fixtures_dir: Path) -> None:
+    source = YamlSource(fixtures_dir / "semantic_source.yml")
+    # "analytics.orders" appears in the `from` side
+    rels = source.get_relationships_for_table("analytics.orders")
+    assert len(rels) == 1
+    assert rels[0].from_ == "analytics.orders.customer_id"
+
+    # "analytics.customers" appears in the `to` side
+    rels = source.get_relationships_for_table("analytics.customers")
+    assert len(rels) == 1
+    assert rels[0].to == "analytics.customers.id"
+
+    # Non-existent table returns empty
+    rels = source.get_relationships_for_table("analytics.nonexistent")
+    assert rels == []
+
+
 class TestBuildRelationshipIndex:
     def test_indexes_from_and_to_tables(self) -> None:
         rels = [

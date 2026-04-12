@@ -59,7 +59,10 @@ def create_tools(
         semantic_source=semantic_source,
     )
 
-    # Build relationship index for lookup tool
+    # Build relationship index for BFS path-finding in lookup_relationships.
+    # This is a snapshot, same pattern as Validator (validator.py:70) which also
+    # captures relationships at construction time.  Direct table lookups go
+    # through semantic_source.get_relationships_for_table() instead.
     _rel_index = (
         build_relationship_index(semantic_source.get_relationships())
         if semantic_source is not None

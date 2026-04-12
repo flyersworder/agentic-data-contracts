@@ -289,7 +289,7 @@ SQL string
 
 Two modes: tool factory for quick starts, middleware for BYO tools.
 
-### 10 Tools in Three Categories
+### 11 Tools in Three Categories
 
 #### Discovery tools (understand what's available)
 
@@ -299,22 +299,24 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 4. **`preview_table(schema, table, limit=5)`** — Sample rows from a table
 5. **`list_metrics(domain?)`** — All metrics from semantic source, optionally filtered by domain
 6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula; fuzzy fallback when no exact match
+7. **`lookup_relationships(table, target_table?)`** — Join paths involving a table; with `target_table`, finds shortest multi-hop path via BFS (up to 3 hops)
 
 #### Execution tools (query with governance)
 
-7. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
-8. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
-9. **`run_query(sql)`** — Validate → execute → return results
+8. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
+9. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
+10. **`run_query(sql)`** — Validate → execute → return results
 
 #### Meta tool (self-awareness)
 
-10. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time
+11. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time
 
 ### Natural Agent Workflow
 
 ```
 list_schemas → list_tables → describe_table → preview_table
     → lookup_metric (if needed)
+    → lookup_relationships (if joining tables)
     → write SQL → validate_query → query_cost_estimate
     → run_query
     → get_contract_info (check remaining budget)

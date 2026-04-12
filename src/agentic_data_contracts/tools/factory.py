@@ -1,4 +1,4 @@
-"""Tool factory — creates 10 agent tools from a DataContract."""
+"""Tool factory — creates 11 agent tools from a DataContract."""
 
 from __future__ import annotations
 
@@ -9,7 +9,11 @@ from typing import Any
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
-from agentic_data_contracts.semantic.base import SemanticSource
+from agentic_data_contracts.semantic.base import (
+    SemanticSource,
+    build_relationship_index,
+    find_join_path,
+)
 from agentic_data_contracts.validation.validator import Validator
 
 
@@ -53,6 +57,13 @@ def create_tools(
         explain_adapter=adapter,
         sql_normalizer=sql_normalizer,
         semantic_source=semantic_source,
+    )
+
+    # Build relationship index for lookup tool
+    _rel_index = (
+        build_relationship_index(semantic_source.get_relationships())
+        if semantic_source is not None
+        else {}
     )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
@@ -215,6 +226,62 @@ def create_tools(
                 }
             )
         )
+
+    # ── Tool 11: lookup_relationships ────────────────────────────────────────
+    async def lookup_relationships(args: dict[str, Any]) -> dict[str, Any]:
+        table = args.get("table", "")
+        target_table = args.get("target_table")
+        if semantic_source is None:
+            return _text_response("No semantic source configured.")
+
+        if target_table:
+            # Graph walk: find join path between two tables
+            path = find_join_path(_rel_index, table, target_table)
+            if path is None:
+                return _text_response(
+                    f"No join path found between '{table}' and '{target_table}'"
+                    " within 3 hops."
+                )
+            data = [
+                {
+                    "from": r.from_,
+                    "to": r.to,
+                    "type": r.type,
+                    "description": r.description,
+                    **(
+                        {"required_filter": r.required_filter}
+                        if r.required_filter
+                        else {}
+                    ),
+                }
+                for r in path
+            ]
+            return _text_response(
+                json.dumps(
+                    {
+                        "table": table,
+                        "target_table": target_table,
+                        "join_path": data,
+                        "hops": len(data),
+                    }
+                )
+            )
+
+        # Direct lookup: all relationships involving this table
+        rels = semantic_source.get_relationships_for_table(table)
+        if not rels:
+            return _text_response(f"No relationships found for table '{table}'.")
+        data = [
+            {
+                "from": r.from_,
+                "to": r.to,
+                "type": r.type,
+                "description": r.description,
+                **({"required_filter": r.required_filter} if r.required_filter else {}),
+            }
+            for r in rels
+        ]
+        return _text_response(json.dumps({"table": table, "relationships": data}))
 
     # ── Tool 7: validate_query ────────────────────────────────────────────────
     async def validate_query(args: dict[str, Any]) -> dict[str, Any]:
@@ -505,6 +572,35 @@ def create_tools(
                 "required": ["sql"],
             },
             callable=run_query,
+        ),
+        ToolDef(
+            name="lookup_relationships",
+            description=(
+                "Look up table relationships (join paths) involving a specific"
+                " table. Returns join columns, types, descriptions, and required"
+                " filters. When target_table is provided, finds the shortest"
+                " multi-hop join path between the two tables (up to 3 hops)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string",
+                        "description": (
+                            'Fully qualified table name, e.g. "schema.table"'
+                        ),
+                    },
+                    "target_table": {
+                        "type": "string",
+                        "description": (
+                            "Optional: find the shortest join path from table"
+                            " to this target table (multi-hop supported)"
+                        ),
+                    },
+                },
+                "required": ["table"],
+            },
+            callable=lookup_relationships,
         ),
         ToolDef(
             name="get_contract_info",

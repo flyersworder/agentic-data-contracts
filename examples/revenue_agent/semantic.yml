@@ -24,3 +24,10 @@ relationships:
       Join orders to customers for region-level breakdowns.
       Every order has exactly one customer.
     required_filter: "status != 'cancelled'"
+
+  - from: analytics.subscriptions.customer_id
+    to: analytics.customers.id
+    type: many_to_one
+    description: >
+      Join subscriptions to customers.
+      Each subscription belongs to one customer.

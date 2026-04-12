@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-04-12
+
+### Added
+
+- **Lazy-loading relationships**: When a semantic source has more than 30 relationships, the system prompt switches to a compact per-table join-count summary instead of listing every relationship. The agent uses the new `lookup_relationships` tool to fetch details on demand — same progressive-disclosure pattern used for metrics since v0.2.6.
+- **`lookup_relationships` tool**: New tool (11th) that returns all relationships involving a given table. When `target_table` is provided, finds the shortest multi-hop join path via BFS (up to 3 hops) — useful when tables are connected through intermediate tables.
+- **`get_relationships_for_table()` protocol method**: Added to `SemanticSource` for filtered relationship lookup by table name. Implemented in `YamlSource` with an O(1) index; `DbtSource` and `CubeSource` return empty (ready for future implementation).
+- **`build_relationship_index()` helper**: Standalone function in `semantic.base` that builds a `dict[str, list[Relationship]]` index from a relationship list, keyed by table name. Reusable by any `SemanticSource` implementation.
+- **`find_join_path()` helper**: BFS shortest-path function that finds a chain of relationships connecting two tables, bounded by `max_hops` (default 3). Returns `None` if no path exists.
+
+### Changed
+
+- **Tool count**: Factory now produces 11 tools (was 10), adding `lookup_relationships`.
+
 ## [0.7.1] - 2026-04-11
 
 ### Fixed

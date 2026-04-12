@@ -24,7 +24,7 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | `ai-agent-contracts` | Required dependency | Optional — upgrades enforcement when installed |
 | Dependency management | pip | uv |
 | Database interaction | Validation only | Full tool set: validate, execute, describe, preview |
-| Tool surface | Validator callback | 10 agent tools (factory + middleware) |
+| Tool surface | Validator callback | 11 agent tools (factory + middleware) |
 
 ## Design Decisions
 
@@ -67,7 +67,7 @@ Mode          ┌─────────────────┐
     │                  │
     ▼                  ▼
  ┌──────────────────────┐
- │ create_tools()        │  10 agent tools
+ │ create_tools()        │  11 agent tools
  │ contract_middleware()  │  BYO tool wrapper
  │ ContractSession       │  Enforcement tracking
  └──────────────────────┘
@@ -329,7 +329,7 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
-# Returns all 10 tools as @tool-decorated async functions
+# Returns all 11 tools as @tool-decorated async functions
 # compatible with claude_agent_sdk.create_sdk_mcp_server()
 ```
 
@@ -505,7 +505,7 @@ agentic-data-contracts/
 │   │   └── explain.py           # EXPLAIN adapter orchestration
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   ├── factory.py           # create_tools() — returns 10 tools
+│   │   ├── factory.py           # create_tools() — returns 11 tools
 │   │   └── middleware.py        # contract_middleware decorator
 │   ├── semantic/
 │   │   ├── __init__.py

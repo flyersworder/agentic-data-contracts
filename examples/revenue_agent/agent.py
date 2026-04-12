@@ -104,6 +104,17 @@ async def _run_demo(tools: list, prompt: str) -> None:
     print("\n=== Query Results ===")
     print(result["content"][0]["text"])
 
+    tool = next(t for t in tools if t.name == "lookup_relationships")
+    result = await tool.callable({"table": "analytics.orders"})
+    print("\n=== Lookup Relationships (orders) ===")
+    print(result["content"][0]["text"])
+
+    result = await tool.callable(
+        {"table": "analytics.orders", "target_table": "analytics.subscriptions"}
+    )
+    print("\n=== Find Join Path (orders → subscriptions, 2 hops) ===")
+    print(result["content"][0]["text"])
+
     tool = next(t for t in tools if t.name == "validate_query")
     join_sql = (
         "SELECT o.id, c.name "

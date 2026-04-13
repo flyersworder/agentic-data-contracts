@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-04-13
+
+### Added
+
+- **First-class business domains**: `domains` redesigned from a flat `dict[str, list[str]]` to a list of `Domain` objects with `name`, `summary`, `description`, `metrics`, and optional `tables`. Domains now carry business context that helps agents understand what a domain means before querying.
+- **`lookup_domain` tool**: New tool (12th) that returns full domain context — description, associated metrics with descriptions (enriched from semantic source), and tables. Supports fuzzy matching for domain names, consistent with `lookup_metric`.
+- **Compact domain index in system prompt**: When domains are defined, the system prompt renders `<available_domains>` with domain name, summary, and metric count — progressive disclosure that keeps context compact while giving the agent enough to decide which domain to explore.
+- **Domain validation warnings**: `create_tools()` now warns at tool creation time if a domain references metrics not found in the semantic source or tables not in `allowed_tables`.
+- **Domain summaries in `get_contract_info`**: The `get_contract_info` tool now includes domain names, summaries, and metric counts in its response.
+- **`get_domain()` helper**: New method on `DataContract` for exact-match domain lookup by name.
+
+### Changed
+
+- **Tool count**: Factory now produces 12 tools (was 11), adding `lookup_domain`.
+- **`list_metrics` domain lookup**: Now uses `DataContract.get_domain()` internally instead of dict lookup.
+- **System prompt rendering**: `_render_metrics` simplified to only handle the no-domains case. When domains exist, the new `_render_domains` method takes over with compact domain index rendering.
+
+### Breaking
+
+- **Domain YAML format**: `domains` changed from `dict[str, list[str]]` to `list[Domain]`. Existing contracts must migrate from `domains: { revenue: [metric1] }` to `domains: [{ name: revenue, summary: "...", description: "...", metrics: [metric1] }]`.
+
 ## [0.8.0] - 2026-04-12
 
 ### Added

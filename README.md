@@ -114,7 +114,7 @@ from claude_agent_sdk import (
     query,
 )
 
-# One-liner: wraps all 11 tools and bundles into an SDK MCP server
+# One-liner: wraps all 12 tools and bundles into an SDK MCP server
 server = create_sdk_mcp_server(dc, adapter=adapter)
 
 options = ClaudeAgentOptions(
@@ -157,7 +157,7 @@ async def demo() -> None:
 asyncio.run(demo())
 ```
 
-## The 11 Tools
+## The 12 Tools
 
 | Tool | Description |
 |------|-------------|
@@ -167,11 +167,12 @@ asyncio.run(demo())
 | `preview_table` | Preview sample rows from an allowed table |
 | `list_metrics` | List metric definitions, optionally filtered by domain |
 | `lookup_metric` | Get a metric definition; fuzzy search fallback when no exact match |
+| `lookup_domain` | Get full domain context (description, metrics, tables); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `validate_query` | Validate a SQL query against contract rules without executing |
 | `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
 | `run_query` | Validate and execute a SQL query, returning results |
-| `get_contract_info` | Get the full contract: rules, limits, and session status |
+| `get_contract_info` | Get the full contract: rules, limits, domains, and session status |
 
 ## Contract Rules
 
@@ -341,22 +342,32 @@ dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt(renderer=MarkdownRenderer()))
 ```
 
-## Scalable Metric Discovery
+## Business Domains
 
-For large data lakes with hundreds of KPIs, group metrics by domain and let the agent discover them efficiently:
+Domains provide business context that helps agents understand *what* they're being asked about before getting into the mechanics of *how* to calculate it:
 
 ```yaml
 semantic:
   domains:
-    acquisition: [CAC, CPA, CPL, click_through_rate]
-    retention: [churn_rate, LTV, retention_30d]
-    attribution: [ROAS, first_touch_revenue]
+    - name: acquisition
+      summary: "Customer acquisition costs and conversion metrics"
+      description: >
+        Acquisition metrics track the cost and efficiency of
+        acquiring new customers across all channels.
+      metrics: [CAC, CPA, CPL, click_through_rate]
+    - name: retention
+      summary: "Customer retention, churn, and lifetime value"
+      description: >
+        Retention metrics measure how well we keep customers.
+        Churn is measured on a 30-day rolling window.
+      metrics: [churn_rate, LTV, retention_30d]
 ```
 
-The system prompt gets a compact index (names + descriptions grouped by domain). The agent uses `lookup_metric` for full SQL definitions — with fuzzy fallback when it doesn't know the exact name:
+The system prompt shows a compact domain index. The agent uses `lookup_domain` for business context, then `lookup_metric` for SQL definitions:
 
 ```
-lookup_metric("CAC")                → exact match, full definition
+lookup_domain("acquisition")        → full description + metrics with descriptions
+lookup_metric("CAC")                → exact match, SQL definition
 lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candidates
 list_metrics(domain="retention")    → only retention metrics
 ```
@@ -367,7 +378,7 @@ Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
 
 | Concern | How it scales |
 |---|---|
-| **System prompt size** | >20 metrics: auto-switches to compact domain counts (`acquisition (45)`). >30 relationships: switches to per-table join counts with `lookup_relationships` hint |
+| **System prompt size** | With domains: compact index (name + summary + count). Without domains: >20 metrics auto-switches to count. >30 relationships: per-table join counts with `lookup_relationships` hint |
 | **Table discovery** | `list_tables` is paginated (default 50, with offset). Use `schema` filter for targeted browsing |
 | **Relationship lookup** | `lookup_relationships(table=...)` returns joins for a table on demand. With `target_table`, finds shortest multi-hop join path via BFS (up to 3 hops) |
 | **Wildcard schemas** | `tables: ["*"]` discovers tables from the database. Resolution is cached — no repeated queries |

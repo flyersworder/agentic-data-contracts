@@ -95,10 +95,10 @@ class ClaudePromptRenderer:
         if compact and domains:
             # Large metric set with domains — show counts only
             metric_names = {m.name for m in metrics}
-            for domain, names in domains.items():
-                count = sum(1 for n in names if n in metric_names)
+            for dom in domains:
+                count = sum(1 for n in dom.metrics if n in metric_names)
                 if count:
-                    lines.append(f'  <domain name="{domain}" count="{count}" />')
+                    lines.append(f'  <domain name="{dom.name}" count="{count}" />')
             lines.append(
                 '  <hint>Use list_metrics(domain="...") to browse,'
                 ' lookup_metric("...") to get SQL definitions.</hint>'
@@ -106,10 +106,10 @@ class ClaudePromptRenderer:
         elif domains:
             # Small metric set with domains — list with descriptions
             metric_map = {m.name: m for m in metrics}
-            for domain, names in domains.items():
-                entries = [metric_map[n] for n in names if n in metric_map]
+            for dom in domains:
+                entries = [metric_map[n] for n in dom.metrics if n in metric_map]
                 if entries:
-                    lines.append(f'  <domain name="{domain}">')
+                    lines.append(f'  <domain name="{dom.name}">')
                     for m in entries:
                         lines.append(
                             f'    <metric name="{m.name}">{m.description}</metric>'

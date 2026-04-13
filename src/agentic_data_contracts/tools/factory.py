@@ -172,13 +172,14 @@ def create_tools(
         domain_filter = args.get("domain")
         if domain_filter:
             domains = contract.schema.semantic.domains
-            allowed_names = set(domains.get(domain_filter, []))
-            if not allowed_names:
-                available = list(domains.keys()) if domains else []
+            domain_obj = next((d for d in domains if d.name == domain_filter), None)
+            if domain_obj is None:
+                available = [d.name for d in domains] if domains else []
                 return _text_response(
                     f"Domain '{domain_filter}' not found."
                     f" Available domains: {available}"
                 )
+            allowed_names = set(domain_obj.metrics)
             metrics = [m for m in metrics if m.name in allowed_names]
         data = [
             {

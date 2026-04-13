@@ -9,6 +9,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -30,10 +31,20 @@ def contract_with_domains(fixtures_dir: Path) -> DataContract:
                     {"schema": "analytics", "tables": ["orders"]}
                 ),
             ],
-            domains={
-                "revenue": ["total_revenue"],
-                "engagement": ["active_customers"],
-            },
+            domains=[
+                Domain(
+                    name="revenue",
+                    summary="Financial metrics",
+                    description="Revenue domain.",
+                    metrics=["total_revenue"],
+                ),
+                Domain(
+                    name="engagement",
+                    summary="Customer activity",
+                    description="Engagement domain.",
+                    metrics=["active_customers"],
+                ),
+            ],
         ),
     )
     return DataContract(schema)

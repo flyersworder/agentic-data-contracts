@@ -9,6 +9,7 @@ from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRende
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.base import MetricDefinition, Relationship
@@ -67,10 +68,21 @@ def _load(fixtures_dir: Path) -> DataContract:
 
 
 def _make_contract_with_domains(metric_names: list[str]) -> DataContract:
-    domains = {
-        "domain_a": metric_names[: len(metric_names) // 2],
-        "domain_b": metric_names[len(metric_names) // 2 :],
-    }
+    half = len(metric_names) // 2
+    domains = [
+        Domain(
+            name="domain_a",
+            summary="Domain A",
+            description="Domain A metrics.",
+            metrics=metric_names[:half],
+        ),
+        Domain(
+            name="domain_b",
+            summary="Domain B",
+            description="Domain B metrics.",
+            metrics=metric_names[half:],
+        ),
+    ]
     schema = DataContractSchema(
         name="test",
         semantic=SemanticConfig(

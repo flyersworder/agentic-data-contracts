@@ -6,6 +6,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -36,10 +37,20 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
             allowed_tables=[
                 AllowedTable.model_validate({"schema": "public", "tables": ["t"]})
             ],
-            domains={
-                "revenue": ["total_revenue"],
-                "engagement": ["active_customers"],
-            },
+            domains=[
+                Domain(
+                    name="revenue",
+                    summary="Financial metrics",
+                    description="Revenue domain.",
+                    metrics=["total_revenue"],
+                ),
+                Domain(
+                    name="engagement",
+                    summary="Customer activity",
+                    description="Engagement domain.",
+                    metrics=["active_customers"],
+                ),
+            ],
         ),
     )
     dc = DataContract(schema)

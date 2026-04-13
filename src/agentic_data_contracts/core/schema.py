@@ -69,12 +69,20 @@ class SemanticRule(BaseModel):
         return self
 
 
+class Domain(BaseModel):
+    name: str
+    summary: str
+    description: str
+    metrics: list[str] = Field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
+
+
 class SemanticConfig(BaseModel):
     source: SemanticSource | None = None
     allowed_tables: list[AllowedTable] = Field(default_factory=list)
     forbidden_operations: list[str] = Field(default_factory=list)
     rules: list[SemanticRule] = Field(default_factory=list)
-    domains: dict[str, list[str]] = Field(default_factory=dict)
+    domains: list[Domain] = Field(default_factory=list)
 
 
 class ResourceConfig(BaseModel):

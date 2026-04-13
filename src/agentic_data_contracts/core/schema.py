@@ -22,6 +22,8 @@ class SemanticSource(BaseModel):
 class AllowedTable(BaseModel):
     schema_: str = Field(alias="schema")
     tables: list[str] = Field(default_factory=list)
+    description: str | None = None
+    preferred: bool = False
 
     model_config = {"populate_by_name": True}
 

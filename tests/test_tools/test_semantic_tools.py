@@ -265,3 +265,48 @@ async def test_domain_validation_warns_unknown_table(
         create_tools(dc, semantic_source=source)
 
     assert any("analytics.nonexistent" in msg for msg in caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_list_schemas_with_description_and_preferred(
+    semantic: YamlSource,
+) -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {
+                        "schema": "analytics",
+                        "tables": ["orders"],
+                        "description": "Curated analytics layer",
+                        "preferred": True,
+                    }
+                ),
+                AllowedTable.model_validate(
+                    {
+                        "schema": "raw",
+                        "tables": ["events"],
+                        "description": "Raw ingestion tables",
+                    }
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    tools = create_tools(dc, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_schemas")
+    result = await tool.callable({})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+
+    assert len(data["schemas"]) == 2
+    analytics = data["schemas"][0]
+    assert analytics["schema"] == "analytics"
+    assert analytics["description"] == "Curated analytics layer"
+    assert analytics["preferred"] is True
+
+    raw = data["schemas"][1]
+    assert raw["schema"] == "raw"
+    assert raw["description"] == "Raw ingestion tables"
+    assert "preferred" not in raw  # False is omitted

@@ -144,3 +144,22 @@ def test_get_domain_exact_match():
 
     result = dc.get_domain("nonexistent")
     assert result is None
+
+
+def test_allowed_table_description_and_preferred():
+    entry = AllowedTable.model_validate(
+        {
+            "schema": "analytics",
+            "tables": ["orders"],
+            "description": "Curated analytics tables",
+            "preferred": True,
+        }
+    )
+    assert entry.description == "Curated analytics tables"
+    assert entry.preferred is True
+
+
+def test_allowed_table_defaults():
+    entry = AllowedTable.model_validate({"schema": "raw", "tables": ["events"]})
+    assert entry.description is None
+    assert entry.preferred is False

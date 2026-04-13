@@ -7,6 +7,8 @@ semantic:
     path: "./semantic.yml"
   allowed_tables:
     - schema: analytics
+      description: "Curated analytics tables — prefer these for all reporting queries"
+      preferred: true
       tables: [orders, customers, subscriptions]
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   domains:

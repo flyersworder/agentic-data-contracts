@@ -99,11 +99,16 @@ def create_tools(
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:
-        schemas = [
-            entry.schema_
-            for entry in contract.schema.semantic.allowed_tables
-            if entry.tables
-        ]
+        schemas = []
+        for entry in contract.schema.semantic.allowed_tables:
+            if not entry.tables:
+                continue
+            info: dict[str, Any] = {"schema": entry.schema_}
+            if entry.description:
+                info["description"] = entry.description
+            if entry.preferred:
+                info["preferred"] = True
+            schemas.append(info)
         return _text_response(json.dumps({"schemas": schemas}))
 
     # ── Tool 2: list_tables ───────────────────────────────────────────────────

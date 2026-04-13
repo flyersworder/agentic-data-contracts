@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-04-13
+
+### Added
+
+- **Schema `description` field**: Optional description on `AllowedTable` entries, surfaced via `list_schemas` to help agents understand what each schema contains and when to use it.
+- **Schema `preferred` flag**: Optional boolean on `AllowedTable` (default `false`), surfaced via `list_schemas` to signal which schema the agent should prefer when similar tables exist across schemas.
+- **Example improvements**: Revenue agent example updated with `lookup_domain` and `lookup_metric` demo steps; fixed pre-existing missing `query_check` blocks on `tenant_isolation` and `no_select_star` rules.
+
 ## [0.9.0] - 2026-04-13
 
 ### Added

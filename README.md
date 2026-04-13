@@ -5,11 +5,11 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Stop your AI agents from running wild on your data.**
+**Domain-driven data governance for AI agents.**
 
-`agentic-data-contracts` lets data engineers define governance contracts in YAML — what tables an agent may query, which operations are forbidden, what resource limits apply — and enforces them automatically at query time via SQL validation powered by [sqlglot](https://github.com/tobymao/sqlglot).
+`agentic-data-contracts` takes a domain-driven approach to AI agent governance: instead of letting agents figure out your data landscape by trial and error, you teach them your business domains, metrics, and rules upfront — in YAML. The agent starts by understanding *what* a business domain means, then discovers *which* metrics to use, then builds queries that comply with your governance rules. All enforced automatically at query time via SQL validation powered by [sqlglot](https://github.com/tobymao/sqlglot).
 
-**Why?** AI agents querying databases face two problems: **resource runaway** (unbounded compute, endless retries, cost overruns) and **semantic inconsistency** (wrong tables, missing filters, ad-hoc metric definitions). This library addresses both with a single YAML contract.
+**Why domain-driven?** AI agents querying databases face three problems: **resource runaway** (unbounded compute, endless retries, cost overruns), **semantic inconsistency** (wrong tables, missing filters, ad-hoc metric definitions), and **lack of business context** (the agent doesn't know what "revenue" means in *your* company). This library addresses all three with a single YAML contract that combines governance rules with business domain knowledge.
 
 **Works with:** [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) (primary target), or any Python agent framework. Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 
@@ -64,6 +64,8 @@ semantic:
     path: "./semantic.yml"
   allowed_tables:
     - schema: analytics
+      description: "Curated analytics tables — prefer for reporting"
+      preferred: true
       tables: ["*"]          # all tables in schema (discovered from database)
     - schema: marketing
       tables: [campaigns]    # or list specific tables
@@ -342,9 +344,19 @@ dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt(renderer=MarkdownRenderer()))
 ```
 
-## Business Domains
+## Domain-Driven Agent Workflow
 
-Domains provide business context that helps agents understand *what* they're being asked about before getting into the mechanics of *how* to calculate it:
+The core design principle: **agents should understand the business domain before writing SQL.** Instead of dumping table schemas and hoping for the best, the contract teaches the agent your business vocabulary through progressive disclosure:
+
+```
+1. Domain context     →  "What does 'revenue' mean here?"
+2. Metric definitions →  "How is 'total_revenue' calculated?"
+3. Query execution    →  "Run the validated SQL"
+```
+
+### Defining domains
+
+Each domain carries a description that teaches the agent your business rules — things the SQL alone can't express:
 
 ```yaml
 semantic:
@@ -354,23 +366,30 @@ semantic:
       description: >
         Acquisition metrics track the cost and efficiency of
         acquiring new customers across all channels.
+        CAC is calculated using fully-loaded cost, not just ad spend.
       metrics: [CAC, CPA, CPL, click_through_rate]
     - name: retention
       summary: "Customer retention, churn, and lifetime value"
       description: >
         Retention metrics measure how well we keep customers.
         Churn is measured on a 30-day rolling window.
+        A customer is "active" if they had at least one qualifying
+        action in the window.
       metrics: [churn_rate, LTV, retention_30d]
 ```
 
-The system prompt shows a compact domain index. The agent uses `lookup_domain` for business context, then `lookup_metric` for SQL definitions:
+### How the agent uses domains
+
+The system prompt gives the agent a compact domain index. When a user asks a domain-specific question, the agent explores progressively:
 
 ```
-lookup_domain("acquisition")        → full description + metrics with descriptions
-lookup_metric("CAC")                → exact match, SQL definition
+lookup_domain("acquisition")        → business context + metric descriptions
+lookup_metric("CAC")                → SQL expression, source table, filters
 lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candidates
-list_metrics(domain="retention")    → only retention metrics
+list_metrics(domain="retention")    → all metrics in the retention domain
 ```
+
+This means the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
 
 ## Scaling to Large Organizations
 

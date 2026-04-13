@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
 **Date:** 2026-04-13
-**Status:** Implemented (v0.9.0)
+**Status:** Implemented (v0.9.1)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -93,6 +93,8 @@ semantic:
   # What the agent is allowed to access
   allowed_tables:
     - schema: analytics
+      description: "Curated analytics tables — prefer for reporting"
+      preferred: true                  # agent should prefer this schema
       tables: [orders, customers, subscriptions]
     - schema: raw
       tables: []                       # empty = nothing from this schema

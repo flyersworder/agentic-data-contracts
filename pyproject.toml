@@ -1,7 +1,7 @@
 [project]
 name = "agentic-data-contracts"
 version = "0.9.1"
-description = "YAML-first data contract governance for AI agents"
+description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Qing", email = "qingye779@gmail.com" }]
@@ -10,9 +10,11 @@ keywords = [
     "ai-agents",
     "data-contracts",
     "data-governance",
+    "domain-driven",
     "sql-validation",
     "llm",
     "claude",
+    "semantic-layer",
     "analytics",
     "dbt",
 ]

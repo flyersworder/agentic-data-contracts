@@ -23,7 +23,7 @@ def test_system_prompt_without_source(fixtures_dir: Path) -> None:
     )
 
 
-def test_system_prompt_with_source_no_domains(fixtures_dir: Path) -> None:
+def test_system_prompt_with_source_and_domains(fixtures_dir: Path) -> None:
     """When contract has domains, domains section is rendered instead of metrics."""
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     source = YamlSource(fixtures_dir / "semantic_source.yml")

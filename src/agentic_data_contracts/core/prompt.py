@@ -41,7 +41,7 @@ class ClaudePromptRenderer:
         lines.extend(self._render_allowed_tables(contract))
 
         # 2. Domains (if defined) OR metrics OR semantic_source fallback
-        domain_lines = self._render_domains(contract, semantic_source)
+        domain_lines = self._render_domains(contract)
         if domain_lines:
             lines.extend(domain_lines)
         else:
@@ -83,7 +83,6 @@ class ClaudePromptRenderer:
     def _render_domains(
         self,
         contract: DataContract,
-        semantic_source: SemanticSource | None,
     ) -> list[str]:
         domains = contract.schema.semantic.domains
         if not domains:

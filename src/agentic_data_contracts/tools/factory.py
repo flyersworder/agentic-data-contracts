@@ -259,7 +259,7 @@ def create_tools(
             )
         )
 
-    # ── Tool 12: lookup_domain ──────────────────────────────────────────
+    # ── Tool 7: lookup_domain ───────────────────────────────────────────
     async def lookup_domain(args: dict[str, Any]) -> dict[str, Any]:
         name = args.get("name", "")
         domain = contract.get_domain(name)
@@ -331,7 +331,7 @@ def create_tools(
             )
         )
 
-    # ── Tool 11: lookup_relationships ────────────────────────────────────────
+    # ── Tool 8: lookup_relationships ────────────────────────────────────────
     async def lookup_relationships(args: dict[str, Any]) -> dict[str, Any]:
         table = args.get("table", "")
         target_table = args.get("target_table")
@@ -387,7 +387,7 @@ def create_tools(
         ]
         return _text_response(json.dumps({"table": table, "relationships": data}))
 
-    # ── Tool 7: validate_query ────────────────────────────────────────────────
+    # ── Tool 9: validate_query ────────────────────────────────────────────────
     async def validate_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
         result = validator.validate(sql)
@@ -410,7 +410,7 @@ def create_tools(
                 )
         return _text_response(msg)
 
-    # ── Tool 8: query_cost_estimate ───────────────────────────────────────────
+    # ── Tool 10: query_cost_estimate ──────────────────────────────────────────
     async def query_cost_estimate(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
         if adapter is None:
@@ -428,7 +428,7 @@ def create_tools(
             data["estimated_rows"] = explain.estimated_rows
         return _text_response(json.dumps(data))
 
-    # ── Tool 9: run_query ─────────────────────────────────────────────────────
+    # ── Tool 11: run_query ────────────────────────────────────────────────────
     async def run_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
 
@@ -492,7 +492,7 @@ def create_tools(
 
         return _text_response(response_text)
 
-    # ── Tool 10: get_contract_info ────────────────────────────────────────────
+    # ── Tool 12: get_contract_info ────────────────────────────────────────────
     async def get_contract_info(args: dict[str, Any]) -> dict[str, Any]:
         info: dict[str, Any] = {
             "name": contract.name,

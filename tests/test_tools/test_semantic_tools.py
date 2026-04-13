@@ -128,3 +128,59 @@ async def test_list_metrics_unknown_domain(
     result = await tool.callable({"domain": "nonexistent"})
     text = result["content"][0]["text"]
     assert "not found" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_exact_match(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    result = await tool.callable({"name": "revenue"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert data["name"] == "revenue"
+    assert "summary" in data
+    assert "description" in data
+    assert len(data["metrics"]) == 1
+    assert data["metrics"][0]["name"] == "total_revenue"
+    assert data["metrics"][0]["description"] != ""  # enriched from semantic source
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_not_found(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    result = await tool.callable({"name": "xyznonexistent"})
+    text = result["content"][0]["text"]
+    assert "not found" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_fuzzy_match(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    result = await tool.callable({"name": "rev"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert data["exact_match"] is False
+    assert len(data["candidates"]) >= 1
+    assert data["candidates"][0]["name"] == "revenue"
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_no_semantic_source(
+    contract_with_domains: DataContract,
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=None)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    result = await tool.callable({"name": "revenue"})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert data["name"] == "revenue"
+    # Without semantic source, metrics are names only (no descriptions)
+    assert data["metrics"] == ["total_revenue"]

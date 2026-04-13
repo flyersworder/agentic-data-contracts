@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,8 @@ from agentic_data_contracts.semantic.base import (
     find_join_path,
 )
 from agentic_data_contracts.validation.validator import Validator
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,6 +71,31 @@ def create_tools(
         if semantic_source is not None
         else {}
     )
+
+    # Validate domain references
+    if contract.schema.semantic.domains:
+        allowed_tables_set = set(contract.allowed_table_names())
+        metric_names_set = (
+            {m.name for m in semantic_source.get_metrics()}
+            if semantic_source is not None
+            else set()
+        )
+        for domain in contract.schema.semantic.domains:
+            if semantic_source is not None:
+                for metric_name in domain.metrics:
+                    if metric_name not in metric_names_set:
+                        logger.warning(
+                            "Domain '%s' references unknown metric '%s'",
+                            domain.name,
+                            metric_name,
+                        )
+            for table in domain.tables:
+                if table not in allowed_tables_set:
+                    logger.warning(
+                        "Domain '%s' references table '%s' not in allowed_tables",
+                        domain.name,
+                        table,
+                    )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:
@@ -481,6 +509,12 @@ def create_tools(
                 }
             )
         info["rules"] = rules
+
+        if contract.schema.semantic.domains:
+            info["domains"] = [
+                {"name": d.name, "summary": d.summary, "metric_count": len(d.metrics)}
+                for d in contract.schema.semantic.domains
+            ]
 
         if contract.schema.semantic.forbidden_operations:
             info["forbidden_operations"] = contract.schema.semantic.forbidden_operations

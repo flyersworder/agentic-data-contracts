@@ -1,6 +1,7 @@
 """Tests for enhanced lookup_metric (fuzzy) and list_metrics (domain filter)."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -184,3 +185,83 @@ async def test_lookup_domain_no_semantic_source(
     assert data["name"] == "revenue"
     # Without semantic source, metrics are names only (no descriptions)
     assert data["metrics"] == ["total_revenue"]
+
+
+@pytest.mark.asyncio
+async def test_get_contract_info_includes_domains(
+    contract_with_domains: DataContract, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract_with_domains, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "get_contract_info")
+    result = await tool.callable({})
+    text = result["content"][0]["text"]
+    data = json.loads(text)
+    assert "domains" in data
+    assert len(data["domains"]) == 2
+    assert data["domains"][0]["name"] == "revenue"
+    assert "summary" in data["domains"][0]
+
+
+@pytest.mark.asyncio
+async def test_domain_validation_warns_unknown_metric(
+    fixtures_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            domains=[
+                Domain(
+                    name="revenue",
+                    summary="Financial metrics",
+                    description="Revenue domain.",
+                    metrics=["total_revenue", "nonexistent_metric"],
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    source = YamlSource(fixtures_dir / "semantic_source.yml")
+
+    with caplog.at_level(logging.WARNING):
+        create_tools(dc, semantic_source=source)
+
+    assert any("nonexistent_metric" in msg for msg in caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_domain_validation_warns_unknown_table(
+    fixtures_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            domains=[
+                Domain(
+                    name="revenue",
+                    summary="Financial metrics",
+                    description="Revenue domain.",
+                    metrics=["total_revenue"],
+                    tables=["analytics.orders", "analytics.nonexistent"],
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    source = YamlSource(fixtures_dir / "semantic_source.yml")
+
+    with caplog.at_level(logging.WARNING):
+        create_tools(dc, semantic_source=source)
+
+    assert any("analytics.nonexistent" in msg for msg in caplog.messages)

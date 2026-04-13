@@ -40,12 +40,16 @@ class ClaudePromptRenderer:
         # 1. Allowed tables
         lines.extend(self._render_allowed_tables(contract))
 
-        # 2. Available metrics or semantic_source fallback
-        metrics_lines = self._render_metrics(contract, semantic_source)
-        if metrics_lines:
-            lines.extend(metrics_lines)
-        elif contract.schema.semantic.source:
-            lines.extend(self._render_semantic_source_fallback(contract))
+        # 2. Domains (if defined) OR metrics OR semantic_source fallback
+        domain_lines = self._render_domains(contract, semantic_source)
+        if domain_lines:
+            lines.extend(domain_lines)
+        else:
+            metrics_lines = self._render_metrics(contract, semantic_source)
+            if metrics_lines:
+                lines.extend(metrics_lines)
+            elif contract.schema.semantic.source:
+                lines.extend(self._render_semantic_source_fallback(contract))
 
         # 3. Table relationships
         rel_lines = self._render_relationships(semantic_source)
@@ -76,6 +80,30 @@ class ClaudePromptRenderer:
         lines.append("</allowed_tables>")
         return lines
 
+    def _render_domains(
+        self,
+        contract: DataContract,
+        semantic_source: SemanticSource | None,
+    ) -> list[str]:
+        domains = contract.schema.semantic.domains
+        if not domains:
+            return []
+
+        lines = ["<available_domains>"]
+        for domain in domains:
+            metric_count = len(domain.metrics)
+            lines.append(
+                f'  <domain name="{domain.name}"'
+                f' summary="{domain.summary}"'
+                f' metric_count="{metric_count}" />'
+            )
+        lines.append(
+            '  <hint>Use lookup_domain("...") for business context,'
+            ' then lookup_metric("...") for SQL definitions.</hint>'
+        )
+        lines.append("</available_domains>")
+        return lines
+
     def _render_metrics(
         self,
         contract: DataContract,
@@ -89,45 +117,15 @@ class ClaudePromptRenderer:
             return []
 
         lines: list[str] = ["<available_metrics>"]
-        domains = contract.schema.semantic.domains
         compact = len(metrics) > self.METRIC_DETAIL_THRESHOLD
 
-        if compact and domains:
-            # Large metric set with domains — show counts only
-            metric_names = {m.name for m in metrics}
-            for dom in domains:
-                count = sum(1 for n in dom.metrics if n in metric_names)
-                if count:
-                    lines.append(f'  <domain name="{dom.name}" count="{count}" />')
-            lines.append(
-                '  <hint>Use list_metrics(domain="...") to browse,'
-                ' lookup_metric("...") to get SQL definitions.</hint>'
-            )
-        elif domains:
-            # Small metric set with domains — list with descriptions
-            metric_map = {m.name: m for m in metrics}
-            for dom in domains:
-                entries = [metric_map[n] for n in dom.metrics if n in metric_map]
-                if entries:
-                    lines.append(f'  <domain name="{dom.name}">')
-                    for m in entries:
-                        lines.append(
-                            f'    <metric name="{m.name}">{m.description}</metric>'
-                        )
-                    lines.append("  </domain>")
-            lines.append(
-                "  <hint>Use lookup_metric tool to get the SQL definition"
-                " before computing any KPI.</hint>"
-            )
-        elif compact:
-            # Large metric set without domains — just count
+        if compact:
             lines.append(f"  <count>{len(metrics)} metrics available.</count>")
             lines.append(
                 "  <hint>Use list_metrics() to browse,"
                 ' lookup_metric("...") to get SQL definitions.</hint>'
             )
         else:
-            # Small metric set without domains — list all
             for m in metrics:
                 lines.append(f'  <metric name="{m.name}">{m.description}</metric>')
             lines.append(

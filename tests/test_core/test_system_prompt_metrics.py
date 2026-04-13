@@ -15,18 +15,24 @@ from agentic_data_contracts.semantic.yaml_source import YamlSource
 def test_system_prompt_without_source(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     prompt = dc.to_system_prompt()
-    # Without semantic source, falls back to file path pointer
-    assert "Consult" in prompt or "Semantic Source" in prompt
+    # Contract has domains, so we get <available_domains> even without semantic source
+    assert (
+        "<available_domains>" in prompt
+        or "Consult" in prompt
+        or "Semantic Source" in prompt
+    )
 
 
 def test_system_prompt_with_source_no_domains(fixtures_dir: Path) -> None:
+    """When contract has domains, domains section is rendered instead of metrics."""
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     source = YamlSource(fixtures_dir / "semantic_source.yml")
     prompt = dc.to_system_prompt(semantic_source=source)
-    assert "available_metrics" in prompt
-    assert "total_revenue" in prompt
-    assert "active_customers" in prompt
-    assert "lookup_metric" in prompt
+    # valid_contract.yml has domains, so we get <available_domains>
+    assert "available_domains" in prompt
+    assert "revenue" in prompt
+    assert "engagement" in prompt
+    assert "lookup_domain" in prompt
 
 
 def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
@@ -40,13 +46,13 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
             domains=[
                 Domain(
                     name="revenue",
-                    summary="Financial metrics",
+                    summary="Revenue and financial metrics",
                     description="Revenue domain.",
                     metrics=["total_revenue"],
                 ),
                 Domain(
                     name="engagement",
-                    summary="Customer activity",
+                    summary="Customer activity metrics",
                     description="Engagement domain.",
                     metrics=["active_customers"],
                 ),
@@ -57,8 +63,7 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
     prompt = dc.to_system_prompt(semantic_source=source)
     assert 'name="revenue"' in prompt
     assert 'name="engagement"' in prompt
-    assert "total_revenue" in prompt
-    assert "active_customers" in prompt
+    assert "lookup_domain" in prompt
 
 
 def test_system_prompt_backwards_compatible(fixtures_dir: Path) -> None:

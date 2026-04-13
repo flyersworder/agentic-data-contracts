@@ -224,10 +224,11 @@ def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
-    assert "<available_metrics>" in output
-    assert "</available_metrics>" in output
-    assert "total_revenue" in output
-    assert "active_customers" in output
+    # valid_contract.yml has domains, so we get <available_domains> instead
+    assert "<available_domains>" in output
+    assert "</available_domains>" in output
+    assert "revenue" in output
+    assert "engagement" in output
 
 
 # ---------------------------------------------------------------------------
@@ -241,12 +242,10 @@ def test_claude_renderer_metrics_large_set_with_domains() -> None:
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
-    assert "<available_metrics>" in output
-    # Should NOT list individual metric descriptions
-    assert "metric_0 —" not in output
-    # Should show domain summaries
+    assert "<available_domains>" in output
     assert "domain_a" in output
     assert "domain_b" in output
+    assert "metric_0 —" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +283,9 @@ def test_claude_renderer_no_semantic_source_with_config(fixtures_dir: Path) -> N
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
-    # Should fall back to <semantic_source> tag
-    assert "<semantic_source>" in output
-    assert "</semantic_source>" in output
-    assert "dbt" in output
+    # Contract has domains, so we get <available_domains> even without semantic source
+    assert "<available_domains>" in output
+    assert "revenue" in output
     assert "<available_metrics>" not in output
 
 

@@ -7,6 +7,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.base import (
@@ -54,10 +55,21 @@ class FakeSemanticSource:
 def _make_contract_with_domains(
     metric_names: list[str],
 ) -> DataContract:
-    domains = {
-        "domain_a": metric_names[: len(metric_names) // 2],
-        "domain_b": metric_names[len(metric_names) // 2 :],
-    }
+    half = len(metric_names) // 2
+    domains = [
+        Domain(
+            name="domain_a",
+            summary="Domain A",
+            description="Domain A metrics.",
+            metrics=metric_names[:half],
+        ),
+        Domain(
+            name="domain_b",
+            summary="Domain B",
+            description="Domain B metrics.",
+            metrics=metric_names[half:],
+        ),
+    ]
     schema = DataContractSchema(
         name="test",
         semantic=SemanticConfig(
@@ -71,24 +83,26 @@ def _make_contract_with_domains(
 
 
 class TestCompactMetricPrompt:
-    def test_small_set_lists_all_metrics(self) -> None:
+    def test_small_set_with_domains_shows_domain_index(self) -> None:
         source = FakeSemanticSource(5)
         dc = _make_contract_with_domains([f"metric_{i}" for i in range(5)])
         prompt = dc.to_system_prompt(semantic_source=source)
-        # Should list individual metric descriptions
-        assert 'name="metric_0"' in prompt
-        assert 'name="metric_4"' in prompt
+        # With domains defined, always show compact domain index
+        assert "<available_domains>" in prompt
+        assert 'name="domain_a"' in prompt
+        assert 'summary="Domain A"' in prompt
+        assert "lookup_domain" in prompt
 
-    def test_large_set_shows_domain_counts(self) -> None:
+    def test_large_set_with_domains_shows_domain_index(self) -> None:
         source = FakeSemanticSource(30)
         dc = _make_contract_with_domains([f"metric_{i}" for i in range(30)])
         prompt = dc.to_system_prompt(semantic_source=source)
+        assert "<available_domains>" in prompt
+        assert 'name="domain_a"' in prompt
+        assert 'metric_count="15"' in prompt
+        assert "lookup_domain" in prompt
         # Should NOT list individual metrics
         assert 'name="metric_0"' not in prompt
-        # Should show domain counts
-        assert 'name="domain_a" count="15"' in prompt
-        assert 'name="domain_b" count="15"' in prompt
-        assert "list_metrics" in prompt
 
     def test_large_set_no_domains_shows_count(self) -> None:
         source = FakeSemanticSource(30)

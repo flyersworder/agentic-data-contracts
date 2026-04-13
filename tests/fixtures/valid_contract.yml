@@ -12,8 +12,18 @@ semantic:
       tables: []
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   domains:
-    revenue: [total_revenue]
-    engagement: [active_customers]
+    - name: revenue
+      summary: "Revenue and financial metrics from completed orders"
+      description: >
+        Revenue metrics track recognized revenue from completed orders.
+        Revenue is recognized at fulfillment, not at booking.
+      metrics: [total_revenue]
+    - name: engagement
+      summary: "Customer activity and retention patterns"
+      description: >
+        Customer engagement measures active usage patterns
+        and retention over time.
+      metrics: [active_customers]
   rules:
     - name: tenant_isolation
       description: "All queries must include a WHERE tenant_id = filter"

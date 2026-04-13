@@ -9,6 +9,7 @@ from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRende
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
+    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.base import MetricDefinition, Relationship
@@ -67,10 +68,21 @@ def _load(fixtures_dir: Path) -> DataContract:
 
 
 def _make_contract_with_domains(metric_names: list[str]) -> DataContract:
-    domains = {
-        "domain_a": metric_names[: len(metric_names) // 2],
-        "domain_b": metric_names[len(metric_names) // 2 :],
-    }
+    half = len(metric_names) // 2
+    domains = [
+        Domain(
+            name="domain_a",
+            summary="Domain A",
+            description="Domain A metrics.",
+            metrics=metric_names[:half],
+        ),
+        Domain(
+            name="domain_b",
+            summary="Domain B",
+            description="Domain B metrics.",
+            metrics=metric_names[half:],
+        ),
+    ]
     schema = DataContractSchema(
         name="test",
         semantic=SemanticConfig(
@@ -212,10 +224,11 @@ def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
-    assert "<available_metrics>" in output
-    assert "</available_metrics>" in output
-    assert "total_revenue" in output
-    assert "active_customers" in output
+    # valid_contract.yml has domains, so we get <available_domains> instead
+    assert "<available_domains>" in output
+    assert "</available_domains>" in output
+    assert "revenue" in output
+    assert "engagement" in output
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +242,10 @@ def test_claude_renderer_metrics_large_set_with_domains() -> None:
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
-    assert "<available_metrics>" in output
-    # Should NOT list individual metric descriptions
-    assert "metric_0 —" not in output
-    # Should show domain summaries
+    assert "<available_domains>" in output
     assert "domain_a" in output
     assert "domain_b" in output
+    assert "metric_0 —" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -267,15 +278,42 @@ def test_claude_renderer_metrics_large_set_no_domains() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_claude_renderer_no_semantic_source_with_config(fixtures_dir: Path) -> None:
+def test_claude_renderer_no_semantic_source_with_config_and_domains(
+    fixtures_dir: Path,
+) -> None:
+    """Contract with domains + source config but no source object → domain index."""
     contract = _load(fixtures_dir)
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
-    # Should fall back to <semantic_source> tag
+    assert "<available_domains>" in output
+    assert "revenue" in output
+    assert "<available_metrics>" not in output
+
+
+def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
+    """Contract with source config but no domains → semantic_source fallback tag."""
+    from agentic_data_contracts.core.schema import (
+        SemanticSource as SemanticSourceConfig,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["t"]})
+            ],
+            source=SemanticSourceConfig(type="dbt", path="./manifest.json"),
+        ),
+    )
+    contract = DataContract(schema)
+    renderer = ClaudePromptRenderer()
+    output = renderer.render(contract, semantic_source=None)
+
     assert "<semantic_source>" in output
     assert "</semantic_source>" in output
     assert "dbt" in output
+    assert "<available_domains>" not in output
     assert "<available_metrics>" not in output
 
 

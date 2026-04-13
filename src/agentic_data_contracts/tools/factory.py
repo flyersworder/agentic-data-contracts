@@ -1,8 +1,9 @@
-"""Tool factory — creates 11 agent tools from a DataContract."""
+"""Tool factory — creates 12 agent tools from a DataContract."""
 
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,8 @@ from agentic_data_contracts.semantic.base import (
     find_join_path,
 )
 from agentic_data_contracts.validation.validator import Validator
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,6 +71,31 @@ def create_tools(
         if semantic_source is not None
         else {}
     )
+
+    # Validate domain references
+    if contract.schema.semantic.domains:
+        allowed_tables_set = set(contract.allowed_table_names())
+        metric_names_set = (
+            {m.name for m in semantic_source.get_metrics()}
+            if semantic_source is not None
+            else set()
+        )
+        for domain in contract.schema.semantic.domains:
+            if semantic_source is not None:
+                for metric_name in domain.metrics:
+                    if metric_name not in metric_names_set:
+                        logger.warning(
+                            "Domain '%s' references unknown metric '%s'",
+                            domain.name,
+                            metric_name,
+                        )
+            for table in domain.tables:
+                if table not in allowed_tables_set:
+                    logger.warning(
+                        "Domain '%s' references table '%s' not in allowed_tables",
+                        domain.name,
+                        table,
+                    )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:
@@ -171,14 +199,15 @@ def create_tools(
         metrics = semantic_source.get_metrics()
         domain_filter = args.get("domain")
         if domain_filter:
-            domains = contract.schema.semantic.domains
-            allowed_names = set(domains.get(domain_filter, []))
-            if not allowed_names:
-                available = list(domains.keys()) if domains else []
+            domain_obj = contract.get_domain(domain_filter)
+            if domain_obj is None:
+                all_doms = contract.schema.semantic.domains
+                available = [d.name for d in all_doms] if all_doms else []
                 return _text_response(
                     f"Domain '{domain_filter}' not found."
                     f" Available domains: {available}"
                 )
+            allowed_names = set(domain_obj.metrics)
             metrics = [m for m in metrics if m.name in allowed_names]
         data = [
             {
@@ -230,7 +259,79 @@ def create_tools(
             )
         )
 
-    # ── Tool 11: lookup_relationships ────────────────────────────────────────
+    # ── Tool 7: lookup_domain ───────────────────────────────────────────
+    async def lookup_domain(args: dict[str, Any]) -> dict[str, Any]:
+        name = args.get("name", "")
+        domain = contract.get_domain(name)
+
+        if domain is not None:
+            # Exact match — enrich metrics with descriptions from semantic source
+            if semantic_source is not None:
+                metric_data: list[Any] = []
+                for metric_name in domain.metrics:
+                    m = semantic_source.get_metric(metric_name)
+                    if m is not None:
+                        metric_data.append(
+                            {"name": m.name, "description": m.description}
+                        )
+                    else:
+                        metric_data.append({"name": metric_name, "description": ""})
+            else:
+                metric_data = list(domain.metrics)
+
+            data: dict[str, Any] = {
+                "name": domain.name,
+                "summary": domain.summary,
+                "description": domain.description,
+                "metrics": metric_data,
+            }
+            if domain.tables:
+                data["tables"] = domain.tables
+            return _text_response(json.dumps(data))
+
+        # Fuzzy fallback over domain names
+        all_domains = contract.schema.semantic.domains
+        if not all_domains:
+            return _text_response(f"Domain '{name}' not found. No domains defined.")
+
+        from thefuzz import fuzz, process
+
+        choices = {d.name: d.name for d in all_domains}
+        results = process.extractBests(
+            name,
+            choices,
+            scorer=fuzz.token_set_ratio,
+            score_cutoff=50,
+            limit=3,
+        )
+        if not results:
+            available = [d.name for d in all_domains]
+            return _text_response(
+                f"Domain '{name}' not found. Available domains: {available}"
+            )
+
+        candidates = []
+        for _, _, key in results:
+            d = contract.get_domain(key)
+            if d is not None:
+                candidates.append(
+                    {
+                        "name": d.name,
+                        "summary": d.summary,
+                        "metric_count": len(d.metrics),
+                    }
+                )
+        return _text_response(
+            json.dumps(
+                {
+                    "query": name,
+                    "exact_match": False,
+                    "candidates": candidates,
+                }
+            )
+        )
+
+    # ── Tool 8: lookup_relationships ────────────────────────────────────────
     async def lookup_relationships(args: dict[str, Any]) -> dict[str, Any]:
         table = args.get("table", "")
         target_table = args.get("target_table")
@@ -286,7 +387,7 @@ def create_tools(
         ]
         return _text_response(json.dumps({"table": table, "relationships": data}))
 
-    # ── Tool 7: validate_query ────────────────────────────────────────────────
+    # ── Tool 9: validate_query ────────────────────────────────────────────────
     async def validate_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
         result = validator.validate(sql)
@@ -309,7 +410,7 @@ def create_tools(
                 )
         return _text_response(msg)
 
-    # ── Tool 8: query_cost_estimate ───────────────────────────────────────────
+    # ── Tool 10: query_cost_estimate ──────────────────────────────────────────
     async def query_cost_estimate(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
         if adapter is None:
@@ -327,7 +428,7 @@ def create_tools(
             data["estimated_rows"] = explain.estimated_rows
         return _text_response(json.dumps(data))
 
-    # ── Tool 9: run_query ─────────────────────────────────────────────────────
+    # ── Tool 11: run_query ────────────────────────────────────────────────────
     async def run_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
 
@@ -391,7 +492,7 @@ def create_tools(
 
         return _text_response(response_text)
 
-    # ── Tool 10: get_contract_info ────────────────────────────────────────────
+    # ── Tool 12: get_contract_info ────────────────────────────────────────────
     async def get_contract_info(args: dict[str, Any]) -> dict[str, Any]:
         info: dict[str, Any] = {
             "name": contract.name,
@@ -408,6 +509,12 @@ def create_tools(
                 }
             )
         info["rules"] = rules
+
+        if contract.schema.semantic.domains:
+            info["domains"] = [
+                {"name": d.name, "summary": d.summary, "metric_count": len(d.metrics)}
+                for d in contract.schema.semantic.domains
+            ]
 
         if contract.schema.semantic.forbidden_operations:
             info["forbidden_operations"] = contract.schema.semantic.forbidden_operations
@@ -534,6 +641,25 @@ def create_tools(
                 "required": ["metric_name"],
             },
             callable=lookup_metric,
+        ),
+        ToolDef(
+            name="lookup_domain",
+            description=(
+                "Look up a business domain by name to get its full description,"
+                " associated metrics, and tables. Use this to understand"
+                " business context before querying."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the domain to look up",
+                    }
+                },
+                "required": ["name"],
+            },
+            callable=lookup_domain,
         ),
         ToolDef(
             name="validate_query",

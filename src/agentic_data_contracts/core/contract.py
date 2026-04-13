@@ -9,6 +9,7 @@ import yaml
 
 from agentic_data_contracts.core.schema import (
     DataContractSchema,
+    Domain,
     Enforcement,
     SemanticRule,
 )
@@ -80,6 +81,13 @@ class DataContract:
         return [
             r for r in self.schema.semantic.rules if r.enforcement == Enforcement.WARN
         ]
+
+    def get_domain(self, name: str) -> Domain | None:
+        """Find a domain by exact name, or None."""
+        for d in self.schema.semantic.domains:
+            if d.name == name:
+                return d
+        return None
 
     def log_rules(self) -> list[SemanticRule]:
         return [

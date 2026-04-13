@@ -12,15 +12,34 @@ from agentic_data_contracts.core.schema import (
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 
-def test_system_prompt_without_source(fixtures_dir: Path) -> None:
+def test_system_prompt_without_source_with_domains(fixtures_dir: Path) -> None:
+    """Contract with domains but no semantic source renders domain index."""
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     prompt = dc.to_system_prompt()
-    # Contract has domains, so we get <available_domains> even without semantic source
-    assert (
-        "<available_domains>" in prompt
-        or "Consult" in prompt
-        or "Semantic Source" in prompt
+    assert "<available_domains>" in prompt
+    assert "revenue" in prompt
+
+
+def test_system_prompt_without_source_no_domains() -> None:
+    """Contract with source config but no domains falls back to semantic_source tag."""
+    from agentic_data_contracts.core.schema import (
+        SemanticSource as SemanticSourceConfig,
     )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["t"]})
+            ],
+            source=SemanticSourceConfig(type="dbt", path="./manifest.json"),
+        ),
+    )
+    dc = DataContract(schema)
+    prompt = dc.to_system_prompt()
+    assert "<semantic_source>" in prompt
+    assert "dbt" in prompt
+    assert "Consult" in prompt
 
 
 def test_system_prompt_with_source_and_domains(fixtures_dir: Path) -> None:

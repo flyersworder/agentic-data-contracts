@@ -278,14 +278,42 @@ def test_claude_renderer_metrics_large_set_no_domains() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_claude_renderer_no_semantic_source_with_config(fixtures_dir: Path) -> None:
+def test_claude_renderer_no_semantic_source_with_config_and_domains(
+    fixtures_dir: Path,
+) -> None:
+    """Contract with domains + source config but no source object → domain index."""
     contract = _load(fixtures_dir)
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
-    # Contract has domains, so we get <available_domains> even without semantic source
     assert "<available_domains>" in output
     assert "revenue" in output
+    assert "<available_metrics>" not in output
+
+
+def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
+    """Contract with source config but no domains → semantic_source fallback tag."""
+    from agentic_data_contracts.core.schema import (
+        SemanticSource as SemanticSourceConfig,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate({"schema": "public", "tables": ["t"]})
+            ],
+            source=SemanticSourceConfig(type="dbt", path="./manifest.json"),
+        ),
+    )
+    contract = DataContract(schema)
+    renderer = ClaudePromptRenderer()
+    output = renderer.render(contract, semantic_source=None)
+
+    assert "<semantic_source>" in output
+    assert "</semantic_source>" in output
+    assert "dbt" in output
+    assert "<available_domains>" not in output
     assert "<available_metrics>" not in output
 
 

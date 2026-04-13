@@ -10,17 +10,28 @@ semantic:
       tables: [orders, customers, subscriptions]
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   domains:
-    revenue: [total_revenue, revenue_by_region]
+    - name: revenue
+      summary: "Financial metrics from completed orders"
+      description: >
+        Revenue metrics track recognized revenue from completed orders.
+        Revenue is recognized at fulfillment, not at booking.
+        Excludes refunds, chargebacks, and pending orders unless stated.
+      metrics: [total_revenue, revenue_by_region]
+      tables: [analytics.orders, analytics.customers]
   rules:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
       enforcement: block
+      query_check:
+        required_filter: tenant_id
     - name: use_semantic_revenue
       description: "Revenue calculations must use the metric definitions"
       enforcement: warn
     - name: no_select_star
       description: "Must specify explicit columns"
       enforcement: block
+      query_check:
+        no_select_star: true
 
 resources:
   cost_limit_usd: 5.00

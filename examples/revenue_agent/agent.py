@@ -86,6 +86,18 @@ async def _run_demo(tools: list, prompt: str) -> None:
     print("\n=== Available Tables ===")
     print(result["content"][0]["text"])
 
+    # Domain discovery: understand the business context before querying
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    result = await tool.callable({"name": "revenue"})
+    print("\n=== Lookup Domain (revenue) ===")
+    print(result["content"][0]["text"])
+
+    # Metric lookup: get the SQL definition for a specific metric
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    result = await tool.callable({"metric_name": "total_revenue"})
+    print("\n=== Lookup Metric (total_revenue) ===")
+    print(result["content"][0]["text"])
+
     tool = next(t for t in tools if t.name == "validate_query")
     sql = (
         "SELECT c.region, SUM(o.amount) as revenue "

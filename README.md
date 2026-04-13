@@ -240,6 +240,10 @@ list_metrics(domain="retention")    → all metrics in the retention domain
 
 This means the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
 
+### Why progressive disclosure works
+
+This pattern — compact index in the prompt, detailed context on demand — is the same philosophy validated by agent skill systems, MCP tool servers, and RAG architectures. Instead of overloading the agent's context window with everything upfront, you give it just enough to know *where to look*, then let it pull details when needed. The result is better token efficiency, more focused reasoning, and fewer hallucinations from context overload.
+
 ## Contract Rules
 
 Rules are enforced at three levels:

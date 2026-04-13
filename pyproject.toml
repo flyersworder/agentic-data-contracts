@@ -44,7 +44,7 @@ Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/mai
 
 [project.optional-dependencies]
 agent-sdk = ["claude-agent-sdk>=0.1.52"]
-agent-contracts = ["ai-agent-contracts>=0.2.0"]
+agent-contracts = ["ai-agent-contracts>=0.3.0"]
 bigquery = ["google-cloud-bigquery"]
 snowflake = ["snowflake-connector-python"]
 postgres = ["psycopg2-binary"]

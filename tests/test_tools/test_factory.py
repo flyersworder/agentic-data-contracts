@@ -79,7 +79,9 @@ async def test_list_schemas(
     text = result["content"][0]["text"]
     data = json.loads(text)
     assert isinstance(data["schemas"], list)
-    assert any(s["schema"] == "analytics" for s in data["schemas"])
+    analytics = next(s for s in data["schemas"] if s["schema"] == "analytics")
+    assert "preferred" not in analytics  # not set in fixture
+    assert "description" not in analytics  # not set in fixture
 
 
 @pytest.mark.asyncio

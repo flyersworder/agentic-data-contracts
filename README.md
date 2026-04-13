@@ -15,6 +15,19 @@
 
 ## How It Works
 
+The agent follows a domain-driven workflow — understanding business context before writing SQL:
+
+```
+1. Agent receives: "How is revenue trending?"
+2. lookup_domain("revenue")     → "Revenue is recognized at fulfillment, not booking"
+3. lookup_metric("total_revenue") → SUM(amount) FILTER (WHERE status = 'completed')
+4. Agent writes SQL using the metric definition
+5. validate_query(sql)          → VALID (passes all contract rules)
+6. run_query(sql)               → results returned
+```
+
+Governance rules are enforced automatically at query time:
+
 ```
 Agent: "SELECT * FROM analytics.orders"
   -> BLOCKED (no SELECT * — specify explicit columns)
@@ -24,12 +37,9 @@ Agent: "SELECT order_id, amount FROM analytics.orders"
 
 Agent: "SELECT order_id, amount FROM analytics.orders WHERE tenant_id = 'acme'"
   -> PASSED + WARN (consider using semantic revenue definition)
-
-Agent: "DELETE FROM analytics.orders WHERE id = 1"
-  -> BLOCKED (forbidden operation: DELETE)
 ```
 
-The contract defines the rules. The library enforces them — before the query ever reaches the database.
+The contract defines the domains, metrics, and rules. The library enforces them — before the query ever reaches the database.
 
 ## Installation
 
@@ -70,6 +80,13 @@ semantic:
     - schema: marketing
       tables: [campaigns]    # or list specific tables
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  domains:
+    - name: revenue
+      summary: "Financial metrics from completed orders"
+      description: >
+        Revenue is recognized at fulfillment, not at booking.
+        Excludes refunds and chargebacks unless stated.
+      metrics: [total_revenue]
   rules:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
@@ -163,7 +180,7 @@ asyncio.run(demo())
 
 | Tool | Description |
 |------|-------------|
-| `list_schemas` | List all allowed database schemas from the contract |
+| `list_schemas` | List allowed schemas with descriptions and preferred flags |
 | `list_tables` | List allowed tables, optionally filtered by schema |
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
@@ -175,6 +192,53 @@ asyncio.run(demo())
 | `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
 | `run_query` | Validate and execute a SQL query, returning results |
 | `get_contract_info` | Get the full contract: rules, limits, domains, and session status |
+
+## Domain-Driven Agent Workflow
+
+The core design principle: **agents should understand the business domain before writing SQL.** Instead of dumping table schemas and hoping for the best, the contract teaches the agent your business vocabulary through progressive disclosure:
+
+```
+1. Domain context     →  "What does 'revenue' mean here?"
+2. Metric definitions →  "How is 'total_revenue' calculated?"
+3. Query execution    →  "Run the validated SQL"
+```
+
+### Defining domains
+
+Each domain carries a description that teaches the agent your business rules — things the SQL alone can't express:
+
+```yaml
+semantic:
+  domains:
+    - name: acquisition
+      summary: "Customer acquisition costs and conversion metrics"
+      description: >
+        Acquisition metrics track the cost and efficiency of
+        acquiring new customers across all channels.
+        CAC is calculated using fully-loaded cost, not just ad spend.
+      metrics: [CAC, CPA, CPL, click_through_rate]
+    - name: retention
+      summary: "Customer retention, churn, and lifetime value"
+      description: >
+        Retention metrics measure how well we keep customers.
+        Churn is measured on a 30-day rolling window.
+        A customer is "active" if they had at least one qualifying
+        action in the window.
+      metrics: [churn_rate, LTV, retention_30d]
+```
+
+### How the agent uses domains
+
+The system prompt gives the agent a compact domain index. When a user asks a domain-specific question, the agent explores progressively:
+
+```
+lookup_domain("acquisition")        → business context + metric descriptions
+lookup_metric("CAC")                → SQL expression, source table, filters
+lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candidates
+list_metrics(domain="retention")    → all metrics in the retention domain
+```
+
+This means the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
 
 ## Contract Rules
 
@@ -343,53 +407,6 @@ class MarkdownRenderer:
 dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt(renderer=MarkdownRenderer()))
 ```
-
-## Domain-Driven Agent Workflow
-
-The core design principle: **agents should understand the business domain before writing SQL.** Instead of dumping table schemas and hoping for the best, the contract teaches the agent your business vocabulary through progressive disclosure:
-
-```
-1. Domain context     →  "What does 'revenue' mean here?"
-2. Metric definitions →  "How is 'total_revenue' calculated?"
-3. Query execution    →  "Run the validated SQL"
-```
-
-### Defining domains
-
-Each domain carries a description that teaches the agent your business rules — things the SQL alone can't express:
-
-```yaml
-semantic:
-  domains:
-    - name: acquisition
-      summary: "Customer acquisition costs and conversion metrics"
-      description: >
-        Acquisition metrics track the cost and efficiency of
-        acquiring new customers across all channels.
-        CAC is calculated using fully-loaded cost, not just ad spend.
-      metrics: [CAC, CPA, CPL, click_through_rate]
-    - name: retention
-      summary: "Customer retention, churn, and lifetime value"
-      description: >
-        Retention metrics measure how well we keep customers.
-        Churn is measured on a 30-day rolling window.
-        A customer is "active" if they had at least one qualifying
-        action in the window.
-      metrics: [churn_rate, LTV, retention_30d]
-```
-
-### How the agent uses domains
-
-The system prompt gives the agent a compact domain index. When a user asks a domain-specific question, the agent explores progressively:
-
-```
-lookup_domain("acquisition")        → business context + metric descriptions
-lookup_metric("CAC")                → SQL expression, source table, filters
-lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candidates
-list_metrics(domain="retention")    → all metrics in the retention domain
-```
-
-This means the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
 
 ## Scaling to Large Organizations
 

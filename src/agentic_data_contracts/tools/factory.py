@@ -104,7 +104,7 @@ def create_tools(
             if not entry.tables:
                 continue
             info: dict[str, Any] = {"schema": entry.schema_}
-            if entry.description:
+            if entry.description is not None:
                 info["description"] = entry.description
             if entry.preferred:
                 info["preferred"] = True
@@ -549,6 +549,7 @@ def create_tools(
             name="list_schemas",
             description=(
                 "List all allowed database schemas defined in the data contract."
+                " Includes schema descriptions and preferred flags when available."
             ),
             input_schema={"type": "object", "properties": {}, "required": []},
             callable=list_schemas,

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -76,7 +77,9 @@ async def test_list_schemas(
     tool = next(t for t in tools if t.name == "list_schemas")
     result = await tool.callable({})
     text = result["content"][0]["text"]
-    assert "analytics" in text
+    data = json.loads(text)
+    assert isinstance(data["schemas"], list)
+    assert any(s["schema"] == "analytics" for s in data["schemas"])
 
 
 @pytest.mark.asyncio

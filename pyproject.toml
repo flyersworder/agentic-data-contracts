@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "sqlglot>=23.0",
+    "sqlglot>=30.4.3",
     "pydantic>=2.0",
     "pyyaml>=6.0.3",
     "thefuzz>=0.22.1",

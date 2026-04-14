@@ -52,7 +52,7 @@ duckdb = ["duckdb"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "pytest-cov>=6.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.10",
     "duckdb",
 ]

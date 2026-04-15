@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
 **Date:** 2026-04-13
-**Status:** Implemented (v0.9.1)
+**Status:** Implemented (v0.9.2)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -188,7 +188,7 @@ When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-cont
 
 - **Retry count** — incremented on each failed query attempt, checked against `max_retries`
 - **Token usage** — tracked via callback, checked against `token_budget`
-- **Wall-clock duration** — start time recorded, checked against `max_duration_seconds`
+- **Wall-clock duration** — lazy start on first `check_limits()` call (not at construction), checked against `max_duration_seconds`. Can be reset via `reset_timer()` for frameworks that manage their own idle timeouts.
 - **Cost estimate** — if EXPLAIN adapter returns cost info, checked against `cost_limit_usd`
 
 These are simple counters/timers with guard checks before each tool call. No formal state machine.

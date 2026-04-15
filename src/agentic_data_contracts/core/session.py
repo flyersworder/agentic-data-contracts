@@ -20,11 +20,22 @@ class ContractSession:
         self.retries: int = 0
         self.tokens_used: int = 0
         self.cost_usd: float = 0.0
-        self._start_time: float = time.monotonic()
+        self._start_time: float | None = None
+
+    def _ensure_timer(self) -> None:
+        """Start the timer if not already running."""
+        if self._start_time is None:
+            self._start_time = time.monotonic()
 
     @property
     def elapsed_seconds(self) -> float:
+        if self._start_time is None:
+            return 0.0
         return time.monotonic() - self._start_time
+
+    def reset_timer(self) -> None:
+        """Reset the timer so it restarts on the next check_limits() call."""
+        self._start_time = None
 
     def record_retry(self) -> None:
         self.retries += 1
@@ -36,6 +47,7 @@ class ContractSession:
         self.cost_usd += amount
 
     def check_limits(self) -> None:
+        self._ensure_timer()
         res = self.contract.schema.resources
         if res is None:
             return

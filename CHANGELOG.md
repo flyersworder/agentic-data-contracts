@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2026-04-15
+
+### Fixed
+
+- **Lazy session timer**: `ContractSession` no longer starts its wall-clock timer at construction. The timer now starts on the first `check_limits()` call, so idle time before the user's first interaction does not count against `temporal.max_duration_seconds`. This fixes premature "session expired" errors in long-lived agent setups (Chainlit, Webex bots) where the session object is created well before the first user message. (#16)
+
+### Added
+
+- **`ContractSession.reset_timer()`**: New method that resets the duration timer so it restarts on the next `check_limits()` call. Useful for frameworks with their own idle-timeout mechanisms that want to restart the clock on user activity.
+
 ## [0.9.1] - 2026-04-13
 
 ### Added

@@ -60,6 +60,7 @@ def test_session_blocks_on_cost_limit(fixtures_dir: Path) -> None:
 def test_session_elapsed_seconds(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     session = ContractSession(dc)
+    session.check_limits()  # starts the timer
     assert session.elapsed_seconds >= 0.0
 
 
@@ -85,3 +86,61 @@ def test_session_remaining_budget(fixtures_dir: Path) -> None:
     assert info["retries_remaining"] == 2
     assert info["tokens_remaining"] == 40000
     assert info["cost_remaining_usd"] == pytest.approx(3.50)
+
+
+# --- Lazy timer tests (issue #16) ---
+
+
+def test_timer_not_started_at_construction(fixtures_dir: Path) -> None:
+    """Timer should not start at construction — elapsed should be 0."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    assert session.elapsed_seconds == 0.0
+
+
+def test_timer_starts_on_first_check_limits(fixtures_dir: Path) -> None:
+    """Timer should start lazily on the first check_limits() call."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    assert session._start_time is None
+    session.check_limits()
+    assert session._start_time is not None
+    assert session.elapsed_seconds >= 0.0
+
+
+def test_reset_timer(fixtures_dir: Path) -> None:
+    """reset_timer() should clear the timer so elapsed returns 0."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    session.check_limits()  # starts timer
+    session.reset_timer()
+    assert session.elapsed_seconds == 0.0
+    assert session._start_time is None
+
+
+def test_reset_timer_restarts_on_next_check(fixtures_dir: Path) -> None:
+    """After reset, timer should restart on the next check_limits() call."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    session.check_limits()  # starts timer
+    session.reset_timer()
+    session.check_limits()  # restarts timer
+    assert session._start_time is not None
+
+
+def test_reset_timer_before_started_is_noop(fixtures_dir: Path) -> None:
+    """reset_timer() on an unstarted timer should be a safe no-op."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    session.reset_timer()  # should not raise
+    assert session._start_time is None
+    assert session.elapsed_seconds == 0.0
+
+
+def test_remaining_before_timer_started(fixtures_dir: Path) -> None:
+    """remaining() should show full duration budget when timer not started."""
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    info = session.remaining()
+    assert "seconds_remaining" in info
+    assert info["seconds_remaining"] == 300.0

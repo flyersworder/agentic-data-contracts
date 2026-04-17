@@ -301,41 +301,24 @@ SQL string
 
 Two modes: tool factory for quick starts, middleware for BYO tools.
 
-### 13 Tools in Three Categories
+### 9 Tools
 
-#### Discovery tools (understand what's available)
-
-1. **`list_schemas()`** — Allowed schemas from contract
-2. **`list_tables(schema?)`** — Allowed tables with column summary
-3. **`describe_table(schema, table)`** — Full column details from database (name, type, description, partitioning)
-4. **`preview_table(schema, table, limit=5)`** — Sample rows from a table
-5. **`list_metrics(domain?, tier?, indicator_kind?)`** — All metrics from semantic source; optional filters for domain, tier (`north_star` / `department_kpi` / `team_kpi`), and `indicator_kind` (`leading` / `lagging`)
-6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula, enriched with `domains`, `tier`, `indicator_kind`, and citation-ready `impacts` / `impacted_by` edges; fuzzy fallback when no exact match
-7. **`lookup_domain(name)`** — Full domain context (description, metrics with descriptions, tables); fuzzy fallback when no exact match
-8. **`lookup_relationships(table, target_table?)`** — Join paths involving a table; with `target_table`, finds shortest multi-hop path via BFS (up to 3 hops)
-9. **`trace_metric_impacts(metric_name, direction, max_depth=2)`** — Walks the metric-impact graph via BFS from the given metric; `direction="upstream"` returns drivers, `direction="downstream"` returns affected metrics. Each edge carries `direction`, `confidence`, and `evidence`. `max_depth` clamped to `[1, 10]`.
-
-#### Execution tools (query with governance)
-
-10. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
-11. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
-12. **`run_query(sql)`** — Validate → execute → return results
-
-#### Meta tool (self-awareness)
-
-13. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time, domain summaries
+1. **`describe_table(schema, table)`** — Column details from the database adapter
+2. **`preview_table(schema, table, limit?)`** — Sample rows
+3. **`list_metrics(domain?, tier?, indicator_kind?)`** — Browse metrics with filters
+4. **`lookup_metric(metric_name)`** — Full metric definition with SQL and impact edges
+5. **`lookup_domain(name)`** — Full domain description with metrics and tables
+6. **`lookup_relationships(table, target_table?)`** — Direct joins and multi-hop paths
+7. **`trace_metric_impacts(metric_name, direction, max_depth?)`** — BFS over the impact graph
+8. **`inspect_query(sql)`** — Static + EXPLAIN check, no execution
+9. **`run_query(sql)`** — Validate and execute; response includes remaining session budget
 
 ### Natural Agent Workflow
 
 ```
-list_schemas → list_tables → describe_table → preview_table
-    → lookup_domain (understand the business domain)
-    → lookup_metric (get SQL definition + tier/indicator_kind/impact edges)
-    → trace_metric_impacts (walk upstream for root-cause, downstream for action impact)
-    → lookup_relationships (if joining tables)
-    → write SQL → validate_query → query_cost_estimate
-    → run_query
-    → get_contract_info (check remaining budget)
+list_metrics → lookup_metric → lookup_relationships → describe_table
+    → write SQL → inspect_query
+    → (if valid) run_query
 ```
 
 ### Tool Factory
@@ -347,7 +330,7 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
-# Returns all 13 tools as @tool-decorated async functions
+# Returns all 9 tools as @tool-decorated async functions
 # compatible with claude_agent_sdk.create_sdk_mcp_server()
 ```
 
@@ -387,10 +370,9 @@ async def my_custom_query_tool(args: dict) -> dict:
 
 | Tool | Without adapter |
 |---|---|
-| `list_schemas`, `list_tables`, `list_metrics`, `lookup_metric`, `lookup_domain`, `lookup_relationships`, `trace_metric_impacts` | Fully functional (contract + semantic source) |
-| `validate_query`, `get_contract_info` | Fully functional |
-| `describe_table`, `preview_table`, `run_query` | Unavailable (clear error message) |
-| `query_cost_estimate` | Returns "unavailable without database adapter" |
+| `describe_table`, `preview_table`, `list_metrics`, `lookup_metric`, `lookup_domain`, `lookup_relationships`, `trace_metric_impacts` | Fully functional (contract + semantic source) |
+| `run_query` | Fully functional when database adapter is configured |
+| `inspect_query` | Layer 1 always runs; EXPLAIN fields populated when adapter is configured |
 
 ## Semantic Layer
 
@@ -528,7 +510,7 @@ agentic-data-contracts/
 │   │   └── explain.py           # EXPLAIN adapter orchestration
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   ├── factory.py           # create_tools() — returns 13 tools
+│   │   ├── factory.py           # create_tools() — returns 9 tools
 │   │   └── middleware.py        # contract_middleware decorator
 │   ├── semantic/
 │   │   ├── __init__.py

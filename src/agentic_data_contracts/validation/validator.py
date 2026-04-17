@@ -215,13 +215,15 @@ class Validator:
             explain_result = self.explain_adapter.explain(sql)
             schema_valid = explain_result.schema_valid
             explain_errors = list(explain_result.errors)
+            estimated_cost_usd = explain_result.estimated_cost_usd
+            estimated_rows = explain_result.estimated_rows
             if not explain_result.schema_valid:
+                # `reasons` blocks the query; `explain_errors` carries raw
+                # diagnostics for inspect_query.
                 reasons.append(
                     f"Schema validation failed: {', '.join(explain_result.errors)}"
                 )
             else:
-                estimated_cost_usd = explain_result.estimated_cost_usd
-                estimated_rows = explain_result.estimated_rows
                 res = self.contract.schema.resources
                 if res:
                     if (

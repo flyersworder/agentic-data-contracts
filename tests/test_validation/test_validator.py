@@ -138,6 +138,48 @@ def test_explain_cost_passed_through(contract: DataContract) -> None:
     assert result.estimated_cost_usd == 2.5
 
 
+def test_explain_fields_populated_when_schema_valid(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=0.05,
+            estimated_rows=1500,
+            schema_valid=True,
+            errors=[],
+        )
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.estimated_cost_usd == 0.05
+    assert result.estimated_rows == 1500
+    assert result.schema_valid is True
+    assert result.explain_errors == []
+
+
+def test_explain_fields_populated_when_schema_invalid(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=None,
+            estimated_rows=None,
+            schema_valid=False,
+            errors=["column foo not found"],
+        )
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.blocked is True
+    assert result.schema_valid is False
+    assert result.explain_errors == ["column foo not found"]
+
+
+def test_explain_fields_default_when_no_adapter(contract: DataContract) -> None:
+    validator = Validator(contract, explain_adapter=None)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.schema_valid is True
+    assert result.explain_errors == []
+    assert result.estimated_rows is None
+    assert result.estimated_cost_usd is None
+
+
 def test_table_scoped_query_check() -> None:
     schema = DataContractSchema(
         name="test",

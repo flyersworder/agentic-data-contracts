@@ -190,21 +190,6 @@ async def test_lookup_domain_no_semantic_source(
 
 
 @pytest.mark.asyncio
-async def test_get_contract_info_includes_domains(
-    contract_with_domains: DataContract, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract_with_domains, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "get_contract_info")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    data = json.loads(text)
-    assert "domains" in data
-    assert len(data["domains"]) == 2
-    assert data["domains"][0]["name"] == "revenue"
-    assert "summary" in data["domains"][0]
-
-
-@pytest.mark.asyncio
 async def test_domain_validation_warns_unknown_metric(
     fixtures_dir: Path,
     caplog: pytest.LogCaptureFixture,
@@ -267,48 +252,3 @@ async def test_domain_validation_warns_unknown_table(
         create_tools(dc, semantic_source=source)
 
     assert any("analytics.nonexistent" in msg for msg in caplog.messages)
-
-
-@pytest.mark.asyncio
-async def test_list_schemas_with_description_and_preferred(
-    semantic: YamlSource,
-) -> None:
-    schema = DataContractSchema(
-        name="test",
-        semantic=SemanticConfig(
-            allowed_tables=[
-                AllowedTable.model_validate(
-                    {
-                        "schema": "analytics",
-                        "tables": ["orders"],
-                        "description": "Curated analytics layer",
-                        "preferred": True,
-                    }
-                ),
-                AllowedTable.model_validate(
-                    {
-                        "schema": "raw",
-                        "tables": ["events"],
-                        "description": "Raw ingestion tables",
-                    }
-                ),
-            ],
-        ),
-    )
-    dc = DataContract(schema)
-    tools = create_tools(dc, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "list_schemas")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    data = json.loads(text)
-
-    assert len(data["schemas"]) == 2
-    analytics = data["schemas"][0]
-    assert analytics["schema"] == "analytics"
-    assert analytics["description"] == "Curated analytics layer"
-    assert analytics["preferred"] is True
-
-    raw = data["schemas"][1]
-    assert raw["schema"] == "raw"
-    assert raw["description"] == "Raw ingestion tables"
-    assert "preferred" not in raw  # False is omitted

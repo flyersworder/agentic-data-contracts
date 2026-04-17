@@ -38,63 +38,37 @@ def semantic(fixtures_dir: Path) -> YamlSource:
     return YamlSource(fixtures_dir / "semantic_source.yml")
 
 
-def test_create_tools_returns_13_tools(
+def test_create_tools_returns_9_tools(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    assert len(tools) == 13
+    assert len(tools) == 9
 
 
 def test_create_tools_without_adapter(
     contract: DataContract, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, semantic_source=semantic)
-    assert len(tools) == 13
+    assert len(tools) == 9
 
 
 def test_tool_names(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    names = [t.name for t in tools]
-    assert "list_schemas" in names
-    assert "list_tables" in names
-    assert "describe_table" in names
-    assert "preview_table" in names
-    assert "list_metrics" in names
-    assert "lookup_metric" in names
-    assert "validate_query" in names
-    assert "query_cost_estimate" in names
-    assert "run_query" in names
-    assert "get_contract_info" in names
-    assert "trace_metric_impacts" in names
-
-
-@pytest.mark.asyncio
-async def test_list_schemas(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "list_schemas")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    data = json.loads(text)
-    assert isinstance(data["schemas"], list)
-    analytics = next(s for s in data["schemas"] if s["schema"] == "analytics")
-    assert "preferred" not in analytics  # not set in fixture
-    assert "description" not in analytics  # not set in fixture
-
-
-@pytest.mark.asyncio
-async def test_list_tables(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "list_tables")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    assert "orders" in text
-    assert "customers" in text
+    names = {t.name for t in tools}
+    expected = {
+        "describe_table",
+        "preview_table",
+        "list_metrics",
+        "lookup_metric",
+        "lookup_domain",
+        "lookup_relationships",
+        "trace_metric_impacts",
+        "inspect_query",
+        "run_query",
+    }
+    assert names == expected
 
 
 @pytest.mark.asyncio
@@ -121,30 +95,6 @@ async def test_describe_table_without_adapter(
 
 
 @pytest.mark.asyncio
-async def test_validate_query_passes(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "validate_query")
-    result = await tool.callable(
-        {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}
-    )
-    text = result["content"][0]["text"]
-    assert "pass" in text.lower() or "valid" in text.lower()
-
-
-@pytest.mark.asyncio
-async def test_validate_query_blocked(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "validate_query")
-    result = await tool.callable({"sql": "SELECT * FROM analytics.orders"})
-    text = result["content"][0]["text"]
-    assert "block" in text.lower() or "violation" in text.lower()
-
-
-@pytest.mark.asyncio
 async def test_run_query_valid(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
@@ -166,17 +116,6 @@ async def test_run_query_blocked(
     result = await tool.callable({"sql": "DELETE FROM analytics.orders"})
     text = result["content"][0]["text"]
     assert "block" in text.lower() or "violation" in text.lower()
-
-
-@pytest.mark.asyncio
-async def test_get_contract_info(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "get_contract_info")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    assert "revenue-analysis" in text
 
 
 @pytest.mark.asyncio
@@ -239,28 +178,6 @@ async def test_describe_table_rejects_non_allowed_table(
     result = await tool.callable({"schema": "secret", "table": "data"})
     text = result["content"][0]["text"]
     assert "not in the allowed" in text.lower()
-
-
-@pytest.mark.asyncio
-async def test_query_cost_estimate_with_adapter(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "query_cost_estimate")
-    result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
-    text = result["content"][0]["text"]
-    assert "schema_valid" in text
-
-
-@pytest.mark.asyncio
-async def test_query_cost_estimate_without_adapter(
-    contract: DataContract, semantic: YamlSource
-) -> None:
-    tools = create_tools(contract, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "query_cost_estimate")
-    result = await tool.callable({"sql": "SELECT 1"})
-    text = result["content"][0]["text"]
-    assert "unavailable" in text.lower()
 
 
 @pytest.mark.asyncio

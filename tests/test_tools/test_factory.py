@@ -434,3 +434,30 @@ async def test_run_query_records_session_cost() -> None:
     # DuckDB doesn't provide cost estimates, so cost should remain 0
     # This test verifies the plumbing works without error
     assert session.cost_usd >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_run_query_response_includes_session_remaining(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable(
+        {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+    data = json.loads(result["content"][0]["text"])
+    assert "session" in data
+    assert "remaining" in data["session"]
+    assert "elapsed_seconds" in data["session"]["remaining"]
+
+
+@pytest.mark.asyncio
+async def test_run_query_blocked_includes_remaining_budget(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable({"sql": "DELETE FROM analytics.orders"})
+    text = result["content"][0]["text"]
+    assert "block" in text.lower() or "violation" in text.lower()
+    assert "remaining" in text.lower()

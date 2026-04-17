@@ -613,11 +613,16 @@ def create_tools(
     async def run_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
 
+        def _with_remaining(msg: str) -> str:
+            return f"{msg}\nRemaining: {json.dumps(session.remaining(), default=str)}"
+
         # Check session limits first
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return _text_response(f"BLOCKED — Session limit exceeded: {e}")
+            return _text_response(
+                _with_remaining(f"BLOCKED — Session limit exceeded: {e}")
+            )
 
         # Phase 1 + 2: query checks + EXPLAIN
         vresult = validator.validate(sql)
@@ -626,7 +631,7 @@ def create_tools(
             msg = "BLOCKED — Violations:\n" + "\n".join(
                 f"- {r}" for r in vresult.reasons
             )
-            return _text_response(msg)
+            return _text_response(_with_remaining(msg))
 
         # Record estimated cost from EXPLAIN — charged before execution because
         # the cost budget tracks database resource consumption, not successful
@@ -644,7 +649,9 @@ def create_tools(
             qresult = adapter.execute(sql)
         except Exception as e:  # noqa: BLE001
             session.record_retry()
-            return _text_response(f"BLOCKED — Query execution failed: {e}")
+            return _text_response(
+                _with_remaining(f"BLOCKED — Query execution failed: {e}")
+            )
 
         # Phase 3: result checks
         rresult = validator.validate_results(
@@ -655,13 +662,14 @@ def create_tools(
             msg = "BLOCKED — Result check violations:\n" + "\n".join(
                 f"- {r}" for r in rresult.reasons
             )
-            return _text_response(msg)
+            return _text_response(_with_remaining(msg))
 
         rows = [dict(zip(qresult.columns, row)) for row in qresult.rows]
         data = {
             "columns": qresult.columns,
             "rows": rows,
             "row_count": qresult.row_count,
+            "session": {"remaining": session.remaining()},
         }
         response_text = json.dumps(data, default=str)
 

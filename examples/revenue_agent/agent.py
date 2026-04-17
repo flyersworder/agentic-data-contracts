@@ -10,6 +10,7 @@ Requires: claude-agent-sdk (optional - falls back to demo mode)
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -18,6 +19,24 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 EXAMPLE_DIR = Path(__file__).parent
+
+
+def _parse_run_query_body(text: str) -> dict | None:
+    """run_query may prepend a `WARNINGS:\n...\n\n` preamble before the JSON body.
+
+    Returns the parsed JSON dict, or None if the response is a plain-text
+    BLOCKED/error message.
+    """
+    if text.startswith("BLOCKED") or text.startswith("No database adapter"):
+        return None
+    body = text
+    if body.startswith("WARNINGS:"):
+        # Strip preamble up to the blank line separating it from the JSON body.
+        _, _, body = body.partition("\n\n")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return None
 
 
 def main() -> None:
@@ -76,14 +95,19 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
 async def _run_demo(tools: list, prompt: str) -> None:
     print(f"Query: {prompt}\n")
 
-    tool = next(t for t in tools if t.name == "list_schemas")
-    result = await tool.callable({})
-    print("=== Available Schemas ===")
-    print(result["content"][0]["text"])
-
-    tool = next(t for t in tools if t.name == "list_tables")
-    result = await tool.callable({})
-    print("\n=== Available Tables ===")
+    # ── Discovery ─────────────────────────────────────────────────────────────
+    # Note: allowed schemas/tables are now injected into the system prompt by
+    # ClaudePromptRenderer, so the agent reads its allowlist directly from the
+    # prompt rather than calling a discovery tool. Column-level discovery is
+    # still available via describe_table.
+    print("=== Discovery ===")
+    print(
+        "Allowed schemas/tables are injected into the system prompt by "
+        "ClaudePromptRenderer. Agents see them without a discovery tool call.\n"
+        "Column-level discovery is still available via describe_table:"
+    )
+    describe = next(t for t in tools if t.name == "describe_table")
+    result = await describe.callable({"schema": "analytics", "table": "orders"})
     print(result["content"][0]["text"])
 
     # Domain discovery: understand the business context before querying
@@ -106,7 +130,8 @@ async def _run_demo(tools: list, prompt: str) -> None:
     print("\n=== Trace Metric Impacts (upstream drivers of total_revenue) ===")
     print(result["content"][0]["text"])
 
-    tool = next(t for t in tools if t.name == "validate_query")
+    # ── Validation (inspect_query) ────────────────────────────────────────────
+    inspect = next(t for t in tools if t.name == "inspect_query")
     sql = (
         "SELECT c.region, SUM(o.amount) as revenue "
         "FROM analytics.orders o "
@@ -115,15 +140,23 @@ async def _run_demo(tools: list, prompt: str) -> None:
         "AND o.created_at BETWEEN '2025-01-01' AND '2025-03-31' "
         "GROUP BY c.region"
     )
-    result = await tool.callable({"sql": sql})
-    print("\n=== Validate Query ===")
-    print(result["content"][0]["text"])
+    result = await inspect.callable({"sql": sql})
+    data = json.loads(result["content"][0]["text"])
+    print("\n=== Inspect Query (valid revenue-by-region SQL) ===")
+    print(f"  valid: {data['valid']}, violations: {data['violations']}")
+    print(
+        f"  cost: ${data.get('estimated_cost_usd', 'n/a')}, "
+        f"rows: {data.get('estimated_rows', 'n/a')}"
+    )
 
-    tool = next(t for t in tools if t.name == "run_query")
-    result = await tool.callable({"sql": sql})
+    # ── Execution ─────────────────────────────────────────────────────────────
+    run = next(t for t in tools if t.name == "run_query")
+    result = await run.callable({"sql": sql})
     print("\n=== Query Results ===")
     print(result["content"][0]["text"])
+    # Parse the JSON body so later steps can read session budget.
 
+    # ── Relationship discovery ───────────────────────────────────────────────
     tool = next(t for t in tools if t.name == "lookup_relationships")
     result = await tool.callable({"table": "analytics.orders"})
     print("\n=== Lookup Relationships (orders) ===")
@@ -135,26 +168,40 @@ async def _run_demo(tools: list, prompt: str) -> None:
     print("\n=== Find Join Path (orders → subscriptions, 2 hops) ===")
     print(result["content"][0]["text"])
 
-    tool = next(t for t in tools if t.name == "validate_query")
+    # Missing-required-filter warning surfaces via inspect_query
     join_sql = (
         "SELECT o.id, c.name "
         "FROM analytics.orders o "
         "JOIN analytics.customers c ON o.customer_id = c.id "
         "WHERE o.tenant_id = 'acme'"
     )
-    result = await tool.callable({"sql": join_sql})
+    result = await inspect.callable({"sql": join_sql})
+    data = json.loads(result["content"][0]["text"])
     print("\n=== Relationship Warning (missing required filter) ===")
-    print(result["content"][0]["text"])
+    print(f"  valid: {data['valid']}, violations: {data['violations']}")
+    print(f"  warnings: {data.get('warnings', [])}")
 
-    tool = next(t for t in tools if t.name == "validate_query")
-    result = await tool.callable({"sql": "SELECT * FROM analytics.orders"})
+    # Blocked query — inspect_query returns valid=False with violations
+    result = await inspect.callable({"sql": "SELECT * FROM analytics.orders"})
+    data = json.loads(result["content"][0]["text"])
     print("\n=== Blocked Query ===")
-    print(result["content"][0]["text"])
+    print(f"  valid: {data['valid']}, violations: {data['violations']}")
 
-    tool = next(t for t in tools if t.name == "get_contract_info")
-    result = await tool.callable({})
-    print("\n=== Contract Info ===")
-    print(result["content"][0]["text"])
+    # ── Session budget ───────────────────────────────────────────────────────
+    # Contract-wide info (name, allowed tables, rules) now lives in the system
+    # prompt via DataContract.to_system_prompt(). Session budget state travels
+    # on every run_query response under data["session"]["remaining"].
+    result = await run.callable(
+        {"sql": "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+    data = _parse_run_query_body(result["content"][0]["text"])
+    print("\n=== Session Budget (from run_query response) ===")
+    if data is not None:
+        print(f"  session remaining: {data.get('session', {}).get('remaining', {})}")
+    else:
+        # Query was blocked or adapter unavailable — print the raw message so
+        # the demo still surfaces the reason rather than silently failing.
+        print(result["content"][0]["text"])
 
 
 if __name__ == "__main__":

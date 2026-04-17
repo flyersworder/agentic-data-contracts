@@ -48,6 +48,9 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
     log_messages: list[str] = field(default_factory=list)
     estimated_cost_usd: float | None = None
+    estimated_rows: int | None = None
+    schema_valid: bool = True
+    explain_errors: list[str] = field(default_factory=list)
 
 
 class Validator:
@@ -165,6 +168,9 @@ class Validator:
         warnings: list[str] = []
         log_messages: list[str] = []
         estimated_cost_usd: float | None = None
+        estimated_rows: int | None = None
+        schema_valid: bool = True
+        explain_errors: list[str] = []
 
         try:
             normalized = (
@@ -207,12 +213,17 @@ class Validator:
 
         if not reasons and self.explain_adapter is not None:
             explain_result = self.explain_adapter.explain(sql)
+            schema_valid = explain_result.schema_valid
+            explain_errors = list(explain_result.errors)
+            estimated_cost_usd = explain_result.estimated_cost_usd
+            estimated_rows = explain_result.estimated_rows
             if not explain_result.schema_valid:
+                # `reasons` blocks the query; `explain_errors` carries raw
+                # diagnostics for inspect_query.
                 reasons.append(
                     f"Schema validation failed: {', '.join(explain_result.errors)}"
                 )
             else:
-                estimated_cost_usd = explain_result.estimated_cost_usd
                 res = self.contract.schema.resources
                 if res:
                     if (
@@ -242,6 +253,9 @@ class Validator:
             warnings=warnings,
             log_messages=log_messages,
             estimated_cost_usd=estimated_cost_usd,
+            estimated_rows=estimated_rows,
+            schema_valid=schema_valid,
+            explain_errors=explain_errors,
         )
 
     def validate_results(

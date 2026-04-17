@@ -74,7 +74,17 @@ class ClaudePromptRenderer:
     # ------------------------------------------------------------------
 
     def _render_allowed_tables(self, contract: DataContract) -> list[str]:
-        lines = ["<allowed_tables>", "Only query these tables:"]
+        lines = ["<allowed_tables>"]
+        for entry in contract.schema.semantic.allowed_tables:
+            if entry.description is None and not entry.preferred:
+                continue
+            attrs = [f'name="{entry.schema_}"']
+            if entry.preferred:
+                attrs.append('preferred="true"')
+            if entry.description is not None:
+                attrs.append(f'description="{entry.description}"')
+            lines.append(f"<schema {' '.join(attrs)} />")
+        lines.append("Only query these tables:")
         for name in contract.allowed_table_names():
             lines.append(f"- {name}")
         lines.append("</allowed_tables>")

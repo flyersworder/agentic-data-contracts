@@ -144,6 +144,46 @@ def test_claude_renderer_allowed_tables(fixtures_dir: Path) -> None:
     assert "analytics.subscriptions" in output
 
 
+def test_claude_renderer_allowed_tables_with_schema_annotations() -> None:
+    """description and preferred on AllowedTable should surface in the prompt."""
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {
+                        "schema": "analytics",
+                        "tables": ["orders"],
+                        "description": "Curated analytics layer",
+                        "preferred": True,
+                    }
+                ),
+                AllowedTable.model_validate(
+                    {
+                        "schema": "raw",
+                        "tables": ["events"],
+                        "description": "Raw ingestion tables",
+                    }
+                ),
+                AllowedTable.model_validate({"schema": "staging", "tables": ["_tmp"]}),
+            ],
+        ),
+    )
+    output = ClaudePromptRenderer().render(DataContract(schema))
+
+    # Annotated schemas appear with their metadata.
+    assert 'name="analytics"' in output
+    assert 'preferred="true"' in output
+    assert 'description="Curated analytics layer"' in output
+    assert 'name="raw"' in output
+    assert 'description="Raw ingestion tables"' in output
+
+    # Schemas without annotations are not listed in the schema-annotation block
+    # (they still appear in the flat table list).
+    assert 'name="staging"' not in output
+    assert "staging._tmp" in output
+
+
 # ---------------------------------------------------------------------------
 # Test 3 — constraints section
 # ---------------------------------------------------------------------------

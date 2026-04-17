@@ -22,7 +22,7 @@ The agent follows a domain-driven workflow — understanding business context be
 2. lookup_domain("revenue")     → "Revenue is recognized at fulfillment, not booking"
 3. lookup_metric("total_revenue") → SUM(amount) FILTER (WHERE status = 'completed')
 4. Agent writes SQL using the metric definition
-5. validate_query(sql)          → VALID (passes all contract rules)
+5. inspect_query(sql)           → {"valid": true, "estimated_cost_usd": 0.0, ...}
 6. run_query(sql)               → results returned
 ```
 
@@ -133,7 +133,7 @@ from claude_agent_sdk import (
     query,
 )
 
-# One-liner: wraps all 13 tools and bundles into an SDK MCP server
+# One-liner: wraps all 9 tools and bundles into an SDK MCP server
 server = create_sdk_mcp_server(dc, adapter=adapter)
 
 options = ClaudeAgentOptions(
@@ -159,29 +159,29 @@ asyncio.run(run("What was total revenue by region in Q1 2025?"))
 import asyncio
 
 async def demo() -> None:
-    # Validate a query without executing
-    validate = next(t for t in tools if t.name == "validate_query")
-    result = await validate.callable(
+    # Inspect a query without executing. Response is structured JSON.
+    inspect = next(t for t in tools if t.name == "inspect_query")
+    result = await inspect.callable(
         {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}
     )
     print(result["content"][0]["text"])
-    # VALID — Query passed all checks.
+    # {"valid": true, "violations": [], "warnings": [], "log_messages": [],
+    #  "schema_valid": true, "explain_errors": [], "pending_result_checks": [...]}
 
     # Blocked query
-    result = await validate.callable({"sql": "SELECT * FROM analytics.orders"})
+    result = await inspect.callable({"sql": "SELECT * FROM analytics.orders"})
     print(result["content"][0]["text"])
-    # BLOCKED — Violations:
-    # - SELECT * is not allowed — specify explicit columns
+    # {"valid": false,
+    #  "violations": ["SELECT * is not allowed — specify explicit columns", ...],
+    #  "warnings": [], ...}
 
 asyncio.run(demo())
 ```
 
-## The 13 Tools
+## The 9 Tools
 
 | Tool | Description |
 |------|-------------|
-| `list_schemas` | List allowed schemas with descriptions and preferred flags |
-| `list_tables` | List allowed tables, optionally filtered by schema |
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
 | `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind |
@@ -189,10 +189,8 @@ asyncio.run(demo())
 | `lookup_domain` | Get full domain context (description, metrics, tables); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `trace_metric_impacts` | Walk the metric-impact graph upstream (drivers) or downstream (affected metrics) from a starting metric |
-| `validate_query` | Validate a SQL query against contract rules without executing |
-| `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
+| `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
 | `run_query` | Validate and execute a SQL query, returning results |
-| `get_contract_info` | Get the full contract: rules, limits, domains, and session status |
 
 ## Domain-Driven Agent Workflow
 
@@ -250,8 +248,8 @@ This pattern — compact index in the prompt, detailed context on demand — is 
 Rules are enforced at three levels:
 
 - **`block`** — query is rejected and an error is returned to the agent
-- **`warn`** — query proceeds but a warning is included in the response
-- **`log`** — violation is recorded but not surfaced to the agent
+- **`warn`** — query proceeds and a `WARNINGS:` preamble is prepended to the `run_query` response (also in `inspect_query` under `warnings`)
+- **`log`** — query proceeds and a `LOG:` preamble is prepended to the `run_query` response (also in `inspect_query` under `log_messages`); rules at this level are omitted from the system prompt so the agent can't adapt behavior to avoid triggering them
 
 Each rule carries a `query_check` (pre-execution) or `result_check` (post-execution) block. Rules with neither are advisory — they appear in the system prompt but don't enforce anything. Every rule can be scoped to a specific table or applied globally.
 
@@ -477,7 +475,6 @@ Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
 | Concern | How it scales |
 |---|---|
 | **System prompt size** | With domains: compact index (name + summary + count). Without domains: >20 metrics auto-switches to count. >30 relationships: per-table join counts with `lookup_relationships` hint |
-| **Table discovery** | `list_tables` is paginated (default 50, with offset). Use `schema` filter for targeted browsing |
 | **Relationship lookup** | `lookup_relationships(table=...)` returns joins for a table on demand. With `target_table`, finds shortest multi-hop join path via BFS (up to 3 hops) |
 | **Wildcard schemas** | `tables: ["*"]` discovers tables from the database. Resolution is cached — no repeated queries |
 | **Metric lookup** | Fuzzy search via `thefuzz` (C++ backed) — sub-millisecond even with 1000+ metrics |

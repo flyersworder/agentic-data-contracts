@@ -1,6 +1,7 @@
 """Tests for tools with wildcard table resolution."""
 
 import json
+import logging
 
 import pytest
 
@@ -40,20 +41,6 @@ def wildcard_contract() -> DataContract:
 
 
 @pytest.mark.asyncio
-async def test_list_tables_after_wildcard_resolve(
-    wildcard_contract: DataContract, adapter: DuckDBAdapter
-) -> None:
-    tools = create_tools(wildcard_contract, adapter=adapter)
-    tool = next(t for t in tools if t.name == "list_tables")
-    result = await tool.callable({})
-    text = result["content"][0]["text"]
-    data = json.loads(text)
-    table_names = [t["table"] for t in data["tables"]]
-    assert "orders" in table_names
-    assert "customers" in table_names
-
-
-@pytest.mark.asyncio
 async def test_run_query_with_wildcard_tables(
     wildcard_contract: DataContract, adapter: DuckDBAdapter
 ) -> None:
@@ -65,12 +52,39 @@ async def test_run_query_with_wildcard_tables(
 
 
 @pytest.mark.asyncio
-async def test_validate_query_with_wildcard_tables(
+async def test_inspect_query_with_wildcard_tables(
     wildcard_contract: DataContract, adapter: DuckDBAdapter
 ) -> None:
     tools = create_tools(wildcard_contract, adapter=adapter)
-    tool = next(t for t in tools if t.name == "validate_query")
+    tool = next(t for t in tools if t.name == "inspect_query")
     # analytics.orders should be allowed after wildcard resolution
     result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
-    text = result["content"][0]["text"]
-    assert "valid" in text.lower()
+    data = json.loads(result["content"][0]["text"])
+    assert data["valid"] is True
+
+
+def test_create_tools_warns_when_wildcard_without_adapter(
+    wildcard_contract: DataContract, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Wildcard tables without an adapter leave tables unresolved silently —
+    emit a warning to flag the misconfiguration for developers."""
+    with caplog.at_level(logging.WARNING):
+        create_tools(wildcard_contract, adapter=None)
+    assert any(
+        "wildcard" in msg.lower() and "adapter" in msg.lower()
+        for msg in caplog.messages
+    )
+
+
+def test_create_tools_no_warning_when_wildcard_resolved(
+    wildcard_contract: DataContract,
+    adapter: DuckDBAdapter,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When an adapter is available, wildcard resolution runs silently."""
+    with caplog.at_level(logging.WARNING):
+        create_tools(wildcard_contract, adapter=adapter)
+    assert not any(
+        "wildcard" in msg.lower() and "adapter" in msg.lower()
+        for msg in caplog.messages
+    )

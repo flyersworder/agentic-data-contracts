@@ -18,7 +18,7 @@
 src/agentic_data_contracts/
 ├── core/          # YAML loading, Pydantic models, lightweight enforcement
 ├── validation/    # sqlglot checkers, Validator (Layer 1 + 2), EXPLAIN protocol
-├── tools/         # 12-tool factory + middleware for Claude Agent SDK
+├── tools/         # 9-tool factory + middleware for Claude Agent SDK
 ├── semantic/      # dbt/Cube/YAML source integrations
 ├── adapters/      # DatabaseAdapter protocol + DuckDB implementation
 └── bridge/        # Optional ai-agent-contracts compilation

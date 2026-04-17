@@ -572,6 +572,25 @@ def create_tools(
                 )
         return _text_response(msg)
 
+    # ── Tool: inspect_query ───────────────────────────────────────────────────
+    async def inspect_query(args: dict[str, Any]) -> dict[str, Any]:
+        sql = args.get("sql", "")
+        result = validator.validate(sql)
+        data: dict[str, Any] = {
+            "valid": not result.blocked,
+            "violations": list(result.reasons),
+            "warnings": list(result.warnings),
+            "schema_valid": result.schema_valid,
+            "pending_result_checks": list(validator.pending_result_check_names()),
+        }
+        if result.estimated_cost_usd is not None:
+            data["estimated_cost_usd"] = result.estimated_cost_usd
+        if result.estimated_rows is not None:
+            data["estimated_rows"] = result.estimated_rows
+        if result.explain_errors:
+            data["explain_errors"] = list(result.explain_errors)
+        return _text_response(json.dumps(data, default=str))
+
     # ── Tool 10: query_cost_estimate ──────────────────────────────────────────
     async def query_cost_estimate(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
@@ -860,6 +879,24 @@ def create_tools(
                 "required": ["sql"],
             },
             callable=validate_query,
+        ),
+        ToolDef(
+            name="inspect_query",
+            description=(
+                "Inspect a SQL query without executing it. Returns validation result"
+                " (violations and warnings from contract rules), estimated cost and row"
+                " count from EXPLAIN when a database adapter is configured, schema"
+                " validity, and any result checks that would run after execution."
+                " Use this to iterate on SQL before spending retry budget on run_query."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "description": "SQL query to inspect"}
+                },
+                "required": ["sql"],
+            },
+            callable=inspect_query,
         ),
         ToolDef(
             name="query_cost_estimate",

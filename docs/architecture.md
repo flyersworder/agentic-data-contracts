@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
 **Date:** 2026-04-17
-**Status:** Implemented (v0.10.0)
+**Status:** Implemented (v0.11.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -24,7 +24,7 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | `ai-agent-contracts` | Required dependency | Optional — upgrades enforcement when installed |
 | Dependency management | pip | uv |
 | Database interaction | Validation only | Full tool set: validate, execute, describe, preview |
-| Tool surface | Validator callback | 13 agent tools (factory + middleware) |
+| Tool surface | Validator callback | 9 agent tools (factory + middleware) |
 
 ## Design Decisions
 
@@ -67,7 +67,7 @@ Mode          ┌─────────────────┐
     │                  │
     ▼                  ▼
  ┌──────────────────────┐
- │ create_tools()        │  13 agent tools
+ │ create_tools()        │  9 agent tools
  │ contract_middleware()  │  BYO tool wrapper
  │ ContractSession       │  Enforcement tracking
  └──────────────────────┘

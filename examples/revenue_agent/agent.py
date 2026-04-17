@@ -77,7 +77,29 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
     )
 
     server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=tools)
-    user_prompt = "You are a revenue analytics assistant for Acme Corp."
+
+    # Recipe: handling undefined metrics.
+    #
+    # `lookup_metric` returns "Metric '<name>' not found." when a metric has no
+    # exact match *and* no fuzzy candidates.  The library intentionally stays
+    # neutral on what the agent should do next — inventing a SQL definition
+    # would bypass the whole point of a governed semantic source, but silently
+    # failing is rarely what a user wants either.  Encode the policy here, in
+    # your agent's own system prompt, not in the library: different agents
+    # (batch ETL, interactive copilot, autonomous runner) want different
+    # behaviors from the same library.
+    undefined_metric_policy = (
+        "If lookup_metric returns 'not found', do NOT invent a SQL definition."
+        " Ask the user to clarify: (1) a plain-English definition,"
+        " (2) the SQL expression or calculation logic, (3) the source table(s),"
+        " and (4) any required filters.  Proceed with the user's definition"
+        " for this session, and suggest they add it to the semantic source"
+        " so future sessions inherit it."
+    )
+    user_prompt = (
+        "You are a revenue analytics assistant for Acme Corp."
+        f"\n\n{undefined_metric_policy}"
+    )
     options = ClaudeAgentOptions(
         model="claude-sonnet-4-6",
         system_prompt=f"{user_prompt}\n\n{dc.to_system_prompt()}",

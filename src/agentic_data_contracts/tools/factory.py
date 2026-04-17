@@ -580,15 +580,15 @@ def create_tools(
             "valid": not result.blocked,
             "violations": list(result.reasons),
             "warnings": list(result.warnings),
+            "log_messages": list(result.log_messages),
             "schema_valid": result.schema_valid,
+            "explain_errors": list(result.explain_errors),
             "pending_result_checks": list(validator.pending_result_check_names()),
         }
         if result.estimated_cost_usd is not None:
             data["estimated_cost_usd"] = result.estimated_cost_usd
         if result.estimated_rows is not None:
             data["estimated_rows"] = result.estimated_rows
-        if result.explain_errors:
-            data["explain_errors"] = list(result.explain_errors)
         return _text_response(json.dumps(data, default=str))
 
     # ── Tool 10: query_cost_estimate ──────────────────────────────────────────

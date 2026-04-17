@@ -81,6 +81,10 @@ async def test_inspect_query_no_adapter(
     assert "valid" in data
     assert data.get("estimated_cost_usd") is None
     assert data.get("estimated_rows") is None
+    assert "estimated_cost_usd" not in data
+    assert "estimated_rows" not in data
+    assert data["explain_errors"] == []
+    assert data["log_messages"] == []
 
 
 @pytest.mark.asyncio
@@ -121,3 +125,65 @@ async def test_inspect_query_returns_pending_result_checks(
     result = await tool.callable({"sql": "SELECT id, amount FROM analytics.orders"})
     data = json.loads(result["content"][0]["text"])
     assert "no_negative" in data["pending_result_checks"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_query_surfaces_log_messages(
+    adapter: DuckDBAdapter,
+) -> None:
+    """enforcement=log rule should populate log_messages, not violations or warnings."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        QueryCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    dc = DataContract(
+        DataContractSchema(
+            name="test",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+                rules=[
+                    SemanticRule(
+                        name="tenant_filter_log",
+                        description="Log when tenant_id filter is missing",
+                        enforcement=Enforcement.LOG,
+                        query_check=QueryCheck(required_filter="tenant_id"),
+                    ),
+                ],
+            ),
+        )
+    )
+    tools = create_tools(dc, adapter=adapter)
+    tool = next(t for t in tools if t.name == "inspect_query")
+    result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
+    data = json.loads(result["content"][0]["text"])
+    assert data["valid"] is True  # log enforcement does not block
+    assert data["violations"] == []
+    assert data["warnings"] == []
+    assert len(data["log_messages"]) >= 1
+    assert (
+        "tenant_filter_log" in data["log_messages"][0]
+        or "tenant_id" in data["log_messages"][0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspect_query_surfaces_explain_errors(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """A SQL referencing a non-existent column should populate explain_errors."""
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "inspect_query")
+    sql = "SELECT nonexistent_column FROM analytics.orders WHERE tenant_id = 'acme'"
+    result = await tool.callable({"sql": sql})
+    data = json.loads(result["content"][0]["text"])
+    assert data["schema_valid"] is False
+    assert len(data["explain_errors"]) >= 1

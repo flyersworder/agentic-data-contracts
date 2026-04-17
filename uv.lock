@@ -8,12 +8,12 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-12T16:17:12.933746Z"
+exclude-newer = "2026-04-14T14:20:11.221205Z"
 exclude-newer-span = "P3D"
 
 [[package]]
 name = "agentic-data-contracts"
-version = "0.9.2"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

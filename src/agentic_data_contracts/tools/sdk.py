@@ -23,7 +23,7 @@ def create_sdk_mcp_server(
 ) -> Any:
     """Create a Claude Agent SDK MCP server from a DataContract.
 
-    Wraps all 12 contract tools with the SDK's @tool decorator and
+    Wraps all 13 contract tools with the SDK's @tool decorator and
     bundles them into an MCP server ready for ClaudeAgentOptions.mcp_servers.
 
     Args:

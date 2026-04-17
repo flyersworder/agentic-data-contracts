@@ -12,7 +12,11 @@ from agentic_data_contracts.core.schema import (
     Domain,
     SemanticConfig,
 )
-from agentic_data_contracts.semantic.base import MetricDefinition, Relationship
+from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    MetricImpact,
+    Relationship,
+)
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 # ---------------------------------------------------------------------------
@@ -55,6 +59,9 @@ class FakeSemanticSource:
         return []
 
     def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
         return []
 
 

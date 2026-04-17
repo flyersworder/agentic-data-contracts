@@ -12,6 +12,7 @@ from agentic_data_contracts.core.schema import (
 )
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
+    MetricImpact,
     Relationship,
     build_relationship_index,
 )
@@ -49,6 +50,9 @@ class FakeSemanticSource:
         return []
 
     def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
         return []
 
 
@@ -198,6 +202,9 @@ class FakeSemanticSourceWithRels:
 
     def get_relationships_for_table(self, table: str) -> list[Relationship]:
         return list(self._rel_index.get(table, []))
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
+        return []
 
 
 class TestCompactRelationshipPrompt:

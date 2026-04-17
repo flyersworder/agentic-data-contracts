@@ -38,18 +38,18 @@ def semantic(fixtures_dir: Path) -> YamlSource:
     return YamlSource(fixtures_dir / "semantic_source.yml")
 
 
-def test_create_tools_returns_12_tools(
+def test_create_tools_returns_13_tools(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    assert len(tools) == 12
+    assert len(tools) == 13
 
 
 def test_create_tools_without_adapter(
     contract: DataContract, semantic: YamlSource
 ) -> None:
     tools = create_tools(contract, semantic_source=semantic)
-    assert len(tools) == 12
+    assert len(tools) == 13
 
 
 def test_tool_names(
@@ -67,6 +67,7 @@ def test_tool_names(
     assert "query_cost_estimate" in names
     assert "run_query" in names
     assert "get_contract_info" in names
+    assert "trace_metric_impacts" in names
 
 
 @pytest.mark.asyncio

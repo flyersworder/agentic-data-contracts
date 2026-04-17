@@ -5,6 +5,9 @@ metrics:
     source_model: analytics.orders
     filters:
       - "status = 'completed'"
+    domains: [revenue]
+    tier: [north_star, department_kpi]
+    indicator_kind: lagging
 
   - name: active_customers
     description: "Count of customers with at least one order in the last 90 days"
@@ -12,6 +15,9 @@ metrics:
     source_model: analytics.customers
     filters:
       - "last_order_date >= CURRENT_DATE - INTERVAL '90 days'"
+    domains: [engagement, revenue]
+    tier: [team_kpi]
+    indicator_kind: leading
 
 tables:
   - schema: analytics
@@ -53,3 +59,11 @@ relationships:
     description: >
       Each order belongs to exactly one customer.
       Use this join for customer-level aggregations.
+
+metric_impacts:
+  - from: active_customers
+    to: total_revenue
+    direction: positive
+    confidence: verified
+    evidence: "A/B test exp-042 (Q3 2025), +3.2% revenue lift, p<0.01"
+    description: "Retained customers drive repeat purchases."

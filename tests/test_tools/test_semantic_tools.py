@@ -116,8 +116,10 @@ async def test_list_metrics_with_domain(
     result = await tool.callable({"domain": "revenue"})
     text = result["content"][0]["text"]
     data = json.loads(text)
-    assert len(data["metrics"]) == 1
-    assert data["metrics"][0]["name"] == "total_revenue"
+    # Union semantics: total_revenue matches via Domain.metrics (contract side)
+    # and active_customers matches via its self-declared metric.domains.
+    names = sorted(m["name"] for m in data["metrics"])
+    assert names == ["active_customers", "total_revenue"]
 
 
 @pytest.mark.asyncio

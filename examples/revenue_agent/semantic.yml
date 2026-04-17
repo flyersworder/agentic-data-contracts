@@ -8,6 +8,9 @@ metrics:
     source_model: analytics.orders
     filters:
       - "status = 'completed'"
+    domains: [revenue]
+    tier: [north_star, department_kpi]
+    indicator_kind: lagging
 
   - name: revenue_by_region
     description: "Revenue broken down by customer region"
@@ -15,6 +18,17 @@ metrics:
     source_model: analytics.orders
     filters:
       - "o.status = 'completed'"
+    domains: [revenue]
+    tier: [team_kpi]
+    indicator_kind: lagging
+
+  - name: active_customers
+    description: "Distinct customers with at least one order in the period"
+    sql_expression: "COUNT(DISTINCT customer_id) FILTER (WHERE status = 'completed')"
+    source_model: analytics.orders
+    domains: [revenue]
+    tier: [team_kpi]
+    indicator_kind: leading
 
 relationships:
   - from: analytics.orders.customer_id
@@ -31,3 +45,11 @@ relationships:
     description: >
       Join subscriptions to customers.
       Each subscription belongs to one customer.
+
+metric_impacts:
+  - from: active_customers
+    to: total_revenue
+    direction: positive
+    confidence: hypothesized
+    evidence: "Directional hypothesis — not yet backed by an A/B test"
+    description: "More distinct active customers in a period typically lifts total revenue."

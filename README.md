@@ -133,7 +133,7 @@ from claude_agent_sdk import (
     query,
 )
 
-# One-liner: wraps all 12 tools and bundles into an SDK MCP server
+# One-liner: wraps all 13 tools and bundles into an SDK MCP server
 server = create_sdk_mcp_server(dc, adapter=adapter)
 
 options = ClaudeAgentOptions(
@@ -176,7 +176,7 @@ async def demo() -> None:
 asyncio.run(demo())
 ```
 
-## The 12 Tools
+## The 13 Tools
 
 | Tool | Description |
 |------|-------------|
@@ -184,10 +184,11 @@ asyncio.run(demo())
 | `list_tables` | List allowed tables, optionally filtered by schema |
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
-| `list_metrics` | List metric definitions, optionally filtered by domain |
-| `lookup_metric` | Get a metric definition; fuzzy search fallback when no exact match |
+| `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind |
+| `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by); fuzzy search fallback when no exact match |
 | `lookup_domain` | Get full domain context (description, metrics, tables); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
+| `trace_metric_impacts` | Walk the metric-impact graph upstream (drivers) or downstream (affected metrics) from a starting metric |
 | `validate_query` | Validate a SQL query against contract rules without executing |
 | `query_cost_estimate` | Estimate cost and row count via EXPLAIN |
 | `run_query` | Validate and execute a SQL query, returning results |
@@ -318,6 +319,9 @@ metrics:
     description: "Total revenue from completed orders"
     sql_expression: "SUM(amount) FILTER (WHERE status = 'completed')"
     source_model: analytics.orders
+    domains: [revenue]                 # optional — see "Metric Impacts" below
+    tier: [north_star, department_kpi] # optional — north_star / department_kpi / team_kpi
+    indicator_kind: lagging            # optional — leading | lagging
 
 tables:
   - schema: analytics
@@ -330,6 +334,8 @@ tables:
       - name: tenant_id
         type: VARCHAR
 ```
+
+`tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names.
 
 **dbt** — point to a `manifest.json`:
 ```yaml
@@ -388,6 +394,58 @@ When a `SemanticSource` is passed to the `Validator`, declared relationships are
 | **Fan-out risk** | Aggregation (SUM, COUNT, etc.) across a `one_to_many` join | "Results may be inflated by row multiplication" |
 
 All relationship checks are **advisory only** (warnings, never blocks). Undeclared joins are silently ignored — the checker only validates relationships you've explicitly defined.
+
+## Metric Impacts
+
+Table relationships tell the agent *how to join*. Metric impacts tell the agent *what drives what* — the causal / economic graph between KPIs. When an agent is asked "why did revenue drop?", an impact graph lets it walk upstream to the drivers (conversion rate, active customers, traffic) rather than blindly querying revenue again. When it's asked to recommend an action, it can cite verified evidence rather than hand-waving.
+
+Declare impacts at the top level of the semantic YAML, alongside `metrics:` and `relationships:`:
+
+```yaml
+# semantic.yml
+metric_impacts:
+  - from: active_customers
+    to: total_revenue
+    direction: positive           # positive | negative
+    confidence: verified          # verified | correlated | hypothesized
+    evidence: "A/B test exp-042 (Q3 2025), +3.2% revenue lift, p<0.01"
+    description: "Retained customers drive repeat purchases."
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `from` / `to` | Yes | Metric names (must match a metric declared in the same contract) |
+| `direction` | No | `positive` (default) or `negative` |
+| `confidence` | No | `hypothesized` (default), `correlated`, or `verified` — lets the agent prioritize backed-up drivers over hunches |
+| `evidence` | No | Free text — study reference, A/B test ID, anything the agent should quote when making a recommendation |
+| `description` | No | Optional elaboration |
+
+Edges are directional. There's no `domains` field on the edge itself: an impact surfaces whenever either endpoint is in the agent's active domain, so cross-domain drivers (Checkout → Revenue) get discovered for free.
+
+### How the agent uses impacts
+
+`lookup_metric` surfaces an enriched response: each metric carries `impacts` (outgoing edges) and `impacted_by` (incoming edges), each rendered as a one-line citation string:
+
+```
+"positive impact on total_revenue (verified): A/B test exp-042 (Q3 2025), +3.2% revenue lift, p<0.01"
+```
+
+The agent can quote this verbatim in its answer — structured enough to reason over, readable enough to paste.
+
+`trace_metric_impacts` walks the graph via BFS:
+
+```python
+await trace.callable({
+    "metric_name": "total_revenue",
+    "direction": "upstream",     # upstream = drivers, downstream = affected
+    "max_depth": 2,
+})
+# Returns: {"edges": [{"depth": 1, "from": "active_customers", "to": "total_revenue",
+#                       "direction": "positive", "confidence": "verified",
+#                       "evidence": "A/B test exp-042..."}]}
+```
+
+Impacts declared in contract YAML reference metric names regardless of where the metric itself is defined, so this works even for dbt and Cube-sourced metrics — neither semantic layer has a native causal-graph concept. Unknown metric references in `metric_impacts` emit a warning at tool-creation time (same pattern as domain validation).
 
 ## Custom Prompt Rendering
 

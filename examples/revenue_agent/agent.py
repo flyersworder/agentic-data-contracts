@@ -92,10 +92,18 @@ async def _run_demo(tools: list, prompt: str) -> None:
     print("\n=== Lookup Domain (revenue) ===")
     print(result["content"][0]["text"])
 
-    # Metric lookup: get the SQL definition for a specific metric
+    # Metric lookup: get the SQL definition + tier + impact edges for a metric
     tool = next(t for t in tools if t.name == "lookup_metric")
     result = await tool.callable({"metric_name": "total_revenue"})
     print("\n=== Lookup Metric (total_revenue) ===")
+    print(result["content"][0]["text"])
+
+    # Impact graph: walk upstream to find drivers of total_revenue
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "total_revenue", "direction": "upstream"}
+    )
+    print("\n=== Trace Metric Impacts (upstream drivers of total_revenue) ===")
     print(result["content"][0]["text"])
 
     tool = next(t for t in tools if t.name == "validate_query")

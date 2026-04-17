@@ -19,6 +19,9 @@ class MetricDefinition:
     sql_expression: str
     source_model: str = ""
     filters: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+    tier: list[str] = field(default_factory=list)
+    indicator_kind: str | None = None
 
 
 @dataclass
@@ -30,6 +33,18 @@ class Relationship:
     required_filter: str | None = None
 
 
+@dataclass
+class MetricImpact:
+    """A directed, annotated edge in the metric-driver graph."""
+
+    from_metric: str  # source metric name
+    to_metric: str  # affected metric name
+    direction: str = "positive"  # "positive" | "negative"
+    confidence: str = "hypothesized"  # "verified" | "correlated" | "hypothesized"
+    evidence: str = ""  # free text, human- and agent-citable
+    description: str = ""
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...
@@ -38,6 +53,7 @@ class SemanticSource(Protocol):
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
     def get_relationships(self) -> list[Relationship]: ...
     def get_relationships_for_table(self, table: str) -> list[Relationship]: ...
+    def get_metric_impacts(self) -> list[MetricImpact]: ...
 
 
 def fuzzy_search_metrics(
@@ -112,3 +128,72 @@ def find_join_path(
                 visited.add(neighbor)
                 queue.append((neighbor, path + [rel]))
     return None
+
+
+def build_metric_impact_index(
+    impacts: list[MetricImpact],
+) -> dict[str, list[MetricImpact]]:
+    """Build a metric-name -> impact edges index for O(1) lookup.
+
+    Each impact is indexed under both its ``from_metric`` and ``to_metric``
+    (unless they are the same), mirroring :func:`build_relationship_index`.
+    Walk direction is disambiguated at traversal time by checking
+    ``edge.from_metric`` / ``edge.to_metric`` against the current node.
+
+    Edges within each entry are in declaration order; callers should not
+    rely on any stronger ordering.
+    """
+    index: dict[str, list[MetricImpact]] = {}
+    for imp in impacts:
+        index.setdefault(imp.from_metric, []).append(imp)
+        if imp.from_metric != imp.to_metric:
+            index.setdefault(imp.to_metric, []).append(imp)
+    return index
+
+
+def walk_metric_impacts(
+    index: dict[str, list[MetricImpact]],
+    start: str,
+    *,
+    direction: str,
+    max_depth: int = 2,
+) -> list[tuple[int, MetricImpact]]:
+    """BFS through the metric impact graph from ``start``.
+
+    ``direction="downstream"`` follows edges where ``edge.from_metric ==
+    current`` — returns metrics impacted *by* ``start``.  ``direction=
+    "upstream"`` follows edges where ``edge.to_metric == current`` —
+    returns metrics that *drive* ``start``.
+
+    Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
+    of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
+    prevents cycles, so each reachable metric appears at most once.
+    """
+    if direction not in ("upstream", "downstream"):
+        msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"
+        raise ValueError(msg)
+
+    visited: set[str] = {start}
+    result: list[tuple[int, MetricImpact]] = []
+    queue: deque[tuple[str, int]] = deque([(start, 0)])
+    while queue:
+        current, depth = queue.popleft()
+        if depth >= max_depth:
+            continue
+        for edge in index.get(current, []):
+            if direction == "downstream":
+                # Only follow edges leaving `current`.
+                if edge.from_metric != current:
+                    continue
+                neighbor = edge.to_metric
+            else:
+                # Only follow edges arriving at `current`.
+                if edge.to_metric != current:
+                    continue
+                neighbor = edge.from_metric
+            if neighbor in visited:
+                continue
+            result.append((depth + 1, edge))
+            visited.add(neighbor)
+            queue.append((neighbor, depth + 1))
+    return result

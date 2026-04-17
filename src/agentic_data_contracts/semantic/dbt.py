@@ -9,6 +9,7 @@ from typing import Any
 from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
+    MetricImpact,
     Relationship,
     fuzzy_search_metrics,
 )
@@ -39,6 +40,14 @@ class DbtSource:
                     val = f.get("value", "")
                     filters.append(f"{field} {op} {val}")
 
+            meta = metric.get("meta") or {}
+            tier_raw = meta.get("tier", [])
+            tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
+            domains_raw = meta.get("domains", [])
+            domains = (
+                [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
+            )
+
             result.append(
                 MetricDefinition(
                     name=metric["name"],
@@ -46,6 +55,9 @@ class DbtSource:
                     sql_expression=sql_expr,
                     source_model=metric.get("model", ""),
                     filters=filters,
+                    domains=domains,
+                    tier=tier,
+                    indicator_kind=meta.get("indicator_kind"),
                 )
             )
         return result
@@ -89,3 +101,8 @@ class DbtSource:
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
+        # dbt has no native impact-graph concept; impacts live in the
+        # contract YAML (declared via YamlSource) and reference metric names.
+        return []

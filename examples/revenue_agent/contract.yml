@@ -18,7 +18,7 @@ semantic:
         Revenue metrics track recognized revenue from completed orders.
         Revenue is recognized at fulfillment, not at booking.
         Excludes refunds, chargebacks, and pending orders unless stated.
-      metrics: [total_revenue, revenue_by_region]
+      metrics: [total_revenue, revenue_by_region, active_customers]
       tables: [analytics.orders, analytics.customers]
   rules:
     - name: tenant_isolation

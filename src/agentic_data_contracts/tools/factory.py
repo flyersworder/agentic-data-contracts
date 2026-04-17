@@ -1,4 +1,4 @@
-"""Tool factory — creates 12 agent tools from a DataContract."""
+"""Tool factory — creates 13 agent tools from a DataContract."""
 
 from __future__ import annotations
 
@@ -9,11 +9,16 @@ from typing import Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.schema import Domain
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    MetricImpact,
     SemanticSource,
+    build_metric_impact_index,
     build_relationship_index,
     find_join_path,
+    walk_metric_impacts,
 )
 from agentic_data_contracts.validation.validator import Validator
 
@@ -32,6 +37,76 @@ class ToolDef:
 
 def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _effective_domains(
+    metric: MetricDefinition,
+    contract_domains: list[Domain],
+) -> list[str]:
+    """Union of metric.domains (self-declared) and reverse-lookup from Domain.metrics.
+
+    Preserves order: self-declared domains come first, then any additional
+    domains discovered via the contract's ``Domain.metrics`` lists.  This
+    back-compat shim lets old domain-first YAML and new metric-first YAML
+    coexist without duplicating declarations.
+    """
+    result = list(metric.domains)
+    for d in contract_domains:
+        if metric.name in d.metrics and d.name not in result:
+            result.append(d.name)
+    return result
+
+
+def _format_impact_edge(edge: MetricImpact, *, perspective: str) -> str:
+    """Render a MetricImpact as a one-line, citation-ready string.
+
+    ``perspective="outgoing"`` emits ``"<direction> impact on <to>
+    (<confidence>): <evidence>"``; ``perspective="incoming"`` flips
+    the preposition and shows the driver's name.
+    """
+    if perspective == "outgoing":
+        target, prep = edge.to_metric, "on"
+    else:
+        target, prep = edge.from_metric, "from"
+    summary = f"{edge.direction} impact {prep} {target} ({edge.confidence})"
+    if edge.evidence:
+        summary += f": {edge.evidence}"
+    return summary
+
+
+def _metric_details(
+    metric: MetricDefinition,
+    contract_domains: list[Domain],
+    impact_index: dict[str, list[MetricImpact]],
+) -> dict[str, Any]:
+    """Serialize a metric with all enrichment fields for tool responses."""
+    data: dict[str, Any] = {
+        "name": metric.name,
+        "description": metric.description,
+        "sql_expression": metric.sql_expression,
+        "source_model": metric.source_model,
+        "filters": metric.filters,
+    }
+    effective = _effective_domains(metric, contract_domains)
+    if effective:
+        data["domains"] = effective
+    if metric.tier:
+        data["tier"] = metric.tier
+    if metric.indicator_kind:
+        data["indicator_kind"] = metric.indicator_kind
+
+    outgoing: list[str] = []
+    incoming: list[str] = []
+    for edge in impact_index.get(metric.name, []):
+        if edge.from_metric == metric.name:
+            outgoing.append(_format_impact_edge(edge, perspective="outgoing"))
+        if edge.to_metric == metric.name:
+            incoming.append(_format_impact_edge(edge, perspective="incoming"))
+    if outgoing:
+        data["impacts"] = outgoing
+    if incoming:
+        data["impacted_by"] = incoming
+    return data
 
 
 def create_tools(
@@ -72,14 +147,24 @@ def create_tools(
         else {}
     )
 
+    # Build metric-impact index for lookup_metric enrichment and trace_metric_impacts.
+    _metric_impacts: list[MetricImpact] = (
+        list(semantic_source.get_metric_impacts())
+        if semantic_source is not None
+        else []
+    )
+    _impact_index = build_metric_impact_index(_metric_impacts)
+
+    _contract_domains = list(contract.schema.semantic.domains)
+    metric_names_set = (
+        {m.name for m in semantic_source.get_metrics()}
+        if semantic_source is not None
+        else set()
+    )
+
     # Validate domain references
     if contract.schema.semantic.domains:
         allowed_tables_set = set(contract.allowed_table_names())
-        metric_names_set = (
-            {m.name for m in semantic_source.get_metrics()}
-            if semantic_source is not None
-            else set()
-        )
         for domain in contract.schema.semantic.domains:
             if semantic_source is not None:
                 for metric_name in domain.metrics:
@@ -96,6 +181,22 @@ def create_tools(
                         domain.name,
                         table,
                     )
+
+    # Validate metric-impact references — mirrors the domain validation above.
+    if _metric_impacts and semantic_source is not None:
+        for impact in _metric_impacts:
+            if impact.from_metric not in metric_names_set:
+                logger.warning(
+                    "Metric impact references unknown from_metric '%s' (-> '%s')",
+                    impact.from_metric,
+                    impact.to_metric,
+                )
+            if impact.to_metric not in metric_names_set:
+                logger.warning(
+                    "Metric impact references unknown to_metric '%s' (from '%s')",
+                    impact.to_metric,
+                    impact.from_metric,
+                )
 
     # ── Tool 1: list_schemas ──────────────────────────────────────────────────
     async def list_schemas(args: dict[str, Any]) -> dict[str, Any]:
@@ -205,23 +306,47 @@ def create_tools(
         domain_filter = args.get("domain")
         if domain_filter:
             domain_obj = contract.get_domain(domain_filter)
-            if domain_obj is None:
+            declared_in_metrics = any(domain_filter in m.domains for m in metrics)
+            if domain_obj is None and not declared_in_metrics:
                 all_doms = contract.schema.semantic.domains
-                available = [d.name for d in all_doms] if all_doms else []
+                declared_names = {d for m in metrics for d in m.domains}
+                available = (
+                    sorted({d.name for d in all_doms} | declared_names)
+                    if all_doms or declared_names
+                    else []
+                )
                 return _text_response(
                     f"Domain '{domain_filter}' not found."
                     f" Available domains: {available}"
                 )
-            allowed_names = set(domain_obj.metrics)
-            metrics = [m for m in metrics if m.name in allowed_names]
-        data = [
-            {
+            # Union: contract's Domain.metrics AND self-declared metric.domains.
+            contract_names = set(domain_obj.metrics) if domain_obj else set()
+            metrics = [
+                m
+                for m in metrics
+                if m.name in contract_names or domain_filter in m.domains
+            ]
+
+        tier_filter = args.get("tier")
+        if tier_filter:
+            metrics = [m for m in metrics if tier_filter in m.tier]
+
+        indicator_filter = args.get("indicator_kind")
+        if indicator_filter:
+            metrics = [m for m in metrics if m.indicator_kind == indicator_filter]
+
+        data: list[dict[str, Any]] = []
+        for m in metrics:
+            entry: dict[str, Any] = {
                 "name": m.name,
                 "description": m.description,
                 "source_model": m.source_model,
             }
-            for m in metrics
-        ]
+            if m.tier:
+                entry["tier"] = m.tier
+            if m.indicator_kind:
+                entry["indicator_kind"] = m.indicator_kind
+            data.append(entry)
         return _text_response(json.dumps({"metrics": data}))
 
     # ── Tool 6: lookup_metric ─────────────────────────────────────────────────
@@ -232,27 +357,15 @@ def create_tools(
         # Try exact match first
         metric = semantic_source.get_metric(metric_name)
         if metric is not None:
-            data = {
-                "name": metric.name,
-                "description": metric.description,
-                "sql_expression": metric.sql_expression,
-                "source_model": metric.source_model,
-                "filters": metric.filters,
-            }
-            return _text_response(json.dumps(data))
+            return _text_response(
+                json.dumps(_metric_details(metric, _contract_domains, _impact_index))
+            )
         # Fuzzy fallback
         candidates = semantic_source.search_metrics(metric_name)
         if not candidates:
             return _text_response(f"Metric '{metric_name}' not found.")
         data = [
-            {
-                "name": m.name,
-                "description": m.description,
-                "sql_expression": m.sql_expression,
-                "source_model": m.source_model,
-                "filters": m.filters,
-            }
-            for m in candidates
+            _metric_details(m, _contract_domains, _impact_index) for m in candidates
         ]
         return _text_response(
             json.dumps(
@@ -391,6 +504,50 @@ def create_tools(
             for r in rels
         ]
         return _text_response(json.dumps({"table": table, "relationships": data}))
+
+    # ── Tool: trace_metric_impacts ────────────────────────────────────────────
+    async def trace_metric_impacts(args: dict[str, Any]) -> dict[str, Any]:
+        metric_name = args.get("metric_name", "")
+        direction = args.get("direction", "upstream")
+        try:
+            max_depth = max(1, min(int(args.get("max_depth", 2)), 10))
+        except (ValueError, TypeError):
+            max_depth = 2
+
+        if direction not in ("upstream", "downstream"):
+            return _text_response(
+                f"direction must be 'upstream' or 'downstream', got {direction!r}."
+            )
+        if semantic_source is None:
+            return _text_response("No semantic source configured.")
+        if semantic_source.get_metric(metric_name) is None:
+            return _text_response(f"Metric '{metric_name}' not found.")
+
+        walk = walk_metric_impacts(
+            _impact_index, metric_name, direction=direction, max_depth=max_depth
+        )
+        edges = [
+            {
+                "depth": depth,
+                "from": edge.from_metric,
+                "to": edge.to_metric,
+                "direction": edge.direction,
+                "confidence": edge.confidence,
+                **({"evidence": edge.evidence} if edge.evidence else {}),
+                **({"description": edge.description} if edge.description else {}),
+            }
+            for depth, edge in walk
+        ]
+        return _text_response(
+            json.dumps(
+                {
+                    "metric_name": metric_name,
+                    "direction": direction,
+                    "max_depth": max_depth,
+                    "edges": edges,
+                }
+            )
+        )
 
     # ── Tool 9: validate_query ────────────────────────────────────────────────
     async def validate_query(args: dict[str, Any]) -> dict[str, Any]:
@@ -617,7 +774,10 @@ def create_tools(
             name="list_metrics",
             description=(
                 "List metric definitions from the semantic source,"
-                " optionally filtered by domain."
+                " optionally filtered by domain, tier, or indicator_kind."
+                " Entries include tier and indicator_kind when available —"
+                " use these to prioritize north-stars, department/team KPIs,"
+                " or leading vs lagging indicators."
             ),
             input_schema={
                 "type": "object",
@@ -625,7 +785,21 @@ def create_tools(
                     "domain": {
                         "type": "string",
                         "description": "Optional domain to filter metrics by",
-                    }
+                    },
+                    "tier": {
+                        "type": "string",
+                        "description": (
+                            "Optional tier to filter by"
+                            " (e.g. 'north_star', 'department_kpi', 'team_kpi')"
+                        ),
+                    },
+                    "indicator_kind": {
+                        "type": "string",
+                        "description": (
+                            "Optional indicator kind to filter by:"
+                            " 'leading' or 'lagging'"
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -634,7 +808,12 @@ def create_tools(
         ToolDef(
             name="lookup_metric",
             description=(
-                "Get the full definition of a specific metric including SQL expression."
+                "Get the full definition of a specific metric including SQL"
+                " expression, tier (north_star / department_kpi / team_kpi),"
+                " indicator_kind (leading / lagging), and any metric-impact"
+                " edges (impacts and impacted_by, each with direction,"
+                " confidence, and evidence citation). Use the impact fields"
+                " to reason about drivers and downstream effects."
             ),
             input_schema={
                 "type": "object",
@@ -736,6 +915,41 @@ def create_tools(
                 "required": ["table"],
             },
             callable=lookup_relationships,
+        ),
+        ToolDef(
+            name="trace_metric_impacts",
+            description=(
+                "Walk the metric-impact graph from a starting metric."
+                " direction='upstream' returns metrics that drive the target"
+                " (useful for root-cause analyses like 'why did revenue"
+                " drop?'); direction='downstream' returns metrics the target"
+                " affects (useful for 'what does this KPI move?')."
+                " Each edge includes direction, confidence, and evidence for"
+                " grounded reasoning. Cycles are handled via visited tracking."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "metric_name": {
+                        "type": "string",
+                        "description": "Metric to walk the impact graph from",
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["upstream", "downstream"],
+                        "description": (
+                            "'upstream' for drivers, 'downstream' for"
+                            " affected metrics. Default 'upstream'."
+                        ),
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Max BFS depth (default 2)",
+                    },
+                },
+                "required": ["metric_name"],
+            },
+            callable=trace_metric_impacts,
         ),
         ToolDef(
             name="get_contract_info",

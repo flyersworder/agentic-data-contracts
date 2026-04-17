@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-04-17
+
+### Added
+
+- **Metric role metadata**: `MetricDefinition` gains three optional fields — `domains` (list), `tier` (list, e.g. `north_star` / `department_kpi` / `team_kpi`), and `indicator_kind` (`leading` / `lagging`). Lets the agent prioritize north-stars and verified leading indicators, and filter metrics by organizational role. All fields default to empty, so existing fixtures parse unchanged.
+- **Metric-impact graph**: New `MetricImpact` dataclass captures directed, annotated edges between metrics — `from_metric`, `to_metric`, `direction` (`positive` / `negative`), `confidence` (`verified` / `correlated` / `hypothesized`), and free-text `evidence` the agent can cite verbatim. Declared via a top-level `metric_impacts:` block in the semantic YAML.
+- **`trace_metric_impacts` tool**: New tool (13th) that walks the metric-impact graph via BFS from a starting metric. `direction="upstream"` returns drivers (for root-cause analyses like "why did revenue drop?"); `direction="downstream"` returns affected metrics (for "what does this KPI move?"). Each edge in the response carries direction, confidence, and evidence for grounded reasoning. `max_depth` is clamped to `[1, 10]` to prevent runaway walks.
+- **`build_metric_impact_index()` and `walk_metric_impacts()` helpers**: Standalone functions in `semantic.base` mirroring the `build_relationship_index` / `find_join_path` pattern. Dual-keyed index (each edge stored under both endpoints); walker disambiguates direction at traversal time. Cycle-safe via visited tracking; self-loops are deduplicated by the index builder.
+- **`get_metric_impacts()` on `SemanticSource` protocol**: New method returning `list[MetricImpact]`. `YamlSource` parses from the `metric_impacts:` block; `DbtSource` / `CubeSource` return `[]` — neither system has a native causal-graph concept, so impacts are declared in the contract YAML regardless of where metrics themselves come from.
+- **Metric role metadata from dbt / Cube `meta`**: `DbtSource` and `CubeSource` now read `tier`, `indicator_kind`, and `domains` from each metric's `meta` dict. String values for `tier` / `domains` are coerced to single-element lists consistently across all three sources (YAML, dbt, Cube), so writing `tier: north_star` works the same as `tier: [north_star]`.
+- **Metric-impact validation warnings**: `create_tools()` emits `logger.warning` at tool-creation time if any `metric_impacts` edge references an unknown metric name. Mirrors the existing domain-reference validation.
+
+### Changed
+
+- **Tool count**: Factory now produces 13 tools (was 12), adding `trace_metric_impacts`.
+- **`lookup_metric` response shape**: Enriched with `domains`, `tier`, `indicator_kind`, `impacts` (outgoing edges), and `impacted_by` (incoming edges). Each edge is rendered as a one-line citation string (e.g. `"positive impact on total_revenue (verified): A/B test exp-042, +3.2% lift, p<0.01"`) the agent can quote verbatim. Fields are only included when non-empty, keeping responses compact for metrics with no impact data.
+- **`list_metrics` filters**: Gains optional `tier` and `indicator_kind` arguments alongside the existing `domain` filter. Entries include `tier` and `indicator_kind` when set.
+- **`list_metrics` domain semantics**: Domain filtering now uses a union of contract-side `Domain.metrics` and metric-side self-declared `metric.domains`. A metric that self-declares a domain is discoverable via the filter even if the contract's `Domain.metrics` list doesn't include it.
+- **Factory tool descriptions**: `lookup_metric` and `list_metrics` descriptions now advertise the new fields and filters so the agent knows when to use them.
+
+### Breaking
+
+- **`SemanticSource` protocol extension**: The `@runtime_checkable` Protocol gains a required `get_metric_impacts()` method. Custom third-party `SemanticSource` implementations must add this method (returning `[]` is fine); without it, `isinstance(source, SemanticSource)` returns `False`. Built-in `YamlSource`, `DbtSource`, and `CubeSource` all implement it — no migration required for users who only use the built-in sources.
+
 ## [0.9.2] - 2026-04-15
 
 ### Fixed

@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
-**Date:** 2026-04-13
-**Status:** Implemented (v0.9.2)
+**Date:** 2026-04-17
+**Status:** Implemented (v0.10.0)
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -24,7 +24,7 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | `ai-agent-contracts` | Required dependency | Optional — upgrades enforcement when installed |
 | Dependency management | pip | uv |
 | Database interaction | Validation only | Full tool set: validate, execute, describe, preview |
-| Tool surface | Validator callback | 12 agent tools (factory + middleware) |
+| Tool surface | Validator callback | 13 agent tools (factory + middleware) |
 
 ## Design Decisions
 
@@ -67,7 +67,7 @@ Mode          ┌─────────────────┐
     │                  │
     ▼                  ▼
  ┌──────────────────────┐
- │ create_tools()        │  12 agent tools
+ │ create_tools()        │  13 agent tools
  │ contract_middleware()  │  BYO tool wrapper
  │ ContractSession       │  Enforcement tracking
  └──────────────────────┘
@@ -301,7 +301,7 @@ SQL string
 
 Two modes: tool factory for quick starts, middleware for BYO tools.
 
-### 12 Tools in Three Categories
+### 13 Tools in Three Categories
 
 #### Discovery tools (understand what's available)
 
@@ -309,27 +309,29 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 2. **`list_tables(schema?)`** — Allowed tables with column summary
 3. **`describe_table(schema, table)`** — Full column details from database (name, type, description, partitioning)
 4. **`preview_table(schema, table, limit=5)`** — Sample rows from a table
-5. **`list_metrics(domain?)`** — All metrics from semantic source, optionally filtered by domain
-6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula; fuzzy fallback when no exact match
+5. **`list_metrics(domain?, tier?, indicator_kind?)`** — All metrics from semantic source; optional filters for domain, tier (`north_star` / `department_kpi` / `team_kpi`), and `indicator_kind` (`leading` / `lagging`)
+6. **`lookup_metric(metric_name)`** — Specific metric definition + SQL formula, enriched with `domains`, `tier`, `indicator_kind`, and citation-ready `impacts` / `impacted_by` edges; fuzzy fallback when no exact match
 7. **`lookup_domain(name)`** — Full domain context (description, metrics with descriptions, tables); fuzzy fallback when no exact match
 8. **`lookup_relationships(table, target_table?)`** — Join paths involving a table; with `target_table`, finds shortest multi-hop path via BFS (up to 3 hops)
+9. **`trace_metric_impacts(metric_name, direction, max_depth=2)`** — Walks the metric-impact graph via BFS from the given metric; `direction="upstream"` returns drivers, `direction="downstream"` returns affected metrics. Each edge carries `direction`, `confidence`, and `evidence`. `max_depth` clamped to `[1, 10]`.
 
 #### Execution tools (query with governance)
 
-9. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
-10. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
-11. **`run_query(sql)`** — Validate → execute → return results
+10. **`validate_query(sql)`** — Static + EXPLAIN check, no execution
+11. **`query_cost_estimate(sql)`** — Estimated cost/rows (Layer 2 only)
+12. **`run_query(sql)`** — Validate → execute → return results
 
 #### Meta tool (self-awareness)
 
-12. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time, domain summaries
+13. **`get_contract_info()`** — Active rules, limits, remaining budget, retries left, elapsed time, domain summaries
 
 ### Natural Agent Workflow
 
 ```
 list_schemas → list_tables → describe_table → preview_table
     → lookup_domain (understand the business domain)
-    → lookup_metric (get SQL definition)
+    → lookup_metric (get SQL definition + tier/indicator_kind/impact edges)
+    → trace_metric_impacts (walk upstream for root-cause, downstream for action impact)
     → lookup_relationships (if joining tables)
     → write SQL → validate_query → query_cost_estimate
     → run_query
@@ -345,7 +347,7 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 dc = DataContract.from_yaml("contract.yml")
 adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
-# Returns all 12 tools as @tool-decorated async functions
+# Returns all 13 tools as @tool-decorated async functions
 # compatible with claude_agent_sdk.create_sdk_mcp_server()
 ```
 
@@ -385,7 +387,7 @@ async def my_custom_query_tool(args: dict) -> dict:
 
 | Tool | Without adapter |
 |---|---|
-| `list_schemas`, `list_tables`, `list_metrics`, `lookup_metric`, `lookup_domain` | Fully functional (contract + semantic source) |
+| `list_schemas`, `list_tables`, `list_metrics`, `lookup_metric`, `lookup_domain`, `lookup_relationships`, `trace_metric_impacts` | Fully functional (contract + semantic source) |
 | `validate_query`, `get_contract_info` | Fully functional |
 | `describe_table`, `preview_table`, `run_query` | Unavailable (clear error message) |
 | `query_cost_estimate` | Returns "unavailable without database adapter" |
@@ -401,19 +403,24 @@ class SemanticSource(Protocol):
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
     def get_relationships(self) -> list[Relationship]: ...
+    def get_relationships_for_table(self, table: str) -> list[Relationship]: ...
+    def get_metric_impacts(self) -> list[MetricImpact]: ...
 ```
 
 **Fuzzy metric search:** When `lookup_metric` receives a query that doesn't exactly match a metric name, it falls back to `search_metrics()` which uses `thefuzz` (`token_set_ratio` scorer, cutoff 50) to find the best matches by name + description. A shared `fuzzy_search_metrics()` helper in `base.py` provides this logic for all source implementations.
+
+**Metric-impact graph (v0.10.0+):** `get_metric_impacts()` returns directed edges between metrics annotated with `direction`, `confidence`, and `evidence`. The `build_metric_impact_index()` / `walk_metric_impacts()` helpers in `base.py` mirror the `build_relationship_index` / `find_join_path` pattern — dual-keyed index (each edge under both endpoints), cycle-safe BFS traversal, direction disambiguated at walk time. `YamlSource` parses a top-level `metric_impacts:` block; `DbtSource` and `CubeSource` return `[]` (neither system has a native causal-graph concept — impacts live in the contract YAML regardless of where the metric itself comes from).
 
 **Built-in sources:**
 
 | Source | Reads | Extracts |
 |---|---|---|
-| `DbtSource` | `manifest.json` | Metrics, models, columns |
-| `CubeSource` | Cube meta API or schema files | Metrics, dimensions |
-| `YamlSource` | Inline YAML definitions | Simple metric/table/relationship definitions for teams not using dbt/Cube |
+| `DbtSource` | `manifest.json` | Metrics (+ `meta.tier` / `meta.indicator_kind` / `meta.domains`), models, columns |
+| `CubeSource` | Cube meta API or schema files | Metrics (+ `meta.tier` / `meta.indicator_kind` / `meta.domains`), dimensions |
+| `YamlSource` | Inline YAML definitions | Metric / table / relationship / `metric_impacts` definitions for teams not using dbt/Cube |
 
-`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`.
+`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`.
+`MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
 `Relationship`: `from_`, `to`, `type`, `description`, `required_filter`.
 `TableSchema`: `columns: list[Column]` with name, type, description.
 
@@ -521,7 +528,7 @@ agentic-data-contracts/
 │   │   └── explain.py           # EXPLAIN adapter orchestration
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   ├── factory.py           # create_tools() — returns 12 tools
+│   │   ├── factory.py           # create_tools() — returns 13 tools
 │   │   └── middleware.py        # contract_middleware decorator
 │   ├── semantic/
 │   │   ├── __init__.py

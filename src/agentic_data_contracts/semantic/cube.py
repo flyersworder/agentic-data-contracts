@@ -9,6 +9,7 @@ import yaml
 from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
+    MetricImpact,
     Relationship,
     fuzzy_search_metrics,
 )
@@ -26,12 +27,22 @@ class CubeSource:
             sql_table = cube.get("sql_table", "")
 
             for measure in cube.get("measures", []):
+                meta = measure.get("meta") or {}
+                tier_raw = meta.get("tier", [])
+                tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
+                domains_raw = meta.get("domains", [])
+                domains = (
+                    [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
+                )
                 self._metrics.append(
                     MetricDefinition(
                         name=measure["name"],
                         description=measure.get("description", ""),
                         sql_expression=measure.get("sql", ""),
                         source_model=sql_table,
+                        domains=domains,
+                        tier=tier,
+                        indicator_kind=meta.get("indicator_kind"),
                     )
                 )
 
@@ -66,3 +77,8 @@ class CubeSource:
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
+        # Cube has no native impact-graph concept; impacts live in the
+        # contract YAML (declared via YamlSource) and reference metric names.
+        return []

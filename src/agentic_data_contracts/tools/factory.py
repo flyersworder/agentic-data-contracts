@@ -124,8 +124,17 @@ def create_tools(
         semantic_source = contract.load_semantic_source()
 
     # Resolve wildcard tables if adapter is available
-    if adapter is not None and contract.has_wildcard_tables():
-        contract.resolve_tables(adapter)
+    if contract.has_wildcard_tables():
+        if adapter is not None:
+            contract.resolve_tables(adapter)
+        else:
+            logger.warning(
+                "Contract has wildcard tables (tables: ['*']) but no database"
+                " adapter was provided to create_tools(). Wildcards will remain"
+                " unresolved, and tools like describe_table will treat"
+                " wildcard-schema tables as 'not in allowed tables list'. Pass a"
+                " DatabaseAdapter to enable resolution."
+            )
 
     dialect = adapter.dialect if adapter else None
     sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None

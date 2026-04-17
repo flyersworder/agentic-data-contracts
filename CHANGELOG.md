@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-04-17
+
+### Breaking
+
+- **Tool surface consolidated from 13 to 9 tools**: Five tools dropped and two merged into one. The full contract is already injected into the system prompt by `ClaudePromptRenderer`, so the dropped tools were redundant from an analytics-agent perspective.
+- **`list_schemas` removed**: The allowed-schemas set is implicit in the allowed-tables list that the prompt renderer already injects.
+- **`list_tables` removed**: The prompt renderer already injects the full allowed-tables list. Per-table column details remain available via `describe_table`.
+- **`get_contract_info` removed**: Contract name, allowed tables, rules, and limits are all in the prompt. The one dynamic field the tool exposed — remaining session budget — is now embedded in every `run_query` response under `session.remaining`.
+- **`validate_query` + `query_cost_estimate` merged into `inspect_query`**: Both tools wrapped the same underlying `Validator.validate()` call (which internally runs Layer 1 + EXPLAIN). The merge removes a "which tool do I call?" decision. Response is structured JSON with `valid`, `violations`, `warnings`, `log_messages`, `schema_valid`, `explain_errors`, `pending_result_checks`, and — when an adapter is configured — `estimated_cost_usd` and `estimated_rows`.
+
+### Changed
+
+- **`run_query` response**: Success responses now include a `session.remaining` block mirroring `ContractSession.remaining()` (elapsed seconds, retries remaining, token budget remaining, cost remaining). Blocked responses append a one-line `Remaining: {...}` suffix with the same data.
+- **`ValidationResult` dataclass**: Gains three additive fields — `estimated_rows: int | None`, `schema_valid: bool = True`, and `explain_errors: list[str] = []`. Populated in `Validator.validate()` when an `ExplainAdapter` is configured. Defaults are safe for existing callers.
+
+### Migration
+
+- Replace `validate_query(sql)` calls with `inspect_query(sql)`. The response is JSON rather than a status string; parse `valid`, `violations`, and `warnings`. Cost and row estimates live under the same response.
+- Replace `query_cost_estimate(sql)` calls with `inspect_query(sql)`. Cost and row fields are now nested alongside validation fields.
+- If an agent previously called `get_contract_info`, read remaining budget from `run_query` responses (`data["session"]["remaining"]`) instead. Static contract metadata is already in the system prompt.
+- `list_schemas` and `list_tables` have no replacements — the prompt already contains this information.
+
 ## [0.10.0] - 2026-04-17
 
 ### Added

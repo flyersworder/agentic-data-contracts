@@ -227,7 +227,7 @@ SQL is parsed once into a sqlglot AST. The Validator passes the AST to all appli
 
 `CheckResult` contains: `passed: bool`, `severity: block | warn | log`, `message: str`.
 
-The validator runs all applicable checkers and aggregates results — any `block` result stops execution, `warn` results are surfaced to the agent, `log` results are recorded silently.
+The validator runs all applicable checkers and aggregates results — any `block` result stops execution, `warn` results are prepended to the `run_query` response as a `WARNINGS:` preamble, `log` results are prepended as a `LOG:` preamble (also exposed via `inspect_query` under `warnings` and `log_messages`). `log`-level rules are omitted from the system prompt so the agent can't adapt behavior to avoid triggering them.
 
 Rules that cannot be statically checked (e.g., "use semantic layer definition for revenue") become advisory rules — they appear in the system prompt but don't enforce anything. They can also be used as `SuccessCriterion` for post-hoc evaluation.
 
@@ -293,7 +293,8 @@ SQL string
   → execute query
   → Phase 3: result_check rules against actual output (table-scoped)
   → any block? → discard data, return violation
-  → any warn? → prepend warnings to response
+  → any warn? → prepend WARNINGS preamble to response
+  → any log? → prepend LOG preamble to response
   → return results
 ```
 

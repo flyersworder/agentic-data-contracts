@@ -159,19 +159,21 @@ asyncio.run(run("What was total revenue by region in Q1 2025?"))
 import asyncio
 
 async def demo() -> None:
-    # Validate a query without executing
+    # Inspect a query without executing. Response is structured JSON.
     inspect = next(t for t in tools if t.name == "inspect_query")
     result = await inspect.callable(
         {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}
     )
     print(result["content"][0]["text"])
-    # VALID — Query passed all checks.
+    # {"valid": true, "violations": [], "warnings": [], "log_messages": [],
+    #  "schema_valid": true, "explain_errors": [], "pending_result_checks": [...]}
 
     # Blocked query
     result = await inspect.callable({"sql": "SELECT * FROM analytics.orders"})
     print(result["content"][0]["text"])
-    # BLOCKED — Violations:
-    # - SELECT * is not allowed — specify explicit columns
+    # {"valid": false,
+    #  "violations": ["SELECT * is not allowed — specify explicit columns", ...],
+    #  "warnings": [], ...}
 
 asyncio.run(demo())
 ```
@@ -246,8 +248,8 @@ This pattern — compact index in the prompt, detailed context on demand — is 
 Rules are enforced at three levels:
 
 - **`block`** — query is rejected and an error is returned to the agent
-- **`warn`** — query proceeds but a warning is included in the response
-- **`log`** — violation is recorded but not surfaced to the agent
+- **`warn`** — query proceeds and a `WARNINGS:` preamble is prepended to the `run_query` response (also in `inspect_query` under `warnings`)
+- **`log`** — query proceeds and a `LOG:` preamble is prepended to the `run_query` response (also in `inspect_query` under `log_messages`); rules at this level are omitted from the system prompt so the agent can't adapt behavior to avoid triggering them
 
 Each rule carries a `query_check` (pre-execution) or `result_check` (post-execution) block. Rules with neither are advisory — they appear in the system prompt but don't enforce anything. Every rule can be scoped to a specific table or applied globally.
 

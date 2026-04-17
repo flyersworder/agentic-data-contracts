@@ -710,10 +710,14 @@ def create_tools(
         ToolDef(
             name="inspect_query",
             description=(
-                "Inspect a SQL query without executing it. Returns validation result"
-                " (violations and warnings from contract rules), estimated cost and row"
-                " count from EXPLAIN when a database adapter is configured, schema"
-                " validity, and any result checks that would run after execution."
+                "Inspect a SQL query without executing it. Returns structured JSON"
+                " with: `valid` (bool), `violations` (block-enforcement rule"
+                " messages), `warnings` (warn-enforcement rule messages),"
+                " `log_messages` (log-enforcement rule messages), `schema_valid`"
+                " and `explain_errors` (from the EXPLAIN layer), and"
+                " `pending_result_checks` (result checks that would run after"
+                " execution). When a database adapter is configured, also"
+                " includes `estimated_cost_usd` and `estimated_rows` from EXPLAIN."
                 " Use this to iterate on SQL before spending retry budget on run_query."
             ),
             input_schema={

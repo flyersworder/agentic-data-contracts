@@ -214,6 +214,7 @@ async def test_run_query_session_limit_exceeded(
         or "limit" in text.lower()
         or "exceeded" in text.lower()
     )
+    assert "Remaining:" in text
 
 
 @pytest.mark.asyncio
@@ -262,6 +263,7 @@ async def test_run_query_result_check_blocks() -> None:
     assert "block" in text.lower() or "no_negative" in text.lower()
     # Should NOT contain the actual row data
     assert "100" not in text
+    assert "Remaining:" in text
 
 
 @pytest.mark.asyncio
@@ -378,3 +380,30 @@ async def test_run_query_blocked_includes_remaining_budget(
     text = result["content"][0]["text"]
     assert "block" in text.lower() or "violation" in text.lower()
     assert "remaining" in text.lower()
+    marker = "\nRemaining: "
+    assert marker in text
+    payload = json.loads(text.split(marker, 1)[1])
+    assert "elapsed_seconds" in payload
+
+
+@pytest.mark.asyncio
+async def test_run_query_execute_exception_includes_remaining_budget(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Adapter execute exceptions should surface BLOCKED with Remaining: suffix."""
+    from unittest.mock import patch
+
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+
+    # SQL that passes Layer 1 + EXPLAIN but raises at execute().
+    with patch.object(
+        adapter, "execute", side_effect=RuntimeError("simulated engine failure")
+    ):
+        result = await tool.callable(
+            {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
+        )
+    text = result["content"][0]["text"]
+    assert "BLOCKED" in text
+    assert "execution failed" in text.lower()
+    assert "Remaining:" in text

@@ -407,3 +407,64 @@ async def test_run_query_execute_exception_includes_remaining_budget(
     assert "BLOCKED" in text
     assert "execution failed" in text.lower()
     assert "Remaining:" in text
+
+
+@pytest.mark.asyncio
+async def test_run_query_surfaces_log_messages() -> None:
+    """enforcement=log rule should populate a LOG preamble in run_query output,
+    mirroring the log_messages field inspect_query exposes."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        QueryCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    dc = DataContract(
+        DataContractSchema(
+            name="test",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+                rules=[
+                    SemanticRule(
+                        name="tenant_filter_log",
+                        description="Log when tenant_id filter is missing",
+                        enforcement=Enforcement.LOG,
+                        query_check=QueryCheck(required_filter="tenant_id"),
+                    ),
+                ],
+            ),
+        )
+    )
+
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        """
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (id INTEGER);
+        INSERT INTO analytics.orders VALUES (1);
+        """
+    )
+
+    tools = create_tools(dc, adapter=db)
+    tool = next(t for t in tools if t.name == "run_query")
+    # No tenant_id filter — log rule should fire but not block execution.
+    result = await tool.callable({"sql": "SELECT id FROM analytics.orders"})
+    text = result["content"][0]["text"]
+
+    # Query executed (rows returned) AND log preamble present.
+    assert "LOG:" in text
+    assert "tenant_id" in text
+    # Payload JSON still present after the preamble.
+    _, _, json_body = text.partition("\n\n")
+    # Response may have both WARNINGS and LOG preambles; find the JSON tail.
+    json_start = text.find("{")
+    assert json_start != -1
+    payload = json.loads(text[json_start:])
+    assert payload["row_count"] == 1

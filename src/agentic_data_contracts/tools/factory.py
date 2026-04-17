@@ -589,11 +589,20 @@ def create_tools(
         }
         response_text = json.dumps(data, default=str)
 
-        # Prepend warnings from both query checks and result checks
+        # Prepend warnings and log-enforcement messages from both query checks
+        # and result checks. log_messages surface rules with enforcement=log
+        # that triggered during validation — symmetric with inspect_query.
         all_warnings = vresult.warnings + rresult.warnings
+        all_logs = vresult.log_messages + rresult.log_messages
+        preamble_parts: list[str] = []
         if all_warnings:
-            warning_text = "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
-            response_text = warning_text + "\n\n" + response_text
+            preamble_parts.append(
+                "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
+            )
+        if all_logs:
+            preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in all_logs))
+        if preamble_parts:
+            response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
 
         return _text_response(response_text)
 

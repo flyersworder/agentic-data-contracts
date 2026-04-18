@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Protocol, runtime_checkable
 
 from thefuzz import fuzz, process
@@ -43,6 +44,7 @@ class MetricImpact:
     confidence: str = "hypothesized"  # "verified" | "correlated" | "hypothesized"
     evidence: str = ""  # free text, human- and agent-citable
     description: str = ""
+    last_reviewed: date | None = None
 
 
 @runtime_checkable

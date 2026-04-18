@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
 from typing import Self
 
@@ -77,6 +78,7 @@ class Domain(BaseModel):
     description: str
     metrics: list[str] = Field(default_factory=list)
     tables: list[str] = Field(default_factory=list)
+    last_reviewed: date | None = None
 
 
 class SemanticConfig(BaseModel):

@@ -1,5 +1,6 @@
 """Tests for the Domain Pydantic model."""
 
+from datetime import date
 from pathlib import Path
 
 from agentic_data_contracts.core.contract import DataContract
@@ -163,3 +164,26 @@ def test_allowed_table_defaults():
     entry = AllowedTable.model_validate({"schema": "raw", "tables": ["events"]})
     assert entry.description is None
     assert entry.preferred is False
+
+
+def test_domain_last_reviewed_defaults_none():
+    """Without last_reviewed, the field is None — callers treat this as 'never'."""
+    d = Domain(
+        name="revenue",
+        summary="Financial metrics",
+        description="Revenue domain.",
+    )
+    assert d.last_reviewed is None
+
+
+def test_domain_last_reviewed_parses_iso_date():
+    """YAML dates arrive as ISO strings via model_validate; Pydantic coerces to date."""
+    d = Domain.model_validate(
+        {
+            "name": "revenue",
+            "summary": "Financial metrics",
+            "description": "Revenue domain.",
+            "last_reviewed": "2026-02-01",
+        }
+    )
+    assert d.last_reviewed == date(2026, 2, 1)

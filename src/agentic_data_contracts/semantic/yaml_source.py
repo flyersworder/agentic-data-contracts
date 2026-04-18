@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -14,6 +16,18 @@ from agentic_data_contracts.semantic.base import (
     build_relationship_index,
     fuzzy_search_metrics,
 )
+
+
+def _parse_date(value: Any) -> date | None:
+    """Accept a YAML-native date, an ISO-8601 string, or None."""
+    if value is None or isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise TypeError(
+        f"last_reviewed must be a date or ISO string, "
+        f"got {type(value).__name__}: {value!r}"
+    )
 
 
 class YamlSource:
@@ -73,6 +87,7 @@ class YamlSource:
                 confidence=i.get("confidence", "hypothesized"),
                 evidence=i.get("evidence", ""),
                 description=i.get("description", ""),
+                last_reviewed=_parse_date(i.get("last_reviewed")),
             )
             for i in raw.get("metric_impacts", [])
         ]

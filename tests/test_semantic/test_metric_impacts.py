@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ class TestMetricImpactDataclass:
         assert imp.confidence == "hypothesized"
         assert imp.evidence == ""
         assert imp.description == ""
+        assert imp.last_reviewed is None
 
     def test_full(self) -> None:
         imp = MetricImpact(
@@ -36,6 +38,15 @@ class TestMetricImpactDataclass:
         assert imp.direction == "negative"
         assert imp.confidence == "verified"
         assert imp.evidence == "study Q4"
+
+    def test_last_reviewed_field(self) -> None:
+        """MetricImpact carries an optional review timestamp for staleness detection."""
+        imp = MetricImpact(
+            from_metric="conv",
+            to_metric="rev",
+            last_reviewed=date(2026, 1, 15),
+        )
+        assert imp.last_reviewed == date(2026, 1, 15)
 
 
 class TestBuildMetricImpactIndex:
@@ -193,6 +204,50 @@ class TestYamlSourceImpacts:
         assert imp.direction == "positive"
         assert imp.confidence == "hypothesized"
         assert imp.evidence == ""
+        assert imp.last_reviewed is None
+
+    def test_loads_last_reviewed_iso_date(self, tmp_path: Path) -> None:
+        """YAML-native date and ISO-string forms both populate last_reviewed."""
+        yml = (
+            "metrics:\n"
+            "  - name: a\n"
+            '    description: ""\n'
+            '    sql_expression: ""\n'
+            "  - name: b\n"
+            '    description: ""\n'
+            '    sql_expression: ""\n'
+            "metric_impacts:\n"
+            "  - from: a\n"
+            "    to: b\n"
+            "    last_reviewed: 2026-01-15\n"  # YAML-native date
+            "  - from: b\n"
+            "    to: a\n"
+            '    last_reviewed: "2025-11-30"\n'  # ISO string form
+        )
+        (tmp_path / "m.yml").write_text(yml)
+        source = YamlSource(tmp_path / "m.yml")
+        impacts = source.get_metric_impacts()
+        assert impacts[0].last_reviewed == date(2026, 1, 15)
+        assert impacts[1].last_reviewed == date(2025, 11, 30)
+
+    def test_last_reviewed_int_raises(self, tmp_path: Path) -> None:
+        """Unexpected types are rejected at load time with a readable error."""
+        yml = (
+            "metrics:\n"
+            "  - name: a\n"
+            '    description: ""\n'
+            '    sql_expression: ""\n'
+            "  - name: b\n"
+            '    description: ""\n'
+            '    sql_expression: ""\n'
+            "metric_impacts:\n"
+            "  - from: a\n"
+            "    to: b\n"
+            "    last_reviewed: 12345\n"
+        )
+        (tmp_path / "m.yml").write_text(yml)
+        with pytest.raises(TypeError, match="last_reviewed"):
+            YamlSource(tmp_path / "m.yml")
 
 
 class TestDbtAndCubeImpactsDefaultEmpty:

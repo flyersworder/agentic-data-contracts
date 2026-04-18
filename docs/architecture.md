@@ -182,6 +182,20 @@ Always be concise and include methodology notes.
 """
 ```
 
+### Governance Staleness
+
+YAML-level business assertions — `domain.description`, `metric_impact.evidence` — rot silently when the business changes. Both models carry an optional `last_reviewed: date` field, and `DataContract.find_stale()` flags any artefact whose timestamp is missing or older than a threshold (default 90 days).
+
+```python
+dc = DataContract.from_yaml("data_contract.yml")
+source = dc.load_semantic_source()
+findings = dc.find_stale(source, threshold_days=90)
+for f in findings:
+    print(f.kind, f.name, f.age_days)
+```
+
+Missing timestamps report as stale (`age_days=None`) — otherwise adoption is optional and defeats the forcing function. During rollout, filter by `f.age_days is not None` to grandfather in un-reviewed entries. The detector is a pure function suitable for direct use in a pytest assertion or CI check.
+
 ### ContractSession (Lightweight Enforcement)
 
 When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-contained enforcement:
@@ -219,7 +233,7 @@ SQL is parsed once into a sqlglot AST. The Validator passes the AST to all appli
 
 | Check | Checker | What it validates |
 |---|---|---|
-| `required_filter` | `RequiredFilterChecker` | Required WHERE clauses present |
+| `required_filter` | `RequiredFilterChecker` | Required WHERE column present in a non-tautological predicate |
 | `no_select_star` | `NoSelectStarChecker` | No `SELECT *` statements |
 | `blocked_columns` | `BlockedColumnsChecker` | Forbidden columns not in SELECT |
 | `require_limit` | `RequireLimitChecker` | LIMIT clause present |
@@ -238,7 +252,7 @@ When a `SemanticSource` is passed to the `Validator`, the `RelationshipChecker` 
 | Check | What it validates |
 |---|---|
 | `RelationshipChecker` (join-key) | JOIN columns match declared `from`/`to` references |
-| `RelationshipChecker` (required-filter) | `required_filter` column present in WHERE clause |
+| `RelationshipChecker` (required-filter) | `required_filter` column present in WHERE with a non-tautological predicate |
 | `RelationshipChecker` (fan-out) | No aggregation across `one_to_many` joins |
 
 All relationship checks produce **warnings only** — they never block queries. Undeclared joins (table pairs with no relationship definition) are silently ignored.

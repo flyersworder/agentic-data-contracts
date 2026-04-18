@@ -210,6 +210,40 @@ def test_table_scoped_query_check() -> None:
     assert not result.blocked
 
 
+def test_required_filter_tautology_is_blocked_end_to_end() -> None:
+    """End-to-end: a blocking required_filter must reject `col = col` bypasses.
+
+    This catches regressions where the low-level checker is hardened but the
+    Validator wiring is missed (or vice versa).
+    """
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="tenant_isolation",
+                    description="Orders must filter by tenant_id",
+                    enforcement=Enforcement.BLOCK,
+                    table="analytics.orders",
+                    query_check=QueryCheck(required_filter="tenant_id"),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+    validator = Validator(dc)
+
+    result = validator.validate(
+        "SELECT id FROM analytics.orders WHERE tenant_id = tenant_id"
+    )
+    assert result.blocked, "Tautological predicate must not satisfy a blocking rule"
+
+
 def test_global_query_check() -> None:
     schema = DataContractSchema(
         name="test",

@@ -160,6 +160,25 @@ class TestRequiredFilterChecker:
         result = RequiredFilterChecker("tenant_id").check_ast(ast)
         assert result.passed
 
+    def test_tautology_is_blocked(self) -> None:
+        """`WHERE tenant_id = tenant_id` must not satisfy a blocking
+        required_filter — it's the exact bypass governance rules exist to prevent."""
+        ast = _parse("SELECT id FROM analytics.orders WHERE tenant_id = tenant_id")
+        result = RequiredFilterChecker("tenant_id").check_ast(ast)
+        assert not result.passed
+        assert "tenant_id" in result.message
+
+    def test_tautology_is_blocked_is_self(self) -> None:
+        ast = _parse("SELECT id FROM analytics.orders WHERE tenant_id IS tenant_id")
+        result = RequiredFilterChecker("tenant_id").check_ast(ast)
+        assert not result.passed
+
+    def test_non_tautological_filter_still_passes(self) -> None:
+        """Regression guard: `tenant_id IS NOT NULL` is a legitimate binding."""
+        ast = _parse("SELECT id FROM analytics.orders WHERE tenant_id IS NOT NULL")
+        result = RequiredFilterChecker("tenant_id").check_ast(ast)
+        assert result.passed
+
 
 class TestBlockedColumnsChecker:
     def test_safe_columns_pass(self) -> None:

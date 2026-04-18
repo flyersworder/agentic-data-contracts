@@ -39,6 +39,85 @@ def extract_tables(expression: exp.Expression) -> set[str]:
     return tables
 
 
+_BINARY_COMPARISONS: tuple[type[exp.Expression], ...] = (
+    exp.EQ,
+    exp.NEQ,
+    exp.LT,
+    exp.LTE,
+    exp.GT,
+    exp.GTE,
+    exp.Like,
+    exp.ILike,
+)
+
+
+def extract_where_columns(ast: exp.Expression) -> set[str]:
+    """Extract all column names referenced in WHERE clauses (lower-cased)."""
+    columns: set[str] = set()
+    for where in ast.find_all(exp.Where):
+        for col in where.find_all(exp.Column):
+            columns.add(col.name.lower())
+    return columns
+
+
+def extract_bound_columns(ast: exp.Expression) -> set[str]:
+    """Return columns that appear in at least one non-tautological predicate.
+
+    A column is "bound" if it appears on one side of a comparison, IN,
+    BETWEEN, or IS (NOT) NULL expression where the other side does not
+    reference the same column. Catches `WHERE tenant_id = tenant_id`
+    style bypasses of column-presence-only filter checks.
+    """
+    bound: set[str] = set()
+    for where in ast.find_all(exp.Where):
+        for node in where.find_all(*_BINARY_COMPARISONS):
+            if not isinstance(node, exp.Binary):
+                continue
+            left_cols = {c.name.lower() for c in node.left.find_all(exp.Column)}
+            right_cols = {c.name.lower() for c in node.right.find_all(exp.Column)}
+            bound |= left_cols - right_cols
+            bound |= right_cols - left_cols
+        for in_node in where.find_all(exp.In):
+            this = in_node.this
+            if not isinstance(this, exp.Column):
+                continue
+            col_name = this.name.lower()
+            other_cols: set[str] = set()
+            for expr in in_node.expressions:
+                other_cols |= {c.name.lower() for c in expr.find_all(exp.Column)}
+            query = in_node.args.get("query")
+            if query is not None:
+                other_cols |= {c.name.lower() for c in query.find_all(exp.Column)}
+            if col_name not in other_cols:
+                bound.add(col_name)
+        for between in where.find_all(exp.Between):
+            this = between.this
+            if not isinstance(this, exp.Column):
+                continue
+            col_name = this.name.lower()
+            other_cols = set()
+            for key in ("low", "high"):
+                expr = between.args.get(key)
+                if expr is not None:
+                    other_cols |= {c.name.lower() for c in expr.find_all(exp.Column)}
+            if col_name not in other_cols:
+                bound.add(col_name)
+        for is_node in where.find_all(exp.Is):
+            this = is_node.this
+            if not isinstance(this, exp.Column):
+                continue
+            col_name = this.name.lower()
+            other = is_node.expression
+            other_cols = (
+                {c.name.lower() for c in other.find_all(exp.Column)}
+                if other is not None
+                else set()
+            )
+            if col_name not in other_cols:
+                bound.add(col_name)
+    return bound
+
+
 class TableAllowlistChecker:
     """Checks that all referenced tables are in the contract's allowed_tables."""
 
@@ -103,21 +182,31 @@ class NoSelectStarChecker:
 
 
 class RequiredFilterChecker:
-    """Checks that a required WHERE filter column is present."""
+    """Checks that a required WHERE filter column is present and non-trivial.
+
+    Rejects both absence (``tenant_id`` not in WHERE at all) and
+    trivially-satisfied predicates (``WHERE tenant_id = tenant_id``,
+    ``WHERE tenant_id IS tenant_id``, etc.) — the latter would otherwise
+    bypass a blocking governance rule.
+    """
 
     def __init__(self, column: str) -> None:
         self.column = column
 
     def check_ast(self, ast: exp.Expression) -> CheckResult:
-        where_columns: set[str] = set()
-        for where in ast.find_all(exp.Where):
-            for col in where.find_all(exp.Column):
-                where_columns.add(col.name.lower())
-
-        if self.column.lower() not in where_columns:
+        needle = self.column.lower()
+        if needle not in extract_where_columns(ast):
             return CheckResult(
                 passed=False,
                 message=f"Missing required filter: {self.column}",
+            )
+        if needle not in extract_bound_columns(ast):
+            return CheckResult(
+                passed=False,
+                message=(
+                    f"Required filter on {self.column} is trivially satisfied "
+                    f"(e.g. `col = col`); add a non-trivial condition"
+                ),
             )
         return CheckResult(passed=True, message="")
 
@@ -473,15 +562,6 @@ class RelationshipChecker:
         return warnings
 
     @staticmethod
-    def _extract_where_columns(ast: exp.Expression) -> set[str]:
-        """Extract all column names referenced in WHERE clauses."""
-        columns: set[str] = set()
-        for where in ast.find_all(exp.Where):
-            for col in where.find_all(exp.Column):
-                columns.add(col.name.lower())
-        return columns
-
-    @staticmethod
     def _extract_filter_columns(required_filter: str) -> set[str]:
         """Extract column names from a required_filter expression string."""
         try:
@@ -512,77 +592,6 @@ class RelationshipChecker:
                 )
             }
 
-    _BINARY_COMPARISONS: tuple[type[exp.Expression], ...] = (
-        exp.EQ,
-        exp.NEQ,
-        exp.LT,
-        exp.LTE,
-        exp.GT,
-        exp.GTE,
-        exp.Like,
-        exp.ILike,
-    )
-
-    @staticmethod
-    def _extract_bound_columns(ast: exp.Expression) -> set[str]:
-        """Return columns that appear in at least one non-tautological predicate.
-
-        A column is "bound" if it appears on one side of a comparison, IN,
-        BETWEEN, or IS (NOT) NULL expression where the other side does not
-        reference the same column. Catches `WHERE tenant_id = tenant_id`
-        style bypasses of required_filter column-presence checks.
-        """
-        bound: set[str] = set()
-        for where in ast.find_all(exp.Where):
-            for node in where.find_all(*RelationshipChecker._BINARY_COMPARISONS):
-                if not isinstance(node, exp.Binary):
-                    continue
-                left_cols = {c.name.lower() for c in node.left.find_all(exp.Column)}
-                right_cols = {c.name.lower() for c in node.right.find_all(exp.Column)}
-                bound |= left_cols - right_cols
-                bound |= right_cols - left_cols
-            for in_node in where.find_all(exp.In):
-                this = in_node.this
-                if not isinstance(this, exp.Column):
-                    continue
-                col_name = this.name.lower()
-                other_cols: set[str] = set()
-                for expr in in_node.expressions:
-                    other_cols |= {c.name.lower() for c in expr.find_all(exp.Column)}
-                query = in_node.args.get("query")
-                if query is not None:
-                    other_cols |= {c.name.lower() for c in query.find_all(exp.Column)}
-                if col_name not in other_cols:
-                    bound.add(col_name)
-            for between in where.find_all(exp.Between):
-                this = between.this
-                if not isinstance(this, exp.Column):
-                    continue
-                col_name = this.name.lower()
-                other_cols = set()
-                for key in ("low", "high"):
-                    expr = between.args.get(key)
-                    if expr is not None:
-                        other_cols |= {
-                            c.name.lower() for c in expr.find_all(exp.Column)
-                        }
-                if col_name not in other_cols:
-                    bound.add(col_name)
-            for is_node in where.find_all(exp.Is):
-                this = is_node.this
-                if not isinstance(this, exp.Column):
-                    continue
-                col_name = this.name.lower()
-                other = is_node.expression
-                other_cols = (
-                    {c.name.lower() for c in other.find_all(exp.Column)}
-                    if other is not None
-                    else set()
-                )
-                if col_name not in other_cols:
-                    bound.add(col_name)
-        return bound
-
     @staticmethod
     def _check_required_filters(
         ast: exp.Expression, matched_rels: list[Relationship]
@@ -590,8 +599,8 @@ class RelationshipChecker:
         """Warn if matched relationships have required_filter but column is
         missing or appears only in trivially-true predicates."""
         warnings: list[str] = []
-        where_columns = RelationshipChecker._extract_where_columns(ast)
-        bound_columns = RelationshipChecker._extract_bound_columns(ast)
+        where_columns = extract_where_columns(ast)
+        bound_columns = extract_bound_columns(ast)
         seen: set[int] = set()
 
         for rel in matched_rels:

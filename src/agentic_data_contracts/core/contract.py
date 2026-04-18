@@ -15,8 +15,11 @@ from agentic_data_contracts.core.schema import (
 )
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.core.prompt import PromptRenderer
+    from agentic_data_contracts.core.staleness import StaleFinding
     from agentic_data_contracts.semantic.base import SemanticSource
 
 
@@ -142,6 +145,28 @@ class DataContract:
             raise ValueError(msg)
 
         return loader_cls(path)
+
+    def find_stale(
+        self,
+        semantic_source: SemanticSource | None = None,
+        *,
+        threshold_days: int = 90,
+        today: date | None = None,
+    ) -> list[StaleFinding]:
+        """Return governance artefacts whose review is missing or expired.
+
+        Convenience entry point that pulls metric impacts from an optional
+        ``SemanticSource`` and delegates to :func:`find_stale_reviews`.
+        Pass no source to check only domain-level staleness.
+        """
+        from agentic_data_contracts.core.staleness import find_stale_reviews
+
+        impacts = (
+            semantic_source.get_metric_impacts() if semantic_source is not None else []
+        )
+        return find_stale_reviews(
+            self, impacts, threshold_days=threshold_days, today=today
+        )
 
     def to_system_prompt(
         self,

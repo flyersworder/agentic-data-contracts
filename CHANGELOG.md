@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-04-18
+
+### Added
+
+- **`last_reviewed: date | None` field on `Domain` and `MetricImpact`**: Optional review timestamp for governance artefacts. YAML loader accepts both YAML-native dates (`last_reviewed: 2026-04-18`) and ISO strings (`last_reviewed: "2026-04-18"`); other types raise `TypeError` at load time. Pydantic coerces ISO strings on `Domain` natively.
+- **`find_stale_reviews()` detector** (`agentic_data_contracts.core.staleness`): Pure function returning `list[StaleFinding]` for domains and metric-impact edges whose `last_reviewed` is missing or older than `threshold_days` (default 90). Accepts `today: date | None` for deterministic testing. Missing timestamp is reported as stale (`age_days=None`) — otherwise adoption is optional and defeats the forcing function. Inclusive boundary: `age == threshold` is fresh.
+- **`StaleFinding` dataclass**: Frozen value object with `kind`, `name`, `last_reviewed`, `age_days`, `threshold_days`, and `context: dict[str, Any]`. Metric-impact findings carry `{from_metric, to_metric, confidence, direction}` in `context` so callers can filter (e.g. "only fail CI on `verified` edges") or format messages.
+- **`DataContract.find_stale()` convenience method**: Discoverable entry point that pulls impacts from an optional `SemanticSource` and delegates to `find_stale_reviews`. Mirrors the signature style of `DataContract.to_system_prompt(semantic_source=...)`.
+- **Module-level `extract_where_columns()` and `extract_bound_columns()` helpers** in `validation.checkers`: Reusable AST utilities for checker authors. `extract_bound_columns` returns the set of columns that appear in at least one non-tautological predicate (comparison, `IN`, `BETWEEN`, or `IS (NOT) NULL` where the other side doesn't reference the same column).
+
+### Changed
+
+- **`RequiredFilterChecker` now rejects trivially-satisfied predicates**: Previously performed column-presence-only matching, so `WHERE tenant_id = tenant_id` would satisfy a blocking `required_filter: tenant_id` rule — the exact bypass governance rules exist to prevent. The checker now requires the filter column to appear in a non-tautological predicate (comparison, `IN`, `BETWEEN`, or `IS (NOT) NULL`). Covers `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`, `ILIKE`, `IS`, `IN`, `BETWEEN` variants. Column matching is by name only (not table-qualified), so cross-table self-comparisons like `a.tenant_id = b.tenant_id` are also flagged — deliberate, since such predicates don't pin the column to a specific value. Does not attempt SAT-level reasoning (e.g. tautology-inside-OR).
+- **`RelationshipChecker` required-filter warning** (advisory path): Same tightening, surfaced as a warning with the message "predicate on ... is trivially satisfied (e.g. `col = col`); add a non-trivial condition".
+
+### Migration
+
+- Review any queries that use self-referential predicates like `col = col`, `col != col`, `col IS col`, `col IN (col)`, or `col BETWEEN col AND col` — these will now be rejected by blocking `required_filter` rules (previously silently passed). Replace with a literal or parameter: `tenant_id = $session_tenant`, `status IS NOT NULL`, `status IN ('active', 'pending')`.
+- Adopting the new `last_reviewed` field is optional. If you add the field to any `Domain` or `metric_impacts` entry and run `find_stale`, be aware that entries *without* the field are reported as stale. To grandfather in existing artefacts during rollout, filter findings by `f.age_days is not None`, or add `last_reviewed: <today>` to each entry as a baseline.
+
 ## [0.11.0] - 2026-04-17
 
 ### Breaking

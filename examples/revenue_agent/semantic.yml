@@ -53,3 +53,4 @@ metric_impacts:
     confidence: hypothesized
     evidence: "Directional hypothesis — not yet backed by an A/B test"
     description: "More distinct active customers in a period typically lifts total revenue."
+    last_reviewed: 2026-04-18  # bump when you re-verify the causal claim

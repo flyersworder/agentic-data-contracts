@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import cast
 
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
@@ -12,7 +13,7 @@ from agentic_data_contracts.core.schema import (
     SemanticConfig,
 )
 from agentic_data_contracts.core.staleness import StaleFinding, find_stale_reviews
-from agentic_data_contracts.semantic.base import MetricImpact
+from agentic_data_contracts.semantic.base import MetricImpact, SemanticSource
 
 
 def _contract(*domains: Domain) -> DataContract:
@@ -248,3 +249,43 @@ class TestMixedAndOrdering:
         )
         findings = find_stale_reviews(contract, impacts=[], today=date(2026, 4, 18))
         assert findings == []
+
+
+class TestDataContractFindStale:
+    """DataContract.find_stale() is the discoverable entry point."""
+
+    def test_delegates_to_detector_without_source(self) -> None:
+        contract = _contract(
+            Domain(name="revenue", summary="", description="x"),  # missing → stale
+        )
+        findings = contract.find_stale(today=date(2026, 4, 18))
+        assert len(findings) == 1
+        assert findings[0].kind == "domain"
+
+    def test_pulls_impacts_from_semantic_source(self) -> None:
+        """When a SemanticSource is provided, its impacts are included."""
+
+        class _Stub:
+            def get_metric_impacts(self) -> list[MetricImpact]:
+                return [MetricImpact(from_metric="a", to_metric="b")]
+
+        contract = _contract()
+        findings = contract.find_stale(
+            cast(SemanticSource, _Stub()), today=date(2026, 4, 18)
+        )
+        assert len(findings) == 1
+        assert findings[0].kind == "metric_impact"
+
+    def test_respects_threshold_days(self) -> None:
+        contract = _contract(
+            Domain(
+                name="revenue",
+                summary="",
+                description="x",
+                last_reviewed=date(2026, 3, 1),
+            ),
+        )
+        fresh = contract.find_stale(today=date(2026, 4, 18), threshold_days=90)
+        stale = contract.find_stale(today=date(2026, 4, 18), threshold_days=30)
+        assert fresh == []
+        assert len(stale) == 1

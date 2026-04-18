@@ -78,6 +78,11 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Example fixtures have wide SQL INSERTs with aligned columns and long
+# demo-query strings; readability outweighs E501 line-length here.
+"examples/**" = ["E501"]
+
 [tool.ty.environment]
 python-version = "3.12"
 

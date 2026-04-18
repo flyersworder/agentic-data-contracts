@@ -1,0 +1,90 @@
+# Ops reliability semantic source
+# Demonstrates: negative-direction impact edge (rare in growth/revenue examples),
+# SLA metrics keyed on severity tier, and all three confidence levels.
+
+metrics:
+  - name: mttr_minutes
+    description: >
+      Mean Time To Resolve in minutes, across all severities.
+      For per-severity breakdown, GROUP BY severity.
+      Excludes incidents still open (resolved_at IS NULL).
+    sql_expression: >
+      AVG(EXTRACT(EPOCH FROM (resolved_at - opened_at)) / 60.0)
+    source_model: sre.incidents
+    filters:
+      - "resolved_at IS NOT NULL"
+    domains: [reliability]
+    tier: [north_star]
+    indicator_kind: lagging
+
+  - name: incident_count_24h
+    description: "Incidents opened in the last 24 hours (rolling)"
+    sql_expression: >
+      COUNT(id) FILTER (WHERE opened_at >= CURRENT_TIMESTAMP - INTERVAL 24 HOUR)
+    source_model: sre.incidents
+    domains: [reliability]
+    tier: [department_kpi]
+    indicator_kind: lagging
+
+  - name: sla_compliance_rate
+    description: >
+      Percentage of incidents resolved within SLA target by severity.
+      SLA targets: SEV1=60min, SEV2=240min, SEV3=1440min (24h).
+    sql_expression: >
+      COUNT(id) FILTER (WHERE resolved_within_sla)::FLOAT
+      / NULLIF(COUNT(id), 0)
+    source_model: sre.incidents
+    domains: [reliability]
+    tier: [north_star]
+    indicator_kind: lagging
+
+  - name: deploy_frequency_per_day
+    description: "Successful deploys per day across all services"
+    sql_expression: >
+      COUNT(id) FILTER (WHERE success = TRUE)::FLOAT
+      / COUNT(DISTINCT DATE(deployed_at))
+    source_model: sre.deploys
+    domains: [reliability]
+    tier: [team_kpi]
+    indicator_kind: leading
+
+relationships:
+  - from: sre.incidents.service_id
+    to: sre.services.id
+    type: many_to_one
+    description: >
+      Each incident is attached to one service. Join for per-service
+      or per-owner-team breakdowns.
+    required_filter: "resolved_at IS NOT NULL OR opened_at >= CURRENT_DATE - INTERVAL 30 DAY"
+
+  - from: sre.deploys.service_id
+    to: sre.services.id
+    type: many_to_one
+    description: "Each deploy targets one service."
+
+metric_impacts:
+  # Negative impact — higher deploy frequency correlates with LOWER incident count.
+  # (Smaller, more frequent changes = less risk per change. Counter-intuitive at
+  # first; well-documented in the DORA literature.)
+  - from: deploy_frequency_per_day
+    to: incident_count_24h
+    direction: negative
+    confidence: correlated
+    evidence: >
+      Internal analysis Q4 2025 (n=180 days, 14 services): services in the
+      top-quartile deploy frequency had 0.43× the incident rate of
+      bottom-quartile services. Not randomized — top-quartile services
+      also had more senior teams. Consistent with DORA 2024 findings.
+    description: "More frequent small deploys appear to reduce incident rate."
+    last_reviewed: 2026-02-28
+
+  # Positive impact — more incidents in 24h predicts longer MTTR per incident.
+  - from: incident_count_24h
+    to: mttr_minutes
+    direction: positive
+    confidence: hypothesized
+    evidence: >
+      Operator hypothesis: high-load days spread responder attention thin,
+      delaying resolution. Not formally tested. Confounded with severity mix.
+    description: "Incident pileup likely degrades per-incident resolution time."
+    last_reviewed: 2025-10-01  # > 90 days ago — find_stale_reviews() will flag

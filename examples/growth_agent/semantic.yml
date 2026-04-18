@@ -1,0 +1,103 @@
+# Growth analytics semantic source
+# Demonstrates: leading indicators, verified/correlated/hypothesized impact edges,
+# and a deliberately un-reviewed edge that find_stale_reviews() will flag.
+
+metrics:
+  - name: signup_rate_7d
+    description: "Distinct users who signed up in the last 7 days (rolling)"
+    sql_expression: "COUNT(DISTINCT id) FILTER (WHERE signup_at >= CURRENT_DATE - INTERVAL 7 DAY)"
+    source_model: analytics.users
+    domains: [acquisition]
+    tier: [team_kpi]
+    indicator_kind: leading
+
+  - name: activation_rate
+    description: >
+      Signed-up users who performed an activation event within 7 days of signup.
+      Activation event is event_name='activation'. Excludes users who churned
+      before day 7.
+    sql_expression: >
+      COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'activation')
+      / COUNT(DISTINCT u.id)::FLOAT
+    source_model: analytics.events
+    filters:
+      - "e.created_at BETWEEN u.signup_at AND u.signup_at + INTERVAL 7 DAY"
+    domains: [experimentation]
+    tier: [department_kpi]
+    indicator_kind: leading
+
+  - name: conversion_rate
+    description: >
+      Signed-up users who made a first_purchase within 30 days.
+      Computed per-cohort; compare cohorts on equal lookback, not calendar window.
+    sql_expression: >
+      COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'first_purchase')
+      / COUNT(DISTINCT u.id)::FLOAT
+    source_model: analytics.events
+    domains: [experimentation]
+    tier: [north_star]
+    indicator_kind: leading
+
+  - name: acquisition_spend
+    description: "Total paid-channel spend attributed to acquisition"
+    sql_expression: "SUM(spend_usd)"
+    source_model: analytics.events  # placeholder — real system would have a spend table
+    domains: [acquisition]
+    tier: [team_kpi]
+    indicator_kind: lagging
+
+relationships:
+  - from: analytics.events.user_id
+    to: analytics.users.id
+    type: many_to_one
+    description: >
+      Every event belongs to one user. Join on equality; event stream is
+      append-only so historical joins are stable.
+    required_filter: "created_at IS NOT NULL"
+
+  - from: analytics.events.experiment_id
+    to: analytics.experiments.id
+    type: many_to_one
+    description: >
+      Events tagged with an experiment_id belong to that experiment. Not every
+      event is part of an experiment — filter on experiment_id IS NOT NULL when
+      doing experiment analysis.
+    required_filter: "status = 'concluded'"
+
+metric_impacts:
+  # verified — real A/B test result with confidence interval
+  - from: signup_rate_7d
+    to: activation_rate
+    direction: positive
+    confidence: verified
+    evidence: >
+      A/B test onboarding-042 (2025-Q3, n=12,400, variant=new_flow):
+      +14.2% activation vs control, p<0.01 (95% CI: +9.1% to +19.3%).
+      Effect replicated in onboarding-051 (2025-Q4, same direction, smaller magnitude).
+    description: "The streamlined onboarding flow lifts day-7 activation — verified."
+    last_reviewed: 2026-03-15
+
+  # correlated — observational, causation not established
+  - from: activation_rate
+    to: conversion_rate
+    direction: positive
+    confidence: correlated
+    evidence: >
+      Cohort analysis Q2 2025 (n=45,000 users across 12 monthly cohorts):
+      Pearson r=0.68 between day-7 activation rate and day-30 conversion rate.
+      Not controlled for cohort acquisition channel — activated users may simply
+      have been higher-intent at signup.
+    description: "Activated users convert more; causal direction unproven."
+    last_reviewed: 2026-04-01
+
+  # hypothesized + missing last_reviewed — find_stale_reviews() will flag this
+  - from: acquisition_spend
+    to: signup_rate_7d
+    direction: positive
+    confidence: hypothesized
+    evidence: >
+      Directional — no controlled holdout. Correlation is confounded by
+      seasonality (spend ramps before major product launches, which also
+      organically drive signups).
+    description: "Marketing spend likely drives signups; causal fraction unknown."
+    # last_reviewed deliberately omitted — demonstrates the stale-detector catch.

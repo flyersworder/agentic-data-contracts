@@ -1,0 +1,96 @@
+version: "1.0"
+name: ops-reliability
+
+semantic:
+  source:
+    type: yaml
+    path: "./semantic.yml"
+  allowed_tables:
+    - schema: sre
+      description: "SRE reliability data — incidents, services, deploys"
+      preferred: true
+      tables: [incidents, services, deploys]
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  domains:
+    - name: reliability
+      summary: "Service health, incident response, and post-mortem metrics"
+      description: >
+        Reliability tracks incident lifecycle (MTTR, severity, SLA compliance)
+        and deploy hygiene (frequency, rollback rate). Severity tiers: SEV1
+        is customer-facing outage; SEV2 is degraded; SEV3 is internal-only.
+        SLA clock starts at `opened_at`, stops at `resolved_at`.
+      metrics: [mttr_minutes, incident_count_24h, sla_compliance_rate, deploy_frequency_per_day]
+      tables: [sre.incidents, sre.services, sre.deploys]
+      last_reviewed: 2026-03-20
+
+  rules:
+    # ── Block-level: hard governance boundaries ─────────────────────────────
+    - name: tenant_isolation
+      description: "All queries must filter by tenant_id"
+      enforcement: block
+      query_check:
+        required_filter: tenant_id
+
+    - name: incidents_need_limit
+      description: >
+        Queries against sre.incidents must include LIMIT. Ops dashboards can
+        generate unbounded queries accidentally (e.g. full history scans on
+        page refresh) — LIMIT provides a safety cap.
+      enforcement: block
+      table: sre.incidents
+      query_check:
+        require_limit: true
+
+    - name: max_joins_cap
+      description: >
+        Ops queries should stay simple. Complex multi-table joins suggest
+        the query belongs in a materialized view, not a live dashboard.
+      enforcement: block
+      query_check:
+        max_joins: 2
+
+    - name: no_select_star
+      description: "Must specify explicit columns"
+      enforcement: block
+      query_check:
+        no_select_star: true
+
+    # ── Warn-level: advisory ─────────────────────────────────────────────────
+    - name: prefer_materialized_metrics
+      description: >
+        MTTR and SLA compliance have expensive underlying calculations.
+        Prefer the pre-aggregated metric tables when available.
+      enforcement: warn
+
+    # ── Log-level: two ghost rules for audit (invisible to the agent) ───────
+    # Ops governance often needs compliance trails for post-mortems. These
+    # rules don't block queries — they annotate the result with a LOG:
+    # preamble the governance team can grep for.
+    - name: pii_in_incident_audit
+      description: >
+        Audit when queries expose PII fields from sre.incidents (customer
+        contact info collected during incident triage).
+      enforcement: log
+      table: sre.incidents
+      query_check:
+        blocked_columns: [user_email, customer_id]
+
+    - name: deploy_metadata_audit
+      description: >
+        Audit when queries expose commit SHAs or deploy actor identity.
+        These fields are not secret but their access pattern is relevant
+        for security review.
+      enforcement: log
+      table: sre.deploys
+      query_check:
+        blocked_columns: [commit_sha, deployed_by]
+
+# Tight resource limits — ops queries power real-time dashboards.
+resources:
+  cost_limit_usd: 0.50
+  max_retries: 2
+  token_budget: 20000
+
+# Aggressive wall-clock — an ops agent that takes 2 minutes is already broken.
+temporal:
+  max_duration_seconds: 30

@@ -1,0 +1,86 @@
+version: "1.0"
+name: growth-analytics
+
+semantic:
+  source:
+    type: yaml
+    path: "./semantic.yml"
+  allowed_tables:
+    - schema: analytics
+      description: "Product analytics — event stream, user table, and experiment metadata"
+      preferred: true
+      tables: [events, users, experiments]
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  domains:
+    - name: acquisition
+      summary: "Top-of-funnel — how users find and sign up for the product"
+      description: >
+        Acquisition tracks the top of the user funnel: signup sources,
+        volumes, and conversion from visit to signup. Source attribution
+        is last-touch and reconciled nightly.
+      metrics: [signup_rate_7d, acquisition_spend]
+      tables: [analytics.users, analytics.events]
+      last_reviewed: 2026-04-01
+
+    - name: experimentation
+      summary: "A/B tests and feature flags — experiment tracking and result analysis"
+      description: >
+        Experiments are defined in `analytics.experiments` with start/end dates.
+        Events tagged with `experiment_id` and `variant` are the unit of analysis.
+        Do not compute lift on running experiments — wait for `status=concluded`.
+      metrics: [activation_rate, conversion_rate]
+      tables: [analytics.experiments, analytics.events]
+      last_reviewed: 2026-03-15
+
+  rules:
+    # ── Block-level: hard governance boundaries ─────────────────────────────
+    - name: tenant_isolation
+      description: "All queries must filter by tenant_id — multi-tenant isolation"
+      enforcement: block
+      query_check:
+        required_filter: tenant_id
+
+    - name: events_time_bounded
+      description: >
+        Event scans must be time-bounded (filter on created_at). Unbounded
+        scans of analytics.events risk full-table scans against the event
+        stream and runaway cost.
+      enforcement: block
+      table: analytics.events
+      query_check:
+        required_filter: created_at
+
+    - name: no_select_star
+      description: "Must specify explicit columns — prevents accidental PII exposure"
+      enforcement: block
+      query_check:
+        no_select_star: true
+
+    # ── Warn-level: advisory, does not block ────────────────────────────────
+    - name: prefer_concluded_experiments
+      description: >
+        When computing experiment lift, join against `experiments.status = 'concluded'`.
+        Running experiments should not be used for decision-making.
+      enforcement: warn
+
+    # ── Log-level: invisible to the agent (not in system prompt) ────────────
+    # This rule exists so the agent cannot adapt behavior to avoid triggering
+    # it. Useful for integrity checks you don't want the agent to know about.
+    - name: pii_exposure_audit
+      description: >
+        Audit when queries against the users table select email or phone.
+        Governance team reviews the LOG: preambles in the run_query output
+        to detect accidental PII reach. Rule is NOT advertised in the system
+        prompt — the agent cannot steer around it.
+      enforcement: log
+      table: analytics.users
+      query_check:
+        blocked_columns: [email, phone]
+
+resources:
+  cost_limit_usd: 2.00
+  max_retries: 3
+  token_budget: 30000
+
+temporal:
+  max_duration_seconds: 120

@@ -198,6 +198,129 @@ class TestRequiredFilterEnforcement:
         warnings = checker.check_joins(ast)
         assert warnings == []
 
+    def test_required_filter_tautology_warns(self, fixtures_dir: Path) -> None:
+        """`WHERE status = status` must not satisfy required_filter — it's a bypass."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id, c.name FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status = o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
+    def test_required_filter_tautology_unqualified_warns(
+        self, fixtures_dir: Path
+    ) -> None:
+        """`WHERE status = status` without table qualifier is still a tautology."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE status = status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "trivially" in warnings[0].lower()
+
+    def test_required_filter_tautology_neq_warns(self, fixtures_dir: Path) -> None:
+        """`WHERE status != status` is a self-reference — also not a valid binding."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status != o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
+    def test_required_filter_tautology_in_self_warns(self, fixtures_dir: Path) -> None:
+        """`WHERE status IN (status)` self-references and does not bind the column."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status IN (o.status)"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
+    def test_required_filter_real_constraint_beside_tautology_no_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        """A real predicate satisfies the check even if a tautology also appears."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status = 'active' AND o.status = o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_required_filter_is_null_binds_column_no_warning(
+        self, fixtures_dir: Path
+    ) -> None:
+        """`IS NOT NULL` is a legitimate (non-tautological) binding predicate."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status IS NOT NULL"
+        )
+        warnings = checker.check_joins(ast)
+        assert warnings == []
+
+    def test_required_filter_tautology_is_self_warns(self, fixtures_dir: Path) -> None:
+        """`WHERE status IS status` self-references and is not a valid binding."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status IS o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
+    def test_required_filter_tautology_between_self_warns(
+        self, fixtures_dir: Path
+    ) -> None:
+        """`WHERE status BETWEEN status AND status` is a self-referential tautology."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status BETWEEN o.status AND o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
+    def test_required_filter_tautology_lte_self_warns(self, fixtures_dir: Path) -> None:
+        """`WHERE status <= status` must also be rejected (non-= binary operators)."""
+        rels = _load_relationships(fixtures_dir)
+        checker = RelationshipChecker(rels)
+        ast = _parse(
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.customers c ON o.customer_id = c.id"
+            " WHERE o.status <= o.status"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "status" in warnings[0]
+
 
 class TestFanOutDetection:
     """Tests that the checker warns when aggregating across a one_to_many join."""

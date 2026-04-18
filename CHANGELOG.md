@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 - Review any queries that use self-referential predicates like `col = col`, `col != col`, `col IS col`, `col IN (col)`, or `col BETWEEN col AND col` — these will now be rejected by blocking `required_filter` rules (previously silently passed). Replace with a literal or parameter: `tenant_id = $session_tenant`, `status IS NOT NULL`, `status IN ('active', 'pending')`.
 - Adopting the new `last_reviewed` field is optional. If you add the field to any `Domain` or `metric_impacts` entry and run `find_stale`, be aware that entries *without* the field are reported as stale. To grandfather in existing artefacts during rollout, filter findings by `f.age_days is not None`, or add `last_reviewed: <today>` to each entry as a baseline.
 
+### Documentation
+
+- **Two new end-to-end example apps** covering governance archetypes orthogonal to the existing `revenue_agent`:
+  - [`examples/growth_agent/`](examples/growth_agent/) — experimentation / leading-indicator archetype. Demonstrates all three impact confidence levels (`verified` / `correlated` / `hypothesized`) with realistic A/B evidence strings, a time-bounded events block rule, a `log`-level PII audit invisible to the agent, and an un-reviewed impact edge that `find_stale_reviews` flags.
+  - [`examples/ops_agent/`](examples/ops_agent/) — SRE reliability / real-time-dashboard archetype. Demonstrates `blocked_columns` for PII on incident triage data, **two** `log`-level audit rules (governance trail), `require_limit` and `max_joins` caps, a rare **negative-direction** metric impact (DORA pattern: higher deploy frequency → lower incident count), and tight resource limits (`max_duration=30s`).
+- Both examples run cleanly in demo mode without the Claude Agent SDK and exercise ~6–7 tools each.
+- **`per-file-ignores` for `examples/**`** added to the ruff config: fixture SQL `INSERT` blocks benefit from aligned-column readability, so `E501` line-length is waived only for example files.
+
 ## [0.11.0] - 2026-04-17
 
 ### Breaking

@@ -13,6 +13,8 @@
 
 **Works with:** [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) (primary target), or any Python agent framework. Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 
+> **See it running: [three working example agents](#examples) cover distinct governance archetypes — financial reporting (`revenue_agent`), experimentation (`growth_agent`), and SRE reliability (`ops_agent`). Each runs end-to-end in demo mode without any external API key.**
+
 ## How It Works
 
 The agent follows a domain-driven workflow — understanding business context before writing SQL:
@@ -529,14 +531,31 @@ contract = compile_to_contract(dc)  # YAML → formal 7-tuple Contract
 
 **When to use it:** formal audit trails, success scoring, multi-agent coordination, or integration with non-Claude agent frameworks.
 
-## Example
+## Examples
 
-See [`examples/revenue_agent/`](examples/revenue_agent/) for a complete working example with a DuckDB database, YAML semantic source, and Claude Agent SDK integration.
+Three end-to-end working examples, each demonstrating a different governance archetype. All three run in demo mode without the Claude Agent SDK installed — DuckDB is used for the sample data and the tools are exercised directly.
+
+| Example | Archetype | Governance patterns it teaches |
+|---|---|---|
+| [`examples/revenue_agent/`](examples/revenue_agent/) | Finance / lagging KPIs / audit-strict | Tenant isolation, `hypothesized` impact edges, north-star metric tier, undefined-metric policy recipe |
+| [`examples/growth_agent/`](examples/growth_agent/) | Experimentation / leading indicators | `verified` / `correlated` / `hypothesized` metric impacts with real-ish A/B evidence, time-bounded events rule, `log`-level PII audit invisible to the agent, stale-review detection |
+| [`examples/ops_agent/`](examples/ops_agent/) | SRE reliability / real-time dashboards | `blocked_columns` for PII, two `log`-level audit rules (governance trail), `require_limit` + `max_joins` caps, **negative-direction** metric impact (DORA pattern), aggressive resource limits |
+
+Run any of them:
 
 ```bash
-uv run python examples/revenue_agent/setup_db.py
 uv run python examples/revenue_agent/agent.py "What was Q1 revenue by region?"
+uv run python examples/growth_agent/agent.py  "Which onboarding variant lifted activation?"
+uv run python examples/ops_agent/agent.py     "What's our MTTR by severity this week?"
 ```
+
+Each example directory contains four files:
+- `contract.yml` — governance rules, allowed tables, resource limits
+- `semantic.yml` — metrics, relationships, metric impacts
+- `setup_db.py` — sample DuckDB data (auto-created on first run)
+- `agent.py` — runnable demo with a Claude Agent SDK path plus a fallback that exercises the tools directly
+
+Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
 
 ## Architecture
 

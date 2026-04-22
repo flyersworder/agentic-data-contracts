@@ -83,6 +83,11 @@ select = ["E", "F", "I", "UP"]
 # demo-query strings; readability outweighs E501 line-length here.
 "examples/**" = ["E501"]
 
+[tool.uv]
+override-dependencies = [
+    "python-dotenv>=1.2.2",
+]
+
 [tool.ty.environment]
 python-version = "3.12"
 

@@ -1,0 +1,19 @@
+version: "1.0"
+name: principals_test_contract
+
+semantic:
+  allowed_tables:
+    - schema: analytics
+      tables: [orders]
+    - schema: hr
+      tables: [salaries]
+      allowed_principals:
+        - alice@co.com
+    - schema: raw
+      tables: [audit_log]
+      blocked_principals:
+        - intern@co.com
+    - schema: sealed
+      tables: [top_secret]
+      allowed_principals: []
+  forbidden_operations: [DELETE, DROP, INSERT, UPDATE]

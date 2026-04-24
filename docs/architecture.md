@@ -1,7 +1,7 @@
 # Agentic Data Contracts — Architecture
 
 **Date:** 2026-04-17
-**Status:** Implemented (v0.11.0)
+**Status:** Implemented
 **Author:** Qing Ye + Claude
 
 ## Problem Statement
@@ -218,7 +218,7 @@ current: str | None = resolve_principal(principal)
 
 **Two-tier empty-string handling:** `resolve_principal` passes through an empty string without normalisation. `DataContract.allowed_table_names_for("")` treats an empty string as unauthenticated — same as `None` — so callers should canonicalize identities before passing them in.
 
-`allowed_principals` and `blocked_principals` on `AllowedTable` are mutually exclusive (validated at YAML load time). Principals are opaque strings compared by exact equality — no normalisation is performed inside the library. See the feature spec for the full truth table covering all combinations of principal resolver value, `allowed_principals`, and `blocked_principals`.
+`allowed_principals` and `blocked_principals` on `AllowedTable` are mutually exclusive (validated at YAML load time). Principals are opaque strings compared by exact equality — no normalisation is performed inside the library. The rule of thumb: **any `*_principals` field on a table requires identification** — symmetric for allowlist and blocklist. An unidentified caller (resolver returns `None` or `""`) is always denied for any table that declares either field.
 
 ### ContractSession (Lightweight Enforcement)
 

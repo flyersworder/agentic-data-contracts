@@ -151,7 +151,7 @@ The resolver is called per-query, not cached, so one long-lived `Validator` can 
 from agentic_data_contracts import Principal, resolve_principal
 ```
 
-> **Known limitation:** `to_system_prompt()` lists all declared tables in the contract without filtering by principal. An LLM serving a user who can't access a restricted table may still be told the table exists (the query is blocked at validation time). If this becomes a UX issue for your deployment, file an issue — principal-aware prompt rendering is a candidate future feature.
+> **Known limitation:** `to_system_prompt()` lists all declared tables in the contract without filtering by principal. Query-time gating remains authoritative (denied queries never reach the database), but the agent may still be told about tables the current caller cannot access and can waste retry budget (`resources.max_retries`) on queries that will be blocked. Principal-aware prompt rendering is a candidate future feature — file an issue if your deployment needs it.
 
 ### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.52`)
 

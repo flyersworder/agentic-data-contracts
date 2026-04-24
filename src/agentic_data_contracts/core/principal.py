@@ -20,5 +20,8 @@ def resolve_principal(p: Principal) -> str | None:
     if p is None:
         return None
     if callable(p):
+        # ty can't narrow `p` after the `callable()` guard when Principal
+        # is a union including str; the call is safe because the guard
+        # above confirmed p is a Callable.
         return p()  # ty: ignore[call-top-callable]
     return p

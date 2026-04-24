@@ -256,6 +256,25 @@ Same pattern in `preview_table`.
 | callable returns `None` | resolver returns `None` |
 | callable raises | exception propagates — the tool call fails loudly |
 
+### Two-layer empty-string handling
+
+The resolver and the policy-check layer treat empty string differently, and
+this is intentional:
+
+| Layer | Input `""` behavior |
+|---|---|
+| `resolve_principal()` (resolver, `core/principal.py`) | Passes through unchanged. No silent coercion — `""` is a distinct principal string that happens not to match anything real. |
+| `allowed_table_names_for()` (policy, `core/contract.py`) | Treats `""` as equivalent to `None` (fail-closed on restricted tables). |
+
+**Why the split:** Keeping the resolver neutral means users can supply an
+identifier system where `""` is a legitimate value (unlikely but
+possible) without the library silently mutating it. Concentrating the
+coercion at the policy layer eliminates a footgun where a
+`blocked_principals` gate would otherwise silently allow empty-string
+callers (because `""` isn't literally in the blocklist). With the
+coercion, any principal field on a table requires non-empty
+identification to pass — the same rule that applies to `None`.
+
 ## Worked example
 
 ```yaml

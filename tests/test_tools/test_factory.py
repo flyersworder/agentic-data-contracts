@@ -468,3 +468,47 @@ async def test_run_query_surfaces_log_messages() -> None:
     assert json_start != -1
     payload = json.loads(text[json_start:])
     assert payload["row_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_query_principal_denied_never_hits_database(
+    fixtures_dir: Path,
+) -> None:
+    """A principal-denied query must not reach the database.
+
+    Uses a spy that counts execute() calls on top of DuckDBAdapter; asserts
+    that a blocked query leaves the count at zero.
+    """
+    from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
+    from agentic_data_contracts.core.contract import DataContract
+    from agentic_data_contracts.tools.factory import create_tools
+
+    class SpyAdapter(DuckDBAdapter):
+        def __init__(self, path: str) -> None:
+            super().__init__(path)
+            self.execute_calls: int = 0
+
+        def execute(self, sql: str):  # type: ignore[override]
+            self.execute_calls += 1
+            return super().execute(sql)
+
+    contract = DataContract.from_yaml(fixtures_dir / "principals_contract.yml")
+    db = SpyAdapter(":memory:")
+    db.connection.execute(
+        "CREATE SCHEMA hr; "
+        "CREATE TABLE hr.salaries (id INTEGER, salary DECIMAL(10,2)); "
+        "INSERT INTO hr.salaries VALUES (1, 100000.00);"
+    )
+
+    tools = create_tools(contract, adapter=db, caller_principal="bob@co.com")
+    run_query = next(t for t in tools if t.name == "run_query").callable
+
+    response = await run_query({"sql": "SELECT salary FROM hr.salaries"})
+    text = response["content"][0]["text"]
+
+    assert "BLOCKED" in text
+    assert "caller: 'bob@co.com'" in text
+    assert db.execute_calls == 0, (
+        f"Expected 0 execute() calls for a principal-denied query, "
+        f"got {db.execute_calls}"
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -119,18 +120,41 @@ def extract_bound_columns(ast: exp.Expression) -> set[str]:
 
 
 class TableAllowlistChecker:
-    """Checks that all referenced tables are in the contract's allowed_tables."""
+    """Checks referenced tables against the contract's allowlist, filtered by caller.
+
+    The principal_resolver is called at check time (not construction), so a
+    single long-lived checker can serve different callers across sequential
+    queries (e.g. a Webex bot with one user per message).
+    """
+
+    def __init__(
+        self,
+        principal_resolver: Callable[[], str | None] | None = None,
+    ) -> None:
+        self._resolve = principal_resolver or (lambda: None)
 
     def check_ast(self, ast: exp.Expression, contract: DataContract) -> CheckResult:
-        allowed = set(contract.allowed_table_names())
-        referenced_tables = extract_tables(ast)
-        disallowed = referenced_tables - allowed
-        if disallowed:
-            return CheckResult(
-                passed=False,
-                message=f"Tables not in allowlist: {', '.join(sorted(disallowed))}",
+        principal = self._resolve()
+        allowed = contract.allowed_table_names_for(principal)
+        declared = set(contract.allowed_table_names())
+        referenced = extract_tables(ast)
+
+        undeclared = referenced - declared
+        restricted = (referenced - allowed) - undeclared
+
+        if not undeclared and not restricted:
+            return CheckResult(passed=True, message="")
+
+        parts: list[str] = []
+        if undeclared:
+            parts.append(f"Tables not in allowlist: {', '.join(sorted(undeclared))}")
+        if restricted:
+            who = principal if principal else "<no caller identified>"
+            parts.append(
+                f"Tables restricted to other principals "
+                f"(caller: {who!r}): {', '.join(sorted(restricted))}"
             )
-        return CheckResult(passed=True, message="")
+        return CheckResult(passed=False, message="; ".join(parts))
 
 
 class OperationBlocklistChecker:

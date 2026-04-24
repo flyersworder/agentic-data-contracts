@@ -64,6 +64,7 @@ class Validator:
         explain_adapter: ExplainAdapter | None = None,
         sql_normalizer: SqlNormalizer | None = None,
         semantic_source: SemanticSource | None = None,
+        *,
         caller_principal: Principal = None,
     ) -> None:
         self.contract = contract
@@ -81,6 +82,10 @@ class Validator:
     def _build_checkers(self) -> None:
         semantic = self.contract.schema.semantic
 
+        # The lambda closes over `self`, so each validate() call re-reads
+        # self._caller_principal. Do NOT inline this to a precomputed value
+        # — the Webex pattern (one Validator, ContextVar-switched identity
+        # per message) depends on late binding here.
         self._table_checker = (
             TableAllowlistChecker(
                 principal_resolver=lambda: resolve_principal(self._caller_principal)

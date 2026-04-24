@@ -196,6 +196,30 @@ for f in findings:
 
 Missing timestamps report as stale (`age_days=None`) — otherwise adoption is optional and defeats the forcing function. During rollout, filter by `f.age_days is not None` to grandfather in un-reviewed entries. The detector is a pure function suitable for direct use in a pytest assertion or CI check.
 
+### Principal Resolver
+
+Per-table access control is built on a thin resolver abstraction that normalises `caller_principal` into the identity string used for allowlist comparisons.
+
+```python
+from agentic_data_contracts import Principal, resolve_principal
+
+# Type alias — matches the keyword-only parameter on Validator and create_tools
+Principal = str | Callable[[], str | None] | None
+
+# Normalises to the current string (calls the callable if needed)
+current: str | None = resolve_principal(principal)
+```
+
+**How it works:**
+
+- `str` — returned as-is; suitable for single-user sessions (Chainlit, one session per authenticated user).
+- `Callable[[], str | None]` — called per-query, not cached; the callable typically reads a `contextvars.ContextVar` set by the message handler for each incoming request. This allows one long-lived `Validator` instance to serve a Webex room bot where different users send messages concurrently.
+- `None` — resolver returns `None`; all `*_principals` restrictions are fail-closed (caller treated as unauthenticated and denied).
+
+**Two-tier empty-string handling:** `resolve_principal` passes through an empty string without normalisation. `DataContract.allowed_table_names_for("")` treats an empty string as unauthenticated — same as `None` — so callers should canonicalize identities before passing them in.
+
+`allowed_principals` and `blocked_principals` on `AllowedTable` are mutually exclusive (validated at YAML load time). Principals are opaque strings compared by exact equality — no normalisation is performed inside the library. See the feature spec for the full truth table covering all combinations of principal resolver value, `allowed_principals`, and `blocked_principals`.
+
 ### ContractSession (Lightweight Enforcement)
 
 When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-contained enforcement:
@@ -226,7 +250,7 @@ SQL is parsed once into a sqlglot AST. The Validator passes the AST to all appli
 
 | Checker | What it validates |
 |---|---|
-| `TableAllowlistChecker` | All referenced tables are in `allowed_tables` |
+| `TableAllowlistChecker` | All referenced tables are in `allowed_tables`, filtered per `caller_principal` if supplied |
 | `OperationBlocklistChecker` | No forbidden SQL operations (DELETE, DROP, etc.) |
 
 **Rule-based query checkers** (from `query_check` blocks):
@@ -347,7 +371,14 @@ adapter = DuckDBAdapter("analytics.duckdb")
 tools = create_tools(dc, adapter=adapter)
 # Returns all 9 tools as @tool-decorated async functions
 # compatible with claude_agent_sdk.create_sdk_mcp_server()
+
+# Per-caller access control (optional)
+tools = create_tools(dc, adapter=adapter, caller_principal="alice@co.com")
+# Or with a callable for multi-user bots (identity read per-query from a ContextVar):
+tools = create_tools(dc, adapter=adapter, caller_principal=lambda: current_sender.get())
 ```
+
+`create_tools` accepts `caller_principal: Principal = None` and forwards it into the `Validator`. Two of the nine tools are principal-aware: `describe_table` and `preview_table` check `allowed_table_names_for(principal)` before serving a response and return a `"Table X is restricted (caller: 'Y')."` message for inaccessible tables. The remaining seven tools are unchanged — `inspect_query` and `run_query` inherit principal gating through the underlying `Validator`.
 
 Tools are returned as Claude Agent SDK `@tool`-decorated async functions. Each tool accepts `args: dict` and returns `{"content": [{"type": "text", "text": ...}]}`. The caller bundles them into an MCP server:
 
@@ -672,3 +703,4 @@ uv run python examples/revenue_agent/agent.py "What was Q1 revenue by region?"
 - dbt plugin: auto-generate contracts from `manifest.json`
 - Compliance dashboard / audit reporting
 - Contract versioning and migration
+- **Principal-aware system prompt rendering** — `to_system_prompt()` currently lists all declared tables regardless of caller. An agent serving Bob may be told about tables Bob can't query. Query-time gating remains authoritative (denied queries never reach the database), but UX could be improved by filtering the rendered prompt to only include tables accessible to the current principal. File an issue if your deployment needs this.

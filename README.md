@@ -81,6 +81,7 @@ semantic:
       tables: ["*"]          # all tables in schema (discovered from database)
     - schema: marketing
       tables: [campaigns]    # or list specific tables
+      allowed_principals: [alice@co.com, bob@co.com]  # only these may query marketing.campaigns
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   domains:
     - name: revenue
@@ -122,6 +123,35 @@ adapter = DuckDBAdapter("analytics.duckdb")
 # Semantic source is auto-loaded from contract config (source.type + source.path)
 tools = create_tools(dc, adapter=adapter)
 ```
+
+### Per-Caller Access Control (Optional)
+
+When different callers should see different subsets of a contract's tables, pass `caller_principal` to `create_tools`. Use a static string for single-user sessions (e.g. Chainlit), or a zero-arg callable when identity changes per request (e.g. a Webex room bot serving multiple users from one long-lived process):
+
+```python
+from agentic_data_contracts import DataContract, create_tools
+
+dc = DataContract.from_yaml("contract.yml")
+
+# Chainlit app (one user per session)
+tools = create_tools(dc, adapter=adapter, caller_principal="alice@co.com")
+
+# Webex bot (multiple users per bot instance, identity per message)
+import contextvars
+current_sender: contextvars.ContextVar[str | None] = contextvars.ContextVar("sender", default=None)
+tools = create_tools(dc, adapter=adapter, caller_principal=lambda: current_sender.get())
+# Handler sets current_sender before invoking the agent for each message.
+```
+
+The resolver is called per-query, not cached, so one long-lived `Validator` can serve different callers sequentially. Fail-closed: any `allowed_principals` or `blocked_principals` field on a table requires the caller to be identified — an anonymous caller is treated as unauthenticated and denied.
+
+`Principal` and `resolve_principal` are available from the package root for integrators typing their own middleware:
+
+```python
+from agentic_data_contracts import Principal, resolve_principal
+```
+
+> **Known limitation:** `to_system_prompt()` lists all declared tables in the contract without filtering by principal. An LLM serving a user who can't access a restricted table may still be told the table exists (the query is blocked at validation time). If this becomes a UX issue for your deployment, file an issue — principal-aware prompt rendering is a candidate future feature.
 
 ### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.52`)
 

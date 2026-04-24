@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Per-table principal access control**: New optional `allowed_principals` / `blocked_principals` fields on `AllowedTable` (mutually exclusive at load time) gate individual tables by caller identity. Principals are opaque strings compared by exact equality — works equally for emails, Webex IDs, employee numbers, or JWT subject claims. Fail-closed: any `*_principals` field on a table requires identification.
+- **`caller_principal` parameter on `Validator` and `create_tools`**: New keyword-only argument accepting `str | Callable[[], str | None] | None`. Static string for one-user-per-session (Chainlit); zero-arg callable for multi-user-per-bot scenarios (Webex rooms with `contextvars.ContextVar`-backed identity per message). The resolver is called per-query, not cached, so one long-lived `Validator` can serve different callers sequentially.
+- **`DataContract.allowed_table_names_for(principal)`**: Returns the subset of declared tables accessible to the given principal. Centralizes the per-caller allowlist computation.
+- **`Principal` type alias and `resolve_principal()` helper**: Re-exported from the package root (`from agentic_data_contracts import Principal, resolve_principal`) for integrators typing their own middleware.
+- **Two-tier `TableAllowlistChecker` error messages**: Blocked queries now distinguish "Tables not in allowlist: X" (undeclared) from "Tables restricted to other principals (caller: 'Y'): X" (declared but not accessible to the current caller). The same idiom extends to `describe_table` / `preview_table` tool responses.
+
+### Changed
+
+- **`TableAllowlistChecker` signature gained optional `principal_resolver: Callable[[], str | None] | None = None`**: Backwards compatible — `TableAllowlistChecker()` with no args still works (resolver defaults to returning `None`, so restricted tables fail closed).
+- **`describe_table` and `preview_table` are now principal-aware**: Both tools check `allowed_table_names_for(principal)` before serving a response. Restricted tables return `"Table X is restricted (caller: 'Y')."`. The remaining 7 tools (`list_metrics`, `lookup_metric`, `lookup_domain`, `lookup_relationships`, `trace_metric_impacts`, `inspect_query`, `run_query`) are unchanged as far as the discovery surface — `inspect_query` / `run_query` inherit principal gating through the underlying Validator.
+
+### Known Limitation
+
+- **System prompt does not filter by principal**: `DataContract.to_system_prompt()` currently renders the unscoped table list. An LLM serving a user who can't access a restricted table may still be told the table exists. Query-time gating remains authoritative (the spy-adapter integration test confirms denied queries never reach the database), but this can cause the agent to waste retries on queries that would be blocked. Principal-aware prompt rendering is a candidate future feature — file an issue if your deployment needs it.
+
 ## [0.12.0] - 2026-04-18
 
 ### Added

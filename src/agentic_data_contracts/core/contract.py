@@ -83,6 +83,10 @@ class DataContract:
         - Table with either field set and principal=None or "" → denied (fail-closed).
         - Table with allowed_principals set → principal must be in the list.
         - Table with blocked_principals set → principal must not be in the list.
+
+        Note: ``resolve_principal()`` passes ``""`` through unchanged; this method
+        treats ``""`` as unauthenticated for policy decisions. The split keeps the
+        resolver neutral and concentrates access-policy here.
         """
         # Treat empty string as unauthenticated (same as None — fail-closed).
         resolved: str | None = principal if principal else None

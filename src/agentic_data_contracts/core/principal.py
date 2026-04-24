@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Union
 
-Principal = Union[str, Callable[[], "str | None"], None]  # noqa: UP007
+Principal = str | Callable[[], "str | None"] | None
 
 
 def resolve_principal(p: Principal) -> str | None:
@@ -21,5 +20,5 @@ def resolve_principal(p: Principal) -> str | None:
     if p is None:
         return None
     if callable(p):
-        return p()  # type: ignore[call-arg]  # ty: ignore[call-top-callable]
+        return p()  # ty: ignore[call-top-callable]
     return p

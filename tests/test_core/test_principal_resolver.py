@@ -24,6 +24,12 @@ def test_callable_returning_none() -> None:
     assert resolve_principal(lambda: None) is None
 
 
+def test_callable_returning_empty_string() -> None:
+    # Symmetric with the static path; locks in that the resolver does not
+    # silently coerce "" to None when it comes via a callable.
+    assert resolve_principal(lambda: "") == ""
+
+
 def test_callable_that_raises_propagates() -> None:
     def broken() -> str:
         raise RuntimeError("identity lookup failed")

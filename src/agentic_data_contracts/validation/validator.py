@@ -10,6 +10,7 @@ from sqlglot import exp
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.validation.checkers import (
     BlockedColumnsChecker,
     CheckResult,
@@ -63,11 +64,13 @@ class Validator:
         explain_adapter: ExplainAdapter | None = None,
         sql_normalizer: SqlNormalizer | None = None,
         semantic_source: SemanticSource | None = None,
+        caller_principal: Principal = None,
     ) -> None:
         self.contract = contract
         self.dialect = dialect
         self.explain_adapter = explain_adapter
         self.sql_normalizer = sql_normalizer
+        self._caller_principal = caller_principal
         self._relationship_checker: RelationshipChecker | None = None
         if semantic_source is not None:
             rels = semantic_source.get_relationships()
@@ -79,7 +82,11 @@ class Validator:
         semantic = self.contract.schema.semantic
 
         self._table_checker = (
-            TableAllowlistChecker() if semantic.allowed_tables else None
+            TableAllowlistChecker(
+                principal_resolver=lambda: resolve_principal(self._caller_principal)
+            )
+            if semantic.allowed_tables
+            else None
         )
         self._operation_checker = (
             OperationBlocklistChecker() if semantic.forbidden_operations else None

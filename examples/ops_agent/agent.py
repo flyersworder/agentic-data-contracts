@@ -7,14 +7,19 @@ revenue_agent and growth_agent:
 - `max_joins` capping query complexity
 - A `negative` metric impact (deploy frequency ↓ incident count — counter-intuitive DORA pattern)
 - Tight resource limits (max_duration=30s) for real-time dashboards
+- `blocked_principals` on `sre.deploys`: interns and contractors can't see
+  commit authorship — demonstrates per-caller access control. Default caller
+  is `sre_lead@co.com`; override with `--caller <email>` to see a denial.
 
 Usage:
     uv run python examples/ops_agent/setup_db.py
     uv run python examples/ops_agent/agent.py "What's our MTTR by severity this week?"
+    uv run python examples/ops_agent/agent.py --caller intern@co.com "Show recent deploys"
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import sys
@@ -41,9 +46,26 @@ def _parse_run_query_body(text: str) -> dict | None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
+    parser.add_argument(
+        "prompt",
+        nargs="*",
+        help="The question to ask the agent. Defaults to an MTTR query.",
+    )
+    parser.add_argument(
+        "--caller",
+        default="sre_lead@co.com",
+        help=(
+            "Caller identity used for per-table principal gates. "
+            "Try --caller intern@co.com to see deploy-table queries denied. "
+            "(default: sre_lead@co.com)"
+        ),
+    )
+    args = parser.parse_args()
+
     prompt = (
-        " ".join(sys.argv[1:])
-        if len(sys.argv) > 1
+        " ".join(args.prompt)
+        if args.prompt
         else "What's our MTTR by severity for incidents this week?"
     )
 
@@ -59,13 +81,17 @@ def main() -> None:
         sys.path.pop(0)
     adapter = DuckDBAdapter(str(db_path))
 
-    tools = create_tools(dc, adapter=adapter, semantic_source=semantic)
+    tools = create_tools(
+        dc, adapter=adapter, semantic_source=semantic, caller_principal=args.caller
+    )
+
+    print(f"Caller: {args.caller}\n")
 
     try:
         asyncio.run(_run_with_sdk(dc, tools, prompt))
     except (ImportError, AttributeError):
         print("claude-agent-sdk not available. Running demo mode.\n")
-        asyncio.run(_run_demo(dc, semantic, tools, prompt))
+        asyncio.run(_run_demo(dc, semantic, tools, prompt, args.caller, adapter))
 
 
 async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
@@ -103,7 +129,12 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
 
 
 async def _run_demo(
-    dc: DataContract, semantic: YamlSource, tools: list, prompt: str
+    dc: DataContract,
+    semantic: YamlSource,
+    tools: list,
+    prompt: str,
+    caller: str,
+    adapter: DuckDBAdapter,
 ) -> None:
     print(f"Query: {prompt}\n")
 
@@ -182,6 +213,61 @@ async def _run_demo(
         print("  (none — every artefact is within review threshold)")
     for f in findings:
         print(f"  [{f.kind}] {f.name} — age_days={f.age_days}")
+
+    # ── 8. Principal gate — sre.deploys has blocked_principals = [intern] ────
+    # Uses two fresh tools instances with fixed identities (regardless of the
+    # --caller CLI flag, which drives the primary agent persona above). Shows
+    # the same deploy query succeeding for an authorized SRE and being blocked
+    # for an intern before reaching DuckDB. Then shows that the intern can
+    # still query sre.incidents (no principal gate there) — principal access
+    # is per-table, not contract-wide.
+    _ = caller  # the CLI caller is captured in `tools` above; step 8 is didactic
+    deploy_sql = (
+        "SELECT id, service_id, success FROM sre.deploys "
+        "WHERE tenant_id = 'acme' LIMIT 3"
+    )
+    incident_sql = (
+        "SELECT id, severity FROM sre.incidents WHERE tenant_id = 'acme' LIMIT 3"
+    )
+    print("\n=== Principal gate: sre.deploys blocks intern@co.com ===")
+
+    authorized_tools = create_tools(
+        dc,
+        adapter=adapter,
+        semantic_source=semantic,
+        caller_principal="sre_lead@co.com",
+    )
+    authorized_run = next(t for t in authorized_tools if t.name == "run_query")
+    authorized_result = await authorized_run.callable({"sql": deploy_sql})
+    authorized_text = authorized_result["content"][0]["text"]
+    print("\nAs sre_lead@co.com on sre.deploys:")
+    if authorized_text.startswith("BLOCKED"):
+        print(f"  {authorized_text[:200]}")
+    else:
+        body = _parse_run_query_body(authorized_text)
+        row_count = body.get("row_count") if body else "?"
+        print(f"  allowed — {row_count} rows returned")
+
+    intern_tools = create_tools(
+        dc,
+        adapter=adapter,
+        semantic_source=semantic,
+        caller_principal="intern@co.com",
+    )
+    intern_run = next(t for t in intern_tools if t.name == "run_query")
+    intern_deploy_result = await intern_run.callable({"sql": deploy_sql})
+    print("\nAs intern@co.com on sre.deploys (blocklisted):")
+    print(f"  {intern_deploy_result['content'][0]['text'][:300]}")
+
+    intern_incident_result = await intern_run.callable({"sql": incident_sql})
+    intern_incident_text = intern_incident_result["content"][0]["text"]
+    print("\nAs intern@co.com on sre.incidents (no principal gate — per-table scope):")
+    if intern_incident_text.startswith("BLOCKED"):
+        print(f"  {intern_incident_text[:200]}")
+    else:
+        body = _parse_run_query_body(intern_incident_text)
+        row_count = body.get("row_count") if body else "?"
+        print(f"  allowed — {row_count} rows returned")
 
 
 if __name__ == "__main__":

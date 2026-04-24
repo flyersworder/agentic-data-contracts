@@ -7,9 +7,18 @@ semantic:
     path: "./semantic.yml"
   allowed_tables:
     - schema: sre
-      description: "SRE reliability data — incidents, services, deploys"
+      description: "SRE reliability data — incidents, services"
       preferred: true
-      tables: [incidents, services, deploys]
+      tables: [incidents, services]
+    - schema: sre
+      description: >
+        Deploy telemetry — commit SHAs and actor identity. Restricted to
+        named SRE team members; interns and contractors shouldn't see who
+        pushed what (avoids pre-judging incidents before root cause).
+      tables: [deploys]
+      blocked_principals:
+        - intern@co.com
+        - contractor@co.com
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
   domains:
     - name: reliability

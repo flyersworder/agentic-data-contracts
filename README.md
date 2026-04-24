@@ -569,7 +569,7 @@ Three end-to-end working examples, each demonstrating a different governance arc
 |---|---|---|
 | [`examples/revenue_agent/`](examples/revenue_agent/) | Finance / lagging KPIs / audit-strict | Tenant isolation, `hypothesized` impact edges, north-star metric tier, undefined-metric policy recipe |
 | [`examples/growth_agent/`](examples/growth_agent/) | Experimentation / leading indicators | `verified` / `correlated` / `hypothesized` metric impacts with real-ish A/B evidence, time-bounded events rule, `log`-level PII audit invisible to the agent, stale-review detection |
-| [`examples/ops_agent/`](examples/ops_agent/) | SRE reliability / real-time dashboards | `blocked_columns` for PII, two `log`-level audit rules (governance trail), `require_limit` + `max_joins` caps, **negative-direction** metric impact (DORA pattern), aggressive resource limits |
+| [`examples/ops_agent/`](examples/ops_agent/) | SRE reliability / real-time dashboards | `blocked_columns` for PII, two `log`-level audit rules (governance trail), `require_limit` + `max_joins` caps, **negative-direction** metric impact (DORA pattern), aggressive resource limits, **`blocked_principals` on `sre.deploys`** (try `--caller intern@co.com` to see a per-table principal denial) |
 
 Run any of them:
 

@@ -75,6 +75,41 @@ class DataContract:
                 names.append(f"{entry.schema_}.{table}")
         return names
 
+    def allowed_table_names_for(self, principal: str | None) -> set[str]:
+        """Return the set of qualified table names the given principal may access.
+
+        Rules:
+        - Table with neither allowed_principals nor blocked_principals → open to all.
+        - Table with either field set and principal=None or "" → denied (fail-closed).
+        - Table with allowed_principals set → principal must be in the list.
+        - Table with blocked_principals set → principal must not be in the list.
+        """
+        # Treat empty string as unauthenticated (same as None — fail-closed).
+        resolved: str | None = principal if principal else None
+        result: set[str] = set()
+        for entry in self.schema.semantic.allowed_tables:
+            restricted = (
+                entry.allowed_principals is not None
+                or entry.blocked_principals is not None
+            )
+            if restricted and resolved is None:
+                continue
+            if (
+                entry.allowed_principals is not None
+                and resolved not in entry.allowed_principals
+            ):
+                continue
+            if (
+                entry.blocked_principals is not None
+                and resolved in entry.blocked_principals
+            ):
+                continue
+            for table in entry.tables:
+                if table == "*":
+                    continue
+                result.add(f"{entry.schema_}.{table}")
+        return result
+
     def block_rules(self) -> list[SemanticRule]:
         return [
             r for r in self.schema.semantic.rules if r.enforcement == Enforcement.BLOCK

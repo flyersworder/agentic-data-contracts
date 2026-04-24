@@ -25,8 +25,19 @@ class AllowedTable(BaseModel):
     tables: list[str] = Field(default_factory=list)
     description: str | None = None
     preferred: bool = False
+    allowed_principals: list[str] | None = None
+    blocked_principals: list[str] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def principals_mutually_exclusive(self) -> Self:
+        if self.allowed_principals is not None and self.blocked_principals is not None:
+            raise ValueError(
+                f"AllowedTable for schema '{self.schema_}' cannot set both "
+                f"allowed_principals and blocked_principals — pick one"
+            )
+        return self
 
 
 class QueryCheck(BaseModel):

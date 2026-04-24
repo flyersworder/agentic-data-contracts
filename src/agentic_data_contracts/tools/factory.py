@@ -9,6 +9,7 @@ from typing import Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.core.schema import Domain
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import (
@@ -115,6 +116,7 @@ def create_tools(
     adapter: DatabaseAdapter | None = None,
     semantic_source: SemanticSource | None = None,
     session: ContractSession | None = None,
+    caller_principal: Principal = None,
 ) -> list[ToolDef]:
     if session is None:
         session = ContractSession(contract)
@@ -144,6 +146,7 @@ def create_tools(
         explain_adapter=adapter,
         sql_normalizer=sql_normalizer,
         semantic_source=semantic_source,
+        caller_principal=caller_principal,
     )
 
     # Build relationship index for BFS path-finding in lookup_relationships.
@@ -216,6 +219,12 @@ def create_tools(
             return _text_response(
                 f"Table {qualified} is not in the allowed tables list."
             )
+        principal = resolve_principal(caller_principal)
+        if qualified not in contract.allowed_table_names_for(principal):
+            who = principal if principal else "<no caller identified>"
+            return _text_response(
+                f"Table {qualified} is restricted; not available to {who!r}."
+            )
         if adapter is None:
             return _text_response(
                 f"No database adapter configured — table description unavailable"
@@ -237,11 +246,16 @@ def create_tools(
             limit = max(1, min(int(args.get("limit", 5)), 100))
         except (ValueError, TypeError):
             limit = 5
-        allowed = contract.allowed_table_names()
         qualified = f"{schema}.{table}"
-        if qualified not in allowed:
+        if qualified not in contract.allowed_table_names():
             return _text_response(
                 f"Table {qualified} is not in the allowed tables list."
+            )
+        principal = resolve_principal(caller_principal)
+        if qualified not in contract.allowed_table_names_for(principal):
+            who = principal if principal else "<no caller identified>"
+            return _text_response(
+                f"Table {qualified} is restricted; not available to {who!r}."
             )
         if adapter is None:
             return _text_response(

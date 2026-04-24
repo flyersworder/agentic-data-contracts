@@ -2,6 +2,7 @@
 
 from agentic_data_contracts.adapters.base import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRenderer
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
@@ -18,6 +19,7 @@ __all__ = [
     "DataContract",
     "MetricDefinition",
     "MetricImpact",
+    "Principal",
     "PromptRenderer",
     "Relationship",
     "SemanticSource",
@@ -25,4 +27,5 @@ __all__ = [
     "contract_middleware",
     "create_sdk_mcp_server",
     "create_tools",
+    "resolve_principal",
 ]

@@ -90,7 +90,7 @@ class TestDescribeTable:
             "text"
         ]
         assert "restricted" in text
-        assert "'bob@co.com'" in text
+        assert "caller: 'bob@co.com'" in text
 
     async def test_restricted_for_unidentified(
         self, contract: DataContract, adapter: DuckDBAdapter
@@ -100,7 +100,7 @@ class TestDescribeTable:
         text = (await describe({"schema": "hr", "table": "salaries"}))["content"][0][
             "text"
         ]
-        assert "'<no caller identified>'" in text
+        assert "caller: '<no caller identified>'" in text
 
     async def test_undeclared_table_unchanged_message(
         self, contract: DataContract, adapter: DuckDBAdapter
@@ -136,7 +136,7 @@ class TestPreviewTable:
             "text"
         ]
         assert "restricted" in text
-        assert "'bob@co.com'" in text
+        assert "caller: 'bob@co.com'" in text
 
 
 @pytest.mark.asyncio

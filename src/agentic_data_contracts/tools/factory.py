@@ -222,9 +222,7 @@ def create_tools(
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
             who = principal if principal else "<no caller identified>"
-            return _text_response(
-                f"Table {qualified} is restricted; not available to {who!r}."
-            )
+            return _text_response(f"Table {qualified} is restricted (caller: {who!r}).")
         if adapter is None:
             return _text_response(
                 f"No database adapter configured — table description unavailable"
@@ -254,9 +252,7 @@ def create_tools(
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
             who = principal if principal else "<no caller identified>"
-            return _text_response(
-                f"Table {qualified} is restricted; not available to {who!r}."
-            )
+            return _text_response(f"Table {qualified} is restricted (caller: {who!r}).")
         if adapter is None:
             return _text_response(
                 "No database adapter configured — preview unavailable."

@@ -10,7 +10,11 @@ from sqlglot import exp
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.core.principal import Principal, resolve_principal
+from agentic_data_contracts.core.principal import (
+    Principal,
+    principal_in_scope,
+    resolve_principal,
+)
 from agentic_data_contracts.validation.checkers import (
     BlockedColumnsChecker,
     CheckResult,
@@ -25,6 +29,11 @@ from agentic_data_contracts.validation.checkers import (
     extract_tables,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter
+
+# (allowed_principals, blocked_principals) snapshot taken at build time. None
+# means the rule has no principal restriction. Schema-level mutual exclusion
+# guarantees at most one of the two lists is non-None.
+PrincipalScope = tuple[list[str] | None, list[str] | None] | None
 
 if TYPE_CHECKING:
     from agentic_data_contracts.semantic.base import SemanticSource
@@ -52,6 +61,22 @@ class ValidationResult:
     estimated_rows: int | None = None
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _QueryRuleEntry:
+    enforcement: str
+    table_scope: str | None
+    principal_scope: PrincipalScope
+    checker: Any
+
+
+@dataclass(frozen=True)
+class _ResultRuleEntry:
+    enforcement: str
+    table_scope: str | None
+    principal_scope: PrincipalScope
+    runner: ResultCheckRunner
 
 
 class Validator:
@@ -97,52 +122,66 @@ class Validator:
             OperationBlocklistChecker() if semantic.forbidden_operations else None
         )
 
-        self._query_checkers: list[tuple[str, str | None, Any]] = []
-        self._result_checkers: list[tuple[str, str | None, ResultCheckRunner]] = []
+        self._query_checkers: list[_QueryRuleEntry] = []
+        self._result_checkers: list[_ResultRuleEntry] = []
 
         for rule in semantic.rules:
             table_scope = rule.table if rule.table and rule.table != "*" else None
+            # Capture the principal scope once at build time so a future
+            # schema mutation (mirroring how resolve_tables mutates entries)
+            # cannot retroactively change the gating semantics.
+            principal_scope: PrincipalScope = (
+                (rule.allowed_principals, rule.blocked_principals)
+                if rule.allowed_principals is not None
+                or rule.blocked_principals is not None
+                else None
+            )
 
             if rule.query_check is not None:
                 qc = rule.query_check
                 if qc.required_filter is not None:
                     self._query_checkers.append(
-                        (
-                            rule.enforcement.value,
-                            table_scope,
-                            RequiredFilterChecker(qc.required_filter),
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=RequiredFilterChecker(qc.required_filter),
                         )
                     )
                 if qc.no_select_star is True:
                     self._query_checkers.append(
-                        (
-                            rule.enforcement.value,
-                            table_scope,
-                            NoSelectStarChecker(),
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=NoSelectStarChecker(),
                         )
                     )
                 if qc.blocked_columns is not None:
                     self._query_checkers.append(
-                        (
-                            rule.enforcement.value,
-                            table_scope,
-                            BlockedColumnsChecker(qc.blocked_columns),
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=BlockedColumnsChecker(qc.blocked_columns),
                         )
                     )
                 if qc.require_limit is True:
                     self._query_checkers.append(
-                        (
-                            rule.enforcement.value,
-                            table_scope,
-                            RequireLimitChecker(),
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=RequireLimitChecker(),
                         )
                     )
                 if qc.max_joins is not None:
                     self._query_checkers.append(
-                        (
-                            rule.enforcement.value,
-                            table_scope,
-                            MaxJoinsChecker(qc.max_joins),
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=MaxJoinsChecker(qc.max_joins),
                         )
                     )
 
@@ -157,16 +196,26 @@ class Validator:
                     rule_name=rule.name,
                 )
                 self._result_checkers.append(
-                    (
-                        rule.enforcement.value,
-                        table_scope,
-                        runner,
+                    _ResultRuleEntry(
+                        enforcement=rule.enforcement.value,
+                        table_scope=table_scope,
+                        principal_scope=principal_scope,
+                        runner=runner,
                     )
                 )
 
     def pending_result_check_names(self) -> list[str]:
-        """Return names of result checks that will run post-execution."""
-        return [runner.rule_name for _, _, runner in self._result_checkers]
+        """Return names of result checks that will run post-execution.
+
+        Returns the full declared list — a *superset* of what actually
+        executes for any given caller. Rules carrying ``allowed_principals``
+        or ``blocked_principals`` may be skipped at validate-time when the
+        current caller is out of scope; they remain reported here because
+        this method has no caller context to resolve and resolving a
+        callable principal at unexpected moments would create a TOCTOU
+        surface for the only consumer (run_query telemetry).
+        """
+        return [entry.runner.rule_name for entry in self._result_checkers]
 
     def _is_table_in_scope(
         self, table_scope: str | None, referenced_tables: set[str]
@@ -174,6 +223,15 @@ class Validator:
         if table_scope is None:
             return True
         return table_scope in referenced_tables
+
+    @staticmethod
+    def _rule_applies_to_principal(
+        principal_scope: PrincipalScope, resolved: str | None
+    ) -> bool:
+        """Return True when a rule's principal scope admits ``resolved``."""
+        if principal_scope is None:
+            return True
+        return principal_in_scope(resolved, principal_scope[0], principal_scope[1])
 
     def validate(self, sql: str) -> ValidationResult:
         reasons: list[str] = []
@@ -196,6 +254,11 @@ class Validator:
 
         referenced_tables = extract_tables(ast)
 
+        # Resolve once per validate() — matches TableAllowlistChecker's
+        # once-per-check_ast contract and gives every rule a consistent
+        # snapshot of the caller's identity for this query.
+        resolved_principal = resolve_principal(self._caller_principal)
+
         if self._table_checker is not None:
             result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
@@ -206,14 +269,18 @@ class Validator:
             if not result.passed:
                 reasons.append(result.message)
 
-        for enforcement, table_scope, checker in self._query_checkers:
-            if not self._is_table_in_scope(table_scope, referenced_tables):
+        for entry in self._query_checkers:
+            if not self._is_table_in_scope(entry.table_scope, referenced_tables):
                 continue
-            result = checker.check_ast(ast)
+            if not self._rule_applies_to_principal(
+                entry.principal_scope, resolved_principal
+            ):
+                continue
+            result = entry.checker.check_ast(ast)
             if not result.passed:
-                if enforcement == "block":
+                if entry.enforcement == "block":
                     reasons.append(result.message)
-                elif enforcement == "warn":
+                elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:
                     log_messages.append(result.message)
@@ -289,14 +356,20 @@ class Validator:
         else:
             referenced_tables = extract_tables(ast)
 
-        for enforcement, table_scope, runner in self._result_checkers:
-            if not self._is_table_in_scope(table_scope, referenced_tables):
+        resolved_principal = resolve_principal(self._caller_principal)
+
+        for entry in self._result_checkers:
+            if not self._is_table_in_scope(entry.table_scope, referenced_tables):
                 continue
-            result = runner.check_results(columns, rows)
+            if not self._rule_applies_to_principal(
+                entry.principal_scope, resolved_principal
+            ):
+                continue
+            result = entry.runner.check_results(columns, rows)
             if not result.passed:
-                if enforcement == "block":
+                if entry.enforcement == "block":
                     reasons.append(result.message)
-                elif enforcement == "warn":
+                elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:
                     log_messages.append(result.message)

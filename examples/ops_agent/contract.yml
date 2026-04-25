@@ -84,6 +84,24 @@ semantic:
       query_check:
         blocked_columns: [user_email, customer_id]
 
+    # Per-rule principal gate: blocks raw PII columns on sre.incidents
+    # for everyone EXCEPT the compliance reviewer. Note the semantics —
+    # `blocked_principals` lists callers the rule does NOT apply to (i.e.
+    # exemptions), mirroring the AllowedTable contract. Composes with the
+    # log-level audit above: the audit always fires; this block-level rule
+    # narrows write-time access for non-compliance callers.
+    - name: pii_columns_block_non_compliance
+      description: >
+        Raw PII (user_email, customer_id) on sre.incidents is blocked for
+        every identified caller except compliance review. Everyone else
+        must use the de-identified incident_summary view.
+      enforcement: block
+      table: sre.incidents
+      blocked_principals:
+        - compliance@co.com
+      query_check:
+        blocked_columns: [user_email, customer_id]
+
     - name: deploy_metadata_audit
       description: >
         Audit when queries expose commit SHAs or deploy actor identity.

@@ -216,9 +216,11 @@ current: str | None = resolve_principal(principal)
 - `Callable[[], str | None]` — called per-query, not cached; the callable typically reads a `contextvars.ContextVar` set by the message handler for each incoming request. This allows one long-lived `Validator` instance to serve a Webex room bot where different users send messages concurrently.
 - `None` — resolver returns `None`; all `*_principals` restrictions are fail-closed (caller treated as unauthenticated and denied).
 
-**Two-tier empty-string handling:** `resolve_principal` passes through an empty string without normalisation. `DataContract.allowed_table_names_for("")` treats an empty string as unauthenticated — same as `None` — so callers should canonicalize identities before passing them in.
+**Two-tier empty-string handling:** `resolve_principal` passes through an empty string without normalisation. The access-policy layer (`principal_in_scope`, called from both `DataContract.allowed_table_names_for` and the per-rule scope check inside `Validator`) treats an empty string as unauthenticated — same as `None` — so callers should canonicalize identities before passing them in. Splitting the resolver from policy is intentional: the resolver stays neutral, and `principal_in_scope` is the single source of truth for the allow/block-list semantics.
 
 `allowed_principals` and `blocked_principals` on `AllowedTable` are mutually exclusive (validated at YAML load time). Principals are opaque strings compared by exact equality — no normalisation is performed inside the library. The rule of thumb: **any `*_principals` field on a table requires identification** — symmetric for allowlist and blocklist. An unidentified caller (resolver returns `None` or `""`) is always denied for any table that declares either field.
+
+**Per-rule principal scoping** uses the exact same model. `SemanticRule` accepts the same `allowed_principals` / `blocked_principals` pair (also mutually exclusive). Inside `Validator._build_checkers`, each rule's principal scope is captured once at construction time as a `(allowed, blocked)` snapshot and stored on a frozen `_QueryRuleEntry` / `_ResultRuleEntry`. At validate-time the caller is resolved once and rules whose scope excludes them are skipped — same fail-closed contract as table scoping. This generalises to every rule kind (`blocked_columns`, `required_filter`, `no_select_star`, `max_joins`, `result_check`) without touching any individual checker class. Note that `pending_result_check_names()` deliberately returns the full declared list (a *superset* of what runs for any given caller); the only consumer is `run_query` telemetry, and resolving a callable principal there would create a TOCTOU surface.
 
 ### ContractSession (Lightweight Enforcement)
 
@@ -244,7 +246,7 @@ class Checker(Protocol):
     def check_ast(self, ast: Expression, *args) -> CheckResult: ...
 ```
 
-SQL is parsed once into a sqlglot AST. The Validator passes the AST to all applicable checkers, respecting table scoping.
+SQL is parsed once into a sqlglot AST. The Validator passes the AST to all applicable checkers, respecting table and per-rule principal scoping (rules carrying `allowed_principals` / `blocked_principals` are skipped when the resolved caller is out of scope).
 
 **Structural checkers** (from top-level config):
 

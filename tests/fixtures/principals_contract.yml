@@ -17,3 +17,30 @@ semantic:
       tables: [top_secret]
       allowed_principals: []
   forbidden_operations: [DELETE, DROP, INSERT, UPDATE]
+
+  # Per-rule principal scoping — same allow/block semantics as AllowedTable,
+  # but applied to individual SemanticRule entries. Both rules below operate
+  # on analytics.orders (open to all callers); the rules themselves narrow
+  # which callers are subject to the column block. The blocked column names
+  # are unique to this fixture so existing analytics.orders tests are not
+  # affected.
+  rules:
+    # Fires only for alice — she may not select `pii_email` from
+    # analytics.orders. Other callers can.
+    - name: alice_only_column_block
+      description: Demonstrate per-rule allowlist gating a column block.
+      enforcement: block
+      table: analytics.orders
+      allowed_principals: [alice@co.com]
+      query_check:
+        blocked_columns: [pii_email]
+
+    # Fires for everyone EXCEPT the intern (and unauthenticated callers —
+    # restricted rules require identification, same as restricted tables).
+    - name: non_intern_column_block
+      description: Demonstrate per-rule blocklist scoping a column block.
+      enforcement: block
+      table: analytics.orders
+      blocked_principals: [intern@co.com]
+      query_check:
+        blocked_columns: [audit_payload]

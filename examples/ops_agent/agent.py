@@ -8,13 +8,20 @@ revenue_agent and growth_agent:
 - A `negative` metric impact (deploy frequency ↓ incident count — counter-intuitive DORA pattern)
 - Tight resource limits (max_duration=30s) for real-time dashboards
 - `blocked_principals` on `sre.deploys`: interns and contractors can't see
-  commit authorship — demonstrates per-caller access control. Default caller
+  commit authorship — demonstrates per-table access control. Default caller
   is `sre_lead@co.com`; override with `--caller <email>` to see a denial.
+- `blocked_principals` on a `pii_columns_block_non_compliance` rule: the
+  block-level PII rule on `sre.incidents` (`user_email`, `customer_id`)
+  exempts `compliance@co.com` and fires for every other identified caller,
+  so only compliance can SELECT raw PII even though `sre.incidents` itself
+  is open at the table level. Demonstrates per-rule access control
+  composing with per-table.
 
 Usage:
     uv run python examples/ops_agent/setup_db.py
     uv run python examples/ops_agent/agent.py "What's our MTTR by severity this week?"
     uv run python examples/ops_agent/agent.py --caller intern@co.com "Show recent deploys"
+    uv run python examples/ops_agent/agent.py --caller compliance@co.com "Pull customer contacts for incident triage"
 """
 
 from __future__ import annotations
@@ -168,6 +175,12 @@ async def _run_demo(
     print(f"  valid: {data['valid']}, violations: {data['violations']}")
 
     # ── 4. Log-level PII audit fires when user_email is selected ─────────────
+    # We route this through a compliance-scoped tool: the new block-level
+    # rule `pii_columns_block_non_compliance` would otherwise stop the
+    # query for the default `sre_lead` caller before the log audit can
+    # fire. `blocked_principals: [compliance@co.com]` exempts compliance
+    # from the rule, so the query runs and the log-level audit annotates
+    # the result for governance review.
     run = next(t for t in tools if t.name == "run_query")
     pii_sql = (
         "SELECT id, severity, user_email FROM sre.incidents "
@@ -175,8 +188,17 @@ async def _run_demo(
         "  AND opened_at >= CURRENT_DATE - INTERVAL 7 DAY "
         "LIMIT 20"
     )
-    result = await run.callable({"sql": pii_sql})
-    print("\n=== Log-level PII audit fires (query runs; governance notified) ===")
+    compliance_tools = create_tools(
+        dc,
+        adapter=adapter,
+        semantic_source=semantic,
+        caller_principal="compliance@co.com",
+    )
+    compliance_run = next(t for t in compliance_tools if t.name == "run_query")
+    result = await compliance_run.callable({"sql": pii_sql})
+    print(
+        "\n=== Log-level PII audit fires (compliance caller; governance notified) ==="
+    )
     print(result["content"][0]["text"][:400])
 
     # ── 5. Second log-level audit — deploy metadata ──────────────────────────
@@ -266,6 +288,47 @@ async def _run_demo(
         print(f"  {intern_incident_text[:200]}")
     else:
         body = _parse_run_query_body(intern_incident_text)
+        row_count = body.get("row_count") if body else "?"
+        print(f"  allowed — {row_count} rows returned")
+
+    # ── 9. Per-rule principal gate: PII columns on sre.incidents ─────────────
+    # sre.incidents has no per-table principal restriction (everyone with a
+    # contract can query it), but `pii_columns_block_non_compliance` blocks
+    # `customer_id` and `user_email` for every caller except compliance.
+    # Same query, three callers: only compliance gets through.
+    pii_query = (
+        "SELECT id, severity, customer_id FROM sre.incidents "
+        "WHERE tenant_id = 'acme' LIMIT 3"
+    )
+    print("\n=== Per-rule principal gate: PII columns on sre.incidents ===")
+
+    sre_lead_pii_result = await authorized_run.callable({"sql": pii_query})
+    sre_lead_pii_text = sre_lead_pii_result["content"][0]["text"]
+    print("\nAs sre_lead@co.com on customer_id (not exempted from rule):")
+    if sre_lead_pii_text.startswith("BLOCKED"):
+        print(f"  {sre_lead_pii_text[:300]}")
+    else:
+        body = _parse_run_query_body(sre_lead_pii_text)
+        row_count = body.get("row_count") if body else "?"
+        print(f"  allowed — {row_count} rows returned")
+
+    intern_pii_result = await intern_run.callable({"sql": pii_query})
+    intern_pii_text = intern_pii_result["content"][0]["text"]
+    print("\nAs intern@co.com on customer_id (also not exempted):")
+    if intern_pii_text.startswith("BLOCKED"):
+        print(f"  {intern_pii_text[:300]}")
+    else:
+        body = _parse_run_query_body(intern_pii_text)
+        row_count = body.get("row_count") if body else "?"
+        print(f"  allowed — {row_count} rows returned")
+
+    compliance_pii_result = await compliance_run.callable({"sql": pii_query})
+    compliance_pii_text = compliance_pii_result["content"][0]["text"]
+    print("\nAs compliance@co.com on customer_id (exempted via blocked_principals):")
+    if compliance_pii_text.startswith("BLOCKED"):
+        print(f"  {compliance_pii_text[:300]}")
+    else:
+        body = _parse_run_query_body(compliance_pii_text)
         row_count = body.get("row_count") if body else "?"
         print(f"  allowed — {row_count} rows returned")
 

@@ -64,6 +64,8 @@ class SemanticRule(BaseModel):
     description: str
     enforcement: Enforcement
     table: str | None = None
+    allowed_principals: list[str] | None = None
+    blocked_principals: list[str] | None = None
     query_check: QueryCheck | None = None
     result_check: ResultCheck | None = None
 
@@ -80,6 +82,15 @@ class SemanticRule(BaseModel):
     def at_most_one_check(self) -> Self:
         if self.query_check is not None and self.result_check is not None:
             raise ValueError("Rule must not have both query_check and result_check")
+        return self
+
+    @model_validator(mode="after")
+    def principals_mutually_exclusive(self) -> Self:
+        if self.allowed_principals is not None and self.blocked_principals is not None:
+            raise ValueError(
+                f"Rule '{self.name}' cannot set both allowed_principals "
+                f"and blocked_principals — pick one"
+            )
         return self
 
 

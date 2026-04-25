@@ -4,7 +4,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from agentic_data_contracts.core.schema import AllowedTable, DataContractSchema
+from agentic_data_contracts.core.schema import (
+    AllowedTable,
+    DataContractSchema,
+    SemanticRule,
+)
 
 
 def test_accepts_allowed_principals() -> None:
@@ -51,6 +55,51 @@ def test_empty_list_preserved() -> None:
         {"schema": "sealed", "tables": ["top_secret"], "allowed_principals": []}
     )
     assert at.allowed_principals == []
+
+
+def _rule_payload(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "name": "sample",
+        "description": "Sample rule",
+        "enforcement": "block",
+        "query_check": {"blocked_columns": ["ssn"]},
+    }
+    base.update(overrides)
+    return base
+
+
+class TestSemanticRulePrincipals:
+    def test_accepts_allowed_principals(self) -> None:
+        rule = SemanticRule.model_validate(
+            _rule_payload(allowed_principals=["alice@co.com"])
+        )
+        assert rule.allowed_principals == ["alice@co.com"]
+        assert rule.blocked_principals is None
+
+    def test_accepts_blocked_principals(self) -> None:
+        rule = SemanticRule.model_validate(
+            _rule_payload(blocked_principals=["intern@co.com"])
+        )
+        assert rule.blocked_principals == ["intern@co.com"]
+        assert rule.allowed_principals is None
+
+    def test_rejects_both_fields_set(self) -> None:
+        with pytest.raises(ValidationError, match="cannot set both"):
+            SemanticRule.model_validate(
+                _rule_payload(
+                    allowed_principals=["alice@co.com"],
+                    blocked_principals=["intern@co.com"],
+                )
+            )
+
+    def test_defaults_are_none(self) -> None:
+        rule = SemanticRule.model_validate(_rule_payload())
+        assert rule.allowed_principals is None
+        assert rule.blocked_principals is None
+
+    def test_empty_allowlist_preserved(self) -> None:
+        rule = SemanticRule.model_validate(_rule_payload(allowed_principals=[]))
+        assert rule.allowed_principals == []
 
 
 def test_principals_contract_fixture_loads(fixtures_dir: Path) -> None:

@@ -101,6 +101,13 @@ semantic:
       enforcement: block
       query_check:
         no_select_star: true
+    - name: pii_columns_redacted_for_juniors
+      description: "Junior analysts may not select PII columns from analytics.users"
+      enforcement: block
+      table: analytics.users
+      blocked_principals: [security_admin@co.com]   # everyone except security_admin
+      query_check:
+        blocked_columns: [ssn, dob, email]
 
 resources:
   cost_limit_usd: 5.00
@@ -152,6 +159,31 @@ from agentic_data_contracts import Principal, resolve_principal
 ```
 
 > **Known limitation:** `to_system_prompt()` lists all declared tables in the contract without filtering by principal. Query-time gating remains authoritative (denied queries never reach the database), but the agent may still be told about tables the current caller cannot access and can waste retry budget (`resources.max_retries`) on queries that will be blocked. Principal-aware prompt rendering is a candidate future feature — file an issue if your deployment needs it.
+
+#### Per-Rule Principal Scoping
+
+Individual `SemanticRule` entries accept the same `allowed_principals` / `blocked_principals` pair (mutually exclusive at load time). When a rule carries either field, it is skipped at validate-time for callers outside the scope. This works across every rule kind — `blocked_columns`, `required_filter`, `no_select_star`, `max_joins`, and `result_check`:
+
+```yaml
+rules:
+  # Block selecting `ssn` for everyone except the security admin.
+  - name: redact_ssn
+    enforcement: block
+    table: pii.users
+    blocked_principals: [security_admin@co.com]
+    query_check:
+      blocked_columns: [ssn]
+
+  # Only the on-call engineer is held to the 60-second timeout result-check.
+  - name: oncall_query_budget
+    enforcement: warn
+    table: prod.events
+    allowed_principals: [oncall@co.com]
+    result_check:
+      max_rows: 1_000_000
+```
+
+Same fail-closed contract as per-table scoping: a rule with `allowed_principals` or `blocked_principals` set requires the caller to be identified — anonymous callers are out of scope and the rule is skipped (it does not silently downgrade to "applies to everyone"). This lets you express things like "Alice may not select `ssn` from `pii.users`, but Bob may" directly in YAML, without splitting tables into per-principal views.
 
 ### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.52`)
 

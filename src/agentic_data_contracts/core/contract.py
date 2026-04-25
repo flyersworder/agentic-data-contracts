@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from agentic_data_contracts.core.principal import principal_in_scope
 from agentic_data_contracts.core.schema import (
     DataContractSchema,
     Domain,
@@ -86,26 +87,14 @@ class DataContract:
 
         Note: ``resolve_principal()`` passes ``""`` through unchanged; this method
         treats ``""`` as unauthenticated for policy decisions. The split keeps the
-        resolver neutral and concentrates access-policy here.
+        resolver neutral and concentrates access-policy in
+        :func:`principal_in_scope`, which is the single source of truth shared
+        with per-rule principal scoping in the Validator.
         """
-        # Treat empty string as unauthenticated (same as None — fail-closed).
-        resolved: str | None = principal if principal else None
         result: set[str] = set()
         for entry in self.schema.semantic.allowed_tables:
-            restricted = (
-                entry.allowed_principals is not None
-                or entry.blocked_principals is not None
-            )
-            if restricted and resolved is None:
-                continue
-            if (
-                entry.allowed_principals is not None
-                and resolved not in entry.allowed_principals
-            ):
-                continue
-            if (
-                entry.blocked_principals is not None
-                and resolved in entry.blocked_principals
+            if not principal_in_scope(
+                principal, entry.allowed_principals, entry.blocked_principals
             ):
                 continue
             for table in entry.tables:

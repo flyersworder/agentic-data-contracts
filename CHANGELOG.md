@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-04-25
+
+### Added
+
+- **Per-rule principal access control**: New optional `allowed_principals` / `blocked_principals` fields on `SemanticRule` (mutually exclusive at load time) gate individual rules by caller identity, mirroring the v0.13.0 `AllowedTable` semantics. A rule whose principal scope excludes the current caller is skipped at validate-time. This generalises across every rule kind — `blocked_columns`, `required_filter`, `no_select_star`, `max_joins`, and `result_check` — letting contracts express things like "Alice may not select `ssn` from `pii.users`, but Bob may" directly in YAML, without having to split tables into per-principal views.
+- **`principal_in_scope()` helper** in `agentic_data_contracts.core.principal`: Single source of truth for the allow/block-list policy used by both `DataContract.allowed_table_names_for` and per-rule scoping. Encapsulates the two-layer empty-string invariant so unauthenticated callers (`None` or `""`) fail closed against any restricted resource.
+- **`ops_agent` example demonstrates per-rule principal gating end-to-end**: Adds a block-level rule that lets `compliance@co.com` select PII columns from `sre.incidents` while every other identified caller is denied — composes with the existing per-table gate on `sre.deploys` to show table-level and rule-level controls side by side.
+
+### Changed
+
+- **`Validator` query and result rule lists are now small frozen dataclasses** (`_QueryRuleEntry`, `_ResultRuleEntry`) rather than plain tuples, carrying an extra `principal_scope` snapshot. Internal change — public `Validator` API is unchanged.
+- **`pending_result_check_names()` documents the superset contract**: When rules carry `allowed_principals` / `blocked_principals`, the actual run-set for a given caller is `<= pending`. The method intentionally does not resolve a callable principal at call time (TOCTOU avoidance); the only consumer is `run_query` telemetry.
+- **Resolved the v0.13.0 known limitation around rule-level scoping** — see the new per-rule principal access control feature above. The system-prompt-rendering limitation is unchanged.
+
 ## [0.13.0] - 2026-04-24
 
 ### Added

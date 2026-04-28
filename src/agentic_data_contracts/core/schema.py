@@ -40,12 +40,51 @@ class AllowedTable(BaseModel):
         return self
 
 
+class RequiredFilterValues(BaseModel):
+    """Per-principal allowlist of literal values for a WHERE-clause column.
+
+    Pairs with ``QueryCheck.required_filter_values``: when a query references
+    ``column``, every literal in the predicate must be a subset of the values
+    keyed under the resolved principal. Principals absent from the map fall
+    through (the rule does not apply to them) — pair with ``allowed_principals``
+    on the rule for a hard deny on unknown callers.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    column: str
+    values_by_principal: dict[str, list[str | int | float]]
+
+    @field_validator("values_by_principal")
+    @classmethod
+    def values_non_empty(
+        cls, v: dict[str, list[str | int | float]]
+    ) -> dict[str, list[str | int | float]]:
+        for principal, values in v.items():
+            if not values:
+                raise ValueError(
+                    f"values_by_principal[{principal!r}] must be non-empty; "
+                    f"omit the key entirely to deny that principal"
+                )
+        return v
+
+
 class QueryCheck(BaseModel):
     required_filter: str | None = None
+    required_filter_values: RequiredFilterValues | None = None
     no_select_star: bool | None = None
     blocked_columns: list[str] | None = None
     require_limit: bool | None = None
     max_joins: int | None = None
+
+    @model_validator(mode="after")
+    def at_most_one_filter(self) -> Self:
+        if self.required_filter is not None and self.required_filter_values is not None:
+            raise ValueError(
+                "QueryCheck must not set both required_filter and "
+                "required_filter_values — pick one (they target the same column)"
+            )
+        return self
 
 
 class ResultCheck(BaseModel):

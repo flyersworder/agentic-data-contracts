@@ -10,6 +10,7 @@ from agentic_data_contracts.validation.checkers import (
     NoSelectStarChecker,
     OperationBlocklistChecker,
     RequiredFilterChecker,
+    RequiredFilterValuesChecker,
     RequireLimitChecker,
     TableAllowlistChecker,
     extract_tables,
@@ -178,6 +179,236 @@ class TestRequiredFilterChecker:
         ast = _parse("SELECT id FROM analytics.orders WHERE tenant_id IS NOT NULL")
         result = RequiredFilterChecker("tenant_id").check_ast(ast)
         assert result.passed
+
+
+class TestRequiredFilterValuesChecker:
+    """Per-principal value allowlist for a WHERE-clause column."""
+
+    VALUES = {"partner@co.com": [123, 456], "vip@co.com": [999]}
+
+    def test_in_list_subset_passes(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id IN (123, 456)")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed
+
+    def test_in_list_with_extra_value_blocked(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id IN (123, 999)")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "999" in result.message
+        assert "partner@co.com" in result.message
+
+    def test_single_equality_match_passes(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 123")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed
+
+    def test_single_equality_miss_blocked(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 789")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "789" in result.message
+
+    def test_or_with_out_of_set_blocked(self) -> None:
+        """Every OR branch must be a subset; `id=123 OR id=999` opens the door."""
+        ast = _parse(
+            "SELECT id FROM sales.opps WHERE account_id = 123 OR account_id = 999"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "999" in result.message
+
+    def test_and_narrowing_passes(self) -> None:
+        """AND adds restrictions; `account_id IN (123, 456) AND amount > 0` is fine."""
+        ast = _parse(
+            "SELECT id FROM sales.opps WHERE account_id IN (123, 456) AND amount > 0"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed
+
+    def test_principal_not_in_map_passes(self) -> None:
+        """Rule only applies to principals it has values for. Others fall through."""
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 7")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="other@co.com"
+        )
+        assert result.passed
+
+    def test_resolved_principal_none_passes(self) -> None:
+        """No identity → rule does not apply. Use allowed_principals for hard fail."""
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 7")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal=None
+        )
+        assert result.passed
+
+    def test_subquery_in_in_blocked(self) -> None:
+        """Non-literal predicate can't be statically proven inside the allowed set."""
+        ast = _parse(
+            "SELECT id FROM sales.opps WHERE account_id IN "
+            "(SELECT account_id FROM sales.partners)"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "non-literal" in result.message
+
+    def test_column_missing_blocked(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE id = 1")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "Missing required filter" in result.message
+
+    def test_tautology_blocked(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = account_id")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "trivially satisfied" in result.message
+
+    def test_string_values_pass(self) -> None:
+        values = {"emea@co.com": ["EU", "UK"]}
+        ast = _parse("SELECT id FROM sales.opps WHERE region IN ('EU', 'UK')")
+        result = RequiredFilterValuesChecker("region", values).check_ast(
+            ast, resolved_principal="emea@co.com"
+        )
+        assert result.passed
+
+    def test_ignores_unknown_kwargs(self) -> None:
+        """Validator may pass other kwargs in the future; checker should not crash."""
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 123")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com", unrelated="x"
+        )
+        assert result.passed
+
+    def test_self_join_alias_smuggle_blocked(self) -> None:
+        """Bypass: aliased self-join with one branch pinned to a forbidden value.
+
+        Without the literal-set guard, AND coverage intersects {123} ∩ {999}
+        to ∅, which the subset check (∅ ⊆ allowed) accepts — but the user
+        is constraining t2 to account 999 they don't own. The guard must
+        catch any literal value referenced on the target column, regardless
+        of AND/OR structure or alias.
+        """
+        ast = _parse(
+            "SELECT t1.id FROM sales.opps t1 "
+            "JOIN sales.opps t2 ON t1.id = t2.id "
+            "WHERE t1.account_id = 123 AND t2.account_id = 999"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "999" in result.message
+
+    def test_same_table_contradiction_blocked(self) -> None:
+        """Bypass: contradictory AND constraints. account_id=123 AND account_id=999
+        is runtime-impossible but must not be accepted by the validator —
+        otherwise post-filter logging hooks may misreport the query."""
+        ast = _parse(
+            "SELECT id FROM sales.opps WHERE account_id = 123 AND account_id = 999"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "999" in result.message
+
+    def test_qualified_column_match(self) -> None:
+        """Regression: qualified column refs (`t.account_id`) match by base name."""
+        ast = _parse("SELECT t.id FROM sales.opps t WHERE t.account_id IN (123, 456)")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed
+
+    def test_int_yaml_matches_decimal_sql(self) -> None:
+        """YAML int 123 must match SQL literal 123.0 (and vice-versa) — the
+        underlying numeric value is the same; canonical form should win."""
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id = 123.0")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed
+
+    def test_decimal_yaml_matches_int_sql(self) -> None:
+        values = {"alice@co.com": [123.0, 456.0]}
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id IN (123, 456)")
+        result = RequiredFilterValuesChecker("account_id", values).check_ast(
+            ast, resolved_principal="alice@co.com"
+        )
+        assert result.passed
+
+    def test_string_quotes_normalised(self) -> None:
+        """SQL `'EU'` and the YAML string `EU` must compare equal."""
+        values = {"emea@co.com": ["EU"]}
+        ast = _parse("SELECT id FROM sales.opps WHERE region = 'EU'")
+        result = RequiredFilterValuesChecker("region", values).check_ast(
+            ast, resolved_principal="emea@co.com"
+        )
+        assert result.passed
+
+    def test_is_not_null_with_eq_passes(self) -> None:
+        """Common defensive pattern. `IS NOT NULL AND = 123` is strictly
+        tighter than `= 123` alone — must not be rejected as non-literal."""
+        ast = _parse(
+            "SELECT id FROM sales.opps "
+            "WHERE account_id IS NOT NULL AND account_id = 123"
+        )
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert result.passed, result.message
+
+    def test_is_null_alone_blocked_as_unbounded(self) -> None:
+        """`IS NULL` doesn't pin the column to a literal; without a sibling
+        equality predicate, the rule must block as not-constrained."""
+        ast = _parse("SELECT id FROM sales.opps WHERE account_id IS NULL")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        # Should report unbounded constraint, not a non-literal predicate.
+        assert "not constrained" in result.message
+
+    def test_not_eq_uses_non_literal_message(self) -> None:
+        """`NOT (account_id = 999)` is correctly blocked, but the error
+        message must NOT imply the user wrote a forbidden EQ — it must
+        surface the structural reason (non-literal predicate)."""
+        ast = _parse("SELECT id FROM sales.opps WHERE NOT (account_id = 999)")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "non-literal" in result.message
+        # Anti-assertion: must NOT claim the user wrote `account_id = 999`.
+        assert "Values ['999']" not in result.message
+
+    def test_not_in_uses_non_literal_message(self) -> None:
+        ast = _parse("SELECT id FROM sales.opps WHERE NOT (account_id IN (999, 1000))")
+        result = RequiredFilterValuesChecker("account_id", self.VALUES).check_ast(
+            ast, resolved_principal="partner@co.com"
+        )
+        assert not result.passed
+        assert "non-literal" in result.message
+        assert "Values ['999'" not in result.message
 
 
 class TestBlockedColumnsChecker:

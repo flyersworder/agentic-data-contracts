@@ -1,0 +1,24 @@
+version: "1.0"
+name: filter_values_test_contract
+
+semantic:
+  allowed_tables:
+    - schema: sales
+      tables: [opps]
+  forbidden_operations: [DELETE, DROP, INSERT, UPDATE]
+
+  rules:
+    # Per-principal value allowlist — partner@co.com can only see their two
+    # accounts; vip@co.com can only see account 999. Other callers fall
+    # through (the rule does not apply); pair with `allowed_principals` if
+    # unknown callers should be denied entirely.
+    - name: partner_account_scope
+      description: Each partner sees only their own accounts on sales.opps.
+      enforcement: block
+      table: sales.opps
+      query_check:
+        required_filter_values:
+          column: account_id
+          values_by_principal:
+            partner@co.com: [123, 456]
+            vip@co.com: [999]

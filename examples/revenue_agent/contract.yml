@@ -26,6 +26,31 @@ semantic:
       enforcement: block
       query_check:
         required_filter: tenant_id
+    # Per-principal value allowlist on the customer_id column. Each external
+    # partner may only query their own customers; principals not in the map
+    # fall through (the rule does not apply to them — internal analysts use
+    # tenant_isolation above instead). This is the value-bound counterpart
+    # to required_filter: column-presence is not enough, the *values* must
+    # also match.
+    #
+    # NOTE: Per-value rules deliberately omit `table:` so they apply
+    # everywhere `customer_id` appears — joins, subqueries, and the
+    # customers table itself. Scoping such a rule to a single table would
+    # let a partner bypass it by querying a different table that exposes
+    # the same column.
+    - name: partner_customer_scope
+      description: >
+        External partners may only query customers in their own accounts.
+        Each partner sees a different allowlist; values are matched against
+        the literal in the WHERE clause (=, IN). Subqueries and ranges are
+        rejected since they cannot be statically proven.
+      enforcement: block
+      query_check:
+        required_filter_values:
+          column: customer_id
+          values_by_principal:
+            partner-a@external.com: [101, 102, 103]
+            partner-b@external.com: [201, 202]
     - name: use_semantic_revenue
       description: "Revenue calculations must use the metric definitions"
       enforcement: warn

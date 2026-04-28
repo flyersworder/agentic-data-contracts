@@ -8,6 +8,7 @@ from agentic_data_contracts.core.schema import (
     DataContractSchema,
     Enforcement,
     QueryCheck,
+    RequiredFilterValues,
     ResultCheck,
     SemanticRule,
     SuccessCriterionConfig,
@@ -208,3 +209,69 @@ def test_result_check_column_bounds() -> None:
     assert rc.column == "revenue"
     assert rc.min_value == 0
     assert rc.not_null is True
+
+
+def test_required_filter_values_basic() -> None:
+    rfv = RequiredFilterValues(
+        column="account_id",
+        values_by_principal={"partner@co.com": [123, 456], "vip@co.com": [999]},
+    )
+    assert rfv.column == "account_id"
+    assert rfv.values_by_principal["partner@co.com"] == [123, 456]
+
+
+def test_required_filter_values_mixed_value_types() -> None:
+    rfv = RequiredFilterValues(
+        column="region",
+        values_by_principal={"emea@co.com": ["EU", "UK"], "us@co.com": ["US"]},
+    )
+    assert rfv.values_by_principal["emea@co.com"] == ["EU", "UK"]
+
+
+def test_required_filter_values_empty_list_rejected() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        RequiredFilterValues(
+            column="account_id",
+            values_by_principal={"alice@co.com": []},
+        )
+
+
+def test_required_filter_values_empty_map_allowed() -> None:
+    """Empty map is valid — means rule applies to nobody (a no-op rule).
+    The user might gate this rule behind separate allowed_principals or
+    populate it dynamically; rejecting empty would force a workaround."""
+    rfv = RequiredFilterValues(column="account_id", values_by_principal={})
+    assert rfv.values_by_principal == {}
+
+
+def test_query_check_with_required_filter_values() -> None:
+    qc = QueryCheck(
+        required_filter_values=RequiredFilterValues(
+            column="account_id",
+            values_by_principal={"partner@co.com": [123]},
+        )
+    )
+    assert qc.required_filter_values is not None
+    assert qc.required_filter_values.column == "account_id"
+
+
+def test_query_check_rejects_both_required_filter_and_values() -> None:
+    with pytest.raises(ValueError, match="required_filter and required_filter_values"):
+        QueryCheck(
+            required_filter="account_id",
+            required_filter_values=RequiredFilterValues(
+                column="account_id",
+                values_by_principal={"partner@co.com": [123]},
+            ),
+        )
+
+
+def test_required_filter_values_extra_field_rejected() -> None:
+    with pytest.raises(ValueError, match="extra"):
+        RequiredFilterValues.model_validate(
+            {
+                "column": "account_id",
+                "values_by_principal": {"alice@co.com": [1]},
+                "typo_field": "oops",
+            }
+        )

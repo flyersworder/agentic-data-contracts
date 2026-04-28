@@ -404,7 +404,7 @@ def test_custom_renderer_via_to_system_prompt(fixtures_dir: Path) -> None:
     """Users can pass their own renderer to to_system_prompt."""
 
     class MyRenderer:
-        def render(self, contract, semantic_source=None):
+        def render(self, contract, semantic_source=None, principal=None):
             return f"CUSTOM: {contract.name}"
 
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
@@ -417,4 +417,45 @@ def test_to_system_prompt_defaults_to_claude_renderer(fixtures_dir: Path) -> Non
     prompt = dc.to_system_prompt()
     assert '<data_contract name="revenue-analysis">' in prompt
     assert "<constraints>" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Principal-scoped rendering of required_filter_values
+# ---------------------------------------------------------------------------
+
+
+def test_filter_values_rendered_for_caller(fixtures_dir: Path) -> None:
+    """When the caller is in the values_by_principal map, render their row inline
+    so the agent knows the constraint upfront."""
+    dc = DataContract.from_yaml(fixtures_dir / "filter_values_contract.yml")
+    prompt = dc.to_system_prompt(principal="partner@co.com")
+    assert "partner_account_scope" in prompt
+    assert "account_id" in prompt
+    # Partner's own values appear:
+    assert "123" in prompt
+    assert "456" in prompt
+    # Other principals' values must NOT leak:
+    assert "999" not in prompt
+    assert "vip@co.com" not in prompt
+
+
+def test_filter_values_omitted_for_unmapped_caller(fixtures_dir: Path) -> None:
+    """A caller not in the values map should not see any per-principal values
+    (the rule does not apply to them)."""
+    dc = DataContract.from_yaml(fixtures_dir / "filter_values_contract.yml")
+    prompt = dc.to_system_prompt(principal="other@co.com")
+    assert "partner_account_scope" in prompt  # rule still listed
+    # No principal-specific values leak:
+    assert "123" not in prompt
+    assert "456" not in prompt
+    assert "999" not in prompt
+
+
+def test_filter_values_omitted_when_no_principal(fixtures_dir: Path) -> None:
+    """No identity → render the rule's name/description but not any values."""
+    dc = DataContract.from_yaml(fixtures_dir / "filter_values_contract.yml")
+    prompt = dc.to_system_prompt()
+    assert "partner_account_scope" in prompt
+    assert "123" not in prompt
+    assert "999" not in prompt
     assert "</data_contract>" in prompt

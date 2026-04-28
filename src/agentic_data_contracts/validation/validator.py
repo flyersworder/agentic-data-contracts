@@ -23,6 +23,7 @@ from agentic_data_contracts.validation.checkers import (
     OperationBlocklistChecker,
     RelationshipChecker,
     RequiredFilterChecker,
+    RequiredFilterValuesChecker,
     RequireLimitChecker,
     ResultCheckRunner,
     TableAllowlistChecker,
@@ -146,6 +147,18 @@ class Validator:
                             table_scope=table_scope,
                             principal_scope=principal_scope,
                             checker=RequiredFilterChecker(qc.required_filter),
+                        )
+                    )
+                if qc.required_filter_values is not None:
+                    rfv = qc.required_filter_values
+                    self._query_checkers.append(
+                        _QueryRuleEntry(
+                            enforcement=rule.enforcement.value,
+                            table_scope=table_scope,
+                            principal_scope=principal_scope,
+                            checker=RequiredFilterValuesChecker(
+                                rfv.column, rfv.values_by_principal
+                            ),
                         )
                     )
                 if qc.no_select_star is True:
@@ -276,7 +289,7 @@ class Validator:
                 entry.principal_scope, resolved_principal
             ):
                 continue
-            result = entry.checker.check_ast(ast)
+            result = entry.checker.check_ast(ast, resolved_principal=resolved_principal)
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)

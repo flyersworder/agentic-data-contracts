@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-04-28
+
+### Added
+
+- **Per-principal value allowlist on WHERE filters**: New `required_filter_values` field on `QueryCheck` carries a `column` plus a `values_by_principal: dict[str, list[str | int | float]]` map. The new `RequiredFilterValuesChecker` walks the WHERE clause as a boolean tree and enforces that every literal predicate value pinning the column is in the calling principal's allowlist. Composes with the existing `allowed_principals` / `blocked_principals` rule scoping; principals not in the value map fall through (rule is a no-op for them — pair with `allowed_principals` for hard deny on unknown callers). This closes the value-bound counterpart to `required_filter`: column-presence is no longer enough, the *values* must also match.
+- **Two-layer static analysis**: A literal-set guard collects every literal value referenced against the target column anywhere in the AST and rejects values outside the allowlist regardless of AND/OR structure (catches cross-alias smuggling like `t1.account_id = 123 AND t2.account_id = 999` and contradictions). A coverage analysis (`_Coverage` state machine) then enforces that the column is actually pinned at all (catches `account_id = 123 OR amount > 0`). Non-literal predicates on the target column — subqueries, function calls, BETWEEN, range comparisons (`<`, `>`, `!=`, `LIKE`), NOT-wrapped EQ/IN — are rejected as unprovable. `IS NULL` / `IS NOT NULL` are treated as presence predicates (UNBOUND) so defensive `IS NOT NULL AND col = 123` patterns pass cleanly.
+- **Numeric form normalisation** via `_canon`: YAML int `123`, YAML float `123.0`, SQL literal `123`, SQL literal `123.0`, and string `"123"` all collapse to the same canonical key. Scientific notation (`1e3`/`1000`), integer-valued floats, and bool literals round-trip stably.
+- **Principal-aware system-prompt rendering**: `to_system_prompt(principal=...)` and `ClaudePromptRenderer.render(principal=...)` now filter `required_filter_values` to expose only the calling principal's allowlist. Other principals' value lists never appear in the prompt.
+- **`partner_customer_scope` rule in the `revenue_agent` example** demonstrates the feature end-to-end with two external partners scoped to different account allowlists. Deliberately *not* table-scoped — per-value rules apply globally so a partner can't bypass them via a join to a sibling table that exposes the same column.
+
+### Changed
+
+- **Breaking**: `PromptRenderer.render()` protocol signature gained a third optional argument `principal: str | None = None`. Custom renderers written against the prior 2-arg signature (`def render(self, contract, semantic_source=None)`) will raise `TypeError` when called via `to_system_prompt`, which now always passes `principal=` as a keyword argument. **Migration**: add `principal=None` to the renderer's signature; if you don't need per-principal filtering, ignore the value.
+- **`Validator` query-checker `check_ast` calls now thread `resolved_principal=` as a keyword argument** uniformly. `RequiredFilterChecker`, `NoSelectStarChecker`, `BlockedColumnsChecker`, `RequireLimitChecker`, and `MaxJoinsChecker` all gained `**_` to accept and ignore the new kwarg — purely additive, no behaviour change.
+- **Mutual-exclusion validator on `QueryCheck`**: A single check may not set both `required_filter` and `required_filter_values` — they target the same column conceptually; pick one.
+
+### Documentation
+
+- 23 new unit tests for `RequiredFilterValuesChecker` covering subset matches, smuggled values, OR-bypass, AND-narrowing, contradictions, self-join smuggling, BETWEEN/range rejection, NOT-wrapped predicates, `IS NULL` / `IS NOT NULL`, numeric and string normalisation, and qualified column refs.
+- 10 integration tests covering the full validator wiring (resolved-principal threading, ContextVar-switched late binding for the Webex pattern, per-principal value gating).
+
 ## [0.14.0] - 2026-04-25
 
 ### Added

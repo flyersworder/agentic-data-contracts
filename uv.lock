@@ -8,14 +8,15 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-26T22:00:00Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P3D"
 
 [manifest]
 overrides = [{ name = "python-dotenv", specifier = ">=1.2.2" }]
 
 [[package]]
 name = "agentic-data-contracts"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

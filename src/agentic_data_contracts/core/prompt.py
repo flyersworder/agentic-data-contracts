@@ -6,17 +6,24 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentic_data_contracts.core.contract import DataContract
+    from agentic_data_contracts.core.schema import SemanticRule
     from agentic_data_contracts.semantic.base import SemanticSource
 
 
 @runtime_checkable
 class PromptRenderer(Protocol):
-    """Renders a DataContract into a string prompt."""
+    """Renders a DataContract into a string prompt.
+
+    ``principal`` is the resolved caller identity. Renderers should use it to
+    filter per-principal sections (e.g. `required_filter_values`) so callers
+    only see policy that applies to themselves. Custom renderers may ignore it.
+    """
 
     def render(
         self,
         contract: DataContract,
         semantic_source: SemanticSource | None = None,
+        principal: str | None = None,
     ) -> str: ...
 
 
@@ -31,6 +38,7 @@ class ClaudePromptRenderer:
         self,
         contract: DataContract,
         semantic_source: SemanticSource | None = None,
+        principal: str | None = None,
     ) -> str:
         lines: list[str] = []
 
@@ -62,7 +70,7 @@ class ClaudePromptRenderer:
             lines.extend(resource_lines)
 
         # 5. Constraints (forbidden ops + rules)
-        lines.extend(self._render_constraints(contract))
+        lines.extend(self._render_constraints(contract, principal=principal))
 
         # Closing wrapper
         lines.append("</data_contract>")
@@ -250,7 +258,9 @@ class ClaudePromptRenderer:
         lines.append("</resource_limits>")
         return lines
 
-    def _render_constraints(self, contract: DataContract) -> list[str]:
+    def _render_constraints(
+        self, contract: DataContract, principal: str | None = None
+    ) -> list[str]:
         forbidden = contract.schema.semantic.forbidden_operations
         block_rules = contract.block_rules()
         warn_rules = contract.warn_rules()
@@ -270,6 +280,7 @@ class ClaudePromptRenderer:
             lines.append("Rules (violations block execution):")
             for rule in block_rules:
                 lines.append(f"- [{rule.name}] {rule.description}")
+                lines.extend(self._render_rule_detail(rule, principal))
 
         # Warn rules
         if warn_rules:
@@ -277,6 +288,30 @@ class ClaudePromptRenderer:
             lines.append("Rules (violations produce warnings):")
             for rule in warn_rules:
                 lines.append(f"- [{rule.name}] {rule.description}")
+                lines.extend(self._render_rule_detail(rule, principal))
 
         lines.append("</constraints>")
         return lines
+
+    def _render_rule_detail(
+        self, rule: SemanticRule, principal: str | None
+    ) -> list[str]:
+        """Render rule-level detail that depends on the caller's identity.
+
+        Currently inlines ``required_filter_values`` for the calling principal
+        only — other principals' allowed value lists are not exposed in the
+        prompt. Returns an empty list when there's nothing to add (the common
+        case for rules without a per-principal detail to surface).
+        """
+        if principal is None or rule.query_check is None:
+            return []
+        rfv = rule.query_check.required_filter_values
+        if rfv is None:
+            return []
+        values = rfv.values_by_principal.get(principal)
+        if not values:
+            return []
+        rendered = ", ".join(repr(v) for v in values)
+        return [
+            f"  Allowed values for {rfv.column} (you): {rendered}",
+        ]

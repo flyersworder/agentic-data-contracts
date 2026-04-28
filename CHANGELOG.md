@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.1] - 2026-04-28
+
+### Fixed
+
+- **`preview_table` honoured table-level access only — bypassing per-rule data-visibility gates** ([#20](https://github.com/qye-inf/agentic-data-contracts/issues/20)). The tool ran a synthesised `SELECT * FROM <table> LIMIT N` directly through `adapter.execute()` after checking `allowed_table_names_for(principal)`, so v0.14's per-rule `blocked_columns` (with `allowed_principals` / `blocked_principals` scoping) and v0.15's `required_filter_values` per-principal value allowlist were silently skipped. Any caller allowed at the table level could read every column via preview, even columns that a `blocked_columns` rule restricted to a whitelist — and could see every row, even when a `required_filter_values` rule meant they should only see a value-bound subset.
+- **Fix scope**: `preview_table` now consults the same per-rule, per-principal gates that the validator applies, classified by enforcement: `block` rules refuse the preview with a structured BLOCKED message naming the rule; `warn` / `log` rules surface `WARNINGS:` / `LOG:` preambles before the JSON body, mirroring `run_query`'s convention. Query-shape rules (`required_filter`, `no_select_star`, `require_limit`, `max_joins`) remain bypassed by design — those guard user-supplied SQL in `run_query`, not preview's auto-built discovery query. `result_check` rules are also skipped (preview executes no result-check pipeline).
+- **Behavioural contract**: preview honours rules that gate which **data** an in-scope caller may see (`blocked_columns`, `required_filter_values`); it bypasses rules that gate **query shape** the caller writes. The matching predicate mirrors `Validator._is_table_in_scope` + `_rule_applies_to_principal` (validator.py:233-247) — including the `principal_in_scope` skip semantics for unidentified callers against principal-scoped rules.
+
+### Changed
+
+- **New module-level helper `_caller_label(principal)`** in `tools.factory`: collapses the `principal if principal else "<no caller identified>"` idiom shared by `describe_table` and `preview_table` into one place. Pure refactor; output messages are byte-identical.
+
+### Documentation
+
+- 9 new edge-case tests for `preview_table` covering: wildcard `table: "*"` rule, omitted `table:` (None) rule, unidentified caller against unscoped vs principal-scoped rules, `enforcement: warn` and `enforcement: log` preamble surfacing, `result_check` rules being correctly skipped, `required_filter_values` blocking when the principal is in `values_by_principal`, and falling through when the principal is unmapped. Built via small inline contracts so the shared `principals_contract.yml` fixture (used by 8 other test modules) is untouched.
+- 3 new regression tests on the issue's exact alice / intern / bob scenarios.
+
 ## [0.15.0] - 2026-04-28
 
 ### Added

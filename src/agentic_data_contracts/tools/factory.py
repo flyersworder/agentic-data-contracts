@@ -9,7 +9,11 @@ from typing import Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.core.principal import Principal, resolve_principal
+from agentic_data_contracts.core.principal import (
+    Principal,
+    principal_in_scope,
+    resolve_principal,
+)
 from agentic_data_contracts.core.schema import Domain
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import (
@@ -38,6 +42,15 @@ class ToolDef:
 
 def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _caller_label(principal: str | None) -> str:
+    """Human-readable identifier for messages — meant to be wrapped with !r.
+
+    Mirrors the inline ``principal if principal else "<no caller identified>"``
+    pattern used by gating tools, so call sites read ``{_caller_label(p)!r}``.
+    """
+    return principal if principal else "<no caller identified>"
 
 
 def _effective_domains(
@@ -221,8 +234,10 @@ def create_tools(
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
-            who = principal if principal else "<no caller identified>"
-            return _text_response(f"Table {qualified} is restricted (caller: {who!r}).")
+            return _text_response(
+                f"Table {qualified} is restricted"
+                f" (caller: {_caller_label(principal)!r})."
+            )
         if adapter is None:
             return _text_response(
                 f"No database adapter configured — table description unavailable"
@@ -251,19 +266,87 @@ def create_tools(
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
-            who = principal if principal else "<no caller identified>"
-            return _text_response(f"Table {qualified} is restricted (caller: {who!r}).")
+            return _text_response(
+                f"Table {qualified} is restricted"
+                f" (caller: {_caller_label(principal)!r})."
+            )
         if adapter is None:
             return _text_response(
                 "No database adapter configured — preview unavailable."
             )
-        # preview_table intentionally uses SELECT * — it's a discovery tool
-        # and the table has already been verified against the allowlist above.
+
+        # preview_table honours rules that gate which DATA an in-scope caller
+        # may see — `blocked_columns` (the column itself is sensitive) and
+        # `required_filter_values` (the caller may only see a subset of rows
+        # filtered on a column). It deliberately bypasses rules that gate
+        # QUERY SHAPE the caller writes — `required_filter`, `no_select_star`,
+        # `require_limit`, `max_joins` — because preview synthesises its own
+        # SELECT *  LIMIT N and those rules guard run_query's user-supplied SQL.
+        # Mirrors Validator._is_table_in_scope + _rule_applies_to_principal
+        # (validator.py:233-247); keep the table/principal predicates in sync.
+        block_msgs: list[str] = []
+        warn_msgs: list[str] = []
+        log_msgs: list[str] = []
+        for rule in contract.schema.semantic.rules:
+            qc = rule.query_check
+            if qc is None:
+                continue
+            if rule.table is not None and rule.table != "*" and rule.table != qualified:
+                continue
+            if not principal_in_scope(
+                principal, rule.allowed_principals, rule.blocked_principals
+            ):
+                continue
+
+            violations: list[str] = []
+            if qc.blocked_columns is not None:
+                violations.append(
+                    f"SELECT * exposes blocked columns {sorted(qc.blocked_columns)}"
+                )
+            rfv = qc.required_filter_values
+            if (
+                rfv is not None
+                and principal is not None
+                and (principal in rfv.values_by_principal)
+            ):
+                violations.append(
+                    f"missing required filter on '{rfv.column}'"
+                    f" (per-principal value allowlist applies)"
+                )
+            if not violations:
+                continue
+
+            message = f"{rule.name}: " + "; ".join(violations)
+            if rule.enforcement == "block":
+                block_msgs.append(message)
+            elif rule.enforcement == "warn":
+                warn_msgs.append(message)
+            else:
+                log_msgs.append(message)
+
+        if block_msgs:
+            return _text_response(
+                f"BLOCKED — preview_table SELECT * gated for caller"
+                f" {_caller_label(principal)!r}:\n"
+                + "\n".join(f"- {m}" for m in block_msgs)
+                + "\nUse run_query with explicit columns instead."
+            )
+
         result = adapter.execute(f"SELECT * FROM {qualified} LIMIT {limit}")
         rows = [dict(zip(result.columns, row)) for row in result.rows]
-        return _text_response(
-            json.dumps({"schema": schema, "table": table, "rows": rows}, default=str)
-        )
+        body = json.dumps({"schema": schema, "table": table, "rows": rows}, default=str)
+        # Symmetric with run_query: surface warn/log enforcement so audit
+        # trails fire on discovery previews too, not just on direct queries.
+        preamble_parts: list[str] = []
+        if warn_msgs:
+            preamble_parts.append(
+                "WARNINGS:\n" + "\n".join(f"- {m}" for m in warn_msgs)
+            )
+        if log_msgs:
+            preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in log_msgs))
+        if preamble_parts:
+            body = "\n\n".join(preamble_parts) + "\n\n" + body
+        return _text_response(body)
 
     # ── Tool 3: list_metrics ──────────────────────────────────────────────────
     async def list_metrics(args: dict[str, Any]) -> dict[str, Any]:

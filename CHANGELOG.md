@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-05-02
+
+### Added
+
+- **dbt manifest relationship parsing**: `DbtSource.get_relationships()` and `get_relationships_for_table()` no longer return empty stubs. Each `relationships` schema test in the manifest (`resource_type == "test"`, `test_metadata.name == "relationships"`) projects into a `Relationship` instance. The owner model is resolved via `attached_node` (manifest v12+); the referenced model is taken from `depends_on.nodes` minus the owner (with self-FK fallback when there's only one entry). Tests that don't carry `relationships` semantics (`not_null`, `unique`, custom test types) are silently filtered out, as are tests whose dependencies can't be resolved to a model — manifests routinely carry tests on seeds/sources we don't track.
+- **`meta:`-block convention** matches the existing `_parse_metrics` pattern (`meta.tier`, `meta.domains`): three optional keys on each `relationships` test surface end-to-end through the same code paths that already serve `YamlSource`-loaded relationships:
+  - `meta.preferred: bool` — canonical-join hint, propagates to the index sort, prompt rendering, and `lookup_relationships` JSON.
+  - `meta.required_filter: str` — SQL predicate enforced by `RelationshipChecker`.
+  - `meta.relationship_type: str` — overrides the default `many_to_one` (accepts `one_to_one`, `many_to_many`).
+- **Index reuse**: `DbtSource` now builds its own `_rel_index` via `build_relationship_index`, inheriting the same preferred-first stable-sort guarantee `YamlSource` got in v0.16.0. No new helper code; the parser is the only addition.
+
+### Documentation
+
+- 9 new tests in `tests/test_semantic/test_dbt.py` (`TestDbtRelationships`) covering the round-trip for canonical and non-preferred edges, self-referencing FK, `meta.relationship_type` override, preferred-first index ordering, the referenced-side appearing in the index, self-FK appearing once not twice, non-`relationships` tests being filtered, and the original empty-relationships fixture continuing to return `[]`.
+- New fixture `tests/fixtures/sample_dbt_manifest_with_relationships.json` — a realistic manifest v12 shape with a multi-FK `orders` model (preferred `customer_id` + secondary `sales_rep_id`), a self-referencing `employees.manager_id`, and decoy `not_null` / `unique` tests to confirm filtering. Existing `sample_dbt_manifest.json` left untouched so it stays the empty-relationships baseline.
+- README's *Semantic Sources / dbt* section documents the manifest convention with a `schema.yml` example showing all three `meta:` keys; architecture doc gains a paragraph describing the resolution logic and skip semantics.
+
+### Notes
+
+- `CubeSource.get_relationships()` still returns `[]` — Cube's `joins:` block carries a SQL expression that needs parsing to extract column references, which is a separate piece of work. The TODO at `semantic/cube.py:73` is preserved.
+
 ## [0.16.0] - 2026-05-02
 
 ### Added

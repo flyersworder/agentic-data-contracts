@@ -441,6 +441,8 @@ class SemanticSource(Protocol):
 
 **Metric-impact graph (v0.10.0+):** `get_metric_impacts()` returns directed edges between metrics annotated with `direction`, `confidence`, and `evidence`. The `build_metric_impact_index()` / `walk_metric_impacts()` helpers in `base.py` mirror the `build_relationship_index` / `find_join_path` pattern — dual-keyed index (each edge under both endpoints), cycle-safe BFS traversal, direction disambiguated at walk time. `YamlSource` parses a top-level `metric_impacts:` block; `DbtSource` and `CubeSource` return `[]` (neither system has a native causal-graph concept — impacts live in the contract YAML regardless of where the metric itself comes from).
 
+**dbt relationship parsing (v0.17.0+):** `DbtSource.get_relationships()` projects dbt's built-in `relationships` schema tests into `Relationship` instances. Each test node (`resource_type == "test"`, `test_metadata.name == "relationships"`) carries `kwargs.column_name` and `kwargs.field`; the owner model is resolved via `attached_node` (manifest v12+) and the referenced model via `depends_on.nodes`. The test's `meta:` block supplies `preferred`, `required_filter`, and `relationship_type` (defaulting to `many_to_one`). Tests that can't be resolved (missing `attached_node`, unmodelled dependencies, non-`relationships` test names) are skipped silently rather than raising — manifests are heterogeneous and some tests live on seeds or sources we don't model.
+
 **Built-in sources:**
 
 | Source | Reads | Extracts |

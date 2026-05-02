@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12/manifest.json",
+    "generated_at": "2026-05-02T00:00:00Z"
+  },
+  "nodes": {
+    "model.project.orders": {
+      "unique_id": "model.project.orders",
+      "name": "orders",
+      "schema": "analytics",
+      "resource_type": "model",
+      "columns": {
+        "id": {"name": "id", "data_type": "INTEGER", "description": "Primary key"},
+        "customer_id": {"name": "customer_id", "data_type": "INTEGER", "description": "FK to customers"},
+        "sales_rep_id": {"name": "sales_rep_id", "data_type": "INTEGER", "description": "FK to users"},
+        "amount": {"name": "amount", "data_type": "DECIMAL", "description": "Order total"},
+        "status": {"name": "status", "data_type": "VARCHAR"}
+      },
+      "description": "Orders fact table"
+    },
+    "model.project.customers": {
+      "unique_id": "model.project.customers",
+      "name": "customers",
+      "schema": "analytics",
+      "resource_type": "model",
+      "columns": {
+        "id": {"name": "id", "data_type": "INTEGER"},
+        "name": {"name": "name", "data_type": "VARCHAR"}
+      },
+      "description": "Customer dimension"
+    },
+    "model.project.users": {
+      "unique_id": "model.project.users",
+      "name": "users",
+      "schema": "analytics",
+      "resource_type": "model",
+      "columns": {
+        "id": {"name": "id", "data_type": "INTEGER"},
+        "email": {"name": "email", "data_type": "VARCHAR"}
+      },
+      "description": "Users dimension (sales reps + customers)"
+    },
+    "model.project.employees": {
+      "unique_id": "model.project.employees",
+      "name": "employees",
+      "schema": "hr",
+      "resource_type": "model",
+      "columns": {
+        "id": {"name": "id", "data_type": "INTEGER"},
+        "manager_id": {"name": "manager_id", "data_type": "INTEGER", "description": "Self-FK to manager"}
+      },
+      "description": "Employee dimension with self-referencing manager FK"
+    },
+    "test.project.relationships_orders_customer_id__id__ref_customers_": {
+      "unique_id": "test.project.relationships_orders_customer_id__id__ref_customers_",
+      "name": "relationships_orders_customer_id__id__ref_customers_",
+      "resource_type": "test",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "to": "ref('customers')",
+          "field": "id",
+          "column_name": "customer_id"
+        },
+        "namespace": null
+      },
+      "column_name": "customer_id",
+      "attached_node": "model.project.orders",
+      "depends_on": {
+        "nodes": ["model.project.customers", "model.project.orders"]
+      },
+      "meta": {
+        "preferred": true,
+        "required_filter": "status != 'cancelled'"
+      },
+      "description": "Each order belongs to one customer; canonical user-facing join."
+    },
+    "test.project.relationships_orders_sales_rep_id__id__ref_users_": {
+      "unique_id": "test.project.relationships_orders_sales_rep_id__id__ref_users_",
+      "name": "relationships_orders_sales_rep_id__id__ref_users_",
+      "resource_type": "test",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "to": "ref('users')",
+          "field": "id",
+          "column_name": "sales_rep_id"
+        },
+        "namespace": null
+      },
+      "column_name": "sales_rep_id",
+      "attached_node": "model.project.orders",
+      "depends_on": {
+        "nodes": ["model.project.users", "model.project.orders"]
+      },
+      "meta": {},
+      "description": "Salesperson who closed the order."
+    },
+    "test.project.relationships_employees_manager_id__id__ref_employees_": {
+      "unique_id": "test.project.relationships_employees_manager_id__id__ref_employees_",
+      "name": "relationships_employees_manager_id__id__ref_employees_",
+      "resource_type": "test",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "to": "ref('employees')",
+          "field": "id",
+          "column_name": "manager_id"
+        },
+        "namespace": null
+      },
+      "column_name": "manager_id",
+      "attached_node": "model.project.employees",
+      "depends_on": {
+        "nodes": ["model.project.employees"]
+      },
+      "meta": {
+        "relationship_type": "many_to_one"
+      },
+      "description": "Each employee reports to one manager (self-referencing FK)."
+    },
+    "test.project.not_null_orders_id": {
+      "unique_id": "test.project.not_null_orders_id",
+      "name": "not_null_orders_id",
+      "resource_type": "test",
+      "test_metadata": {
+        "name": "not_null",
+        "kwargs": {
+          "column_name": "id"
+        },
+        "namespace": null
+      },
+      "column_name": "id",
+      "attached_node": "model.project.orders",
+      "depends_on": {
+        "nodes": ["model.project.orders"]
+      },
+      "meta": {}
+    },
+    "test.project.unique_customers_id": {
+      "unique_id": "test.project.unique_customers_id",
+      "name": "unique_customers_id",
+      "resource_type": "test",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "id"
+        },
+        "namespace": null
+      },
+      "column_name": "id",
+      "attached_node": "model.project.customers",
+      "depends_on": {
+        "nodes": ["model.project.customers"]
+      },
+      "meta": {}
+    }
+  },
+  "metrics": {}
+}

@@ -11,6 +11,7 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    build_relationship_index,
     fuzzy_search_metrics,
 )
 
@@ -20,8 +21,11 @@ class DbtSource:
 
     def __init__(self, path: str | Path) -> None:
         raw = json.loads(Path(path).read_text())
+        nodes = raw.get("nodes", {})
         self._metrics = self._parse_metrics(raw.get("metrics", {}))
-        self._tables = self._parse_models(raw.get("nodes", {}))
+        self._tables = self._parse_models(nodes)
+        self._relationships = self._parse_relationships(nodes)
+        self._rel_index = build_relationship_index(self._relationships)
 
     def _parse_metrics(self, metrics: dict[str, Any]) -> list[MetricDefinition]:
         result: list[MetricDefinition] = []
@@ -81,6 +85,71 @@ class DbtSource:
             tables[key] = TableSchema(columns=columns)
         return tables
 
+    def _parse_relationships(self, nodes: dict[str, Any]) -> list[Relationship]:
+        """Project dbt's built-in `relationships` schema tests into Relationships.
+
+        A relationships test compiles into a node with ``resource_type == "test"``
+        and ``test_metadata.name == "relationships"``; its kwargs carry the FK
+        column (``column_name``) and the referenced ``field``. The owner model
+        is resolved via ``attached_node`` (manifest v12+); the referenced model
+        comes from ``depends_on.nodes`` minus the owner. Tests with missing or
+        unresolvable model references are skipped silently — they're either
+        compiler artefacts (e.g. tests on seeds/sources we don't model) or
+        manifests too old to carry ``attached_node``.
+
+        Reads from the test's ``meta:`` block (matching how ``_parse_metrics``
+        consumes ``meta.tier`` / ``meta.domains``):
+
+        - ``meta.preferred`` (bool, default False) — canonical-join hint
+        - ``meta.required_filter`` (str, default None) — SQL predicate
+        - ``meta.relationship_type`` (str, default "many_to_one")
+        """
+        relationships: list[Relationship] = []
+        for node in nodes.values():
+            if node.get("resource_type") != "test":
+                continue
+            tm = node.get("test_metadata") or {}
+            if tm.get("name") != "relationships":
+                continue
+
+            kwargs = tm.get("kwargs") or {}
+            column_name = kwargs.get("column_name")
+            field = kwargs.get("field")
+            if not column_name or not field:
+                continue
+
+            owner_id = node.get("attached_node")
+            owner = nodes.get(owner_id) if owner_id else None
+            if owner is None:
+                continue
+
+            depends = (node.get("depends_on") or {}).get("nodes") or []
+            other_ids = [n for n in depends if n != owner_id]
+            if other_ids:
+                referenced = nodes.get(other_ids[0])
+            elif owner_id in depends:
+                referenced = owner  # self-referencing FK
+            else:
+                referenced = None
+            if referenced is None or referenced.get("resource_type") != "model":
+                continue
+
+            owner_table = f"{owner.get('schema', '')}.{owner.get('name', '')}"
+            ref_table = f"{referenced.get('schema', '')}.{referenced.get('name', '')}"
+            meta = node.get("meta") or {}
+
+            relationships.append(
+                Relationship(
+                    from_=f"{owner_table}.{column_name}",
+                    to=f"{ref_table}.{field}",
+                    type=meta.get("relationship_type", "many_to_one"),
+                    description=node.get("description", ""),
+                    required_filter=meta.get("required_filter"),
+                    preferred=bool(meta.get("preferred", False)),
+                )
+            )
+        return relationships
+
     def get_metrics(self) -> list[MetricDefinition]:
         return list(self._metrics)
 
@@ -94,10 +163,10 @@ class DbtSource:
         return fuzzy_search_metrics(self._metrics, self.get_metric, query)
 
     def get_relationships(self) -> list[Relationship]:
-        return []  # TODO: parse from dbt manifest relationships/refs
+        return list(self._relationships)
 
     def get_relationships_for_table(self, table: str) -> list[Relationship]:
-        return []  # TODO: parse from dbt manifest relationships/refs
+        return list(self._rel_index.get(table, []))
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")

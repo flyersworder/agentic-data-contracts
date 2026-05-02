@@ -407,6 +407,24 @@ semantic:
     path: "./dbt/manifest.json"
 ```
 
+dbt's built-in `relationships` schema test compiles into the manifest as a test node — `DbtSource` projects each one into a `Relationship`, resolving the owner via `attached_node` (manifest v12+) and the referenced model via `depends_on.nodes`. Tests with non-`relationships` types (`not_null`, `unique`, custom tests) and tests that can't be resolved are silently ignored. Three optional knobs read from the test's `meta:` block (matching how `tier` / `domains` are read on metrics):
+
+```yaml
+# In your dbt schema.yml
+models:
+  - name: orders
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('customers')
+              field: id
+              meta:
+                preferred: true
+                required_filter: "status != 'cancelled'"
+                relationship_type: many_to_one  # default; one_to_one / many_to_many also accepted
+```
+
 **Cube** — point to a Cube schema file:
 ```yaml
 semantic:

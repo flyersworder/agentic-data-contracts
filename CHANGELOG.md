@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-05-02
+
+### Added
+
+- **Cube schema relationship parsing**: `CubeSource.get_relationships()` and `get_relationships_for_table()` no longer return empty stubs. Each cube's `joins:` block is parsed and projected into `Relationship` instances, completing the trifecta with `YamlSource` (v0.16.0) and `DbtSource` (v0.17.0) — every built-in semantic source now carries the same `preferred`, `required_filter`, and `relationship_type` semantics end-to-end.
+- **`from`/`to` normalisation**: The Relationship's `from` is always the column on the cube declaring the join, regardless of which side `{CUBE}` appears on in the SQL. Authors who write `{CUBE}.fk = {Other}.pk` and authors who write `{Other}.pk = {CUBE}.fk` get identical Relationship instances. The `type` carries the cardinality (`many_to_one` / `one_to_one` / `one_to_many`), so a `hasMany` join on cube A produces `A.pk -> B.fk` with `type=one_to_many`, matching how `YamlSource` authors hand-write the same pattern.
+- **Cube enum mapping**: `belongsTo` / `hasOne` / `hasMany` (camelCase v1) and `many_to_one` / `one_to_one` / `one_to_many` (snake_case v2 aliases) all collapse to the canonical `Relationship.type` strings via a small lookup table. `meta.relationship_type` overrides for unusual cases.
+- **`meta:` block convention** matches `DbtSource`'s v0.17.0 contract: `meta.preferred`, `meta.required_filter`, `meta.relationship_type` on each join entry.
+- **Index reuse via `build_relationship_index`** — `CubeSource` inherits the v0.16.0 preferred-first stable-sort guarantee, same as `YamlSource` and `DbtSource`.
+
+### Documentation
+
+- 11 new tests in `tests/test_semantic/test_cube.py` (`TestCubeRelationships`) covering: load count with one phantom-cube reference filtered, canonical edge round-trip, non-preferred default, reversed-SQL parsing (`{Other}.pk = {CUBE}.fk` form), `hasMany` -> `one_to_many` alias mapping, self-FK with `meta.relationship_type` overriding `hasOne`, preferred-first index ordering, referenced-side indexing, self-FK appearing once not twice, the original empty-joins fixture continuing to return `[]`, and unresolvable cube names being silently skipped.
+- New fixture `tests/fixtures/sample_cube_schema_with_joins.yml` — Orders cube with two role-playing joins into Users (`customer_id` preferred, `sales_rep_id` not), a Customers cube with a `hasMany` join into Orders, a self-referencing Employees cube, and one deliberately broken join pointing at a non-existent cube to exercise the silent-skip path. Existing `sample_cube_schema.yml` left untouched as the empty-joins baseline.
+- README's *Semantic Sources / Cube* section documents the parser convention with a `joins:` example showing all three `meta:` keys; architecture doc gains a paragraph mirroring the v0.17.0 dbt note.
+
+### Limitations
+
+- Composite-key joins (`{CUBE}.tenant_id = {Other}.tenant_id AND {CUBE}.id = {Other}.parent_id`) are not parsed — declare those via `YamlSource` instead. The TODO surfaces as a "skipped silently" outcome rather than an error so existing Cube schemas don't break.
+
 ## [0.17.0] - 2026-05-02
 
 ### Added

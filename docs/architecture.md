@@ -443,6 +443,8 @@ class SemanticSource(Protocol):
 
 **dbt relationship parsing (v0.17.0+):** `DbtSource.get_relationships()` projects dbt's built-in `relationships` schema tests into `Relationship` instances. Each test node (`resource_type == "test"`, `test_metadata.name == "relationships"`) carries `kwargs.column_name` and `kwargs.field`; the owner model is resolved via `attached_node` (manifest v12+) and the referenced model via `depends_on.nodes`. The test's `meta:` block supplies `preferred`, `required_filter`, and `relationship_type` (defaulting to `many_to_one`). Tests that can't be resolved (missing `attached_node`, unmodelled dependencies, non-`relationships` test names) are skipped silently rather than raising — manifests are heterogeneous and some tests live on seeds or sources we don't model.
 
+**Cube relationship parsing (v0.18.0+):** `CubeSource.get_relationships()` parses each cube's `joins:` block. The parser builds a `cube_name -> sql_table` map, regexes the single-equality form `{X}.col1 = {Y}.col2` from each join's `sql:` field, and normalises so the `from` side is always the column on the cube declaring the join (independent of which side `{CUBE}` appears on in the SQL). Cube's `relationship` enum (`belongsTo` / `hasOne` / `hasMany` plus `many_to_one` / `one_to_one` / `one_to_many` aliases) maps to canonical `Relationship.type` strings; `meta.relationship_type` overrides. `meta.preferred` and `meta.required_filter` work the same way as `YamlSource` and `DbtSource`. Composite-key joins (multiple `AND`-chained equalities) and joins whose target cube can't be resolved by name are skipped — declare those in contract YAML via `YamlSource` instead.
+
 **Built-in sources:**
 
 | Source | Reads | Extracts |

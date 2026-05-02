@@ -433,6 +433,25 @@ semantic:
     path: "./cube/schema.yml"
 ```
 
+Each cube's `joins:` block projects into `Relationship` instances. The parser handles the single-equality form `{CUBE}.col1 = {Other}.col2` (in either direction); the `from` side is always the column on the cube declaring the join, regardless of how the SQL was written. Cube's `relationship` enum (`belongsTo`, `hasOne`, `hasMany`, plus the snake_case aliases `many_to_one` / `one_to_one` / `one_to_many`) maps to the canonical `Relationship.type`. Reads from each join's `meta:` block:
+
+```yaml
+# In your Cube schema
+cubes:
+  - name: Orders
+    sql_table: analytics.orders
+    joins:
+      - name: Users
+        sql: "{CUBE}.customer_id = {Users}.id"
+        relationship: belongsTo
+        meta:
+          preferred: true
+          required_filter: "status != 'cancelled'"
+          relationship_type: many_to_one  # optional override
+```
+
+Joins whose SQL doesn't match the single-equality pattern (composite keys with `AND`-chained equalities) or whose target cube can't be resolved by name are skipped silently — fall back to declaring those in your contract YAML via `YamlSource`.
+
 ## Table Relationships
 
 Define join paths so the agent knows how to combine tables correctly:

@@ -1,0 +1,69 @@
+# Cube schema demonstrating relationship parsing:
+# - Orders has two role-playing joins into Users (customer_id preferred, sales_rep_id not)
+# - Employees has a self-referencing FK (manager_id -> id)
+# - Customers cube has a hasMany join into Orders to exercise the
+#   one_to_many / hasMany alias mapping (and to confirm the parser flips
+#   from/to direction so the Relationship is always emitted in the SQL's
+#   written direction)
+# - One join points at a non-existent cube — must be silently skipped
+cubes:
+  - name: Orders
+    sql_table: analytics.orders
+    measures:
+      - name: order_count
+        sql: "COUNT(*)"
+        type: count
+    columns:
+      - name: id
+        type: INTEGER
+      - name: customer_id
+        type: INTEGER
+      - name: sales_rep_id
+        type: INTEGER
+    joins:
+      - name: Users
+        sql: "{CUBE}.customer_id = {Users}.id"
+        relationship: belongsTo
+        meta:
+          preferred: true
+          required_filter: "status != 'cancelled'"
+      - name: Users
+        sql: "{Users}.id = {CUBE}.sales_rep_id"  # reversed order to exercise both regex directions
+        relationship: many_to_one
+      - name: Phantoms
+        sql: "{CUBE}.phantom_id = {Phantoms}.id"
+        relationship: belongsTo
+
+  - name: Users
+    sql_table: analytics.users
+    measures:
+      - name: user_count
+        sql: "COUNT(*)"
+        type: count
+    columns:
+      - name: id
+        type: INTEGER
+
+  - name: Customers
+    sql_table: analytics.customers
+    columns:
+      - name: id
+        type: INTEGER
+    joins:
+      - name: Orders
+        sql: "{CUBE}.id = {Orders}.customer_id"
+        relationship: hasMany
+
+  - name: Employees
+    sql_table: hr.employees
+    columns:
+      - name: id
+        type: INTEGER
+      - name: manager_id
+        type: INTEGER
+    joins:
+      - name: Employees
+        sql: "{CUBE}.manager_id = {Employees}.id"
+        relationship: hasOne
+        meta:
+          relationship_type: many_to_one  # override the hasOne default

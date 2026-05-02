@@ -195,7 +195,11 @@ class ClaudePromptRenderer:
         else:
             for r in rels:
                 desc = r.description.strip()
-                desc_attr = f' description="{desc}"' if desc else ""
+                attrs = [f'type="{r.type}"']
+                if r.preferred:
+                    attrs.append('preferred="true"')
+                if desc:
+                    attrs.append(f'description="{desc}"')
                 parts = [
                     f"<from>{r.from_}</from>",
                     f"<to>{r.to}</to>",
@@ -205,7 +209,7 @@ class ClaudePromptRenderer:
                     parts.append(f"<required_filter>{filt}</required_filter>")
                 inner = "".join(parts)
                 lines.append(
-                    f'  <relationship type="{r.type}"{desc_attr}>{inner}</relationship>'
+                    f"  <relationship {' '.join(attrs)}>{inner}</relationship>"
                 )
 
         lines.append("</table_relationships>")

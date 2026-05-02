@@ -434,6 +434,20 @@ relationships:
     type: many_to_one
     description: "Bridge table — filter to avoid fan-out from multiple attribution records."
     required_filter: "attribution_model = 'last_touch_attribution'"
+
+  # When multiple parallel join paths exist between the same pair of tables
+  # (role-playing dimensions, multi-role FKs), mark the canonical one
+  # `preferred: true`. The agent sees `preferred="true"` in the prompt and
+  # `lookup_relationships` returns preferred edges first.
+  - from: analytics.orders.customer_id
+    to: analytics.users.id
+    type: many_to_one
+    description: "Customer who placed the order — canonical user join."
+    preferred: true
+  - from: analytics.orders.sales_rep_id
+    to: analytics.users.id
+    type: many_to_one
+    description: "Salesperson who closed the order."
 ```
 
 | Field | Required | Description |
@@ -442,6 +456,7 @@ relationships:
 | `type` | No | Cardinality: `many_to_one` (default), `one_to_one`, `many_to_many` |
 | `description` | No | Free-text context for the agent (join guidance, caveats, data quality notes) |
 | `required_filter` | No | SQL condition that **must** be applied when using this join (e.g., bridge table disambiguation) |
+| `preferred` | No | Mark the canonical join when alternatives exist (defaults to `false`). Surfaces as `preferred="true"` in the prompt, floats the edge to the front of `lookup_relationships` direct-lookup output, and biases multi-hop BFS path-finding toward it. Leave unset for role-playing peers (e.g. `order_date` vs `ship_date`) where no single path is canonical. |
 
 The agent sees these in its system prompt and uses them to write correct JOINs instead of guessing from column names.
 
@@ -600,7 +615,7 @@ Three end-to-end working examples, each demonstrating a different governance arc
 | Example | Archetype | Governance patterns it teaches |
 |---|---|---|
 | [`examples/revenue_agent/`](examples/revenue_agent/) | Finance / lagging KPIs / audit-strict | Tenant isolation, `hypothesized` impact edges, north-star metric tier, undefined-metric policy recipe |
-| [`examples/growth_agent/`](examples/growth_agent/) | Experimentation / leading indicators | `verified` / `correlated` / `hypothesized` metric impacts with real-ish A/B evidence, time-bounded events rule, `log`-level PII audit invisible to the agent, stale-review detection |
+| [`examples/growth_agent/`](examples/growth_agent/) | Experimentation / leading indicators | `verified` / `correlated` / `hypothesized` metric impacts with real-ish A/B evidence, time-bounded events rule, `log`-level PII audit invisible to the agent, stale-review detection, **`preferred: true` on the canonical `events.user_id → users.id` join** (alongside a non-preferred `events.referrer_user_id → users.id` for referral-mechanics questions) |
 | [`examples/ops_agent/`](examples/ops_agent/) | SRE reliability / real-time dashboards | `blocked_columns` for PII, two `log`-level audit rules (governance trail), `require_limit` + `max_joins` caps, **negative-direction** metric impact (DORA pattern), aggressive resource limits, **`blocked_principals` on `sre.deploys`** (try `--caller intern@co.com` to see a per-table principal denial) |
 
 Run any of them:

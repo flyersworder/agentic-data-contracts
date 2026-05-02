@@ -381,6 +381,29 @@ def test_claude_renderer_relationships(fixtures_dir: Path) -> None:
     assert "analytics.customers.id" in output
 
 
+def test_claude_renderer_relationship_preferred_attribute(
+    fixtures_dir: Path,
+) -> None:
+    """A Relationship with preferred=True surfaces as preferred="true" in XML."""
+    source = YamlSource(fixtures_dir / "relationships_preferred.yml")
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders", "users"]}
+                ),
+            ],
+        ),
+    )
+    output = ClaudePromptRenderer().render(DataContract(schema), semantic_source=source)
+
+    # Preferred edge carries the attribute on its <relationship> tag.
+    assert 'preferred="true"' in output
+    # Non-preferred edges in the same fixture do not.
+    assert output.count('preferred="true"') == 1
+
+
 # ---------------------------------------------------------------------------
 # Test 11 — no relationships omits section
 # ---------------------------------------------------------------------------

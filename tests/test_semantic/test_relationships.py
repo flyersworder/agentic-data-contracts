@@ -232,3 +232,94 @@ class TestFindJoinPath:
         index = self._make_index()
         path = find_join_path(index, "s.orders", "s.orders")
         assert path == []
+
+
+class TestPreferredRelationship:
+    """Authoring hint: mark the canonical join when alternatives exist."""
+
+    def test_relationship_default_preferred_is_false(self) -> None:
+        rel = Relationship(from_="s.a.x", to="s.b.y")
+        assert rel.preferred is False
+
+    def test_yaml_source_loads_preferred_flag(self, fixtures_dir: Path) -> None:
+        source = YamlSource(fixtures_dir / "relationships_preferred.yml")
+        rels = source.get_relationships()
+        preferred = [r for r in rels if r.preferred]
+        assert len(preferred) == 1
+        assert preferred[0].from_ == "analytics.orders.customer_id"
+        # Edges without the key default to False (not None).
+        non_preferred = [r for r in rels if not r.preferred]
+        assert {r.from_ for r in non_preferred} == {
+            "analytics.orders.sales_rep_id",
+            "analytics.orders.approver_id",
+        }
+
+    def test_yaml_source_preferred_defaults_false_when_absent(
+        self, tmp_path: Path
+    ) -> None:
+        yml = "relationships:\n  - from: s.a.x\n    to: s.b.y\n"
+        (tmp_path / "rel.yml").write_text(yml)
+        source = YamlSource(tmp_path / "rel.yml")
+        assert source.get_relationships()[0].preferred is False
+
+    def test_index_sorts_preferred_first(self) -> None:
+        """Adjacency lists put preferred edges ahead of declaration order."""
+        rels = [
+            Relationship(from_="s.orders.sales_rep_id", to="s.users.id"),
+            Relationship(from_="s.orders.customer_id", to="s.users.id", preferred=True),
+            Relationship(from_="s.orders.approver_id", to="s.users.id"),
+        ]
+        index = build_relationship_index(rels)
+        # Declaration order is sales_rep, customer, approver.
+        # After sort, customer (preferred) is first; the other two retain
+        # their relative declaration order (stable sort).
+        assert [r.from_ for r in index["s.orders"]] == [
+            "s.orders.customer_id",
+            "s.orders.sales_rep_id",
+            "s.orders.approver_id",
+        ]
+
+    def test_index_no_preferred_preserves_declaration_order(self) -> None:
+        rels = [
+            Relationship(from_="s.orders.sales_rep_id", to="s.users.id"),
+            Relationship(from_="s.orders.customer_id", to="s.users.id"),
+        ]
+        index = build_relationship_index(rels)
+        assert [r.from_ for r in index["s.orders"]] == [
+            "s.orders.sales_rep_id",
+            "s.orders.customer_id",
+        ]
+
+    def test_find_join_path_picks_preferred_alternative(self) -> None:
+        """When multiple direct edges exist, BFS returns the preferred one."""
+        rels = [
+            Relationship(from_="s.orders.sales_rep_id", to="s.users.id"),
+            Relationship(from_="s.orders.customer_id", to="s.users.id", preferred=True),
+            Relationship(from_="s.orders.approver_id", to="s.users.id"),
+        ]
+        index = build_relationship_index(rels)
+        path = find_join_path(index, "s.orders", "s.users")
+        assert path is not None
+        assert len(path) == 1
+        assert path[0].from_ == "s.orders.customer_id"
+
+    def test_get_relationships_for_table_orders_preferred_first(
+        self, fixtures_dir: Path
+    ) -> None:
+        source = YamlSource(fixtures_dir / "relationships_preferred.yml")
+        rels = source.get_relationships_for_table("analytics.orders")
+        assert len(rels) == 3
+        assert rels[0].from_ == "analytics.orders.customer_id"
+        assert rels[0].preferred is True
+
+    def test_get_relationships_preserves_declaration_order(
+        self, fixtures_dir: Path
+    ) -> None:
+        """The flat list (used by the prompt renderer) keeps YAML order."""
+        source = YamlSource(fixtures_dir / "relationships_preferred.yml")
+        rels = source.get_relationships()
+        assert [r.from_ for r in rels] == [
+            "analytics.orders.sales_rep_id",
+            "analytics.orders.customer_id",
+            "analytics.orders.approver_id",
+        ]

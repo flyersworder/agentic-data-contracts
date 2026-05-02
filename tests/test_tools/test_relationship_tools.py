@@ -147,3 +147,70 @@ async def test_lookup_relationships_no_semantic_source(
     result = await tool.callable({"table": "s.orders"})
     text = result["content"][0]["text"]
     assert "no semantic source" in text.lower()
+
+
+@pytest.fixture
+def preferred_rel_source(tmp_path: Path) -> YamlSource:
+    """Two parallel edges between orders and users; customer_id is canonical."""
+    yml = """\
+relationships:
+  - from: s.orders.sales_rep_id
+    to: s.users.id
+    type: many_to_one
+    description: "Salesperson who closed the order"
+  - from: s.orders.customer_id
+    to: s.users.id
+    type: many_to_one
+    description: "Customer who placed the order"
+    preferred: true
+"""
+    (tmp_path / "rels.yml").write_text(yml)
+    return YamlSource(tmp_path / "rels.yml")
+
+
+@pytest.fixture
+def preferred_contract() -> DataContract:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "s", "tables": ["orders", "users"]}
+                ),
+            ],
+        ),
+    )
+    return DataContract(schema)
+
+
+@pytest.mark.asyncio
+async def test_lookup_relationships_direct_includes_preferred_flag(
+    preferred_contract: DataContract, preferred_rel_source: YamlSource
+) -> None:
+    tools = create_tools(preferred_contract, semantic_source=preferred_rel_source)
+    tool = next(t for t in tools if t.name == "lookup_relationships")
+    result = await tool.callable({"table": "s.orders"})
+    data = json.loads(result["content"][0]["text"])
+
+    assert len(data["relationships"]) == 2
+    # Preferred edge surfaces first.
+    assert data["relationships"][0]["from"] == "s.orders.customer_id"
+    assert data["relationships"][0]["preferred"] is True
+    # Non-preferred edge omits the flag entirely (mirrors required_filter).
+    assert "preferred" not in data["relationships"][1]
+
+
+@pytest.mark.asyncio
+async def test_lookup_relationships_join_path_includes_preferred_flag(
+    preferred_contract: DataContract, preferred_rel_source: YamlSource
+) -> None:
+    tools = create_tools(preferred_contract, semantic_source=preferred_rel_source)
+    tool = next(t for t in tools if t.name == "lookup_relationships")
+    result = await tool.callable({"table": "s.orders", "target_table": "s.users"})
+    data = json.loads(result["content"][0]["text"])
+
+    # BFS picks the preferred edge over the parallel non-preferred one.
+    assert len(data["join_path"]) == 1
+    edge = data["join_path"][0]
+    assert edge["from"] == "s.orders.customer_id"
+    assert edge["preferred"] is True

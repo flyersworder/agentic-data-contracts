@@ -47,12 +47,30 @@ metrics:
     indicator_kind: lagging
 
 relationships:
+  # `events` has two FKs into `users`: the actor (`user_id`) and the inviter
+  # (`referrer_user_id`, populated only for referral signups). Mark the actor
+  # join `preferred: true` — that's the canonical lens for almost all growth
+  # questions (activation, conversion, retention). The agent should fall back
+  # to the referrer edge only when the question is specifically about referral
+  # mechanics, guided by the descriptions below.
   - from: analytics.events.user_id
     to: analytics.users.id
     type: many_to_one
     description: >
-      Every event belongs to one user. Join on equality; event stream is
+      The user who triggered the event (canonical actor join). Use this for
+      activation / conversion / retention analysis. Event stream is
       append-only so historical joins are stable.
+    required_filter: "created_at IS NOT NULL"
+    preferred: true
+
+  - from: analytics.events.referrer_user_id
+    to: analytics.users.id
+    type: many_to_one
+    description: >
+      The user who *invited* the actor — populated only when the actor signed
+      up via referral (acquisition_source = 'referral'). Use this only for
+      referral-mechanics questions ("which users have referred the most
+      activated signups?"); for general user joins, prefer `user_id`.
     required_filter: "created_at IS NOT NULL"
 
   - from: analytics.events.experiment_id

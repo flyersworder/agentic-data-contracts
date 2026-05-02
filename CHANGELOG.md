@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-05-02
+
+### Added
+
+- **`preferred: bool` flag on `Relationship`**: Marks the canonical join when multiple parallel join paths exist between the same pair of tables — the role-playing-dimension and multi-role-FK case (`fact_sales → dim_date` on `order_date` / `ship_date` / `deliver_date`; `orders → users` on `customer_id` / `sales_rep_id` / `approver_id`). Default `False`. Surfaces as a per-edge `preferred="true"` attribute in the rendered prompt and as `"preferred": true` in `lookup_relationships` JSON output (omitted when false, mirroring the `required_filter` shape).
+- **Index-time stable sort**: `build_relationship_index` now stable-sorts each adjacency list with preferred edges first (`edges.sort(key=lambda r: not r.preferred)`). One line of code propagates the invariant to two consumers automatically: `find_join_path` (BFS) picks the preferred edge when alternatives exist at the same hop depth, and `get_relationships_for_table` (the `lookup_relationships` direct-lookup path) returns preferred-first ordering. The flat list returned by `SemanticSource.get_relationships()` deliberately keeps declaration order — that list feeds the prompt renderer, which uses the per-edge `preferred="true"` attribute instead of reordering. Forward-compat: a future `preference: int | None` rank field can be added as a non-breaking superset, treating `preferred=True` as `preference=0`.
+- **YAML loader threading**: `YamlSource` reads `preferred` from each relationship entry, defaulting to `False` when absent. The `dbt` and `cube` loaders are unchanged (they still return `[]` as TODO stubs); when those parsers are filled in, `preferred` will read from their respective `meta:` blocks.
+- **`growth_agent` example demonstrates the feature end-to-end**: `analytics.events` gains a `referrer_user_id` column populated only for users with `acquisition_source = 'referral'`, creating two parallel edges into `analytics.users`. The canonical actor join (`events.user_id → users.id`) carries `preferred: true`; the referrer join is unmarked and the description steers the agent toward it only for referral-mechanics questions. Both referral users (charlie, henry) carry their referrer FK across every event row in their history, so referral attribution is observable at event grain.
+
+### Changed
+
+- **Authoring guidance**: When alternatives are *semantic peers* (e.g. role-playing date dimensions where `order_date` and `ship_date` are equally valid), authors should leave all edges unmarked and rely on `description` for disambiguation. The boolean form is intentional — it captures "canonical vs secondary" without inviting authors to invent false hierarchies among genuine peers. No uniqueness validator is enforced at load time (matches `AllowedTable.preferred`'s lenient handling).
+
+### Documentation
+
+- 11 new tests across three suites: 8 in `tests/test_semantic/test_relationships.py` (`TestPreferredRelationship` class — default value, YAML round-trip, index sort stability, `find_join_path` preference, declaration-order preservation across `get_relationships()` vs `get_relationships_for_table()`); 2 in `tests/test_tools/test_relationship_tools.py` covering JSON shape and preferred-first ordering for both direct-lookup and `join_path` modes; 1 in `tests/test_core/test_prompt_renderers.py` mirroring the `AllowedTable.preferred` rendering test pattern.
+- New fixture `tests/fixtures/relationships_preferred.yml` — three parallel edges between `analytics.orders` and `analytics.users` with the preferred edge deliberately at position 2 of 3, decoupling preferred-first behaviour from declaration order so a no-op sort would fail the tests.
+- README's *Table Relationships* section gains a parallel-edge YAML snippet and a `preferred` row in the field reference table covering prompt rendering, direct-lookup ordering, and BFS path-finding bias. Architecture doc's `Relationship` field listing extended with the same semantics.
+
 ## [0.15.1] - 2026-04-28
 
 ### Fixed

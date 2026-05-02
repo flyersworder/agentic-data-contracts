@@ -32,6 +32,7 @@ class Relationship:
     type: str = "many_to_one"  # many_to_one | one_to_one | many_to_many
     description: str = ""
     required_filter: str | None = None
+    preferred: bool = False
 
 
 @dataclass
@@ -88,6 +89,13 @@ def build_relationship_index(
     Each relationship is indexed under both its ``from`` and ``to`` table
     (the table portion of "schema.table.column"), unless they are the same
     table (self-referencing FK).
+
+    Each adjacency list is stable-sorted with ``preferred=True`` edges first,
+    so BFS path-finding and direct table lookup both surface the canonical
+    join when alternatives exist. The flat list returned by
+    ``SemanticSource.get_relationships()`` deliberately keeps declaration
+    order — that list feeds the prompt renderer, where ``preferred="true"``
+    is rendered as a per-edge attribute instead of via reordering.
     """
     index: dict[str, list[Relationship]] = {}
     for r in relationships:
@@ -96,6 +104,8 @@ def build_relationship_index(
         index.setdefault(from_table, []).append(r)
         if from_table != to_table:
             index.setdefault(to_table, []).append(r)
+    for edges in index.values():
+        edges.sort(key=lambda r: not r.preferred)
     return index
 
 

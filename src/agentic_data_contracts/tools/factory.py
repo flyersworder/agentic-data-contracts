@@ -525,6 +525,7 @@ def create_tools(
                         if r.required_filter
                         else {}
                     ),
+                    **({"preferred": True} if r.preferred else {}),
                 }
                 for r in path
             ]
@@ -550,6 +551,7 @@ def create_tools(
                 "type": r.type,
                 "description": r.description,
                 **({"required_filter": r.required_filter} if r.required_filter else {}),
+                **({"preferred": True} if r.preferred else {}),
             }
             for r in rels
         ]

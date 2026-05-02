@@ -451,7 +451,7 @@ class SemanticSource(Protocol):
 
 `MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`.
 `MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
-`Relationship`: `from_`, `to`, `type`, `description`, `required_filter`.
+`Relationship`: `from_`, `to`, `type`, `description`, `required_filter`, `preferred`. The `preferred` flag (default `False`) marks the canonical join when alternatives exist between the same table pair. `build_relationship_index` stable-sorts each adjacency list with preferred edges first, so `find_join_path` (BFS) and `get_relationships_for_table` both surface the canonical edge automatically. The flat list returned by `get_relationships()` deliberately keeps declaration order; that list feeds the prompt renderer, which renders `preferred="true"` as a per-edge attribute instead of via reordering.
 `TableSchema`: `columns: list[Column]` with name, type, description.
 
 ## Database Adapters

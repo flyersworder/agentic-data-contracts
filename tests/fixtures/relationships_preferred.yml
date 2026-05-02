@@ -1,0 +1,14 @@
+relationships:
+  - from: analytics.orders.sales_rep_id
+    to: analytics.users.id
+    type: many_to_one
+    description: Salesperson who closed the order
+  - from: analytics.orders.customer_id
+    to: analytics.users.id
+    type: many_to_one
+    description: Customer who placed the order
+    preferred: true
+  - from: analytics.orders.approver_id
+    to: analytics.users.id
+    type: many_to_one
+    description: Manager who approved the order

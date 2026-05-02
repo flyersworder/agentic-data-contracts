@@ -55,10 +55,16 @@ def setup(db_path: str = "sample_data.duckdb") -> None:
         ('pricing-019',    'Self-serve pricing experiment',      'running',   '2026-03-15', NULL)
     """)
 
+    # Two user FKs: `user_id` (the actor) and `referrer_user_id` (who invited
+    # them, when acquisition_source = 'referral'). The semantic contract marks
+    # `user_id` as the canonical join (preferred: true) so the agent uses it by
+    # default for analytics, and reaches for `referrer_user_id` only when a
+    # question is specifically about referral mechanics.
     conn.execute("""
         CREATE OR REPLACE TABLE analytics.events (
             id INTEGER,
             user_id INTEGER,
+            referrer_user_id INTEGER,
             event_name VARCHAR,
             experiment_id VARCHAR,
             variant VARCHAR,
@@ -69,39 +75,43 @@ def setup(db_path: str = "sample_data.duckdb") -> None:
     """)
     # Each user has a signup event; some activate; fewer convert.
     # Users 1-5 are in onboarding-042 (concluded); 6-10 in pricing-019 (running).
+    # User 3 (charlie) and user 8 (henry) signed up via referral — referrer set.
     conn.execute("""
         INSERT INTO analytics.events VALUES
         -- signups (all users)
-        (1,  1,  'signup',         NULL,             NULL,        0,    '2025-07-15 10:01', 'acme'),
-        (2,  2,  'signup',         NULL,             NULL,        0,    '2025-07-22 14:22', 'acme'),
-        (3,  3,  'signup',         NULL,             NULL,        0,    '2025-08-05 09:15', 'acme'),
-        (4,  4,  'signup',         NULL,             NULL,        0,    '2025-08-18 11:40', 'acme'),
-        (5,  5,  'signup',         NULL,             NULL,        0,    '2025-09-10 16:03', 'acme'),
-        (6,  6,  'signup',         NULL,             NULL,        0,    '2026-04-08 08:55', 'acme'),
-        (7,  7,  'signup',         NULL,             NULL,        0,    '2026-04-10 13:12', 'acme'),
-        (8,  8,  'signup',         NULL,             NULL,        0,    '2026-04-12 17:45', 'acme'),
-        (9,  9,  'signup',         NULL,             NULL,        0,    '2026-04-14 10:30', 'acme'),
-        (10, 10, 'signup',         NULL,             NULL,        0,    '2026-04-15 15:20', 'acme'),
+        (1,  1,  NULL, 'signup',         NULL,             NULL,        0,    '2025-07-15 10:01', 'acme'),
+        (2,  2,  NULL, 'signup',         NULL,             NULL,        0,    '2025-07-22 14:22', 'acme'),
+        (3,  3,  1,    'signup',         NULL,             NULL,        0,    '2025-08-05 09:15', 'acme'),
+        (4,  4,  NULL, 'signup',         NULL,             NULL,        0,    '2025-08-18 11:40', 'acme'),
+        (5,  5,  NULL, 'signup',         NULL,             NULL,        0,    '2025-09-10 16:03', 'acme'),
+        (6,  6,  NULL, 'signup',         NULL,             NULL,        0,    '2026-04-08 08:55', 'acme'),
+        (7,  7,  NULL, 'signup',         NULL,             NULL,        0,    '2026-04-10 13:12', 'acme'),
+        (8,  8,  4,    'signup',         NULL,             NULL,        0,    '2026-04-12 17:45', 'acme'),
+        (9,  9,  NULL, 'signup',         NULL,             NULL,        0,    '2026-04-14 10:30', 'acme'),
+        (10, 10, NULL, 'signup',         NULL,             NULL,        0,    '2026-04-15 15:20', 'acme'),
         -- activations (concluded experiment: onboarding-042, users 1-5)
-        (11, 1,  'activation',     'onboarding-042', 'new_flow',  0,    '2025-07-15 10:12', 'acme'),
-        (12, 2,  'activation',     'onboarding-042', 'new_flow',  0,    '2025-07-24 09:02', 'acme'),
-        (13, 3,  'activation',     'onboarding-042', 'control',   0,    '2025-08-07 14:18', 'acme'),
-        (14, 4,  'activation',     'onboarding-042', 'new_flow',  0,    '2025-08-20 11:55', 'acme'),
+        (11, 1,  NULL, 'activation',     'onboarding-042', 'new_flow',  0,    '2025-07-15 10:12', 'acme'),
+        (12, 2,  NULL, 'activation',     'onboarding-042', 'new_flow',  0,    '2025-07-24 09:02', 'acme'),
+        (13, 3,  1,    'activation',     'onboarding-042', 'control',   0,    '2025-08-07 14:18', 'acme'),
+        (14, 4,  NULL, 'activation',     'onboarding-042', 'new_flow',  0,    '2025-08-20 11:55', 'acme'),
         -- user 5 did not activate
         -- activations (running experiment: pricing-019, users 6-10)
-        (15, 6,  'activation',     'pricing-019',    'A',         0,    '2026-04-09 09:30', 'acme'),
-        (16, 7,  'activation',     'pricing-019',    'B',         0,    '2026-04-11 13:40', 'acme'),
-        (17, 9,  'activation',     'pricing-019',    'A',         0,    '2026-04-15 10:50', 'acme'),
-        -- users 8, 10 did not activate
+        (15, 6,  NULL, 'activation',     'pricing-019',    'A',         0,    '2026-04-09 09:30', 'acme'),
+        (16, 7,  NULL, 'activation',     'pricing-019',    'B',         0,    '2026-04-11 13:40', 'acme'),
+        -- henry (user 8) signed up via referral; the FK propagates through his
+        -- whole event history, illustrating the referrer-edge join target.
+        (17, 8,  4,    'activation',     'pricing-019',    'B',         0,    '2026-04-13 18:20', 'acme'),
+        (18, 9,  NULL, 'activation',     'pricing-019',    'A',         0,    '2026-04-15 10:50', 'acme'),
+        -- user 10 did not activate
         -- purchases (conversion events)
-        (18, 1,  'first_purchase', 'onboarding-042', 'new_flow',  0,    '2025-08-12 10:00', 'acme'),
-        (19, 2,  'first_purchase', 'onboarding-042', 'new_flow',  0,    '2025-08-25 11:00', 'acme'),
-        (20, 6,  'first_purchase', 'pricing-019',    'A',         0,    '2026-04-17 08:45', 'acme'),
+        (19, 1,  NULL, 'first_purchase', 'onboarding-042', 'new_flow',  0,    '2025-08-12 10:00', 'acme'),
+        (20, 2,  NULL, 'first_purchase', 'onboarding-042', 'new_flow',  0,    '2025-08-25 11:00', 'acme'),
+        (21, 6,  NULL, 'first_purchase', 'pricing-019',    'A',         0,    '2026-04-17 08:45', 'acme'),
         -- marketing spend records (one row per week, placeholder shape)
-        (21, NULL,'spend',         NULL,             NULL,        1200, '2026-03-23 00:00', 'acme'),
-        (22, NULL,'spend',         NULL,             NULL,        1500, '2026-03-30 00:00', 'acme'),
-        (23, NULL,'spend',         NULL,             NULL,        1800, '2026-04-06 00:00', 'acme'),
-        (24, NULL,'spend',         NULL,             NULL,        2100, '2026-04-13 00:00', 'acme')
+        (22, NULL,NULL, 'spend',         NULL,             NULL,        1200, '2026-03-23 00:00', 'acme'),
+        (23, NULL,NULL, 'spend',         NULL,             NULL,        1500, '2026-03-30 00:00', 'acme'),
+        (24, NULL,NULL, 'spend',         NULL,             NULL,        1800, '2026-04-06 00:00', 'acme'),
+        (25, NULL,NULL, 'spend',         NULL,             NULL,        2100, '2026-04-13 00:00', 'acme')
     """)
     conn.close()
     print(f"Sample database created at {db_path}")

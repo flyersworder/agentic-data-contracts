@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-05-10
+
+### Changed
+
+- **`create_sdk_mcp_server` now auto-applies session-limit enforcement to all 9 tools by default**, matching the v0.19.0 behavior of `create_langchain_tools`. Pre-v0.20.0, only `run_query` self-checked `ContractSession` limits — lookup tools (`describe_table`, `list_metrics`, etc.) bypassed. The two adapters now behave identically: a single contract YAML enforces the same way under SDK and LangChain.
+- **Practical effect**: `max_duration_seconds` now measures wall-clock from the *first tool call* (any tool), not just from the first `run_query`. For most contracts this is invisible — lookups complete in milliseconds. The narrow population that sees a behavior change: agents with tight `max_duration_seconds` AND lookup-heavy prompts that browse extensively before querying. The new behavior matches the YAML's documented intent ("the agent has N seconds total"), and closes the runaway-loop gap where an agent stuck on lookup tools previously bypassed the duration cap.
+- **Escape hatch**: pass `apply_middleware=False` to `create_sdk_mcp_server` to restore pre-0.20.0 behavior.
+
+### Added
+
+- New `_wrap_with_session_check(inner, session)` helper in `tools/sdk.py` — exported as a private symbol so tests can verify the enforcement wrapper directly without going through the SDK's `@tool` decorator. Mirrors the in-tool enforcement pattern in `tools/langchain.py:_to_structured_tool`.
+
+### Compatibility
+
+- Public API unchanged — `create_sdk_mcp_server` gains one optional kwarg with a sensible default. Pre-built `ToolDef` lists, custom sessions, and all other call shapes continue to work.
+- 6 new tests in `tests/test_tools/test_sdk.py` cover the wrapper behavior and the new kwarg.
+
 ## [0.19.0] - 2026-05-10
 
 ### Added

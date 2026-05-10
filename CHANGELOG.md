@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - 2026-05-10
+
+### Added
+
+- **LangChain / deepagents integration**: new optional `[langchain]` extra exposes `create_langchain_tools()` returning a `list[BaseTool]` consumable by `deepagents.create_deep_agent(tools=...)` or any `langchain.agents.create_agent(tools=...)`. Each tool wraps the existing `ToolDef` via `StructuredTool.from_function(args_schema=<JSON Schema dict>, response_format="content_and_artifact")` — the JSON Schema reaches the agent verbatim and the original MCP envelope is preserved on `ToolMessage.artifact`. `BLOCKED —` envelopes from the underlying tools (`tools/factory.py`, `tools/middleware.py`) are surfaced as `ToolException`, which the agent loop renders as `ToolMessage(status="error")`.
+- **`ContractMiddleware(AgentMiddleware)`** for graph-level enforcement. Pair with `create_langchain_tools(..., apply_middleware=False)` to avoid duplicate work when the middleware is installed at the deepagents/LangGraph boundary. Runs `Validator.validate(sql)` + `ContractSession.check_limits()` and short-circuits with `ToolMessage(status="error")`.
+- **Top-level lazy re-exports** of `create_langchain_tools` and `ContractMiddleware` from `agentic_data_contracts`. The base install (without the `[langchain]` extra) keeps both names defined as `None`, so `from agentic_data_contracts import …` continues to work unchanged for existing Claude Agent SDK users.
+
+### Notes
+
+- Auto-applied in-tool enforcement intentionally **does not** validate SQL on every call (unlike `contract_middleware`); doing so would block `inspect_query`'s purpose of *reporting* violations as JSON. SQL validation is left to `run_query`'s self-checks at `tools/factory.py:632-672`, which still surface as `ToolException` via the canonical `BLOCKED —` prefix sniff.
+- Backward-compatible: zero changes to `tools/factory.py`, `tools/sdk.py`, `tools/middleware.py`, or any existing top-level import. Pinned to current stable: `langchain-core>=1.3.3`, `langchain>=1.2.17`.
+
 ## [0.18.0] - 2026-05-02
 
 ### Added

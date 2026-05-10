@@ -14,8 +14,22 @@ from agentic_data_contracts.tools.factory import create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
 
+# Optional [langchain] extra — module top-level imports langchain_core and
+# langchain.agents, so this fails fast when the extra isn't installed. We
+# fall through to ``None`` so ``from agentic_data_contracts import …`` keeps
+# working for users on the base install.
+try:
+    from agentic_data_contracts.tools.langchain import (
+        ContractMiddleware,
+        create_langchain_tools,
+    )
+except ImportError:  # pragma: no cover — exercised only without the extra
+    ContractMiddleware = None  # ty: ignore[invalid-assignment]
+    create_langchain_tools = None  # ty: ignore[invalid-assignment]
+
 __all__ = [
     "ClaudePromptRenderer",
+    "ContractMiddleware",
     "DataContract",
     "MetricDefinition",
     "MetricImpact",
@@ -25,6 +39,7 @@ __all__ = [
     "SemanticSource",
     "SqlNormalizer",
     "contract_middleware",
+    "create_langchain_tools",
     "create_sdk_mcp_server",
     "create_tools",
     "resolve_principal",

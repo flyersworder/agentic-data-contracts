@@ -244,7 +244,10 @@ async def test_session_limit_exceeded_raises_tool_exception(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """Even non-SQL tools must surface session-limit exhaustion. Fixture
-    sets max_retries=3 (tests/fixtures/valid_contract.yml:45)."""
+    sets max_retries=3 (tests/fixtures/valid_contract.yml:45). The
+    raised ToolException must include the ``Remaining:`` budget summary
+    so the agent sees the same diagnostic info ``run_query`` would have
+    emitted directly."""
     session = ContractSession(contract)
     for _ in range(4):  # exceed max_retries=3
         session.record_retry()
@@ -256,6 +259,7 @@ async def test_session_limit_exceeded_raises_tool_exception(
         await describe.ainvoke({"schema": "analytics", "table": "orders"})
     msg = str(exc.value).lower()
     assert "limit" in msg or "exceeded" in msg
+    assert "remaining:" in msg
 
 
 # ─── apply_middleware=False escape hatch ──────────────────────────────────────
@@ -324,6 +328,7 @@ async def test_contract_middleware_blocks_disallowed_sql_via_awrap_tool_call(
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
     assert "BLOCKED" in str(result.content)
+    assert "Remaining:" in str(result.content)  # agent must see budget
     assert result.tool_call_id == "tc-1"
 
 

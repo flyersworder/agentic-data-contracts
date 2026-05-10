@@ -20,6 +20,7 @@ behavior where only ``run_query`` self-checked limits).
 from __future__ import annotations
 
 import functools
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -30,6 +31,13 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import ToolDef, create_tools
 
 _BLOCKED_PREFIX = "BLOCKED —"
+
+
+def _with_remaining(message: str, session: ContractSession) -> str:
+    """Append the canonical ``Remaining: {budget}`` suffix used by
+    ``run_query`` (factory.py:627-628) so wrapper-emitted blocks carry
+    the same diagnostic footprint as run_query's own blocks."""
+    return f"{message}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
 
 def _wrap_with_session_check(
@@ -53,7 +61,10 @@ def _wrap_with_session_check(
                 "content": [
                     {
                         "type": "text",
-                        "text": f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                        "text": _with_remaining(
+                            f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                            session,
+                        ),
                     }
                 ]
             }
@@ -87,9 +98,20 @@ def create_sdk_mcp_server(
         tools: Pre-built ToolDefs (if None, created via create_tools).
         apply_middleware: When ``True`` (default since v0.20.0), every
             wrapped tool pre-checks ``session.check_limits()`` and
-            short-circuits on overrun — matching ``create_langchain_tools``.
-            Set ``False`` to restore pre-0.20.0 behavior in which only
+            short-circuits on overrun. Aligned with ``create_langchain_tools``
+            on enforcement *timing* (clock starts at first tool call), but
+            error transport differs by design — see note below. Set
+            ``False`` to restore pre-0.20.0 behavior in which only
             ``run_query`` self-checks limits (lookup tools bypass).
+
+            Note on cross-adapter parity: with ``apply_middleware=False``,
+            this adapter passes a tool's BLOCKED envelope through to the
+            agent as-is (the SDK MCP transport carries error context as
+            text content; there is no ``status="error"`` field). The
+            LangChain adapter additionally sniffs the ``BLOCKED —``
+            prefix and converts it into a ``ToolException``. Both surface
+            the same text to the agent; only the structured-error signal
+            differs.
         server_name: Name for the MCP server.
         server_version: Version for the MCP server.
 

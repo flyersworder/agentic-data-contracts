@@ -14,6 +14,10 @@ All notable changes to this project will be documented in this file.
 
 - New `_wrap_with_session_check(inner, session)` helper in `tools/sdk.py` — exported as a private symbol so tests can verify the enforcement wrapper directly without going through the SDK's `@tool` decorator. Mirrors the in-tool enforcement pattern in `tools/langchain.py:_to_structured_tool`.
 
+### Fixed
+
+- Wrapper-emitted BLOCKED envelopes now include the canonical `Remaining: {budget}` suffix that `run_query`'s self-emitted blocks have always carried (per `factory.py:627-628`). Pre-0.20.0 the LangChain wrapper (introduced in v0.19.0) and the new SDK wrapper both omitted this suffix, so agents whose retry-planning logic depended on the suffix would lose context once they hit the wrapper layer instead of `run_query`'s own block. Applies to both `_wrap_with_session_check` (SDK) and `_to_structured_tool` / `ContractMiddleware._check` (LangChain).
+
 ### Compatibility
 
 - Public API unchanged — `create_sdk_mcp_server` gains one optional kwarg with a sensible default. Pre-built `ToolDef` lists, custom sessions, and all other call shapes continue to work.

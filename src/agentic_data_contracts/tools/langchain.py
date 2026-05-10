@@ -25,7 +25,7 @@ key — including ``inspect_query``, whose explicit purpose is to *report*
 violations as JSON without blocking. The in-tool path here therefore only
 runs ``session.check_limits()`` and the ``BLOCKED —`` prefix sniff; SQL
 validation is left to the underlying tools (``run_query`` self-validates
-at ``factory.py:632-672``).
+at ``factory.py:632-702``).
 
 Requires the ``[langchain]`` extra: ``pip install agentic-data-contracts[langchain]``.
 """
@@ -87,9 +87,12 @@ def create_langchain_tools(
         tools: Pre-built ``ToolDef`` list (if ``None``, created via
             ``create_tools``).
         apply_middleware: When ``True`` (default), each tool pre-checks
-            ``session.check_limits()`` and converts ``BLOCKED —`` envelopes
-            into ``ToolException``. Set ``False`` if you are pairing this
-            with ``ContractMiddleware`` to avoid duplicate work.
+            ``session.check_limits()``. Set ``False`` if you are pairing
+            this with ``ContractMiddleware`` to avoid duplicate
+            limit-check work — note that the ``BLOCKED —`` prefix sniff
+            is always active regardless of this flag, so error semantics
+            (raising ``ToolException`` on a blocked envelope) are
+            preserved either way.
 
     Returns:
         A list of ``BaseTool`` instances; order matches the underlying

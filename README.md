@@ -217,7 +217,30 @@ async def run(prompt: str) -> None:
 asyncio.run(run("What was total revenue by region in Q1 2025?"))
 ```
 
-### 4. Or use the tools directly (no SDK required)
+### 4. Or use with deepagents / LangChain (requires `langchain>=1.2.17`)
+
+```python
+from agentic_data_contracts import create_langchain_tools, ContractMiddleware
+from deepagents import create_deep_agent
+
+# `dc` and `adapter` are from the previous example.
+# Returns list[BaseTool] — drop in anywhere LangChain accepts tools.
+tools = create_langchain_tools(dc, adapter=adapter)
+
+# Enforcement is auto-applied: session limits and BLOCKED envelopes from the
+# underlying tools surface as ToolMessage(status="error"). Pair with
+# ContractMiddleware (and apply_middleware=False) for graph-level interception.
+agent = create_deep_agent(tools=tools)
+```
+
+Install: `pip install "agentic-data-contracts[langchain]"`. For graph-level enforcement instead of in-tool:
+
+```python
+tools = create_langchain_tools(dc, adapter=adapter, apply_middleware=False)
+agent = create_deep_agent(tools=tools, middleware=[ContractMiddleware(dc, adapter=adapter)])
+```
+
+### 5. Or use the tools directly (no SDK required)
 
 ```python
 import asyncio
@@ -616,6 +639,7 @@ resources:
 | `snowflake` | `snowflake-connector-python` | Snowflake adapter |
 | `postgres` | `psycopg2-binary` | PostgreSQL adapter |
 | `agent-sdk` | `claude-agent-sdk` | Claude Agent SDK integration |
+| `langchain` | `langchain-core`, `langchain` | LangChain / deepagents integration |
 | `agent-contracts` | `ai-agent-contracts>=0.2.0` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

@@ -32,6 +32,7 @@ Requires the ``[langchain]`` extra: ``pip install agentic-data-contracts[langcha
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -48,6 +49,13 @@ from agentic_data_contracts.tools.factory import ToolDef, create_tools
 from agentic_data_contracts.validation.validator import Validator
 
 _BLOCKED_PREFIX = "BLOCKED —"
+
+
+def _with_remaining(message: str, session: ContractSession) -> str:
+    """Append the canonical ``Remaining: {budget}`` suffix used by
+    ``run_query`` (factory.py:627-628) so wrapper-emitted blocks carry
+    the same diagnostic footprint as run_query's own blocks."""
+    return f"{message}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
 
 def _unwrap_mcp_text(envelope: dict[str, Any]) -> str:
@@ -131,7 +139,10 @@ def _to_structured_tool(
                 session.check_limits()
             except LimitExceededError as e:
                 raise ToolException(
-                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}"
+                    _with_remaining(
+                        f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                        session,
+                    )
                 ) from e
 
         envelope = await inner(kwargs)
@@ -209,7 +220,10 @@ class ContractMiddleware(AgentMiddleware):
             self._session.check_limits()
         except LimitExceededError as e:
             return ToolMessage(
-                content=f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                content=_with_remaining(
+                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                    self._session,
+                ),
                 name=name,
                 tool_call_id=tool_call_id,
                 status="error",
@@ -226,9 +240,10 @@ class ContractMiddleware(AgentMiddleware):
             if result.blocked:
                 self._session.record_retry()
                 return ToolMessage(
-                    content=(
+                    content=_with_remaining(
                         f"{_BLOCKED_PREFIX} Violations:\n"
-                        + "\n".join(f"- {r}" for r in result.reasons)
+                        + "\n".join(f"- {r}" for r in result.reasons),
+                        self._session,
                     ),
                     name=name,
                     tool_call_id=tool_call_id,

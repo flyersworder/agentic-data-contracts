@@ -344,7 +344,7 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 
 ### 9 Tools
 
-1. **`describe_table(schema, table)`** — Column details from the database adapter
+1. **`describe_table(schema, table)`** — Column details, merging the database adapter's catalog view with authored descriptions from the semantic source (semantic wins; adapter fills gaps)
 2. **`preview_table(schema, table, limit?)`** — Sample rows
 3. **`list_metrics(domain?, tier?, indicator_kind?)`** — Browse metrics with filters
 4. **`lookup_metric(metric_name)`** — Full metric definition with SQL and impact edges

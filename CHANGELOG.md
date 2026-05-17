@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.0] - 2026-05-17
+
+### Fixed
+
+- **`describe_table` now emits column descriptions to the agent.** Since the tool factory's first commit (`0296613`), the tool serialised columns as `{name, type, nullable}` only — `Column.description` was silently dropped on the way out, even when populated by the adapter (e.g., a Denodo deployment carrying authored catalog comments) or available in the contract's semantic source. This is the single largest *context* improvement a data-contract library can make: per the [Datacult "boring work" benchmark](https://www.datacult.com/post/the-boring-work-that-makes-ai-analytics-actually-work-why-winning-with-ai-in-analytics-is-an-investment-in-a-rich-data-context-not-better-llm-models), adding column descriptions moved an agent's SQL accuracy from 0% to 15% and SQL generation from 38.5% to 100% — the largest jump in their six-layer experiment. The fix overlays descriptions onto the tool response with this precedence: (1) semantic source via `SemanticSource.get_table_schema(schema, table)`, which is the canonical agent-facing authority; (2) `Column.description` from the adapter, which captures warehouse catalog comments; (3) field omitted entirely when both are empty, keeping responses tight.
+- **The `SemanticSource.get_table_schema` protocol method is no longer dead code from the tool layer's perspective.** All three built-in semantic sources (`YamlSource`, `DbtSource`, `CubeSource`) already populated `TableSchema.columns[*].description` from their respective inputs; the tool just never consulted them. Now it does.
+
+### Added
+
+- 3 new tests in `tests/test_tools/test_factory.py` covering the merge behaviour: `test_describe_table_includes_semantic_descriptions` (semantic-source descriptions reach the agent), `test_describe_table_falls_back_to_adapter_description` (adapter-supplied descriptions surface when the semantic source has no entry, and the field is omitted when both are empty), and `test_describe_table_semantic_overrides_adapter_description` (semantic source wins when both have descriptions for the same column).
+
+### Compatibility
+
+- **Backward-compatible response shape.** The new `description` field is *additive only* — consumers that ignore unknown keys see no behaviour change. The field is omitted (not set to `""`) when no description exists, so JSON payload size is unchanged for description-less columns.
+- **No new failure modes.** The merge guards `semantic_source is None`, `get_table_schema(...)` returning `None`, columns appearing in one source but not the other, and empty-string descriptions. A column described in the semantic source but absent from the warehouse is silently dropped — the adapter's column list is the source of truth for *which* columns exist; the semantic source only adorns them.
+- **No new dependencies.** The fix uses interfaces that already existed in the codebase.
+
+### Internal
+
+- `uv lock --upgrade` refreshed transitive dependencies (notable bumps: `sqlglot 30.6.0 → 30.8.0`, `langchain 1.2.17 → 1.3.0`, `langgraph 1.1.10 → 1.2.0`, `pydantic 2.13.3 → 2.13.4`, `cryptography 47.0.0 → 48.0.0`). Full 602-test suite + ruff + ty all green against the new versions.
+- `.pre-commit-config.yaml`: `ruff-pre-commit` rev bumped to `v0.15.13` to match the lockfile-pinned `ruff` binary, preventing the silent local-vs-hook drift where the same file passes `uv run ruff` but a stale hook env flags it.
+
 ## [0.20.0] - 2026-05-10
 
 ### Changed

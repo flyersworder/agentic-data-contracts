@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -92,6 +93,98 @@ async def test_describe_table_without_adapter(
     result = await tool.callable({"schema": "analytics", "table": "orders"})
     text = result["content"][0]["text"]
     assert "unavailable" in text.lower() or "no database" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_describe_table_includes_semantic_descriptions(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Column descriptions from the semantic source must reach the agent."""
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "describe_table")
+    result = await tool.callable({"schema": "analytics", "table": "orders"})
+    payload = json.loads(result["content"][0]["text"])
+    cols_by_name = {c["name"]: c for c in payload["columns"]}
+    assert cols_by_name["amount"]["description"] == "Order total in USD"
+    assert cols_by_name["tenant_id"]["description"] == (
+        "Tenant identifier for multi-tenancy"
+    )
+
+
+@pytest.mark.asyncio
+async def test_describe_table_falls_back_to_adapter_description(
+    contract: DataContract, semantic: YamlSource
+) -> None:
+    """When semantic source has no entry, adapter-supplied descriptions surface.
+
+    Mirrors deployments (e.g. Denodo) where the warehouse catalog already
+    carries authored column comments and the adapter populates Column.description.
+    """
+
+    class DescriptionAwareAdapter(DuckDBAdapter):
+        def describe_table(self, schema: str, table: str) -> TableSchema:
+            if (schema, table) == ("analytics", "subscriptions"):
+                return TableSchema(
+                    columns=[
+                        Column(name="id", type="INTEGER", description="Plan FK"),
+                        Column(
+                            name="plan",
+                            type="VARCHAR",
+                            description="Subscription tier from billing system",
+                        ),
+                        Column(name="tenant_id", type="VARCHAR"),
+                    ]
+                )
+            return super().describe_table(schema, table)
+
+    desc_adapter = DescriptionAwareAdapter(":memory:")
+    desc_adapter.connection.execute(
+        "CREATE SCHEMA analytics;"
+        "CREATE TABLE analytics.subscriptions ("
+        "id INTEGER, plan VARCHAR, tenant_id VARCHAR);"
+    )
+    tools = create_tools(contract, adapter=desc_adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "describe_table")
+    result = await tool.callable({"schema": "analytics", "table": "subscriptions"})
+    payload = json.loads(result["content"][0]["text"])
+    cols_by_name = {c["name"]: c for c in payload["columns"]}
+    assert (
+        cols_by_name["plan"]["description"] == "Subscription tier from billing system"
+    )
+    # No description anywhere → field omitted to keep responses tight.
+    assert "description" not in cols_by_name["tenant_id"]
+
+
+@pytest.mark.asyncio
+async def test_describe_table_semantic_overrides_adapter_description(
+    contract: DataContract, semantic: YamlSource
+) -> None:
+    """Authored semantic-source descriptions win over adapter catalog comments."""
+
+    class CompetingAdapter(DuckDBAdapter):
+        def describe_table(self, schema: str, table: str) -> TableSchema:
+            return TableSchema(
+                columns=[
+                    Column(
+                        name="status",
+                        type="VARCHAR",
+                        description="catalog-side stale description",
+                    ),
+                ]
+            )
+
+    competing = CompetingAdapter(":memory:")
+    competing.connection.execute(
+        "CREATE SCHEMA analytics; CREATE TABLE analytics.orders (status VARCHAR);"
+    )
+    tools = create_tools(contract, adapter=competing, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "describe_table")
+    result = await tool.callable({"schema": "analytics", "table": "orders"})
+    payload = json.loads(result["content"][0]["text"])
+    cols_by_name = {c["name"]: c for c in payload["columns"]}
+    assert cols_by_name["status"]["description"] == (
+        "Order status: pending, completed, cancelled"
+    )
 
 
 @pytest.mark.asyncio

@@ -244,9 +244,29 @@ def create_tools(
                 f" for {qualified}."
             )
         ts = adapter.describe_table(schema_name, table_name)
-        cols = [
-            {"name": c.name, "type": c.type, "nullable": c.nullable} for c in ts.columns
-        ]
+        # Overlay authored descriptions from the semantic source onto adapter
+        # output. Semantic source wins because it is the canonical agent-facing
+        # documentation; adapter-supplied descriptions (e.g. warehouse column
+        # comments) fill in where the semantic source has no entry. Columns
+        # with no description anywhere omit the field to keep responses tight.
+        sem_descs: dict[str, str] = {}
+        if semantic_source is not None:
+            sem_ts = semantic_source.get_table_schema(schema_name, table_name)
+            if sem_ts is not None:
+                sem_descs = {
+                    c.name: c.description for c in sem_ts.columns if c.description
+                }
+        cols: list[dict[str, Any]] = []
+        for c in ts.columns:
+            col: dict[str, Any] = {
+                "name": c.name,
+                "type": c.type,
+                "nullable": c.nullable,
+            }
+            desc = sem_descs.get(c.name) or c.description
+            if desc:
+                col["description"] = desc
+            cols.append(col)
         return _text_response(
             json.dumps({"schema": schema_name, "table": table_name, "columns": cols})
         )

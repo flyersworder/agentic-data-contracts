@@ -22,13 +22,24 @@ Usage:
     uv run python examples/ops_agent/agent.py "What's our MTTR by severity this week?"
     uv run python examples/ops_agent/agent.py --caller intern@co.com "Show recent deploys"
     uv run python examples/ops_agent/agent.py --caller compliance@co.com "Pull customer contacts for incident triage"
+
+Optional data-plugin skills overlay (see growth_agent for the canonical template):
+the governed in-process MCP server stays the *only* path to the warehouse — the
+plugin's own `.mcp.json` warehouse servers are suppressed with
+``strict_mcp_config=True``. Enable by pointing at a local checkout:
+
+    git clone https://github.com/anthropics/knowledge-work-plugins /tmp/kwp
+    DATA_PLUGIN_PATH=/tmp/kwp/data \\
+        uv run python examples/ops_agent/agent.py "What's our MTTR by severity this week?"
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +48,40 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 EXAMPLE_DIR = Path(__file__).parent
+
+# Curated subset of the `data` plugin's skills that complement governed tools.
+# These do analytical *craft* (the contract supplies metric *meaning*).
+#   - data-context-extractor is deliberately OMITTED: it generates a parallel
+#     semantic skill that would compete with this contract as the source of
+#     metric truth.
+#   - create-viz / build-dashboard are omitted too: they need code-execution
+#     tools (Bash/file), which this governed agent does not grant.
+DATA_PLUGIN_SKILLS = [
+    "validate-data",  # pre-share methodology / bias QA on the analysis
+    "statistical-analysis",  # significance testing + descriptive rigor
+    "explore-data",  # profiling / data-quality checks (routes via run_query)
+    "sql-queries",  # window-function & dialect craft for funnels/cohorts
+]
+
+
+def _resolve_data_plugin() -> Path | None:
+    """Return the local `data` plugin directory if configured and valid.
+
+    The plugin is an external checkout, so it is opt-in via ``DATA_PLUGIN_PATH``.
+    Returns None (with a hint) when unset or not a plugin dir, keeping the
+    example runnable with zero external setup.
+    """
+    raw = os.environ.get("DATA_PLUGIN_PATH")
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not (path / ".claude-plugin").is_dir() and not (path / ".mcp.json").is_file():
+        print(
+            f"DATA_PLUGIN_PATH={raw!r} is not a plugin directory "
+            "(no .claude-plugin/ or .mcp.json) — skipping plugin overlay.\n"
+        )
+        return None
+    return path
 
 
 def _parse_run_query_body(text: str) -> dict | None:
@@ -120,13 +165,58 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
         " improving or degrading vs the prior period. When reasoning about"
         " deploy/incident causation, cite the confidence level from"
         " trace_metric_impacts — correlated is NOT causal."
+        " Always resolve business metrics via lookup_metric / lookup_domain before"
+        " writing SQL; use the data-plugin SQL/stats skills only to shape and QA"
+        " the analysis around the contract's validated metric definitions."
     )
-    options = ClaudeAgentOptions(
-        model="claude-sonnet-4-6",
-        system_prompt=f"{ops_policy}\n\n{dc.to_system_prompt()}",
-        mcp_servers={"dc": server},
-        allowed_tools=[f"mcp__dc__{t.name}" for t in tools],
-    )
+
+    # Base options: the governed in-process server is the ONLY data path, and its
+    # tools are the only ones auto-allowed.
+    opts_kwargs: dict = {
+        "model": "claude-sonnet-4-6",
+        "mcp_servers": {"dc": server},
+        "allowed_tools": [f"mcp__dc__{t.name}" for t in tools],
+    }
+
+    # ── Optional: overlay the `data` plugin's analyst skills ──────────────────
+    # Only when (a) the SDK supports it and (b) a plugin checkout is configured.
+    option_fields = {f.name for f in dataclasses.fields(ClaudeAgentOptions)}
+    sdk_supports_plugins = {"plugins", "skills", "strict_mcp_config"} <= option_fields
+    plugin_path = _resolve_data_plugin()
+
+    if sdk_supports_plugins and plugin_path is not None:
+        opts_kwargs["plugins"] = [{"type": "local", "path": str(plugin_path)}]
+        opts_kwargs["skills"] = DATA_PLUGIN_SKILLS
+        # THE GUARD: load the plugin's skills but IGNORE its bundled .mcp.json
+        # warehouse servers — so the agent cannot bypass the contract. Only the
+        # "dc" server above is reachable.
+        opts_kwargs["strict_mcp_config"] = True
+        # Skills/commands need the claude_code system-prompt harness; append the
+        # ops policy + contract governance on top of it.
+        opts_kwargs["system_prompt"] = {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": f"{ops_policy}\n\n{dc.to_system_prompt()}",
+        }
+        print(
+            f"[plugin overlay] data-plugin skills enabled from {plugin_path} "
+            f"({', '.join(DATA_PLUGIN_SKILLS)}); warehouse access stays governed.\n"
+        )
+    else:
+        # Governed-tools-only path (default). Plain-string prompt works on any SDK.
+        opts_kwargs["system_prompt"] = f"{ops_policy}\n\n{dc.to_system_prompt()}"
+        if plugin_path is None:
+            print(
+                "[plugin overlay] disabled — set DATA_PLUGIN_PATH to a local "
+                "`data` plugin checkout to enable the analyst skills.\n"
+            )
+        elif not sdk_supports_plugins:
+            print(
+                "[plugin overlay] skipped — installed claude-agent-sdk lacks "
+                "plugins/skills support; upgrade to enable.\n"
+            )
+
+    options = ClaudeAgentOptions(**opts_kwargs)
 
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):

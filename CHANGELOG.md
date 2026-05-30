@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.1] - 2026-05-30
+
+### Added
+
+- **Reference template for layering Anthropic's [`data` knowledge-work plugin](https://github.com/anthropics/knowledge-work-plugins/tree/main/data) on top of contract-governed tools.** All three example agents (`revenue_agent`, `growth_agent`, `ops_agent`) now carry an opt-in overlay, off by default and enabled by pointing `DATA_PLUGIN_PATH` at a local plugin checkout. The agent gains the plugin's tool-agnostic analyst *skills* (`validate-data`, `statistical-analysis`, `explore-data`, `sql-queries`) while every query it runs is still enforced by the contract — the plugin's skills drive "whatever warehouse tool is connected," which in-process is the governed `create_sdk_mcp_server` server. `growth_agent/agent.py` is the canonical, fully-commented template; the README gains a "Layer Anthropic's `data` plugin on top" subsection under the Agent SDK usage docs.
+- **The security-critical piece is `strict_mcp_config=True`.** Loading a plugin would otherwise also activate the warehouse servers in its bundled `.mcp.json`, giving the agent an ungoverned path around the contract. `strict_mcp_config` restricts the session to *only* the servers passed via `mcp_servers`, so the plugin's skills load but its `.mcp.json` warehouse servers stay inert. The curated skill list deliberately omits `data-context-extractor` (it generates a parallel semantic skill that competes with the contract as the source of metric truth) and the viz/dashboard skills (they require code-execution tools the governed agents do not grant). Each agent's system prompt also gained a metric-precedence line so the plugin's "just write a query" instinct does not undercut the governed semantic layer.
+
+### Compatibility
+
+- **No library API change.** This release touches only `examples/`, `README.md`, the dependency lockfile, and tooling config — nothing under `src/`. Consumers of the importable library see no behavioural change; hence a patch bump.
+- **Opt-in and degrades gracefully.** The overlay is inert unless `DATA_PLUGIN_PATH` is set to a valid plugin directory, and the example feature-detects `plugins` / `skills` / `strict_mcp_config` on `ClaudeAgentOptions` before using them — so the examples still run unchanged on older `claude-agent-sdk` versions and with zero external setup.
+
+### Internal
+
+- `uv lock --upgrade` refreshed all dependencies. Headline bump: **`claude-agent-sdk 0.1.81 → 0.2.87`** (a 0.1→0.2 minor jump); the overlay-relevant `ClaudeAgentOptions` surface (`plugins`, `skills`, `strict_mcp_config`, the `claude_code` system-prompt preset) and `create_sdk_mcp_server` were verified intact across the jump. Other notable bumps: `langchain 1.3.0 → 1.3.2`, `langgraph 1.2.0 → 1.2.2`, `duckdb 1.5.2 → 1.5.3`, `snowflake-connector-python 4.5.0 → 4.6.0`, `mcp 1.27.1 → 1.27.2`, `ruff 0.15.13 → 0.15.15`, `cryptography`/`boto3`/`starlette`/`uvicorn` patch/minor refreshes. Full 602-test suite + ruff + ty all green against the new versions.
+- `.pre-commit-config.yaml`: `ruff-pre-commit` rev bumped `v0.15.13 → v0.15.15` (via `prek autoupdate`) to match the lockfile-pinned `ruff` binary, preserving the local-vs-hook alignment.
+
 ## [0.21.0] - 2026-05-17
 
 ### Fixed

@@ -217,6 +217,43 @@ async def run(prompt: str) -> None:
 asyncio.run(run("What was total revenue by region in Q1 2025?"))
 ```
 
+#### Layer Anthropic's `data` plugin on top (governed analyst skills)
+
+The Agent SDK can load [knowledge-work plugins](https://github.com/anthropics/knowledge-work-plugins) alongside your governed tools, so the agent gets the `data` plugin's analyst *skills* (`validate-data`, `statistical-analysis`, `explore-data`, `sql-queries`, …) while every query it runs is still enforced by your contract. The skills are tool-agnostic — they drive "whatever warehouse tool is connected," which in your process is your governed in-process server.
+
+The one rule that makes this safe: **suppress the plugin's bundled `.mcp.json` warehouse servers** so the agent can't bypass the contract. `strict_mcp_config=True` does exactly that — it uses *only* the servers you pass in `mcp_servers`.
+
+```python
+import dataclasses
+
+server = create_sdk_mcp_server(dc, adapter=adapter)
+
+opts_kwargs = {
+    "model": "claude-sonnet-4-6",
+    "mcp_servers": {"dc": server},                  # the ONLY data path
+    "allowed_tools": [f"mcp__dc__{t.name}" for t in tools],
+}
+
+# Feature-detect SDK support, then overlay the plugin's skills.
+fields = {f.name for f in dataclasses.fields(ClaudeAgentOptions)}
+if {"plugins", "skills", "strict_mcp_config"} <= fields:
+    opts_kwargs["plugins"] = [{"type": "local", "path": "/path/to/knowledge-work-plugins/data"}]
+    opts_kwargs["skills"] = ["validate-data", "statistical-analysis", "explore-data", "sql-queries"]
+    opts_kwargs["strict_mcp_config"] = True         # ← ignore the plugin's warehouse .mcp.json
+    opts_kwargs["system_prompt"] = {                # skills need the claude_code harness
+        "type": "preset", "preset": "claude_code",
+        "append": dc.to_system_prompt(),            # your governance, appended
+    }
+
+options = ClaudeAgentOptions(**opts_kwargs)
+```
+
+Notes:
+
+- **Curate the skill list — do not use `skills="all"`.** `data-context-extractor` is deliberately omitted: it generates a parallel semantic skill that competes with your contract as the source of metric truth. The viz/dashboard skills (`create-viz`, `build-dashboard`) need code-execution tools you may not want to grant.
+- **Set metric precedence in your prompt** (e.g. "resolve metrics via `lookup_metric`/`lookup_domain` before writing SQL") so the plugin's "just write a query" instinct doesn't undercut your governed semantic layer.
+- All three [examples](#examples) ship this wiring behind an opt-in `DATA_PLUGIN_PATH` env var — `growth_agent/agent.py` is the canonical, fully-commented template.
+
 ### 4. Or use with deepagents / LangChain (requires `langchain>=1.2.17`)
 
 ```python
@@ -694,6 +731,14 @@ Each example directory contains four files:
 - `agent.py` — runnable demo with a Claude Agent SDK path plus a fallback that exercises the tools directly
 
 Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
+
+All three `agent.py` files also carry the [`data`-plugin skills overlay](#layer-anthropics-data-plugin-on-top-governed-analyst-skills) behind an opt-in `DATA_PLUGIN_PATH` env var (off by default, so the examples run with zero external setup):
+
+```bash
+git clone https://github.com/anthropics/knowledge-work-plugins /tmp/kwp
+DATA_PLUGIN_PATH=/tmp/kwp/data \
+    uv run python examples/growth_agent/agent.py "Which onboarding variant lifted activation?"
+```
 
 ## Architecture
 

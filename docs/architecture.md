@@ -456,6 +456,14 @@ connection pool**, not the thread pool — connections are the real concurrency
 gate. Size your adapter's connection pool to the concurrency you want to
 support.
 
+Because the offloaded calls now run on worker threads, an adapter must be safe
+for concurrent invocation. Implementations backed by a connection pool get this
+for free; an adapter that shares a single connection must serialize access to
+it. The bundled `DuckDBAdapter` holds a single connection — which is not safe
+for concurrent queries — so it guards `execute` / `explain` / `describe_table`
+with a `threading.Lock`, serializing on the connection rather than interleaving.
+Custom single-connection adapters should do the same.
+
 ## Semantic Layer
 
 Reads external semantic definitions so the agent knows *how* metrics are defined.

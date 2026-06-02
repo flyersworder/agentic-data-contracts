@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
   - **`tools/factory.py`** — `adapter.execute` (in `run_query` and `preview_table`), `adapter.describe_table` (in `describe_table`), and `validator.validate`'s EXPLAIN dry-run (`explain_adapter.explain`, used by `run_query` and `inspect_query`).
   - **`tools/middleware.py`** — `contract_middleware`'s async wrapper now offloads `validator.validate`.
   - **`tools/langchain.py`** — `ContractMiddleware.awrap_tool_call` now offloads its `_check` (which runs `validator.validate`); the synchronous `wrap_tool_call` path is unchanged.
+- **`DuckDBAdapter` is now safe under the concurrency the offloading enables.** A single DuckDB connection is not safe for concurrent queries across threads, and the new `asyncio.to_thread` offloading lets multiple sessions land in `execute` / `explain` / `describe_table` on different worker threads at once. The adapter now guards every access to its shared connection with a `threading.Lock`, so concurrent calls serialize on the connection instead of interleaving and corrupting each other's result state. DuckDB still parallelizes the work of an individual query internally; the lock only prevents two queries from interleaving on the same connection.
 
 ### Compatibility
 
@@ -20,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 - 4 tests in `tests/test_tools/test_event_loop.py` asserting that `run_query`, `inspect_query`, `describe_table`, and `preview_table` execute their blocking adapter calls on a worker thread rather than the event-loop thread.
 - Matching off-loop tests for the other two async enforcement paths: `test_middleware_offloads_validate_off_event_loop` (`contract_middleware`) and `test_contract_middleware_offloads_validate_off_event_loop` (LangChain `ContractMiddleware.awrap_tool_call`).
+- `test_execute_serializes_concurrent_connection_access` in `tests/test_adapters/test_duckdb.py`, which fires 8 concurrent `execute` calls through `asyncio.to_thread` and asserts the adapter lock holds peak connection concurrency at 1.
 
 ## [0.21.1] - 2026-05-30
 

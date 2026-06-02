@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 from collections.abc import Callable
 from typing import Any
@@ -47,7 +48,10 @@ def contract_middleware(
 
             sql = args.get("sql", "")
             if sql:
-                result = validator.validate(sql)
+                # validate() makes a synchronous EXPLAIN/dry-run DB round-trip
+                # (validator.py:307), so offload it to a worker thread to keep
+                # the event loop responsive — same rationale as factory.py.
+                result = await asyncio.to_thread(validator.validate, sql)
                 if result.blocked:
                     session.record_retry()
                     return {

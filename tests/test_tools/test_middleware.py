@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -91,3 +92,31 @@ async def test_middleware_checks_session_limits(
     )
     text = result["content"][0]["text"]
     assert "limit" in text.lower() or "exceeded" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_middleware_offloads_validate_off_event_loop(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """The async wrapper must run the blocking EXPLAIN dry-run (inside
+    validator.validate) on a worker thread, not the event-loop thread."""
+    seen: dict[str, int] = {}
+    original_explain = adapter.explain
+
+    def tracking_explain(sql: str):  # type: ignore[no-untyped-def]
+        seen["explain"] = threading.get_ident()
+        return original_explain(sql)
+
+    setattr(adapter, "explain", tracking_explain)
+
+    @contract_middleware(contract, adapter=adapter)
+    async def my_query(args: dict) -> dict:
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    await my_query(
+        {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+
+    assert seen["explain"] != threading.get_ident(), (
+        "EXPLAIN ran on the event-loop thread"
+    )

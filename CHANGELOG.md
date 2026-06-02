@@ -6,7 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **Async tool handlers no longer block the event loop on synchronous adapter I/O.** The nine tool handlers in `tools/factory.py` are `async def`, but four of them called **synchronous**, blocking `DatabaseAdapter` / `ExplainAdapter` methods directly on the event-loop thread. A single slow query (tens of seconds, common for analytical warehouses) therefore stalled the **entire asyncio event loop of the host process** — freezing every other concurrent coroutine: other sessions' tool calls, health-check probes, and anything else sharing the loop. This is invisible at low concurrency but becomes the dominant latency multiplier once multiple sessions share one host process (e.g. a shared in-process MCP server backing a multi-user bot). Each blocking round-trip is now offloaded via `asyncio.to_thread(...)`: `adapter.execute` (in `run_query` and `preview_table`), `adapter.describe_table` (in `describe_table`), and `validator.validate`'s EXPLAIN dry-run (`explain_adapter.explain`, used by `run_query` and `inspect_query`).
+- **Async enforcement paths no longer block the event loop on synchronous adapter I/O.** The `async def` handlers across the tools layer called **synchronous**, blocking `DatabaseAdapter` / `ExplainAdapter` methods directly on the event-loop thread. A single slow query (tens of seconds, common for analytical warehouses) therefore stalled the **entire asyncio event loop of the host process** — freezing every other concurrent coroutine: other sessions' tool calls, health-check probes, and anything else sharing the loop. This is invisible at low concurrency but becomes the dominant latency multiplier once multiple sessions share one host process (e.g. a shared in-process MCP server backing a multi-user bot). Each blocking round-trip is now offloaded via `asyncio.to_thread(...)` in every async path:
+  - **`tools/factory.py`** — `adapter.execute` (in `run_query` and `preview_table`), `adapter.describe_table` (in `describe_table`), and `validator.validate`'s EXPLAIN dry-run (`explain_adapter.explain`, used by `run_query` and `inspect_query`).
+  - **`tools/middleware.py`** — `contract_middleware`'s async wrapper now offloads `validator.validate`.
+  - **`tools/langchain.py`** — `ContractMiddleware.awrap_tool_call` now offloads its `_check` (which runs `validator.validate`); the synchronous `wrap_tool_call` path is unchanged.
 
 ### Compatibility
 
@@ -16,6 +19,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - 4 tests in `tests/test_tools/test_event_loop.py` asserting that `run_query`, `inspect_query`, `describe_table`, and `preview_table` execute their blocking adapter calls on a worker thread rather than the event-loop thread.
+- Matching off-loop tests for the other two async enforcement paths: `test_middleware_offloads_validate_off_event_loop` (`contract_middleware`) and `test_contract_middleware_offloads_validate_off_event_loop` (LangChain `ContractMiddleware.awrap_tool_call`).
 
 ## [0.21.1] - 2026-05-30
 

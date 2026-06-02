@@ -1,5 +1,6 @@
 """Tests for LangChain / deepagents BaseTool adapter."""
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -395,6 +396,49 @@ def test_contract_middleware_blocks_disallowed_sql_via_wrap_tool_call_sync(
     assert result.status == "error"
     assert "BLOCKED" in str(result.content)
     assert result.tool_call_id == "tc-sync"
+
+
+@pytest.mark.asyncio
+async def test_contract_middleware_offloads_validate_off_event_loop(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """awrap_tool_call must run the blocking EXPLAIN dry-run (inside
+    Validator.validate, via _check) on a worker thread, not the event-loop
+    thread."""
+    from langchain.agents.middleware.types import ToolCallRequest
+    from langchain_core.messages import ToolMessage
+
+    seen: dict[str, int] = {}
+    original_explain = adapter.explain
+
+    def tracking_explain(sql: str):  # type: ignore[no-untyped-def]
+        seen["explain"] = threading.get_ident()
+        return original_explain(sql)
+
+    setattr(adapter, "explain", tracking_explain)
+
+    mw = ContractMiddleware(contract, adapter=adapter)
+    request = ToolCallRequest(
+        tool_call={
+            "name": "run_query",
+            "args": {
+                "sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'",
+            },
+            "id": "tc-thread",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={},
+        runtime=None,  # ty: ignore[invalid-argument-type]
+    )
+
+    async def _handler(_req: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="ok", tool_call_id="tc-thread")
+
+    await mw.awrap_tool_call(request, _handler)
+    assert seen["explain"] != threading.get_ident(), (
+        "EXPLAIN ran on the event-loop thread"
+    )
 
 
 # ─── top-level lazy re-export ─────────────────────────────────────────────────

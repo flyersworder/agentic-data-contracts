@@ -437,6 +437,12 @@ adapter round-trip in the async handlers is offloaded to a worker thread via
 | `describe_table` | `adapter.describe_table` |
 | `preview_table` | `adapter.execute` |
 
+The two graph-/decorator-level enforcement entry points apply the same offload
+on their async paths: `contract_middleware`'s async wrapper and the LangChain
+`ContractMiddleware.awrap_tool_call` both run `validator.validate` (and its
+EXPLAIN dry-run) via `asyncio.to_thread`. The synchronous `wrap_tool_call`
+path is left as-is — it is not on an event loop.
+
 This matters when one host process serves multiple concurrent sessions on a
 single event loop (e.g. a shared in-process MCP server backing a multi-user
 bot): without offloading, a single 30–60s analytical query would freeze every

@@ -12,7 +12,7 @@ overrides = [{ name = "python-dotenv", specifier = ">=1.2.2" }]
 
 [[package]]
 name = "agentic-data-contracts"
-version = "0.21.1"
+version = "0.22.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

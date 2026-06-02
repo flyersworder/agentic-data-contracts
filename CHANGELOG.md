@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Async tool handlers no longer block the event loop on synchronous adapter I/O.** The nine tool handlers in `tools/factory.py` are `async def`, but four of them called **synchronous**, blocking `DatabaseAdapter` / `ExplainAdapter` methods directly on the event-loop thread. A single slow query (tens of seconds, common for analytical warehouses) therefore stalled the **entire asyncio event loop of the host process** — freezing every other concurrent coroutine: other sessions' tool calls, health-check probes, and anything else sharing the loop. This is invisible at low concurrency but becomes the dominant latency multiplier once multiple sessions share one host process (e.g. a shared in-process MCP server backing a multi-user bot). Each blocking round-trip is now offloaded via `asyncio.to_thread(...)`: `adapter.execute` (in `run_query` and `preview_table`), `adapter.describe_table` (in `describe_table`), and `validator.validate`'s EXPLAIN dry-run (`explain_adapter.explain`, used by `run_query` and `inspect_query`).
+
+### Compatibility
+
+- **No API change.** The synchronous `DatabaseAdapter` / `ExplainAdapter` protocols are unchanged — this is a purely internal change to how the async handlers invoke them, so existing consumers (and custom adapters) need no changes.
+- **Connection pool, not thread pool, remains the concurrency gate.** `asyncio.to_thread` uses the event loop's default `ThreadPoolExecutor`; concurrent DB work stays bounded by the adapter's own connection pool. Consumers should size that pool to the concurrency they want to support (now documented in `docs/architecture.md`).
+
+### Added
+
+- 4 tests in `tests/test_tools/test_event_loop.py` asserting that `run_query`, `inspect_query`, `describe_table`, and `preview_table` execute their blocking adapter calls on a worker thread rather than the event-loop thread.
+
 ## [0.21.1] - 2026-05-30
 
 ### Added

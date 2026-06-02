@@ -422,6 +422,34 @@ async def my_custom_query_tool(args: dict) -> dict:
 | `run_query` | Fully functional when database adapter is configured |
 | `inspect_query` | Layer 1 always runs; EXPLAIN fields populated when adapter is configured |
 
+### Concurrency & Event-Loop Safety
+
+The tool handlers are `async def`, but the `DatabaseAdapter` / `ExplainAdapter`
+protocols are deliberately **synchronous**. To keep the public adapter contract
+simple while never stalling the host's asyncio event loop, every blocking
+adapter round-trip in the async handlers is offloaded to a worker thread via
+`asyncio.to_thread(...)`:
+
+| Tool | Offloaded call |
+|---|---|
+| `run_query` | `validator.validate` (EXPLAIN dry-run) + `adapter.execute` |
+| `inspect_query` | `validator.validate` (EXPLAIN dry-run) |
+| `describe_table` | `adapter.describe_table` |
+| `preview_table` | `adapter.execute` |
+
+This matters when one host process serves multiple concurrent sessions on a
+single event loop (e.g. a shared in-process MCP server backing a multi-user
+bot): without offloading, a single 30–60s analytical query would freeze every
+other coroutine — other sessions' tool calls, health-check probes, and so on.
+Offloading keeps the adapter contract unchanged, so existing consumers need no
+code changes.
+
+`asyncio.to_thread` uses the event loop's default `ThreadPoolExecutor`.
+Concurrent database work is therefore naturally bounded by **the adapter's own
+connection pool**, not the thread pool — connections are the real concurrency
+gate. Size your adapter's connection pool to the concurrency you want to
+support.
+
 ## Semantic Layer
 
 Reads external semantic definitions so the agent knows *how* metrics are defined.

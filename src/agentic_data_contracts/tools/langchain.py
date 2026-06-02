@@ -32,6 +32,7 @@ Requires the ``[langchain]`` extra: ``pip install agentic-data-contracts[langcha
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -266,7 +267,11 @@ class ContractMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
-        blocked = self._check(request)
+        # _check runs the synchronous Validator.validate(), which makes a
+        # blocking EXPLAIN/dry-run DB round-trip (validator.py:307). Offload it
+        # to a worker thread so a slow check cannot stall the event loop in an
+        # async runtime. The sync wrap_tool_call path calls _check directly.
+        blocked = await asyncio.to_thread(self._check, request)
         if blocked is not None:
             return blocked
         return await handler(request)

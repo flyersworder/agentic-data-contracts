@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-06-02
+
+### Fixed
+
+- **Async enforcement paths no longer block the event loop on synchronous adapter I/O.** The `async def` handlers across the tools layer called **synchronous**, blocking `DatabaseAdapter` / `ExplainAdapter` methods directly on the event-loop thread. A single slow query (tens of seconds, common for analytical warehouses) therefore stalled the **entire asyncio event loop of the host process** — freezing every other concurrent coroutine: other sessions' tool calls, health-check probes, and anything else sharing the loop. This is invisible at low concurrency but becomes the dominant latency multiplier once multiple sessions share one host process (e.g. a shared in-process MCP server backing a multi-user bot). Each blocking round-trip is now offloaded via `asyncio.to_thread(...)` in every async path:
+  - **`tools/factory.py`** — `adapter.execute` (in `run_query` and `preview_table`), `adapter.describe_table` (in `describe_table`), and `validator.validate`'s EXPLAIN dry-run (`explain_adapter.explain`, used by `run_query` and `inspect_query`).
+  - **`tools/middleware.py`** — `contract_middleware`'s async wrapper now offloads `validator.validate`.
+  - **`tools/langchain.py`** — `ContractMiddleware.awrap_tool_call` now offloads its `_check` (which runs `validator.validate`); the synchronous `wrap_tool_call` path is unchanged.
+- **`DuckDBAdapter` is now safe under the concurrency the offloading enables.** A single DuckDB connection is not safe for concurrent queries across threads, and the new `asyncio.to_thread` offloading lets multiple sessions land in `execute` / `explain` / `describe_table` on different worker threads at once. The adapter now guards every access to its shared connection with a `threading.Lock`, so concurrent calls serialize on the connection instead of interleaving and corrupting each other's result state. DuckDB still parallelizes the work of an individual query internally; the lock only prevents two queries from interleaving on the same connection.
+
+### Compatibility
+
+- **No API change.** The synchronous `DatabaseAdapter` / `ExplainAdapter` protocols are unchanged — this is a purely internal change to how the async handlers invoke them, so existing consumers (and custom adapters) need no changes.
+- **Connection pool, not thread pool, remains the concurrency gate.** `asyncio.to_thread` uses the event loop's default `ThreadPoolExecutor`; concurrent DB work stays bounded by the adapter's own connection pool. Consumers should size that pool to the concurrency they want to support (now documented in `docs/architecture.md`).
+
+### Added
+
+- 4 tests in `tests/test_tools/test_event_loop.py` asserting that `run_query`, `inspect_query`, `describe_table`, and `preview_table` execute their blocking adapter calls on a worker thread rather than the event-loop thread.
+- Matching off-loop tests for the other two async enforcement paths: `test_middleware_offloads_validate_off_event_loop` (`contract_middleware`) and `test_contract_middleware_offloads_validate_off_event_loop` (LangChain `ContractMiddleware.awrap_tool_call`).
+- `test_execute_serializes_concurrent_connection_access` in `tests/test_adapters/test_duckdb.py`, which fires 8 concurrent `execute` calls through `asyncio.to_thread` and asserts the adapter lock holds peak connection concurrency at 1.
+
 ## [0.21.1] - 2026-05-30
 
 ### Added

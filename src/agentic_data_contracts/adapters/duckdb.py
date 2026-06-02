@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import duckdb
 
 from agentic_data_contracts.adapters.base import Column, QueryResult, TableSchema
@@ -9,25 +11,38 @@ from agentic_data_contracts.validation.explain import ExplainResult
 
 
 class DuckDBAdapter:
-    """Database adapter for DuckDB."""
+    """Database adapter for DuckDB.
+
+    A single DuckDB connection is **not** safe for concurrent queries from
+    multiple threads. The async tool handlers offload adapter calls via
+    ``asyncio.to_thread`` (see ``tools/factory.py``), so concurrent sessions
+    can land here on different worker threads at once. ``_lock`` serializes
+    every access to ``self.connection`` so the shared connection stays
+    consistent. DuckDB still parallelizes the work of an individual query
+    internally; the lock only prevents two queries from interleaving on the
+    same connection.
+    """
 
     def __init__(self, database: str = ":memory:") -> None:
         self.connection = duckdb.connect(database)
+        self._lock = threading.Lock()
 
     @property
     def dialect(self) -> str:
         return "duckdb"
 
     def execute(self, sql: str) -> QueryResult:
-        result = self.connection.execute(sql)
-        columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
+        with self._lock:
+            result = self.connection.execute(sql)
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
         return QueryResult(columns=columns, rows=rows)
 
     def explain(self, sql: str) -> ExplainResult:
         try:
-            result = self.connection.execute(f"EXPLAIN {sql}")
-            rows = result.fetchall()
+            with self._lock:
+                result = self.connection.execute(f"EXPLAIN {sql}")
+                rows = result.fetchall()
             estimated_rows = self._parse_row_estimate(rows)
             return ExplainResult(
                 estimated_cost_usd=None,
@@ -60,27 +75,29 @@ class DuckDBAdapter:
         return last_estimate
 
     def list_tables(self, schema: str) -> list[str]:
-        rows = self.connection.execute(
-            """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = ?
-            ORDER BY table_name
-            """,
-            [schema],
-        ).fetchall()
+        with self._lock:
+            rows = self.connection.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                ORDER BY table_name
+                """,
+                [schema],
+            ).fetchall()
         return [row[0] for row in rows]
 
     def describe_table(self, schema: str, table: str) -> TableSchema:
-        rows = self.connection.execute(
-            """
-            SELECT column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE table_schema = ? AND table_name = ?
-            ORDER BY ordinal_position
-            """,
-            [schema, table],
-        ).fetchall()
+        with self._lock:
+            rows = self.connection.execute(
+                """
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = ? AND table_name = ?
+                ORDER BY ordinal_position
+                """,
+                [schema, table],
+            ).fetchall()
         columns = [
             Column(
                 name=row[0],

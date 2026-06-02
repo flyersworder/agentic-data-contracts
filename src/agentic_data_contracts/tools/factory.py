@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -243,7 +244,11 @@ def create_tools(
                 f"No database adapter configured — table description unavailable"
                 f" for {qualified}."
             )
-        ts = adapter.describe_table(schema_name, table_name)
+        # Offload the synchronous DB round-trip to a worker thread so a slow
+        # warehouse call cannot stall the host's asyncio event loop (and every
+        # other coroutine sharing it). The sync DatabaseAdapter contract is
+        # unchanged. See tests/test_tools/test_event_loop.py.
+        ts = await asyncio.to_thread(adapter.describe_table, schema_name, table_name)
         # Overlay authored descriptions from the semantic source onto adapter
         # output. Semantic source wins because it is the canonical agent-facing
         # documentation; adapter-supplied descriptions (e.g. warehouse column
@@ -352,7 +357,10 @@ def create_tools(
                 + "\nUse run_query with explicit columns instead."
             )
 
-        result = adapter.execute(f"SELECT * FROM {qualified} LIMIT {limit}")
+        # Offload the blocking DB round-trip — see describe_table above.
+        result = await asyncio.to_thread(
+            adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
+        )
         rows = [dict(zip(result.columns, row)) for row in result.rows]
         body = json.dumps({"schema": schema, "table": table, "rows": rows}, default=str)
         # Symmetric with run_query: surface warn/log enforcement so audit
@@ -624,7 +632,10 @@ def create_tools(
     # ── Tool 8: inspect_query ─────────────────────────────────────────────────
     async def inspect_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
-        result = validator.validate(sql)
+        # validate() runs a synchronous EXPLAIN/dry-run round-trip to the DB
+        # (validator.py:307) when an explain adapter is configured, so offload
+        # it to a worker thread to keep the event loop responsive.
+        result = await asyncio.to_thread(validator.validate, sql)
         data: dict[str, Any] = {
             "valid": not result.blocked,
             "violations": list(result.reasons),
@@ -655,8 +666,10 @@ def create_tools(
                 _with_remaining(f"BLOCKED — Session limit exceeded: {e}")
             )
 
-        # Phase 1 + 2: query checks + EXPLAIN
-        vresult = validator.validate(sql)
+        # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
+        # EXPLAIN/dry-run DB round-trip (validator.py:307), so offload it to a
+        # worker thread to avoid blocking the event loop.
+        vresult = await asyncio.to_thread(validator.validate, sql)
         if vresult.blocked:
             session.record_retry()
             msg = "BLOCKED — Violations:\n" + "\n".join(
@@ -677,7 +690,10 @@ def create_tools(
             )
 
         try:
-            qresult = adapter.execute(sql)
+            # Offload the query execution — the dominant blocking call — off
+            # the event loop. Concurrent DB work stays bounded by the adapter's
+            # own connection pool, not the thread pool.
+            qresult = await asyncio.to_thread(adapter.execute, sql)
         except Exception as e:  # noqa: BLE001
             session.record_retry()
             return _text_response(

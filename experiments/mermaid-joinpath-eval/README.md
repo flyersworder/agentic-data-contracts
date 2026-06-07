@@ -1,0 +1,32 @@
+# Mermaid Join-Path Eval
+
+Measures whether rendering an (anonymized) Spider schema as XML / Mermaid / NL-adjacency changes an
+LLM's join-path reconstruction accuracy. See the design spec under
+`docs/superpowers/specs/2026-06-07-mermaid-joinpath-eval-design.md`.
+
+## Setup
+```bash
+cd experiments/mermaid-joinpath-eval
+uv sync
+uv run pytest -q          # all deterministic units, offline
+```
+
+## Run the pilot (spends OpenRouter credit)
+The key is read from `OPENROUTER_API_KEY`; source it from the lens project (never commit it):
+```bash
+set -a; . /Users/qingye/Documents/lens/.env; set +a
+uv run python -m mje.runner --n 45 --max-spend 2.00
+uv run python -m mje.stats --results results/results.jsonl
+```
+
+Flags: `--n` items (hardest strata first), `--samples`, `--models`, `--min-joins`, `--max-spend`,
+and `--tables/--dev` to point at a manual Spider download if the HF mirror URL is unavailable.
+
+## Notes
+- Schemas are opaque-token anonymized to defeat training contamination (Spider predates the model cutoff).
+- Grading is static (no DB execution): gold join edges come from gold SQL via sqlglot.
+- Data source: the full Spider dev set (166 DBs / 1034 items) is fetched from the `taoyds/spider`
+  GitHub raw mirror into `data/` (gitignored). Of the 1034 dev queries, ~71 have >=2 join edges
+  (65 with 2, 6 with 3); Spider dev is join-shallow, so deep multi-hop strata require BIRD instead.
+- Default models: `anthropic/claude-sonnet-4.6` and `deepseek/deepseek-v4-flash`, via OpenRouter's
+  OpenAI-compatible endpoint.

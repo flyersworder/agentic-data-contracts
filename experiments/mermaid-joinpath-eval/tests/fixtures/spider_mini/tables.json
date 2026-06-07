@@ -1,0 +1,15 @@
+[
+  {
+    "db_id": "shop",
+    "table_names_original": ["customers", "orders", "line_items", "products"],
+    "column_names_original": [
+      [-1, "*"],
+      [0, "id"], [0, "name"],
+      [1, "id"], [1, "customer_id"],
+      [2, "id"], [2, "order_id"], [2, "product_id"],
+      [3, "id"], [3, "title"]
+    ],
+    "column_types": ["text", "number", "text", "number", "number", "number", "number", "number", "number", "text"],
+    "foreign_keys": [[4, 1], [6, 3], [7, 8]]
+  }
+]

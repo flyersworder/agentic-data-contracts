@@ -19,16 +19,18 @@ def run_eval(
     max_spend: float = 2.0,
     max_tokens: int = 4096,
     samples: int = 1,
+    renderings: dict | None = None,
 ) -> list[dict]:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     spent = 0.0
     EST_PER_CALL = 0.02  # conservative pre-call guess (USD) for the budget gate
+    renderings = renderings if renderings is not None else RENDERERS
 
     with out_path.open("w") as fh:
         for it in items:
-            for rname, rfn in RENDERERS.items():
+            for rname, rfn in renderings.items():
                 rendering = rfn(it.graph)
                 messages = build_messages(rendering, it.endpoint_tables)
                 for model in models:
@@ -97,6 +99,13 @@ def main() -> None:
     )
     ap.add_argument("--dataset", choices=["spider", "bird"], default="spider")
     ap.add_argument("--query-key", default=None)
+    ap.add_argument(
+        "--renderings",
+        nargs="+",
+        default=None,
+        choices=list(RENDERERS),
+        help="subset of renderings to run (default: all)",
+    )
     args = ap.parse_args()
 
     unknown = [m for m in args.models if m not in PRICING]
@@ -121,9 +130,13 @@ def main() -> None:
     items.sort(key=lambda it: it.n_joins, reverse=True)
     items = items[: args.n]
 
-    est = len(items) * len(RENDERERS) * len(args.models) * args.samples * 0.02
+    renderings = (
+        {k: RENDERERS[k] for k in args.renderings} if args.renderings else RENDERERS
+    )
+
+    est = len(items) * len(renderings) * len(args.models) * args.samples * 0.02
     n_items = len(items)
-    n_renderings = len(RENDERERS)
+    n_renderings = len(renderings)
     n_models = len(args.models)
     print(
         f"[plan] {n_items} items x {n_renderings} renderings x {n_models} models "
@@ -139,6 +152,7 @@ def main() -> None:
         max_spend=args.max_spend,
         max_tokens=args.max_tokens,
         samples=args.samples,
+        renderings=renderings,
     )
 
 

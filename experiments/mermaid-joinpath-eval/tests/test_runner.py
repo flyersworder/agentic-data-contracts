@@ -62,10 +62,30 @@ def test_run_eval_scores_all_renderings(tmp_path):
         out_path=out,
         max_spend=1.0,
     )
-    assert len(rows) == 3
+    from mje.renderers import RENDERERS
+
+    assert len(rows) == len(RENDERERS)
     assert all(r["f1"] == 1.0 and r["exact"] for r in rows)
-    assert {r["rendering"] for r in rows} == {"xml", "mermaid", "nl_adjacency"}
-    assert out.exists() and len(out.read_text().strip().splitlines()) == 3
+    assert {r["rendering"] for r in rows} == set(RENDERERS)
+    assert out.exists() and len(out.read_text().strip().splitlines()) == len(RENDERERS)
+
+
+def test_run_eval_respects_renderings_subset(tmp_path):
+    from mje.renderers import RENDERERS
+
+    items = [_one_item()]
+    client = _FakeClient(items)
+    subset = {"mermaid_qualified": RENDERERS["mermaid_qualified"]}
+    rows = run_eval(
+        items,
+        models=["anthropic/claude-sonnet-4.6"],
+        client=client,
+        out_path=tmp_path / "r.jsonl",
+        max_spend=1.0,
+        renderings=subset,
+    )
+    assert len(rows) == 1
+    assert {r["rendering"] for r in rows} == {"mermaid_qualified"}
 
 
 def test_main_rejects_unknown_model(monkeypatch):

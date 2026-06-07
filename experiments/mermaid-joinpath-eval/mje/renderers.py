@@ -41,6 +41,24 @@ def render_mermaid(graph: SchemaGraph) -> str:
     return "\n".join(lines)
 
 
+def render_mermaid_qualified(graph: SchemaGraph) -> str:
+    """Mermaid erDiagram with fully table-qualified join columns in edge labels.
+
+    Identical to render_mermaid except the relationship label reads
+    "t1.c0 = t3.c2" instead of "c0 = c2", matching the explicitness of the
+    XML and NL-adjacency renderings. Used to test whether mermaid's deficit is
+    the notation itself or under-qualified edge labels.
+    """
+    lines = ["erDiagram"]
+    for t in _sorted_tables(graph):
+        body = "  ".join(f"{c.type} {c.name}" for c in graph.tables[t])
+        lines.append(f"  {t} {{ {body} }}")
+    for e in _sorted_edges(graph):
+        label = f"{e.a[0]}.{e.a[1]} = {e.b[0]}.{e.b[1]}"
+        lines.append(f'  {e.a[0]} ||--o{{ {e.b[0]} : "{label}"')
+    return "\n".join(lines)
+
+
 def render_nl_adjacency(graph: SchemaGraph) -> str:
     lines = []
     for t in _sorted_tables(graph):
@@ -55,5 +73,6 @@ def render_nl_adjacency(graph: SchemaGraph) -> str:
 RENDERERS = {
     "xml": render_xml,
     "mermaid": render_mermaid,
+    "mermaid_qualified": render_mermaid_qualified,
     "nl_adjacency": render_nl_adjacency,
 }

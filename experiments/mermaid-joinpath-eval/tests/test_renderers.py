@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 
 from mje.anonymize import anonymize
-from mje.renderers import RENDERERS, render_mermaid, render_xml
+from mje.renderers import (
+    RENDERERS,
+    render_mermaid,
+    render_mermaid_qualified,
+    render_xml,
+)
 from mje.schema_graph import parse_tables_json
 
 FIX = Path(__file__).parent / "fixtures" / "spider_mini" / "tables.json"
@@ -47,3 +52,16 @@ def test_deterministic_output():
     ag = _anon()
     for fn in RENDERERS.values():
         assert fn(ag) == fn(ag)
+
+
+def test_mermaid_qualified_has_table_qualified_labels():
+    ag = _anon()
+    out = render_mermaid_qualified(ag)
+    assert out.strip().startswith("erDiagram")
+    # every edge label fully qualifies both join columns as table.column
+    for e in ag.fk_edges:
+        a = f"{e.a[0]}.{e.a[1]}"
+        b = f"{e.b[0]}.{e.b[1]}"
+        assert (f"{a} = {b}" in out) or (f"{b} = {a}" in out)
+    # and it is registered for selection
+    assert "mermaid_qualified" in RENDERERS

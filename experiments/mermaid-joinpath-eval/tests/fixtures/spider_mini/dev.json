@@ -1,0 +1,8 @@
+[
+  {"db_id": "shop", "question": "ignored",
+   "query": "SELECT T1.name FROM customers AS T1 JOIN orders AS T2 ON T1.id = T2.customer_id"},
+  {"db_id": "shop", "question": "ignored",
+   "query": "SELECT c.name FROM customers c, orders o, line_items l WHERE c.id = o.customer_id AND o.id = l.order_id"},
+  {"db_id": "shop", "question": "ignored",
+   "query": "SELECT name FROM customers"}
+]

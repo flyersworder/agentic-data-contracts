@@ -19,6 +19,10 @@ from mje.schema_graph import (
 SPIDER_TABLES_URL = "https://raw.githubusercontent.com/taoyds/spider/master/evaluation_examples/examples/tables.json"
 SPIDER_DEV_URL = "https://raw.githubusercontent.com/taoyds/spider/master/evaluation_examples/examples/dev.json"
 
+# BIRD mini-dev JSON sources.
+BIRD_TABLES_URL = "https://raw.githubusercontent.com/Harris-X/NLP2SQL/main/LLaMA-Factory/datasets/minidev/MINIDEV/dev_tables.json"
+BIRD_DEV_URL = "https://huggingface.co/datasets/birdsql/bird_mini_dev/resolve/main/data/mini_dev_sqlite-00000-of-00001.json"
+
 
 @dataclass
 class Item:
@@ -38,6 +42,17 @@ def download_spider(dest: Path) -> tuple[Path, Path]:
     for url, p in [(SPIDER_TABLES_URL, tables_p), (SPIDER_DEV_URL, dev_p)]:
         if not p.exists():
             r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            p.write_bytes(r.content)
+    return tables_p, dev_p
+
+
+def download_bird(dest: Path) -> tuple[Path, Path]:
+    dest.mkdir(parents=True, exist_ok=True)
+    tables_p, dev_p = dest / "dev_tables.json", dest / "mini_dev_sqlite.json"
+    for url, p in [(BIRD_TABLES_URL, tables_p), (BIRD_DEV_URL, dev_p)]:
+        if not p.exists():
+            r = requests.get(url, timeout=120)
             r.raise_for_status()
             p.write_bytes(r.content)
     return tables_p, dev_p
@@ -72,7 +87,11 @@ def _ambiguous(raw_graph: SchemaGraph, used_tables: set[str]) -> bool:
 
 
 def build_items(
-    tables_path: Path, dev_path: Path, min_joins: int = 2, limit: int | None = None
+    tables_path: Path,
+    dev_path: Path,
+    min_joins: int = 2,
+    limit: int | None = None,
+    query_key: str = "query",
 ) -> list[Item]:
     tables = {
         e["db_id"]: parse_tables_json(e)
@@ -82,7 +101,7 @@ def build_items(
 
     items: list[Item] = []
     for i, ex in enumerate(dev):
-        db_id, query = ex["db_id"], ex["query"]
+        db_id, query = ex["db_id"], ex[query_key]
         graph = tables.get(db_id)
         if graph is None:
             continue
@@ -92,6 +111,10 @@ def build_items(
         except Exception:  # noqa: BLE001 — bad query must not abort whole build
             continue
         if len(gold) < min_joins:
+            continue
+        # Guard: skip items where gold edges reference non-existent tables (e.g. CTEs).
+        valid_tables = {t.lower() for t in graph.tables}
+        if any(tn.lower() not in valid_tables for pair in gold for (tn, _cn) in pair):
             continue
         ambiguous = _ambiguous(graph, used)
         anon_graph, m = anonymize(graph)

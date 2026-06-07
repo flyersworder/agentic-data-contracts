@@ -1,0 +1,6 @@
+[
+  {"db_id": "shop", "question": "q", "evidence": "", "difficulty": "moderate",
+   "SQL": "SELECT c.name FROM customers c, orders o, line_items l WHERE c.id = o.customer_id AND o.id = l.order_id"},
+  {"db_id": "shop", "question": "q", "evidence": "", "difficulty": "simple",
+   "SQL": "SELECT name FROM customers"}
+]

@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from mje.data import Item, build_items, download_spider
+from mje.data import Item, build_items, download_bird, download_spider
 from mje.grade import parse_pred_edges, score
 from mje.model_client import PRICING, ModelClient, cost
 from mje.prompt import build_messages
@@ -95,18 +95,29 @@ def main() -> None:
         nargs="+",
         default=["anthropic/claude-sonnet-4.6", "deepseek/deepseek-v4-flash"],
     )
+    ap.add_argument("--dataset", choices=["spider", "bird"], default="spider")
+    ap.add_argument("--query-key", default=None)
     args = ap.parse_args()
 
     unknown = [m for m in args.models if m not in PRICING]
     if unknown:
         raise SystemExit(f"Unknown model(s): {unknown}. Supported: {sorted(PRICING)}")
 
+    if args.query_key is not None:
+        query_key = args.query_key
+    elif args.dataset == "bird":
+        query_key = "SQL"
+    else:
+        query_key = "query"
+
     if args.tables and args.dev:
         tables_p, dev_p = Path(args.tables), Path(args.dev)
+    elif args.dataset == "bird":
+        tables_p, dev_p = download_bird(Path(args.data_dir) / "bird")
     else:
         tables_p, dev_p = download_spider(Path(args.data_dir))
 
-    items = build_items(tables_p, dev_p, min_joins=args.min_joins)
+    items = build_items(tables_p, dev_p, min_joins=args.min_joins, query_key=query_key)
     items.sort(key=lambda it: it.n_joins, reverse=True)
     items = items[: args.n]
 

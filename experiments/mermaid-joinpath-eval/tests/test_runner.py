@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+from mje import runner
 from mje.anonymize import anonymize, map_edges, map_tables
 from mje.data import Item
 from mje.runner import run_eval
@@ -64,6 +66,18 @@ def test_run_eval_scores_all_renderings(tmp_path):
     assert all(r["f1"] == 1.0 and r["exact"] for r in rows)
     assert {r["rendering"] for r in rows} == {"xml", "mermaid", "nl_adjacency"}
     assert out.exists() and len(out.read_text().strip().splitlines()) == 3
+
+
+def test_main_rejects_unknown_model(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mje.runner", "--models", "fake/model", "--tables", "x", "--dev", "y"],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
 
 
 def test_budget_cap_aborts(tmp_path):

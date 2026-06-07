@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mje.data import Item, build_items, download_spider
 from mje.grade import parse_pred_edges, score
-from mje.model_client import ModelClient, cost
+from mje.model_client import PRICING, ModelClient, cost
 from mje.prompt import build_messages
 from mje.renderers import RENDERERS
 
@@ -42,7 +42,8 @@ def run_eval(
                         text, in_tok, out_tok = client.call(
                             model, messages, max_tokens=max_tokens
                         )
-                        spent += cost(model, in_tok, out_tok)
+                        call_cost = cost(model, in_tok, out_tok)
+                        spent += call_cost
                         pred = parse_pred_edges(text, it.graph)
                         sc = score(pred, it.gold_edges, it.graph)
                         row = {
@@ -55,7 +56,7 @@ def run_eval(
                             "sample": s,
                             "in_tok": in_tok,
                             "out_tok": out_tok,
-                            "cost_usd": cost(model, in_tok, out_tok),
+                            "cost_usd": call_cost,
                             **sc,
                             "gold_edges": [
                                 sorted(tuple(p) for p in e) for e in it.gold_edges
@@ -87,6 +88,10 @@ def main() -> None:
         default=["anthropic/claude-sonnet-4.6", "deepseek/deepseek-v4-flash"],
     )
     args = ap.parse_args()
+
+    unknown = [m for m in args.models if m not in PRICING]
+    if unknown:
+        raise SystemExit(f"Unknown model(s): {unknown}. Supported: {sorted(PRICING)}")
 
     if args.tables and args.dev:
         tables_p, dev_p = Path(args.tables), Path(args.dev)

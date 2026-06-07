@@ -14,14 +14,10 @@ from mje.schema_graph import (
     parse_tables_json,
 )
 
-# Spider dev/tables JSON (HuggingFace mirror).
+# Spider dev/tables JSON — taoyds/spider raw GitHub source (evaluation_examples mirror).
 # If this 404s, download Spider manually and pass --tables/--dev paths to the runner.
-SPIDER_TABLES_URL = (
-    "https://huggingface.co/datasets/xlangai/spider/resolve/main/spider/tables.json"
-)
-SPIDER_DEV_URL = (
-    "https://huggingface.co/datasets/xlangai/spider/resolve/main/spider/dev.json"
-)
+SPIDER_TABLES_URL = "https://raw.githubusercontent.com/taoyds/spider/master/evaluation_examples/examples/tables.json"
+SPIDER_DEV_URL = "https://raw.githubusercontent.com/taoyds/spider/master/evaluation_examples/examples/dev.json"
 
 
 @dataclass
@@ -48,6 +44,12 @@ def download_spider(dest: Path) -> tuple[Path, Path]:
 
 
 def _ambiguous(raw_graph: SchemaGraph, used_tables: set[str]) -> bool:
+    # Conservative proxy for join-path ambiguity (intentional for this experiment).
+    # Limitations:
+    #   (a) Treats the FK graph as a simple graph — two distinct FK column-pairs between
+    #       the same table pair collapse to one edge, so ambiguity is under-counted.
+    #   (b) If the used tables span multiple disconnected FK components the cycle test
+    #       runs over the union of those components and may produce a false negative.
     # connected component spanning used_tables; cycle (edges >= nodes) => multiple paths
     adj: dict[str, set[str]] = {t: set() for t in raw_graph.tables}
     edge_set: set[frozenset] = set()
@@ -105,6 +107,6 @@ def build_items(
                 ambiguous=ambiguous,
             )
         )
-        if limit and len(items) >= limit:
+        if limit is not None and len(items) >= limit:
             break
     return items

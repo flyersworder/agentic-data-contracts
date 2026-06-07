@@ -17,7 +17,7 @@ def run_eval(
     client,
     out_path: Path,
     max_spend: float = 2.0,
-    max_tokens: int = 256,
+    max_tokens: int = 4096,
     samples: int = 1,
 ) -> list[dict]:
     out_path = Path(out_path)
@@ -56,7 +56,9 @@ def run_eval(
                             "sample": s,
                             "in_tok": in_tok,
                             "out_tok": out_tok,
+                            "truncated": out_tok >= max_tokens,
                             "cost_usd": call_cost,
+                            "raw": text[:1000],
                             **sc,
                             "gold_edges": [
                                 sorted(tuple(p) for p in e) for e in it.gold_edges
@@ -81,6 +83,12 @@ def main() -> None:
         "--n", type=int, default=45, help="max items (hardest strata first)"
     )
     ap.add_argument("--samples", type=int, default=1)
+    ap.add_argument(
+        "--max-tokens",
+        type=int,
+        default=4096,
+        help="output token cap; must be high enough for reasoning models",
+    )
     ap.add_argument("--max-spend", type=float, default=2.0)
     ap.add_argument(
         "--models",
@@ -118,6 +126,7 @@ def main() -> None:
         client=client,
         out_path=Path(args.out),
         max_spend=args.max_spend,
+        max_tokens=args.max_tokens,
         samples=args.samples,
     )
 

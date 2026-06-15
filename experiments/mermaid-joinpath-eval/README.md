@@ -12,15 +12,19 @@ uv run pytest -q          # all deterministic units, offline
 ```
 
 ## Run the pilot (spends OpenRouter credit)
-The key is read from `OPENROUTER_API_KEY`; source it from the lens project (never commit it):
+The key is read from `OPENROUTER_API_KEY`; source it from a `.env` that lives **outside** this repo
+(never commit it). Point `LENS_ENV_FILE` at that file:
 ```bash
-set -a; . /Users/qingye/Documents/lens/.env; set +a
+set -a; . "$LENS_ENV_FILE"; set +a   # the .env stays outside the repo
 uv run python -m mje.runner --n 45 --max-spend 2.00
-uv run python -m mje.stats --results results/results.jsonl
+uv run python -m mje.stats --results results/results.jsonl --exclude-truncated
 ```
 
 Flags: `--n` items (hardest strata first), `--samples`, `--models`, `--min-joins`, `--max-spend`,
-and `--tables/--dev` to point at a manual Spider download if the HF mirror URL is unavailable.
+`--max-tokens` (keep high for reasoning models), `--renderings` (subset), and `--tables/--dev` to
+point at a manual Spider download if the mirror URL is unavailable.
+`stats.py` stratifies by join depth and by the ambiguity (cyclic-schema) proxy, and `--exclude-truncated`
+drops output-token-truncated rows; see `FINDINGS.md` for why the ambiguity split matters.
 
 ## Notes
 - Schemas are opaque-token anonymized to defeat training contamination (Spider predates the model cutoff).

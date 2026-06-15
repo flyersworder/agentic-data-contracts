@@ -1,0 +1,17 @@
+[project]
+name = "mje"
+version = "0.1.0"
+description = "Mermaid vs text rendering for LLM join-path reasoning (anonymized Spider)"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlglot>=25",
+    "openai>=1.40",
+    "requests>=2.31",
+    "scipy>=1.11",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

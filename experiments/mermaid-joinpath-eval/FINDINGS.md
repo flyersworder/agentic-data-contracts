@@ -71,10 +71,12 @@ trending worse." **Keep the existing XML relationship rendering** (`core/prompt.
 If Mermaid is ever desired for human readability, **fully table-qualify the join columns in edge labels** —
 that recovers most of the penalty.
 
-This matches the literature: for capable models, schema-representation format has small and shrinking effects
-(see "Death of Schema Linking?"), and rigid structured formats do not beat plain verbalization for reasoning
-(see KG-prompting work). The original Mermaid-as-memory idea (TencentDB-Agent-Memory) works for *episodic*
-task memory via compression + drill-down; it does not transfer to *semantic* relationship memory here.
+This is consistent with the literature: capable models are increasingly robust to schema *presentation*.
+"Death of Schema Linking?" (Maamari et al., 2024, arXiv:2408.07702) shows modern models barely need the
+schema filtered down to relevant tables — they generate fine over the full schema; our result adds, one level
+down, that they are also largely indifferent to the rendering *notation* once join columns are unambiguous.
+The original Mermaid-as-memory idea (TencentDB-Agent-Memory) works for *episodic* task memory via
+compression + drill-down; it does not transfer to *semantic* relationship memory here.
 
 ## Methodological catches (why smoke-first mattered)
 

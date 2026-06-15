@@ -71,6 +71,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_data_contracts"]
 
+[tool.hatch.build.targets.sdist]
+# Keep research code, agent/editor config, and process docs out of the published
+# source distribution. `experiments/` is a standalone project with its own venv
+# and (gitignored) downloaded benchmark data + result logs that must never ship.
+exclude = [
+    "experiments",
+    ".claude",
+    "docs/superpowers",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

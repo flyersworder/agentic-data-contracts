@@ -1,8 +1,7 @@
 # Mermaid Join-Path Eval
 
 Measures whether rendering an (anonymized) Spider schema as XML / Mermaid / NL-adjacency changes an
-LLM's join-path reconstruction accuracy. See the design spec under
-`docs/superpowers/specs/2026-06-07-mermaid-joinpath-eval-design.md`.
+LLM's join-path reconstruction accuracy. See `FINDINGS.md` for the method, results, and conclusion.
 
 ## Setup
 ```bash

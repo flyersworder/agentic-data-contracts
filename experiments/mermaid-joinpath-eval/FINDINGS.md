@@ -12,8 +12,8 @@ subset where the metric is trustworthy, all four renderings are **tied**, with M
 **Recommendation stands: do not switch the library's relationship rendering to Mermaid** — XML never loses and
 most reliably reproduces the canonical/gold join path, which is what a governance library wants.
 
-Design spec: `../../docs/superpowers/specs/2026-06-07-mermaid-joinpath-eval-design.md` (repo root, not this dir).
-Plan: `../../docs/superpowers/plans/2026-06-07-mermaid-joinpath-eval.md`.
+The original design spec and TDD plan were process scaffolding (`docs/superpowers/`), removed once the work
+shipped; they remain in git history if needed. This file is the self-contained record of method and results.
 
 ## Method
 

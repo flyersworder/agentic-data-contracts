@@ -28,12 +28,17 @@ def test_top_level_imports() -> None:
 def test_core_imports() -> None:
     from agentic_data_contracts.core.contract import DataContract
     from agentic_data_contracts.core.schema import DataContractSchema
-    from agentic_data_contracts.core.session import ContractSession, LimitExceededError
+    from agentic_data_contracts.core.session import (
+        ContractSession,
+        ContractSessionLimitError,
+        LimitExceededError,
+    )
 
     assert DataContract is not None
     assert DataContractSchema is not None
     assert ContractSession is not None
     assert LimitExceededError is not None
+    assert ContractSessionLimitError is not None
 
 
 def test_validation_imports() -> None:

@@ -59,6 +59,8 @@ uv add "agentic-data-contracts[bigquery]"    # BigQuery
 uv add "agentic-data-contracts[snowflake]"   # Snowflake
 uv add "agentic-data-contracts[postgres]"    # PostgreSQL
 uv add "agentic-data-contracts[agent-sdk]"   # Claude Agent SDK integration
+uv add "agentic-data-contracts[langchain]"   # LangChain / deepagents integration
+uv add "agentic-data-contracts[pydantic-ai]" # Pydantic AI integration
 ```
 
 ## Quick Start
@@ -276,6 +278,24 @@ Install: `pip install "agentic-data-contracts[langchain]"`. For graph-level enfo
 tools = create_langchain_tools(dc, adapter=adapter, apply_middleware=False)
 agent = create_deep_agent(tools=tools, middleware=[ContractMiddleware(dc, adapter=adapter)])
 ```
+
+### 4b. Or use with Pydantic AI (requires `pydantic-ai-slim>=1.107.0`)
+
+```python
+from agentic_data_contracts import create_pydantic_ai_tools
+from pydantic_ai import Agent
+
+# `dc` and `adapter` are from the previous example.
+# Returns list[pydantic_ai.Tool] — drop into Agent(tools=...).
+tools = create_pydantic_ai_tools(dc, adapter=adapter)
+agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
+```
+
+Enforcement is auto-applied in-tool: a blocked query (bad SQL, forbidden
+operation, missing required filter) raises `ModelRetry` so the model rewrites
+and retries, while session-limit exhaustion raises a terminal
+`ContractSessionLimitError` that ends the run. Install:
+`pip install "agentic-data-contracts[pydantic-ai]"`.
 
 ### 5. Or use the tools directly (no SDK required)
 
@@ -677,6 +697,7 @@ resources:
 | `postgres` | `psycopg2-binary` | PostgreSQL adapter |
 | `agent-sdk` | `claude-agent-sdk` | Claude Agent SDK integration |
 | `langchain` | `langchain-core`, `langchain` | LangChain / deepagents integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]` | Pydantic AI integration |
 | `agent-contracts` | `ai-agent-contracts>=0.2.0` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

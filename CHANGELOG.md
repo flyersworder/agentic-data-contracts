@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-06-20
+
+### Added
+
+- **Pydantic AI adapter — `create_pydantic_ai_tools(contract, ...)`.** A third agent-framework adapter (alongside `create_sdk_mcp_server` and `create_langchain_tools`) that wraps a contract's 9 governed tools as a list of `pydantic_ai.Tool`, ready to drop into `pydantic_ai.Agent(tools=...)`. It reuses the framework-neutral `ToolDef` output of `create_tools` via `pydantic_ai.Tool.from_schema`, so the contract's JSON Schemas reach the model verbatim with no Pydantic re-synthesis. Enforcement is applied in-tool: each wrapped tool pre-checks `ContractSession` limits (unless `apply_middleware=False`) and the underlying callables self-validate SQL. Install with the new `[pydantic-ai]` extra (`pip install "agentic-data-contracts[pydantic-ai]"`, which pulls `pydantic-ai-slim[anthropic]`).
+- **Recoverable-vs-terminal enforcement mapped onto Pydantic AI's error contract.** A validation block (bad SQL, forbidden operation, missing required filter, failed result-check, or a per-caller permission gate) surfaces as `pydantic_ai.ModelRetry`, so the model can rewrite its arguments or switch tools and try again. A *session-budget* breach (`max_retries` / `max_duration` / cost) surfaces as the new terminal `ContractSessionLimitError` instead — retrying cannot recover an exhausted cap, so the run ends rather than burning further model retries. This is finer-grained than the SDK / LangChain adapters, which collapse both signals into one transport error. The distinction holds even under `apply_middleware=False`, where `run_query`'s own limit check self-emits the `BLOCKED — Session limit exceeded` envelope.
+- **`ContractSessionLimitError` in `core.session`.** A new terminal-budget error type defined alongside `LimitExceededError`. `LimitExceededError` remains the *internal* signal raised by `ContractSession.check_limits()`; `ContractSessionLimitError` is the *terminal* error adapters raise to propagate a breach out of an agent run. It lives in the core layer so the terminal-error vocabulary is shared across adapters rather than transport-specific.
+- **18 tests in `tests/test_tools/test_pydantic_ai.py`** covering tool shape, schema-verbatim registration, the `BLOCKED — → ModelRetry` mapping, the terminal `ContractSessionLimitError` path (including the `apply_middleware=False` regression guard), `inspect_query` reporting violations without raising, the `_unwrap_mcp_text` helper, and an end-to-end agent run through Pydantic AI's real invocation machinery via `TestModel`. `create_pydantic_ai_tools` is also re-exported from the package root behind a lazy import guard, and `tests/test_public_api.py` now covers both the new export and `ContractSessionLimitError`'s core-layer location.
+
+### Compatibility
+
+- **Purely additive — no API change.** No existing source file's behaviour changed: `tools/sdk.py`, `tools/langchain.py`, `tools/factory.py`, and `tools/middleware.py` are untouched. The only edits to shipped modules are a new export guard in `__init__.py` and the additive `ContractSessionLimitError` definition in `core/session.py`. The full pre-existing test suite passes unchanged.
+- **The `[pydantic-ai]` extra is optional.** Base installs gain no new required dependency; `from agentic_data_contracts import create_pydantic_ai_tools` resolves to `None` when the extra is absent — exactly like `create_langchain_tools` — so importing the package on a base install keeps working.
+
+### Internal
+
+- New `pydantic-ai` extra wired into `pyproject.toml` (added to `all` and `dev`). Documentation updated: `README.md` (integration section + Optional Dependencies table), `docs/architecture.md` (module tree + dependencies block), and `CLAUDE.md` (adapter list).
+
 ## [0.22.0] - 2026-06-02
 
 ### Fixed

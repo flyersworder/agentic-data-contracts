@@ -12,6 +12,20 @@ class LimitExceededError(Exception):
     """Raised when a contract resource limit is exceeded."""
 
 
+class ContractSessionLimitError(RuntimeError):
+    """Terminal enforcement error surfaced when a session budget is exhausted.
+
+    Distinct from :class:`LimitExceededError`, which is the internal signal
+    raised by :meth:`ContractSession.check_limits`. Framework adapters raise
+    ``ContractSessionLimitError`` to *propagate* a budget breach out of an
+    agent run — it is terminal because retrying a breached
+    ``max_retries`` / ``max_duration`` / cost cap cannot recover. Adapters
+    that distinguish recoverable from terminal failures (e.g. the Pydantic AI
+    adapter, which uses ``ModelRetry`` for recoverable validation blocks) raise
+    this instead so the run ends rather than spending another retry.
+    """
+
+
 class ContractSession:
     """Tracks enforcement state for a single agent run."""
 

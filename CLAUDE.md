@@ -18,7 +18,7 @@
 src/agentic_data_contracts/
 ├── core/          # YAML loading, Pydantic models, lightweight enforcement
 ├── validation/    # sqlglot checkers, Validator (Layer 1 + 2), EXPLAIN protocol
-├── tools/         # 9-tool factory + middleware; SDK + LangChain/deepagents adapters
+├── tools/         # 9-tool factory + middleware; SDK + LangChain + Pydantic AI adapters
 ├── semantic/      # dbt/Cube/YAML source integrations
 ├── adapters/      # DatabaseAdapter protocol + DuckDB implementation
 └── bridge/        # Optional ai-agent-contracts compilation

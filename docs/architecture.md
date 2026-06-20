@@ -605,7 +605,10 @@ agentic-data-contracts/
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── factory.py           # create_tools() — returns 9 tools
-│   │   └── middleware.py        # contract_middleware decorator
+│   │   ├── middleware.py        # contract_middleware decorator
+│   │   ├── sdk.py               # Claude Agent SDK adapter (create_sdk_mcp_server)
+│   │   ├── langchain.py         # LangChain / deepagents adapter (create_langchain_tools)
+│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools)
 │   ├── semantic/
 │   │   ├── __init__.py
 │   │   ├── base.py              # SemanticSource protocol
@@ -655,12 +658,14 @@ dependencies = [
 [project.optional-dependencies]
 agent-sdk = ["claude-agent-sdk"]
 agent-contracts = ["ai-agent-contracts>=0.1.0"]
+langchain = ["langchain-core", "langchain", "langgraph"]
+pydantic-ai = ["pydantic-ai-slim[anthropic]"]
 bigquery = ["google-cloud-bigquery"]
 snowflake = ["snowflake-connector-python"]
 postgres = ["psycopg2-binary"]
 duckdb = ["duckdb"]
 all = [
-    "agentic-data-contracts[agent-sdk,agent-contracts,bigquery,snowflake,postgres,duckdb]",
+    "agentic-data-contracts[agent-sdk,agent-contracts,langchain,pydantic-ai,bigquery,snowflake,postgres,duckdb]",
 ]
 ```
 

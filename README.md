@@ -297,6 +297,33 @@ and retries, while session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
+**One shared agent for many users.** For a multi-user service, build the `Agent`
+**once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
+rebuilds the tools per run, bound to that user's session and principal, so you
+don't construct a separate agent (or tools list) per user:
+
+```python
+from agentic_data_contracts import ContractDeps, create_pydantic_ai_toolset
+from agentic_data_contracts.core.session import ContractSession
+from pydantic_ai import Agent
+
+# per_run_step=False: deps are stable within a run, so build the tools once
+# per run instead of once per model step.
+agent = Agent("anthropic:claude-sonnet-4-6", deps_type=ContractDeps)
+agent.toolset(per_run_step=False)(create_pydantic_ai_toolset(dc, adapter=adapter))
+
+# Per user: keep one ContractSession (cumulative limits) and pass it each turn.
+result = await agent.run(
+    "Revenue by region last quarter",
+    deps=ContractDeps(session=user_session, caller_principal="alice@corp.com"),
+    message_history=user_history,
+)
+```
+
+The caller owns each user's `ContractSession` (created once per user, keyed by
+user id). Per-user principals drive per-principal table/rule gating, and the same
+`ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
+
 ### 5. Or use the tools directly (no SDK required)
 
 ```python

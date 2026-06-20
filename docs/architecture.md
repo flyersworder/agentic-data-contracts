@@ -608,7 +608,7 @@ agentic-data-contracts/
 │   │   ├── middleware.py        # contract_middleware decorator
 │   │   ├── sdk.py               # Claude Agent SDK adapter (create_sdk_mcp_server)
 │   │   ├── langchain.py         # LangChain / deepagents adapter (create_langchain_tools)
-│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools)
+│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools; create_pydantic_ai_toolset for one shared Agent across users)
 │   ├── semantic/
 │   │   ├── __init__.py
 │   │   ├── base.py              # SemanticSource protocol

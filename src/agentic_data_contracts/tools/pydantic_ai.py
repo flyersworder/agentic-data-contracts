@@ -29,12 +29,15 @@ Requires the ``[pydantic-ai]`` extra:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
-from pydantic_ai import ModelRetry, Tool
+from pydantic_ai import ModelRetry, RunContext, Tool
+from pydantic_ai.toolsets import FunctionToolset, ToolsetFunc
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.principal import Principal
 from agentic_data_contracts.core.session import (
     ContractSession,
     ContractSessionLimitError,
@@ -81,6 +84,7 @@ def create_pydantic_ai_tools(
     adapter: DatabaseAdapter | None = None,
     semantic_source: SemanticSource | None = None,
     session: ContractSession | None = None,
+    caller_principal: Principal = None,
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
 ) -> list[Tool]:
@@ -92,6 +96,8 @@ def create_pydantic_ai_tools(
         semantic_source: Optional semantic source (auto-loaded if not given).
         session: Optional ``ContractSession`` for tracking enforcement state.
             One is created automatically if omitted.
+        caller_principal: Optional principal identifying the caller, used for
+            per-principal table/rule gating (passed through to ``create_tools``).
         tools: Pre-built ``ToolDef`` list (if ``None``, created via
             ``create_tools``).
         apply_middleware: When ``True`` (default), each tool pre-checks
@@ -111,6 +117,7 @@ def create_pydantic_ai_tools(
             adapter=adapter,
             semantic_source=semantic_source,
             session=session,
+            caller_principal=caller_principal,
         )
 
     return [_to_pydantic_ai_tool(t, session, apply_middleware) for t in tools]
@@ -165,3 +172,83 @@ def _to_pydantic_ai_tool(
         json_schema=tool_def.input_schema,
         takes_ctx=False,
     )
+
+
+@dataclass
+class ContractDeps:
+    """Per-user run dependencies for the deps-aware Pydantic AI toolset.
+
+    Used as ``Agent(deps_type=ContractDeps)`` and passed on each turn via
+    ``agent.run(..., deps=ContractDeps(session=..., caller_principal=...))``.
+
+    The **caller owns** each user's ``ContractSession``: create it once per user,
+    keep it keyed by user id, and pass the *same* object on every turn so
+    cumulative limits (``max_duration`` from the first call, retries, cost)
+    accumulate across the conversation. The toolset never creates sessions.
+    """
+
+    session: ContractSession
+    caller_principal: Principal = None
+
+
+def create_pydantic_ai_toolset(
+    contract: DataContract,
+    *,
+    adapter: DatabaseAdapter | None = None,
+    semantic_source: SemanticSource | None = None,
+    apply_middleware: bool = True,
+) -> ToolsetFunc[ContractDeps]:
+    """Create a deps-aware toolset factory so ONE shared ``Agent`` serves many users.
+
+    Returns a ``ToolsetFunc`` — register it on a single shared agent via the
+    public ``agent.toolset(...)`` API (or ``@agent.toolset``). On each run it
+    reads the per-user :class:`ContractDeps` from ``RunContext.deps`` and rebuilds
+    the contract's tools bound to that user's ``ContractSession`` + principal, so
+    you do not build a separate tools list (or Agent) per user::
+
+        agent = Agent(model, deps_type=ContractDeps)
+        agent.toolset(per_run_step=False)(
+            create_pydantic_ai_toolset(contract, adapter=adapter)
+        )
+        await agent.run(prompt, deps=ContractDeps(session=user_session,
+                                                  caller_principal=user))
+
+    Register with ``per_run_step=False`` (the decorator-factory form above is the
+    typed public API for passing it). ``agent.toolset`` defaults to
+    ``per_run_step=True``, which re-invokes the factory — rebuilding the 9 tools +
+    a ``Validator`` — on *every* model step. The deps (session and principal) are
+    stable within a single run, so the tools only need building once per run;
+    ``per_run_step=False`` evaluates the factory once per ``run()`` and avoids the
+    per-step rebuild. (The rebuild does no I/O, so the cost is small either way,
+    but once-per-run is the right default for this factory.)
+
+    Enforcement is identical to :func:`create_pydantic_ai_tools` (a validation
+    block becomes ``ModelRetry``; a session-budget breach becomes the terminal
+    ``ContractSessionLimitError``). The shared config (adapter connection pool,
+    semantic source) stays shared across all users; only the per-user session and
+    principal vary, threaded in via ``deps``.
+    """
+
+    def _factory(ctx: RunContext[ContractDeps]) -> FunctionToolset[ContractDeps]:
+        deps = ctx.deps
+        # Fail loudly on mis-wiring — never silently skip enforcement.
+        if not isinstance(deps, ContractDeps):
+            raise TypeError(
+                "create_pydantic_ai_toolset requires Agent(deps_type=ContractDeps)"
+                " and run(..., deps=ContractDeps(...)); got"
+                f" {type(deps).__name__}."
+            )
+        if deps.session is None:
+            raise ValueError("ContractDeps.session must not be None.")
+
+        tools = create_pydantic_ai_tools(
+            contract,
+            adapter=adapter,
+            semantic_source=semantic_source,
+            session=deps.session,
+            caller_principal=deps.caller_principal,
+            apply_middleware=apply_middleware,
+        )
+        return FunctionToolset(tools)
+
+    return _factory

@@ -31,12 +31,19 @@ except ImportError:  # pragma: no cover — exercised only without the extra
 # fails fast when the extra isn't installed. We fall through to ``None`` so
 # ``from agentic_data_contracts import …`` keeps working on the base install.
 try:
-    from agentic_data_contracts.tools.pydantic_ai import create_pydantic_ai_tools
+    from agentic_data_contracts.tools.pydantic_ai import (
+        ContractDeps,
+        create_pydantic_ai_tools,
+        create_pydantic_ai_toolset,
+    )
 except ImportError:  # pragma: no cover — exercised only without the extra
+    ContractDeps = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_tools = None  # ty: ignore[invalid-assignment]
+    create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
 
 __all__ = [
     "ClaudePromptRenderer",
+    "ContractDeps",
     "ContractMiddleware",
     "DataContract",
     "MetricDefinition",
@@ -48,6 +55,7 @@ __all__ = [
     "SqlNormalizer",
     "contract_middleware",
     "create_langchain_tools",
+    "create_pydantic_ai_toolset",
     "create_pydantic_ai_tools",
     "create_sdk_mcp_server",
     "create_tools",

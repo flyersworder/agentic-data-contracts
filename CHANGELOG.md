@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-06-20
+
+### Added
+
+- **Deps-aware Pydantic AI toolset — one shared `Agent` for many users.** New `create_pydantic_ai_toolset(contract, ...)` returns a Pydantic AI `ToolsetFunc` you register on a *single* shared agent via the public `agent.toolset(...)` API. On each run it reads a per-user `ContractDeps` (new dataclass: `session` + `caller_principal`) from `RunContext.deps` and rebuilds the contract's 9 tools bound to that user's `ContractSession` and principal. This delivers the multi-user memory profile the v0.23.0 baked-in path could not: build the `Agent` **once**, and each user is just a `message_history` + a small `ContractDeps`, instead of a separate per-user tools list (and the Claude Agent SDK's per-session subprocess is gone entirely). The **caller owns** each user's `ContractSession` (created once per user, passed on every turn so cumulative limits accumulate); the toolset never creates sessions. Enforcement is unchanged from `create_pydantic_ai_tools` — a validation block becomes `ModelRetry`, a session-budget breach the terminal `ContractSessionLimitError` — and now applies the *correct* per-user principal on each run.
+- **`caller_principal` passthrough on `create_pydantic_ai_tools`.** The v0.23.0 function now accepts a `caller_principal` keyword and threads it to `create_tools`, so per-principal table/rule gating applies in the baked-in path too (previously it was silently dropped).
+- **Tests** covering the `caller_principal` passthrough, that `create_pydantic_ai_toolset` returns a registrable factory, multi-user **session isolation** — both directly and **end-to-end through one shared `Agent` via `agent.run()`** (user A exhausting their budget does not affect user B on the same agent), **per-principal gating** via `deps`, blocked-SQL → `ModelRetry` through the toolset, and clear errors on both mis-wiring branches (non-`ContractDeps`, and `ContractDeps` with `session=None`). `ContractDeps` and `create_pydantic_ai_toolset` are re-exported from the package root behind the `[pydantic-ai]` import guard.
+
+### Compatibility
+
+- **Purely additive.** `tools/factory.py` and the v0.23.0 `create_pydantic_ai_tools` behaviour are unchanged except the new optional `caller_principal` keyword (defaults to `None` = prior behaviour). No new dependency — the deps-aware path reuses `pydantic-ai-slim`. The full pre-existing test suite passes unchanged.
+
+### Internal
+
+- Uses Pydantic AI's built-in dynamic-toolset mechanism via a `ToolsetFunc` registered with the public `agent.toolset(...)` — deliberately **not** a hand-rolled `AbstractToolset` subclass, which would need fragile run-scoped caching to keep `get_tools()` and `call_tool()` consistent. Register with `agent.toolset(per_run_step=False)(create_pydantic_ai_toolset(...))`: the deps (session, principal) are stable within a run, so the factory need only run once per run rather than once per model step (the docstring and README show this form). The 9 tools + a `Validator` are rebuilt per run (no I/O); the shared config — adapter connection pool, semantic source — stays shared across all users.
+
 ## [0.23.0] - 2026-06-20
 
 ### Added

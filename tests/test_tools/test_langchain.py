@@ -149,7 +149,9 @@ def test_run_query_args_schema_exposes_sql_property(
     if isinstance(schema, dict):
         props = schema["properties"]
     else:
-        props = schema.model_json_schema()["properties"]
+        # langchain-core synthesizes a Pydantic v2 model here; ty widens
+        # args_schema to a v1|v2 union, so guard the v2-only method.
+        props = schema.model_json_schema()["properties"]  # ty: ignore[unresolved-attribute]
     assert "sql" in props
 
 

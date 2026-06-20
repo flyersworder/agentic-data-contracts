@@ -9,8 +9,9 @@ import pytest
 # matches the "extra is optional" backward-compat contract.
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai import Agent, ModelRetry, Tool  # noqa: E402
+from pydantic_ai import Agent, ModelRetry, RunContext, Tool  # noqa: E402
 from pydantic_ai.models.test import TestModel  # noqa: E402
+from pydantic_ai.usage import RunUsage  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
 from agentic_data_contracts.core.contract import DataContract  # noqa: E402
@@ -26,8 +27,10 @@ from agentic_data_contracts.core.session import (  # noqa: E402
 from agentic_data_contracts.semantic.yaml_source import YamlSource  # noqa: E402
 from agentic_data_contracts.tools.factory import create_tools  # noqa: E402
 from agentic_data_contracts.tools.pydantic_ai import (  # noqa: E402
+    ContractDeps,
     _unwrap_mcp_text,
     create_pydantic_ai_tools,
+    create_pydantic_ai_toolset,
 )
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -43,6 +46,17 @@ async def _invoke(tool: Tool, **kwargs: Any) -> Any:
     """
     fn = cast(Any, tool.function)
     return await fn(**kwargs)
+
+
+def _run_ctx(deps: Any) -> RunContext[Any]:
+    """Minimal RunContext for driving a deps-aware toolset factory directly."""
+    return RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+
+
+def _toolset_tools(factory: Any, deps: Any) -> dict[str, Tool]:
+    """Invoke the deps-aware factory with ``deps`` and return its {name: Tool}."""
+    toolset = factory(_run_ctx(deps))
+    return cast("dict[str, Tool]", toolset.tools)
 
 
 # ─── fixtures ─────────────────────────────────────────────────────────────────
@@ -344,10 +358,196 @@ async def test_tool_invoked_through_agent_real_path(
     assert "describe_table" in str(result.all_messages())
 
 
+# ─── deps-aware toolset (one shared Agent, per-user state) ────────────────────
+
+
+def _principal_scoped_contract() -> DataContract:
+    """Contract whose only table is restricted to principal 'bob'."""
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {
+                        "schema": "analytics",
+                        "tables": ["orders"],
+                        "allowed_principals": ["bob"],
+                    }
+                ),
+            ],
+        ),
+    )
+    return DataContract(schema)
+
+
+@pytest.mark.asyncio
+async def test_caller_principal_passthrough_gates_per_principal(
+    adapter: DuckDBAdapter,
+) -> None:
+    """create_pydantic_ai_tools now threads caller_principal into create_tools,
+    so per-principal table gating applies in the baked-in path too."""
+    contract = _principal_scoped_contract()
+    bob_describe = next(
+        t
+        for t in create_pydantic_ai_tools(
+            contract, adapter=adapter, caller_principal="bob"
+        )
+        if t.name == "describe_table"
+    )
+    alice_describe = next(
+        t
+        for t in create_pydantic_ai_tools(
+            contract, adapter=adapter, caller_principal="alice"
+        )
+        if t.name == "describe_table"
+    )
+    assert "restricted" not in await _invoke(
+        bob_describe, schema="analytics", table="orders"
+    )
+    assert "restricted" in await _invoke(
+        alice_describe, schema="analytics", table="orders"
+    )
+
+
+def test_create_pydantic_ai_toolset_returns_registrable_factory(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """The factory is a ToolsetFunc registrable on a shared Agent via the
+    public agent.toolset(...) API, and builds the 9 contract tools from deps."""
+    factory = create_pydantic_ai_toolset(contract_no_source, adapter=adapter)
+    assert callable(factory)
+    agent = Agent(model=TestModel(call_tools=[]), deps_type=ContractDeps)
+    agent.toolset(factory)  # registration via the public API must not raise
+    tools = _toolset_tools(
+        factory, ContractDeps(session=ContractSession(contract_no_source))
+    )
+    assert len(tools) == 9
+    assert {"run_query", "describe_table", "inspect_query"} <= set(tools)
+
+
+@pytest.mark.asyncio
+async def test_toolset_isolates_sessions_across_users(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """One shared factory, two users with distinct sessions: user A exhausting
+    their budget must not affect user B — the headline multi-user property."""
+    factory = create_pydantic_ai_toolset(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    session_a = ContractSession(contract)
+    for _ in range(4):  # exhaust A (max_retries=3)
+        session_a.record_retry()
+    session_b = ContractSession(contract)  # fresh
+
+    tools_a = _toolset_tools(factory, ContractDeps(session=session_a))
+    tools_b = _toolset_tools(factory, ContractDeps(session=session_b))
+
+    with pytest.raises(ContractSessionLimitError):
+        await _invoke(tools_a["describe_table"], schema="analytics", table="orders")
+    result_b = await _invoke(
+        tools_b["describe_table"], schema="analytics", table="orders"
+    )
+    assert "BLOCKED" not in result_b
+
+
+@pytest.mark.asyncio
+async def test_toolset_isolation_end_to_end_through_shared_agent(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Drive the toolset through the REAL framework path: register the factory on
+    ONE shared Agent and run two users via ``agent.run()``. This exercises
+    ``agent.toolset(...)`` registration, per-run ``RunContext.deps`` threading,
+    and tool dispatch — none of which the direct ``_toolset_tools`` tests cover.
+    User A (exhausted) must raise the terminal error out of ``agent.run()`` while
+    user B (fresh) completes on the same agent — proving real cross-user isolation."""
+    factory = create_pydantic_ai_toolset(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    agent = Agent(
+        model=TestModel(call_tools=["describe_table"]), deps_type=ContractDeps
+    )
+    # per_run_step=False: deps (session/principal) are stable within a run, so the
+    # tools need building only once per run, not once per model step. The
+    # decorator-factory form is the typed public API for passing per_run_step.
+    agent.toolset(per_run_step=False)(factory)
+
+    session_b = ContractSession(contract)  # fresh user B
+    result_b = await agent.run("describe orders", deps=ContractDeps(session=session_b))
+    assert "describe_table" in str(result_b.all_messages())
+
+    session_a = ContractSession(contract)  # exhausted user A
+    for _ in range(4):  # exceed max_retries=3
+        session_a.record_retry()
+    with pytest.raises(ContractSessionLimitError):
+        await agent.run("describe orders", deps=ContractDeps(session=session_a))
+
+
+@pytest.mark.asyncio
+async def test_toolset_applies_per_principal_gating_via_deps(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The per-user principal in deps drives per-principal table gating."""
+    contract = _principal_scoped_contract()
+    factory = create_pydantic_ai_toolset(contract, adapter=adapter)
+    bob = _toolset_tools(
+        factory, ContractDeps(session=ContractSession(contract), caller_principal="bob")
+    )
+    alice = _toolset_tools(
+        factory,
+        ContractDeps(session=ContractSession(contract), caller_principal="alice"),
+    )
+    assert "restricted" not in await _invoke(
+        bob["describe_table"], schema="analytics", table="orders"
+    )
+    assert "restricted" in await _invoke(
+        alice["describe_table"], schema="analytics", table="orders"
+    )
+
+
+@pytest.mark.asyncio
+async def test_toolset_enforces_blocked_sql_via_deps(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Enforcement still fires through the deps-aware path: blocked SQL → ModelRetry."""
+    factory = create_pydantic_ai_toolset(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    tools = _toolset_tools(factory, ContractDeps(session=ContractSession(contract)))
+    with pytest.raises(ModelRetry):
+        await _invoke(tools["run_query"], sql="DELETE FROM analytics.orders")
+
+
+def test_toolset_rejects_non_contract_deps(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """A non-ContractDeps object (None, dict, ...) hits the TypeError guard —
+    fail loudly rather than silently skipping enforcement."""
+    factory = create_pydantic_ai_toolset(contract_no_source, adapter=adapter)
+    with pytest.raises(TypeError):
+        factory(_run_ctx(None))
+    with pytest.raises(TypeError):
+        factory(_run_ctx({"session": None}))
+
+
+def test_toolset_rejects_contract_deps_with_no_session(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """A ContractDeps carrying session=None hits the ValueError guard — without
+    it, a None session would flow into create_pydantic_ai_tools and silently
+    auto-create a fresh unbounded session, defeating enforcement."""
+    factory = create_pydantic_ai_toolset(contract_no_source, adapter=adapter)
+    with pytest.raises(ValueError, match="session"):
+        factory(_run_ctx(ContractDeps(session=None)))  # ty: ignore[invalid-argument-type]
+
+
 # ─── top-level lazy re-export ─────────────────────────────────────────────────
 
 
 def test_top_level_import_resolves_when_extra_installed() -> None:
+    from agentic_data_contracts import ContractDeps as _CD
     from agentic_data_contracts import create_pydantic_ai_tools as _ct
+    from agentic_data_contracts import create_pydantic_ai_toolset as _cts
 
     assert _ct is not None
+    assert _cts is not None
+    assert _CD is not None

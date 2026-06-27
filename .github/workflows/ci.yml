@@ -58,6 +58,31 @@ jobs:
       - run: uv sync --all-extras --dev --frozen
       - run: uv run pytest --cov=agentic_data_contracts --cov-report=term-missing
 
+  test-pydantic-ai-v2:
+    # Early-warning job. pyproject allows pydantic-ai-slim >=1.107 (unbounded), and
+    # Pydantic AI's version policy only guarantees ~3 months between breaking majors.
+    # The `test` job above runs against the locked v1.107; this runs the adapter
+    # suite against the latest v2.x so an upstream break surfaces here rather than in
+    # a user's install. Intentionally NOT a release gate (omitted from publish.needs).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv python install 3.13
+      # --isolated forces a fresh resolve (ignoring the v1-pinned uv.lock); --with
+      # overrides the floor to the latest 2.x. Only the extras the adapter suite
+      # needs are installed.
+      - run: >-
+          uv run --isolated --python 3.13
+          --with 'pydantic-ai-slim[anthropic]>=2.0,<3'
+          --extra pydantic-ai --extra duckdb --extra dev
+          pytest tests/test_tools/test_pydantic_ai.py -v
+
   security:
     runs-on: ubuntu-latest
     permissions:

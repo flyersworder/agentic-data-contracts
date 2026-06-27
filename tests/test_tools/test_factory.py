@@ -224,6 +224,100 @@ async def test_lookup_metric(
 
 
 @pytest.mark.asyncio
+async def test_lookup_metric_includes_owners_and_freshness(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """A reviewed metric exposes its owners + freshness so the agent can disclose."""
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    payload = json.loads(
+        (await tool.callable({"metric_name": "total_revenue"}))["content"][0]["text"]
+    )
+    assert payload["business_owner"] == "revenue-platform"
+    assert payload["operational_owner"] == "data-eng-finance"
+    assert payload["last_reviewed"] == "2020-01-01"
+    assert payload["stale"] is True  # 2020 is well past the 90-day default
+
+
+@pytest.mark.asyncio
+async def test_lookup_metric_omits_freshness_when_unset(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Metrics with no review date / owners don't get noisy stale flags."""
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    payload = json.loads(
+        (await tool.callable({"metric_name": "active_customers"}))["content"][0]["text"]
+    )
+    assert "last_reviewed" not in payload
+    assert "stale" not in payload
+    assert "business_owner" not in payload
+    assert "operational_owner" not in payload
+
+
+@pytest.mark.asyncio
+async def test_lookup_metric_not_stale_under_large_threshold(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """staleness_threshold_days controls the stale flag deterministically."""
+    tools = create_tools(
+        contract,
+        adapter=adapter,
+        semantic_source=semantic,
+        staleness_threshold_days=1_000_000,
+    )
+    tool = next(t for t in tools if t.name == "lookup_metric")
+    payload = json.loads(
+        (await tool.callable({"metric_name": "total_revenue"}))["content"][0]["text"]
+    )
+    assert payload["last_reviewed"] == "2020-01-01"
+    assert payload["stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_flags_stale_only(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """list_metrics carries a lean stale flag only for stale metrics."""
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+    payload = json.loads((await tool.callable({}))["content"][0]["text"])
+    by_name = {m["name"]: m for m in payload["metrics"]}
+    assert by_name["total_revenue"]["stale"] is True
+    assert "stale" not in by_name["active_customers"]
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_includes_owners_and_freshness(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    payload = json.loads(
+        (await tool.callable({"name": "revenue"}))["content"][0]["text"]
+    )
+    assert payload["business_owner"] == "revenue-platform"
+    assert payload["operational_owner"] == "data-eng-finance"
+    assert payload["last_reviewed"] == "2020-01-01"
+    assert payload["stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_lookup_domain_omits_freshness_when_unset(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "lookup_domain")
+    payload = json.loads(
+        (await tool.callable({"name": "engagement"}))["content"][0]["text"]
+    )
+    assert "business_owner" not in payload
+    assert "operational_owner" not in payload
+    assert "last_reviewed" not in payload
+    assert "stale" not in payload
+
+
+@pytest.mark.asyncio
 async def test_preview_table(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:

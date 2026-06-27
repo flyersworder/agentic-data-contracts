@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +19,26 @@ from agentic_data_contracts.semantic.base import (
 
 
 def _parse_date(value: Any) -> date | None:
-    """Accept a YAML-native date, an ISO-8601 string, or None."""
-    if value is None or isinstance(value, date):
+    """Accept a YAML-native date/datetime, an ISO-8601 string, or None.
+
+    ``datetime`` is checked before ``date`` because it subclasses ``date`` — a
+    YAML scalar with a time component (``2020-01-01 12:00:00``) parses to
+    ``datetime`` and must be normalised to ``date``, otherwise downstream
+    ``date - datetime`` staleness arithmetic raises ``TypeError``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
         return value
     if isinstance(value, str):
-        return date.fromisoformat(value)
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"last_reviewed must be an ISO date (YYYY-MM-DD), got {value!r}"
+            ) from exc
     raise TypeError(
         f"last_reviewed must be a date or ISO string, "
         f"got {type(value).__name__}: {value!r}"
@@ -53,6 +68,9 @@ class YamlSource:
                     domains=domains,
                     tier=tier,
                     indicator_kind=m.get("indicator_kind"),
+                    business_owner=m.get("business_owner"),
+                    operational_owner=m.get("operational_owner"),
+                    last_reviewed=_parse_date(m.get("last_reviewed")),
                 )
             )
         self._tables: dict[str, TableSchema] = {}

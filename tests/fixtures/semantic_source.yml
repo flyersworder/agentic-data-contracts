@@ -8,7 +8,15 @@ metrics:
     domains: [revenue]
     tier: [north_star, department_kpi]
     indicator_kind: lagging
+    # Owners are teams, not individuals. business_owner owns the definition +
+    # review cadence; operational_owner owns data health (DQ, backfills).
+    business_owner: revenue-platform
+    operational_owner: data-eng-finance
+    # Deliberately old so staleness is deterministic against the real clock.
+    last_reviewed: 2020-01-01
 
+  # active_customers intentionally omits owners + last_reviewed — exercises the
+  # "field absent" path in the staleness detector and the agent-facing tools.
   - name: active_customers
     description: "Count of customers with at least one order in the last 90 days"
     sql_expression: "COUNT(DISTINCT customer_id)"

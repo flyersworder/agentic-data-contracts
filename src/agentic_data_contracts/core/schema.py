@@ -140,6 +140,11 @@ class Domain(BaseModel):
     metrics: list[str] = Field(default_factory=list)
     tables: list[str] = Field(default_factory=list)
     last_reviewed: date | None = None
+    # Owners are teams, not individuals (convention, not validated): the
+    # business owner owns the definition + review cadence, the operational
+    # owner owns data health (DQ, backfills).
+    business_owner: str | None = None
+    operational_owner: str | None = None
 
 
 class SemanticConfig(BaseModel):

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
@@ -17,6 +18,7 @@ from agentic_data_contracts.core.principal import (
 )
 from agentic_data_contracts.core.schema import Domain
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
+from agentic_data_contracts.core.staleness import owner_context, review_age_days
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
@@ -89,10 +91,32 @@ def _format_impact_edge(edge: MetricImpact, *, perspective: str) -> str:
     return summary
 
 
+def _freshness_fields(
+    last_reviewed: date | None, today: date, threshold_days: int
+) -> dict[str, Any]:
+    """Lenient freshness slice for agent-facing output.
+
+    Returns ``{}`` when ``last_reviewed`` is unset — unlike the governance audit
+    (:func:`find_stale_reviews`), the runtime tools stay quiet about metadata the
+    org never adopted rather than crying "stale" on every lookup. When a review
+    date is present, emits ``last_reviewed`` (ISO) and a ``stale`` boolean.
+    """
+    age_days = review_age_days(last_reviewed, today)
+    if last_reviewed is None or age_days is None:
+        return {}
+    return {
+        "last_reviewed": last_reviewed.isoformat(),
+        "stale": age_days > threshold_days,
+    }
+
+
 def _metric_details(
     metric: MetricDefinition,
     contract_domains: list[Domain],
     impact_index: dict[str, list[MetricImpact]],
+    *,
+    today: date,
+    threshold_days: int,
 ) -> dict[str, Any]:
     """Serialize a metric with all enrichment fields for tool responses."""
     data: dict[str, Any] = {
@@ -109,6 +133,8 @@ def _metric_details(
         data["tier"] = metric.tier
     if metric.indicator_kind:
         data["indicator_kind"] = metric.indicator_kind
+    data.update(owner_context(metric.business_owner, metric.operational_owner))
+    data.update(_freshness_fields(metric.last_reviewed, today, threshold_days))
 
     outgoing: list[str] = []
     incoming: list[str] = []
@@ -131,6 +157,7 @@ def create_tools(
     semantic_source: SemanticSource | None = None,
     session: ContractSession | None = None,
     caller_principal: Principal = None,
+    staleness_threshold_days: int = 90,
 ) -> list[ToolDef]:
     if session is None:
         session = ContractSession(contract)
@@ -413,6 +440,7 @@ def create_tools(
         if indicator_filter:
             metrics = [m for m in metrics if m.indicator_kind == indicator_filter]
 
+        today = date.today()
         data: list[dict[str, Any]] = []
         for m in metrics:
             entry: dict[str, Any] = {
@@ -424,6 +452,12 @@ def create_tools(
                 entry["tier"] = m.tier
             if m.indicator_kind:
                 entry["indicator_kind"] = m.indicator_kind
+            # Lean flag only — list entries are for scanning; full freshness +
+            # owners live in lookup_metric. Surface `stale` only when actually
+            # stale to avoid noise on fresh / unreviewed metrics.
+            age_days = review_age_days(m.last_reviewed, today)
+            if age_days is not None and age_days > staleness_threshold_days:
+                entry["stale"] = True
             data.append(entry)
         return _text_response(json.dumps({"metrics": data}))
 
@@ -432,18 +466,34 @@ def create_tools(
         metric_name = args.get("metric_name", "")
         if semantic_source is None:
             return _text_response("No semantic source configured.")
+        today = date.today()
         # Try exact match first
         metric = semantic_source.get_metric(metric_name)
         if metric is not None:
             return _text_response(
-                json.dumps(_metric_details(metric, _contract_domains, _impact_index))
+                json.dumps(
+                    _metric_details(
+                        metric,
+                        _contract_domains,
+                        _impact_index,
+                        today=today,
+                        threshold_days=staleness_threshold_days,
+                    )
+                )
             )
         # Fuzzy fallback
         candidates = semantic_source.search_metrics(metric_name)
         if not candidates:
             return _text_response(f"Metric '{metric_name}' not found.")
         data = [
-            _metric_details(m, _contract_domains, _impact_index) for m in candidates
+            _metric_details(
+                m,
+                _contract_domains,
+                _impact_index,
+                today=today,
+                threshold_days=staleness_threshold_days,
+            )
+            for m in candidates
         ]
         return _text_response(
             json.dumps(
@@ -458,6 +508,7 @@ def create_tools(
     # ── Tool 5: lookup_domain ───────────────────────────────────────────
     async def lookup_domain(args: dict[str, Any]) -> dict[str, Any]:
         name = args.get("name", "")
+        today = date.today()
         domain = contract.get_domain(name)
 
         if domain is not None:
@@ -483,6 +534,10 @@ def create_tools(
             }
             if domain.tables:
                 data["tables"] = domain.tables
+            data.update(owner_context(domain.business_owner, domain.operational_owner))
+            data.update(
+                _freshness_fields(domain.last_reviewed, today, staleness_threshold_days)
+            )
             return _text_response(json.dumps(data))
 
         # Fuzzy fallback over domain names

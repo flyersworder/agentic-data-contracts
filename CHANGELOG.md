@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-06-27
+
+### Added
+
+- **Dual-role ownership on metrics and domains.** `MetricDefinition` and `Domain` gain optional `business_owner` and `operational_owner` fields — the business owner owns the *definition* and its review cadence; the operational owner owns *data health* (DQ, backfills). Owners are teams, not individuals (a convention, not validated — owners must outlive any one person). Read from the YAML semantic source and from the contract's `domains:`; `DbtSource` / `CubeSource` leave them unset (graceful defaults, deferred). Inspired by Lyft's Metric Semantic Layer governance model.
+- **Per-metric review timestamps + metric staleness.** `MetricDefinition` gains an optional `last_reviewed: date` (joining the existing field on `Domain` and `MetricImpact`). `find_stale_reviews()` / `DataContract.find_stale()` now evaluate metrics as a third artefact kind, so findings come back as `domain` / `metric` / `metric_impact`. Every domain and metric finding carries its owners in `context` (`business_owner` / `operational_owner`) so the audit report says *who to nag*. A new pure helper `review_age_days(last_reviewed, as_of)` centralises the age arithmetic shared by the detector and the tool layer.
+- **Owners + freshness surfaced in the agent-facing tools.** `lookup_metric` and `lookup_domain` now include `business_owner` / `operational_owner` and a `last_reviewed` + `stale` pair; `list_metrics` carries a lean `stale: true` flag (only when stale). `create_tools(...)` gains a `staleness_threshold_days: int = 90` knob. **Two audiences, two policies:** `find_stale()` is the strict audit path (missing `last_reviewed` = stale), while the tools are lenient — they emit `last_reviewed`/`stale` only when a review date is actually set, so contracts that never adopted the field get no false "stale" noise at query time.
+- **17 tests** across `tests/test_core/test_domain_model.py` (domain owners), `tests/test_semantic/test_yaml_source.py` (parsing the three new fields + None defaults), `tests/test_core/test_staleness.py` (metric staleness: missing / fresh / beyond-threshold, owner context for metric and domain findings, `find_stale` pulling metrics from a source), and `tests/test_tools/test_factory.py` (owners + freshness on `lookup_metric` / `lookup_domain`, the lenient omit-when-unset path, the `list_metrics` stale flag, and `staleness_threshold_days` control).
+
+### Compatibility
+
+- **Additive API.** All new fields are optional with `None` defaults; `find_stale_reviews` gains an optional keyword-only `metrics=` parameter (defaults to `None`), and `create_tools` gains an optional `staleness_threshold_days` keyword. Existing contracts, semantic sources (including dbt/Cube), and call sites compile and run unchanged. The full pre-existing test suite passes.
+- **Behavior change in `DataContract.find_stale()`.** It now also audits metrics, so any metric whose source does not set `last_reviewed` is reported as a new `metric`-kind finding (`age_days=None`) on first run — the same "missing = stale" forcing function already applied to domains and metric-impacts. This is intentional, but a consumer that gates on a non-empty result (e.g. a CI check that fails when `find_stale()` returns anything) will newly fire for every un-reviewed metric. To grandfather existing catalogs during rollout, either back-fill `last_reviewed` or filter with `f.age_days is not None`. dbt/Cube sources do not yet parse `last_reviewed` on metrics, so all their metrics report as un-reviewed until that lands.
+
+### Internal
+
+- Documentation updated: `README.md` (semantic-source YAML schema + ownership/cadence note + tools table), `docs/architecture.md` (Governance Staleness section, `MetricDefinition` field list, the two-audiences policy). All three `examples/*/semantic.yml` now declare owners + `last_reviewed` on their metrics, showcasing the feature and keeping the `find_stale` demos focused.
+
 ## [0.24.0] - 2026-06-20
 
 ### Added

@@ -3,6 +3,9 @@
 # SLA metrics keyed on severity tier, and all three confidence levels.
 
 metrics:
+  # Owners are teams, not individuals: business_owner owns the definition +
+  # review cadence; operational_owner owns data health. last_reviewed feeds
+  # find_stale() and surfaces in lookup_metric so the agent can flag drift.
   - name: mttr_minutes
     description: >
       Mean Time To Resolve in minutes, across all severities.
@@ -16,6 +19,9 @@ metrics:
     domains: [reliability]
     tier: [north_star]
     indicator_kind: lagging
+    business_owner: sre-analytics
+    operational_owner: data-platform
+    last_reviewed: 2026-05-15
 
   - name: incident_count_24h
     description: "Incidents opened in the last 24 hours (rolling)"
@@ -25,6 +31,9 @@ metrics:
     domains: [reliability]
     tier: [department_kpi]
     indicator_kind: lagging
+    business_owner: sre-analytics
+    operational_owner: data-platform
+    last_reviewed: 2026-05-15
 
   - name: sla_compliance_rate
     description: >
@@ -37,6 +46,9 @@ metrics:
     domains: [reliability]
     tier: [north_star]
     indicator_kind: lagging
+    business_owner: sre-analytics
+    operational_owner: data-platform
+    last_reviewed: 2026-05-15
 
   - name: deploy_frequency_per_day
     description: "Successful deploys per day across all services"
@@ -47,6 +59,9 @@ metrics:
     domains: [reliability]
     tier: [team_kpi]
     indicator_kind: leading
+    business_owner: sre-analytics
+    operational_owner: data-platform
+    last_reviewed: 2026-05-15
 
 relationships:
   - from: sre.incidents.service_id

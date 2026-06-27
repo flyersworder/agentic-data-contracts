@@ -187,3 +187,29 @@ def test_domain_last_reviewed_parses_iso_date():
         }
     )
     assert d.last_reviewed == date(2026, 2, 1)
+
+
+def test_domain_owners_default_none():
+    """Without owners, both fields are None — callers treat this as 'unowned'."""
+    d = Domain(
+        name="revenue",
+        summary="Financial metrics",
+        description="Revenue domain.",
+    )
+    assert d.business_owner is None
+    assert d.operational_owner is None
+
+
+def test_domain_owners_set():
+    """Owners are team identifiers (business owns the definition)."""
+    d = Domain.model_validate(
+        {
+            "name": "revenue",
+            "summary": "Financial metrics",
+            "description": "Revenue domain.",
+            "business_owner": "revenue-platform",
+            "operational_owner": "data-eng-finance",
+        }
+    )
+    assert d.business_owner == "revenue-platform"
+    assert d.operational_owner == "data-eng-finance"

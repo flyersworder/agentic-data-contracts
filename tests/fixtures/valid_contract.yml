@@ -18,6 +18,12 @@ semantic:
         Revenue metrics track recognized revenue from completed orders.
         Revenue is recognized at fulfillment, not at booking.
       metrics: [total_revenue]
+      # Owners are teams, not individuals (business owns the definition,
+      # operational owns the data). Old review date → deterministically stale.
+      business_owner: revenue-platform
+      operational_owner: data-eng-finance
+      last_reviewed: 2020-01-01
+    # engagement intentionally omits owners + last_reviewed (negative case).
     - name: engagement
       summary: "Customer activity and retention patterns"
       description: >

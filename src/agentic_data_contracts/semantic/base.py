@@ -23,6 +23,12 @@ class MetricDefinition:
     domains: list[str] = field(default_factory=list)
     tier: list[str] = field(default_factory=list)
     indicator_kind: str | None = None
+    # Owners are teams, not individuals (convention, not validated): the
+    # business owner owns the definition + review cadence; the operational
+    # owner owns data health. ``last_reviewed`` drives staleness detection.
+    business_owner: str | None = None
+    operational_owner: str | None = None
+    last_reviewed: date | None = None
 
 
 @dataclass

@@ -13,7 +13,11 @@ from agentic_data_contracts.core.schema import (
     SemanticConfig,
 )
 from agentic_data_contracts.core.staleness import StaleFinding, find_stale_reviews
-from agentic_data_contracts.semantic.base import MetricImpact, SemanticSource
+from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    MetricImpact,
+    SemanticSource,
+)
 
 
 def _contract(*domains: Domain) -> DataContract:
@@ -159,10 +163,120 @@ class TestMetricImpactStaleness:
         assert ctx["to_metric"] == "b"
 
     def test_domain_context_is_empty(self) -> None:
-        """Domain findings have no kind-specific metadata today."""
+        """Domain findings carry no metadata when no owners are set."""
         contract = _contract(Domain(name="revenue", summary="", description="x"))
         findings = find_stale_reviews(contract, impacts=[], today=date(2026, 4, 18))
         assert findings[0].context == {}
+
+    def test_domain_context_carries_owners_when_set(self) -> None:
+        """Owners go into context so the audit report can say who to nag."""
+        contract = _contract(
+            Domain(
+                name="revenue",
+                summary="",
+                description="x",
+                business_owner="revenue-platform",
+                operational_owner="data-eng-finance",
+            )
+        )
+        findings = find_stale_reviews(contract, impacts=[], today=date(2026, 4, 18))
+        ctx = findings[0].context
+        assert ctx["business_owner"] == "revenue-platform"
+        assert ctx["operational_owner"] == "data-eng-finance"
+
+
+class TestMetricStaleness:
+    """Per-metric review timestamps — faithful to Lyft's cadence-review model."""
+
+    @staticmethod
+    def _metric(
+        *,
+        name: str = "total_revenue",
+        last_reviewed: date | None = None,
+        business_owner: str | None = None,
+        operational_owner: str | None = None,
+    ) -> MetricDefinition:
+        return MetricDefinition(
+            name=name,
+            description="",
+            sql_expression="",
+            last_reviewed=last_reviewed,
+            business_owner=business_owner,
+            operational_owner=operational_owner,
+        )
+
+    def test_metric_without_last_reviewed_is_stale(self) -> None:
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[self._metric()],
+            today=date(2026, 4, 18),
+        )
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == "metric"
+        assert f.name == "total_revenue"
+        assert f.last_reviewed is None
+        assert f.age_days is None
+
+    def test_metric_fresh_is_not_flagged(self) -> None:
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[self._metric(last_reviewed=date(2026, 3, 1))],
+            today=date(2026, 4, 18),
+            threshold_days=90,
+        )
+        assert findings == []
+
+    def test_metric_beyond_threshold_is_stale(self) -> None:
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[self._metric(last_reviewed=date(2025, 11, 1))],
+            today=date(2026, 4, 18),
+            threshold_days=90,
+        )
+        assert len(findings) == 1
+        assert findings[0].kind == "metric"
+        assert findings[0].age_days == (date(2026, 4, 18) - date(2025, 11, 1)).days
+
+    def test_metric_context_carries_owners(self) -> None:
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[
+                self._metric(
+                    business_owner="revenue-platform",
+                    operational_owner="data-eng-finance",
+                )
+            ],
+            today=date(2026, 4, 18),
+        )
+        ctx = findings[0].context
+        assert ctx["business_owner"] == "revenue-platform"
+        assert ctx["operational_owner"] == "data-eng-finance"
+
+    def test_metric_without_owners_has_empty_context(self) -> None:
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[self._metric()],
+            today=date(2026, 4, 18),
+        )
+        assert findings[0].context == {}
+
+    def test_metric_empty_string_owner_omitted_from_context(self) -> None:
+        """An empty-string owner is treated as unset (same rule as the tools)."""
+        findings = find_stale_reviews(
+            _contract(),
+            impacts=[],
+            metrics=[self._metric(business_owner="", operational_owner="data-eng")],
+            today=date(2026, 4, 18),
+        )
+        ctx = findings[0].context
+        assert "business_owner" not in ctx
+        assert ctx["operational_owner"] == "data-eng"
 
 
 class TestMixedAndOrdering:
@@ -269,12 +383,40 @@ class TestDataContractFindStale:
             def get_metric_impacts(self) -> list[MetricImpact]:
                 return [MetricImpact(from_metric="a", to_metric="b")]
 
+            def get_metrics(self) -> list[MetricDefinition]:
+                return []
+
         contract = _contract()
         findings = contract.find_stale(
             cast(SemanticSource, _Stub()), today=date(2026, 4, 18)
         )
         assert len(findings) == 1
         assert findings[0].kind == "metric_impact"
+
+    def test_pulls_metrics_from_semantic_source(self) -> None:
+        """A metric missing its review date surfaces as a metric-kind finding."""
+
+        class _Stub:
+            def get_metric_impacts(self) -> list[MetricImpact]:
+                return []
+
+            def get_metrics(self) -> list[MetricDefinition]:
+                return [
+                    MetricDefinition(
+                        name="total_revenue",
+                        description="",
+                        sql_expression="",
+                        business_owner="revenue-platform",
+                    )
+                ]
+
+        contract = _contract()
+        findings = contract.find_stale(
+            cast(SemanticSource, _Stub()), today=date(2026, 4, 18)
+        )
+        assert len(findings) == 1
+        assert findings[0].kind == "metric"
+        assert findings[0].context["business_owner"] == "revenue-platform"
 
     def test_respects_threshold_days(self) -> None:
         contract = _contract(

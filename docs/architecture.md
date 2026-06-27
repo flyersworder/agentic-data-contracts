@@ -184,17 +184,19 @@ Always be concise and include methodology notes.
 
 ### Governance Staleness
 
-YAML-level business assertions — `domain.description`, `metric_impact.evidence` — rot silently when the business changes. Both models carry an optional `last_reviewed: date` field, and `DataContract.find_stale()` flags any artefact whose timestamp is missing or older than a threshold (default 90 days).
+YAML-level business assertions — `domain.description`, `metric.sql_expression`, `metric_impact.evidence` — rot silently when the business changes. `Domain`, `MetricDefinition`, and `MetricImpact` each carry an optional `last_reviewed: date` field, and `DataContract.find_stale()` flags any artefact whose timestamp is missing or older than a threshold (default 90 days). Findings come back as three `kind`s — `domain`, `metric`, `metric_impact` — and each carries its owners (`business_owner` / `operational_owner`) in `context` when set, so the report says *who to nag*.
 
 ```python
 dc = DataContract.from_yaml("data_contract.yml")
 source = dc.load_semantic_source()
 findings = dc.find_stale(source, threshold_days=90)
 for f in findings:
-    print(f.kind, f.name, f.age_days)
+    print(f.kind, f.name, f.age_days, f.context.get("business_owner"))
 ```
 
 Missing timestamps report as stale (`age_days=None`) — otherwise adoption is optional and defeats the forcing function. During rollout, filter by `f.age_days is not None` to grandfather in un-reviewed entries. The detector is a pure function suitable for direct use in a pytest assertion or CI check.
+
+**Two audiences, two policies.** `find_stale()` is the strict *audit* path above (missing date = stale). The agent-facing tools (`lookup_metric`, `list_metrics`, `lookup_domain`) take the *lenient* view: they surface `last_reviewed` + a `stale` boolean only when a review date is actually set, so contracts that never adopted the field get no false "stale" noise at query time. The stale threshold for the tools is `create_tools(..., staleness_threshold_days=90)`.
 
 ### Principal Resolver
 
@@ -495,7 +497,7 @@ class SemanticSource(Protocol):
 | `CubeSource` | Cube meta API or schema files | Metrics (+ `meta.tier` / `meta.indicator_kind` / `meta.domains`), dimensions |
 | `YamlSource` | Inline YAML definitions | Metric / table / relationship / `metric_impacts` definitions for teams not using dbt/Cube |
 
-`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`.
+`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`. The last three are parsed by `YamlSource` only; `DbtSource` / `CubeSource` leave them unset.
 `MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
 `Relationship`: `from_`, `to`, `type`, `description`, `required_filter`, `preferred`. The `preferred` flag (default `False`) marks the canonical join when alternatives exist between the same table pair. `build_relationship_index` stable-sorts each adjacency list with preferred edges first, so `find_join_path` (BFS) and `get_relationships_for_table` both surface the canonical edge automatically. The flat list returned by `get_relationships()` deliberately keeps declaration order; that list feeds the prompt renderer, which renders `preferred="true"` as a per-edge attribute instead of via reordering.
 `TableSchema`: `columns: list[Column]` with name, type, description.

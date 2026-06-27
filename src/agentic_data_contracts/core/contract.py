@@ -183,8 +183,8 @@ class DataContract:
     ) -> list[StaleFinding]:
         """Return governance artefacts whose review is missing or expired.
 
-        Convenience entry point that pulls metric impacts from an optional
-        ``SemanticSource`` and delegates to :func:`find_stale_reviews`.
+        Convenience entry point that pulls metrics and metric impacts from an
+        optional ``SemanticSource`` and delegates to :func:`find_stale_reviews`.
         Pass no source to check only domain-level staleness.
         """
         from agentic_data_contracts.core.staleness import find_stale_reviews
@@ -192,8 +192,9 @@ class DataContract:
         impacts = (
             semantic_source.get_metric_impacts() if semantic_source is not None else []
         )
+        metrics = semantic_source.get_metrics() if semantic_source is not None else []
         return find_stale_reviews(
-            self, impacts, threshold_days=threshold_days, today=today
+            self, impacts, metrics=metrics, threshold_days=threshold_days, today=today
         )
 
     def to_system_prompt(

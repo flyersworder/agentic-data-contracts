@@ -355,9 +355,9 @@ asyncio.run(demo())
 |------|-------------|
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
-| `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind |
-| `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by); fuzzy search fallback when no exact match |
-| `lookup_domain` | Get full domain context (description, metrics, tables); fuzzy search fallback |
+| `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind; flags `stale` metrics |
+| `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, owners, freshness); fuzzy search fallback when no exact match |
+| `lookup_domain` | Get full domain context (description, metrics, tables, owners, freshness); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `trace_metric_impacts` | Walk the metric-impact graph upstream (drivers) or downstream (affected metrics) from a starting metric |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
@@ -491,6 +491,9 @@ metrics:
     domains: [revenue]                 # optional — see "Metric Impacts" below
     tier: [north_star, department_kpi] # optional — north_star / department_kpi / team_kpi
     indicator_kind: lagging            # optional — leading | lagging
+    business_owner: revenue-platform   # optional — team that owns the definition
+    operational_owner: data-eng-finance # optional — team that owns data health
+    last_reviewed: 2026-05-15          # optional — drives staleness detection
 
 tables:
   - schema: analytics
@@ -505,6 +508,8 @@ tables:
 ```
 
 `tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names.
+
+**Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** today; dbt/Cube metrics default to unset.
 
 **dbt** — point to a `manifest.json`:
 ```yaml

@@ -49,7 +49,7 @@ class ClaudePromptRenderer:
         lines.extend(self._render_allowed_tables(contract))
 
         # 2. Domains (if defined) OR metrics OR semantic_source fallback
-        domain_lines = self._render_domains(contract)
+        domain_lines = self._render_domains(contract, semantic_source)
         if domain_lines:
             lines.extend(domain_lines)
         else:
@@ -101,19 +101,28 @@ class ClaudePromptRenderer:
     def _render_domains(
         self,
         contract: DataContract,
+        semantic_source: SemanticSource | None,
     ) -> list[str]:
         domains = contract.schema.semantic.domains
         if not domains:
             return []
 
+        # Membership is metric-first, so per-domain counts come from the source's
+        # metrics — tallied in a single pass rather than re-scanning per domain.
+        # Without a source we can't count; the index then advertises name +
+        # summary only and the agent uses lookup_domain. Imported locally to keep
+        # core decoupled from semantic at module scope.
+        from agentic_data_contracts.semantic.base import domain_metric_counts
+
+        domain_counts = domain_metric_counts(
+            semantic_source.get_metrics() if semantic_source is not None else []
+        )
         lines = ["<available_domains>"]
         for domain in domains:
-            metric_count = len(domain.metrics)
-            lines.append(
-                f'  <domain name="{domain.name}"'
-                f' summary="{domain.summary}"'
-                f' metric_count="{metric_count}" />'
-            )
+            attrs = f'name="{domain.name}" summary="{domain.summary}"'
+            if domain_counts[domain.name]:
+                attrs += f' metric_count="{domain_counts[domain.name]}"'
+            lines.append(f"  <domain {attrs} />")
         lines.append(
             '  <hint>Use lookup_domain("...") for business context,'
             ' then lookup_metric("...") for SQL definitions.</hint>'

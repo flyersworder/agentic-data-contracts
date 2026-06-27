@@ -41,7 +41,9 @@ Agent: "SELECT order_id, amount FROM analytics.orders WHERE tenant_id = 'acme'"
   -> PASSED + WARN (consider using semantic revenue definition)
 ```
 
-The contract defines the domains, metrics, and rules. The library enforces them — before the query ever reaches the database.
+**Two files, two responsibilities.** The **contract** (`contract.yml`) defines *governance* — allowed tables, rules, resource limits, and domain *catalog metadata* (what a domain means, who owns it, when it was last reviewed). The **semantic source** (`semantic.yml`, or dbt/Cube) defines the *metrics themselves* — their SQL, source tables, and which domain each belongs to.
+
+Domain membership is **metric-first**: a metric declares the domains it belongs to (`domains: [...]`), and the contract's `Domain` block never lists its metrics. The grain that matters — the metric — owns the relationship; the domain is just a label it points at. `lookup_domain` reconstructs a domain's members at query time by reverse-looking-up the metrics that declare it, so the two files never drift. The library enforces all of this — before the query ever reaches the database.
 
 ## Installation
 
@@ -91,7 +93,8 @@ semantic:
       description: >
         Revenue is recognized at fulfillment, not at booking.
         Excludes refunds and chargebacks unless stated.
-      metrics: [total_revenue]
+      # Membership is metric-first: metrics declare their domains in the
+      # semantic source (see "Semantic Sources"), so no metric list here.
   rules:
     - name: tenant_isolation
       description: "All queries must filter by tenant_id"
@@ -375,9 +378,10 @@ The core design principle: **agents should understand the business domain before
 
 ### Defining domains
 
-Each domain carries a description that teaches the agent your business rules — things the SQL alone can't express:
+A domain in the contract carries **catalog metadata** — a description that teaches the agent your business rules (things the SQL alone can't express), plus ownership and review cadence. It does **not** list its metrics: domain membership is *metric-first*, declared on each metric in the semantic source via `domains: [...]`. The contract describes a domain; the metrics decide which domain they belong to. `lookup_domain` stitches the two together at query time by reverse-looking-up metrics that declare the domain.
 
 ```yaml
+# contract.yml — catalog metadata only
 semantic:
   domains:
     - name: acquisition
@@ -386,7 +390,8 @@ semantic:
         Acquisition metrics track the cost and efficiency of
         acquiring new customers across all channels.
         CAC is calculated using fully-loaded cost, not just ad spend.
-      metrics: [CAC, CPA, CPL, click_through_rate]
+      business_owner: growth-platform   # optional
+      last_reviewed: 2026-05-15          # optional — drives staleness detection
     - name: retention
       summary: "Customer retention, churn, and lifetime value"
       description: >
@@ -394,7 +399,19 @@ semantic:
         Churn is measured on a 30-day rolling window.
         A customer is "active" if they had at least one qualifying
         action in the window.
-      metrics: [churn_rate, LTV, retention_30d]
+```
+
+```yaml
+# semantic.yml — metrics declare their domain membership
+metrics:
+  - name: CAC
+    description: "Fully-loaded customer acquisition cost"
+    sql_expression: "..."
+    domains: [acquisition]
+  - name: churn_rate
+    description: "30-day rolling churn"
+    sql_expression: "..."
+    domains: [retention]
 ```
 
 ### How the agent uses domains
@@ -408,7 +425,9 @@ lookup_metric("acquisition cost")   → fuzzy match, returns [CAC, CPA] as candi
 list_metrics(domain="retention")    → all metrics in the retention domain
 ```
 
-This means the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
+**Navigation is bidirectional — two doors into the same graph.** Top-down: a user asks about a *domain*, the agent reads its context, then drills into the metrics. Bottom-up (the common case, since queries usually name a metric): the agent looks up a *metric*, and `lookup_metric` returns that metric's `domains`, which it can follow into `lookup_domain` for the business context. Because membership lives on the metric, the metric path is always a first-class on-ramp to the domain.
+
+Either way, the agent knows that "revenue is recognized at fulfillment, not at booking" *before* it writes a single line of SQL — reducing hallucinated metrics and incorrect calculations.
 
 ### Why progressive disclosure works
 

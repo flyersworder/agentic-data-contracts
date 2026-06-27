@@ -3,6 +3,9 @@
 from datetime import date
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
@@ -12,17 +15,29 @@ from agentic_data_contracts.core.schema import (
 )
 
 
+def test_domain_forbids_unknown_field():
+    """A stale `metrics:` key from a pre-0.26 contract must fail loudly, not be
+    silently dropped (which would leave the domain with no members)."""
+    with pytest.raises(ValidationError):
+        Domain.model_validate(
+            {
+                "name": "revenue",
+                "summary": "Financial metrics",
+                "description": "Revenue domain.",
+                "metrics": ["total_revenue"],  # removed in 0.26 — now forbidden
+            }
+        )
+
+
 def test_domain_model_basic():
     d = Domain(
         name="revenue",
         summary="Financial metrics",
         description="Revenue tracks recognized revenue from completed orders.",
-        metrics=["total_revenue", "mrr"],
     )
     assert d.name == "revenue"
     assert d.summary == "Financial metrics"
     assert d.description == "Revenue tracks recognized revenue from completed orders."
-    assert d.metrics == ["total_revenue", "mrr"]
     assert d.tables == []
 
 
@@ -31,7 +46,6 @@ def test_domain_model_with_tables():
         name="revenue",
         summary="Financial metrics",
         description="Revenue domain.",
-        metrics=["total_revenue"],
         tables=["analytics.orders", "analytics.invoices"],
     )
     assert d.tables == ["analytics.orders", "analytics.invoices"]
@@ -47,13 +61,11 @@ def test_semantic_config_with_domains():
                 name="revenue",
                 summary="Financial metrics",
                 description="Revenue domain.",
-                metrics=["total_revenue"],
             ),
             Domain(
                 name="engagement",
                 summary="Customer activity",
                 description="Engagement domain.",
-                metrics=["active_customers"],
             ),
         ],
     )
@@ -84,7 +96,6 @@ def test_domain_in_full_contract_schema():
                     name="revenue",
                     summary="Financial metrics",
                     description="Revenue domain.",
-                    metrics=["total_revenue"],
                 ),
             ],
         ),
@@ -101,11 +112,14 @@ def test_domain_from_yaml(fixtures_dir: Path) -> None:
     assert revenue.name == "revenue"
     assert revenue.summary != ""
     assert revenue.description != ""
-    assert "total_revenue" in revenue.metrics
+    # Domains carry catalog metadata, not membership (that is metric-first).
+    assert revenue.business_owner == "revenue-platform"
+    assert revenue.last_reviewed is not None
 
     engagement = domains[1]
     assert engagement.name == "engagement"
-    assert "active_customers" in engagement.metrics
+    # engagement intentionally omits owners + last_reviewed (negative case).
+    assert engagement.business_owner is None
 
 
 def test_get_domain_exact_match():
@@ -122,13 +136,11 @@ def test_get_domain_exact_match():
                     name="revenue",
                     summary="Financial metrics",
                     description="Revenue domain.",
-                    metrics=["total_revenue"],
                 ),
                 Domain(
                     name="engagement",
                     summary="Customer activity",
                     description="Engagement domain.",
-                    metrics=["active_customers"],
                 ),
             ],
         ),

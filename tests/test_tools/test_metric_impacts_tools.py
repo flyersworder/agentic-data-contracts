@@ -1,5 +1,5 @@
 """Tests for metric-impact enrichment in list_metrics/lookup_metric and the
-new trace_metric_impacts tool, plus back-compat for Domain.metrics reverse lookup."""
+trace_metric_impacts tool."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
-    Domain,
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -28,30 +27,6 @@ def semantic(fixtures_dir: Path) -> YamlSource:
 @pytest.fixture
 def contract_no_domains(fixtures_dir: Path) -> DataContract:
     return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-
-
-@pytest.fixture
-def contract_with_domains() -> DataContract:
-    schema = DataContractSchema(
-        name="test",
-        semantic=SemanticConfig(
-            allowed_tables=[
-                AllowedTable.model_validate(
-                    {"schema": "analytics", "tables": ["orders"]}
-                ),
-            ],
-            domains=[
-                Domain(
-                    name="revenue",
-                    summary="Financial metrics",
-                    description="Revenue domain.",
-                    # Domain-first declaration: total_revenue lives here too.
-                    metrics=["total_revenue"],
-                ),
-            ],
-        ),
-    )
-    return DataContract(schema)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -178,26 +153,6 @@ async def test_list_metrics_unknown_domain_still_errors(
     result = await tool.callable({"domain": "nowhere_land"})
     text = result["content"][0]["text"]
     assert "not found" in text.lower()
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# Back-compat: Domain.metrics reverse lookup
-# ──────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_effective_domains_merges_contract_domain_metrics(
-    contract_with_domains: DataContract, semantic: YamlSource
-) -> None:
-    """Domain.metrics=['total_revenue'] should appear in the metric's domains
-    even if (hypothetically) the metric hadn't self-declared the revenue domain."""
-    tools = create_tools(contract_with_domains, semantic_source=semantic)
-    tool = next(t for t in tools if t.name == "lookup_metric")
-    result = await tool.callable({"metric_name": "total_revenue"})
-    data = json.loads(result["content"][0]["text"])
-    # "revenue" appears from both metric.domains AND Domain.metrics, but the
-    # effective list should de-duplicate.
-    assert data["domains"].count("revenue") == 1
 
 
 # ──────────────────────────────────────────────────────────────────────────

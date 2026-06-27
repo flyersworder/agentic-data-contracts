@@ -35,6 +35,7 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | `ai-agent-contracts` | Optional dependency | Lowers barrier to entry; library works standalone with lightweight enforcement |
 | Database support | Adapter protocol | Clean interface, any database can be plugged in |
 | Semantic governance | Reference-based | Point to external source of truth (dbt, Cube), don't replicate it |
+| Domain membership | Metric-first | A metric declares its domains (`domains: [...]`); the contract's `Domain` holds only catalog metadata (summary, owners, review cadence) — never a metric list. Single source of truth, no contract↔source drift, and it matches the grain dbt/Cube already use (`meta.domains` per metric) |
 | Developer experience | YAML-first | Data engineers live in YAML; zero Python knowledge required to define a contract |
 | Enforcement | Configurable per-rule | `block` / `warn` / `log` per rule |
 | Tool delivery | Factory + middleware | Quick start via factory, composable via middleware |
@@ -102,20 +103,20 @@ semantic:
   # What the agent must NOT do
   forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
 
-  # Business domains — provide context for domain-specific questions
+  # Business domains — catalog metadata (description, owners, review cadence)
+  # for domain-specific questions. Membership is metric-first: metrics declare
+  # their domains in the semantic source, so there is no metric list here.
   domains:
     - name: revenue
       summary: "Revenue and financial metrics from completed orders"
       description: >
         Revenue metrics track recognized revenue from completed orders.
         Revenue is recognized at fulfillment, not at booking.
-      metrics: [total_revenue, gross_margin]
     - name: engagement
       summary: "Customer activity and retention patterns"
       description: >
         Customer engagement measures active usage patterns
         and retention over time.
-      metrics: [active_customers, churn_rate]
 
   # Governance rules (per-rule enforcement)
   # Each rule has a query_check (pre-execution) or result_check (post-execution)
@@ -488,6 +489,10 @@ class SemanticSource(Protocol):
 **dbt relationship parsing (v0.17.0+):** `DbtSource.get_relationships()` projects dbt's built-in `relationships` schema tests into `Relationship` instances. Each test node (`resource_type == "test"`, `test_metadata.name == "relationships"`) carries `kwargs.column_name` and `kwargs.field`; the owner model is resolved via `attached_node` (manifest v12+) and the referenced model via `depends_on.nodes`. The test's `meta:` block supplies `preferred`, `required_filter`, and `relationship_type` (defaulting to `many_to_one`). Tests that can't be resolved (missing `attached_node`, unmodelled dependencies, non-`relationships` test names) are skipped silently rather than raising — manifests are heterogeneous and some tests live on seeds or sources we don't model.
 
 **Cube relationship parsing (v0.18.0+):** `CubeSource.get_relationships()` parses each cube's `joins:` block. The parser builds a `cube_name -> sql_table` map, regexes the single-equality form `{X}.col1 = {Y}.col2` from each join's `sql:` field, and normalises so the `from` side is always the column on the cube declaring the join (independent of which side `{CUBE}` appears on in the SQL). Cube's `relationship` enum (`belongsTo` / `hasOne` / `hasMany` plus `many_to_one` / `one_to_one` / `one_to_many` aliases) maps to canonical `Relationship.type` strings; `meta.relationship_type` overrides. `meta.preferred` and `meta.required_filter` work the same way as `YamlSource` and `DbtSource`. Composite-key joins (multiple `AND`-chained equalities) and joins whose target cube can't be resolved by name are skipped — declare those in contract YAML via `YamlSource` instead.
+
+**Metric-first domain membership (v0.26.0+):** A metric declares the domains it belongs to via `MetricDefinition.domains`, populated from `meta.domains` by every adapter (`YamlSource`, `DbtSource`, `CubeSource`). The contract's `Domain` model carries only catalog metadata (summary, description, owners, `last_reviewed`) and does **not** list its metrics; it sets `extra="forbid"`, so a stale `metrics:` key from a pre-0.26 contract fails loudly at load time instead of being silently dropped. To enumerate a domain's members, callers reverse-look-up with the `metrics_in_domain(metrics, domain_name)` helper in `base.py` (used by `lookup_domain` and the `list_metrics(domain=...)` filter); per-domain `metric_count` in the prompt index and the `lookup_domain` fuzzy fallback is tallied in a single `Counter` pass over the metrics. This makes the metric the single source of truth for membership: the contract and the semantic source cannot disagree, because only one of them states it. (Prior to v0.26.0 the contract also carried a `Domain.metrics` list, reconciled with `metric.domains` by a union shim; that redundancy — and the drift it allowed — has been removed.)
+
+**The catalog is authoritative for which domains exist.** `list_metrics(domain=...)`, `lookup_domain`, and the prompt's `<available_domains>` index all treat the contract's domain catalog as the set of navigable domains — a domain a metric references but the contract does not catalog is not navigable, and `create_tools` logs a warning for it at startup (the metric-first mirror of the old "domain references unknown metric" check). Metrics declare *membership*; the catalog defines *identity* (and supplies the business context `lookup_domain` returns).
 
 **Built-in sources:**
 

@@ -67,13 +67,11 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
                     name="revenue",
                     summary="Revenue and financial metrics",
                     description="Revenue domain.",
-                    metrics=["total_revenue"],
                 ),
                 Domain(
                     name="engagement",
                     summary="Customer activity metrics",
                     description="Engagement domain.",
-                    metrics=["active_customers"],
                 ),
             ],
         ),

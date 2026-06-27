@@ -18,7 +18,7 @@ semantic:
         Acquisition tracks the top of the user funnel: signup sources,
         volumes, and conversion from visit to signup. Source attribution
         is last-touch and reconciled nightly.
-      metrics: [signup_rate_7d, acquisition_spend]
+      # Membership is metric-first: metrics declare their domains in semantic.yml.
       tables: [analytics.users, analytics.events]
       last_reviewed: 2026-04-01
 
@@ -28,7 +28,7 @@ semantic:
         Experiments are defined in `analytics.experiments` with start/end dates.
         Events tagged with `experiment_id` and `variant` are the unit of analysis.
         Do not compute lift on running experiments — wait for `status=concluded`.
-      metrics: [activation_rate, conversion_rate]
+      # Membership is metric-first: metrics declare their domains in semantic.yml.
       tables: [analytics.experiments, analytics.events]
       last_reviewed: 2026-03-15
 

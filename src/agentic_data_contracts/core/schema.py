@@ -134,10 +134,24 @@ class SemanticRule(BaseModel):
 
 
 class Domain(BaseModel):
+    """Catalog metadata for a business domain.
+
+    A domain carries only governance/catalog facts — summary, description,
+    ownership, and review cadence. Membership is metric-first: each metric
+    declares the domains it belongs to (``MetricDefinition.domains``), so the
+    domain does not list its metrics. Enumerate members by reverse-lookup with
+    ``agentic_data_contracts.semantic.base.metrics_in_domain``.
+
+    ``extra="forbid"`` so a stale ``metrics:`` key from a pre-0.26 contract fails
+    loudly at load time rather than being silently dropped (which would leave the
+    domain with no discoverable members).
+    """
+
+    model_config = {"extra": "forbid"}
+
     name: str
     summary: str
     description: str
-    metrics: list[str] = Field(default_factory=list)
     tables: list[str] = Field(default_factory=list)
     last_reviewed: date | None = None
     # Owners are teams, not individuals (convention, not validated): the

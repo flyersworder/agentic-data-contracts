@@ -16,7 +16,6 @@ from agentic_data_contracts.core.principal import (
     principal_in_scope,
     resolve_principal,
 )
-from agentic_data_contracts.core.schema import Domain
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.core.staleness import owner_context, review_age_days
 from agentic_data_contracts.semantic.base import (
@@ -25,7 +24,9 @@ from agentic_data_contracts.semantic.base import (
     SemanticSource,
     build_metric_impact_index,
     build_relationship_index,
+    domain_metric_counts,
     find_join_path,
+    metrics_in_domain,
     walk_metric_impacts,
 )
 from agentic_data_contracts.validation.validator import Validator
@@ -54,24 +55,6 @@ def _caller_label(principal: str | None) -> str:
     pattern used by gating tools, so call sites read ``{_caller_label(p)!r}``.
     """
     return principal if principal else "<no caller identified>"
-
-
-def _effective_domains(
-    metric: MetricDefinition,
-    contract_domains: list[Domain],
-) -> list[str]:
-    """Union of metric.domains (self-declared) and reverse-lookup from Domain.metrics.
-
-    Preserves order: self-declared domains come first, then any additional
-    domains discovered via the contract's ``Domain.metrics`` lists.  This
-    back-compat shim lets old domain-first YAML and new metric-first YAML
-    coexist without duplicating declarations.
-    """
-    result = list(metric.domains)
-    for d in contract_domains:
-        if metric.name in d.metrics and d.name not in result:
-            result.append(d.name)
-    return result
 
 
 def _format_impact_edge(edge: MetricImpact, *, perspective: str) -> str:
@@ -112,7 +95,6 @@ def _freshness_fields(
 
 def _metric_details(
     metric: MetricDefinition,
-    contract_domains: list[Domain],
     impact_index: dict[str, list[MetricImpact]],
     *,
     today: date,
@@ -126,9 +108,8 @@ def _metric_details(
         "source_model": metric.source_model,
         "filters": metric.filters,
     }
-    effective = _effective_domains(metric, contract_domains)
-    if effective:
-        data["domains"] = effective
+    if metric.domains:
+        data["domains"] = list(metric.domains)
     if metric.tier:
         data["tier"] = metric.tier
     if metric.indicator_kind:
@@ -208,31 +189,38 @@ def create_tools(
     )
     _impact_index = build_metric_impact_index(_metric_impacts)
 
-    _contract_domains = list(contract.schema.semantic.domains)
     metric_names_set = (
         {m.name for m in semantic_source.get_metrics()}
         if semantic_source is not None
         else set()
     )
 
-    # Validate domain references
+    # Validate domain references. The contract's domain catalog is authoritative
+    # for which domains exist; metrics declare *membership* in those domains.
+    catalog_domain_names = {d.name for d in contract.schema.semantic.domains}
     if contract.schema.semantic.domains:
         allowed_tables_set = set(contract.allowed_table_names())
         for domain in contract.schema.semantic.domains:
-            if semantic_source is not None:
-                for metric_name in domain.metrics:
-                    if metric_name not in metric_names_set:
-                        logger.warning(
-                            "Domain '%s' references unknown metric '%s'",
-                            domain.name,
-                            metric_name,
-                        )
             for table in domain.tables:
                 if table not in allowed_tables_set:
                     logger.warning(
                         "Domain '%s' references table '%s' not in allowed_tables",
                         domain.name,
                         table,
+                    )
+
+    # Metric-first mirror of the old "domain references unknown metric" check:
+    # warn when a metric self-declares a domain the catalog doesn't define (a
+    # typo or rename leaves it un-navigable). Skipped when no catalog is in use.
+    if semantic_source is not None and catalog_domain_names:
+        for metric in semantic_source.get_metrics():
+            for domain_name in metric.domains:
+                if domain_name not in catalog_domain_names:
+                    logger.warning(
+                        "Metric '%s' references domain '%s' not in the contract's "
+                        "domain catalog",
+                        metric.name,
+                        domain_name,
                     )
 
     # Validate metric-impact references — mirrors the domain validation above.
@@ -410,27 +398,17 @@ def create_tools(
         metrics = semantic_source.get_metrics()
         domain_filter = args.get("domain")
         if domain_filter:
-            domain_obj = contract.get_domain(domain_filter)
-            declared_in_metrics = any(domain_filter in m.domains for m in metrics)
-            if domain_obj is None and not declared_in_metrics:
-                all_doms = contract.schema.semantic.domains
-                declared_names = {d for m in metrics for d in m.domains}
-                available = (
-                    sorted({d.name for d in all_doms} | declared_names)
-                    if all_doms or declared_names
-                    else []
-                )
+            # The catalog is authoritative for which domains exist (consistent
+            # with lookup_domain and the prompt index); members are the metrics
+            # that declare the domain. An unknown domain → not found; a known
+            # domain with no declaring metric → an empty list, which is honest.
+            if contract.get_domain(domain_filter) is None:
+                available = sorted(d.name for d in contract.schema.semantic.domains)
                 return _text_response(
                     f"Domain '{domain_filter}' not found."
                     f" Available domains: {available}"
                 )
-            # Union: contract's Domain.metrics AND self-declared metric.domains.
-            contract_names = set(domain_obj.metrics) if domain_obj else set()
-            metrics = [
-                m
-                for m in metrics
-                if m.name in contract_names or domain_filter in m.domains
-            ]
+            metrics = metrics_in_domain(metrics, domain_filter)
 
         tier_filter = args.get("tier")
         if tier_filter:
@@ -474,7 +452,6 @@ def create_tools(
                 json.dumps(
                     _metric_details(
                         metric,
-                        _contract_domains,
                         _impact_index,
                         today=today,
                         threshold_days=staleness_threshold_days,
@@ -488,7 +465,6 @@ def create_tools(
         data = [
             _metric_details(
                 m,
-                _contract_domains,
                 _impact_index,
                 today=today,
                 threshold_days=staleness_threshold_days,
@@ -512,19 +488,18 @@ def create_tools(
         domain = contract.get_domain(name)
 
         if domain is not None:
-            # Exact match — enrich metrics with descriptions from semantic source
+            # Members are reverse-looked-up from metric.domains (metric-first).
+            # Without a semantic source there are no metrics to look up, so the
+            # member list is empty — membership lives on the metric, not here.
             if semantic_source is not None:
-                metric_data: list[Any] = []
-                for metric_name in domain.metrics:
-                    m = semantic_source.get_metric(metric_name)
-                    if m is not None:
-                        metric_data.append(
-                            {"name": m.name, "description": m.description}
-                        )
-                    else:
-                        metric_data.append({"name": metric_name, "description": ""})
+                metric_data: list[Any] = [
+                    {"name": m.name, "description": m.description}
+                    for m in metrics_in_domain(
+                        semantic_source.get_metrics(), domain.name
+                    )
+                ]
             else:
-                metric_data = list(domain.metrics)
+                metric_data = []
 
             data: dict[str, Any] = {
                 "name": domain.name,
@@ -556,11 +531,16 @@ def create_tools(
             limit=3,
         )
         if not results:
-            available = [d.name for d in all_domains]
+            available = sorted(d.name for d in all_domains)
             return _text_response(
                 f"Domain '{name}' not found. Available domains: {available}"
             )
 
+        # Count members per domain in one pass, rather than re-scanning per
+        # fuzzy candidate.
+        domain_counts = domain_metric_counts(
+            semantic_source.get_metrics() if semantic_source is not None else []
+        )
         candidates = []
         for _, _, key in results:
             d = contract.get_domain(key)
@@ -569,7 +549,7 @@ def create_tools(
                     {
                         "name": d.name,
                         "summary": d.summary,
-                        "metric_count": len(d.metrics),
+                        "metric_count": domain_counts[d.name],
                     }
                 )
         return _text_response(

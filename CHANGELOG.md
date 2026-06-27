@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0] - 2026-06-27
+
+### Changed
+
+- **Domain membership is now metric-first — `Domain.metrics` removed.** A metric declares the domains it belongs to via `MetricDefinition.domains` (read from `meta.domains` by `YamlSource`, `DbtSource`, and `CubeSource` alike); the contract's `Domain` model now carries only *catalog metadata* — `name`, `summary`, `description`, `tables`, `business_owner`, `operational_owner`, `last_reviewed` — and no longer lists its metrics. The metric is the single source of truth for membership, so the contract and the semantic source can no longer disagree (the old shape let them drift). A new pure helper `metrics_in_domain(metrics, domain_name)` in `semantic/base.py` is the canonical reverse-lookup, used by `lookup_domain` and the `list_metrics(domain=...)` filter. The previous `_effective_domains` union shim — which reconciled the contract-side `Domain.metrics` with `metric.domains` — is gone.
+- **The domain catalog is authoritative for which domains exist.** Metrics declare *membership* in catalog domains; a domain a metric references but the contract does not catalog is not navigable. `list_metrics(domain=...)`, `lookup_domain`, and the system-prompt `<available_domains>` index now share one notion of "known domain" (the catalog), so the agent never gets contradictory guidance.
+
+### Compatibility
+
+- **Breaking (fail-loud): `Domain.metrics` is no longer a field, and `Domain` now sets `extra="forbid"`.** A pre-0.26 contract that still lists `metrics:` under a domain raises a `ValidationError` at load time (rather than silently dropping the key and leaving the domain with no discoverable members). Migration is mechanical: delete the `metrics:` lines from your contract's `domains:` block and ensure each metric declares its domain in the semantic source via `domains: [...]` (all built-in adapters already read it; metric-first contracts already work unchanged).
+- **Behavior changes in the agent-facing tools.** `lookup_domain(name)` now returns members reverse-looked-up from `metric.domains`, so it surfaces *every* metric that declares the domain (previously only those hand-listed in `Domain.metrics`, which could drift out of sync). With no semantic source configured, `lookup_domain` returns an empty member list — membership lives on the metric, which lives in the source. The startup "Domain references unknown metric" warning is *replaced* by its metric-first mirror: a metric self-declaring a domain absent from the contract's catalog (a typo or rename) now logs a warning. The "references unknown table" warning is unchanged.
+- **Prompt index `metric_count` is now omitted when zero** (a cataloged domain with no declaring metric, or no semantic source) rather than rendered as `metric_count="0"` — the `<available_domains>` entry shows name + summary and the agent uses `lookup_domain` to drill in.
+- **The `[pydantic-ai]` extra now requires `pydantic-ai-slim[anthropic]>=2.0.0`** (was `>=1.107.0`). The adapter is verified against 2.x and the lockfile resolves 2.0.0, so the declared floor now matches what's actually tested. Installs that pinned `pydantic-ai-slim<2` must upgrade to use this extra.
+
+### Internal
+
+- Removed `_effective_domains` and all `Domain.metrics` plumbing from `tools/factory.py`; `_metric_details` no longer takes a `contract_domains` argument.
+- Per-domain `metric_count` (system prompt and `lookup_domain` fuzzy fallback) is now tallied in a single `Counter` pass via the `domain_metric_counts(metrics)` helper instead of an O(domains × metrics) reverse-lookup — `to_system_prompt` runs on every agent invocation, and this library targets large catalogs. The helper de-duplicates a metric's domain tags so the displayed count always equals `len(metrics_in_domain(...))`. `core/prompt.py` keeps `core` decoupled from `semantic/` at module scope.
+- Docs rewritten to teach metric-first throughout: `README.md` ("How It Works" two-file split, "Defining domains", bidirectional metric↔domain navigation), `docs/architecture.md` (Design Decisions row + a metric-first note in the Semantic Layer section). All three `examples/*/contract.yml` drop the redundant `metrics:` from their domains (membership already lives in each `examples/*/semantic.yml`).
+- New `tests/test_semantic/test_domain_membership.py` covers `metrics_in_domain` and `domain_metric_counts` (including the de-dupe invariant); new tests for `extra="forbid"`, catalog-authoritative `list_metrics`, and the metric→uncataloged-domain warning. The obsolete "warns on unknown domain metric" and "merges contract Domain.metrics" union-shim tests are removed. Full suite green (663 tests); `ruff`, `ruff format`, and `ty` clean.
+- Hardening above was driven by two code-review passes over the branch (a multi-agent automated review and a follow-up reviewer subagent): correctness/migration items (`extra="forbid"`, catalog-authoritative consistency, the metric-first validation warning) and efficiency cleanups were applied; a `lookup_domain` "standalone fallback" finding was correctly refuted in verification.
+- `prek autoupdate`: pinned `ruff-pre-commit` `v0.15.15 → v0.15.20` (aligned with the `uv`-resolved ruff).
+- The CI early-warning job (renamed `test-pydantic-ai-v2` → `test-pydantic-ai-latest`) now resolves the newest release allowed by the `>=2.0` floor (the next 2.x, and the next major once it ships) instead of a `<3`-capped 2.x, so it keeps catching upstream breaks ahead of users. Still not a release gate.
+- **Dependencies upgraded via `uv lock --upgrade`.** Notably `pydantic-ai-slim` / `pydantic-graph` `1.107.0 → 2.0.0` (a major bump) — the Pydantic AI adapter and its 26 tests pass unchanged against v2.x, confirming what the v0.24.0 early-warning CI job was added to watch. Also refreshed: `anthropic` `0.111.0 → 0.112.0`, `claude-agent-sdk` `0.2.105 → 0.2.110`, `langchain` `1.3.10 → 1.3.11`, `sqlglot` `30.11.0 → 30.12.0`, `ruff` `0.15.18 → 0.15.20`, and assorted transitive bumps.
+
 ## [0.25.0] - 2026-06-27
 
 ### Added

@@ -28,7 +28,7 @@ semantic:
         and deploy hygiene (frequency, rollback rate). Severity tiers: SEV1
         is customer-facing outage; SEV2 is degraded; SEV3 is internal-only.
         SLA clock starts at `opened_at`, stops at `resolved_at`.
-      metrics: [mttr_minutes, incident_count_24h, sla_compliance_rate, deploy_frequency_per_day]
+      # Membership is metric-first: metrics declare their domains in semantic.yml.
       tables: [sre.incidents, sre.services, sre.deploys]
       last_reviewed: 2026-03-20
 

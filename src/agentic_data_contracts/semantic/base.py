@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -85,6 +85,36 @@ def fuzzy_search_metrics(
         limit=limit,
     )
     return [m for _, _, key in results if (m := get_metric(key)) is not None]
+
+
+def metrics_in_domain(
+    metrics: list[MetricDefinition],
+    domain_name: str,
+) -> list[MetricDefinition]:
+    """Metrics that self-declare membership in *domain_name*.
+
+    Domain membership is metric-first: each metric lists its domains
+    (``MetricDefinition.domains``), and every adapter (yaml/dbt/cube) populates
+    that field from the source's ``meta.domains``.  This reverse-lookup is the
+    canonical way to enumerate a domain's members — the contract's ``Domain``
+    object carries only catalog metadata (summary, owners, review cadence), not
+    a membership list.  Declaration order of *metrics* is preserved.
+    """
+    return [m for m in metrics if domain_name in m.domains]
+
+
+def domain_metric_counts(metrics: list[MetricDefinition]) -> Counter[str]:
+    """Count members per domain in one pass, for callers needing many domains.
+
+    Each metric contributes at most once per domain (duplicate ``domains`` tags
+    on a single metric are de-duplicated), so ``counts[d]`` always equals
+    ``len(metrics_in_domain(metrics, d))``.  Returns a :class:`Counter`, so an
+    absent domain reads as ``0`` rather than raising.
+    """
+    counts: Counter[str] = Counter()
+    for m in metrics:
+        counts.update(set(m.domains))
+    return counts
 
 
 def build_relationship_index(

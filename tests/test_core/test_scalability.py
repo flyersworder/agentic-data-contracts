@@ -22,11 +22,15 @@ class FakeSemanticSource:
     """Fake source with configurable metric count."""
 
     def __init__(self, count: int) -> None:
+        # Metric-first membership: first half declare domain_a, rest domain_b,
+        # so the prompt's per-domain metric_count is reverse-looked-up from here.
+        half = count // 2
         self._metrics = [
             MetricDefinition(
                 name=f"metric_{i}",
                 description=f"Description for metric {i}",
                 sql_expression=f"SUM(col_{i})",
+                domains=["domain_a" if i < half else "domain_b"],
             )
             for i in range(count)
         ]
@@ -56,22 +60,19 @@ class FakeSemanticSource:
         return []
 
 
-def _make_contract_with_domains(
-    metric_names: list[str],
-) -> DataContract:
-    half = len(metric_names) // 2
+def _make_contract_with_domains() -> DataContract:
+    # Domains are catalog-only; membership lives on the metrics (see the
+    # FakeSemanticSource, whose metrics declare domain_a / domain_b).
     domains = [
         Domain(
             name="domain_a",
             summary="Domain A",
             description="Domain A metrics.",
-            metrics=metric_names[:half],
         ),
         Domain(
             name="domain_b",
             summary="Domain B",
             description="Domain B metrics.",
-            metrics=metric_names[half:],
         ),
     ]
     schema = DataContractSchema(
@@ -89,7 +90,7 @@ def _make_contract_with_domains(
 class TestCompactMetricPrompt:
     def test_small_set_with_domains_shows_domain_index(self) -> None:
         source = FakeSemanticSource(5)
-        dc = _make_contract_with_domains([f"metric_{i}" for i in range(5)])
+        dc = _make_contract_with_domains()
         prompt = dc.to_system_prompt(semantic_source=source)
         # With domains defined, always show compact domain index
         assert "<available_domains>" in prompt
@@ -99,7 +100,7 @@ class TestCompactMetricPrompt:
 
     def test_large_set_with_domains_shows_domain_index(self) -> None:
         source = FakeSemanticSource(30)
-        dc = _make_contract_with_domains([f"metric_{i}" for i in range(30)])
+        dc = _make_contract_with_domains()
         prompt = dc.to_system_prompt(semantic_source=source)
         assert "<available_domains>" in prompt
         assert 'name="domain_a"' in prompt

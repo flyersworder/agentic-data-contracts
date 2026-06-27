@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.25.0"
+version = "0.26.0"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,7 +46,7 @@ Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/mai
 agent-sdk = ["claude-agent-sdk>=0.1.58"]
 agent-contracts = ["ai-agent-contracts>=0.3.1"]
 langchain = ["langchain-core>=1.3.3", "langchain>=1.2.17", "langgraph>=1.1.10"]
-pydantic-ai = ["pydantic-ai-slim[anthropic]>=1.107.0"]
+pydantic-ai = ["pydantic-ai-slim[anthropic]>=2.0.0"]
 bigquery = ["google-cloud-bigquery"]
 snowflake = ["snowflake-connector-python"]
 postgres = ["psycopg2-binary"]
@@ -60,7 +60,7 @@ dev = [
     "langchain-core>=1.3.3",
     "langchain>=1.2.17",
     "langgraph>=1.1.10",
-    "pydantic-ai-slim[anthropic]>=1.107.0",
+    "pydantic-ai-slim[anthropic]>=2.0.0",
 ]
 all = [
     "agentic-data-contracts[agent-sdk,agent-contracts,langchain,pydantic-ai,bigquery,snowflake,postgres,duckdb]",

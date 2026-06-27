@@ -74,20 +74,18 @@ def _load(fixtures_dir: Path) -> DataContract:
     return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
 
 
-def _make_contract_with_domains(metric_names: list[str]) -> DataContract:
-    half = len(metric_names) // 2
+def _make_contract_with_domains() -> DataContract:
+    # Domains are catalog-only; metric membership lives on the metrics.
     domains = [
         Domain(
             name="domain_a",
             summary="Domain A",
             description="Domain A metrics.",
-            metrics=metric_names[:half],
         ),
         Domain(
             name="domain_b",
             summary="Domain B",
             description="Domain B metrics.",
-            metrics=metric_names[half:],
         ),
     ]
     schema = DataContractSchema(
@@ -284,7 +282,7 @@ def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
 
 
 def test_claude_renderer_metrics_large_set_with_domains() -> None:
-    contract = _make_contract_with_domains([f"metric_{i}" for i in range(30)])
+    contract = _make_contract_with_domains()
     source = FakeSemanticSource(30)
     renderer = ClaudePromptRenderer()
     output = renderer.render(contract, semantic_source=source)

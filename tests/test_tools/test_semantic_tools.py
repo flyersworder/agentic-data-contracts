@@ -37,13 +37,11 @@ def contract_with_domains(fixtures_dir: Path) -> DataContract:
                     name="revenue",
                     summary="Financial metrics",
                     description="Revenue domain.",
-                    metrics=["total_revenue"],
                 ),
                 Domain(
                     name="engagement",
                     summary="Customer activity",
                     description="Engagement domain.",
-                    metrics=["active_customers"],
                 ),
             ],
         ),
@@ -54,6 +52,62 @@ def contract_with_domains(fixtures_dir: Path) -> DataContract:
 @pytest.fixture
 def contract_no_domains(fixtures_dir: Path) -> DataContract:
     return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+
+
+@pytest.fixture
+def contract_revenue_only() -> DataContract:
+    """Catalog lists only `revenue`. The shared semantic_source.yml has a metric
+    (active_customers) that also declares `engagement` — uncataloged here."""
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                ),
+            ],
+            domains=[
+                Domain(
+                    name="revenue",
+                    summary="Financial metrics",
+                    description="Revenue domain.",
+                ),
+            ],
+        ),
+    )
+    return DataContract(schema)
+
+
+@pytest.mark.asyncio
+async def test_list_metrics_uncataloged_domain_not_found(
+    contract_revenue_only: DataContract, semantic: YamlSource
+) -> None:
+    """Catalog is authoritative: a domain a metric declares but the contract does
+    not catalog is not navigable — list_metrics agrees with lookup_domain."""
+    tools = create_tools(contract_revenue_only, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "list_metrics")
+
+    result = await tool.callable({"domain": "engagement"})  # declared, not cataloged
+    assert "not found" in result["content"][0]["text"].lower()
+
+    # revenue IS cataloged → filter works
+    result2 = await tool.callable({"domain": "revenue"})
+    data2 = json.loads(result2["content"][0]["text"])
+    names = sorted(m["name"] for m in data2["metrics"])
+    assert names == ["active_customers", "total_revenue"]
+
+
+def test_metric_referencing_uncataloged_domain_warns(
+    contract_revenue_only: DataContract,
+    fixtures_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Metric-first mirror of the old 'unknown metric' check: warn when a metric
+    self-declares a domain absent from the contract's catalog (typo/rename)."""
+    source = YamlSource(fixtures_dir / "semantic_source.yml")
+    with caplog.at_level(logging.WARNING):
+        create_tools(contract_revenue_only, semantic_source=source)
+    assert any("engagement" in msg for msg in caplog.messages)
 
 
 @pytest.mark.asyncio
@@ -116,8 +170,8 @@ async def test_list_metrics_with_domain(
     result = await tool.callable({"domain": "revenue"})
     text = result["content"][0]["text"]
     data = json.loads(text)
-    # Union semantics: total_revenue matches via Domain.metrics (contract side)
-    # and active_customers matches via its self-declared metric.domains.
+    # Metric-first membership: both metrics self-declare the "revenue" domain
+    # (total_revenue -> [revenue]; active_customers -> [engagement, revenue]).
     names = sorted(m["name"] for m in data["metrics"])
     assert names == ["active_customers", "total_revenue"]
 
@@ -145,9 +199,11 @@ async def test_lookup_domain_exact_match(
     assert data["name"] == "revenue"
     assert "summary" in data
     assert "description" in data
-    assert len(data["metrics"]) == 1
-    assert data["metrics"][0]["name"] == "total_revenue"
-    assert data["metrics"][0]["description"] != ""  # enriched from semantic source
+    # Members are reverse-looked-up from metric.domains: total_revenue and
+    # active_customers both declare the "revenue" domain.
+    names = [m["name"] for m in data["metrics"]]
+    assert names == ["total_revenue", "active_customers"]
+    assert all(m["description"] != "" for m in data["metrics"])  # enriched
 
 
 @pytest.mark.asyncio
@@ -185,40 +241,9 @@ async def test_lookup_domain_no_semantic_source(
     text = result["content"][0]["text"]
     data = json.loads(text)
     assert data["name"] == "revenue"
-    # Without semantic source, metrics are names only (no descriptions)
-    assert data["metrics"] == ["total_revenue"]
-
-
-@pytest.mark.asyncio
-async def test_domain_validation_warns_unknown_metric(
-    fixtures_dir: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    schema = DataContractSchema(
-        name="test",
-        semantic=SemanticConfig(
-            allowed_tables=[
-                AllowedTable.model_validate(
-                    {"schema": "analytics", "tables": ["orders"]}
-                ),
-            ],
-            domains=[
-                Domain(
-                    name="revenue",
-                    summary="Financial metrics",
-                    description="Revenue domain.",
-                    metrics=["total_revenue", "nonexistent_metric"],
-                ),
-            ],
-        ),
-    )
-    dc = DataContract(schema)
-    source = YamlSource(fixtures_dir / "semantic_source.yml")
-
-    with caplog.at_level(logging.WARNING):
-        create_tools(dc, semantic_source=source)
-
-    assert any("nonexistent_metric" in msg for msg in caplog.messages)
+    # Membership lives on metrics (in the semantic source); without a source
+    # there is nothing to reverse-look-up, so the member list is empty.
+    assert data["metrics"] == []
 
 
 @pytest.mark.asyncio
@@ -239,7 +264,6 @@ async def test_domain_validation_warns_unknown_table(
                     name="revenue",
                     summary="Financial metrics",
                     description="Revenue domain.",
-                    metrics=["total_revenue"],
                     tables=["analytics.orders", "analytics.nonexistent"],
                 ),
             ],

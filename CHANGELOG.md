@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.0] - 2026-06-28
+
+### Added
+
+- **Portable, self-contained contracts via `DataContract.freeze_semantic_source()`.** Snapshots the contract's semantic source *inline* (metrics, relationships, metric-impacts, and table column-schemas) so a serialized contract carries its own semantics and enforces identically on any machine — with no filesystem access to the original dbt/Cube/YAML source. Freezing clears the machine-specific external `path` and normalizes `type` to `yaml`, so the frozen artifact's content address (`contract_digest`) is reproducible across machines and leaks no local filesystem paths into a published catalog. `load_semantic_source()` prefers the inline snapshot over `path`. New `YamlSource.from_raw(dict)` and `semantic.base.dump_semantic_source(source)` are an inverse pair (the latter backed by a new `SemanticSource.get_table_schemas()`), so frozen snapshots are *source-type-agnostic* — a contract authored against dbt or Cube freezes into the same canonical YAML-source shape.
+- **ARD publish path — new `agentic_data_contracts.ard` module.** `build_catalog_entry(contract, ...)` emits a spec-valid [Agentic Resource Discovery](https://agenticresourcediscovery.org/) `ai-catalog.json` entry for a contract-governed MCP server, with the frozen contract pinned as a digest-addressed `data-contract` attestation in the trust manifest (`identity` equals the entry `identifier`, per the AI Catalog spec). `build_ai_catalog(entries, ...)` assembles the top-level `/.well-known/ai-catalog.json` document. `contract_canonical_bytes()` / `contract_digest()` produce the portable, content-addressable artifact a consumer independently recomputes — so the publish→verify loop closes with no trust in the publisher's assertion. ARD does publisher *authentication*; the `data-contract` attestation is the hook for the per-operation *authorization* ARD itself leaves open. (`data-contract` is a custom attestation type — the spec's `attestations[].type` is an open string — not yet a registered well-known value.)
+
+### Compatibility
+
+- **Breaking (fail-loud): a declared-but-unavailable semantic source now raises `SemanticSourceUnavailableError`, not a bare `FileNotFoundError`.** When a contract declares a semantic source that cannot be loaded — missing file, a directory path, a permission error, or a malformed YAML/Cube or dbt-manifest source — `load_semantic_source()` (and therefore `create_tools` and every adapter) fails closed with a new governance-specific error. It is deliberately **not** a `FileNotFoundError` subclass, so an application's generic file-error handling cannot swallow it and fall through to silent under-enforcement (dropped relationship/metric enforcement and dark discovery tools). **Migration:** code that catches `FileNotFoundError` around contract/tool construction should catch `SemanticSourceUnavailableError` (exported at the top level).
+- **`SemanticSource.path` is now optional**, but a source must declare **either** `path` **or** `inline` — a model validator rejects one with neither at load time. A frozen contract carries only an `inline` snapshot (no `path`).
+- Contracts without a semantic source, or with a loadable one, are unaffected. `freeze_semantic_source()` is opt-in: a no-op until called.
+
+### Internal
+
+- New top-level exports: `SemanticSourceUnavailableError`, `build_catalog_entry`, `build_ai_catalog`, `contract_digest`, `contract_canonical_bytes`.
+- New test suites, built TDD red-first: `tests/test_portability/` (a frozen contract's enforcement survives serialize→rehydrate; an unfrozen one fails closed), `tests/test_ard/` (entry shape, trust-manifest identity binding, the attestation digest closing the publish→verify loop, path-independent digests, and the full publish → consumer-verify → enforce flow), `tests/test_tools/test_fail_closed_semantic_source.py`, plus `freeze`/fail-closed/table-capture cases in `tests/test_core/`.
+- Hardened via two independent code-review passes of the branch (a high-effort multi-agent review and a final senior-reviewer pass): freeze now clears the machine-specific path and normalizes type (reproducible, leak-free content addresses), captures table column-schemas (`describe_table` keeps authored descriptions off-box), no longer crashes under `force=True` on inline-only contracts, and fails closed on every unloadable-source error (OSError, malformed YAML, malformed dbt JSON); `path` becoming optional is guarded in the prompt renderer and the `ai-agent-contracts` bridge; a `SemanticSource` model validator requires path-or-inline; and the published content-address bytes use the documented YAML aliases (`schema`, not the `schema_` field name). Full suite green (688 tests); `ruff`, `ruff format`, and `ty` clean.
+
 ## [0.26.0] - 2026-06-27
 
 ### Changed

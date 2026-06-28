@@ -72,7 +72,9 @@ def compile_to_contract(dc: DataContract) -> Contract:
         "allowed_tables": dc.allowed_table_names(),
         "forbidden_operations": dc.schema.semantic.forbidden_operations,
     }
-    if dc.schema.semantic.source:
+    # A frozen contract carries its semantics inline (path=None); omit
+    # source_of_truth rather than write a literal None pointer.
+    if dc.schema.semantic.source and dc.schema.semantic.source.path is not None:
         metadata["source_of_truth"] = dc.schema.semantic.source.path
 
     for rule in dc.log_rules():

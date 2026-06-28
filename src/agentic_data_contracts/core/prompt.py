@@ -168,11 +168,19 @@ class ClaudePromptRenderer:
         lines = [
             "<semantic_source>",
             f"  <type>{src.type}</type>",
-            f"  <path>{src.path}</path>",
-            "  <hint>Consult this source for metric definitions"
-            " before computing metrics.</hint>",
-            "</semantic_source>",
         ]
+        if src.path is not None:
+            lines.append(f"  <path>{src.path}</path>")
+            lines.append(
+                "  <hint>Consult this source for metric definitions"
+                " before computing metrics.</hint>"
+            )
+        else:
+            # Frozen / inline-only contract: definitions travel with the contract.
+            lines.append(
+                "  <hint>Metric definitions are embedded in this contract.</hint>"
+            )
+        lines.append("</semantic_source>")
         return lines
 
     def _render_relationships(

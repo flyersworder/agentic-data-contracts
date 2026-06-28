@@ -6,7 +6,7 @@ from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from thefuzz import fuzz, process
 
@@ -59,10 +59,83 @@ class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...
     def get_metric(self, name: str) -> MetricDefinition | None: ...
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None: ...
+    def get_table_schemas(self) -> dict[str, TableSchema]: ...
     def search_metrics(self, query: str) -> list[MetricDefinition]: ...
     def get_relationships(self) -> list[Relationship]: ...
     def get_relationships_for_table(self, table: str) -> list[Relationship]: ...
     def get_metric_impacts(self) -> list[MetricImpact]: ...
+
+
+def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
+    """Serialize a source's enumerable semantics into the YAML-source raw format.
+
+    The inverse of :meth:`YamlSource.from_raw`: lets a contract freeze its
+    semantics inline (see :meth:`DataContract.freeze_semantic_source`) and
+    rebuild them on a consumer with no file access. Captures metrics,
+    relationships, metric impacts, and table column-schemas (name, type, and
+    authored description — column ``nullable`` is not carried by the YAML-source
+    format and defaults on rehydrate).
+    """
+
+    def _iso(d: date | None) -> str | None:
+        return d.isoformat() if d is not None else None
+
+    tables: list[dict[str, Any]] = []
+    for key, ts in source.get_table_schemas().items():
+        schema_name, _, table_name = key.partition(".")
+        tables.append(
+            {
+                "schema": schema_name,
+                "table": table_name,
+                "columns": [
+                    {"name": c.name, "type": c.type, "description": c.description}
+                    for c in ts.columns
+                ],
+            }
+        )
+
+    return {
+        "tables": tables,
+        "metrics": [
+            {
+                "name": m.name,
+                "description": m.description,
+                "sql_expression": m.sql_expression,
+                "source_model": m.source_model,
+                "filters": list(m.filters),
+                "domains": list(m.domains),
+                "tier": list(m.tier),
+                "indicator_kind": m.indicator_kind,
+                "business_owner": m.business_owner,
+                "operational_owner": m.operational_owner,
+                "last_reviewed": _iso(m.last_reviewed),
+            }
+            for m in source.get_metrics()
+        ],
+        "relationships": [
+            {
+                "from": r.from_,
+                "to": r.to,
+                "type": r.type,
+                "description": r.description,
+                "required_filter": r.required_filter,
+                "preferred": r.preferred,
+            }
+            for r in source.get_relationships()
+        ],
+        "metric_impacts": [
+            {
+                "from": i.from_metric,
+                "to": i.to_metric,
+                "direction": i.direction,
+                "confidence": i.confidence,
+                "evidence": i.evidence,
+                "description": i.description,
+                "last_reviewed": _iso(i.last_reviewed),
+            }
+            for i in source.get_metric_impacts()
+        ],
+    }
 
 
 def fuzzy_search_metrics(

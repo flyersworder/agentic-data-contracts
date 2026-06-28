@@ -1,0 +1,14 @@
+version: "1.0"
+name: missing-source
+
+# Declares a semantic source whose file does not exist (resolved relative to
+# this fixture's dir). Used to assert fail-closed behaviour: enforcement
+# construction must raise rather than silently run without the declared source.
+semantic:
+  source:
+    type: yaml
+    path: does_not_exist.yml
+  allowed_tables:
+    - schema: analytics
+      tables: [orders]
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]

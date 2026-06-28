@@ -50,6 +50,20 @@ class YamlSource:
 
     def __init__(self, path: str | Path) -> None:
         raw = yaml.safe_load(Path(path).read_text())
+        self._load_from_raw(raw if raw is not None else {})
+
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any]) -> YamlSource:
+        """Build a source from already-parsed semantic data — no file access.
+
+        The inverse of :func:`dump_semantic_source`; lets a frozen contract carry
+        its semantics inline and rebuild them on a consumer with no filesystem.
+        """
+        obj = cls.__new__(cls)
+        obj._load_from_raw(raw)
+        return obj
+
+    def _load_from_raw(self, raw: dict[str, Any]) -> None:
         self._metrics = []
         for m in raw.get("metrics", []):
             tier_raw = m.get("tier", [])
@@ -131,6 +145,9 @@ class YamlSource:
 
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")
+
+    def get_table_schemas(self) -> dict[str, TableSchema]:
+        return dict(self._tables)
 
     def get_metric_impacts(self) -> list[MetricImpact]:
         return list(self._metric_impacts)

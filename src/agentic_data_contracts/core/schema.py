@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -17,7 +17,22 @@ class Enforcement(StrEnum):
 
 class SemanticSource(BaseModel):
     type: str  # dbt | cube | yaml | custom
-    path: str
+    # ``path`` references an external file; ``inline`` is a self-contained
+    # snapshot of the semantics (YAML-source raw format) written by
+    # ``DataContract.freeze_semantic_source()``. When ``inline`` is present it
+    # wins, so a frozen contract is portable with no filesystem access. At least
+    # one of the two must be set.
+    path: str | None = None
+    inline: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def path_or_inline_required(self) -> Self:
+        if self.path is None and self.inline is None:
+            raise ValueError(
+                "semantic.source must set either 'path' (an external file) or"
+                " 'inline' (a frozen snapshot) — got neither"
+            )
+        return self
 
 
 class AllowedTable(BaseModel):

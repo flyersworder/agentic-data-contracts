@@ -171,6 +171,9 @@ class DbtSource:
     def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
         return self._tables.get(f"{schema}.{table}")
 
+    def get_table_schemas(self) -> dict[str, TableSchema]:
+        return dict(self._tables)
+
     def get_metric_impacts(self) -> list[MetricImpact]:
         # dbt has no native impact-graph concept; impacts live in the
         # contract YAML (declared via YamlSource) and reference metric names.

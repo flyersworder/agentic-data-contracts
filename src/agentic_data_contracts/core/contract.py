@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,8 +21,23 @@ if TYPE_CHECKING:
 
     from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.core.prompt import PromptRenderer
+    from agentic_data_contracts.core.schema import (
+        SemanticSource as SemanticSourceConfig,
+    )
     from agentic_data_contracts.core.staleness import StaleFinding
     from agentic_data_contracts.semantic.base import SemanticSource
+
+
+class SemanticSourceUnavailableError(RuntimeError):
+    """A contract declares a semantic source that could not be loaded.
+
+    Deliberately **not** a subclass of ``FileNotFoundError`` so generic
+    file-error handling in a calling application cannot silently swallow it.
+    A declared-but-unavailable semantic source is a governance failure: the
+    agent would otherwise run with relationship/metric enforcement and the
+    discovery tools (``list_metrics``, ``lookup_metric``, ``lookup_relationships``)
+    silently degraded. Enforcement construction fails closed instead.
+    """
 
 
 class DataContract:
@@ -141,20 +157,39 @@ class DataContract:
         return config
 
     def load_semantic_source(self) -> SemanticSource | None:
-        """Auto-load the semantic source from the contract's source config.
+        """Load the semantic source declared by the contract.
 
+        Prefers an inline snapshot (a frozen, self-contained contract — see
+        :meth:`freeze_semantic_source`) over the external ``path``, so a contract
+        rehydrated on another machine enforces identically with no file access.
         Returns None if no source is configured.
         """
         source_config = self.schema.semantic.source
         if source_config is None:
             return None
 
+        if source_config.inline is not None:
+            from agentic_data_contracts.semantic.yaml_source import YamlSource
+
+            return YamlSource.from_raw(source_config.inline)
+
+        return self._load_semantic_source_from_file(source_config)
+
+    def _load_semantic_source_from_file(
+        self, source_config: SemanticSourceConfig
+    ) -> SemanticSource:
+        """Load a semantic source from its external ``path``, failing closed."""
         from agentic_data_contracts.semantic.cube import CubeSource
         from agentic_data_contracts.semantic.dbt import DbtSource
         from agentic_data_contracts.semantic.yaml_source import YamlSource
 
         source_type = source_config.type.lower()
         path = source_config.path
+        if path is None:
+            raise SemanticSourceUnavailableError(
+                f"Contract {self.name!r} declares a semantic source with neither"
+                " an inline snapshot nor a path."
+            )
         if self._source_dir is not None and not Path(path).is_absolute():
             path = str(self._source_dir / path)
 
@@ -172,7 +207,60 @@ class DataContract:
             )
             raise ValueError(msg)
 
-        return loader_cls(path)
+        # Fail closed: a declared source that cannot be loaded must raise a
+        # governance-specific error, not a raw OSError/parse error an app might
+        # catch as routine file handling and proceed under-enforcing. OSError
+        # covers missing file, a directory path, and permission denial;
+        # yaml.YAMLError a malformed YAML/Cube source; json.JSONDecodeError a
+        # malformed dbt manifest. (Content errors past a successful parse — e.g. a
+        # KeyError on a missing metric name — are out of scope: that is a
+        # malformed-but-present source, which still fails loud, just not as this
+        # type.)
+        try:
+            return loader_cls(path)
+        except (OSError, yaml.YAMLError, json.JSONDecodeError) as exc:
+            raise SemanticSourceUnavailableError(
+                f"Contract {self.name!r} declares a {source_type!r} semantic"
+                f" source at {path!r}, but it could not be loaded: {exc}."
+                " Refusing to build enforcement without the declared semantic"
+                " source (this would silently drop relationship/metric"
+                " enforcement and the discovery tools). Provide the source file"
+                " or remove `semantic.source` from the contract."
+            ) from exc
+
+    def freeze_semantic_source(self, *, force: bool = False) -> None:
+        """Snapshot the semantic source inline so the contract is self-contained.
+
+        After freezing, ``model_dump`` → rehydrate preserves relationship/metric
+        enforcement with no filesystem access — the contract artifact carries its
+        own semantics (the basis for publishing a portable, content-addressed
+        contract, e.g. as an ARD ``data-contract`` attestation). Captures metrics,
+        relationships, metric impacts, and table column-schemas.
+
+        Clears the external ``path`` and normalizes ``type`` to ``"yaml"`` once
+        frozen: the path is machine-specific (so it must not enter the content
+        address or leak into a published catalog), and the inline snapshot always
+        rehydrates as a :class:`YamlSource`. Idempotent; a no-op when no source is
+        configured, when one is already frozen (unless ``force``), or when there
+        is no ``path`` to (re)load from. Loads from the external source, so it
+        fails closed (:class:`SemanticSourceUnavailableError`) if it is
+        unavailable.
+        """
+        from agentic_data_contracts.semantic.base import dump_semantic_source
+
+        source_config = self.schema.semantic.source
+        if source_config is None:
+            return
+        if source_config.inline is not None and not force:
+            return
+        # Nothing to (re)load from — an inline-only contract is already its own
+        # source; force cannot improve on it.
+        if source_config.path is None:
+            return
+        loaded = self._load_semantic_source_from_file(source_config)
+        source_config.inline = dump_semantic_source(loaded)
+        source_config.path = None
+        source_config.type = "yaml"
 
     def find_stale(
         self,

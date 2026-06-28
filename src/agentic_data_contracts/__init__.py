@@ -1,7 +1,16 @@
 """Agentic Data Contracts — YAML-first data contract governance for AI agents."""
 
 from agentic_data_contracts.adapters.base import SqlNormalizer
-from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.ard import (
+    build_ai_catalog,
+    build_catalog_entry,
+    contract_canonical_bytes,
+    contract_digest,
+)
+from agentic_data_contracts.core.contract import (
+    DataContract,
+    SemanticSourceUnavailableError,
+)
 from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRenderer
 from agentic_data_contracts.semantic.base import (
@@ -52,7 +61,12 @@ __all__ = [
     "PromptRenderer",
     "Relationship",
     "SemanticSource",
+    "SemanticSourceUnavailableError",
     "SqlNormalizer",
+    "build_ai_catalog",
+    "build_catalog_entry",
+    "contract_canonical_bytes",
+    "contract_digest",
     "contract_middleware",
     "create_langchain_tools",
     "create_pydantic_ai_toolset",

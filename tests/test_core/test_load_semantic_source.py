@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.contract import (
+    DataContract,
+    SemanticSourceUnavailableError,
+)
 from agentic_data_contracts.core.schema import (
     DataContractSchema,
     SemanticConfig,
@@ -186,3 +189,81 @@ def test_from_yaml_string_has_no_source_dir() -> None:
     )
     dc = DataContract.from_yaml_string(contract_yaml)
     assert dc._source_dir is None
+
+
+def test_declared_but_missing_source_fails_closed(fixtures_dir: Path) -> None:
+    """A declared-but-unavailable semantic source must fail closed.
+
+    It raises a governance-specific error rather than a bare FileNotFoundError,
+    so calling applications cannot silently swallow it under generic file-error
+    handling and proceed with relationship/metric enforcement (and the discovery
+    tools) silently degraded.
+    """
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="yaml", path=str(fixtures_dir / "does_not_exist.yml")
+            ),
+        ),
+    )
+    dc = DataContract(schema)
+    with pytest.raises(SemanticSourceUnavailableError):
+        dc.load_semantic_source()
+    # Design intent: NOT a FileNotFoundError subclass, so an app's file-error
+    # handling won't catch it and fall through to under-enforcement.
+    assert not issubclass(SemanticSourceUnavailableError, FileNotFoundError)
+
+
+def test_freeze_makes_source_self_contained(fixtures_dir: Path, tmp_path: Path) -> None:
+    """After freezing, the semantic source loads with NO access to the original
+    file — the contract carries its own semantics (portability)."""
+    import shutil
+
+    shutil.copy(fixtures_dir / "relationships_checker.yml", tmp_path / "rels.yml")
+    (tmp_path / "contract.yml").write_text(
+        "name: test\n"
+        "semantic:\n"
+        "  allowed_tables:\n"
+        "    - schema: analytics\n"
+        "      tables: [orders, customers]\n"
+        "  source:\n"
+        "    type: yaml\n"
+        "    path: rels.yml\n"
+    )
+    dc = DataContract.from_yaml(tmp_path / "contract.yml")
+    dc.freeze_semantic_source()
+    assert dc.schema.semantic.source is not None
+    assert dc.schema.semantic.source.inline is not None  # snapshot populated
+
+    # Delete the original source file: a frozen contract must not need it.
+    (tmp_path / "rels.yml").unlink()
+    source = dc.load_semantic_source()
+    assert source is not None
+    # relationships_checker.yml declares 3 relationships — all survive the freeze.
+    assert len(source.get_relationships()) == 3
+
+
+def test_freeze_is_idempotent_and_noop_without_source() -> None:
+    """Re-freezing leaves the snapshot untouched; freezing a source-less contract
+    is a harmless no-op."""
+    no_source = DataContract(DataContractSchema(name="test", semantic=SemanticConfig()))
+    no_source.freeze_semantic_source()  # must not raise
+    assert no_source.schema.semantic.source is None
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="yaml", path=str(Path(__file__).parent.parent / "fixtures")
+            ),
+        ),
+    )
+    # Pre-populate an inline snapshot; a second freeze must leave it identical.
+    dc = DataContract(schema)
+    source = dc.schema.semantic.source
+    assert source is not None
+    source.inline = {"relationships": []}
+    sentinel = source.inline
+    dc.freeze_semantic_source()
+    assert source.inline is sentinel

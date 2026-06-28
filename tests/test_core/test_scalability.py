@@ -47,6 +47,9 @@ class FakeSemanticSource:
     def get_table_schema(self, schema: str, table: str):  # noqa: ANN201
         return None
 
+    def get_table_schemas(self):  # noqa: ANN201
+        return {}
+
     def search_metrics(self, query: str) -> list[MetricDefinition]:
         return []
 
@@ -194,6 +197,9 @@ class FakeSemanticSourceWithRels:
 
     def get_table_schema(self, schema: str, table: str):  # noqa: ANN201
         return None
+
+    def get_table_schemas(self):  # noqa: ANN201
+        return {}
 
     def search_metrics(self, query: str) -> list[MetricDefinition]:
         return []

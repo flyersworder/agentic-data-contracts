@@ -1,0 +1,28 @@
+version: "1.0"
+name: revenue-analysis-roundtrip
+
+# Identical to valid_contract.yml EXCEPT the semantic source points at a real
+# YAML file (relationships_checker.yml) so load_semantic_source() succeeds on the
+# authoring box and the orders->customers join emits the relationship's
+# required_filter ("status") warning. Used by the portability round-trip spike.
+semantic:
+  source:
+    type: yaml
+    path: relationships_checker.yml
+  allowed_tables:
+    - schema: analytics
+      tables: [orders, customers, subscriptions]
+    - schema: raw
+      tables: []
+  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  rules:
+    - name: tenant_isolation
+      description: "All queries must include a WHERE tenant_id = filter"
+      enforcement: block
+      query_check:
+        required_filter: tenant_id
+    - name: no_select_star
+      description: "Queries must specify explicit columns, no SELECT *"
+      enforcement: block
+      query_check:
+        no_select_star: true

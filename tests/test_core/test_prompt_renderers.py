@@ -52,6 +52,9 @@ class FakeSemanticSource:
     def get_table_schema(self, schema: str, table: str):  # noqa: ANN201
         return None
 
+    def get_table_schemas(self):  # noqa: ANN201
+        return {}
+
     def search_metrics(self, query: str) -> list[MetricDefinition]:
         return []
 
@@ -480,3 +483,13 @@ def test_filter_values_omitted_when_no_principal(fixtures_dir: Path) -> None:
     assert "123" not in prompt
     assert "999" not in prompt
     assert "</data_contract>" in prompt
+
+
+def test_fallback_omits_path_for_frozen_contract(fixtures_dir: Path) -> None:
+    """A frozen (inline-only) contract has no external path; the semantic-source
+    fallback must not emit `<path>None</path>`."""
+    dc = DataContract.from_yaml(fixtures_dir / "roundtrip_contract.yml")
+    dc.freeze_semantic_source()  # path -> None
+    prompt = dc.to_system_prompt()  # no semantic_source -> fallback renders
+    assert "<path>None</path>" not in prompt
+    assert "<path>" not in prompt

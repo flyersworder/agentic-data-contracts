@@ -25,6 +25,24 @@ def test_top_level_imports() -> None:
     assert SemanticSource is not None
 
 
+def test_ard_publish_imports() -> None:
+    from agentic_data_contracts import (
+        SemanticSourceUnavailableError,
+        build_ai_catalog,
+        build_catalog_entry,
+        contract_canonical_bytes,
+        contract_digest,
+    )
+
+    assert SemanticSourceUnavailableError is not None
+    assert build_catalog_entry is not None
+    assert build_ai_catalog is not None
+    assert contract_digest is not None
+    assert contract_canonical_bytes is not None
+    # Governance failures must not be swallowed by generic file-error handling.
+    assert not issubclass(SemanticSourceUnavailableError, FileNotFoundError)
+
+
 def test_core_imports() -> None:
     from agentic_data_contracts.core.contract import DataContract
     from agentic_data_contracts.core.schema import DataContractSchema

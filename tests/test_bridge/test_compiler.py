@@ -77,3 +77,12 @@ def test_compile_metadata(dc: DataContract) -> None:
     assert (
         "source_of_truth" in contract.metadata or "allowed_tables" in contract.metadata
     )
+
+
+def test_compile_omits_source_of_truth_for_frozen_contract(fixtures_dir: Path) -> None:
+    """A frozen contract carries its semantics inline (path=None); the compiler
+    must omit source_of_truth rather than write a literal None pointer."""
+    dc = DataContract.from_yaml(fixtures_dir / "roundtrip_contract.yml")
+    dc.freeze_semantic_source()
+    contract = compile_to_contract(dc)
+    assert "source_of_truth" not in contract.metadata

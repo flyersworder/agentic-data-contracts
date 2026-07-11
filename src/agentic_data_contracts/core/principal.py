@@ -30,12 +30,12 @@ def resolve_principal(p: Principal) -> str | None:
     """
     if p is None:
         return None
-    if callable(p):
-        # ty can't narrow `p` after the `callable()` guard when Principal
-        # is a union including str; the call is safe because the guard
-        # above confirmed p is a Callable.
-        return p()  # ty: ignore[call-top-callable]
-    return p
+    # Narrow by excluding `str` rather than testing `callable()`: a `callable()`
+    # guard over a union containing `str` widens to a top callable, whose return
+    # type is `object`, not `str | None`.
+    if isinstance(p, str):
+        return p
+    return p()
 
 
 def principal_in_scope(

@@ -107,5 +107,10 @@ override-dependencies = [
 [tool.ty.environment]
 python-version = "3.12"
 
-[tool.ty.rules]
-unresolved-import = "ignore"
+[tool.ty.src]
+# `experiments/` is a standalone project with its own pyproject.toml, lockfile,
+# and venv (openai, scipy). Resolving its imports against the root venv would
+# fail, so it is checked from its own directory, not from here. Scoping ty out
+# of it is what lets the root project keep `unresolved-import` at error level --
+# a typo'd import in src/ must not pass.
+exclude = ["experiments/"]

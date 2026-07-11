@@ -6,11 +6,11 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: local
+  # The rev pins both the ty version and a compatible uv version. The hook runs
+  # `uv check` under the hood, so this project's own dependencies resolve for ty
+  # -- a `language: system` hook calling `ty check` cannot see them, and needs
+  # `unresolved-import = "ignore"` to stay quiet.
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.58
     hooks:
-      - id: ty-check
-        name: ty check
-        entry: ty check
-        language: system
-        types: [python]
-        pass_filenames: false
+      - id: ty

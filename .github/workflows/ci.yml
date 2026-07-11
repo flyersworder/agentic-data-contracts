@@ -40,6 +40,9 @@ jobs:
       - run: uv sync --all-extras --dev --frozen
       - run: uv run ruff check src/ tests/
       - run: uv run ruff format --check src/ tests/
+      # Same ty version the prek hook pins, so a commit that passes the hooks
+      # locally cannot fail here on a version drift.
+      - run: uvx ty@0.0.58 check
 
   test:
     runs-on: ubuntu-latest

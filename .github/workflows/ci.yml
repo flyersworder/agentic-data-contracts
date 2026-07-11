@@ -37,12 +37,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
       - run: uv python install 3.13
+      # Not a lint step: `--frozen` fails if uv.lock has drifted from pyproject.
       - run: uv sync --all-extras --dev --frozen
-      - run: uv run ruff check src/ tests/
-      - run: uv run ruff format --check src/ tests/
-      # Same ty version the prek hook pins, so a commit that passes the hooks
-      # locally cannot fail here on a version drift.
-      - run: uvx ty@0.0.58 check
+      # Run the hooks themselves instead of re-invoking ruff and ty, so the revs
+      # in .pre-commit-config.yaml are the single source of truth for which tool
+      # versions run. A version named here too would be a copy Dependabot cannot
+      # see, and it would silently drift from the hook on the next bump.
+      - run: uvx prek run --all-files --show-diff-on-failure
 
   test:
     runs-on: ubuntu-latest

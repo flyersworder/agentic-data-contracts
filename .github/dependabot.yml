@@ -21,3 +21,19 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # The hook revs in .pre-commit-config.yaml are the only place ruff's and ty's
+  # versions are declared -- the lint job runs the hooks rather than the tools --
+  # so bumping a rev here moves CI and every developer's pre-commit in lockstep.
+  # Dependabot skips `local` hooks, which is why these must stay as real repos.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+    groups:
+      hooks:
+        patterns:
+          - "*"

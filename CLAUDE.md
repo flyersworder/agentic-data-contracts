@@ -30,11 +30,15 @@ src/agentic_data_contracts/
 uv sync --all-extras          # Install all dependencies
 uv run pytest -v              # Run all tests
 uv run pytest tests/test_core # Run specific test suite
-uv run ruff check src/ tests/ # Lint
-uv run ruff format src/ tests/ # Format
-ty check                      # Type check
-prek run --all-files          # Run pre-commit hooks
+prek run --all-files          # Lint + format + type check (what CI runs)
+prek run ty --all-files       # Type check only
+prek run ruff-check --all-files  # Lint only
 ```
+
+Run the linters **through prek**, not directly. The hook `rev`s in
+`.pre-commit-config.yaml` pin ruff and ty, and CI runs those same hooks — so
+`prek run` reproduces CI exactly, while a bare `ty check` or `uv run ruff` uses
+whatever version happens to be on PATH or in the lockfile.
 
 ## Key Design Decisions
 
@@ -49,4 +53,4 @@ prek run --all-files          # Run pre-commit hooks
 - Each layer is independently testable with its own test suite under `tests/test_<layer>/`
 - YAML fixtures live in `tests/fixtures/`
 - Use `uv run` to execute anything Python-related
-- Pre-commit hooks (ruff + ty) run automatically on commit via prek
+- Pre-commit hooks (ruff + ty) run automatically on commit via prek, and CI runs the same hooks — never name a tool version outside `.pre-commit-config.yaml`, or it will drift from the hook. Dependabot bumps the `rev`s weekly.

@@ -61,18 +61,25 @@ def test_report_partitions_by_status() -> None:
     assert [r.status for r in report.unchecked] == ["unchecked"]
 
 
-def test_ok_is_false_only_when_violations_present() -> None:
+def test_ok_requires_every_example_verified_and_passing() -> None:
+    # A safe CI gate: only an all-valid corpus is ok. Any violation, unchecked,
+    # or unverified (engine-planned but policy-unchecked) row makes it unsafe.
     assert ExampleValidationReport(results=[_res("valid")]).ok
-    assert ExampleValidationReport(results=[_res("unchecked")]).ok
     assert not ExampleValidationReport(results=[_res("violation")]).ok
+    assert not ExampleValidationReport(results=[_res("unchecked")]).ok
+    assert not ExampleValidationReport(
+        results=[_res("unverified", contract_checked=False)]
+    ).ok
+    assert not ExampleValidationReport(results=[_res("valid"), _res("unchecked")]).ok
 
 
 def test_unverified_compliance_flags_engine_only_passes() -> None:
     report = ExampleValidationReport(
-        results=[_res("valid"), _res("valid", contract_checked=False)]
+        results=[_res("valid"), _res("unverified", contract_checked=False)]
     )
     assert len(report.unverified_compliance) == 1
-    assert not report.unverified_compliance[0].contract_checked
+    assert report.unverified_compliance[0].status == "unverified"
+    assert not report.ok  # an unverified row makes the gate unsafe
 
 
 def test_summary_mentions_counts_and_offenders() -> None:
@@ -259,7 +266,7 @@ def test_warn_rule_surfaces_warning_without_failing() -> None:
 _UNPARSEABLE_SQL = "SELECT * FROM ("  # confirmed to raise ParseError in Task 1
 
 
-def test_parse_fallback_engine_plans_is_valid_unverified(
+def test_parse_fallback_engine_plans_is_unverified(
     contract: DataContract,
 ) -> None:
     adapter = FakeExplainAdapter(
@@ -271,12 +278,12 @@ def test_parse_fallback_engine_plans_is_valid_unverified(
         explain_adapter=adapter,
     )
     r = report.results[0]
-    assert r.status == "valid"
+    assert r.status == "unverified"  # engine planned it, policy NOT checked
     assert not r.contract_checked
     assert r.engine_checked
     assert any("not statically verified" in w for w in r.warnings)
     assert report.unverified_compliance == [r]
-    assert report.ok  # valid, so the gate is not failed
+    assert not report.ok  # unverified — the gate must NOT green-light it
 
 
 def test_parse_fallback_engine_rejects_is_violation(contract: DataContract) -> None:
@@ -368,6 +375,46 @@ def test_summary_distinguishes_two_unnamed_rows() -> None:
     text = ExampleValidationReport(results=unnamed).summary()
     assert "`#0`: reason A" in text
     assert "`#1`: reason B" in text
+
+
+def test_all_unparseable_corpus_is_not_ok(contract: DataContract) -> None:
+    # No adapter + unparseable SQL -> every result is "unchecked". The CI gate
+    # (`if not report.ok`) must FAIL, not green-light an unvalidated corpus.
+    report = validate_examples(
+        [
+            VerifiedExample(sql=_UNPARSEABLE_SQL, id="a"),
+            VerifiedExample(sql=_UNPARSEABLE_SQL, id="b"),
+        ],
+        contract,
+    )
+    assert all(r.status == "unchecked" for r in report.results)
+    assert not report.violations
+    assert not report.ok
+
+
+class _RaisingExplainAdapter:
+    def explain(self, sql: str) -> ExplainResult:
+        raise RuntimeError("driver could not parse")
+
+
+def test_raising_adapter_degrades_to_unchecked_without_aborting(
+    contract: DataContract,
+) -> None:
+    # A thin adapter that raises (Layer 2 or decision-B) must not crash the batch;
+    # the offending example degrades to "unchecked" and the rest still validate.
+    report = validate_examples(
+        [
+            VerifiedExample(sql=_UNPARSEABLE_SQL, id="x"),  # decision-B path
+            VerifiedExample(sql=_OK_SQL, id="y"),  # Layer-2 path
+        ],
+        contract,
+        explain_adapter=_RaisingExplainAdapter(),
+    )
+    by_id = {r.example.id: r for r in report.results}
+    assert by_id["x"].status == "unchecked"
+    assert by_id["y"].status == "unchecked"
+    assert any("validation error" in reason for reason in by_id["y"].reasons)
+    assert not report.ok
 
 
 def test_row_limit_block_marks_engine_checked(contract: DataContract) -> None:

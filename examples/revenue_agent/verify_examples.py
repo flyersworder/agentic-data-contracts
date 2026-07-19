@@ -16,10 +16,13 @@ contract, using the SAME two-layer Validator that gates live agent queries:
                         renamed column) is caught even when the static contract
                         cannot see it
 
-Each example lands in one of ``valid`` / ``violation`` / ``unchecked``, with two
-flags — ``contract_checked`` (static checks ran) and ``engine_checked`` (the dry
-run ran) — recording *what* was verified. Extra YAML keys (``type``,
-``verified_by``, ``last_verified``) are preserved untouched in ``.metadata``.
+Each example lands in exactly one status — ``valid`` (contract-checked and
+passed), ``violation`` (a check rejected it), ``unverified`` (engine-planned but
+policy not statically checked; see the note below), or ``unchecked`` (no verdict)
+— with two flags, ``contract_checked`` and ``engine_checked``, recording *what*
+was verified. ``report.ok`` is True only when every example is ``valid``. Extra
+YAML keys (``type``, ``verified_by``, ``last_verified``) are preserved untouched
+in ``.metadata``.
 
 Two real uses of the same call:
   * MR gate — validate the corpus in CI before a human reviews; ``sys.exit(1)``
@@ -67,6 +70,7 @@ def main() -> None:
     report = validate_examples(
         examples,
         contract,
+        dialect=adapter.dialect,  # so Layer 1 parses in the engine's dialect
         explain_adapter=adapter,  # enables the live DuckDB EXPLAIN dry run
         semantic_source=semantic,
     )

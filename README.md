@@ -797,7 +797,7 @@ if not report.ok:
     # in CI: sys.exit(1)
 ```
 
-Each example lands in `valid` / `violation` / `unchecked`, with two flags — `contract_checked` (static checks ran) and `engine_checked` (the EXPLAIN dry-run ran) — recording *what* was verified. Two uses of the same call:
+Each example lands in exactly one `status` — `valid` (statically contract-checked and passed), `violation` (a check rejected it), `unverified` (the engine planned it but policy couldn't be statically checked — see below), or `unchecked` (no verdict possible) — with two flags, `contract_checked` and `engine_checked`, recording *what* was verified. `report.ok` is a **safe gate**: it is True only when *every* example is `valid`, so `if not report.ok: sys.exit(1)` fails on violations, unchecked, *and* unverified rows (test `report.violations` directly for a laxer gate). Two uses of the same call:
 
 - **MR gate** — validate the corpus in CI *before* a human reviews it; fail on `not report.ok`, so the human is no longer the only check.
 - **Drift sweep** — re-run against a *changed* contract; `report.violations` are the examples the change just broke. With an `explain_adapter`, the live EXPLAIN also catches a dropped or renamed column that static checks can't see.

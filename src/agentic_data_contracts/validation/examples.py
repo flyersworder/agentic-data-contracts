@@ -3,7 +3,8 @@
 The framework never stores, loads, retrieves, or serves examples. It takes a
 batch of already-parsed ``VerifiedExample`` records and re-validates each one's
 SQL against a ``DataContract`` using the same ``Validator`` that gates live agent
-queries. See docs/superpowers/specs/2026-07-19-verified-examples-validation-design.md.
+queries. See the "Validating a verified-examples corpus" section of the README
+for usage and the boundary rationale.
 """
 
 from __future__ import annotations
@@ -60,16 +61,20 @@ class VerifiedExample:
 class ExampleResult:
     """The verdict for one example.
 
-    ``status``:
-      - ``"valid"``     — passed every layer that ran.
-      - ``"violation"`` — a contract check or engine EXPLAIN rejected it.
-      - ``"unchecked"`` — no layer could render a verdict (parse failed, no adapter).
+    ``status`` (each result has exactly one):
+      - ``"valid"``      — statically contract-checked *and* passed (plus the
+                           EXPLAIN dry-run, if an adapter was given).
+      - ``"violation"``  — a contract check or engine EXPLAIN rejected it.
+      - ``"unverified"`` — decision-B: the engine planned it (sqlglot could not
+                           parse the SQL), but contract policy was NOT statically
+                           checked, so it is neither vouched-valid nor rejected.
+      - ``"unchecked"``  — no verdict was possible (parse failed with no adapter,
+                           or the adapter raised while planning).
 
     ``contract_checked`` is True only when the static checkers ran (needs a
-    successful sqlglot parse). ``engine_checked`` is True when EXPLAIN ran
-    (directly or via the decision-B fallback). A ``valid`` result with
-    ``contract_checked is False`` is a decision-B pass: plannable, but contract
-    policy was not statically verified.
+    successful sqlglot parse). ``engine_checked`` is True when EXPLAIN ran. So a
+    trusted pass is ``status == "valid"``; ``"unverified"`` rows are plannable
+    but require human judgement.
     """
 
     example: VerifiedExample
@@ -98,19 +103,20 @@ class ExampleValidationReport:
 
     @property
     def unverified_compliance(self) -> list[ExampleResult]:
-        """Valid results the engine planned but the contract could not check."""
-        return [
-            r for r in self.results if r.status == "valid" and not r.contract_checked
-        ]
+        """Decision-B passes: the engine planned them, contract policy unchecked."""
+        return [r for r in self.results if r.status == "unverified"]
 
     @property
     def ok(self) -> bool:
-        """True when no example is a contract/engine violation.
+        """True only when every example was contract-checked and passed.
 
-        ``unchecked`` results do not flip this — the caller decides whether an
-        un-verifiable example should fail their gate.
+        Safe as a CI gate — ``if not report.ok: sys.exit(1)``. It is False if ANY
+        example is a ``violation``, is ``unchecked`` (no verdict could be
+        rendered), or is ``unverified`` (the engine planned it but contract
+        policy was never statically checked). A laxer view — e.g. fail only on
+        hard violations — can test ``report.violations`` directly.
         """
-        return not self.violations
+        return not (self.violations or self.unchecked or self.unverified_compliance)
 
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment.
@@ -123,19 +129,20 @@ class ExampleValidationReport:
         def _label(result: ExampleResult, index: int) -> str:
             return result.example.id or result.example.question or f"#{index}"
 
+        # Each result has exactly one status, so the four counts sum to the total.
         lines = [
             f"**Example validation:** {len(self.valid)} valid, "
             f"{len(self.violations)} violation(s), "
-            f"{len(self.unchecked)} unchecked, "
-            f"{len(self.unverified_compliance)} plannable-but-unverified.",
+            f"{len(self.unverified_compliance)} unverified, "
+            f"{len(self.unchecked)} unchecked.",
         ]
         for i, r in enumerate(self.results):
             if r.status == "violation":
                 lines.append(f"- violation `{_label(r, i)}`: {'; '.join(r.reasons)}")
+            elif r.status == "unverified":
+                lines.append(f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}")
             elif r.status == "unchecked":
                 lines.append(f"- unchecked `{_label(r, i)}`: {'; '.join(r.reasons)}")
-            elif r.status == "valid" and not r.contract_checked:
-                lines.append(f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}")
         return "\n".join(lines)
 
 
@@ -178,8 +185,21 @@ def validate_examples(
 
     results: list[ExampleResult] = []
     for example in examples:
-        vr = _validator_for(example.principal).validate(example.sql)
-        results.append(_to_result(example, vr, explain_adapter))
+        try:
+            vr = _validator_for(example.principal).validate(example.sql)
+            results.append(_to_result(example, vr, explain_adapter))
+        except Exception as exc:  # noqa: BLE001 — batch resilience
+            # A misbehaving adapter (a Layer-2 or decision-B EXPLAIN that raises
+            # instead of returning schema_valid=False) or any other unexpected
+            # error degrades THIS example to "unchecked" — one bad example must
+            # never abort validation of the rest of the corpus.
+            results.append(
+                ExampleResult(
+                    example=example,
+                    status="unchecked",
+                    reasons=[f"validation error: {exc}"],
+                )
+            )
     return ExampleValidationReport(results=results)
 
 
@@ -230,12 +250,16 @@ def _to_result(
         )
 
     # Decision B: sqlglot cannot parse it, but the engine is the authoritative
-    # parser — ask it directly. Verifies plannability, NOT contract policy.
+    # parser — ask it directly. Verifies plannability, NOT contract policy. A
+    # raise here (a thin adapter that does not wrap driver errors) is caught by
+    # validate_examples' per-example guard and degraded to "unchecked".
     explain_result = explain_adapter.explain(example.sql)
     if explain_result.schema_valid:
+        # Engine vouches for plannability, but the static contract checks never
+        # ran (no AST) — its own status, never counted as a trusted "valid".
         return ExampleResult(
             example=example,
-            status="valid",
+            status="unverified",
             warnings=[_PARSE_FALLBACK_CAVEAT],
             contract_checked=False,
             engine_checked=True,

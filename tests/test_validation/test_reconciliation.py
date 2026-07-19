@@ -146,6 +146,41 @@ class TestReconcileHappyPath:
         )
         assert result.reconciles is False
 
+    def test_abs_tol_reconciles_near_zero_parent(self, adapter: DuckDBAdapter) -> None:
+        # actual 0 makes rel_tol useless (rel_tol*0 == 0); abs_tol governs.
+        metric = _metric("sum", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 0",
+            operand_sql={"a": "SELECT 0.25", "b": "SELECT 0"},
+            adapter=adapter,
+            abs_tol=0.25,
+        )
+        assert result.reconciles is True
+        assert result.rel_diff == float("inf")  # actual_parent == 0, abs_diff != 0
+
+    def test_zero_parent_without_abs_tol_does_not_reconcile(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        metric = _metric("sum", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 0",
+            operand_sql={"a": "SELECT 0.25", "b": "SELECT 0"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+
+    def test_difference_through_reconcile(self, adapter: DuckDBAdapter) -> None:
+        metric = _metric("difference", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 6",
+            operand_sql={"a": "SELECT 10", "b": "SELECT 4"},
+            adapter=adapter,
+        )
+        assert result.reconciles is True
+
 
 class TestReconcileFindings:
     def test_null_operand_is_finding(self, adapter: DuckDBAdapter) -> None:
@@ -159,6 +194,17 @@ class TestReconcileFindings:
         assert result.reconciles is False
         assert result.reason is not None and "NULL" in result.reason
         assert "a" in result.reason
+
+    def test_null_parent_is_finding(self, adapter: DuckDBAdapter) -> None:
+        metric = _metric("product", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT NULL",
+            operand_sql={"a": "SELECT 4", "b": "SELECT 5"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+        assert result.reason is not None and "parent" in result.reason
 
     def test_ratio_zero_denominator_is_finding(self, adapter: DuckDBAdapter) -> None:
         metric = _metric("ratio", ["num", "den"])
@@ -220,6 +266,23 @@ class TestReconcilePreconditions:
         )
         assert result.operator == "sum"
         assert result.reconciles is True
+
+    def test_ratio_wrong_arity_raises(self, adapter: DuckDBAdapter) -> None:
+        # A directly-built metric that skipped validate_decompositions() must
+        # raise a clean ValueError, not leak an IndexError.
+        metric = MetricDefinition(
+            name="bad",
+            description="",
+            sql_expression="x",
+            decompositions=[Decomposition(operator="ratio", operands=["only"])],
+        )
+        with pytest.raises(ValueError, match="requires exactly 2 operands"):
+            reconcile_decomposition(
+                metric,
+                parent_sql="SELECT 1",
+                operand_sql={"only": "SELECT 1"},
+                adapter=adapter,
+            )
 
 
 class TestReconcilePopulationMismatch:

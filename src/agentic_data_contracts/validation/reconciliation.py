@@ -113,6 +113,17 @@ def reconcile_decomposition(
             f"operands {declared} of metric {metric.name!r}"
         )
 
+    if decomp.operator in ("ratio", "difference") and len(declared) != 2:
+        raise ValueError(
+            f"operator {decomp.operator!r} requires exactly 2 operands, "
+            f"got {len(declared)}"
+        )
+    if decomp.operator in ("sum", "product") and len(declared) < 2:
+        raise ValueError(
+            f"operator {decomp.operator!r} requires at least 2 operands, "
+            f"got {len(declared)}"
+        )
+
     measured: dict[str, float] = {}
     missing: list[str] = []
     for name in declared:
@@ -124,8 +135,9 @@ def reconcile_decomposition(
     actual_parent = _scalar(adapter, parent_sql, "parent")
 
     if missing or actual_parent is None:
+        labels = [f"operand {name!r}" for name in missing]
         if actual_parent is None:
-            missing = [*missing, "parent"]
+            labels = [*labels, "parent"]
         return ReconciliationResult(
             metric=metric.name,
             operator=decomp.operator,
@@ -137,7 +149,7 @@ def reconcile_decomposition(
             reconciles=False,
             rel_tol=rel_tol,
             abs_tol=abs_tol,
-            reason=f"{', '.join(missing)} returned NULL",
+            reason=f"{', '.join(labels)} returned NULL",
         )
 
     values = [measured[name] for name in declared]

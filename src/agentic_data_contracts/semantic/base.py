@@ -76,6 +76,45 @@ class MetricImpact:
         return "influence"
 
 
+@dataclass
+class IdentityEdge:
+    """A directed identity edge parent -> operand in the metric graph."""
+
+    from_metric: str  # parent metric
+    to_metric: str  # operand metric
+    operator: str  # the decomposition operator that produced this edge
+
+    @property
+    def kind(self) -> str:
+        return "identity"
+
+
+MetricEdge = MetricImpact | IdentityEdge
+
+
+def identity_edges_from_metrics(
+    metrics: list[MetricDefinition],
+) -> list[IdentityEdge]:
+    """Flatten each metric's decompositions into directed identity edges.
+
+    For every operand of every decomposition, emit one edge
+    ``parent -> operand`` carrying the decomposition's operator. Leaf metrics
+    (no decompositions) contribute nothing.
+    """
+    edges: list[IdentityEdge] = []
+    for metric in metrics:
+        for decomp in metric.decompositions:
+            for operand in decomp.operands:
+                edges.append(
+                    IdentityEdge(
+                        from_metric=metric.name,
+                        to_metric=operand,
+                        operator=decomp.operator,
+                    )
+                )
+    return edges
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...

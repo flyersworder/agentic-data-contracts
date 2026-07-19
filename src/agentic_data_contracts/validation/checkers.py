@@ -925,8 +925,8 @@ class RelationshipChecker:
                     continue
 
                 for rel in rels:
-                    from_table, from_col = self._parse_ref(rel.from_)
-                    to_table, to_col = self._parse_ref(rel.to)
+                    _, from_col = self._parse_ref(rel.from_)
+                    _, to_col = self._parse_ref(rel.to)
                     correct = {l_col, r_col} == {from_col, to_col}
                     if not correct:
                         warnings.append(

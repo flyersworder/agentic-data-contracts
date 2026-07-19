@@ -316,6 +316,42 @@ class TestRoundtrip:
         assert revenue.decompositions[0].operands == ["paying_users", "arpu"]
         assert revenue.drill_by[0].column == "analytics.dim_customer.region"
 
+    def test_dump_omits_empty_decomposition_fields(self) -> None:
+        # A leaf metric (no decompositions/drill_by) must NOT carry empty keys
+        # in the dump — keeps the frozen-contract digest byte-stable against the
+        # pre-0.28 format and matches the tools layer's omit-when-empty rule.
+        source = YamlSource.from_raw(
+            {"metrics": [{"name": "signups", "sql_expression": "COUNT(*)"}]}
+        )
+        metric = dump_semantic_source(source)["metrics"][0]
+        assert "decompositions" not in metric
+        assert "drill_by" not in metric
+
+    def test_dump_includes_nonempty_decomposition_fields(self) -> None:
+        source = YamlSource.from_raw(
+            {
+                "metrics": [
+                    {
+                        "name": "revenue",
+                        "sql_expression": "x",
+                        "decompositions": [
+                            {"operator": "product", "operands": ["a", "b"]}
+                        ],
+                        "drill_by": [{"dimension": "region", "column": "s.t.region"}],
+                    },
+                    {"name": "a", "sql_expression": "x"},
+                    {"name": "b", "sql_expression": "x"},
+                ]
+            }
+        )
+        metric = next(
+            m for m in dump_semantic_source(source)["metrics"] if m["name"] == "revenue"
+        )
+        assert metric["decompositions"] == [
+            {"operator": "product", "operands": ["a", "b"]}
+        ]
+        assert metric["drill_by"] == [{"dimension": "region", "column": "s.t.region"}]
+
 
 from agentic_data_contracts.semantic.base import (  # noqa: E402
     build_metric_impact_index,

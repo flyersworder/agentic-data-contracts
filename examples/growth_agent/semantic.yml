@@ -49,6 +49,17 @@ metrics:
     business_owner: growth-analytics
     operational_owner: data-eng-growth
     last_reviewed: 2026-05-15
+    # Arithmetic identity: conversion_rate is exactly first_purchase_users /
+    # cohort_signups. Combined with the causal impact edge below
+    # (activation_rate -> conversion_rate), trace_metric_impacts on this metric
+    # returns a MIXED graph — walk kinds="identity" first (what arithmetically
+    # moved: numerator or denominator?), then kinds="influence" for candidate
+    # causal drivers.
+    decompositions:
+      - operator: ratio
+        operands: [first_purchase_users, cohort_signups]
+    drill_by:
+      - {dimension: acquisition_source, column: analytics.users.acquisition_source}
 
   - name: acquisition_spend
     description: "Total paid-channel spend attributed to acquisition"
@@ -57,6 +68,29 @@ metrics:
     domains: [acquisition]
     tier: [team_kpi]
     indicator_kind: lagging
+    business_owner: growth-analytics
+    operational_owner: data-eng-growth
+    last_reviewed: 2026-05-15
+
+  # Leaf metrics — the numerator and denominator of the conversion_rate ratio.
+  - name: first_purchase_users
+    description: "Distinct users whose first_purchase occurred within 30 days of signup"
+    sql_expression: "COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'first_purchase')"
+    source_model: analytics.events
+    domains: [experimentation]
+    tier: [team_kpi]
+    indicator_kind: leading
+    business_owner: growth-analytics
+    operational_owner: data-eng-growth
+    last_reviewed: 2026-05-15
+
+  - name: cohort_signups
+    description: "Distinct signed-up users in the cohort (conversion denominator)"
+    sql_expression: "COUNT(DISTINCT u.id)"
+    source_model: analytics.users
+    domains: [acquisition]
+    tier: [team_kpi]
+    indicator_kind: leading
     business_owner: growth-analytics
     operational_owner: data-eng-growth
     last_reviewed: 2026-05-15

@@ -350,10 +350,10 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 1. **`describe_table(schema, table)`** — Column details, merging the database adapter's catalog view with authored descriptions from the semantic source (semantic wins; adapter fills gaps)
 2. **`preview_table(schema, table, limit?)`** — Sample rows
 3. **`list_metrics(domain?, tier?, indicator_kind?)`** — Browse metrics with filters
-4. **`lookup_metric(metric_name)`** — Full metric definition with SQL and impact edges
+4. **`lookup_metric(metric_name)`** — Full metric definition with SQL, impact edges, and any `decompositions` / `drill_by`
 5. **`lookup_domain(name)`** — Full domain description with metrics and tables
 6. **`lookup_relationships(table, target_table?)`** — Direct joins and multi-hop paths
-7. **`trace_metric_impacts(metric_name, direction, max_depth?)`** — BFS over the impact graph
+7. **`trace_metric_impacts(metric_name, direction, max_depth?, kinds?)`** — BFS over the metric graph across both influence and identity (decomposition) edges; `kinds` (`all` / `identity` / `influence`) filters which kind(s) to walk
 8. **`inspect_query(sql)`** — Static + EXPLAIN check, no execution
 9. **`run_query(sql)`** — Validate and execute; response includes remaining session budget
 
@@ -504,7 +504,7 @@ class SemanticSource(Protocol):
 | `CubeSource` | Cube meta API or schema files | Metrics (+ `meta.tier` / `meta.indicator_kind` / `meta.domains`), dimensions |
 | `YamlSource` | Inline YAML definitions | Metric / table / relationship / `metric_impacts` definitions for teams not using dbt/Cube |
 
-`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`. The last three are parsed by `YamlSource` only; `DbtSource` / `CubeSource` leave them unset.
+`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`, `decompositions`, `drill_by`. `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by` are parsed by `YamlSource` only; `DbtSource` / `CubeSource` leave them unset/empty.
 `MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
 `Decomposition`: `operator`, `operands`. `DrillDimension`: `dimension`, `column`. `IdentityEdge`: `from_metric`, `to_metric`, `operator`.
 `Relationship`: `from_`, `to`, `type`, `description`, `required_filter`, `preferred`. The `preferred` flag (default `False`) marks the canonical join when alternatives exist between the same table pair. `build_relationship_index` stable-sorts each adjacency list with preferred edges first, so `find_join_path` (BFS) and `get_relationships_for_table` both surface the canonical edge automatically. The flat list returned by `get_relationships()` deliberately keeps declaration order; that list feeds the prompt renderer, which renders `preferred="true"` as a per-edge attribute instead of via reordering.

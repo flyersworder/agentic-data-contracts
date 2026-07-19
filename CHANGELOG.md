@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.1] - 2026-07-19
+
+### Fixed
+
+- **`dump_semantic_source` now omits empty `decompositions` / `drill_by`.** 0.28.0 emitted both keys on *every* metric even when empty, which (a) diverged from the omit-when-empty convention the tools layer already uses (`_metric_details`) and (b) changed a frozen contract's `contract_digest` for a source that declares no decompositions — re-freezing a pre-0.28 contract produced a different content address than it had under 0.27.x. A leaf metric now dumps byte-identically to the pre-0.28 format, so `contract_digest` is stable across the upgrade for contracts that don't use the new fields. Metrics that *do* declare decompositions/drill_by are unaffected (the keys are still emitted and round-trip through `from_raw`).
+
+### Docs
+
+- The `revenue_agent` and `growth_agent` examples now demonstrate the 0.28.0 feature. `revenue_agent` declares a `product` identity (`total_revenue = active_customers × revenue_per_customer`) plus a `region` drill dimension; `growth_agent` declares a `ratio` identity on `conversion_rate` which — combined with its existing causal impact edge — exercises a *mixed* identity + influence graph, the case `trace_metric_impacts`'s `kinds` filter is built for.
+- Filled decomposition gaps left in `docs/architecture.md` by the 0.28.0 doc pass: the 9-tools list now shows `trace_metric_impacts`'s `kinds` argument and its dual-edge-kind walk, `lookup_metric` notes the surfaced `decompositions` / `drill_by`, and the `MetricDefinition` field enumeration includes both new fields.
+
 ## [0.28.0] - 2026-07-19
 
 ### Added

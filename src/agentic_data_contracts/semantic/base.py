@@ -237,6 +237,35 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
     def _iso(d: date | None) -> str | None:
         return d.isoformat() if d is not None else None
 
+    def _dump_metric(m: MetricDefinition) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "name": m.name,
+            "description": m.description,
+            "sql_expression": m.sql_expression,
+            "source_model": m.source_model,
+            "filters": list(m.filters),
+            "domains": list(m.domains),
+            "tier": list(m.tier),
+            "indicator_kind": m.indicator_kind,
+            "business_owner": m.business_owner,
+            "operational_owner": m.operational_owner,
+            "last_reviewed": _iso(m.last_reviewed),
+        }
+        # Omit when empty: a leaf metric's dump stays byte-identical to the
+        # pre-0.28 format, so a frozen contract's ``contract_digest`` is stable
+        # across the upgrade, and it matches the omit-when-empty convention the
+        # tools layer already uses (``_metric_details``).
+        if m.decompositions:
+            data["decompositions"] = [
+                {"operator": d.operator, "operands": list(d.operands)}
+                for d in m.decompositions
+            ]
+        if m.drill_by:
+            data["drill_by"] = [
+                {"dimension": dd.dimension, "column": dd.column} for dd in m.drill_by
+            ]
+        return data
+
     tables: list[dict[str, Any]] = []
     for key, ts in source.get_table_schemas().items():
         schema_name, _, table_name = key.partition(".")
@@ -253,30 +282,7 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
 
     return {
         "tables": tables,
-        "metrics": [
-            {
-                "name": m.name,
-                "description": m.description,
-                "sql_expression": m.sql_expression,
-                "source_model": m.source_model,
-                "filters": list(m.filters),
-                "domains": list(m.domains),
-                "tier": list(m.tier),
-                "indicator_kind": m.indicator_kind,
-                "business_owner": m.business_owner,
-                "operational_owner": m.operational_owner,
-                "last_reviewed": _iso(m.last_reviewed),
-                "decompositions": [
-                    {"operator": d.operator, "operands": list(d.operands)}
-                    for d in m.decompositions
-                ],
-                "drill_by": [
-                    {"dimension": dd.dimension, "column": dd.column}
-                    for dd in m.drill_by
-                ],
-            }
-            for m in source.get_metrics()
-        ],
+        "metrics": [_dump_metric(m) for m in source.get_metrics()],
         "relationships": [
             {
                 "from": r.from_,

@@ -17,6 +17,16 @@ metrics:
     business_owner: revenue-analytics
     operational_owner: data-eng-finance
     last_reviewed: 2026-05-15
+    # Arithmetic identity (exact, exhaustive): total_revenue is precisely
+    # active_customers × revenue_per_customer. The agent walks this
+    # deterministically for root-cause ("did customer count or per-customer
+    # spend move?") before reaching for the causal impact edges below.
+    decompositions:
+      - operator: product
+        operands: [active_customers, revenue_per_customer]
+    # Priority-ordered dimensional cut the metric can be sliced by exhaustively.
+    drill_by:
+      - {dimension: region, column: analytics.customers.region}
 
   - name: revenue_by_region
     description: "Revenue broken down by customer region"
@@ -38,6 +48,20 @@ metrics:
     domains: [revenue]
     tier: [team_kpi]
     indicator_kind: leading
+    business_owner: revenue-analytics
+    operational_owner: data-eng-finance
+    last_reviewed: 2026-05-15
+
+  # Leaf metric — the second factor of the total_revenue decomposition above.
+  - name: revenue_per_customer
+    description: "Average completed-order revenue per active customer (ARPC)"
+    sql_expression: >
+      SUM(amount) FILTER (WHERE status = 'completed')
+      / NULLIF(COUNT(DISTINCT customer_id) FILTER (WHERE status = 'completed'), 0)
+    source_model: analytics.orders
+    domains: [revenue]
+    tier: [team_kpi]
+    indicator_kind: lagging
     business_owner: revenue-analytics
     operational_owner: data-eng-finance
     last_reviewed: 2026-05-15

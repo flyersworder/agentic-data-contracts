@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.validator import ValidationResult, Validator
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.semantic.base import SemanticSource
 
 _KNOWN_KEYS = frozenset({"sql", "question", "id", "principal", "metadata"})
 

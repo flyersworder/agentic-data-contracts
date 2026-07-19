@@ -296,3 +296,30 @@ def test_parse_fallback_engine_rejects_is_violation(contract: DataContract) -> N
     assert not r.contract_checked
     assert r.engine_checked
     assert any("syntax error" in reason for reason in r.reasons)
+
+
+def test_public_exports() -> None:
+    from agentic_data_contracts.validation import (
+        ExampleResult,
+        ExampleValidationReport,
+        VerifiedExample,
+        validate_examples,
+    )
+
+    assert VerifiedExample and ExampleResult
+    assert ExampleValidationReport and validate_examples
+
+
+def test_principal_scoped_validation(fixtures_dir: Path) -> None:
+    contract = DataContract.from_yaml(fixtures_dir / "filter_values_contract.yml")
+    sql = "SELECT id FROM sales.opps WHERE account_id = 123"
+    report = validate_examples(
+        [
+            VerifiedExample(sql=sql, principal="partner@co.com", id="partner"),
+            VerifiedExample(sql=sql, principal="vip@co.com", id="vip"),
+        ],
+        contract,
+    )
+    by_id = {r.example.id: r.status for r in report.results}
+    assert by_id["partner"] == "valid"  # 123 in partner's allowlist
+    assert by_id["vip"] == "violation"  # 123 not in vip's [999]

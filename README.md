@@ -1,19 +1,57 @@
 # agentic-data-contracts
 
 [![PyPI version](https://img.shields.io/pypi/v/agentic-data-contracts.svg)](https://pypi.org/project/agentic-data-contracts/)
+[![PyPI downloads](https://img.shields.io/pepy/dt/agentic-data-contracts)](https://pypistats.org/packages/agentic-data-contracts)
 [![CI](https://github.com/flyersworder/agentic-data-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/flyersworder/agentic-data-contracts/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **YAML-first, domain-driven data governance for AI agents.**
 
-`agentic-data-contracts` takes a domain-driven approach to AI agent governance: instead of letting agents figure out your data landscape by trial and error, you teach them your business domains, metrics, and rules upfront — in YAML. The agent starts by understanding *what* a business domain means, then discovers *which* metrics to use, then builds queries that comply with your governance rules. All enforced automatically at query time via SQL validation powered by [sqlglot](https://github.com/tobymao/sqlglot).
+You teach agents your business domains, metrics, and governance rules upfront — in YAML — instead of letting them reverse-engineer your data landscape by trial and error. The agent learns *what* a domain means, discovers *which* metrics to use, then writes queries that are validated against your rules at query time (via [sqlglot](https://github.com/tobymao/sqlglot)) before anything reaches the database.
 
-**Why domain-driven?** AI agents querying databases face three problems: **resource runaway** (unbounded compute, endless retries, cost overruns), **semantic inconsistency** (wrong tables, missing filters, ad-hoc metric definitions), and **lack of business context** (the agent doesn't know what "revenue" means in *your* company). This library addresses all three with a single YAML contract that combines governance rules with business domain knowledge.
+### Highlights
 
-**Works with:** [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) (primary target), or any Python agent framework. Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
+- **Governed, not guessed** — the agent uses *your* metric definitions (`SUM(amount) FILTER (WHERE status = 'completed')`), not an ad-hoc query it invented.
+- **Bad SQL blocked before execution** — forbidden operations, disallowed tables, missing tenant filters, `SELECT *`, unbounded scans — caught by static analysis plus an optional EXPLAIN dry-run.
+- **Business context first** — domain descriptions, metric ownership, freshness, and a metric graph (causal *and* arithmetic) guide the agent before it writes a line of SQL.
+- **Resource governance built in** — per-session cost, retry, row, and token budgets, and wall-clock limits.
+- **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
+- **Framework-agnostic** — plain-function tools for the Claude Agent SDK, LangChain/deepagents, Pydantic AI, or no framework at all.
+- **Bring your own semantics** — read metrics from dbt, Cube, or inline YAML.
 
-> **See it running: [three working example agents](#examples) cover distinct governance archetypes — financial reporting (`revenue_agent`), experimentation (`growth_agent`), and SRE reliability (`ops_agent`). Each runs end-to-end in demo mode without any external API key.**
+### Without a contract vs. with one
+
+| A raw agent on your warehouse | With `agentic-data-contracts` |
+|---|---|
+| Invents `revenue = SUM(amount)` — silently wrong (counts refunds, cancelled orders) | Uses the governed definition: `SUM(amount) FILTER (WHERE status = 'completed')` |
+| `SELECT *`, cross-tenant reads, unbounded scans | Blocked at query time — explicit columns, required `tenant_id`, row caps enforced |
+| Loops on retries with no cost ceiling | Per-session retry / cost / token budgets |
+| "Why did revenue drop?" → guesses | Walks the metric graph: arithmetic decomposition first, then causal drivers |
+
+**Works with:** any Python agent framework — first-class helpers for the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), [LangChain](https://github.com/langchain-ai/langchain) / [deepagents](https://github.com/langchain-ai/deepagents), and [Pydantic AI](https://github.com/pydantic/pydantic-ai), plus a framework-free path (the tools are plain async functions). Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
+
+> **See it running:** [three example agents](#examples) — `revenue_agent` (finance), `growth_agent` (experimentation), `ops_agent` (SRE) — each runs end-to-end in demo mode with no API key.
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [The 9 Tools](#the-9-tools)
+- [Domain-Driven Agent Workflow](#domain-driven-agent-workflow)
+- [Contract Rules](#contract-rules)
+- [Semantic Sources](#semantic-sources)
+- [Table Relationships](#table-relationships)
+- [Metric Impacts](#metric-impacts) (incl. [decomposition & drill dimensions](#metric-decomposition-and-drill-dimensions))
+- [Custom Prompt Rendering](#custom-prompt-rendering)
+- [Scaling to Large Organizations](#scaling-to-large-organizations)
+- [Resource Limits](#resource-limits)
+- [Optional Dependencies](#optional-dependencies)
+- [Formal Governance with ai-agent-contracts](#optional-formal-governance-with-ai-agent-contracts)
+- [Examples](#examples)
+- [FAQ](#faq)
+- [Architecture](#architecture)
 
 ## How It Works
 
@@ -190,7 +228,12 @@ rules:
 
 Same fail-closed contract as per-table scoping: a rule with `allowed_principals` or `blocked_principals` set requires the caller to be identified — anonymous callers are out of scope and the rule is skipped (it does not silently downgrade to "applies to everyone"). This lets you express things like "Alice may not select `ssn` from `pii.users`, but Bob may" directly in YAML, without splitting tables into per-principal views.
 
-### 3. Use with the Claude Agent SDK (requires `claude-agent-sdk>=0.1.52`)
+### 3. Framework integrations
+
+Contract-aware tools are plain async functions, so they drop into any framework — expand the one you use.
+
+<details>
+<summary><b>Claude Agent SDK</b> — requires <code>claude-agent-sdk</code> 0.1.52+</summary>
 
 ```python
 import asyncio
@@ -259,7 +302,10 @@ Notes:
 - **Set metric precedence in your prompt** (e.g. "resolve metrics via `lookup_metric`/`lookup_domain` before writing SQL") so the plugin's "just write a query" instinct doesn't undercut your governed semantic layer.
 - All three [examples](#examples) ship this wiring behind an opt-in `DATA_PLUGIN_PATH` env var — `growth_agent/agent.py` is the canonical, fully-commented template.
 
-### 4. Or use with deepagents / LangChain (requires `langchain>=1.2.17`)
+</details>
+
+<details>
+<summary><b>LangChain / deepagents</b> — requires <code>langchain</code> 1.2.17+</summary>
 
 ```python
 from agentic_data_contracts import create_langchain_tools, ContractMiddleware
@@ -282,7 +328,10 @@ tools = create_langchain_tools(dc, adapter=adapter, apply_middleware=False)
 agent = create_deep_agent(tools=tools, middleware=[ContractMiddleware(dc, adapter=adapter)])
 ```
 
-### 4b. Or use with Pydantic AI (requires `pydantic-ai-slim>=1.107.0`)
+</details>
+
+<details>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 1.107.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -327,7 +376,10 @@ The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
 `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
 
-### 5. Or use the tools directly (no SDK required)
+</details>
+
+<details>
+<summary><b>Directly</b> — no framework required</summary>
 
 ```python
 import asyncio
@@ -351,6 +403,8 @@ async def demo() -> None:
 
 asyncio.run(demo())
 ```
+
+</details>
 
 ## The 9 Tools
 
@@ -844,6 +898,20 @@ git clone https://github.com/anthropics/knowledge-work-plugins /tmp/kwp
 DATA_PLUGIN_PATH=/tmp/kwp/data \
     uv run python examples/growth_agent/agent.py "Which onboarding variant lifted activation?"
 ```
+
+## FAQ
+
+**Do I need `ai-agent-contracts`?** No. The library works standalone with lightweight enforcement (session counters, cost/retry/token budgets). Install [`ai-agent-contracts`](#optional-formal-governance-with-ai-agent-contracts) only if you want the formal 7-tuple contract, weighted success scoring, or multi-agent coordination.
+
+**Which databases are supported?** Any, via the `DatabaseAdapter` protocol. DuckDB, BigQuery, Snowflake, and PostgreSQL adapters ship as [optional extras](#optional-dependencies). Layer 1 validation (static SQL analysis) runs even with no adapter configured; a database adapter adds the EXPLAIN dry-run and query execution.
+
+**Does it execute my SQL?** Only `run_query` does, and only after validation passes (plus an optional EXPLAIN dry-run). `inspect_query` validates without executing, and forbidden operations (DELETE/DROP/UPDATE/…) are blocked before they ever reach the database.
+
+**Do I have to use dbt or Cube?** No. Author metrics inline in a `semantic.yml` with `YamlSource`. dbt (`manifest.json`) and Cube are supported if you already have them — the agent-facing behavior is identical regardless of source.
+
+**Does it work without the Claude Agent SDK?** Yes. The tools are plain async functions usable from LangChain/deepagents, Pydantic AI, or directly; the example agents fall back to a no-SDK demo mode.
+
+**Is it production-ready?** It's pre-1.0 and actively evolving. Every breaking change is documented in [`CHANGELOG.md`](CHANGELOG.md) with migration notes.
 
 ## Architecture
 

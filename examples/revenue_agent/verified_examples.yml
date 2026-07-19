@@ -1,0 +1,62 @@
+# An EXTERNAL "verified examples" corpus — the kind your analytics agent's
+# lessons-learned MR flow produces (human-reviewed question -> SQL pairs). The
+# framework never owns or stores this file; `validate_examples` only re-checks
+# each `sql` against the contract. Non-`sql` keys (type, verified_by,
+# last_verified) are preserved untouched in each example's `.metadata`.
+
+# 1. Valid — has tenant_id, explicit columns, and the real columns exist, so it
+#    passes static checks AND the live DuckDB EXPLAIN.
+- id: revenue-by-region
+  question: "total revenue by region"
+  sql: >
+    SELECT c.region, SUM(o.amount) AS revenue
+    FROM analytics.orders o
+    JOIN analytics.customers c ON o.customer_id = c.id
+    WHERE o.tenant_id = 'acme' AND o.status = 'completed'
+    GROUP BY c.region
+  type: sql
+  verified_by: data-eng-finance
+  last_verified: 2026-06-01
+
+# 2. Contract violation — missing the required tenant_id filter. Blocked
+#    statically (Layer 1), so the dry run is skipped (engine_checked stays False).
+- id: orders-missing-tenant-filter
+  question: "list recent order amounts"
+  sql: "SELECT id, amount FROM analytics.orders"
+  type: sql
+
+# 3. Contract violation — SELECT * is forbidden by the no_select_star rule.
+- id: customers-select-star
+  question: "show all customer fields"
+  sql: "SELECT * FROM analytics.customers WHERE tenant_id = 'acme'"
+  type: sql
+
+# 4. SCHEMA DRIFT — passes every static check (allowed table, tenant filter,
+#    explicit columns), but `discount_pct` no longer exists in the warehouse.
+#    Only the live EXPLAIN catches it: status violation, engine_checked True.
+#    This is the payoff a static-only gate cannot deliver.
+- id: orders-dropped-column
+  question: "orders with discount percentage"
+  sql: "SELECT o.id, o.discount_pct FROM analytics.orders o WHERE o.tenant_id = 'acme'"
+  type: sql
+  verified_by: data-eng-finance
+  last_verified: 2025-11-01
+
+# 5 & 6. Principal-scoped — the SAME SQL, validated under two different
+#    principals. customer_id 101 is in partner-a's allowlist [101,102,103] so it
+#    is VALID for them, but not in partner-b's [201,202] so it is a VIOLATION for
+#    them. Each example is checked as its own identity — this is why the corpus
+#    can carry a `principal` per row.
+- id: partner-a-own-orders
+  question: "partner A's orders for customer 101"
+  sql: "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme' AND customer_id = 101"
+  principal: partner-a@external.com
+  type: sql
+  verified_by: partner-success
+  last_verified: 2026-05-20
+
+- id: partner-b-foreign-customer
+  question: "partner B querying customer 101 (not theirs)"
+  sql: "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme' AND customer_id = 101"
+  principal: partner-b@external.com
+  type: sql

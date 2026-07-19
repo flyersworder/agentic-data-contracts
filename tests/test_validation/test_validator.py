@@ -398,6 +398,19 @@ def test_malformed_sql_blocks(validator: Validator) -> None:
     assert any("parse error" in r.lower() for r in result.reasons)
 
 
+def test_parse_error_sets_flag(validator: Validator) -> None:
+    result = validator.validate("SELECT * FROM (")
+    assert result.blocked
+    assert result.parse_error
+
+
+def test_valid_query_has_no_parse_error(validator: Validator) -> None:
+    result = validator.validate(
+        "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"
+    )
+    assert not result.parse_error
+
+
 class TestValidatorWithSemanticSource:
     """Tests Validator integration with SemanticSource for relationship checking."""
 

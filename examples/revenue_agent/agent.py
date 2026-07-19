@@ -95,12 +95,11 @@ def main() -> None:
     semantic = YamlSource(EXAMPLE_DIR / "semantic.yml")
 
     db_path = EXAMPLE_DIR / "sample_data.duckdb"
-    if not db_path.exists():
-        sys.path.insert(0, str(EXAMPLE_DIR))
-        from setup_db import setup  # type: ignore[import]
+    sys.path.insert(0, str(EXAMPLE_DIR))
+    from setup_db import ensure_sample_db  # type: ignore[import]
 
-        setup(str(db_path))
-        sys.path.pop(0)
+    ensure_sample_db(str(db_path))
+    sys.path.pop(0)
     adapter = DuckDBAdapter(str(db_path))
 
     tools = create_tools(dc, adapter=adapter, semantic_source=semantic)

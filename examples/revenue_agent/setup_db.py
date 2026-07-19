@@ -51,5 +51,13 @@ def setup(db_path: str = "sample_data.duckdb") -> None:
     print(f"Sample database created at {db_path}")
 
 
+def ensure_sample_db(db_path: str = "sample_data.duckdb") -> None:
+    """Create the sample database only if it does not already exist."""
+    from pathlib import Path
+
+    if not Path(db_path).exists():
+        setup(db_path)
+
+
 if __name__ == "__main__":
     setup()

@@ -62,6 +62,7 @@ class ValidationResult:
     estimated_rows: int | None = None
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
+    parse_error: bool = False
 
 
 @dataclass(frozen=True)
@@ -263,7 +264,11 @@ class Validator:
                 exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
             )
         except errors.ParseError as e:
-            return ValidationResult(blocked=True, reasons=[f"SQL parse error: {e}"])
+            return ValidationResult(
+                blocked=True,
+                reasons=[f"SQL parse error: {e}"],
+                parse_error=True,
+            )
 
         referenced_tables = extract_tables(ast)
 

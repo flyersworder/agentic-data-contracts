@@ -14,6 +14,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 
 - **Governed, not guessed** — the agent uses *your* metric definitions (`SUM(amount) FILTER (WHERE status = 'completed')`), not an ad-hoc query it invented.
 - **Bad SQL blocked before execution** — forbidden operations, disallowed tables, missing tenant filters, `SELECT *`, unbounded scans — caught by static analysis plus an optional EXPLAIN dry-run.
+- **Validate a whole corpus, not just live queries** — re-check a verified-examples database (or a metric's arithmetic identity) against the contract in CI, and catch drift when the contract or the warehouse schema changes.
 - **Business context first** — domain descriptions, metric ownership, freshness, and a metric graph (causal *and* arithmetic) guide the agent before it writes a line of SQL.
 - **Resource governance built in** — per-session cost, retry, row, and token budgets, and wall-clock limits.
 - **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
@@ -777,7 +778,33 @@ await trace.callable({
 #                      "kind": "identity", "operator": "product"}
 ```
 
-Today `decompositions` / `drill_by` are declared directly in YAML contracts; dbt/Cube extraction, an execution-based reconciliation check, and a variance-diagnosis tool are deferred.
+Today `decompositions` / `drill_by` are declared directly in YAML contracts; dbt/Cube extraction and a variance-diagnosis tool are deferred.
+
+## Validating a verified-examples corpus
+
+If you keep a corpus of known-good `question → SQL` examples — the kind an analytics agent accumulates from real sessions and promotes through review — `validate_examples` re-checks each example's SQL against a contract using the *same* two-layer `Validator` that gates live queries. The corpus stays entirely yours (your repo, your format, your review flow); the library never stores, loads, or executes it — it contributes exactly one verb, *validate*.
+
+```python
+from agentic_data_contracts import DataContract
+from agentic_data_contracts.validation import VerifiedExample, validate_examples
+
+contract = DataContract.from_yaml("contract.yml")
+examples = [VerifiedExample.from_dict(row) for row in load_your_yaml()]  # you own the load step
+
+report = validate_examples(examples, contract, explain_adapter=adapter)  # adapter → live EXPLAIN
+if not report.ok:
+    print(report.summary())   # markdown, ready to post as an MR comment
+    # in CI: sys.exit(1)
+```
+
+Each example lands in exactly one `status` — `valid` (statically contract-checked and passed), `violation` (a check rejected it), `unverified` (the engine planned it but policy couldn't be statically checked — see below), or `unchecked` (no verdict possible) — with two flags, `contract_checked` and `engine_checked`, recording *what* was verified. `report.ok` is a **safe gate**: it is True only when *every* example is `valid`, so `if not report.ok: sys.exit(1)` fails on violations, unchecked, *and* unverified rows (test `report.violations` directly for a laxer gate). Two uses of the same call:
+
+- **MR gate** — validate the corpus in CI *before* a human reviews it; fail on `not report.ok`, so the human is no longer the only check.
+- **Drift sweep** — re-run against a *changed* contract; `report.violations` are the examples the change just broke. With an `explain_adapter`, the live EXPLAIN also catches a dropped or renamed column that static checks can't see.
+
+It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with your review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
+
+Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance.
 
 ## Custom Prompt Rendering
 
@@ -888,6 +915,12 @@ Each example directory contains four files:
 - `semantic.yml` — metrics, relationships, metric impacts
 - `setup_db.py` — sample DuckDB data (auto-created on first run)
 - `agent.py` — runnable demo with a Claude Agent SDK path plus a fallback that exercises the tools directly
+
+`revenue_agent` additionally ships a **verified-examples validation** demo — `verified_examples.yml` (an external corpus) and `verify_examples.py`, which re-checks it against the contract with a live DuckDB EXPLAIN (valid, static violations, a schema-drift catch only the dry-run finds, and the same SQL diverging by principal):
+
+```bash
+uv run python examples/revenue_agent/verify_examples.py
+```
 
 Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
 

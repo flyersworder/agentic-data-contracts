@@ -115,6 +115,15 @@ def _metric_details(
         data["tier"] = metric.tier
     if metric.indicator_kind:
         data["indicator_kind"] = metric.indicator_kind
+    if metric.decompositions:
+        data["decompositions"] = [
+            {"operator": d.operator, "operands": list(d.operands)}
+            for d in metric.decompositions
+        ]
+    if metric.drill_by:
+        data["drill_by"] = [
+            {"dimension": dd.dimension, "column": dd.column} for dd in metric.drill_by
+        ]
     data.update(owner_context(metric.business_owner, metric.operational_owner))
     data.update(_freshness_fields(metric.last_reviewed, today, threshold_days))
 

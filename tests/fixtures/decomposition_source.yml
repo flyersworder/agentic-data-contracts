@@ -1,0 +1,36 @@
+metrics:
+  - name: revenue
+    description: "Total revenue"
+    sql_expression: "SUM(amount)"
+    decompositions:
+      - operator: product
+        operands: [paying_users, arpu]
+      - operator: sum
+        operands: [new_revenue, expansion_revenue]
+    drill_by:
+      - {dimension: region, column: analytics.dim_customer.region}
+  - name: paying_users
+    description: "Distinct paying customers"
+    sql_expression: "COUNT(DISTINCT customer_id)"
+  - name: arpu
+    description: "Average revenue per user (leaf — no decomposition)"
+    sql_expression: "SUM(amount) / NULLIF(COUNT(DISTINCT customer_id), 0)"
+  - name: new_revenue
+    description: "Revenue from new customers"
+    sql_expression: "SUM(amount) FILTER (WHERE is_new)"
+  - name: expansion_revenue
+    description: "Revenue expansion from existing customers"
+    sql_expression: "SUM(amount) FILTER (WHERE is_expansion)"
+
+tables:
+  - schema: analytics
+    table: dim_customer
+    columns:
+      - {name: region, type: VARCHAR, description: "Geographic region"}
+
+metric_impacts:
+  - from: paying_users
+    to: revenue
+    direction: positive
+    confidence: verified
+    evidence: "trivially true"

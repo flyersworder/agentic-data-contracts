@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Docs
 
 - The `revenue_agent` and `growth_agent` examples now demonstrate the 0.28.0 feature. `revenue_agent` declares a `product` identity (`total_revenue = active_customers × revenue_per_customer`) plus a `region` drill dimension; `growth_agent` declares a `ratio` identity on `conversion_rate` which — combined with its existing causal impact edge — exercises a *mixed* identity + influence graph, the case `trace_metric_impacts`'s `kinds` filter is built for.
+- Filled decomposition gaps left in `docs/architecture.md` by the 0.28.0 doc pass: the 9-tools list now shows `trace_metric_impacts`'s `kinds` argument and its dual-edge-kind walk, `lookup_metric` notes the surfaced `decompositions` / `drill_by`, and the `MetricDefinition` field enumeration includes both new fields.
 
 ## [0.28.0] - 2026-07-19
 

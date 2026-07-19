@@ -19,6 +19,7 @@ from agentic_data_contracts.core.principal import (
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.core.staleness import owner_context, review_age_days
 from agentic_data_contracts.semantic.base import (
+    IdentityEdge,
     MetricDefinition,
     MetricEdge,
     MetricImpact,
@@ -27,6 +28,7 @@ from agentic_data_contracts.semantic.base import (
     build_relationship_index,
     domain_metric_counts,
     find_join_path,
+    identity_edges_from_metrics,
     metrics_in_domain,
     walk_metric_impacts,
 )
@@ -200,6 +202,12 @@ def create_tools(
         else []
     )
     _impact_index = build_metric_impact_index(_metric_impacts)
+
+    _identity_edges: list[IdentityEdge] = (
+        identity_edges_from_metrics(semantic_source.get_metrics())
+        if semantic_source is not None
+        else []
+    )
 
     metric_names_set = (
         {m.name for m in semantic_source.get_metrics()}
@@ -650,26 +658,39 @@ def create_tools(
         if semantic_source.get_metric(metric_name) is None:
             return _text_response(f"Metric '{metric_name}' not found.")
 
+        kinds = args.get("kinds", "all")
+        if kinds not in ("all", "identity", "influence"):
+            return _text_response(
+                f"kinds must be 'all', 'identity', or 'influence', got {kinds!r}."
+            )
+        graph_edges: list[MetricEdge] = []
+        if kinds in ("all", "influence"):
+            graph_edges.extend(_metric_impacts)
+        if kinds in ("all", "identity"):
+            graph_edges.extend(_identity_edges)
+        graph_index = build_metric_impact_index(graph_edges)
+
         walk = walk_metric_impacts(
-            _impact_index, metric_name, direction=direction, max_depth=max_depth
+            graph_index, metric_name, direction=direction, max_depth=max_depth
         )
-        # _impact_index only ever holds influence (MetricImpact) edges today —
-        # identity-edge traversal/formatting is Task 9's scope. The isinstance
-        # check narrows the now-mixed MetricEdge type for ty; it skips nothing
-        # at runtime.
-        edges = [
-            {
+        edges: list[dict[str, Any]] = []
+        for depth, edge in walk:
+            entry: dict[str, Any] = {
                 "depth": depth,
                 "from": edge.from_metric,
                 "to": edge.to_metric,
-                "direction": edge.direction,
-                "confidence": edge.confidence,
-                **({"evidence": edge.evidence} if edge.evidence else {}),
-                **({"description": edge.description} if edge.description else {}),
+                "kind": edge.kind,
             }
-            for depth, edge in walk
-            if isinstance(edge, MetricImpact)
-        ]
+            if isinstance(edge, IdentityEdge):
+                entry["operator"] = edge.operator
+            else:
+                entry["direction"] = edge.direction
+                entry["confidence"] = edge.confidence
+                if edge.evidence:
+                    entry["evidence"] = edge.evidence
+                if edge.description:
+                    entry["description"] = edge.description
+            edges.append(entry)
         return _text_response(
             json.dumps(
                 {
@@ -972,6 +993,10 @@ def create_tools(
                 " affects (useful for 'what does this KPI move?')."
                 " Each edge includes direction, confidence, and evidence for"
                 " grounded reasoning. Cycles are handled via visited tracking."
+                " Edges are tagged with 'kind': identity edges carry an"
+                " 'operator' (sum/product/ratio/difference) and are exact;"
+                " influence edges carry direction/confidence/evidence and are"
+                " hypotheses."
             ),
             input_schema={
                 "type": "object",
@@ -991,6 +1016,18 @@ def create_tools(
                     "max_depth": {
                         "type": "integer",
                         "description": "Max BFS depth (default 2)",
+                    },
+                    "kinds": {
+                        "type": "string",
+                        "enum": ["all", "identity", "influence"],
+                        "description": (
+                            "Which edge kinds to walk. 'identity' = arithmetic"
+                            " decomposition (exhaustive, deterministic);"
+                            " 'influence' = causal driver edges (with evidence);"
+                            " 'all' (default) = both. For root-cause, walk"
+                            " 'identity' first to localize the change, then"
+                            " 'influence' for candidate explanations."
+                        ),
                     },
                 },
                 "required": ["metric_name"],

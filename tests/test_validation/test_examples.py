@@ -35,10 +35,21 @@ def test_from_dict_merges_explicit_metadata() -> None:
 
 
 def test_from_dict_requires_sql() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="sql"):
         VerifiedExample.from_dict({"question": "no sql here"})
+
+
+def test_from_dict_rejects_non_mapping_row() -> None:
+    # A mis-indented YAML entry can parse to a bare string; from_dict must give a
+    # clear error, not do substring matching on "sql" and crash with a TypeError.
+    with pytest.raises(ValueError, match="expects a mapping"):
+        VerifiedExample.from_dict("type: sql")
+
+
+def test_from_dict_rejects_non_mapping_metadata() -> None:
+    # A scalar `metadata:` value must raise a clear error, not crash in dict().
+    with pytest.raises(ValueError, match="metadata"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "metadata": "reviewed"})
 
 
 def _res(status: str, *, contract_checked: bool = True) -> ExampleResult:
@@ -167,10 +178,12 @@ def test_parse_error_without_adapter_is_unchecked(contract: DataContract) -> Non
     assert not r.engine_checked
 
 
-def test_empty_input(contract: DataContract) -> None:
+def test_empty_input_is_not_ok(contract: DataContract) -> None:
+    # An empty corpus validated nothing, so the gate must NOT pass — otherwise a
+    # bad load path or emptied file silently green-lights the MR.
     report = validate_examples([], contract)
     assert report.results == []
-    assert report.ok
+    assert not report.ok
 
 
 def test_results_preserve_input_order(contract: DataContract) -> None:

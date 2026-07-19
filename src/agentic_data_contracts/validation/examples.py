@@ -9,6 +9,7 @@ for usage and the boundary rationale.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -35,16 +36,27 @@ class VerifiedExample:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> VerifiedExample:
-        """Map an already-parsed dict to a VerifiedExample.
+    def from_dict(cls, raw: Any) -> VerifiedExample:
+        """Map an already-parsed mapping to a VerifiedExample.
 
         A shape adapter, not a loader: unknown keys are preserved under
-        ``metadata`` (merged over an explicit ``metadata`` block) and never
-        interpreted. ``sql`` is required.
+        ``metadata`` (merged over an explicit ``metadata`` mapping) and never
+        interpreted. ``sql`` is required. A malformed corpus row — not a mapping,
+        missing ``sql``, or a non-mapping ``metadata`` — raises ``ValueError``
+        with an actionable message, rather than crashing with a cryptic
+        ``TypeError`` / ``ValueError`` deeper in (external YAML is untrusted, so
+        ``raw`` is typed ``Any`` and validated at runtime).
         """
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"VerifiedExample.from_dict expects a mapping, got {type(raw).__name__}"
+            )
         if "sql" not in raw:
             raise ValueError("VerifiedExample requires a 'sql' field")
-        metadata = dict(raw.get("metadata") or {})
+        meta = raw.get("metadata")
+        if meta is not None and not isinstance(meta, dict):
+            raise ValueError(f"'metadata' must be a mapping, got {type(meta).__name__}")
+        metadata = dict(meta or {})
         for key, value in raw.items():
             if key not in _KNOWN_KEYS:
                 metadata[key] = value
@@ -108,15 +120,20 @@ class ExampleValidationReport:
 
     @property
     def ok(self) -> bool:
-        """True only when every example was contract-checked and passed.
+        """True only when there is ≥1 example and every one is ``valid``.
 
         Safe as a CI gate — ``if not report.ok: sys.exit(1)``. It is False if ANY
         example is a ``violation``, is ``unchecked`` (no verdict could be
         rendered), or is ``unverified`` (the engine planned it but contract
-        policy was never statically checked). A laxer view — e.g. fail only on
-        hard violations — can test ``report.violations`` directly.
+        policy was never statically checked). An **empty** report is also NOT ok:
+        a corpus that loaded to zero examples (bad path, emptied file, an
+        upstream filter that dropped every row) must surface as a failure rather
+        than silently pass a no-op gate. A laxer view — e.g. fail only on hard
+        violations — can test ``report.violations`` directly.
         """
-        return not (self.violations or self.unchecked or self.unverified_compliance)
+        return bool(self.results) and not (
+            self.violations or self.unchecked or self.unverified_compliance
+        )
 
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment.
@@ -129,12 +146,14 @@ class ExampleValidationReport:
         def _label(result: ExampleResult, index: int) -> str:
             return result.example.id or result.example.question or f"#{index}"
 
-        # Each result has exactly one status, so the four counts sum to the total.
+        # One pass over results; each has exactly one status, so the four counts
+        # sum to the total (avoids re-scanning via the status properties).
+        counts = Counter(r.status for r in self.results)
         lines = [
-            f"**Example validation:** {len(self.valid)} valid, "
-            f"{len(self.violations)} violation(s), "
-            f"{len(self.unverified_compliance)} unverified, "
-            f"{len(self.unchecked)} unchecked.",
+            f"**Example validation:** {counts['valid']} valid, "
+            f"{counts['violation']} violation(s), "
+            f"{counts['unverified']} unverified, "
+            f"{counts['unchecked']} unchecked.",
         ]
         for i, r in enumerate(self.results):
             if r.status == "violation":
@@ -166,8 +185,14 @@ def validate_examples(
     One Validator is built per distinct ``example.principal`` (cheap; few
     principals per corpus) so per-principal rules are checked under the right
     identity. Layer 1 always runs; Layer 2 (EXPLAIN) runs when *explain_adapter*
-    is given; on a sqlglot parse failure with an adapter present, the engine is
-    asked directly (decision B). Input order is preserved.
+    is given. Input order is preserved.
+
+    On a sqlglot parse failure with an adapter present, the engine is asked
+    directly (**decision B**). This deliberately DIVERGES from the live agent
+    gate, where a parse failure hard-blocks the query: here it yields an
+    ``unverified`` result (engine-plannable, policy-unchecked) so a
+    contract-unmodelable dialect (e.g. Denodo/VDP) is surfaced for human triage
+    rather than silently refused. ``unverified`` never counts toward ``ok``.
     """
     validators: dict[str | None, Validator] = {}
 

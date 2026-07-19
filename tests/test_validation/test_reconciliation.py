@@ -27,14 +27,32 @@ def _metric(
 
 
 class TestScalar:
-    def test_returns_float(self, adapter: DuckDBAdapter) -> None:
-        assert _scalar(adapter, "SELECT 5", "x") == 5.0
+    def test_returns_value_and_no_reason(self, adapter: DuckDBAdapter) -> None:
+        assert _scalar(adapter, "SELECT 5", "x") == (5.0, None)
 
-    def test_null_value_returns_none(self, adapter: DuckDBAdapter) -> None:
-        assert _scalar(adapter, "SELECT NULL", "x") is None
+    def test_null_value_reports_null(self, adapter: DuckDBAdapter) -> None:
+        value, reason = _scalar(adapter, "SELECT NULL", "x")
+        assert value is None
+        assert reason is not None and "NULL" in reason
 
-    def test_empty_result_returns_none(self, adapter: DuckDBAdapter) -> None:
-        assert _scalar(adapter, "SELECT 1 WHERE false", "x") is None
+    def test_empty_result_reports_no_rows(self, adapter: DuckDBAdapter) -> None:
+        # An empty result is distinct from a NULL value — the reason must say so
+        # rather than mislabelling it "NULL".
+        value, reason = _scalar(adapter, "SELECT 1 WHERE false", "x")
+        assert value is None
+        assert reason is not None and "no rows" in reason
+
+    def test_nan_reports_non_finite(self, adapter: DuckDBAdapter) -> None:
+        # NaN is a valid SQL float distinct from NULL; it must not slip through
+        # as a real number into the arithmetic.
+        value, reason = _scalar(adapter, "SELECT 'nan'::DOUBLE", "x")
+        assert value is None
+        assert reason is not None and "non-finite" in reason
+
+    def test_infinity_reports_non_finite(self, adapter: DuckDBAdapter) -> None:
+        value, reason = _scalar(adapter, "SELECT 'inf'::DOUBLE", "x")
+        assert value is None
+        assert reason is not None and "non-finite" in reason
 
     def test_multi_column_raises(self, adapter: DuckDBAdapter) -> None:
         with pytest.raises(ValueError, match="exactly one column"):
@@ -216,6 +234,33 @@ class TestReconcileFindings:
         )
         assert result.reconciles is False
         assert result.reason is not None and "denominator" in result.reason
+
+    def test_nan_operand_is_finding_not_drift(self, adapter: DuckDBAdapter) -> None:
+        # A NaN operand must be reported as a non-finite measurement, NOT
+        # misdiagnosed as "identity does not hold within tolerance" (which would
+        # steer an operator toward a false definition-drift investigation).
+        metric = _metric("product", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 20",
+            operand_sql={"a": "SELECT 'nan'::DOUBLE", "b": "SELECT 5"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+        assert result.reason is not None
+        assert "non-finite" in result.reason and "a" in result.reason
+        assert "does not hold within tolerance" not in result.reason
+
+    def test_empty_operand_reports_no_rows(self, adapter: DuckDBAdapter) -> None:
+        metric = _metric("product", ["a", "b"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 20",
+            operand_sql={"a": "SELECT 4 WHERE false", "b": "SELECT 5"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+        assert result.reason is not None and "no rows" in result.reason
 
 
 class TestReconcilePreconditions:

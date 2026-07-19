@@ -4,26 +4,6 @@
 
 `agentic-data-contracts` is a Python library for YAML-first data contract governance for AI agents. It lets data engineers define what tables an agent may query, which operations are forbidden, and what resource limits apply — then enforces those rules automatically at query time.
 
-## Tech Stack
-
-- Python 3.12+, uv for dependency management
-- Pydantic 2 for schema validation, sqlglot for SQL parsing, thefuzz for fuzzy metric search
-- pytest + pytest-asyncio for testing, DuckDB for integration tests
-- ruff for linting/formatting, ty for type checking
-- prek for pre-commit hooks
-
-## Project Structure
-
-```
-src/agentic_data_contracts/
-├── core/          # YAML loading, Pydantic models, lightweight enforcement
-├── validation/    # sqlglot checkers, Validator (Layer 1 + 2), EXPLAIN protocol
-├── tools/         # 9-tool factory + middleware; SDK + LangChain + Pydantic AI adapters
-├── semantic/      # dbt/Cube/YAML source integrations
-├── adapters/      # DatabaseAdapter protocol + DuckDB implementation
-└── bridge/        # Optional ai-agent-contracts compilation
-```
-
 ## Common Commands
 
 ```bash

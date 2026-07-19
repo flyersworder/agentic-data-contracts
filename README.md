@@ -29,7 +29,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 | Loops on retries with no cost ceiling | Per-session retry / cost / token budgets |
 | "Why did revenue drop?" → guesses | Walks the metric graph: arithmetic decomposition first, then causal drivers |
 
-**Works with:** [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) (primary target), or any Python agent framework. Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
+**Works with:** any Python agent framework — first-class helpers for the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), [LangChain](https://github.com/langchain-ai/langchain) / [deepagents](https://github.com/langchain-ai/deepagents), and [Pydantic AI](https://github.com/pydantic/pydantic-ai), plus a framework-free path (the tools are plain async functions). Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 
 > **See it running:** [three example agents](#examples) — `revenue_agent` (finance), `growth_agent` (experimentation), `ops_agent` (SRE) — each runs end-to-end in demo mode with no API key.
 

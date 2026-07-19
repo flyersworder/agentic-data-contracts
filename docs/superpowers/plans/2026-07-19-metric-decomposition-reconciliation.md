@@ -159,7 +159,7 @@ def _scalar(adapter: DatabaseAdapter, sql: str, label: str) -> float | None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_validation/test_reconciliation.py -v`
-Expected: PASS (7 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 5: Commit**
 

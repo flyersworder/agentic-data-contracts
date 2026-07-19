@@ -10,6 +10,7 @@ does not infer the cause (that is agent-owned diagnosis).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
@@ -51,3 +52,19 @@ def _scalar(adapter: DatabaseAdapter, sql: str, label: str) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _apply_operator(operator: str, values: list[float]) -> float:
+    """Fold ``values`` (in declared order) by the decomposition operator."""
+    if operator == "sum":
+        return math.fsum(values)
+    if operator == "product":
+        product = 1.0
+        for value in values:
+            product *= value
+        return product
+    if operator == "ratio":
+        return values[0] / values[1]
+    if operator == "difference":
+        return values[0] - values[1]
+    raise ValueError(f"unknown decomposition operator: {operator!r}")

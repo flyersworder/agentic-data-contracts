@@ -3,6 +3,7 @@ import pytest
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.validation.reconciliation import (
     ReconciliationResult,
+    _apply_operator,
     _scalar,
 )
 
@@ -48,3 +49,21 @@ class TestResultType:
         assert r.reason is None
         with pytest.raises(AttributeError):
             r.reconciles = False  # type: ignore
+
+
+class TestApplyOperator:
+    def test_sum(self) -> None:
+        assert _apply_operator("sum", [1.0, 2.0, 3.0]) == 6.0
+
+    def test_product(self) -> None:
+        assert _apply_operator("product", [2.0, 3.0, 4.0]) == 24.0
+
+    def test_ratio(self) -> None:
+        assert _apply_operator("ratio", [3.0, 4.0]) == 0.75
+
+    def test_difference(self) -> None:
+        assert _apply_operator("difference", [10.0, 4.0]) == 6.0
+
+    def test_unknown_operator_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown decomposition operator"):
+            _apply_operator("power", [2.0, 3.0])

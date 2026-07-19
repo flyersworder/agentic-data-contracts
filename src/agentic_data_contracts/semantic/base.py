@@ -14,6 +14,22 @@ from agentic_data_contracts.adapters.base import TableSchema
 
 
 @dataclass
+class Decomposition:
+    """An arithmetic identity: how a metric is reconstructed from other metrics."""
+
+    operator: str  # "sum" | "product" | "ratio" | "difference"
+    operands: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DrillDimension:
+    """A dimension a metric can be exhaustively sliced by. List order = priority."""
+
+    dimension: str
+    column: str  # "schema.table.column" — same convention as Relationship endpoints
+
+
+@dataclass
 class MetricDefinition:
     name: str
     description: str
@@ -29,6 +45,8 @@ class MetricDefinition:
     business_owner: str | None = None
     operational_owner: str | None = None
     last_reviewed: date | None = None
+    decompositions: list[Decomposition] = field(default_factory=list)
+    drill_by: list[DrillDimension] = field(default_factory=list)
 
 
 @dataclass
@@ -52,6 +70,10 @@ class MetricImpact:
     evidence: str = ""  # free text, human- and agent-citable
     description: str = ""
     last_reviewed: date | None = None
+
+    @property
+    def kind(self) -> str:
+        return "influence"
 
 
 @runtime_checkable

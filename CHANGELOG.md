@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0] - 2026-07-19
+
+### Added
+
+- **Verified-examples contract validation.** New `validate_examples(...)` (in `agentic_data_contracts.validation`) re-validates an external corpus of `question → SQL` examples against a `DataContract` using the **same two-layer `Validator`** that gates live agent queries — Layer 1 (sqlglot static analysis: allowed tables, forbidden ops, required filters, `SELECT *`) always, plus Layer 2 (a live `EXPLAIN` dry-run) when a database adapter is supplied. The examples database stays **entirely external** — your repo, your YAML, your human-reviewed MR flow; the framework never stores, loads, retrieves, or executes the corpus, contributing exactly one verb: *validate*. The interchange is a plain `VerifiedExample` dataclass (`sql` is the only load-bearing field; `VerifiedExample.from_dict(...)` is a shape adapter that preserves unknown keys under `.metadata` and never interprets them). The result is an `ExampleValidationReport` of `ExampleResult`s, each with a `status` (`valid` / `violation` / `unchecked`) and two flags — `contract_checked` (static checks ran) and `engine_checked` (the dry-run ran) — recording *what* was verified, plus `ok`, `unverified_compliance`, and a markdown `summary()`. Two uses of the same call: an **MR gate** (validate the corpus in CI before a human reviews it; fail on `not report.ok`) and a **drift sweep** (re-run against a changed contract; `report.violations` are the examples the change — or a dropped/renamed column caught by the live EXPLAIN — just broke). The verdict is honest about its own reach: it confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with the human review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner — **decision B** — which verifies plannability but not policy, surfaced honestly via `unverified_compliance`.
+
+### Compatibility
+
+- **Backward compatible.** One new field on `ValidationResult` — `parse_error: bool` (defaults `False`, appended after existing fields) — is the only change to core validation; it lets callers distinguish a parse failure from a policy block and drives the decision-B fallback. Otherwise a net-new module plus four new exports (`VerifiedExample`, `ExampleResult`, `ExampleValidationReport`, `validate_examples`) from `agentic_data_contracts.validation`; nothing existing changes behavior, and no new dependencies are added.
+
+### Docs
+
+- New runnable demo `examples/revenue_agent/verify_examples.py` + `verified_examples.yml`: validates an external corpus against the revenue contract with a **live DuckDB EXPLAIN**, showing a valid example, static violations, a **schema-drift catch only the dry-run finds**, and the same SQL diverging `valid` / `violation` by principal. New README section "Validating a verified-examples corpus", and the previously-undocumented `reconcile_decomposition` (0.29.0) is now cross-referenced there.
+
+### Internal
+
+- New `validation/examples.py`, built across 6 TDD tasks (red-first) with a per-task spec+quality review, a three-lens plan review *before* execution, and a final whole-branch review. `engine_checked` is reconstructed from `schema_valid` / `estimated_*` rather than a second core field, so the only `validator.py` change stays `parse_error`. The `SemanticSource` type import is guarded under `TYPE_CHECKING` (annotation-only, cycle-safe, matching the existing `validator.py` pattern). Full suite green (785 tests); `ruff` / `ruff format` / `ty` clean.
+
 ## [0.29.0] - 2026-07-19
 
 ### Added

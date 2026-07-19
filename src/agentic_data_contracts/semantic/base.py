@@ -181,6 +181,36 @@ def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:
         visit(node, [])
 
 
+def validate_drill_by(
+    metrics: list[MetricDefinition],
+    table_schemas: dict[str, TableSchema],
+) -> None:
+    """Validate drill-by column references.
+
+    A column is ``"schema.table.column"``. The ``schema.table`` portion keys
+    into *table_schemas*. Column existence is checked only when that table is
+    declared; when the table is absent (schemas are optional in these
+    contracts), the check is skipped silently. A malformed reference (no
+    ``schema.table.column`` shape) always raises.
+    """
+    for metric in metrics:
+        for drill in metric.drill_by:
+            table_key, _, column = drill.column.rpartition(".")
+            if not table_key or not column or "." not in table_key:
+                raise ValueError(
+                    f"metric {metric.name!r} drill_by column {drill.column!r} "
+                    f"must be 'schema.table.column'"
+                )
+            schema = table_schemas.get(table_key)
+            if schema is None:
+                continue  # table not declared — soft skip
+            if not any(col.name == column for col in schema.columns):
+                raise ValueError(
+                    f"metric {metric.name!r} drill_by references unknown column "
+                    f"{drill.column!r}"
+                )
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...

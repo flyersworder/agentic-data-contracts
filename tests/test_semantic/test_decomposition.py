@@ -179,3 +179,49 @@ class TestValidateDecompositions:
             _m("e"),
         ]
         validate_decompositions(metrics)  # no raise
+
+
+from agentic_data_contracts.adapters.base import Column, TableSchema  # noqa: E402
+from agentic_data_contracts.semantic.base import validate_drill_by  # noqa: E402
+
+
+def _md(name: str, drill_by: list[DrillDimension]) -> MetricDefinition:
+    return MetricDefinition(
+        name=name, description="", sql_expression="x", drill_by=drill_by
+    )
+
+
+class TestValidateDrillBy:
+    def test_declared_column_passes(self) -> None:
+        schemas = {
+            "analytics.dim_customer": TableSchema(
+                columns=[Column(name="region", type="VARCHAR")]
+            )
+        }
+        metrics = [
+            _md("revenue", [DrillDimension("region", "analytics.dim_customer.region")])
+        ]
+        validate_drill_by(metrics, schemas)  # no raise
+
+    def test_unknown_column_in_declared_table_raises(self) -> None:
+        schemas = {
+            "analytics.dim_customer": TableSchema(
+                columns=[Column(name="region", type="VARCHAR")]
+            )
+        }
+        metrics = [
+            _md(
+                "revenue", [DrillDimension("segment", "analytics.dim_customer.segment")]
+            )
+        ]
+        with pytest.raises(ValueError, match="unknown column"):
+            validate_drill_by(metrics, schemas)
+
+    def test_undeclared_table_is_skipped_silently(self) -> None:
+        metrics = [_md("revenue", [DrillDimension("plan", "analytics.dim_plan.tier")])]
+        validate_drill_by(metrics, {})  # table not declared -> soft skip, no raise
+
+    def test_malformed_column_raises(self) -> None:
+        metrics = [_md("revenue", [DrillDimension("region", "region")])]
+        with pytest.raises(ValueError, match="schema.table.column"):
+            validate_drill_by(metrics, {})

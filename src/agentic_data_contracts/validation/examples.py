@@ -158,8 +158,7 @@ def validate_examples(
     principals per corpus) so per-principal rules are checked under the right
     identity. Layer 1 always runs; Layer 2 (EXPLAIN) runs when *explain_adapter*
     is given; on a sqlglot parse failure with an adapter present, the engine is
-    asked directly (decision B — added in the next task). Input order is
-    preserved.
+    asked directly (decision B). Input order is preserved.
     """
     validators: dict[str | None, Validator] = {}
 
@@ -218,11 +217,33 @@ def _to_result(
             ),
         )
 
-    # Parse failure — no AST, so no contract check. Engine fallback is Task 5.
+    # Parse failure — no AST, so no contract check possible.
+    if explain_adapter is None:
+        return ExampleResult(
+            example=example,
+            status="unchecked",
+            reasons=list(vr.reasons),
+            contract_checked=False,
+            engine_checked=False,
+        )
+
+    # Decision B: sqlglot cannot parse it, but the engine is the authoritative
+    # parser — ask it directly. Verifies plannability, NOT contract policy.
+    explain_result = explain_adapter.explain(example.sql)
+    if explain_result.schema_valid:
+        return ExampleResult(
+            example=example,
+            status="valid",
+            warnings=[_PARSE_FALLBACK_CAVEAT],
+            contract_checked=False,
+            engine_checked=True,
+        )
     return ExampleResult(
         example=example,
-        status="unchecked",
-        reasons=list(vr.reasons),
+        status="violation",
+        reasons=[
+            f"Engine rejected (parse-fallback): {', '.join(explain_result.errors)}"
+        ],
         contract_checked=False,
-        engine_checked=False,
+        engine_checked=True,
     )

@@ -254,3 +254,45 @@ def test_warn_rule_surfaces_warning_without_failing() -> None:
     assert r.status == "valid"
     assert report.ok
     assert any("SELECT *" in w for w in r.warnings)
+
+
+_UNPARSEABLE_SQL = "SELECT * FROM ("  # confirmed to raise ParseError in Task 1
+
+
+def test_parse_fallback_engine_plans_is_valid_unverified(
+    contract: DataContract,
+) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=None, estimated_rows=1, schema_valid=True)
+    )
+    report = validate_examples(
+        [VerifiedExample(sql=_UNPARSEABLE_SQL, id="vdp")],
+        contract,
+        explain_adapter=adapter,
+    )
+    r = report.results[0]
+    assert r.status == "valid"
+    assert not r.contract_checked
+    assert r.engine_checked
+    assert any("not statically verified" in w for w in r.warnings)
+    assert report.unverified_compliance == [r]
+    assert report.ok  # valid, so the gate is not failed
+
+
+def test_parse_fallback_engine_rejects_is_violation(contract: DataContract) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=None,
+            estimated_rows=None,
+            schema_valid=False,
+            errors=["syntax error near '('"],
+        )
+    )
+    report = validate_examples(
+        [VerifiedExample(sql=_UNPARSEABLE_SQL)], contract, explain_adapter=adapter
+    )
+    r = report.results[0]
+    assert r.status == "violation"
+    assert not r.contract_checked
+    assert r.engine_checked
+    assert any("syntax error" in reason for reason in r.reasons)

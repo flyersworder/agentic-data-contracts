@@ -359,10 +359,10 @@ asyncio.run(demo())
 | `describe_table` | Get full column details for an allowed table |
 | `preview_table` | Preview sample rows from an allowed table |
 | `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind; flags `stale` metrics |
-| `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, owners, freshness); fuzzy search fallback when no exact match |
+| `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, decompositions, drill_by, owners, freshness); fuzzy search fallback when no exact match |
 | `lookup_domain` | Get full domain context (description, metrics, tables, owners, freshness); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
-| `trace_metric_impacts` | Walk the metric-impact graph upstream (drivers) or downstream (affected metrics) from a starting metric |
+| `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges, filtered by `kinds` |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
 | `run_query` | Validate and execute a SQL query, returning results |
 
@@ -691,6 +691,39 @@ await trace.callable({
 ```
 
 Impacts declared in contract YAML reference metric names regardless of where the metric itself is defined, so this works even for dbt and Cube-sourced metrics — neither semantic layer has a native causal-graph concept. Unknown metric references in `metric_impacts` emit a warning at tool-creation time (same pattern as domain validation).
+
+### Metric decomposition and drill dimensions
+
+Impact edges are *causal* — evidential and non-exhaustive. A metric can also declare its *arithmetic identity*: how its value is exactly reconstructed from other metrics. Declare `decompositions` on the metric itself:
+
+```yaml
+metrics:
+  - name: total_revenue
+    sql_expression: "SUM(amount)"
+    decompositions:
+      - operator: product            # sum | product | ratio | difference
+        operands: [paying_customers, arpu]
+    drill_by:
+      - {dimension: region, column: analytics.dim_customer.region}
+```
+
+An identity decomposition is *exhaustive and exact* — nothing else can move `total_revenue` except `paying_customers` and `arpu` — so an agent diagnosing a change can localize it deterministically before reaching for the speculative impact edges. `ratio` and `difference` are binary; `sum` and `product` take two or more operands. Decompositions are validated at load time: every operand must resolve to a declared metric, and the identity edges must form a DAG (a metric cannot transitively decompose into itself). A metric with no decomposition is a valid leaf.
+
+`drill_by` lists the dimensional cuts a metric can be sliced by, in priority order (`schema.table.column`) — the exhaustive `GROUP BY` axes ("revenue by region") that dominate weekly-review diagnosis. Its column reference is soft-validated: a malformed shape raises, but a reference to a table the contract hasn't declared is allowed (schemas are optional).
+
+Decomposition operands become identity edges in the same graph as impacts, so `trace_metric_impacts` walks both. Its `kinds` argument selects which — `identity` (arithmetic), `influence` (causal), or `all` (default) — and every returned edge is tagged with its `kind`:
+
+```python
+await trace.callable({
+    "metric_name": "total_revenue",
+    "direction": "downstream",
+    "kinds": "identity",           # walk the arithmetic skeleton first
+})
+# Returns edges like: {"depth": 1, "from": "total_revenue", "to": "arpu",
+#                      "kind": "identity", "operator": "product"}
+```
+
+Today `decompositions` / `drill_by` are declared directly in YAML contracts; dbt/Cube extraction, an execution-based reconciliation check, and a variance-diagnosis tool are deferred.
 
 ## Custom Prompt Rendering
 

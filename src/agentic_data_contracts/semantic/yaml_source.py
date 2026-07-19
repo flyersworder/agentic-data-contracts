@@ -10,11 +10,15 @@ import yaml
 
 from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.semantic.base import (
+    Decomposition,
+    DrillDimension,
     MetricDefinition,
     MetricImpact,
     Relationship,
     build_relationship_index,
     fuzzy_search_metrics,
+    validate_decompositions,
+    validate_drill_by,
 )
 
 
@@ -85,6 +89,17 @@ class YamlSource:
                     business_owner=m.get("business_owner"),
                     operational_owner=m.get("operational_owner"),
                     last_reviewed=_parse_date(m.get("last_reviewed")),
+                    decompositions=[
+                        Decomposition(
+                            operator=d["operator"],
+                            operands=list(d.get("operands", [])),
+                        )
+                        for d in m.get("decompositions", [])
+                    ],
+                    drill_by=[
+                        DrillDimension(dimension=dd["dimension"], column=dd["column"])
+                        for dd in m.get("drill_by", [])
+                    ],
                 )
             )
         self._tables: dict[str, TableSchema] = {}
@@ -124,6 +139,8 @@ class YamlSource:
             )
             for i in raw.get("metric_impacts", [])
         ]
+        validate_decompositions(self._metrics)
+        validate_drill_by(self._metrics, self._tables)
 
     def get_metrics(self) -> list[MetricDefinition]:
         return list(self._metrics)

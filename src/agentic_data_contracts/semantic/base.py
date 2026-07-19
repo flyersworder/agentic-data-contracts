@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
@@ -11,6 +11,22 @@ from typing import Any, Protocol, runtime_checkable
 from thefuzz import fuzz, process
 
 from agentic_data_contracts.adapters.base import TableSchema
+
+
+@dataclass
+class Decomposition:
+    """An arithmetic identity: how a metric is reconstructed from other metrics."""
+
+    operator: str  # "sum" | "product" | "ratio" | "difference"
+    operands: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DrillDimension:
+    """A dimension a metric can be exhaustively sliced by. List order = priority."""
+
+    dimension: str
+    column: str  # "schema.table.column" — same convention as Relationship endpoints
 
 
 @dataclass
@@ -29,6 +45,8 @@ class MetricDefinition:
     business_owner: str | None = None
     operational_owner: str | None = None
     last_reviewed: date | None = None
+    decompositions: list[Decomposition] = field(default_factory=list)
+    drill_by: list[DrillDimension] = field(default_factory=list)
 
 
 @dataclass
@@ -52,6 +70,145 @@ class MetricImpact:
     evidence: str = ""  # free text, human- and agent-citable
     description: str = ""
     last_reviewed: date | None = None
+
+    @property
+    def kind(self) -> str:
+        return "influence"
+
+
+@dataclass
+class IdentityEdge:
+    """A directed identity edge parent -> operand in the metric graph."""
+
+    from_metric: str  # parent metric
+    to_metric: str  # operand metric
+    operator: str  # the decomposition operator that produced this edge
+
+    @property
+    def kind(self) -> str:
+        return "identity"
+
+
+MetricEdge = MetricImpact | IdentityEdge
+
+
+def identity_edges_from_metrics(
+    metrics: list[MetricDefinition],
+) -> list[IdentityEdge]:
+    """Flatten each metric's decompositions into directed identity edges.
+
+    For every operand of every decomposition, emit one edge
+    ``parent -> operand`` carrying the decomposition's operator. Leaf metrics
+    (no decompositions) contribute nothing.
+    """
+    edges: list[IdentityEdge] = []
+    for metric in metrics:
+        for decomp in metric.decompositions:
+            for operand in decomp.operands:
+                edges.append(
+                    IdentityEdge(
+                        from_metric=metric.name,
+                        to_metric=operand,
+                        operator=decomp.operator,
+                    )
+                )
+    return edges
+
+
+VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})
+_BINARY_OPERATORS = frozenset({"ratio", "difference"})
+
+
+def validate_decompositions(metrics: list[MetricDefinition]) -> None:
+    """Validate every declared decomposition; raise ``ValueError`` on any fault.
+
+    Optional to declare, validated only when present. Checks operator, operand
+    arity, operand resolution, and that the identity edges form a DAG (a metric
+    cannot transitively decompose into itself). Leaf metrics pass untouched.
+    """
+    names = {m.name for m in metrics}
+    adjacency: dict[str, list[str]] = {}
+    for metric in metrics:
+        for decomp in metric.decompositions:
+            if decomp.operator not in VALID_OPERATORS:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition has unknown operator "
+                    f"{decomp.operator!r}; expected one of {sorted(VALID_OPERATORS)}"
+                )
+            count = len(decomp.operands)
+            if decomp.operator in _BINARY_OPERATORS and count != 2:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition {decomp.operator!r} "
+                    f"requires exactly 2 operands, got {count}"
+                )
+            if decomp.operator not in _BINARY_OPERATORS and count < 2:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition {decomp.operator!r} "
+                    f"requires at least 2 operands, got {count}"
+                )
+            for operand in decomp.operands:
+                if operand == metric.name:
+                    raise ValueError(
+                        f"metric {metric.name!r} decomposition cannot reference itself"
+                    )
+                if operand not in names:
+                    raise ValueError(
+                        f"metric {metric.name!r} decomposition references "
+                        f"unknown metric {operand!r}"
+                    )
+            adjacency.setdefault(metric.name, []).extend(decomp.operands)
+    _assert_identity_acyclic(adjacency)
+
+
+def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:
+    """DFS the identity graph; raise ``ValueError`` naming the first cycle found."""
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str, stack: list[str]) -> None:
+        if node in visiting:
+            cycle = " -> ".join([*stack, node])
+            raise ValueError(f"metric decomposition cycle detected: {cycle}")
+        if node in visited:
+            return
+        visiting.add(node)
+        for neighbor in adjacency.get(node, []):
+            visit(neighbor, [*stack, node])
+        visiting.discard(node)
+        visited.add(node)
+
+    for node in list(adjacency):
+        visit(node, [])
+
+
+def validate_drill_by(
+    metrics: list[MetricDefinition],
+    table_schemas: dict[str, TableSchema],
+) -> None:
+    """Validate drill-by column references.
+
+    A column is ``"schema.table.column"``. The ``schema.table`` portion keys
+    into *table_schemas*. Column existence is checked only when that table is
+    declared; when the table is absent (schemas are optional in these
+    contracts), the check is skipped silently. A malformed reference (no
+    ``schema.table.column`` shape) always raises.
+    """
+    for metric in metrics:
+        for drill in metric.drill_by:
+            table_key, _, column = drill.column.rpartition(".")
+            if not table_key or not column or "." not in table_key:
+                raise ValueError(
+                    f"metric {metric.name!r} drill_by column {drill.column!r} "
+                    f"must be 'schema.table.column'"
+                )
+            schema = table_schemas.get(table_key)
+            if schema is None:
+                continue  # table not declared — soft skip
+            if not any(col.name == column for col in schema.columns):
+                raise ValueError(
+                    f"metric {metric.name!r} drill_by references unknown column "
+                    f"{drill.column!r}"
+                )
 
 
 @runtime_checkable
@@ -109,6 +266,14 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
                 "business_owner": m.business_owner,
                 "operational_owner": m.operational_owner,
                 "last_reviewed": _iso(m.last_reviewed),
+                "decompositions": [
+                    {"operator": d.operator, "operands": list(d.operands)}
+                    for d in m.decompositions
+                ],
+                "drill_by": [
+                    {"dimension": dd.dimension, "column": dd.column}
+                    for dd in m.drill_by
+                ],
             }
             for m in source.get_metrics()
         ],
@@ -252,8 +417,8 @@ def find_join_path(
 
 
 def build_metric_impact_index(
-    impacts: list[MetricImpact],
-) -> dict[str, list[MetricImpact]]:
+    impacts: Sequence[MetricEdge],
+) -> dict[str, list[MetricEdge]]:
     """Build a metric-name -> impact edges index for O(1) lookup.
 
     Each impact is indexed under both its ``from_metric`` and ``to_metric``
@@ -262,9 +427,10 @@ def build_metric_impact_index(
     ``edge.from_metric`` / ``edge.to_metric`` against the current node.
 
     Edges within each entry are in declaration order; callers should not
-    rely on any stronger ordering.
+    rely on any stronger ordering. Accepts a mix of influence (``MetricImpact``)
+    and identity (``IdentityEdge``) edges.
     """
-    index: dict[str, list[MetricImpact]] = {}
+    index: dict[str, list[MetricEdge]] = {}
     for imp in impacts:
         index.setdefault(imp.from_metric, []).append(imp)
         if imp.from_metric != imp.to_metric:
@@ -273,12 +439,12 @@ def build_metric_impact_index(
 
 
 def walk_metric_impacts(
-    index: dict[str, list[MetricImpact]],
+    index: dict[str, list[MetricEdge]],
     start: str,
     *,
     direction: str,
     max_depth: int = 2,
-) -> list[tuple[int, MetricImpact]]:
+) -> list[tuple[int, MetricEdge]]:
     """BFS through the metric impact graph from ``start``.
 
     ``direction="downstream"`` follows edges where ``edge.from_metric ==
@@ -288,14 +454,15 @@ def walk_metric_impacts(
 
     Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
-    prevents cycles, so each reachable metric appears at most once.
+    prevents cycles, so each reachable metric appears at most once. Works
+    over a mixed influence + identity edge index.
     """
     if direction not in ("upstream", "downstream"):
         msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"
         raise ValueError(msg)
 
     visited: set[str] = {start}
-    result: list[tuple[int, MetricImpact]] = []
+    result: list[tuple[int, MetricEdge]] = []
     queue: deque[tuple[str, int]] = deque([(start, 0)])
     while queue:
         current, depth = queue.popleft()

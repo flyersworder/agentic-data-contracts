@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.0] - 2026-07-19
+
+### Added
+
+- **Metric identity decomposition.** A metric can now declare `decompositions` — arithmetic identities describing how its value is exactly reconstructed from other metrics via `sum`, `product`, `ratio`, or `difference` (e.g. `total_revenue = product(paying_customers, arpu)`). Unlike the *causal* `metric_impacts` graph (evidential and non-exhaustive), an identity decomposition is *exact and exhaustive* — the operands fully reconstruct the parent — so an agent doing root-cause analysis can walk the arithmetic skeleton deterministically before reaching for speculative drivers. Decompositions are validated loudly at load time, on both file load and frozen-contract `from_raw` rehydration: unknown operator, wrong operand arity (`ratio`/`difference` are binary; `sum`/`product` take two or more operands), an operand that doesn't resolve to a declared metric, and any cycle — identity edges must form a DAG, so a metric cannot transitively decompose into itself. A metric with no decomposition is a valid leaf.
+- **Dimensional drill hints via `drill_by`.** A metric can declare `drill_by`: a priority-ordered list of dimensional slice hints (`dimension` name + `schema.table.column`) naming the exhaustive cuts (`revenue GROUP BY region`) that dominate weekly-review diagnosis. Columns are *soft*-validated — a malformed `schema.table.column` shape always raises, but a reference to an as-yet-undeclared table is skipped, since table schemas are optional in a contract.
+- **`trace_metric_impacts` walks both edge kinds.** Decomposition operands become `IdentityEdge`s that share the metric graph with the existing `MetricImpact` (influence) edges. `trace_metric_impacts` now traverses both, tags each edge with its `kind` (`identity` carries the producing `operator`; `influence` keeps `direction`/`confidence`/`evidence`), and takes a new `kinds` argument (`all` | `identity` | `influence`, default `all`) so an agent can walk the deterministic identity skeleton first, then the causal drivers. `lookup_metric` surfaces a metric's `decompositions` and `drill_by` directly (omitted when empty).
+
+### Compatibility
+
+- **Fully backward compatible.** `decompositions` and `drill_by` are new optional fields that default to empty; existing contracts, and dbt/Cube-sourced metrics (which don't populate them), behave identically. Extraction from dbt/Cube, an execution-based reconciliation check (parent vs. children), and a variance-diagnosis tool are deliberately deferred — today the two fields are `YamlSource`-only, declared directly in contract YAML.
+
+### Internal
+
+- New `Decomposition` / `DrillDimension` / `IdentityEdge` dataclasses and the `MetricEdge` union in `semantic/base.py`; `build_metric_impact_index` / `walk_metric_impacts` generalized to the union (BFS logic unchanged, type annotations widened); new pure helpers `identity_edges_from_metrics`, `validate_decompositions`, `validate_drill_by`; both fields round-trip through `dump_semantic_source` / `from_raw` for frozen contracts. Built across 10 TDD tasks (red-first) with a per-task spec+quality review and a final whole-branch review; full suite green (722 tests), `ruff` / `ruff format` / `ty` clean.
+
 ## [0.27.0] - 2026-06-28
 
 ### Added

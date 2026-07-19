@@ -19,13 +19,16 @@ from agentic_data_contracts.core.principal import (
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.core.staleness import owner_context, review_age_days
 from agentic_data_contracts.semantic.base import (
+    IdentityEdge,
     MetricDefinition,
+    MetricEdge,
     MetricImpact,
     SemanticSource,
     build_metric_impact_index,
     build_relationship_index,
     domain_metric_counts,
     find_join_path,
+    identity_edges_from_metrics,
     metrics_in_domain,
     walk_metric_impacts,
 )
@@ -95,7 +98,7 @@ def _freshness_fields(
 
 def _metric_details(
     metric: MetricDefinition,
-    impact_index: dict[str, list[MetricImpact]],
+    impact_index: dict[str, list[MetricEdge]],
     *,
     today: date,
     threshold_days: int,
@@ -114,12 +117,23 @@ def _metric_details(
         data["tier"] = metric.tier
     if metric.indicator_kind:
         data["indicator_kind"] = metric.indicator_kind
+    if metric.decompositions:
+        data["decompositions"] = [
+            {"operator": d.operator, "operands": list(d.operands)}
+            for d in metric.decompositions
+        ]
+    if metric.drill_by:
+        data["drill_by"] = [
+            {"dimension": dd.dimension, "column": dd.column} for dd in metric.drill_by
+        ]
     data.update(owner_context(metric.business_owner, metric.operational_owner))
     data.update(_freshness_fields(metric.last_reviewed, today, threshold_days))
 
     outgoing: list[str] = []
     incoming: list[str] = []
     for edge in impact_index.get(metric.name, []):
+        if not isinstance(edge, MetricImpact):
+            continue
         if edge.from_metric == metric.name:
             outgoing.append(_format_impact_edge(edge, perspective="outgoing"))
         if edge.to_metric == metric.name:
@@ -181,13 +195,20 @@ def create_tools(
         else {}
     )
 
-    # Build metric-impact index for lookup_metric enrichment and trace_metric_impacts.
+    # Influence-only impact index — enriches lookup_metric. (trace_metric_impacts
+    # builds its own per-call index from _metric_impacts + _identity_edges by `kinds`.)
     _metric_impacts: list[MetricImpact] = (
         list(semantic_source.get_metric_impacts())
         if semantic_source is not None
         else []
     )
     _impact_index = build_metric_impact_index(_metric_impacts)
+
+    _identity_edges: list[IdentityEdge] = (
+        identity_edges_from_metrics(semantic_source.get_metrics())
+        if semantic_source is not None
+        else []
+    )
 
     metric_names_set = (
         {m.name for m in semantic_source.get_metrics()}
@@ -638,21 +659,39 @@ def create_tools(
         if semantic_source.get_metric(metric_name) is None:
             return _text_response(f"Metric '{metric_name}' not found.")
 
+        kinds = args.get("kinds", "all")
+        if kinds not in ("all", "identity", "influence"):
+            return _text_response(
+                f"kinds must be 'all', 'identity', or 'influence', got {kinds!r}."
+            )
+        graph_edges: list[MetricEdge] = []
+        if kinds in ("all", "influence"):
+            graph_edges.extend(_metric_impacts)
+        if kinds in ("all", "identity"):
+            graph_edges.extend(_identity_edges)
+        graph_index = build_metric_impact_index(graph_edges)
+
         walk = walk_metric_impacts(
-            _impact_index, metric_name, direction=direction, max_depth=max_depth
+            graph_index, metric_name, direction=direction, max_depth=max_depth
         )
-        edges = [
-            {
+        edges: list[dict[str, Any]] = []
+        for depth, edge in walk:
+            entry: dict[str, Any] = {
                 "depth": depth,
                 "from": edge.from_metric,
                 "to": edge.to_metric,
-                "direction": edge.direction,
-                "confidence": edge.confidence,
-                **({"evidence": edge.evidence} if edge.evidence else {}),
-                **({"description": edge.description} if edge.description else {}),
+                "kind": edge.kind,
             }
-            for depth, edge in walk
-        ]
+            if isinstance(edge, IdentityEdge):
+                entry["operator"] = edge.operator
+            else:
+                entry["direction"] = edge.direction
+                entry["confidence"] = edge.confidence
+                if edge.evidence:
+                    entry["evidence"] = edge.evidence
+                if edge.description:
+                    entry["description"] = edge.description
+            edges.append(entry)
         return _text_response(
             json.dumps(
                 {
@@ -953,8 +992,11 @@ def create_tools(
                 " (useful for root-cause analyses like 'why did revenue"
                 " drop?'); direction='downstream' returns metrics the target"
                 " affects (useful for 'what does this KPI move?')."
-                " Each edge includes direction, confidence, and evidence for"
-                " grounded reasoning. Cycles are handled via visited tracking."
+                " Each edge is tagged with 'kind': identity edges carry an"
+                " 'operator' (sum/product/ratio/difference) and are exact"
+                " arithmetic; influence edges carry direction, confidence, and"
+                " evidence and are hypotheses. Cycles are handled via visited"
+                " tracking."
             ),
             input_schema={
                 "type": "object",
@@ -974,6 +1016,18 @@ def create_tools(
                     "max_depth": {
                         "type": "integer",
                         "description": "Max BFS depth (default 2)",
+                    },
+                    "kinds": {
+                        "type": "string",
+                        "enum": ["all", "identity", "influence"],
+                        "description": (
+                            "Which edge kinds to walk. 'identity' = arithmetic"
+                            " decomposition (exhaustive, deterministic);"
+                            " 'influence' = causal driver edges (with evidence);"
+                            " 'all' (default) = both. For root-cause, walk"
+                            " 'identity' first to localize the change, then"
+                            " 'influence' for candidate explanations."
+                        ),
                     },
                 },
                 "required": ["metric_name"],

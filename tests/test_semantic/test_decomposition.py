@@ -225,3 +225,60 @@ class TestValidateDrillBy:
         metrics = [_md("revenue", [DrillDimension("region", "region")])]
         with pytest.raises(ValueError, match="schema.table.column"):
             validate_drill_by(metrics, {})
+
+
+from agentic_data_contracts.semantic.yaml_source import YamlSource  # noqa: E402
+
+
+class TestYamlSourceLoading:
+    def test_parses_decompositions_and_drill_by(self) -> None:
+        raw = {
+            "metrics": [
+                {
+                    "name": "revenue",
+                    "sql_expression": "SUM(amount)",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["paying_users", "arpu"]}
+                    ],
+                    "drill_by": [
+                        {
+                            "dimension": "region",
+                            "column": "analytics.dim_customer.region",
+                        }
+                    ],
+                },
+                {"name": "paying_users", "sql_expression": "x"},
+                {"name": "arpu", "sql_expression": "x"},
+            ]
+        }
+        source = YamlSource.from_raw(raw)
+        revenue = source.get_metric("revenue")
+        assert revenue is not None
+        assert revenue.decompositions[0].operator == "product"
+        assert revenue.decompositions[0].operands == ["paying_users", "arpu"]
+        assert revenue.drill_by[0].dimension == "region"
+
+    def test_leaf_metric_has_empty_lists(self) -> None:
+        source = YamlSource.from_raw(
+            {"metrics": [{"name": "signups", "sql_expression": "COUNT(*)"}]}
+        )
+        signups = source.get_metric("signups")
+        assert signups is not None
+        assert signups.decompositions == []
+        assert signups.drill_by == []
+
+    def test_invalid_decomposition_raises_at_load(self) -> None:
+        raw = {
+            "metrics": [
+                {
+                    "name": "revenue",
+                    "sql_expression": "x",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["ghost", "arpu"]}
+                    ],
+                },
+                {"name": "arpu", "sql_expression": "x"},
+            ]
+        }
+        with pytest.raises(ValueError, match="unknown metric 'ghost'"):
+            YamlSource.from_raw(raw)

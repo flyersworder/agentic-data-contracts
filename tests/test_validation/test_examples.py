@@ -323,3 +323,65 @@ def test_principal_scoped_validation(fixtures_dir: Path) -> None:
     by_id = {r.example.id: r.status for r in report.results}
     assert by_id["partner"] == "valid"  # 123 in partner's allowlist
     assert by_id["vip"] == "violation"  # 123 not in vip's [999]
+
+
+def test_summary_renders_offender_line_with_reason() -> None:
+    # Strengthen the earlier weak substring check: the per-row offender line must
+    # actually render, with the violation's reason text — not just the header.
+    report = ExampleValidationReport(
+        results=[
+            ExampleResult(
+                example=VerifiedExample(sql="SELECT 1", id="bad-query"),
+                status="violation",
+                reasons=["forbidden table raw.payments"],
+                warnings=[],
+                contract_checked=True,
+                engine_checked=False,
+            )
+        ]
+    )
+    text = report.summary()
+    assert "- violation `bad-query`: forbidden table raw.payments" in text
+
+
+def test_summary_distinguishes_two_unnamed_rows() -> None:
+    # Two rows with no id and no question must not collapse to one label — the
+    # positional #index fallback keeps them distinct in the MR comment.
+    unnamed = [
+        ExampleResult(
+            example=VerifiedExample(sql="SELECT 1"),
+            status="violation",
+            reasons=["reason A"],
+            warnings=[],
+            contract_checked=True,
+            engine_checked=False,
+        ),
+        ExampleResult(
+            example=VerifiedExample(sql="SELECT 2"),
+            status="violation",
+            reasons=["reason B"],
+            warnings=[],
+            contract_checked=True,
+            engine_checked=False,
+        ),
+    ]
+    text = ExampleValidationReport(results=unnamed).summary()
+    assert "`#0`: reason A" in text
+    assert "`#1`: reason B" in text
+
+
+def test_row_limit_block_marks_engine_checked(contract: DataContract) -> None:
+    # valid_contract.yml sets max_rows_scanned = 1_000_000. A block from the
+    # row-limit check (schema_valid stays True, estimated_rows non-None) must
+    # still report engine_checked True — the sibling path to the cost-limit case.
+    adapter = FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=None, estimated_rows=1_000_001, schema_valid=True
+        )
+    )
+    report = validate_examples(
+        [VerifiedExample(sql=_OK_SQL)], contract, explain_adapter=adapter
+    )
+    r = report.results[0]
+    assert r.status == "violation"
+    assert r.engine_checked

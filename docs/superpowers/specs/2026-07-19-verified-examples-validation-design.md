@@ -265,6 +265,7 @@ Status truth table:
 | parses, static clean, engine plans (or no adapter) | `valid` | ✓ | ✓ / — |
 | parses, static violation | `violation` | ✓ | — |
 | parses, static clean, engine **rejects** (schema drift) | `violation` | ✓ | ✓ |
+| parses, static clean, engine **blocks on cost/row limit** | `violation` | ✓ | ✓ |
 | sqlglot fails, engine plans (decision B) | `valid` | ✗ | ✓ |
 | sqlglot fails, engine **rejects** (decision B) | `violation` | ✗ | ✓ |
 | sqlglot fails, no adapter | `unchecked` | ✗ | ✗ |
@@ -273,8 +274,11 @@ Status truth table:
   decision-B pass), a caveat warning is added — *"contract policy not statically
   verified; engine confirmed plannability only"* — and the row appears in
   `unverified_compliance` so a sweep can route it to a human.
-- **violation** — a layer rejected it: a static contract check, or an engine
-  `EXPLAIN` rejection (schema drift / type error). `reasons` name the cause.
+- **violation** — a layer rejected it: a static contract check, or the engine
+  (`EXPLAIN` schema rejection, or a cost/row-limit block computed from the plan).
+  `reasons` name the cause. `engine_checked` is `True` whenever `EXPLAIN` ran —
+  including cost/row-limit blocks, not only schema rejections — reconstructed
+  from `schema_valid`/`estimated_*` without a second core field.
 - **unchecked** — no layer could render a verdict (sqlglot failed to parse and no
   `explain_adapter` was available). Caller decides whether this fails the gate.
 - `warnings` carry warn-enforcement rule hits regardless of status and never flip

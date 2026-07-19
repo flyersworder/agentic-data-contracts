@@ -349,10 +349,15 @@ class ExampleValidationReport:
         return not self.violations
 
     def summary(self) -> str:
-        """A compact markdown report, suitable for an MR comment."""
+        """A compact markdown report, suitable for an MR comment.
 
-        def _label(r: ExampleResult) -> str:
-            return r.example.id or r.example.question or "<unnamed>"
+        Iterates ``enumerate(self.results)`` once so each row can fall back to
+        its positional index (``id → question → #index``, per the spec) — two
+        unnamed rows never render identically.
+        """
+
+        def _label(result: ExampleResult, index: int) -> str:
+            return result.example.id or result.example.question or f"#{index}"
 
         lines = [
             f"**Example validation:** {len(self.valid)} valid, "
@@ -360,12 +365,15 @@ class ExampleValidationReport:
             f"{len(self.unchecked)} unchecked, "
             f"{len(self.unverified_compliance)} plannable-but-unverified.",
         ]
-        for r in self.violations:
-            lines.append(f"- violation `{_label(r)}`: {'; '.join(r.reasons)}")
-        for r in self.unchecked:
-            lines.append(f"- unchecked `{_label(r)}`: {'; '.join(r.reasons)}")
-        for r in self.unverified_compliance:
-            lines.append(f"- unverified `{_label(r)}`: {'; '.join(r.warnings)}")
+        for i, r in enumerate(self.results):
+            if r.status == "violation":
+                lines.append(f"- violation `{_label(r, i)}`: {'; '.join(r.reasons)}")
+            elif r.status == "unchecked":
+                lines.append(f"- unchecked `{_label(r, i)}`: {'; '.join(r.reasons)}")
+            elif r.status == "valid" and not r.contract_checked:
+                lines.append(
+                    f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}"
+                )
         return "\n".join(lines)
 ```
 
@@ -400,7 +408,7 @@ git commit -m "feat: ExampleResult and ExampleValidationReport"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_examples.py` (add imports for `DataContract`, `Path`, `ExplainResult`, and a `FakeExplainAdapter` mirroring `test_explain.py`):
+Append to `tests/test_validation/test_examples.py` (add imports for `DataContract`, `Path`, `ExplainResult`, and a `FakeExplainAdapter` mirroring `test_explain.py`):
 
 ```python
 from pathlib import Path
@@ -502,11 +510,92 @@ def test_results_preserve_input_order(contract: DataContract) -> None:
     ]
     report = validate_examples(exs, contract)
     assert [r.example.id for r in report.results] == ["a", "b"]
+
+
+def test_forbidden_op_is_violation(contract: DataContract) -> None:
+    report = validate_examples(
+        [VerifiedExample(sql="DELETE FROM analytics.orders WHERE tenant_id = 'x'")],
+        contract,
+    )
+    assert report.results[0].status == "violation"
+
+
+def test_cost_block_marks_engine_checked(contract: DataContract) -> None:
+    # valid_contract.yml sets cost_limit_usd = 5.00; 10.0 exceeds it. The block
+    # comes from EXPLAIN (schema_valid stays True), so engine_checked must be
+    # True even though it is not a schema rejection.
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=10.0, estimated_rows=None, schema_valid=True)
+    )
+    report = validate_examples(
+        [VerifiedExample(sql=_OK_SQL)], contract, explain_adapter=adapter
+    )
+    r = report.results[0]
+    assert r.status == "violation"
+    assert r.engine_checked
+
+
+def test_contract_policy_drift_valid_then_violation(contract: DataContract) -> None:
+    # Same SQL: valid under contract A (analytics.orders allowed), a violation
+    # under contract B (only analytics.customers allowed). Proves the verdict is
+    # contract-relative — the drift sweep's core promise.
+    from agentic_data_contracts.core.schema import DataContractSchema
+
+    example = [VerifiedExample(sql=_OK_SQL)]
+    assert validate_examples(example, contract).results[0].status == "valid"
+
+    schema_b = DataContractSchema.model_validate(
+        {
+            "version": "1.0",
+            "name": "drift-b",
+            "semantic": {
+                "allowed_tables": [{"schema": "analytics", "tables": ["customers"]}],
+                "forbidden_operations": [],
+                "rules": [],
+            },
+        }
+    )
+    contract_b = DataContract(schema=schema_b)
+    assert validate_examples(example, contract_b).results[0].status == "violation"
+
+
+def test_warn_rule_surfaces_warning_without_failing() -> None:
+    # A warn-enforcement rule must land in ExampleResult.warnings and keep the
+    # example valid (ok stays True). valid_contract's warn rule has no
+    # query_check and never fires, so build a contract whose warn rule can.
+    from agentic_data_contracts.core.schema import DataContractSchema
+
+    schema = DataContractSchema.model_validate(
+        {
+            "version": "1.0",
+            "name": "warn-test",
+            "semantic": {
+                "allowed_tables": [{"schema": "analytics", "tables": ["orders"]}],
+                "forbidden_operations": [],
+                "rules": [
+                    {
+                        "name": "prefer_explicit_columns",
+                        "description": "avoid SELECT *",
+                        "enforcement": "warn",
+                        "query_check": {"no_select_star": True},
+                    }
+                ],
+            },
+        }
+    )
+    warn_contract = DataContract(schema=schema)
+    report = validate_examples(
+        [VerifiedExample(sql="SELECT * FROM analytics.orders")], warn_contract
+    )
+    r = report.results[0]
+    assert r.status == "valid"
+    assert report.ok
+    assert any("SELECT *" in w for w in r.warnings)
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `uv run pytest tests/test_validation/test_examples.py -k "example or filter or drift or engine or unchecked or empty or order" -v`
+Run: `uv run pytest tests/test_validation/test_examples.py -k "example or filter or drift or engine or unchecked or empty or order or forbidden or warn or cost" -v`
 Expected: FAIL — `ImportError: cannot import name 'validate_examples'`.
 
 - [ ] **Step 3: Implement `validate_examples` (parsed path + unchecked)**
@@ -596,9 +685,17 @@ def _to_result(
             reasons=list(vr.reasons),
             warnings=list(vr.warnings),
             contract_checked=True,
-            # In the blocked path, engine involvement is only certain when the
-            # engine rejected the schema. Static / cost blocks read False.
-            engine_checked=explain_adapter is not None and not vr.schema_valid,
+            # EXPLAIN ran iff there was no *static* reason at the gate. A static
+            # block leaves schema_valid True and estimated_* None (EXPLAIN was
+            # skipped); an EXPLAIN-caused block always sets one of them —
+            # schema_valid False (schema reject), or a non-None estimate (the
+            # cost/row-limit checks only fire when their estimate is present).
+            engine_checked=explain_adapter is not None
+            and (
+                not vr.schema_valid
+                or vr.estimated_cost_usd is not None
+                or vr.estimated_rows is not None
+            ),
         )
 
     # Parse failure — no AST, so no contract check. Engine fallback is Task 5.
@@ -637,7 +734,7 @@ git commit -m "feat: validate_examples parsed path with per-principal validators
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_examples.py`:
+Append to `tests/test_validation/test_examples.py`:
 
 ```python
 _UNPARSEABLE_SQL = "SELECT * FROM ("  # confirmed to raise ParseError in Task 1
@@ -747,7 +844,7 @@ git commit -m "feat: decision-B engine fallback for sqlglot-unparseable examples
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_examples.py`:
+Append to `tests/test_validation/test_examples.py`:
 
 ```python
 def test_public_exports() -> None:
@@ -762,7 +859,28 @@ def test_public_exports() -> None:
     assert ExampleValidationReport and validate_examples
 ```
 
-For a principal-scoped example, add a test using the filter-values fixture pattern (mirror `tests/test_validation/test_validator_filter_values.py` — reuse its contract fixture path). If that fixture requires a principal-gated value, assert an example carrying the right `principal` is `valid` and one carrying a wrong/absent principal is a `violation`. Keep it in this task so the whole surface is exercised before wiring is declared done.
+Also add the principal-scoped test. `tests/fixtures/filter_values_contract.yml` gates
+`sales.opps` per principal: `partner@co.com` may filter `account_id` in `[123, 456]`,
+`vip@co.com` in `[999]`. The same SQL must therefore be `valid` for the partner and a
+`violation` for the vip — proving per-principal validators are built and the batch is
+checked under each example's own identity (this also exercises order preservation across
+principals):
+
+```python
+def test_principal_scoped_validation(fixtures_dir: Path) -> None:
+    contract = DataContract.from_yaml(fixtures_dir / "filter_values_contract.yml")
+    sql = "SELECT id FROM sales.opps WHERE account_id = 123"
+    report = validate_examples(
+        [
+            VerifiedExample(sql=sql, principal="partner@co.com", id="partner"),
+            VerifiedExample(sql=sql, principal="vip@co.com", id="vip"),
+        ],
+        contract,
+    )
+    by_id = {r.example.id: r.status for r in report.results}
+    assert by_id["partner"] == "valid"     # 123 in partner's allowlist
+    assert by_id["vip"] == "violation"      # 123 not in vip's [999]
+```
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -807,6 +925,17 @@ Per the spec: no YAML loader / file IO, no `find_examples` retrieval tool or pro
 
 ## Self-Review
 
-- **Spec coverage:** interchange shape (Task 2), report + statuses (Task 3), the verb + two layers + principal grouping (Task 4), decision B (Task 5), exports (Task 6), the one core change `parse_error` (Task 1). All spec sections map to a task.
-- **Type consistency:** `validate_examples` signature, `Validator` constructor args, `ValidationResult` fields (`blocked`/`reasons`/`warnings`/`schema_valid`/`parse_error`), and `ExplainResult` fields (`schema_valid`/`errors`) match the source read during planning.
+- **Spec coverage:** interchange shape (Task 2), report + statuses (Task 3), the verb + two layers + principal grouping (Task 4), decision B (Task 5), exports + principal test (Task 6), the one core change `parse_error` (Task 1).
+- **Type consistency:** `validate_examples` signature, `Validator` constructor args, `ValidationResult` fields (`blocked`/`reasons`/`warnings`/`schema_valid`/`estimated_cost_usd`/`estimated_rows`/`parse_error`), and `ExplainResult` fields (`schema_valid`/`errors`) match the source read during planning.
+- **Applied after a three-lens plan review (2026-07-19):**
+  - `engine_checked` in the violation branch now reports `True` for cost/row-limit
+    blocks (EXPLAIN ran) — reconstructed from `schema_valid`/`estimated_*`, so the
+    "only `parse_error` touches core" property holds; covered by
+    `test_cost_block_marks_engine_checked`.
+  - `summary()` iterates `enumerate(self.results)` for an `id → question → #index`
+    label so two unnamed rows never collide.
+  - Added tests the spec mandated but the first draft omitted: forbidden-op,
+    contract-policy drift (A→B), warn-rule-surfaces-warning, and a concrete
+    principal-scoped test (Task 6).
+  - Fixed the test path in Tasks 4–6 (`tests/test_validation/test_examples.py`).
 - **Known follow-up for the implementer:** confirm that `"SELECT * FROM ("` raises `sqlglot.errors.ParseError` on the pinned sqlglot before relying on it in Tasks 1 and 5; substitute another guaranteed-unparseable literal (reused in both tasks) if not.

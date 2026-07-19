@@ -90,3 +90,92 @@ class TestIdentityEdges:
 
     def test_leaf_metric_produces_no_edges(self) -> None:
         assert identity_edges_from_metrics([_metric("signups")]) == []
+
+
+import pytest  # noqa: E402
+
+from agentic_data_contracts.semantic.base import validate_decompositions  # noqa: E402
+
+
+def _m(
+    name: str, decompositions: list[Decomposition] | None = None
+) -> MetricDefinition:
+    return MetricDefinition(
+        name=name,
+        description="",
+        sql_expression="x",
+        decompositions=decompositions or [],
+    )
+
+
+class TestValidateDecompositions:
+    def test_valid_tree_passes(self) -> None:
+        metrics = [
+            _m("revenue", [Decomposition("product", ["paying_users", "arpu"])]),
+            _m("paying_users"),
+            _m("arpu"),
+        ]
+        validate_decompositions(metrics)  # no raise
+
+    def test_leaf_only_passes(self) -> None:
+        validate_decompositions([_m("signups")])
+
+    def test_unknown_operator_raises(self) -> None:
+        metrics = [
+            _m("revenue", [Decomposition("divide", ["a", "b"])]),
+            _m("a"),
+            _m("b"),
+        ]
+        with pytest.raises(ValueError, match="unknown operator"):
+            validate_decompositions(metrics)
+
+    def test_ratio_requires_exactly_two_operands(self) -> None:
+        metrics = [
+            _m("rate", [Decomposition("ratio", ["a", "b", "c"])]),
+            _m("a"),
+            _m("b"),
+            _m("c"),
+        ]
+        with pytest.raises(ValueError, match="exactly 2 operands"):
+            validate_decompositions(metrics)
+
+    def test_sum_requires_at_least_two_operands(self) -> None:
+        metrics = [_m("revenue", [Decomposition("sum", ["a"])]), _m("a")]
+        with pytest.raises(ValueError, match="at least 2 operands"):
+            validate_decompositions(metrics)
+
+    def test_unresolved_operand_raises(self) -> None:
+        metrics = [
+            _m("revenue", [Decomposition("product", ["paying_users", "ghost"])]),
+            _m("paying_users"),
+        ]
+        with pytest.raises(ValueError, match="unknown metric 'ghost'"):
+            validate_decompositions(metrics)
+
+    def test_self_reference_raises(self) -> None:
+        metrics = [
+            _m("revenue", [Decomposition("sum", ["revenue", "arpu"])]),
+            _m("arpu"),
+        ]
+        with pytest.raises(ValueError, match="itself"):
+            validate_decompositions(metrics)
+
+    def test_two_cycle_raises(self) -> None:
+        metrics = [
+            _m("a", [Decomposition("sum", ["b", "c"])]),
+            _m("b", [Decomposition("sum", ["a", "c"])]),
+            _m("c"),
+        ]
+        with pytest.raises(ValueError, match="cycle"):
+            validate_decompositions(metrics)
+
+    def test_diamond_is_not_a_cycle(self) -> None:
+        # a -> b, a -> c, b -> d, c -> d : shared child, no cycle
+        metrics = [
+            _m("a", [Decomposition("sum", ["b", "c"])]),
+            _m("b", [Decomposition("sum", ["d", "e"])]),
+            _m("c", [Decomposition("sum", ["d", "e"])]),
+            _m("d"),
+            _m("e"),
+        ]
+        validate_decompositions(metrics)  # no raise

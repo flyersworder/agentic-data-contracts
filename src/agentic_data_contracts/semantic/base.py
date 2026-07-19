@@ -115,6 +115,72 @@ def identity_edges_from_metrics(
     return edges
 
 
+VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})
+_BINARY_OPERATORS = frozenset({"ratio", "difference"})
+
+
+def validate_decompositions(metrics: list[MetricDefinition]) -> None:
+    """Validate every declared decomposition; raise ``ValueError`` on any fault.
+
+    Optional to declare, validated only when present. Checks operator, operand
+    arity, operand resolution, and that the identity edges form a DAG (a metric
+    cannot transitively decompose into itself). Leaf metrics pass untouched.
+    """
+    names = {m.name for m in metrics}
+    adjacency: dict[str, list[str]] = {}
+    for metric in metrics:
+        for decomp in metric.decompositions:
+            if decomp.operator not in VALID_OPERATORS:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition has unknown operator "
+                    f"{decomp.operator!r}; expected one of {sorted(VALID_OPERATORS)}"
+                )
+            count = len(decomp.operands)
+            if decomp.operator in _BINARY_OPERATORS and count != 2:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition {decomp.operator!r} "
+                    f"requires exactly 2 operands, got {count}"
+                )
+            if decomp.operator not in _BINARY_OPERATORS and count < 2:
+                raise ValueError(
+                    f"metric {metric.name!r} decomposition {decomp.operator!r} "
+                    f"requires at least 2 operands, got {count}"
+                )
+            for operand in decomp.operands:
+                if operand == metric.name:
+                    raise ValueError(
+                        f"metric {metric.name!r} decomposition cannot reference itself"
+                    )
+                if operand not in names:
+                    raise ValueError(
+                        f"metric {metric.name!r} decomposition references "
+                        f"unknown metric {operand!r}"
+                    )
+            adjacency.setdefault(metric.name, []).extend(decomp.operands)
+    _assert_identity_acyclic(adjacency)
+
+
+def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:
+    """DFS the identity graph; raise ``ValueError`` naming the first cycle found."""
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str, stack: list[str]) -> None:
+        if node in visiting:
+            cycle = " -> ".join([*stack, node])
+            raise ValueError(f"metric decomposition cycle detected: {cycle}")
+        if node in visited:
+            return
+        visiting.add(node)
+        for neighbor in adjacency.get(node, []):
+            visit(neighbor, [*stack, node])
+        visiting.discard(node)
+        visited.add(node)
+
+    for node in list(adjacency):
+        visit(node, [])
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...

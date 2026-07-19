@@ -877,11 +877,8 @@ metrics:
     description: "Distinct paying customers"
     sql_expression: "COUNT(DISTINCT customer_id)"
   - name: arpu
-    description: "Average revenue per user"
+    description: "Average revenue per user (leaf — no decomposition)"
     sql_expression: "SUM(amount) / NULLIF(COUNT(DISTINCT customer_id), 0)"
-    decompositions:
-      - operator: ratio
-        operands: [revenue, paying_users]
   - name: new_revenue
     description: "Revenue from new customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_new)"
@@ -903,13 +900,10 @@ metric_impacts:
     evidence: "trivially true"
 ```
 
-Note: `arpu = ratio(revenue, paying_users)` while `revenue = product(paying_users, arpu)` — these are two *different* decompositions of two *different* metrics and do NOT form a cycle in the identity graph (`revenue -> arpu -> revenue` would; but here it is `revenue -> {paying_users, arpu}` and `arpu -> {revenue, paying_users}`, which IS a cycle). **Fix:** give `arpu` no decomposition to keep the fixture acyclic. Use this corrected `arpu` entry instead:
-
-```yaml
-  - name: arpu
-    description: "Average revenue per user"
-    sql_expression: "SUM(amount) / NULLIF(COUNT(DISTINCT customer_id), 0)"
-```
+`arpu` is deliberately a leaf (no decomposition). Do NOT give it a
+`ratio(revenue, paying_users)` decomposition: combined with
+`revenue = product(paying_users, arpu)` that would create the cycle
+`revenue -> arpu -> revenue`, which Task 3's validator correctly rejects at load.
 
 Create `tests/test_tools/test_decomposition_tools.py`:
 
@@ -924,6 +918,11 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.schema import (
+    AllowedTable,
+    DataContractSchema,
+    SemanticConfig,
+)
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 from agentic_data_contracts.tools.factory import create_tools
 
@@ -931,11 +930,17 @@ FIXTURE = Path(__file__).parent.parent / "fixtures" / "decomposition_source.yml"
 
 
 def _tools() -> dict:
-    contract = DataContract(
+    schema = DataContractSchema(
         name="test",
-        tables=["analytics.dim_customer"],
-        forbidden_operations=["DELETE"],
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["dim_customer"]}
+                ),
+            ],
+        ),
     )
+    contract = DataContract(schema)
     source = YamlSource(FIXTURE)
     tools = create_tools(contract, semantic_source=source)
     return {t.name: t.callable for t in tools}
@@ -1024,10 +1029,14 @@ class TestTraceWalksIdentity:
 
     @pytest.mark.asyncio
     async def test_kinds_identity_excludes_influence(self) -> None:
+        # Walk upstream from arpu: identity edge revenue->arpu exists; arpu has no
+        # influence edges, so kinds="identity" must return a non-empty, all-identity set.
         data = await _call(
-            _tools()["trace_metric_impacts"], metric_name="revenue", direction="upstream", kinds="identity"
+            _tools()["trace_metric_impacts"], metric_name="arpu", direction="upstream", kinds="identity"
         )
+        assert data["edges"]  # non-empty
         assert all(e["kind"] == "identity" for e in data["edges"])
+        assert any(e["from"] == "revenue" for e in data["edges"])
 
     @pytest.mark.asyncio
     async def test_kinds_influence_excludes_identity(self) -> None:
@@ -1203,8 +1212,12 @@ git commit -m "docs: note reconciliation check + diagnosis tool as Spec B follow
 - dbt/Cube untouched (inherit empty defaults) → no task needed; confirmed by running full suite in Task 10. ✓
 - Testing (unit + integration over multi-level fixture) → Tasks 1–9 tests + Task 8 fixture. ✓
 
-**Placeholder scan:** No TBD/TODO. Every code step shows complete code. The fixture note in Task 8 explicitly corrects the `arpu` entry to keep the identity graph acyclic (a real trap: `revenue -> arpu` + `arpu -> revenue` is a cycle Task 3 would reject).
+**Placeholder scan:** No TBD/TODO. Every code step shows complete code. The Task 8 fixture keeps `arpu` a leaf so the identity graph stays acyclic (a `ratio(revenue, paying_users)` on `arpu` combined with `product(paying_users, arpu)` on `revenue` would be the cycle `revenue -> arpu -> revenue`, which Task 3 rejects).
 
 **Type consistency:** `Decomposition(operator, operands)`, `DrillDimension(dimension, column)`, `IdentityEdge(from_metric, to_metric, operator)`, `MetricEdge = MetricImpact | IdentityEdge`, `identity_edges_from_metrics(metrics)`, `validate_decompositions(metrics)`, `validate_drill_by(metrics, table_schemas)` — names used consistently across Tasks 1–9. Tool output keys (`decompositions`, `drill_by`, `kind`, `operator`) consistent between Tasks 8/9 and their tests.
 
-**One risk flagged for the implementer:** the async tool-response accessor (`result["content"][0]["text"]`) in Task 8/9 tests is written to match the existing pattern in `tests/test_tools/`; if the repo's helper differs (e.g. a `_text` helper), mirror that instead — Step 1 of Task 8 says to confirm against `test_semantic_tools.py`.
+**Verified against the live codebase (round 2):**
+- Tool output shape is `result["content"][0]["text"]` + `json.loads` — matches `tests/test_tools/test_semantic_tools.py`. ✓
+- `DataContract` takes a `DataContractSchema` (NOT `name=`/`tables=` kwargs). Task 8's helper builds `DataContractSchema(name=..., semantic=SemanticConfig(allowed_tables=[AllowedTable.model_validate({"schema": ..., "tables": [...]})]))` then `DataContract(schema)`, mirroring the existing `contract_revenue_only` fixture. ✓ (This was a bug in the first draft — now fixed.)
+- `create_tools(contract, semantic_source=source)` with no adapter is the standard call in these tests (graceful degradation). ✓
+- Task 9's `test_kinds_identity_excludes_influence` walks upstream from `arpu` so the identity result is non-empty (walking from `revenue` would have passed trivially on an empty list). ✓

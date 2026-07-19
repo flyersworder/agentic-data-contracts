@@ -266,6 +266,14 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
                 "business_owner": m.business_owner,
                 "operational_owner": m.operational_owner,
                 "last_reviewed": _iso(m.last_reviewed),
+                "decompositions": [
+                    {"operator": d.operator, "operands": list(d.operands)}
+                    for d in m.decompositions
+                ],
+                "drill_by": [
+                    {"dimension": dd.dimension, "column": dd.column}
+                    for dd in m.drill_by
+                ],
             }
             for m in source.get_metrics()
         ],

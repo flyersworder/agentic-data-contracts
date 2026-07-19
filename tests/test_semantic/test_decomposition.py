@@ -282,3 +282,36 @@ class TestYamlSourceLoading:
         }
         with pytest.raises(ValueError, match="unknown metric 'ghost'"):
             YamlSource.from_raw(raw)
+
+
+from agentic_data_contracts.semantic.base import dump_semantic_source  # noqa: E402
+
+
+class TestRoundtrip:
+    def test_dump_then_from_raw_preserves_fields(self) -> None:
+        raw = {
+            "metrics": [
+                {
+                    "name": "revenue",
+                    "sql_expression": "SUM(amount)",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["paying_users", "arpu"]}
+                    ],
+                    "drill_by": [
+                        {
+                            "dimension": "region",
+                            "column": "analytics.dim_customer.region",
+                        }
+                    ],
+                },
+                {"name": "paying_users", "sql_expression": "x"},
+                {"name": "arpu", "sql_expression": "x"},
+            ]
+        }
+        source = YamlSource.from_raw(raw)
+        dumped = dump_semantic_source(source)
+        rebuilt = YamlSource.from_raw(dumped)
+        revenue = rebuilt.get_metric("revenue")
+        assert revenue is not None
+        assert revenue.decompositions[0].operands == ["paying_users", "arpu"]
+        assert revenue.drill_by[0].column == "analytics.dim_customer.region"

@@ -315,3 +315,39 @@ class TestRoundtrip:
         assert revenue is not None
         assert revenue.decompositions[0].operands == ["paying_users", "arpu"]
         assert revenue.drill_by[0].column == "analytics.dim_customer.region"
+
+
+from agentic_data_contracts.semantic.base import (  # noqa: E402
+    build_metric_impact_index,
+    walk_metric_impacts,
+)
+
+
+class TestMixedGraphTraversal:
+    def test_walk_identity_downstream_returns_components(self) -> None:
+        edges = identity_edges_from_metrics(
+            [_metric("revenue", [Decomposition("product", ["paying_users", "arpu"])])]
+        )
+        index = build_metric_impact_index(edges)
+        walk = walk_metric_impacts(
+            index, "revenue", direction="downstream", max_depth=2
+        )
+        assert {e.to_metric for _, e in walk} == {"paying_users", "arpu"}
+        assert all(e.kind == "identity" for _, e in walk)
+
+    def test_walk_identity_upstream_returns_parents(self) -> None:
+        edges = identity_edges_from_metrics(
+            [_metric("revenue", [Decomposition("product", ["paying_users", "arpu"])])]
+        )
+        index = build_metric_impact_index(edges)
+        walk = walk_metric_impacts(index, "arpu", direction="upstream", max_depth=2)
+        assert {e.from_metric for _, e in walk} == {"revenue"}
+
+    def test_index_mixes_influence_and_identity(self) -> None:
+        influence = [MetricImpact(from_metric="conv", to_metric="revenue")]
+        identity = identity_edges_from_metrics(
+            [_metric("revenue", [Decomposition("product", ["paying_users", "arpu"])])]
+        )
+        index = build_metric_impact_index([*influence, *identity])
+        kinds = {e.kind for edges in index.values() for e in edges}
+        assert kinds == {"influence", "identity"}

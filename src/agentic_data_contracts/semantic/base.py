@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
@@ -417,8 +417,8 @@ def find_join_path(
 
 
 def build_metric_impact_index(
-    impacts: list[MetricImpact],
-) -> dict[str, list[MetricImpact]]:
+    impacts: Sequence[MetricEdge],
+) -> dict[str, list[MetricEdge]]:
     """Build a metric-name -> impact edges index for O(1) lookup.
 
     Each impact is indexed under both its ``from_metric`` and ``to_metric``
@@ -427,9 +427,10 @@ def build_metric_impact_index(
     ``edge.from_metric`` / ``edge.to_metric`` against the current node.
 
     Edges within each entry are in declaration order; callers should not
-    rely on any stronger ordering.
+    rely on any stronger ordering. Accepts a mix of influence (``MetricImpact``)
+    and identity (``IdentityEdge``) edges.
     """
-    index: dict[str, list[MetricImpact]] = {}
+    index: dict[str, list[MetricEdge]] = {}
     for imp in impacts:
         index.setdefault(imp.from_metric, []).append(imp)
         if imp.from_metric != imp.to_metric:
@@ -438,12 +439,12 @@ def build_metric_impact_index(
 
 
 def walk_metric_impacts(
-    index: dict[str, list[MetricImpact]],
+    index: dict[str, list[MetricEdge]],
     start: str,
     *,
     direction: str,
     max_depth: int = 2,
-) -> list[tuple[int, MetricImpact]]:
+) -> list[tuple[int, MetricEdge]]:
     """BFS through the metric impact graph from ``start``.
 
     ``direction="downstream"`` follows edges where ``edge.from_metric ==
@@ -453,14 +454,15 @@ def walk_metric_impacts(
 
     Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
-    prevents cycles, so each reachable metric appears at most once.
+    prevents cycles, so each reachable metric appears at most once. Works
+    over a mixed influence + identity edge index.
     """
     if direction not in ("upstream", "downstream"):
         msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"
         raise ValueError(msg)
 
     visited: set[str] = {start}
-    result: list[tuple[int, MetricImpact]] = []
+    result: list[tuple[int, MetricEdge]] = []
     queue: deque[tuple[str, int]] = deque([(start, 0)])
     while queue:
         current, depth = queue.popleft()

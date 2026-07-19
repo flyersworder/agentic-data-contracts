@@ -20,6 +20,7 @@ from agentic_data_contracts.core.session import ContractSession, LimitExceededEr
 from agentic_data_contracts.core.staleness import owner_context, review_age_days
 from agentic_data_contracts.semantic.base import (
     MetricDefinition,
+    MetricEdge,
     MetricImpact,
     SemanticSource,
     build_metric_impact_index,
@@ -95,7 +96,7 @@ def _freshness_fields(
 
 def _metric_details(
     metric: MetricDefinition,
-    impact_index: dict[str, list[MetricImpact]],
+    impact_index: dict[str, list[MetricEdge]],
     *,
     today: date,
     threshold_days: int,
@@ -120,6 +121,8 @@ def _metric_details(
     outgoing: list[str] = []
     incoming: list[str] = []
     for edge in impact_index.get(metric.name, []):
+        if not isinstance(edge, MetricImpact):
+            continue
         if edge.from_metric == metric.name:
             outgoing.append(_format_impact_edge(edge, perspective="outgoing"))
         if edge.to_metric == metric.name:
@@ -641,6 +644,10 @@ def create_tools(
         walk = walk_metric_impacts(
             _impact_index, metric_name, direction=direction, max_depth=max_depth
         )
+        # _impact_index only ever holds influence (MetricImpact) edges today —
+        # identity-edge traversal/formatting is Task 9's scope. The isinstance
+        # check narrows the now-mixed MetricEdge type for ty; it skips nothing
+        # at runtime.
         edges = [
             {
                 "depth": depth,
@@ -652,6 +659,7 @@ def create_tools(
                 **({"description": edge.description} if edge.description else {}),
             }
             for depth, edge in walk
+            if isinstance(edge, MetricImpact)
         ]
         return _text_response(
             json.dumps(

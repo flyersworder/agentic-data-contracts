@@ -12,6 +12,10 @@ from agentic_data_contracts.validation.checkers import (
     extract_tables,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter, ExplainResult
+from agentic_data_contracts.validation.reconciliation import (
+    ReconciliationResult,
+    reconcile_decomposition,
+)
 from agentic_data_contracts.validation.validator import (
     Checker,
     ValidationResult,
@@ -27,6 +31,7 @@ __all__ = [
     "MaxJoinsChecker",
     "NoSelectStarChecker",
     "OperationBlocklistChecker",
+    "ReconciliationResult",
     "RelationshipChecker",
     "RequiredFilterChecker",
     "RequireLimitChecker",
@@ -35,4 +40,5 @@ __all__ = [
     "ValidationResult",
     "Validator",
     "extract_tables",
+    "reconcile_decomposition",
 ]

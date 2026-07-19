@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0] - 2026-07-19
+
+### Added
+
+- **Metric decomposition reconciliation check.** New `reconcile_decomposition(...)` (in `agentic_data_contracts.validation`) executes a metric's declared `decompositions` against a live database and asserts the arithmetic identity holds within tolerance — the *reconciliation half of Spec B*. It catches an identity that has gone false in the data (ETL drift, a child metric SQL that diverged, a join that skews a population) which the per-query validators (sqlglot, EXPLAIN) never see because the SQL is still authorized. The check is **keyed off the declared decomposition** — the contract owns *what* the identity is (operator + operand names), while the caller supplies scalar SQL for the parent and each declared operand, owning *how* to measure each over its chosen slice; no metric executor is assumed. Malformed input raises `ValueError` (no decomposition, out-of-range index, operand-key mismatch, unknown operator, wrong operand arity); data conditions are *findings* (`reconciles=False` with a mechanical `reason`) — a NULL / empty / non-finite (`NaN` / `inf`) measurement, or a `ratio` zero denominator. `ReconciliationResult.reason` reports only the mechanical condition and **never infers the cause** — diagnosis stays agent-owned, the same governance/agent boundary the decomposition feature drew. Default `rel_tol=1e-4` is tight because decompositions are exact identities. Intended primary home is CI: a hermetic per-PR regression guard plus a live-warehouse nightly drift detector.
+
+### Compatibility
+
+- **Fully backward compatible.** A net-new module plus two new exports (`reconcile_decomposition`, `ReconciliationResult`) from `agentic_data_contracts.validation`; nothing existing changes behavior, and no new dependencies are added.
+
+### Internal
+
+- New `validation/reconciliation.py`, built across 3 TDD tasks (red-first) with a per-task spec+quality review, a final whole-branch review, and a workflow-backed code review whose findings were folded in (NaN/±inf and empty-result measurements routed to the missing-value path with accurate reasons; operator/arity validated before any query; three result constructions collapsed into one helper). The operator vocabulary (`VALID_OPERATORS` / `_BINARY_OPERATORS`) is reused from `semantic.base` as the single source of truth via a cycle-safe function-local import. Includes a table-backed population-mismatch integration test. Full suite green (756 tests); `ruff` / `ruff format` / `ty` clean.
+
 ## [0.28.1] - 2026-07-19
 
 ### Fixed

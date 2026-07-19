@@ -195,7 +195,8 @@ def create_tools(
         else {}
     )
 
-    # Build metric-impact index for lookup_metric enrichment and trace_metric_impacts.
+    # Influence-only impact index — enriches lookup_metric. (trace_metric_impacts
+    # builds its own per-call index from _metric_impacts + _identity_edges by `kinds`.)
     _metric_impacts: list[MetricImpact] = (
         list(semantic_source.get_metric_impacts())
         if semantic_source is not None
@@ -991,12 +992,11 @@ def create_tools(
                 " (useful for root-cause analyses like 'why did revenue"
                 " drop?'); direction='downstream' returns metrics the target"
                 " affects (useful for 'what does this KPI move?')."
-                " Each edge includes direction, confidence, and evidence for"
-                " grounded reasoning. Cycles are handled via visited tracking."
-                " Edges are tagged with 'kind': identity edges carry an"
-                " 'operator' (sum/product/ratio/difference) and are exact;"
-                " influence edges carry direction/confidence/evidence and are"
-                " hypotheses."
+                " Each edge is tagged with 'kind': identity edges carry an"
+                " 'operator' (sum/product/ratio/difference) and are exact"
+                " arithmetic; influence edges carry direction, confidence, and"
+                " evidence and are hypotheses. Cycles are handled via visited"
+                " tracking."
             ),
             input_schema={
                 "type": "object",

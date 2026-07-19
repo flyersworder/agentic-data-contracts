@@ -114,3 +114,23 @@ python-version = "3.12"
 # of it is what lets the root project keep `unresolved-import` at error level --
 # a typo'd import in src/ must not pass.
 exclude = ["experiments/"]
+
+[tool.pyright]
+# ty (above) is this project's authoritative type checker and gates CI. This
+# block only tunes the pyright LSP so it stops emitting noise ty already vets
+# away. Pyright resolves config per project root, so this lives in the repo
+# rather than a global file -- and the suppression below is specific to a
+# dependency this repo uses, so it must not leak to other projects.
+#
+# venvPath/venv point the LSP at the uv-managed virtualenv; without them it
+# checks against a bare interpreter, cannot resolve sqlglot/pydantic/etc., and
+# every downstream type collapses to Unknown (a cascade of false errors).
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+exclude = ["experiments", ".venv"]
+# sqlglot re-exports its AST nodes through `exp` without listing them in
+# `__all__`, so pyright flags the idiomatic `exp.Expression` (used all over
+# validation/) as a private import. No import form avoids it, and ty does not
+# flag it. Silence only this one rule -- attribute and type checks stay on.
+reportPrivateImportUsage = "none"

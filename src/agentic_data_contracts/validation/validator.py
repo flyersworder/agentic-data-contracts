@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import sqlglot
-from sqlglot import exp
+from sqlglot import errors, exp
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
@@ -262,7 +262,7 @@ class Validator:
             ast = cast(
                 exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
             )
-        except sqlglot.errors.ParseError as e:
+        except errors.ParseError as e:
             return ValidationResult(blocked=True, reasons=[f"SQL parse error: {e}"])
 
         referenced_tables = extract_tables(ast)
@@ -364,7 +364,7 @@ class Validator:
             ast = cast(
                 exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
             )
-        except sqlglot.errors.ParseError:
+        except errors.ParseError:
             referenced_tables: set[str] = set()
         else:
             referenced_tables = extract_tables(ast)

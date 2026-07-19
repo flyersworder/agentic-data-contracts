@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import sqlglot
-from sqlglot import exp
+from sqlglot import errors, exp
 
 from agentic_data_contracts.core.contract import DataContract
 
@@ -1006,7 +1006,7 @@ class RelationshipChecker:
                 for col in where.find_all(exp.Column):
                     columns.add(col.name.lower())
             return columns
-        except sqlglot.errors.ParseError:
+        except errors.ParseError:
             import re
 
             return {

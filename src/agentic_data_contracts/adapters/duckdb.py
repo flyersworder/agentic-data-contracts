@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 import duckdb
 
@@ -58,7 +59,7 @@ class DuckDBAdapter:
                 errors=[str(e)],
             )
 
-    def _parse_row_estimate(self, explain_rows: list[tuple]) -> int | None:
+    def _parse_row_estimate(self, explain_rows: list[tuple[Any, ...]]) -> int | None:
         """Parse DuckDB EXPLAIN output for estimated row count.
 
         DuckDB EXPLAIN includes lines with ~N indicating estimated cardinality.
@@ -68,7 +69,12 @@ class DuckDBAdapter:
 
         last_estimate = None
         for row in explain_rows:
-            text = str(row[1]) if len(row) > 1 else str(row[0])
+            if len(row) > 1:
+                text = str(row[1])
+            elif len(row) == 1:
+                text = str(row[0])
+            else:
+                continue
             match = re.search(r"~(\d+)", text)
             if match:
                 last_estimate = int(match.group(1))

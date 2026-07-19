@@ -8,8 +8,15 @@ queries. See docs/superpowers/specs/2026-07-19-verified-examples-validation-desi
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+from agentic_data_contracts.adapters._normalizer import SqlNormalizer
+from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.semantic.base import SemanticSource
+from agentic_data_contracts.validation.explain import ExplainAdapter
+from agentic_data_contracts.validation.validator import ValidationResult, Validator
 
 _KNOWN_KEYS = frozenset({"sql", "question", "id", "principal", "metadata"})
 
@@ -128,3 +135,94 @@ class ExampleValidationReport:
             elif r.status == "valid" and not r.contract_checked:
                 lines.append(f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}")
         return "\n".join(lines)
+
+
+_PARSE_FALLBACK_CAVEAT = (
+    "contract policy not statically verified "
+    "(sqlglot could not parse; engine confirmed plannability only)"
+)
+
+
+def validate_examples(
+    examples: Iterable[VerifiedExample],
+    contract: DataContract,
+    *,
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
+    explain_adapter: ExplainAdapter | None = None,
+    semantic_source: SemanticSource | None = None,
+) -> ExampleValidationReport:
+    """Validate each example's SQL against *contract* via the live Validator.
+
+    One Validator is built per distinct ``example.principal`` (cheap; few
+    principals per corpus) so per-principal rules are checked under the right
+    identity. Layer 1 always runs; Layer 2 (EXPLAIN) runs when *explain_adapter*
+    is given; on a sqlglot parse failure with an adapter present, the engine is
+    asked directly (decision B — added in the next task). Input order is
+    preserved.
+    """
+    validators: dict[str | None, Validator] = {}
+
+    def _validator_for(principal: str | None) -> Validator:
+        if principal not in validators:
+            validators[principal] = Validator(
+                contract,
+                dialect=dialect,
+                explain_adapter=explain_adapter,
+                sql_normalizer=sql_normalizer,
+                semantic_source=semantic_source,
+                caller_principal=principal,
+            )
+        return validators[principal]
+
+    results: list[ExampleResult] = []
+    for example in examples:
+        vr = _validator_for(example.principal).validate(example.sql)
+        results.append(_to_result(example, vr, explain_adapter))
+    return ExampleValidationReport(results=results)
+
+
+def _to_result(
+    example: VerifiedExample,
+    vr: ValidationResult,
+    explain_adapter: ExplainAdapter | None,
+) -> ExampleResult:
+    if not vr.parse_error:
+        # Static checkers ran (we have an AST).
+        if not vr.blocked:
+            return ExampleResult(
+                example=example,
+                status="valid",
+                warnings=list(vr.warnings),
+                contract_checked=True,
+                # A non-blocked result with an adapter means EXPLAIN ran and
+                # passed (validate() runs it whenever there are no static reasons).
+                engine_checked=explain_adapter is not None,
+            )
+        return ExampleResult(
+            example=example,
+            status="violation",
+            reasons=list(vr.reasons),
+            warnings=list(vr.warnings),
+            contract_checked=True,
+            # EXPLAIN ran iff there was no *static* reason at the gate. A static
+            # block leaves schema_valid True and estimated_* None (EXPLAIN was
+            # skipped); an EXPLAIN-caused block always sets one of them —
+            # schema_valid False (schema reject), or a non-None estimate (the
+            # cost/row-limit checks only fire when their estimate is present).
+            engine_checked=explain_adapter is not None
+            and (
+                not vr.schema_valid
+                or vr.estimated_cost_usd is not None
+                or vr.estimated_rows is not None
+            ),
+        )
+
+    # Parse failure — no AST, so no contract check. Engine fallback is Task 5.
+    return ExampleResult(
+        example=example,
+        status="unchecked",
+        reasons=list(vr.reasons),
+        contract_checked=False,
+        engine_checked=False,
+    )

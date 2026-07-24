@@ -313,15 +313,21 @@ def test_langchain_wrapper_accepts_row_format(
     assert "positionally aligned" not in preview.description
 
 
-def test_sdk_wrapper_accepts_row_format(
+def test_sdk_wrapper_forwards_row_format_to_create_tools(
     contract: DataContract, adapter: DuckDBAdapter
 ) -> None:
+    # Proves the value actually reaches create_tools (the only place that
+    # raises this ValueError) rather than merely appearing in the wrapper's
+    # signature — a dropped `row_format=row_format` forward at sdk.py would
+    # let a bogus value through silently and this test would still pass if it
+    # only inspected the signature. `tools=` is deliberately omitted so the
+    # `if tools is None:` branch in create_sdk_mcp_server runs and calls
+    # create_tools itself.
     pytest.importorskip("claude_agent_sdk")
-    import inspect as _inspect
-
     from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
 
-    assert "row_format" in _inspect.signature(create_sdk_mcp_server).parameters
+    with pytest.raises(ValueError, match="row_format must be one of"):
+        create_sdk_mcp_server(contract, adapter=adapter, row_format="bogus")  # type: ignore
 
 
 def test_prebuilt_tools_list_takes_precedence_over_row_format(

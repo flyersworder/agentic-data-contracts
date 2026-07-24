@@ -81,6 +81,20 @@ def _render_rows(
     return [dict(zip(columns, row)) for row in rows]
 
 
+def _validate_row_format(row_format: RowFormat) -> None:
+    """Raise if ``row_format`` is not a recognised value.
+
+    Callers validate eagerly — at wiring time rather than at render time —
+    because tool callables are async and their failures surface as
+    agent-visible text, so a deferred check turns a wiring typo into a
+    confusing mid-session tool error.
+    """
+    if row_format not in _ROW_FORMATS:
+        raise ValueError(
+            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
+        )
+
+
 def _caller_label(principal: str | None) -> str:
     """Human-readable identifier for messages — meant to be wrapped with !r.
 
@@ -185,13 +199,7 @@ def create_tools(
     staleness_threshold_days: int = 90,
     row_format: RowFormat = "compact",
 ) -> list[ToolDef]:
-    # Validated here rather than at render time: tool callables are async and
-    # their failures surface as agent-visible text, so a deferred check would
-    # turn a wiring typo into a confusing mid-session tool error.
-    if row_format not in _ROW_FORMATS:
-        raise ValueError(
-            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
-        )
+    _validate_row_format(row_format)
 
     rows_note = _COMPACT_ROWS_NOTE if row_format == "compact" else ""
 

@@ -45,9 +45,9 @@ from agentic_data_contracts.core.session import (
 )
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
-    _ROW_FORMATS,
     RowFormat,
     ToolDef,
+    _validate_row_format,
     create_tools,
 )
 
@@ -242,10 +242,7 @@ def create_pydantic_ai_toolset(
     """
     # This function returns a factory that builds tools per run, so deferring
     # to create_tools would push a typo to the first agent run. Check now.
-    if row_format not in _ROW_FORMATS:
-        raise ValueError(
-            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
-        )
+    _validate_row_format(row_format)
 
     def _factory(ctx: RunContext[ContractDeps]) -> FunctionToolset[ContractDeps]:
         deps = ctx.deps

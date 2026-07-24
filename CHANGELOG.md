@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.0] - 2026-07-24
+
+### Changed
+
+- **`run_query` and `preview_table` return compact rows by default.** Both tools previously rendered each result row as a JSON object repeating every column name, which roughly **doubles to triples** the token cost of a result for identical information — measured at 198,003 characters versus 84,503 for a 20-column x 500-row result. Because tool results persist in the message history and are re-sent on every subsequent model request, that overhead is paid repeatedly rather than once. `rows` is now a list of **positional arrays** aligned to the `columns` key that `run_query` already returned. New `create_tools(..., row_format=...)` selects the rendering: `"compact"` (default) or `"records"` (the previous dict-per-row shape). The knob is deliberately **operator-facing rather than a model-facing tool argument** — unlike Anthropic's `concise`/`detailed` pattern this drops no information, so the agent has no basis on which to choose, and an `input_schema` field would cost tokens on every request. An unrecognised value raises `ValueError` at `create_tools()` time. In `compact` mode both tool descriptions gain one clause stating that rows are positionally aligned to `columns`.
+
+### Added
+
+- **`preview_table` now returns a `columns` key** in both renderings, so the two result tools share one `{columns, rows}` envelope and a consumer writes a single parser. This also closes a real gap: a zero-row preview previously returned `{"rows": []}` and told the agent nothing about the table's shape.
+- **`RowFormat`** (`Literal["compact", "records"]`) is exported from the package root, alongside `Principal`, for callers typing their own wiring.
+- All four ecosystem wrappers — `create_langchain_tools`, `create_sdk_mcp_server`, `create_pydantic_ai_tools`, `create_pydantic_ai_toolset` — accept and forward `row_format`. `create_pydantic_ai_toolset` validates it in its own body rather than deferring to the per-run factory, so the fail-at-wiring-time guarantee holds on every path. A pre-built `tools=` list continues to take precedence, as it already does over `adapter` and `semantic_source`.
+
+### Compatibility
+
+- **The default output shape of `run_query` and `preview_table` changed.** Anything parsing `rows` as a list of dicts must either read positionally (`row[columns.index("col")]`) or pass `row_format="records"` to restore the previous rendering exactly. Values are unaffected — `json.dumps(..., default=str)` is unchanged, so `Decimal` and `date` still serialize identically. `preview_table`'s new `columns` key is additive and present in both modes. Every other tool is untouched, and no new dependencies are added.
+
+### Internal
+
+- New `_render_rows` helper in `tools/factory.py` owns the branch for both tools. Its `list(row)` coercion is load-bearing: `DatabaseAdapter` is a `@runtime_checkable` Protocol, so an adapter may return its driver's row type, which `dict(zip(...))` tolerated (it needs only iteration) but `json.dumps` would have routed through `default=str` and serialized as a string. Built across 5 TDD tasks, red-first, from a reviewed spec. Full suite green; `ruff` / `ruff format` / `ty` clean.
+
 ## [0.30.0] - 2026-07-19
 
 ### Added

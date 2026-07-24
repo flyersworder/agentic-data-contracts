@@ -146,7 +146,7 @@ async def test_wrap_with_session_check_blocks_on_limit_exceeded(
     callable returns the canonical BLOCKED envelope without invoking
     the inner function. The envelope includes a ``Remaining:`` suffix so
     the agent can see remaining budget — matching ``run_query``'s own
-    blocked-path format at ``factory.py:634-636``."""
+    blocked-path format, produced by its ``_with_remaining`` helper."""
     session = ContractSession(contract_with_limits)
     for _ in range(4):  # exceed max_retries=3
         session.record_retry()

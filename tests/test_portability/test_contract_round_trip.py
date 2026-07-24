@@ -33,8 +33,10 @@ from agentic_data_contracts.validation.validator import Validator
 
 # A query whose verdict depends on the semantic source: joining orders -> customers
 # without the relationship's required_filter ("status != 'cancelled'") makes the
-# producer emit a warning (mirrors test_validator.py:412). The table allowlist and
-# rules (tenant_id filter present, explicit columns) are satisfied, so it is never
+# producer emit a warning (mirrors
+# TestValidatorWithSemanticSource::test_validator_with_semantic_source_emits_warnings).
+# The table allowlist and rules (tenant_id filter, explicit columns) are
+# satisfied, so it is never
 # *blocked* — the only enforcement signal is the semantic-source-derived warning.
 SEMANTIC_DEPENDENT_SQL = (
     "SELECT o.id, c.name FROM analytics.orders o"

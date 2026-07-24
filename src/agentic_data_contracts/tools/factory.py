@@ -235,8 +235,8 @@ def create_tools(
     )
 
     # Build relationship index for BFS path-finding in lookup_relationships.
-    # This is a snapshot, same pattern as Validator (validator.py:70) which also
-    # captures relationships at construction time.  Direct table lookups go
+    # This is a snapshot, same pattern as Validator's frozen _QueryRuleEntry,
+    # which also captures its inputs at construction time.  Direct lookups go
     # through semantic_source.get_relationships_for_table() instead.
     _rel_index = (
         build_relationship_index(semantic_source.get_relationships())
@@ -392,8 +392,8 @@ def create_tools(
         # QUERY SHAPE the caller writes — `required_filter`, `no_select_star`,
         # `require_limit`, `max_joins` — because preview synthesises its own
         # SELECT *  LIMIT N and those rules guard run_query's user-supplied SQL.
-        # Mirrors Validator._is_table_in_scope + _rule_applies_to_principal
-        # (validator.py:233-247); keep the table/principal predicates in sync.
+        # Mirrors Validator._is_table_in_scope + _rule_applies_to_principal;
+        # keep the table/principal predicates in sync.
         block_msgs: list[str] = []
         warn_msgs: list[str] = []
         log_msgs: list[str] = []
@@ -765,8 +765,9 @@ def create_tools(
     async def inspect_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
         # validate() runs a synchronous EXPLAIN/dry-run round-trip to the DB
-        # (validator.py:307) when an explain adapter is configured, so offload
-        # it to a worker thread to keep the event loop responsive.
+        # (Validator.validate -> explain_adapter.explain) when an explain
+        # adapter is configured, so offload it to a worker thread to keep the
+        # event loop responsive.
         result = await asyncio.to_thread(validator.validate, sql)
         data: dict[str, Any] = {
             "valid": not result.blocked,
@@ -799,8 +800,9 @@ def create_tools(
             )
 
         # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
-        # EXPLAIN/dry-run DB round-trip (validator.py:307), so offload it to a
-        # worker thread to avoid blocking the event loop.
+        # EXPLAIN/dry-run DB round-trip (Validator.validate ->
+        # explain_adapter.explain), so offload it to a worker thread to avoid
+        # blocking the event loop.
         vresult = await asyncio.to_thread(validator.validate, sql)
         if vresult.blocked:
             session.record_retry()

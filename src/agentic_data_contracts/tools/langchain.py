@@ -25,7 +25,7 @@ key — including ``inspect_query``, whose explicit purpose is to *report*
 violations as JSON without blocking. The in-tool path here therefore only
 runs ``session.check_limits()`` and the ``BLOCKED —`` prefix sniff; SQL
 validation is left to the underlying tools (``run_query`` self-validates
-at ``factory.py:632-702``).
+inside ``factory.create_tools``).
 
 Requires the ``[langchain]`` extra: ``pip install agentic-data-contracts[langchain]``.
 """
@@ -54,8 +54,8 @@ _BLOCKED_PREFIX = "BLOCKED —"
 
 def _with_remaining(message: str, session: ContractSession) -> str:
     """Append the canonical ``Remaining: {budget}`` suffix used by
-    ``run_query`` (factory.py:627-628) so wrapper-emitted blocks carry
-    the same diagnostic footprint as run_query's own blocks."""
+    ``run_query``'s own ``_with_remaining`` helper, so wrapper-emitted
+    blocks carry the same diagnostic footprint as run_query's own blocks."""
     return f"{message}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
 
@@ -220,9 +220,9 @@ class ContractMiddleware(AgentMiddleware):
         # Session-limit breach: do NOT call ``record_retry()`` here. The
         # session is already past its cap; recording another retry would
         # increment past it for no benefit and risks double-counting if a
-        # future ceiling is added. This mirrors ``factory.py:631-636`` where
-        # ``run_query`` similarly skips ``record_retry`` on limit-exceeded
-        # but does record on validation-block (next branch).
+        # future ceiling is added. This mirrors ``run_query`` in ``factory``,
+        # which similarly skips ``record_retry`` on limit-exceeded but does
+        # record on validation-block (next branch).
         try:
             self._session.check_limits()
         except LimitExceededError as e:
@@ -274,9 +274,10 @@ class ContractMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
         # _check runs the synchronous Validator.validate(), which makes a
-        # blocking EXPLAIN/dry-run DB round-trip (validator.py:307). Offload it
-        # to a worker thread so a slow check cannot stall the event loop in an
-        # async runtime. The sync wrap_tool_call path calls _check directly.
+        # blocking EXPLAIN/dry-run DB round-trip via explain_adapter.explain.
+        # Offload it to a worker thread so a slow check cannot stall the event
+        # loop in an async runtime. The sync wrap_tool_call path calls _check
+        # directly.
         blocked = await asyncio.to_thread(self._check, request)
         if blocked is not None:
             return blocked

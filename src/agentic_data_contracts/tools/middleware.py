@@ -49,8 +49,9 @@ def contract_middleware(
             sql = args.get("sql", "")
             if sql:
                 # validate() makes a synchronous EXPLAIN/dry-run DB round-trip
-                # (validator.py:307), so offload it to a worker thread to keep
-                # the event loop responsive — same rationale as factory.py.
+                # (Validator.validate -> explain_adapter.explain), so offload it
+                # to a worker thread to keep the event loop responsive — same
+                # rationale as factory.py.
                 result = await asyncio.to_thread(validator.validate, sql)
                 if result.blocked:
                     session.record_retry()

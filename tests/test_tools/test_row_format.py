@@ -242,7 +242,8 @@ async def test_preview_table_compact_carries_columns(
     text = result["content"][0]["text"]
     # `columns` must precede `rows` in the serialized body — json.dumps
     # preserves insertion order, so the model reads the header before the
-    # positional values it must align to (factory.py:449-450).
+    # positional values it must align to (see the key-order comment in
+    # preview_table).
     assert text.index('"columns"') < text.index('"rows"')
     body = json.loads(text)
     assert body["columns"] == ["id", "amount", "tenant_id"]

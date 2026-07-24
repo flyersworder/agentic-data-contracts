@@ -10,8 +10,8 @@ not just from the first ``run_query``.
 
 SQL validation is intentionally **not** auto-applied. Doing so would
 block ``inspect_query`` from reporting violations as JSON; the canonical
-``run_query`` self-validation at ``factory.py:632-702`` already covers
-the cost path.
+``run_query`` self-validation inside ``factory.create_tools`` already
+covers the cost path.
 
 Pass ``apply_middleware=False`` to opt out (preserves the pre-0.20.0
 behavior where only ``run_query`` self-checked limits).
@@ -35,8 +35,8 @@ _BLOCKED_PREFIX = "BLOCKED —"
 
 def _with_remaining(message: str, session: ContractSession) -> str:
     """Append the canonical ``Remaining: {budget}`` suffix used by
-    ``run_query`` (factory.py:627-628) so wrapper-emitted blocks carry
-    the same diagnostic footprint as run_query's own blocks."""
+    ``run_query``'s own ``_with_remaining`` helper, so wrapper-emitted
+    blocks carry the same diagnostic footprint as run_query's own blocks."""
     return f"{message}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
 

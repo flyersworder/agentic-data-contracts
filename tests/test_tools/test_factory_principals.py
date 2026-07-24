@@ -461,8 +461,8 @@ class TestPreviewTableEdgeCases:
         self, preview_adapter: DuckDBAdapter
     ) -> None:
         # C2 companion: callers absent from values_by_principal fall through
-        # the rule (mirrors RequiredFilterValuesChecker's documented contract,
-        # checkers.py:339-340). Preview proceeds.
+        # the rule (mirrors RequiredFilterValuesChecker's documented
+        # contract in its class docstring). Preview proceeds.
         contract = _preview_contract(
             """
     - name: tenant_scoped_to_alice

@@ -44,7 +44,12 @@ from agentic_data_contracts.core.session import (
     LimitExceededError,
 )
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    _ROW_FORMATS,
+    RowFormat,
+    ToolDef,
+    create_tools,
+)
 
 _BLOCKED_PREFIX = "BLOCKED —"
 # Substring marking a *terminal* session-budget breach inside a BLOCKED
@@ -87,6 +92,7 @@ def create_pydantic_ai_tools(
     caller_principal: Principal = None,
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
+    row_format: RowFormat = "compact",
 ) -> list[Tool]:
     """Create a list of ``pydantic_ai.Tool``s from a ``DataContract``.
 
@@ -100,6 +106,10 @@ def create_pydantic_ai_tools(
             per-principal table/rule gating (passed through to ``create_tools``).
         tools: Pre-built ``ToolDef`` list (if ``None``, created via
             ``create_tools``).
+        row_format: How ``run_query`` / ``preview_table`` render result
+            rows — ``"compact"`` (default) for positional arrays aligned
+            to ``columns``, ``"records"`` for one dict per row. Ignored
+            when ``tools`` is supplied.
         apply_middleware: When ``True`` (default), each tool pre-checks
             ``session.check_limits()`` and raises ``ContractSessionLimitError``
             on overrun. Set ``False`` to skip the pre-check.
@@ -118,6 +128,7 @@ def create_pydantic_ai_tools(
             semantic_source=semantic_source,
             session=session,
             caller_principal=caller_principal,
+            row_format=row_format,
         )
 
     return [_to_pydantic_ai_tool(t, session, apply_middleware) for t in tools]
@@ -197,6 +208,7 @@ def create_pydantic_ai_toolset(
     adapter: DatabaseAdapter | None = None,
     semantic_source: SemanticSource | None = None,
     apply_middleware: bool = True,
+    row_format: RowFormat = "compact",
 ) -> ToolsetFunc[ContractDeps]:
     """Create a deps-aware toolset factory so ONE shared ``Agent`` serves many users.
 
@@ -228,6 +240,12 @@ def create_pydantic_ai_toolset(
     semantic source) stays shared across all users; only the per-user session and
     principal vary, threaded in via ``deps``.
     """
+    # This function returns a factory that builds tools per run, so deferring
+    # to create_tools would push a typo to the first agent run. Check now.
+    if row_format not in _ROW_FORMATS:
+        raise ValueError(
+            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
+        )
 
     def _factory(ctx: RunContext[ContractDeps]) -> FunctionToolset[ContractDeps]:
         deps = ctx.deps
@@ -248,6 +266,7 @@ def create_pydantic_ai_toolset(
             session=deps.session,
             caller_principal=deps.caller_principal,
             apply_middleware=apply_middleware,
+            row_format=row_format,
         )
         return FunctionToolset(tools)
 

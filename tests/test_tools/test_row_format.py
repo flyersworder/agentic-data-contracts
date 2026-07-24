@@ -282,3 +282,63 @@ def test_preview_table_description_documents_compact_shape(
     )
     assert "positionally aligned" in compact.description
     assert records.description == "Preview sample rows from an allowed table."
+
+
+def test_pydantic_ai_toolset_validates_row_format_eagerly(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # The toolset builds its tools inside a per-run factory, so without its own
+    # check a typo would surface on the first agent run instead of at wiring.
+    pytest.importorskip("pydantic_ai")
+    from agentic_data_contracts.tools.pydantic_ai import create_pydantic_ai_toolset
+
+    with pytest.raises(ValueError, match="row_format must be one of"):
+        create_pydantic_ai_toolset(
+            contract,
+            adapter=adapter,
+            row_format="bogus",  # type: ignore
+        )
+
+
+def test_langchain_wrapper_accepts_row_format(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    pytest.importorskip("langchain_core")
+    from agentic_data_contracts.tools.langchain import create_langchain_tools
+
+    tools = create_langchain_tools(
+        contract, adapter=adapter, semantic_source=semantic, row_format="records"
+    )
+    preview = next(t for t in tools if t.name == "preview_table")
+    assert "positionally aligned" not in preview.description
+
+
+def test_sdk_wrapper_accepts_row_format(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    pytest.importorskip("claude_agent_sdk")
+    import inspect as _inspect
+
+    from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
+
+    assert "row_format" in _inspect.signature(create_sdk_mcp_server).parameters
+
+
+def test_prebuilt_tools_list_takes_precedence_over_row_format(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    pytest.importorskip("langchain_core")
+    from agentic_data_contracts.tools.langchain import create_langchain_tools
+
+    prebuilt = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, row_format="compact"
+    )
+    tools = create_langchain_tools(
+        contract,
+        adapter=adapter,
+        semantic_source=semantic,
+        tools=prebuilt,
+        row_format="records",
+    )
+    preview = next(t for t in tools if t.name == "preview_table")
+    assert "positionally aligned" in preview.description

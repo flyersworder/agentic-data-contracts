@@ -14,3 +14,23 @@ repos:
     rev: v0.0.61
     hooks:
       - id: ty
+
+  # `file.py:NNN` references in comments go stale silently and, unlike a vague
+  # comment, still read as precise -- a reader who follows one lands on
+  # unrelated code and has to work out whether the comment or the code is
+  # wrong. A 2026-07 sweep found 7 of 11 such references pointing somewhere
+  # else entirely (`run_query` had drifted ~630 -> ~790). Name the symbol
+  # instead: it either resolves or visibly doesn't.
+  #
+  # `language: pygrep` inverts the usual logic -- the hook FAILS when `entry`
+  # matches. It is built into pre-commit, so there is no version to pin and no
+  # dependency added. There is no inline escape (no `# noqa` equivalent); if a
+  # legitimate match ever appears -- a test asserting a traceback string, say
+  # -- add a narrow `exclude:` glob here rather than deleting the hook.
+  - repo: local
+    hooks:
+      - id: no-file-line-refs
+        name: no file.py:NNN references (they drift; name the symbol)
+        language: pygrep
+        entry: '[A-Za-z_][A-Za-z0-9_]*\.py:[0-9]+'
+        types: [python]

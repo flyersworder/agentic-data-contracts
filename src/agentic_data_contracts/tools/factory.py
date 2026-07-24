@@ -438,8 +438,17 @@ def create_tools(
         result = await asyncio.to_thread(
             adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
         )
-        rows = [dict(zip(result.columns, row)) for row in result.rows]
-        body = json.dumps({"schema": schema, "table": table, "rows": rows}, default=str)
+        # `columns` precedes `rows`: json.dumps preserves insertion order, so
+        # the model reads the header before the values it must align to.
+        body = json.dumps(
+            {
+                "schema": schema,
+                "table": table,
+                "columns": result.columns,
+                "rows": _render_rows(result.columns, result.rows, row_format),
+            },
+            default=str,
+        )
         # Symmetric with run_query: surface warn/log enforcement so audit
         # trails fire on discovery previews too, not just on direct queries.
         preamble_parts: list[str] = []
@@ -870,7 +879,7 @@ def create_tools(
         ),
         ToolDef(
             name="preview_table",
-            description="Preview sample rows from an allowed table.",
+            description="Preview sample rows from an allowed table." + rows_note,
             input_schema={
                 "type": "object",
                 "properties": {

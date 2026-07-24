@@ -125,7 +125,8 @@ class TestPreviewTable:
         ]
         body = json.loads(text)
         # DuckDB returns Decimal; json.dumps(..., default=str) renders it as a string.
-        assert body["rows"][0]["salary"] == "100000.00"
+        salary = body["rows"][0][body["columns"].index("salary")]
+        assert salary == "100000.00"
 
     async def test_restricted_for_other_principal(
         self, contract: DataContract, adapter: DuckDBAdapter

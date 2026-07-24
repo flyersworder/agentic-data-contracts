@@ -221,3 +221,64 @@ def test_run_query_description_documents_compact_shape(
     assert records.description == (
         "Validate and execute a SQL query, returning the results."
     )
+
+
+@pytest.mark.asyncio
+async def test_preview_table_compact_carries_columns(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    result = await _tool(tools, "preview_table").callable(
+        {"schema": "analytics", "table": "orders"}
+    )
+    body = json.loads(result["content"][0]["text"])
+    assert body["columns"] == ["id", "amount", "tenant_id"]
+    assert body["rows"][0] == [1, "100.00", "acme"]
+
+
+@pytest.mark.asyncio
+async def test_preview_table_records_also_carries_columns(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, row_format="records"
+    )
+    result = await _tool(tools, "preview_table").callable(
+        {"schema": "analytics", "table": "orders"}
+    )
+    body = json.loads(result["content"][0]["text"])
+    assert body["columns"] == ["id", "amount", "tenant_id"]
+    assert body["rows"][0] == {"id": 1, "amount": "100.00", "tenant_id": "acme"}
+
+
+@pytest.mark.asyncio
+async def test_zero_row_preview_still_reports_columns(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    # The gap this closes: an empty preview used to return {"rows": []} and
+    # tell the agent nothing about the table's shape.
+    adapter.connection.execute("DELETE FROM analytics.orders")
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    result = await _tool(tools, "preview_table").callable(
+        {"schema": "analytics", "table": "orders"}
+    )
+    body = json.loads(result["content"][0]["text"])
+    assert body["rows"] == []
+    assert body["columns"] == ["id", "amount", "tenant_id"]
+
+
+def test_preview_table_description_documents_compact_shape(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    compact = _tool(
+        create_tools(contract, adapter=adapter, semantic_source=semantic),
+        "preview_table",
+    )
+    records = _tool(
+        create_tools(
+            contract, adapter=adapter, semantic_source=semantic, row_format="records"
+        ),
+        "preview_table",
+    )
+    assert "positionally aligned" in compact.description
+    assert records.description == "Preview sample rows from an allowed table."

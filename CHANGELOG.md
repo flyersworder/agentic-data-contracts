@@ -16,11 +16,11 @@ All notable changes to this project will be documented in this file.
 
 ### Compatibility
 
-- **The default output shape of `run_query` and `preview_table` changed.** Anything parsing `rows` as a list of dicts must either read positionally (`row[columns.index("col")]`) or pass `row_format="records"` to restore the previous rendering exactly. Values are unaffected — `json.dumps(..., default=str)` is unchanged, so `Decimal` and `date` still serialize identically. `preview_table`'s new `columns` key is additive and present in both modes. Every other tool is untouched, and no new dependencies are added.
+- **The default output shape of `run_query` and `preview_table` changed.** Anything parsing `rows` as a list of dicts must either read positionally (`row[columns.index("col")]`) or pass `row_format="records"` to restore the previous `rows` rendering — with one caveat: `records`' `dict(zip(columns, row))` is last-value-wins, so a query with duplicate column labels (e.g. `SELECT t.id, u.id FROM t, t u`) silently drops one column under `records`, where `compact`'s positional arrays keep both — one more reason `compact` is the better default. Values are unaffected — `json.dumps(..., default=str)` is unchanged, so `Decimal` and `date` still serialize identically. `preview_table`'s new `columns` key is additive and present in both modes. Every other tool is untouched, and no new dependencies are added.
 
 ### Internal
 
-- New `_render_rows` helper in `tools/factory.py` owns the branch for both tools. Its `list(row)` coercion is load-bearing: `DatabaseAdapter` is a `@runtime_checkable` Protocol, so an adapter may return its driver's row type, which `dict(zip(...))` tolerated (it needs only iteration) but `json.dumps` would have routed through `default=str` and serialized as a string. Built across 5 TDD tasks, red-first, from a reviewed spec. Full suite green; `ruff` / `ruff format` / `ty` clean.
+- New `_render_rows` helper in `tools/factory.py` owns the branch for both tools. Its `list(row)` coercion is load-bearing: `DatabaseAdapter` is a `@runtime_checkable` Protocol, so an adapter may return its driver's row type, which `dict(zip(...))` tolerated (it needs only iteration) but `json.dumps` would have routed through `default=str` and serialized as a string. Full suite green; `ruff` / `ruff format` / `ty` clean.
 
 ## [0.30.0] - 2026-07-19
 

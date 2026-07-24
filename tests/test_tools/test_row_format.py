@@ -10,7 +10,11 @@ import pytest
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.yaml_source import YamlSource
-from agentic_data_contracts.tools.factory import _render_rows, create_tools
+from agentic_data_contracts.tools.factory import (
+    _COMPACT_ROWS_NOTE,
+    _render_rows,
+    create_tools,
+)
 
 COLUMNS = ["region", "units", "note"]
 ROWS = [
@@ -147,7 +151,11 @@ def test_unknown_row_format_raises_at_create_time(
     contract: DataContract, adapter: DuckDBAdapter
 ) -> None:
     with pytest.raises(ValueError, match="row_format must be one of"):
-        create_tools(contract, adapter=adapter, row_format="bogus")  # type: ignore
+        create_tools(
+            contract,
+            adapter=adapter,
+            row_format="bogus",  # ty: ignore[invalid-argument-type]
+        )
 
 
 @pytest.mark.asyncio
@@ -217,10 +225,10 @@ def test_run_query_description_documents_compact_shape(
         ),
         "run_query",
     )
-    assert "positionally aligned" in compact.description
     assert records.description == (
         "Validate and execute a SQL query, returning the results."
     )
+    assert compact.description == records.description + _COMPACT_ROWS_NOTE
 
 
 @pytest.mark.asyncio
@@ -231,7 +239,12 @@ async def test_preview_table_compact_carries_columns(
     result = await _tool(tools, "preview_table").callable(
         {"schema": "analytics", "table": "orders"}
     )
-    body = json.loads(result["content"][0]["text"])
+    text = result["content"][0]["text"]
+    # `columns` must precede `rows` in the serialized body — json.dumps
+    # preserves insertion order, so the model reads the header before the
+    # positional values it must align to (factory.py:449-450).
+    assert text.index('"columns"') < text.index('"rows"')
+    body = json.loads(text)
     assert body["columns"] == ["id", "amount", "tenant_id"]
     assert body["rows"][0] == [1, "100.00", "acme"]
 
@@ -280,8 +293,8 @@ def test_preview_table_description_documents_compact_shape(
         ),
         "preview_table",
     )
-    assert "positionally aligned" in compact.description
     assert records.description == "Preview sample rows from an allowed table."
+    assert compact.description == records.description + _COMPACT_ROWS_NOTE
 
 
 def test_pydantic_ai_toolset_validates_row_format_eagerly(
@@ -296,7 +309,7 @@ def test_pydantic_ai_toolset_validates_row_format_eagerly(
         create_pydantic_ai_toolset(
             contract,
             adapter=adapter,
-            row_format="bogus",  # type: ignore
+            row_format="bogus",  # ty: ignore[invalid-argument-type]
         )
 
 
@@ -327,7 +340,11 @@ def test_sdk_wrapper_forwards_row_format_to_create_tools(
     from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
 
     with pytest.raises(ValueError, match="row_format must be one of"):
-        create_sdk_mcp_server(contract, adapter=adapter, row_format="bogus")  # type: ignore
+        create_sdk_mcp_server(
+            contract,
+            adapter=adapter,
+            row_format="bogus",  # ty: ignore[invalid-argument-type]
+        )
 
 
 def test_prebuilt_tools_list_takes_precedence_over_row_format(
@@ -348,3 +365,62 @@ def test_prebuilt_tools_list_takes_precedence_over_row_format(
     )
     preview = next(t for t in tools if t.name == "preview_table")
     assert "positionally aligned" in preview.description
+
+
+def test_pydantic_ai_tools_forwards_row_format_to_create_tools(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # Mirrors test_sdk_wrapper_forwards_row_format_to_create_tools above:
+    # proves row_format actually reaches create_tools (the only place that
+    # raises this ValueError) rather than merely appearing in the wrapper's
+    # signature. `tools=` is deliberately omitted so the `if tools is None:`
+    # branch in create_pydantic_ai_tools runs and calls create_tools itself.
+    pytest.importorskip("pydantic_ai")
+    from agentic_data_contracts.tools.pydantic_ai import create_pydantic_ai_tools
+
+    with pytest.raises(ValueError, match="row_format must be one of"):
+        create_pydantic_ai_tools(
+            contract,
+            adapter=adapter,
+            row_format="bogus",  # ty: ignore[invalid-argument-type]
+        )
+
+
+def test_pydantic_ai_toolset_factory_forwards_row_format(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    # test_pydantic_ai_toolset_validates_row_format_eagerly (above) only
+    # proves the toolset's own eager pre-check at wiring time — that check
+    # runs before _factory is ever invoked, so it never touches the
+    # `row_format=row_format` forward inside _factory's create_pydantic_ai_tools
+    # call. Actually invoke the factory with a real ContractDeps/RunContext so
+    # a dropped forward there is caught too.
+    pytest.importorskip("pydantic_ai")
+    from typing import Any, cast
+
+    from pydantic_ai import RunContext
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.usage import RunUsage
+
+    from agentic_data_contracts.core.session import ContractSession
+    from agentic_data_contracts.tools.pydantic_ai import (
+        ContractDeps,
+        create_pydantic_ai_toolset,
+    )
+
+    factory = create_pydantic_ai_toolset(
+        contract, adapter=adapter, semantic_source=semantic, row_format="records"
+    )
+    deps = ContractDeps(session=ContractSession(contract))
+    ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+    # create_pydantic_ai_toolset's declared return type is a ToolsetFunc whose
+    # call signature covers async-factory and None cases the deps-aware path
+    # never takes; cast through Any here, same as test_pydantic_ai.py's
+    # _toolset_tools helper, rather than a line-level ty:ignore.
+    toolset = cast(Any, factory(ctx))
+    preview = toolset.tools["preview_table"]
+    # "positionally aligned" is appended only in compact mode (factory.py's
+    # _COMPACT_ROWS_NOTE); its absence proves "records" travelled through
+    # _factory's create_pydantic_ai_tools(..., row_format=row_format) call
+    # into create_tools, not just into the toolset factory's own signature.
+    assert "positionally aligned" not in preview.description

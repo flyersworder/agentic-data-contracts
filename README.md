@@ -445,9 +445,13 @@ tools = create_tools(contract, adapter=adapter, row_format="records")
 #  "rows": [{"region": "EMEA", "units": 412}, {"region": "APAC", "units": 87}]}
 ```
 
-Both renderings carry identical information and coerce values identically; only
-the container differs. An unrecognised value raises `ValueError` at
-`create_tools()` time, not on the first query.
+Both renderings coerce values identically, and carry identical information for
+distinctly-labelled columns; only the container differs. One case is not
+symmetric: a query with duplicate column labels (e.g. `SELECT t.id, u.id FROM
+t, t u`) collapses under `records`, since `dict(zip(columns, row))` is
+last-value-wins and silently drops one column — `compact`'s positional arrays
+keep both. An unrecognised value raises `ValueError` at `create_tools()` time,
+not on the first query.
 
 ## Domain-Driven Agent Workflow
 

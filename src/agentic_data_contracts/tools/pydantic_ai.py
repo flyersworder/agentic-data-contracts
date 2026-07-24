@@ -47,8 +47,8 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
     RowFormat,
     ToolDef,
-    _validate_row_format,
     create_tools,
+    validate_row_format,
 )
 
 _BLOCKED_PREFIX = "BLOCKED —"
@@ -242,7 +242,7 @@ def create_pydantic_ai_toolset(
     """
     # This function returns a factory that builds tools per run, so deferring
     # to create_tools would push a typo to the first agent run. Check now.
-    _validate_row_format(row_format)
+    validate_row_format(row_format)
 
     def _factory(ctx: RunContext[ContractDeps]) -> FunctionToolset[ContractDeps]:
         deps = ctx.deps

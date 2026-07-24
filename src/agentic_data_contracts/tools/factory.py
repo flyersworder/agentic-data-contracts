@@ -81,7 +81,7 @@ def _render_rows(
     return [dict(zip(columns, row)) for row in rows]
 
 
-def _validate_row_format(row_format: RowFormat) -> None:
+def validate_row_format(row_format: RowFormat) -> None:
     """Raise if ``row_format`` is not a recognised value.
 
     Callers validate eagerly — at wiring time rather than at render time —
@@ -199,7 +199,7 @@ def create_tools(
     staleness_threshold_days: int = 90,
     row_format: RowFormat = "compact",
 ) -> list[ToolDef]:
-    _validate_row_format(row_format)
+    validate_row_format(row_format)
 
     rows_note = _COMPACT_ROWS_NOTE if row_format == "compact" else ""
 

@@ -183,7 +183,18 @@ def create_tools(
     session: ContractSession | None = None,
     caller_principal: Principal = None,
     staleness_threshold_days: int = 90,
+    row_format: RowFormat = "compact",
 ) -> list[ToolDef]:
+    # Validated here rather than at render time: tool callables are async and
+    # their failures surface as agent-visible text, so a deferred check would
+    # turn a wiring typo into a confusing mid-session tool error.
+    if row_format not in _ROW_FORMATS:
+        raise ValueError(
+            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
+        )
+
+    rows_note = _COMPACT_ROWS_NOTE if row_format == "compact" else ""
+
     if session is None:
         session = ContractSession(contract)
 
@@ -815,10 +826,9 @@ def create_tools(
             )
             return _text_response(_with_remaining(msg))
 
-        rows = [dict(zip(qresult.columns, row)) for row in qresult.rows]
         data = {
             "columns": qresult.columns,
-            "rows": rows,
+            "rows": _render_rows(qresult.columns, qresult.rows, row_format),
             "row_count": qresult.row_count,
             "session": {"remaining": session.remaining()},
         }
@@ -975,7 +985,9 @@ def create_tools(
         ),
         ToolDef(
             name="run_query",
-            description="Validate and execute a SQL query, returning the results.",
+            description=(
+                "Validate and execute a SQL query, returning the results." + rows_note
+            ),
             input_schema={
                 "type": "object",
                 "properties": {

@@ -3,8 +3,14 @@
 import json
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
-from agentic_data_contracts.tools.factory import _render_rows
+import pytest
+
+from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
+from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.semantic.yaml_source import YamlSource
+from agentic_data_contracts.tools.factory import _render_rows, create_tools
 
 COLUMNS = ["region", "units", "note"]
 ROWS = [
@@ -99,3 +105,119 @@ def test_row_format_is_exported_from_package_root() -> None:
     import agentic_data_contracts
 
     assert "RowFormat" in agentic_data_contracts.__all__
+
+
+SQL = "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"
+
+
+@pytest.fixture
+def contract(fixtures_dir: Path) -> DataContract:
+    return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+
+
+@pytest.fixture
+def adapter() -> DuckDBAdapter:
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        """
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (
+            id INTEGER, amount DECIMAL(10,2), tenant_id VARCHAR
+        );
+        INSERT INTO analytics.orders VALUES (1, 100.00, 'acme'), (2, 200.00, 'acme');
+        CREATE TABLE analytics.customers (id INTEGER, name VARCHAR, tenant_id VARCHAR);
+        CREATE TABLE analytics.subscriptions (
+            id INTEGER, plan VARCHAR, tenant_id VARCHAR
+        );
+        """
+    )
+    return db
+
+
+@pytest.fixture
+def semantic(fixtures_dir: Path) -> YamlSource:
+    return YamlSource(fixtures_dir / "semantic_source.yml")
+
+
+def _tool(tools: list, name: str):
+    return next(t for t in tools if t.name == name)
+
+
+def test_unknown_row_format_raises_at_create_time(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    with pytest.raises(ValueError, match="row_format must be one of"):
+        create_tools(contract, adapter=adapter, row_format="bogus")  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_run_query_compact_is_the_default(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    result = await _tool(tools, "run_query").callable({"sql": SQL})
+    body = json.loads(result["content"][0]["text"])
+    assert body["columns"] == ["id", "amount"]
+    assert body["rows"] == [[1, "100.00"], [2, "200.00"]]
+
+
+@pytest.mark.asyncio
+async def test_run_query_records_reproduces_legacy_shape(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, row_format="records"
+    )
+    result = await _tool(tools, "run_query").callable({"sql": SQL})
+    body = json.loads(result["content"][0]["text"])
+    assert body["rows"] == [
+        {"id": 1, "amount": "100.00"},
+        {"id": 2, "amount": "200.00"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_both_modes_agree_column_for_column(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    compact = json.loads(
+        (
+            await _tool(
+                create_tools(contract, adapter=adapter, semantic_source=semantic),
+                "run_query",
+            ).callable({"sql": SQL})
+        )["content"][0]["text"]
+    )
+    records = json.loads(
+        (
+            await _tool(
+                create_tools(
+                    contract,
+                    adapter=adapter,
+                    semantic_source=semantic,
+                    row_format="records",
+                ),
+                "run_query",
+            ).callable({"sql": SQL})
+        )["content"][0]["text"]
+    )
+    rebuilt = [dict(zip(compact["columns"], row)) for row in compact["rows"]]
+    assert rebuilt == records["rows"]
+
+
+def test_run_query_description_documents_compact_shape(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    compact = _tool(
+        create_tools(contract, adapter=adapter, semantic_source=semantic), "run_query"
+    )
+    records = _tool(
+        create_tools(
+            contract, adapter=adapter, semantic_source=semantic, row_format="records"
+        ),
+        "run_query",
+    )
+    assert "positionally aligned" in compact.description
+    assert records.description == (
+        "Validate and execute a SQL query, returning the results."
+    )

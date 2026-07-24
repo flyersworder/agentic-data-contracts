@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
@@ -49,6 +50,35 @@ class ToolDef:
 
 def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+RowFormat = Literal["compact", "records"]
+
+_ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
+
+_COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
+
+
+def _render_rows(
+    columns: Sequence[str],
+    rows: Iterable[Iterable[Any]],
+    row_format: RowFormat,
+) -> list[Any]:
+    """Render result rows for JSON serialization.
+
+    ``compact`` emits positional arrays aligned to ``columns``; ``records``
+    emits one dict per row (the pre-0.31 rendering).
+
+    The ``list(row)`` coercion is load-bearing. ``QueryResult.rows`` is
+    annotated ``list[tuple[Any, ...]]``, but ``DatabaseAdapter`` is a
+    ``@runtime_checkable`` Protocol, so a third-party adapter may hand back its
+    driver's row type. ``zip`` only needs iteration, so the ``records`` branch
+    tolerates that; ``json.dumps`` does not — a row that is neither list nor
+    tuple falls through to ``default=str`` and serializes as a *string*.
+    """
+    if row_format == "compact":
+        return [list(row) for row in rows]
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def _caller_label(principal: str | None) -> str:

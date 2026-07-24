@@ -19,7 +19,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     SemanticSource,
 )
-from agentic_data_contracts.tools.factory import create_tools
+from agentic_data_contracts.tools.factory import RowFormat, create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
 
@@ -60,6 +60,7 @@ __all__ = [
     "Principal",
     "PromptRenderer",
     "Relationship",
+    "RowFormat",
     "SemanticSource",
     "SemanticSourceUnavailableError",
     "SqlNormalizer",

@@ -412,14 +412,46 @@ asyncio.run(demo())
 | Tool | Description |
 |------|-------------|
 | `describe_table` | Get full column details for an allowed table |
-| `preview_table` | Preview sample rows from an allowed table |
+| `preview_table` | Preview sample rows from an allowed table; returns `{schema, table, columns, rows}` |
 | `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind; flags `stale` metrics |
 | `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, decompositions, drill_by, owners, freshness); fuzzy search fallback when no exact match |
 | `lookup_domain` | Get full domain context (description, metrics, tables, owners, freshness); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges, filtered by `kinds` |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
-| `run_query` | Validate and execute a SQL query, returning results |
+| `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, session}` |
+
+### Result encoding
+
+`run_query` and `preview_table` both return a `columns` list alongside their
+`rows`. By default `rows` is a list of **positional arrays** aligned to
+`columns`:
+
+```json
+{"columns": ["region", "units"], "rows": [["EMEA", 412], ["APAC", 87]]}
+```
+
+This costs less than half the tokens of repeating every column name on every
+row, and matters more than it looks: tool results stay in the message history
+and are re-sent on every subsequent model request, so an oversized result is
+paid for repeatedly rather than once.
+
+Pass `row_format="records"` to `create_tools()` (or to any of the ecosystem
+wrappers) to get one dict per row instead — the pre-0.31 shape:
+
+```python
+tools = create_tools(contract, adapter=adapter, row_format="records")
+# {"columns": ["region", "units"],
+#  "rows": [{"region": "EMEA", "units": 412}, {"region": "APAC", "units": 87}]}
+```
+
+Both renderings coerce values identically, and carry identical information for
+distinctly-labelled columns; only the container differs. One case is not
+symmetric: a query with duplicate column labels (e.g. `SELECT t.id, u.id FROM
+t, t u`) collapses under `records`, since `dict(zip(columns, row))` is
+last-value-wins and silently drops one column — `compact`'s positional arrays
+keep both. An unrecognised value raises `ValueError` at `create_tools()` time,
+not on the first query.
 
 ## Domain-Driven Agent Workflow
 

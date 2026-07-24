@@ -354,7 +354,7 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 ### 9 Tools
 
 1. **`describe_table(schema, table)`** — Column details, merging the database adapter's catalog view with authored descriptions from the semantic source (semantic wins; adapter fills gaps)
-2. **`preview_table(schema, table, limit?)`** — Sample rows
+2. **`preview_table(schema, table, limit?)`** — Sample rows, as `{schema, table, columns, rows}`
 3. **`list_metrics(domain?, tier?, indicator_kind?)`** — Browse metrics with filters
 4. **`lookup_metric(metric_name)`** — Full metric definition with SQL, impact edges, and any `decompositions` / `drill_by`
 5. **`lookup_domain(name)`** — Full domain description with metrics and tables
@@ -362,6 +362,13 @@ Two modes: tool factory for quick starts, middleware for BYO tools.
 7. **`trace_metric_impacts(metric_name, direction, max_depth?, kinds?)`** — BFS over the metric graph across both influence and identity (decomposition) edges; `kinds` (`all` / `identity` / `influence`) filters which kind(s) to walk
 8. **`inspect_query(sql)`** — Static + EXPLAIN check, no execution
 9. **`run_query(sql)`** — Validate and execute; response includes remaining session budget
+
+Both result-returning tools render `rows` according to `create_tools(row_format=...)`:
+`"compact"` (the default) emits positional arrays aligned to the `columns` key,
+`"records"` emits one dict per row. The rendering is an operator decision, not an
+agent-facing tool argument — the two carry identical information, so the model has
+no basis on which to choose, and a schema field would cost input tokens on every
+request. The value is validated eagerly at `create_tools()` time.
 
 ### Natural Agent Workflow
 

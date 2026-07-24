@@ -28,7 +28,7 @@ from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import ToolDef, create_tools
+from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
 
 _BLOCKED_PREFIX = "BLOCKED —"
 
@@ -81,6 +81,7 @@ def create_sdk_mcp_server(
     session: ContractSession | None = None,
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
+    row_format: RowFormat = "compact",
     server_name: str = "data-contracts",
     server_version: str = "1.0.0",
 ) -> Any:
@@ -96,6 +97,10 @@ def create_sdk_mcp_server(
         session: Optional session for tracking enforcement state. One is
             created automatically if omitted.
         tools: Pre-built ToolDefs (if None, created via create_tools).
+        row_format: How ``run_query`` / ``preview_table`` render result
+            rows — ``"compact"`` (default) for positional arrays aligned
+            to ``columns``, ``"records"`` for one dict per row. Ignored
+            when ``tools`` is supplied.
         apply_middleware: When ``True`` (default since v0.20.0), every
             wrapped tool pre-checks ``session.check_limits()`` and
             short-circuits on overrun. Aligned with ``create_langchain_tools``
@@ -140,6 +145,7 @@ def create_sdk_mcp_server(
             adapter=adapter,
             semantic_source=semantic_source,
             session=session,
+            row_format=row_format,
         )
 
     sdk_tools = []

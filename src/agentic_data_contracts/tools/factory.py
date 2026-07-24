@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
@@ -49,6 +50,49 @@ class ToolDef:
 
 def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+RowFormat = Literal["compact", "records"]
+
+_ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
+
+_COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
+
+
+def _render_rows(
+    columns: Sequence[str],
+    rows: Iterable[Iterable[Any]],
+    row_format: RowFormat,
+) -> list[Any]:
+    """Render result rows for JSON serialization.
+
+    ``compact`` emits positional arrays aligned to ``columns``; ``records``
+    emits one dict per row (the pre-0.31 rendering).
+
+    The ``list(row)`` coercion is load-bearing. ``QueryResult.rows`` is
+    annotated ``list[tuple[Any, ...]]``, but ``DatabaseAdapter`` is a
+    ``@runtime_checkable`` Protocol, so a third-party adapter may hand back its
+    driver's row type. ``zip`` only needs iteration, so the ``records`` branch
+    tolerates that; ``json.dumps`` does not — a row that is neither list nor
+    tuple falls through to ``default=str`` and serializes as a *string*.
+    """
+    if row_format == "compact":
+        return [list(row) for row in rows]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def validate_row_format(row_format: RowFormat) -> None:
+    """Raise if ``row_format`` is not a recognised value.
+
+    Callers validate eagerly — at wiring time rather than at render time —
+    because tool callables are async and their failures surface as
+    agent-visible text, so a deferred check turns a wiring typo into a
+    confusing mid-session tool error.
+    """
+    if row_format not in _ROW_FORMATS:
+        raise ValueError(
+            f"row_format must be one of {list(_ROW_FORMATS)}; got {row_format!r}"
+        )
 
 
 def _caller_label(principal: str | None) -> str:
@@ -153,7 +197,12 @@ def create_tools(
     session: ContractSession | None = None,
     caller_principal: Principal = None,
     staleness_threshold_days: int = 90,
+    row_format: RowFormat = "compact",
 ) -> list[ToolDef]:
+    validate_row_format(row_format)
+
+    rows_note = _COMPACT_ROWS_NOTE if row_format == "compact" else ""
+
     if session is None:
         session = ContractSession(contract)
 
@@ -397,8 +446,17 @@ def create_tools(
         result = await asyncio.to_thread(
             adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
         )
-        rows = [dict(zip(result.columns, row)) for row in result.rows]
-        body = json.dumps({"schema": schema, "table": table, "rows": rows}, default=str)
+        # `columns` precedes `rows`: json.dumps preserves insertion order, so
+        # the model reads the header before the values it must align to.
+        body = json.dumps(
+            {
+                "schema": schema,
+                "table": table,
+                "columns": result.columns,
+                "rows": _render_rows(result.columns, result.rows, row_format),
+            },
+            default=str,
+        )
         # Symmetric with run_query: surface warn/log enforcement so audit
         # trails fire on discovery previews too, not just on direct queries.
         preamble_parts: list[str] = []
@@ -785,10 +843,9 @@ def create_tools(
             )
             return _text_response(_with_remaining(msg))
 
-        rows = [dict(zip(qresult.columns, row)) for row in qresult.rows]
         data = {
             "columns": qresult.columns,
-            "rows": rows,
+            "rows": _render_rows(qresult.columns, qresult.rows, row_format),
             "row_count": qresult.row_count,
             "session": {"remaining": session.remaining()},
         }
@@ -830,7 +887,7 @@ def create_tools(
         ),
         ToolDef(
             name="preview_table",
-            description="Preview sample rows from an allowed table.",
+            description="Preview sample rows from an allowed table." + rows_note,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -945,7 +1002,9 @@ def create_tools(
         ),
         ToolDef(
             name="run_query",
-            description="Validate and execute a SQL query, returning the results.",
+            description=(
+                "Validate and execute a SQL query, returning the results." + rows_note
+            ),
             input_schema={
                 "type": "object",
                 "properties": {

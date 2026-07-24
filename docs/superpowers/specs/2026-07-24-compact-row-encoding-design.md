@@ -86,6 +86,12 @@ an escape hatch. All four wrapper call sites accept and forward the parameter.
 
 ### Public API
 
+`RowFormat` is defined in `tools/factory.py` beside `ToolDef`, imported from
+there by the four wrapper modules, and re-exported from the top-level
+`agentic_data_contracts` package. This follows `Principal`, the analogous
+parameter-type alias on `create_tools`, which is already exported that way
+(`__init__.py:14`, `:60`).
+
 ```python
 RowFormat = Literal["compact", "records"]
 
@@ -108,6 +114,12 @@ string raises `ValueError` naming both valid options.
 Eager validation is deliberate. Tool callables are async and their failures
 surface as agent-visible text, so a deferred check would turn a wiring typo into
 a confusing mid-session tool error rather than an immediate startup failure.
+
+`create_pydantic_ai_toolset` builds its tools inside a per-run `_factory`
+closure rather than at call time, so it must validate `row_format` in its own
+body *before* returning the factory. Relying on `create_tools` alone would defer
+the check to the first agent run on that one path, which is the failure mode
+eager validation exists to prevent.
 
 ### Response envelopes
 
@@ -163,6 +175,17 @@ Placed in `factory.py` beside `_text_response`. Pure, no I/O, called by both
 tools. Keeping it separate makes the branch unit-testable without a database
 adapter, rather than reachable only through two 40-line async functions.
 
+**`compact` must coerce each row with `list(row)`.** `QueryResult.rows` is
+annotated `list[tuple[Any, ...]]`, but `DatabaseAdapter` is a
+`@runtime_checkable` Protocol, so a third-party adapter may return driver row
+objects instead. Today's `dict(zip(columns, row))` requires only *iterability*,
+so such rows work by accident; `json.dumps` does not — a row that is neither
+`list` nor `tuple` falls through to `default=str` and serializes as a **string**
+rather than an array, silently corrupting the shape. The codebase already
+distrusts this annotation: `run_query` does `[tuple(r) for r in qresult.rows]`
+before result checks (`factory.py:779`). The `records` branch keeps working
+unchanged, since `zip` needs nothing more than iteration.
+
 ### Tool descriptions
 
 In `compact` mode, both descriptions gain one clause:
@@ -194,18 +217,29 @@ a caller supplies a pre-built list, `row_format` is not consulted.
 
 No new failure modes. The only new raise is the eager `ValueError` on an
 unrecognised `row_format`. Rendering cannot fail for inputs that render today:
-`_render_rows` performs no type inspection, and serialization keeps the existing
-`default=str` fallback. Empty result sets produce `"rows": []` in both modes,
-now accompanied by a populated `columns` list.
+`_render_rows` inspects no value types, the `list(row)` coercion accepts any
+iterable, and serialization keeps the existing `default=str` fallback.
+
+Empty result sets produce `"rows": []` in both modes, accompanied by whatever
+`columns` the adapter reported. Note the dependency: the `preview_table`
+zero-row improvement holds only for adapters that populate `columns` on an empty
+result. The bundled DuckDB adapter does, reading `cursor.description` before
+`fetchall` (`adapters/duckdb.py:38`), but the `DatabaseAdapter` protocol does
+not require it, and an adapter returning `columns=[]` there simply gets today's
+behaviour rather than an error.
 
 ## Testing
 
-Test-driven, red first, under `tests/test_tools/`.
+Test-driven, red first, in a new `tests/test_tools/test_row_format.py`, except
+for the one existing-test update noted below.
 
 **`_render_rows` unit tests** — both modes on the same fixture; empty row list;
 `None` values preserved as `null` and distinct from `""`; a value containing a
 tab and a newline, documenting that the delimiter bug class does not exist here;
-`Decimal` and `date` coerced identically in both modes via `default=str`.
+`Decimal` and `date` coerced identically in both modes via `default=str`; and a
+row supplied as a **non-tuple sequence** (a custom iterable, standing in for a
+driver row type), asserting the serialized `compact` output is a JSON array
+rather than a quoted string.
 
 **`run_query`** — compact yields lists and records yields dicts; both agree
 column-for-column on one fixture; the `WARNINGS:` / `LOG:` preamble still
@@ -214,9 +248,10 @@ precedes the JSON body in compact mode.
 **`preview_table`** — `columns` present in both modes; a zero-row preview still
 carries `columns`.
 
-**Configuration** — `create_tools(row_format="bogus")` raises `ValueError`; each
-of the four wrappers forwards the parameter; a wrapper given an explicit `tools=`
-list ignores `row_format`.
+**Configuration** — `create_tools(row_format="bogus")` raises `ValueError`;
+`create_pydantic_ai_toolset(row_format="bogus")` raises at call time, not on
+first run; each of the four wrappers forwards the parameter; a wrapper given an
+explicit `tools=` list ignores `row_format`.
 
 **Existing test to update** — `tests/test_tools/test_factory_principals.py:128`
 asserts `body["rows"][0]["salary"]`. Rewritten as

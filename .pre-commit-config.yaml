@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.22
+    rev: v0.16.0
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -11,7 +11,7 @@ repos:
   # -- a `language: system` hook calling `ty check` cannot see them, and needs
   # `unresolved-import = "ignore"` to stay quiet.
   - repo: https://github.com/astral-sh/ty-pre-commit
-    rev: v0.0.61
+    rev: v0.0.64
     hooks:
       - id: ty
 

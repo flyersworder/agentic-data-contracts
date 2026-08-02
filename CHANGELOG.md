@@ -2,20 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.32.1] - 2026-08-02
+## [0.33.0] - 2026-08-02
 
 ### Fixed
 
-- **Two optional-extra floors were untrue, and the `test-lowest-floors` job now proves the rest are not.** 0.32.0 added that job but scoped it to core dependencies, because widening it revealed pre-existing floor breaks that would have made it permanently red. Both are now fixed, so the job runs the **full suite** against every declared minimum.
+- **Two optional-extra floors were untrue, and `mcp` was imported without being declared.** 0.32.0 added the `test-lowest-floors` job but scoped it to core dependencies, because widening it revealed pre-existing breaks that would have left the job permanently red. Those are fixed here, so the job now runs the **full suite** at every declared minimum, matrixed over both supported Pythons.
 
-  - **`agent-sdk`: `claude-agent-sdk>=0.1.58` → `>=0.2.96`.** An upstream constraint bug this package's floor inherited: 0.1.58 declared a bare `mcp>=0.1.0`, so resolving the extra at its floor pulled `mcp` 2.0.0 — which removed `Server.list_tools` and broke `claude_agent_sdk`'s own `create_sdk_mcp_server`. 0.2.96 is the first release bounding it (`mcp<2.0.0,>=1.23.0`).
-  - **`duckdb`: `>=1.0.0` → `>=1.1.0`.** DuckDB 1.0.0 renders the EXPLAIN cardinality as `EC: N`; 1.1.0 changed it to `~N Rows`, which is what `DuckDBAdapter._parse_row_estimate` matches. At 1.0.0 the estimate silently parsed as `None`, so `run_query`'s cost accounting had nothing to record.
+  - **`agent-sdk` now declares `mcp>=1.23.0` directly, and requires `claude-agent-sdk>=0.2.96`.** `tools/sdk.py` imports `mcp.types.ToolAnnotations` at runtime, so `mcp` was always a direct dependency — it simply was not declared, which is how this extra inherited an upstream constraint bug it could have owned. `claude-agent-sdk` 0.1.x declared a bare `mcp>=0.1.0`, so resolving the extra at its floor pulled `mcp` 2.0.0, which removed `Server.list_tools` and broke the SDK's own `create_sdk_mcp_server`. The **upper** bound is deliberately left with `claude-agent-sdk` (0.2.96 is the first release declaring `mcp<2.0.0,>=1.23.0`): mcp 2.0 broke *its* call, not ours, and duplicating another project's ceiling here would go stale.
+  - **`duckdb`: `>=1.0.0` → `>=1.1.1`.** DuckDB 1.0.0 renders the EXPLAIN cardinality as `EC: N`; 1.1.0 changed it to `~N Rows`, which is what `DuckDBAdapter._parse_row_estimate` matches. This was **not** merely lost telemetry: `Validator` gates the `max_rows_scanned` check on `estimated_rows is not None`, so on duckdb 1.0.0 a contract's row-scan limit was **silently unenforced** — the limit read as active and did nothing. 1.1.1 rather than 1.1.0 because 1.1.0 ships no cp313 wheel and this package supports Python 3.13; at that floor a 3.13 install would fall back to a from-source C++ build.
 
-  Verified rather than assumed: `langchain`, `pydantic-ai`, and `agent-contracts` all pass at their existing floors unchanged. The `bigquery`, `snowflake`, and `postgres` extras stay out of the job by design — this package contains **no adapter code** for them (no import of those drivers exists in `src/`), so they are install conveniences for users writing their own `DatabaseAdapter` and their floors cannot affect it.
+  Verified rather than assumed: `langchain`, `pydantic-ai`, and `agent-contracts` all pass at their existing floors unchanged — only two of six were wrong. The `bigquery`, `snowflake`, and `postgres` extras stay out of the job by design: this package contains **no adapter code** for them (no import of those drivers exists in `src/`), so they are install conveniences for users writing their own `DatabaseAdapter` and their floors cannot affect it.
+
+### Changed
+
+- **`test-lowest-floors` is matrixed over Python 3.12 and 3.13.** A floor can be satisfiable on one interpreter and not the other — the duckdb cp313 gap above is exactly that, and a 3.12-only job could not see it. It also now uses the `dev` extra instead of unbounded `--with pytest` flags, which additionally floor-tests `dev`.
 
 ### Compatibility
 
-- If you install the `agent-sdk` or `duckdb` extras with a pin below the new floors, you will get a resolution conflict rather than a working install. Both old floors were already broken at those versions, so nothing that worked before stops working.
+- **The `agent-sdk` extra now requires `claude-agent-sdk>=0.2.96`, dropping support for the 0.1.x line.** To be clear, 0.1.x is not broken *per se* — it works when `mcp` resolves below 2.0. What it cannot do is guarantee that on its own, and the fix is to depend on a release that bounds it. If you are pinned to `claude-agent-sdk` 0.1.x you will get a resolution conflict and must upgrade.
+- **The `duckdb` extra now requires `>=1.1.1`.** Anything below that either mis-parses the row estimate (silently disabling `max_rows_scanned`) or, on Python 3.13, has no wheel.
+- Minor version rather than patch, deliberately: raising a floor can break a consumer's resolve, and this project puts changes that can do that in the minor slot.
 
 ## [0.32.0] - 2026-08-02
 

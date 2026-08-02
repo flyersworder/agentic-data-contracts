@@ -15,7 +15,7 @@ overrides = [{ name = "python-dotenv", specifier = ">=1.2.2" }]
 
 [[package]]
 name = "agentic-data-contracts"
-version = "0.32.1"
+version = "0.33.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -30,6 +30,7 @@ agent-contracts = [
 ]
 agent-sdk = [
     { name = "claude-agent-sdk" },
+    { name = "mcp" },
 ]
 all = [
     { name = "ai-agent-contracts" },
@@ -39,6 +40,7 @@ all = [
     { name = "langchain" },
     { name = "langchain-core" },
     { name = "langgraph" },
+    { name = "mcp" },
     { name = "psycopg2-binary" },
     { name = "pydantic-ai-slim", extra = ["anthropic"] },
     { name = "snowflake-connector-python" },
@@ -78,10 +80,10 @@ snowflake = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-data-contracts", extras = ["agent-sdk", "agent-contracts", "langchain", "pydantic-ai", "bigquery", "snowflake", "postgres", "duckdb"], marker = "extra == 'all'" },
+    { name = "agentic-data-contracts", extras = ["duckdb"], marker = "extra == 'dev'" },
     { name = "ai-agent-contracts", marker = "extra == 'agent-contracts'", specifier = ">=0.3.1" },
     { name = "claude-agent-sdk", marker = "extra == 'agent-sdk'", specifier = ">=0.2.96" },
-    { name = "duckdb", marker = "extra == 'dev'", specifier = ">=1.1.0" },
-    { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.1.0" },
+    { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.1.1" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.0.0" },
     { name = "langchain", marker = "extra == 'dev'", specifier = ">=1.2.17" },
     { name = "langchain", marker = "extra == 'langchain'", specifier = ">=1.2.17" },
@@ -89,6 +91,7 @@ requires-dist = [
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=1.3.3" },
     { name = "langgraph", marker = "extra == 'dev'", specifier = ">=1.1.10" },
     { name = "langgraph", marker = "extra == 'langchain'", specifier = ">=1.1.10" },
+    { name = "mcp", marker = "extra == 'agent-sdk'", specifier = ">=1.23.0" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9.9" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], marker = "extra == 'dev'", specifier = ">=2.0.0" },

@@ -98,11 +98,17 @@ jobs:
     # is built at import time the wrong floor did not degrade a feature, it
     # raised AttributeError on import.
     #
-    # Extras included are the ones the suite actually exercises. bigquery,
-    # snowflake and postgres are omitted on purpose: there is no adapter code
-    # for them (grep finds no import of those drivers anywhere in src/) -- they
-    # are install conveniences for users writing their own DatabaseAdapter, so
-    # their floors cannot break this package and there is nothing to assert.
+    # Matrixed over BOTH supported Pythons, not just 3.12. A floor can be
+    # satisfiable on one interpreter and not the other: duckdb 1.1.0 ships no
+    # cp313 wheel (1.1.1 is the first), so a 3.12-only job would have certified
+    # a floor that falls back to a from-source C++ build on 3.13 -- the same
+    # class of bug this job exists to catch, hidden by the job's own scope.
+    #
+    # Extras included are the ones the suite exercises. bigquery, snowflake and
+    # postgres are omitted on purpose: there is no adapter code for them (grep
+    # finds no import of those drivers anywhere in src/) -- they are install
+    # conveniences for users writing their own DatabaseAdapter, so their floors
+    # cannot break this package and there is nothing to assert.
     #
     # Not a release gate (omitted from publish.needs), matching
     # test-pydantic-ai-latest: a floor break should be loud, but it should not
@@ -110,24 +116,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-      - run: uv python install 3.12
+      - run: uv python install ${{ matrix.python-version }}
       # Import first: the failure this job guards happens at import time, and a
       # bare ImportError reads far more clearly here than inside a pytest
       # collection stack trace.
       - run: >-
-          uv run --isolated --resolution lowest-direct --python 3.12
+          uv run --isolated --resolution lowest-direct
+          --python ${{ matrix.python-version }}
           python -c "import agentic_data_contracts"
+      # `--extra dev` rather than `--with pytest --with pytest-asyncio`: those
+      # are unbounded, so uv warns on every run, and the runner version is then
+      # decided by the dev extra's floors participating in the universal resolve
+      # -- governed by an extra the job never installed. Using it directly also
+      # floor-tests `dev` itself.
       - run: >-
-          uv run --isolated --resolution lowest-direct --python 3.12
+          uv run --isolated --resolution lowest-direct
+          --python ${{ matrix.python-version }}
           --extra duckdb --extra agent-sdk --extra agent-contracts
-          --extra langchain --extra pydantic-ai
-          --with pytest --with pytest-asyncio
+          --extra langchain --extra pydantic-ai --extra dev
           pytest -q
 
   security:

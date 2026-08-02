@@ -145,10 +145,26 @@ def _to_pydantic_ai_tool(
     does not re-validate them against the JSON schema; the underlying factory
     callables read ``args.get(...)`` defensively, so collecting ``**kwargs``
     into a dict is safe.
+
+    ``takes_ctx=True`` so the wrapper can read ``ctx.usage`` — this is the only
+    place the contract's ``token_budget`` can be fed on this path. Pydantic AI
+    reports usage cumulatively *per run*, while a session may span many runs
+    (see :class:`ContractDeps`), so ``ctx.run_id`` scopes it and
+    ``observe_tokens`` accrues the delta.
     """
     inner = tool_def.callable
 
-    async def _fn(**kwargs: Any) -> str:
+    async def _fn(ctx: RunContext[Any], **kwargs: Any) -> str:
+        # Observe BEFORE the limit check, so a budget already exhausted by the
+        # model's own consumption is caught on this call rather than the next.
+        # `run_id` scopes the observation: pydantic-ai reports usage
+        # cumulatively per run, and one session spans many. Skip rather than
+        # fall back to a shared key -- a constant scope collapses every run into
+        # max() and silently drops the smaller ones.
+        run_id = ctx.run_id
+        if run_id is not None and ctx.usage.total_tokens:
+            session.observe_tokens(ctx.usage.total_tokens, scope=str(run_id))
+
         if apply_middleware:
             try:
                 session.check_limits()
@@ -181,7 +197,7 @@ def _to_pydantic_ai_tool(
         name=tool_def.name,
         description=tool_def.description,
         json_schema=tool_def.input_schema,
-        takes_ctx=False,
+        takes_ctx=True,
     )
 
 

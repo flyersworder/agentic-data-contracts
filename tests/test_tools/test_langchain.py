@@ -1,7 +1,10 @@
 """Tests for LangChain / deepagents BaseTool adapter."""
 
+import logging
 import threading
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -10,6 +13,7 @@ import pytest
 pytest.importorskip("langchain_core")
 pytest.importorskip("langchain")
 
+from langchain.agents.middleware.types import ToolCallRequest  # noqa: E402
 from langchain_core.tools import BaseTool, ToolException  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
@@ -17,6 +21,7 @@ from agentic_data_contracts.core.contract import DataContract  # noqa: E402
 from agentic_data_contracts.core.schema import (  # noqa: E402
     AllowedTable,
     DataContractSchema,
+    ResourceConfig,
     SemanticConfig,
 )
 from agentic_data_contracts.core.session import ContractSession  # noqa: E402
@@ -456,3 +461,179 @@ def test_top_level_imports_resolve_when_extra_installed() -> None:
 
     assert _CM is not None
     assert _ct is not None
+
+
+# ─── token budget (v0.34.0) ───────────────────────────────────────────────────
+
+
+def _budgeted_contract() -> DataContract:
+    return DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=50_000),
+        )
+    )
+
+
+def test_structured_tool_path_warns_that_budget_is_inert(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    # A declared-but-unenforced limit is worse than an absent one: the contract
+    # reads as protective while permitting the thing it names. This path does
+    # not read run state, so it must say so.
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(_budgeted_contract(), adapter=adapter)
+    assert "token_budget" in caplog.text
+    assert "NOT be enforced" in caplog.text
+    assert "ContractMiddleware" in caplog.text
+
+
+def test_no_warning_when_delegating_to_the_middleware(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    """`apply_middleware=False` is how a caller signals delegation.
+
+    Warning then would fire on the configuration the README teaches, and a
+    warning that cries wolf on a correct setup is how the real ones get
+    filtered out.
+    """
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(
+            _budgeted_contract(), adapter=adapter, apply_middleware=False
+        )
+    assert "token_budget" not in caplog.text
+
+
+def test_no_warning_when_no_budget_declared(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    unbudgeted = _budgeted_contract()
+    unbudgeted.schema.resources = None
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(unbudgeted, adapter=adapter)
+    assert "token_budget" not in caplog.text
+
+
+def _usage_request(
+    total: int, thread_id: str | None = None, message_id: str | None = None
+) -> ToolCallRequest:
+    """A real ToolCallRequest carrying one usage-bearing AIMessage.
+
+    ``thread_id`` mimics a configured checkpointer; ``message_id`` mimics the
+    UUID LangGraph's reducer stamps on messages entering state, which is what
+    separates conversations when no checkpointer is present.
+    """
+    from langchain_core.messages import AIMessage
+
+    # `runtime` is typed non-optional on ToolCallRequest, but the middleware
+    # reads it defensively: `None` stands for "outside a graph", the shape
+    # where neither a thread id nor a runtime config is available.
+    runtime = cast(
+        Any,
+        SimpleNamespace(config={"configurable": {"thread_id": thread_id}})
+        if thread_id is not None
+        else None,
+    )
+    return ToolCallRequest(
+        tool_call={"name": "describe_table", "args": {}, "id": "1"},
+        tool=cast(Any, None),
+        state=cast(
+            Any,
+            {
+                "messages": [
+                    AIMessage(
+                        id=message_id,
+                        content="x",
+                        usage_metadata={
+                            "input_tokens": total - 300,
+                            "output_tokens": 300,
+                            "total_tokens": total,
+                        },
+                    )
+                ]
+            },
+        ),
+        runtime=runtime,
+    )
+
+
+def test_middleware_feeds_the_budget_from_run_state() -> None:
+    # The middleware is the one LangChain path that reads run state, so it is
+    # the one that can make a declared token_budget real.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
+    assert session.tokens_used == 1200
+    # Cumulative, not additive: observing the same history again must not
+    # double-count it.
+    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
+    assert session.tokens_used == 1200
+
+
+def test_two_conversations_do_not_erase_each_other() -> None:
+    """One middleware serves every thread, so the scope key must include it.
+
+    With a constant scope, thread B's 1000 tokens vanish -- 1000 is not greater
+    than A's 1000, so nothing accrues -- and B is then told it has its full
+    budget left. That is the exact false-number defect this feature removes,
+    reintroduced one layer down.
+    """
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    middleware._observe_token_usage(_usage_request(1000, thread_id="A"))
+    middleware._observe_token_usage(_usage_request(1000, thread_id="B"))
+    assert session.tokens_used == 2000
+
+
+def test_missing_thread_id_still_accrues() -> None:
+    # Neither a thread id nor an identified message: the last-resort key. Must
+    # still feed rather than silently no-op.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    middleware._observe_token_usage(_usage_request(800))
+    assert session.tokens_used == 800
+
+
+def test_unthreaded_conversations_separate_by_message_id() -> None:
+    """No checkpointer is the README's own LangChain wiring.
+
+    LangGraph stamps a UUID on the first message as it enters state, so
+    conversations are distinguishable even without a thread id. Without this,
+    a second conversation whose running sum sits below the first's peak accrues
+    nothing and is told it has its full budget — the same defect thread scoping
+    fixed, one configuration over.
+    """
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    middleware._observe_token_usage(_usage_request(1000, message_id="conv-a"))
+    middleware._observe_token_usage(_usage_request(1000, message_id="conv-b"))
+    assert session.tokens_used == 2000
+
+
+def test_thread_id_wins_over_message_id() -> None:
+    # A configured checkpointer is the stronger signal: it survives history
+    # trimming that could drop the first message entirely.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    scope = middleware._usage_scope(_usage_request(10, thread_id="T", message_id="M"))
+    assert scope == "langchain:thread:T"
+
+
+def test_middleware_blocks_once_the_budget_is_spent() -> None:
+    # The point of the whole feature: a breach must actually stop the next
+    # tool call, not merely be counted.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    blocked = middleware._check(_usage_request(50_001, thread_id="A"))
+    assert blocked is not None
+    assert "token budget exceeded" in str(blocked.content)

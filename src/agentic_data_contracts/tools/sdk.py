@@ -32,6 +32,7 @@ from agentic_data_contracts.tools.factory import (
     RowFormat,
     ToolDef,
     _error_response,
+    _warn_token_budget_unenforceable,
     create_tools,
 )
 
@@ -185,6 +186,8 @@ def create_sdk_mcp_server(
             "Install with: pip install agentic-data-contracts[agent-sdk]"
         )
         raise ImportError(msg) from None
+
+    _warn_token_budget_unenforceable(contract, "the Claude Agent SDK path")
 
     if session is None:
         session = ContractSession(contract)

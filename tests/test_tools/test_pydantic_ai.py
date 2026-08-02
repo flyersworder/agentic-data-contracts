@@ -18,6 +18,7 @@ from agentic_data_contracts.core.contract import DataContract  # noqa: E402
 from agentic_data_contracts.core.schema import (  # noqa: E402
     AllowedTable,
     DataContractSchema,
+    ResourceConfig,
     SemanticConfig,
 )
 from agentic_data_contracts.core.session import (  # noqa: E402
@@ -36,21 +37,24 @@ from agentic_data_contracts.tools.pydantic_ai import (  # noqa: E402
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _invoke(tool: Tool, **kwargs: Any) -> Any:
+async def _invoke(
+    tool: Tool, *, ctx: RunContext[Any] | None = None, **kwargs: Any
+) -> Any:
     """Call a wrapped tool's underlying function with keyword args.
 
-    ``Tool.function``'s declared type carries pydantic_ai's positional
-    ``RunContext`` signature, while ours is ``_fn(**kwargs)``. Going through
-    an ``Any`` indirection lets tests invoke it directly without the type
-    checker flagging the call shape.
+    The wrapper is registered ``takes_ctx=True`` — it reads ``ctx.usage`` to
+    feed the contract's token budget — so a ``RunContext`` is required.
+    Tests that do not exercise usage get a fresh zero-usage one; pass ``ctx``
+    to drive it. Going through an ``Any`` indirection lets tests invoke the
+    function directly without the type checker flagging the call shape.
     """
     fn = cast(Any, tool.function)
-    return await fn(**kwargs)
+    return await fn(ctx if ctx is not None else _run_ctx(None), **kwargs)
 
 
 def _run_ctx(deps: Any) -> RunContext[Any]:
     """Minimal RunContext for driving a deps-aware toolset factory directly."""
-    return RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+    return RunContext(deps=deps, model=TestModel(), usage=RunUsage(), run_id="test-run")
 
 
 def _toolset_tools(factory: Any, deps: Any) -> dict[str, Tool]:
@@ -551,3 +555,116 @@ def test_top_level_import_resolves_when_extra_installed() -> None:
     assert _ct is not None
     assert _cts is not None
     assert _CD is not None
+
+
+# ─── token budget (v0.34.0) ───────────────────────────────────────────────────
+
+
+def _ctx_with_usage(total: int, run_id: str = "run-1") -> RunContext[Any]:
+    """A RunContext reporting `total` cumulative tokens for `run_id`."""
+    return RunContext(
+        deps=None,
+        model=TestModel(),
+        usage=RunUsage(input_tokens=total),
+        run_id=run_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_call_feeds_the_token_budget(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # Before this, ContractSession.record_tokens was called only from tests, so
+    # a declared token_budget was inert and remaining() reported the full
+    # budget forever.
+    session = ContractSession(contract_no_source)
+    tools = {
+        t.name: t
+        for t in create_pydantic_ai_tools(
+            contract_no_source, adapter=adapter, session=session
+        )
+    }
+    await _invoke(
+        tools["describe_table"],
+        ctx=_ctx_with_usage(1_500),
+        schema="analytics",
+        table="orders",
+    )
+    assert session.tokens_used == 1_500
+
+
+@pytest.mark.asyncio
+async def test_repeated_calls_in_one_run_do_not_multiply(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # ctx.usage is cumulative for the run, so adding it on each call would
+    # count 1500 + 2200 = 3700 instead of the true 2200.
+    session = ContractSession(contract_no_source)
+    tools = {
+        t.name: t
+        for t in create_pydantic_ai_tools(
+            contract_no_source, adapter=adapter, session=session
+        )
+    }
+    for total in (1_500, 2_200):
+        await _invoke(
+            tools["describe_table"],
+            ctx=_ctx_with_usage(total),
+            schema="analytics",
+            table="orders",
+        )
+    assert session.tokens_used == 2_200
+
+
+@pytest.mark.asyncio
+async def test_usage_accumulates_across_runs_on_one_session(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # The ContractDeps pattern: one session per user, reused every turn. Each
+    # run's counter restarts, so the session must total them, not reset.
+    session = ContractSession(contract_no_source)
+    tools = {
+        t.name: t
+        for t in create_pydantic_ai_tools(
+            contract_no_source, adapter=adapter, session=session
+        )
+    }
+    for run_id, total in (("run-1", 1_000), ("run-2", 700)):
+        await _invoke(
+            tools["describe_table"],
+            ctx=_ctx_with_usage(total, run_id=run_id),
+            schema="analytics",
+            table="orders",
+        )
+    assert session.tokens_used == 1_700
+
+
+@pytest.mark.asyncio
+async def test_exhausted_token_budget_is_terminal(adapter: DuckDBAdapter) -> None:
+    # A budget breach cannot be fixed by retrying, so it must raise the
+    # terminal error rather than a recoverable ModelRetry.
+    contract = DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=50_000),
+        )
+    )
+    session = ContractSession(contract)
+    tools = {
+        t.name: t
+        for t in create_pydantic_ai_tools(contract, adapter=adapter, session=session)
+    }
+    with pytest.raises(ContractSessionLimitError, match="token"):
+        await _invoke(
+            tools["describe_table"],
+            ctx=_ctx_with_usage(50_001),
+            schema="analytics",
+            table="orders",
+        )

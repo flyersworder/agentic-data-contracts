@@ -231,11 +231,61 @@ current: str | None = resolve_principal(principal)
 When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-contained enforcement:
 
 - **Retry count** — incremented on each failed query attempt, checked against `max_retries`
-- **Token usage** — tracked via callback, checked against `token_budget`
+- **Token usage** — fed by the adapters via `observe_tokens()`, checked against `token_budget` (see below)
 - **Wall-clock duration** — lazy start on first `check_limits()` call (not at construction), checked against `max_duration_seconds`. Can be reset via `reset_timer()` for frameworks that manage their own idle timeouts.
 - **Cost estimate** — if EXPLAIN adapter returns cost info, checked against `cost_limit_usd`
 
 These are simple counters/timers with guard checks before each tool call. No formal state machine.
+
+**Token usage is the one counter the session cannot produce itself,** because
+the tokens are spent by the *model* between tool calls, not by anything this
+library runs. It has to be fed from whatever the host framework exposes, and
+two paths currently read it:
+
+| Path | Feeds `token_budget`? | Source |
+|---|---|---|
+| Pydantic AI tools / toolset | Yes | `ctx.usage.total_tokens`, scoped by `ctx.run_id` |
+| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped by `thread_id` |
+| LangChain `create_langchain_tools` | Not yet | Could take a `ToolRuntime` parameter; not wired |
+| `contract_middleware` | No | its wrapper receives an `args` dict only |
+| Claude Agent SDK | No | the tool callable receives an `args` dict only |
+
+Note "not yet" rather than "cannot" for `create_langchain_tools`: a
+`StructuredTool` coroutine *can* be handed a `ToolRuntime` (and with it the
+message list and `thread_id`), so that row is a wiring gap, not a capability
+limit. Only the last two are genuinely blind. Stating it as a limit — in docs
+or, worse, in a permanent runtime warning — would be the same
+declared-but-false failure this section is about.
+
+The paths that do not feed it warn at wiring time, for the same reason
+`Validator` warns about unenforceable `forbidden_operations`: a
+declared-but-unenforced limit is worse than an absent one, because the contract
+reads as protective while permitting the thing it names. `create_langchain_tools`
+stays quiet when `apply_middleware=False`, since that is exactly how a caller
+signals it is delegating enforcement to `ContractMiddleware` — a warning that
+fires on a correct configuration is how the real ones get ignored.
+
+**Both LangChain enforcement pieces must share one `ContractSession`.** They
+each default to constructing their own, and a split pair enforces against the
+middleware's session while `run_query` reports `remaining()` from the tools'
+— so the model is told it has its full budget no matter what it spent. Build
+one session and pass it to both.
+
+`observe_tokens(cumulative, *, scope)` exists because framework counters report
+a running total for **their** scope (a Pydantic AI run, a LangGraph thread)
+while a `ContractSession` deliberately spans several of them — `ContractDeps`
+tells callers to keep one session per user across every turn. Adding the total
+on each call multiplies it; assigning it resets the session at each new run.
+Only the per-scope delta accrues. `record_tokens()` remains the delta-based
+entry point for framework-free callers.
+
+**Known window:** `check_limits()` runs *before* a tool call, so a breach is
+caught at the *next* one. An agent that exhausts its budget and stops calling
+tools never trips it — inherent to enforcing from inside tools, and identical to
+how `max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
+`remaining()` reports honest `tokens_remaining` in every `run_query` response,
+which lets the model self-regulate; Pydantic AI's `UsageLimits` is what would
+close the window entirely.
 
 When `ai-agent-contracts` IS installed, enforcement is delegated to the formal framework via the bridge layer (see below).
 

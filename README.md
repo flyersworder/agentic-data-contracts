@@ -323,17 +323,25 @@ tools = create_langchain_tools(dc, adapter=adapter)
 agent = create_deep_agent(tools=tools)
 ```
 
-Install: `pip install "agentic-data-contracts[langchain]"`. For graph-level enforcement instead of in-tool:
+Install: `pip install "agentic-data-contracts[langchain]"`. For graph-level enforcement instead of in-tool — note the **shared session**, without which the middleware enforces against one budget while `run_query` reports `tokens_remaining` from another:
 
 ```python
-tools = create_langchain_tools(dc, adapter=adapter, apply_middleware=False)
-agent = create_deep_agent(tools=tools, middleware=[ContractMiddleware(dc, adapter=adapter)])
+from agentic_data_contracts.core.session import ContractSession
+
+session = ContractSession(dc)
+tools = create_langchain_tools(
+    dc, adapter=adapter, session=session, apply_middleware=False
+)
+agent = create_deep_agent(
+    tools=tools,
+    middleware=[ContractMiddleware(dc, adapter=adapter, session=session)],
+)
 ```
 
 </details>
 
 <details>
-<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 1.107.0+</summary>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.0.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -907,6 +915,39 @@ resources:
   max_query_time_seconds: 30     # max wall-clock query time
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
 ```
+
+`token_budget` is the one limit this library cannot measure on its own — the
+tokens are spent by the *model* between tool calls. It is fed from the host
+framework's own counter, which two paths currently read: the **Pydantic AI**
+adapter (`ctx.usage`) and LangChain's **`ContractMiddleware`** (`request.state`,
+scoped per conversation). The other paths warn at wiring time if your contract
+declares a budget, so an inert budget is not silent — with one deliberate
+exception: `create_langchain_tools(..., apply_middleware=False)` stays quiet,
+because that flag is how you signal you are delegating enforcement to
+`ContractMiddleware`. Wire the middleware if you set it.
+
+With LangChain, **share one session between the tools and the middleware** — each
+otherwise builds its own, and a split pair enforces against one while reporting
+`tokens_remaining` from the other:
+
+```python
+from agentic_data_contracts.core.session import ContractSession
+
+session = ContractSession(dc)
+tools = create_langchain_tools(dc, adapter=adapter, session=session,
+                               apply_middleware=False)
+middleware = ContractMiddleware(dc, adapter=adapter, session=session)
+```
+
+To enforce it elsewhere, feed the session yourself:
+
+```python
+session.observe_tokens(my_client.cumulative_tokens, scope="my-run-id")
+```
+
+Note that limits are checked *before* each tool call, so a breach stops the
+next one — an agent that exhausts its budget and then stops calling tools will
+not be interrupted mid-thought.
 
 ## Optional Dependencies
 

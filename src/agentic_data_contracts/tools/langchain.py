@@ -46,7 +46,12 @@ from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    RowFormat,
+    ToolDef,
+    _warn_token_budget_unenforceable,
+    create_tools,
+)
 from agentic_data_contracts.validation.validator import Validator
 
 _BLOCKED_PREFIX = "BLOCKED —"
@@ -112,6 +117,16 @@ def create_langchain_tools(
         A list of ``BaseTool`` instances; order matches the underlying
         ``create_tools()`` output.
     """
+    # This path's StructuredTool coroutines are not wired for run state, so a
+    # declared token_budget is inert here -- say so rather than fail silently.
+    # But `apply_middleware=False` is exactly how a caller signals it is
+    # delegating enforcement to ContractMiddleware, which *does* observe usage,
+    # so warning then would cry wolf in the configuration the README teaches --
+    # and a warning that fires when things are correct is how the real ones get
+    # ignored.
+    if apply_middleware:
+        _warn_token_budget_unenforceable(contract, "create_langchain_tools")
+
     if session is None:
         session = ContractSession(contract)
 
@@ -209,6 +224,89 @@ class ContractMiddleware(AgentMiddleware):
             sql_normalizer=sql_normalizer,
         )
 
+    def _observe_token_usage(self, request: ToolCallRequest) -> None:
+        """Feed the contract's ``token_budget`` from the run's message history.
+
+        This middleware is the only LangChain path that currently reads run
+        state; ``create_langchain_tools``' ``StructuredTool`` coroutines are not
+        wired for it, so a contract's token budget is inert there (the factory
+        warns about it).
+
+        ``usage_metadata`` is **per message**, so the running total is the
+        *sum* over the list -- do not "simplify" this to the last message's
+        total, which would undercount by an order of magnitude. The sum grows
+        monotonically as messages append, which is what
+        ``ContractSession.observe_tokens`` expects.
+
+        Scoped per conversation, never by a constant: one middleware instance
+        serves every conversation an agent handles (the README wires exactly
+        one), and a shared key silently drops the second conversation's usage
+        whenever its running sum sits below the first's peak -- under-enforcing
+        *and* reporting a false ``tokens_remaining`` to the model, which is the
+        failure this feature exists to remove. See :meth:`_usage_scope`.
+
+        Two accepted limits. Concurrent conversations still share one
+        ``ContractSession``, so the budget is a combined ceiling across them
+        rather than per-conversation -- correct for a per-user session, worth
+        knowing if you share one more widely. And a middleware that trims or
+        summarises history (``SummarizationMiddleware``, ``trim_messages``)
+        shrinks the sum; the monotone guard refuses to subtract, so accrual
+        pauses until the new sum passes the old peak. That under-enforces
+        rather than over-enforces, which is the safe direction.
+        """
+        state = getattr(request, "state", None)
+        if not state:
+            return
+        try:
+            messages = state["messages"]
+        except (KeyError, TypeError):
+            return
+        total = 0
+        for message in messages or []:
+            usage = getattr(message, "usage_metadata", None)
+            if isinstance(usage, dict):
+                total += int(usage.get("total_tokens") or 0)
+        if total:
+            self._session.observe_tokens(total, scope=self._usage_scope(request))
+
+    @staticmethod
+    def _usage_scope(request: ToolCallRequest) -> str:
+        """Identify the conversation whose running total is being observed.
+
+        Two sources, tried in order, because neither covers every wiring:
+
+        1. ``thread_id`` from the runtime config — present whenever a
+           checkpointer is configured, and stable across turns.
+        2. The id of the first message in state. LangGraph's ``add_messages``
+           reducer assigns a UUID as messages enter state, and the first one
+           stays put across turns, so it identifies a conversation even with no
+           checkpointer — which is the shape the README's own LangChain example
+           uses.
+
+        Falling back to a bare constant is the *last* resort and is the one
+        case that still under-counts: two conversations sharing it accrue only
+        the larger. It is reached only when there is neither a thread id nor an
+        identified first message, and it under-enforces rather than
+        over-enforces, which is the safe direction to fail.
+        """
+        runtime = getattr(request, "runtime", None)
+        config = getattr(runtime, "config", None) or {}
+        thread_id = (config.get("configurable") or {}).get("thread_id")
+        if thread_id:
+            return f"langchain:thread:{thread_id}"
+
+        state = getattr(request, "state", None)
+        try:
+            messages = state["messages"] if state else None
+        except (KeyError, TypeError):
+            messages = None
+        if messages:
+            first_id = getattr(messages[0], "id", None)
+            if first_id:
+                return f"langchain:conv:{first_id}"
+
+        return "langchain"
+
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit
         ``ToolMessage`` on violation, ``None`` to continue."""
@@ -216,6 +314,8 @@ class ContractMiddleware(AgentMiddleware):
         name = tool_call.get("name", "")
         args = tool_call.get("args") or {}
         tool_call_id = tool_call.get("id", "")
+
+        self._observe_token_usage(request)
 
         # Session-limit breach: do NOT call ``record_retry()`` here. The
         # session is already past its cap; recording another retry would

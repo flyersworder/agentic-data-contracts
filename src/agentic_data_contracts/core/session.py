@@ -35,6 +35,8 @@ class ContractSession:
         self.tokens_used: int = 0
         self.cost_usd: float = 0.0
         self._start_time: float | None = None
+        # Last cumulative total seen per external counter — see observe_tokens.
+        self._observed_totals: dict[str, int] = {}
 
     def _ensure_timer(self) -> None:
         """Start the timer if not already running."""
@@ -55,7 +57,36 @@ class ContractSession:
         self.retries += 1
 
     def record_tokens(self, count: int) -> None:
+        """Add a *delta* of tokens to the session tally.
+
+        For callers holding an incremental count. If you have a framework's
+        running total instead, use :meth:`observe_tokens` — adding a cumulative
+        figure here multiplies it.
+        """
         self.tokens_used += count
+
+    def observe_tokens(self, cumulative: int, *, scope: str = "") -> None:
+        """Record a *cumulative* token total reported by an external counter.
+
+        Framework usage counters report a running total for **their** scope — a
+        Pydantic AI run (``ctx.usage``), a LangGraph thread (message
+        ``usage_metadata``) — while a ``ContractSession`` deliberately spans
+        several of them: :class:`~...tools.pydantic_ai.ContractDeps` instructs
+        callers to keep one session per user across every turn so limits
+        accumulate. That mismatch rules out both obvious implementations —
+        adding the total on each tool call multiplies it, and assigning it
+        resets the session's tally at each new run, silently discarding earlier
+        turns. So only the per-scope delta accrues.
+
+        ``scope`` identifies the counter (Pydantic AI's ``ctx.run_id``). A
+        total lower than the last one seen for that scope adds nothing rather
+        than subtracting, so a counter that restarts under a reused key cannot
+        hand back budget the session already spent.
+        """
+        previous = self._observed_totals.get(scope, 0)
+        if cumulative > previous:
+            self.tokens_used += cumulative - previous
+            self._observed_totals[scope] = cumulative
 
     def record_cost(self, amount: float) -> None:
         self.cost_usd += amount

@@ -126,6 +126,11 @@ class TestCompactMetricPrompt:
         prompt = dc.to_system_prompt(semantic_source=source)
         assert "30 metrics available" in prompt
         assert "metric_0 \u2014" not in prompt
+        # The compact branch must carry the same lookup-before-computing
+        # imperative as the detailed branch. Dropping it here would leave the
+        # guidance weakest precisely where there are the most metrics to get
+        # wrong.
+        assert "before computing any KPI" in prompt
 
     def test_threshold_boundary(self) -> None:
         # Exactly at threshold — should still list individually

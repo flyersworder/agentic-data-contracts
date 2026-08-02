@@ -18,7 +18,11 @@ import pytest
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.yaml_source import YamlSource
-from agentic_data_contracts.tools.factory import ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    _PROTOCOL_PRECEDENCE,
+    ToolDef,
+    create_tools,
+)
 
 
 @pytest.fixture
@@ -197,6 +201,86 @@ async def test_every_blocked_envelope_carries_is_error(
     assert seen_blocked, "no BLOCKED envelope produced — invariant untested"
 
 
+@pytest.mark.asyncio
+async def test_middleware_envelopes_carry_is_error(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    # contract_middleware is the BYO-tool path, exported from the package root.
+    # Its envelopes are built by hand rather than through _error_response, so
+    # they need their own coverage -- the previous version of this invariant
+    # spanned only create_tools, which is exactly how its violations envelope
+    # shipped without the flag.
+    from agentic_data_contracts.tools.middleware import contract_middleware
+
+    @contract_middleware(contract, adapter=adapter)
+    async def my_query(args: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    blocked = await my_query({"sql": "SELECT id FROM analytics.orders"})
+    assert _text(blocked).startswith("BLOCKED —")
+    assert blocked.get("is_error") is True
+
+
+@pytest.mark.asyncio
+async def test_middleware_session_limit_carries_is_error(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    from agentic_data_contracts.core.session import ContractSession
+    from agentic_data_contracts.tools.middleware import contract_middleware
+
+    session = ContractSession(contract)
+    session.record_retry()
+    session.record_retry()
+    session.record_retry()
+    session.record_retry()
+
+    @contract_middleware(contract, adapter=adapter, session=session)
+    async def my_query(args: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    result = await my_query({"sql": "SELECT id FROM analytics.orders"})
+    assert "Session limit exceeded" in _text(result)
+    assert result.get("is_error") is True
+
+
+@pytest.mark.asyncio
+async def test_sdk_session_check_envelope_carries_is_error(
+    contract: DataContract,
+) -> None:
+    from agentic_data_contracts.core.session import ContractSession
+    from agentic_data_contracts.tools.sdk import _wrap_with_session_check
+
+    session = ContractSession(contract)
+    for _ in range(4):
+        session.record_retry()
+
+    async def inner(args: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    result = await _wrap_with_session_check(inner, session)({})
+    assert "Session limit exceeded" in _text(result)
+    assert result.get("is_error") is True
+
+
+@pytest.mark.asyncio
+async def test_run_query_session_limit_carries_is_error(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    from agentic_data_contracts.core.session import ContractSession
+
+    session = ContractSession(contract)
+    for _ in range(4):
+        session.record_retry()
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, session=session
+    )
+    result = await _tool(tools, "run_query").callable(
+        {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+    assert "Session limit exceeded" in _text(result)
+    assert result.get("is_error") is True
+
+
 # ── MCP tool annotations (SDK path only) ─────────────────────────────────────
 
 
@@ -214,7 +298,7 @@ def test_read_only_annotation_covers_every_non_executing_tool(
         annotations = _annotations_for(tool.name)
         if tool.name == "run_query":
             # Left unset: whether run_query can write depends on the contract,
-            # and our operation blocklist cannot see CREATE/ALTER, so claiming
+            # and `CALL` / vendor DDL still parse as a bare Command, so claiming
             # read-only would overclaim. Absent means "unknown" in MCP.
             assert annotations is None
         else:
@@ -236,3 +320,40 @@ def test_read_only_set_matches_the_shipped_tools(
     }
     assert _READ_ONLY_TOOLS <= shipped
     assert shipped - _READ_ONLY_TOOLS == {"run_query"}
+
+
+def test_sdk_forwards_description_and_annotations(
+    contract: DataContract,
+    adapter: DuckDBAdapter,
+    semantic: YamlSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the SDK wiring without touching MCP internals.
+
+    The registered MCP `Server` exposes no public read-back for a tool's
+    description or annotations, so asserting through it would couple this suite
+    to a third-party private API. But `sdk.py` imports `claude_agent_sdk.tool`
+    *inside* the function, so spying on that public name captures exactly what
+    was forwarded. The unit tests above cover `_annotations_for`'s lookup; this
+    covers the call.
+    """
+    claude_agent_sdk = pytest.importorskip("claude_agent_sdk")
+    from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
+
+    seen: dict[str, tuple[str, Any]] = {}
+    real_tool = claude_agent_sdk.tool
+
+    def spy(name: str, description: str, input_schema: Any, annotations: Any = None):
+        seen[name] = (description, annotations)
+        return real_tool(name, description, input_schema, annotations)
+
+    monkeypatch.setattr(claude_agent_sdk, "tool", spy)
+    create_sdk_mcp_server(contract, adapter=adapter, semantic_source=semantic)
+
+    run_query_description, run_query_annotations = seen["run_query"]
+    assert _PROTOCOL_PRECEDENCE in run_query_description
+    assert run_query_annotations is None
+
+    _, describe_annotations = seen["describe_table"]
+    assert describe_annotations is not None
+    assert describe_annotations.readOnlyHint is True

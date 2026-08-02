@@ -66,7 +66,9 @@ def contract_middleware(
                                 "text": "BLOCKED — Violations:\n"
                                 + "\n".join(f"- {r}" for r in result.reasons),
                             }
-                        ]
+                        ],
+                        # As above: a governance block is not a successful call.
+                        "is_error": True,
                     }
 
             return await fn(args)

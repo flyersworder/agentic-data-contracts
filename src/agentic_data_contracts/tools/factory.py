@@ -669,6 +669,12 @@ def create_tools(
             limit=3,
         )
         if not results:
+            # Stays a success, unlike trace_metric_impacts' `direction must be
+            # ...` which is an _error_response. The boundary: a domain name is
+            # *data* the caller was searching for, so "not found" is the answer
+            # to the question asked (and this branch is reached only after fuzzy
+            # search, so the reply carries suggestions). An invalid enum is
+            # *schema* — the argument was never callable.
             available = sorted(d.name for d in all_domains)
             return _text_response(
                 f"Domain '{name}' not found. Available domains: {available}"

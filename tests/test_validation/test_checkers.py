@@ -22,7 +22,10 @@ from agentic_data_contracts.validation.checkers import (
     TableAllowlistChecker,
     extract_tables,
 )
-from agentic_data_contracts.validation.validator import Validator
+from agentic_data_contracts.validation.validator import (
+    Validator,
+    _warn_unenforceable_operations,
+)
 
 
 def _parse(sql: str) -> sqlglot.exp.Expression:
@@ -546,14 +549,19 @@ class TestEnforceableOperations:
     def test_derived_from_the_map(self) -> None:
         # Derived, never hand-maintained: a second list would drift from the
         # map, which is the failure mode being fixed.
-        assert set(OperationBlocklistChecker._OPERATION_MAP.values()) <= (
-            ENFORCEABLE_OPERATIONS
-        )
-        assert "TRUNCATE" in ENFORCEABLE_OPERATIONS
+        # Exact shape, not a subset: `<=` is unconditionally true given the
+        # `frozenset(map.values()) | {...}` definition, so it would only catch a
+        # hand-retyped replacement — which is the very drift being guarded.
+        assert ENFORCEABLE_OPERATIONS == set(
+            OperationBlocklistChecker._OPERATION_MAP.values()
+        ) | {"TRUNCATE"}
 
     def test_unenforceable_operation_warns(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        # The warning is lru_cached per operation-set, so clear it first —
+        # otherwise this passes or fails depending on what ran before.
+        _warn_unenforceable_operations.cache_clear()
         contract = _contract_forbidding(["DELETE", "CALL", "VACUUM"])
         with caplog.at_level(logging.WARNING):
             Validator(contract)
@@ -566,7 +574,34 @@ class TestEnforceableOperations:
     def test_no_warning_when_all_enforceable(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        _warn_unenforceable_operations.cache_clear()
         contract = _contract_forbidding(sorted(ENFORCEABLE_OPERATIONS))
         with caplog.at_level(logging.WARNING):
             Validator(contract)
         assert "NOT enforced" not in caplog.text
+
+    def test_warns_once_per_operation_set(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Validator construction is not once-per-process: the deps-aware
+        # Pydantic AI toolset rebuilds one per model step under the default
+        # per_run_step=True. Uncached, a misconfigured contract would log on
+        # every step.
+        _warn_unenforceable_operations.cache_clear()
+        contract = _contract_forbidding(["NOSUCHOP"])
+        with caplog.at_level(logging.WARNING):
+            for _ in range(5):
+                Validator(contract)
+        assert caplog.text.count("NOT enforced") == 1
+
+    def test_a_different_mistake_still_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Keyed on the operation set, so caching one contract's warning must
+        # not swallow another contract's.
+        _warn_unenforceable_operations.cache_clear()
+        with caplog.at_level(logging.WARNING):
+            Validator(_contract_forbidding(["FIRSTOP"]))
+            Validator(_contract_forbidding(["SECONDOP"]))
+        assert "FIRSTOP" in caplog.text
+        assert "SECONDOP" in caplog.text

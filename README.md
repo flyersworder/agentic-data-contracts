@@ -125,7 +125,8 @@ semantic:
     - schema: marketing
       tables: [campaigns]    # or list specific tables
       allowed_principals: [alice@co.com, bob@co.com]  # only these may query marketing.campaigns
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
   domains:
     - name: revenue
       summary: "Financial metrics from completed orders"

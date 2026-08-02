@@ -101,7 +101,8 @@ semantic:
       tables: []                       # empty = nothing from this schema
 
   # What the agent must NOT do
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
 
   # Business domains — catalog metadata (description, owners, review cadence)
   # for domain-specific questions. Membership is metric-first: metrics declare
@@ -276,9 +277,24 @@ cannot detect — declared but NOT enforced. Enforceable operations: [...]
 ```
 
 A declared-but-unenforced rule is worse than an absent one, so this fails loud
-rather than silent. The residue is real and bounded: `CALL` and vendor-specific
-DDL parse as a bare `exp.Command`, which is why the warning exists rather than a
-claim of completeness — and why `run_query` carries no `readOnlyHint`.
+rather than silent. The warning is `lru_cache`d on the operation set: `Validator`
+construction is not once-per-process (the deps-aware Pydantic AI toolset rebuilds
+one per model step under `per_run_step=True`), so an uncached warning would log
+on every step.
+
+The residue is real, and not purely `exp.Command`:
+
+- `CALL proc()` and vendor-specific DDL parse as a bare `exp.Command` — no
+  operation name reaches the blocklist, and the warning cannot fire for them
+  either, since the contract never named them.
+- `SELECT a INTO newtbl FROM t` parses as a plain `exp.Select` (tsql, postgres).
+  The operation blocklist never sees a write at all. It is caught by a
+  *different* checker — `extract_tables` walks the `Into` node, so
+  `TableAllowlistChecker` rejects it unless the target table happens to be
+  allowlisted.
+
+That is why the warning exists rather than a claim of completeness, and why
+`run_query` carries no `readOnlyHint`.
 
 **Rule-based query checkers** (from `query_check` blocks):
 
@@ -471,6 +487,18 @@ The key is additive on every path. `create_langchain_tools` and
 signalled errors natively (`ToolException`, `ModelRetry` / the terminal
 `ContractSessionLimitError`), which is why this gap was specific to the SDK
 path — the only path where the MCP envelope survives as MCP.
+
+**Two error signals now coexist, deliberately.** The wrappers still branch on
+`text.startswith("BLOCKED —")` rather than reading `is_error`, so a denial like
+`Table x is not in the allowed tables list.` carries the flag but does not become
+a `ToolException` / `ModelRetry`. Switching them was considered and rejected: it
+is not the behaviour-preserving refactor it appears to be, because `is_error`
+covers strictly more than the prefix, so denials, misconfiguration, and invalid
+arguments would newly raise on two shipped adapters. And the inner
+`_SESSION_LIMIT_MARKER` sniff would have to stay regardless — one boolean cannot
+separate recoverable from terminal, which is the distinction those adapters exist
+to make. The prefix remains the wrappers' trigger; `is_error` is the MCP-facing
+signal. Revisit only with a deliberate decision to widen what the wrappers raise.
 
 ### MCP Tool Annotations (SDK path only)
 

@@ -38,8 +38,10 @@ _BLOCKED_PREFIX = "BLOCKED —"
 # Tools that only read — from the contract, the semantic source, or the database
 # catalog. `run_query` is deliberately absent rather than annotated `False`:
 # whether it can write depends on the contract's `forbidden_operations`, and
-# OperationBlocklistChecker detects only DELETE / DROP / INSERT / UPDATE /
-# TRUNCATE, so a `CREATE TABLE ... AS SELECT` would pass unseen. An omitted hint
+# the blocklist covers every operation in ENFORCEABLE_OPERATIONS, but `CALL` and
+# vendor-specific DDL parse as a bare `exp.Command` and pass unseen, and
+# `SELECT ... INTO newtbl` parses as a plain `exp.Select` (it is caught by the
+# table allowlist instead, not the operation blocklist). An omitted hint
 # means "unknown" in MCP, which is honest; claiming readOnlyHint would invite a
 # client to skip a confirmation prompt it should have shown.
 #
@@ -159,12 +161,16 @@ def create_sdk_mcp_server(
 
             Note on cross-adapter parity: with ``apply_middleware=False``,
             this adapter passes a tool's BLOCKED envelope through to the
-            agent as-is (the SDK MCP transport carries error context as
-            text content; there is no ``status="error"`` field). The
-            LangChain adapter additionally sniffs the ``BLOCKED —``
-            prefix and converts it into a ``ToolException``. Both surface
-            the same text to the agent; only the structured-error signal
-            differs.
+            agent as-is. That envelope now carries ``is_error``, which
+            ``claude_agent_sdk`` maps onto MCP's ``isError``, so the agent
+            receives a structured error signal on this path too. The
+            LangChain adapter instead raises a ``ToolException`` (and its
+            middleware returns ``ToolMessage(status="error")``); Pydantic AI
+            raises ``ModelRetry``, or the terminal
+            ``ContractSessionLimitError`` on a budget breach. All three
+            surface the same text; they differ in *shape* — one MCP boolean
+            here, native exception types there, which is why the other two
+            can distinguish recoverable from terminal and this one cannot.
         server_name: Name for the MCP server.
         server_version: Version for the MCP server.
 

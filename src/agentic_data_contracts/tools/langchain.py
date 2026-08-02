@@ -117,12 +117,17 @@ def create_langchain_tools(
         A list of ``BaseTool`` instances; order matches the underlying
         ``create_tools()`` output.
     """
-    # This path's StructuredTool coroutines receive arguments only, with no
-    # access to run state, so a declared token_budget is inert here.
-    # ContractMiddleware can enforce it; say so rather than fail silently.
-    _warn_token_budget_unenforceable(
-        contract, "create_langchain_tools (use ContractMiddleware instead)"
-    )
+    # This path's StructuredTool coroutines are not wired for run state, so a
+    # declared token_budget is inert here -- say so rather than fail silently.
+    # But `apply_middleware=False` is exactly how a caller signals it is
+    # delegating enforcement to ContractMiddleware, which *does* observe usage,
+    # so warning then would cry wolf in the configuration the README teaches --
+    # and a warning that fires when things are correct is how the real ones get
+    # ignored.
+    if apply_middleware:
+        _warn_token_budget_unenforceable(
+            contract, "create_langchain_tools (ContractMiddleware does)"
+        )
 
     if session is None:
         session = ContractSession(contract)
@@ -224,16 +229,32 @@ class ContractMiddleware(AgentMiddleware):
     def _observe_token_usage(self, request: ToolCallRequest) -> None:
         """Feed the contract's ``token_budget`` from the run's message history.
 
-        This middleware is the only LangChain path with access to run state;
-        ``create_langchain_tools``' ``StructuredTool`` coroutines receive
-        arguments alone, so a contract's token budget is inert there (the
-        factory warns about it).
+        This middleware is the only LangChain path that currently reads run
+        state; ``create_langchain_tools``' ``StructuredTool`` coroutines are not
+        wired for it, so a contract's token budget is inert there (the factory
+        warns about it).
 
-        ``usage_metadata`` totals are cumulative over the message list, so this
-        is a *cumulative* observation, not a delta — see
-        ``ContractSession.observe_tokens``. The scope key is fixed because one
-        middleware instance owns one session; a new conversation gets a new
-        middleware.
+        ``usage_metadata`` is **per message**, so the running total is the
+        *sum* over the list -- do not "simplify" this to the last message's
+        total, which would undercount by an order of magnitude. The sum grows
+        monotonically as messages append, which is what
+        ``ContractSession.observe_tokens`` expects.
+
+        Scoped by ``thread_id``, not a constant: one middleware instance serves
+        every conversation an agent handles (the README wires exactly one), and
+        a shared key means the second thread's usage is silently dropped
+        whenever its running sum sits below the first's peak -- under-enforcing
+        *and* reporting a false ``tokens_remaining`` to the model, which is the
+        failure this feature exists to remove.
+
+        Two accepted limits. Concurrent threads still share one
+        ``ContractSession``, so the budget is a combined ceiling across
+        conversations rather than per-conversation -- correct for a per-user
+        session, worth knowing if you share one more widely. And a middleware
+        that trims or summarises history (``SummarizationMiddleware``,
+        ``trim_messages``) shrinks the sum; the monotone guard refuses to
+        subtract, so accrual pauses until the new sum passes the old peak. That
+        under-enforces rather than over-enforces, which is the safe direction.
         """
         state = getattr(request, "state", None)
         if not state:
@@ -248,7 +269,16 @@ class ContractMiddleware(AgentMiddleware):
             if isinstance(usage, dict):
                 total += int(usage.get("total_tokens") or 0)
         if total:
-            self._session.observe_tokens(total, scope="langchain")
+            self._session.observe_tokens(total, scope=self._usage_scope(request))
+
+    @staticmethod
+    def _usage_scope(request: ToolCallRequest) -> str:
+        """Per-conversation scope key, falling back when no thread is set."""
+        runtime = getattr(request, "runtime", None)
+        config = getattr(runtime, "config", None) or {}
+        configurable = config.get("configurable") or {}
+        thread_id = configurable.get("thread_id")
+        return f"langchain:{thread_id}" if thread_id else "langchain"
 
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit

@@ -333,7 +333,7 @@ agent = create_deep_agent(tools=tools, middleware=[ContractMiddleware(dc, adapte
 </details>
 
 <details>
-<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 1.107.0+</summary>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.0.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -910,11 +910,23 @@ resources:
 
 `token_budget` is the one limit this library cannot measure on its own — the
 tokens are spent by the *model* between tool calls. It is fed from the host
-framework's own counter, which only two paths expose: the **Pydantic AI**
-adapter (`ctx.usage`) and LangChain's **`ContractMiddleware`** (`request.state`).
-`create_langchain_tools` and `create_sdk_mcp_server` cannot see usage and will
-warn at wiring time if your contract declares a budget, so it never fails
-silently. To enforce it elsewhere, feed the session yourself:
+framework's own counter, which two paths currently read: the **Pydantic AI**
+adapter (`ctx.usage`) and LangChain's **`ContractMiddleware`** (`request.state`,
+scoped per `thread_id`). The other paths warn at wiring time if your contract
+declares a budget, so it never fails silently.
+
+With LangChain, **share one session between the tools and the middleware** — each
+otherwise builds its own, and a split pair enforces against one while reporting
+`tokens_remaining` from the other:
+
+```python
+session = ContractSession(dc)
+tools = create_langchain_tools(dc, adapter=adapter, session=session,
+                               apply_middleware=False)
+middleware = ContractMiddleware(dc, adapter=adapter, session=session)
+```
+
+To enforce it elsewhere, feed the session yourself:
 
 ```python
 session.observe_tokens(my_client.cumulative_tokens, scope="my-run-id")

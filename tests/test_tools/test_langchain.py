@@ -3,6 +3,7 @@
 import logging
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 pytest.importorskip("langchain_core")
 pytest.importorskip("langchain")
 
+from langchain.agents.middleware.types import ToolCallRequest  # noqa: E402
 from langchain_core.tools import BaseTool, ToolException  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
@@ -503,32 +505,85 @@ def test_no_warning_when_no_budget_declared(
     assert "token_budget" not in caplog.text
 
 
-def test_middleware_feeds_the_budget_from_run_state() -> None:
-    # The middleware is the one LangChain path with run state, so it is the one
-    # that can make a declared token_budget real.
+def _usage_request(total: int, thread_id: str | None = None) -> ToolCallRequest:
+    """A real ToolCallRequest carrying one usage-bearing AIMessage."""
     from langchain_core.messages import AIMessage
 
+    # `runtime` is typed non-optional on ToolCallRequest, but the middleware
+    # reads it defensively because an agent without a checkpointer has no
+    # thread. `None` exercises that branch.
+    runtime = cast(
+        Any,
+        SimpleNamespace(config={"configurable": {"thread_id": thread_id}})
+        if thread_id is not None
+        else None,
+    )
+    return ToolCallRequest(
+        tool_call={"name": "describe_table", "args": {}, "id": "1"},
+        tool=cast(Any, None),
+        state=cast(
+            Any,
+            {
+                "messages": [
+                    AIMessage(
+                        content="x",
+                        usage_metadata={
+                            "input_tokens": total - 300,
+                            "output_tokens": 300,
+                            "total_tokens": total,
+                        },
+                    )
+                ]
+            },
+        ),
+        runtime=runtime,
+    )
+
+
+def test_middleware_feeds_the_budget_from_run_state() -> None:
+    # The middleware is the one LangChain path that reads run state, so it is
+    # the one that can make a declared token_budget real.
     session = ContractSession(_budgeted_contract())
     middleware = ContractMiddleware(_budgeted_contract(), session=session)
 
-    class _Req:
-        tool_call = {"name": "describe_table", "args": {}, "id": "1"}
-        state = {
-            "messages": [
-                AIMessage(
-                    content="x",
-                    usage_metadata={
-                        "input_tokens": 900,
-                        "output_tokens": 300,
-                        "total_tokens": 1200,
-                    },
-                )
-            ]
-        }
-
-    middleware._observe_token_usage(cast(Any, _Req()))
+    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
     assert session.tokens_used == 1200
     # Cumulative, not additive: observing the same history again must not
     # double-count it.
-    middleware._observe_token_usage(cast(Any, _Req()))
+    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
     assert session.tokens_used == 1200
+
+
+def test_two_conversations_do_not_erase_each_other() -> None:
+    """One middleware serves every thread, so the scope key must include it.
+
+    With a constant scope, thread B's 1000 tokens vanish -- 1000 is not greater
+    than A's 1000, so nothing accrues -- and B is then told it has its full
+    budget left. That is the exact false-number defect this feature removes,
+    reintroduced one layer down.
+    """
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    middleware._observe_token_usage(_usage_request(1000, thread_id="A"))
+    middleware._observe_token_usage(_usage_request(1000, thread_id="B"))
+    assert session.tokens_used == 2000
+
+
+def test_missing_thread_id_still_accrues() -> None:
+    # No checkpointer configured: one conversation, no thread id. Must still
+    # feed rather than silently no-op.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    middleware._observe_token_usage(_usage_request(800))
+    assert session.tokens_used == 800
+
+
+def test_middleware_blocks_once_the_budget_is_spent() -> None:
+    # The point of the whole feature: a breach must actually stop the next
+    # tool call, not merely be counted.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    blocked = middleware._check(_usage_request(50_001, thread_id="A"))
+    assert blocked is not None
+    assert "token budget exceeded" in str(blocked.content)

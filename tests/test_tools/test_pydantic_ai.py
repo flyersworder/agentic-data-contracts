@@ -54,7 +54,7 @@ async def _invoke(
 
 def _run_ctx(deps: Any) -> RunContext[Any]:
     """Minimal RunContext for driving a deps-aware toolset factory directly."""
-    return RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+    return RunContext(deps=deps, model=TestModel(), usage=RunUsage(), run_id="test-run")
 
 
 def _toolset_tools(factory: Any, deps: Any) -> dict[str, Tool]:

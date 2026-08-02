@@ -157,11 +157,13 @@ def _to_pydantic_ai_tool(
     async def _fn(ctx: RunContext[Any], **kwargs: Any) -> str:
         # Observe BEFORE the limit check, so a budget already exhausted by the
         # model's own consumption is caught on this call rather than the next.
-        usage = getattr(ctx, "usage", None)
-        if usage is not None:
-            total = getattr(usage, "total_tokens", None)
-            if total:
-                session.observe_tokens(total, scope=str(getattr(ctx, "run_id", "")))
+        # `run_id` scopes the observation: pydantic-ai reports usage
+        # cumulatively per run, and one session spans many. Skip rather than
+        # fall back to a shared key -- a constant scope collapses every run into
+        # max() and silently drops the smaller ones.
+        run_id = ctx.run_id
+        if run_id is not None and ctx.usage.total_tokens:
+            session.observe_tokens(ctx.usage.total_tokens, scope=str(run_id))
 
         if apply_middleware:
             try:

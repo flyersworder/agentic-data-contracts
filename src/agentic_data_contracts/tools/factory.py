@@ -80,21 +80,27 @@ def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
     Same shape, and the same reasoning, as the ``ENFORCEABLE_OPERATIONS``
     warning in ``Validator``: a declared-but-unenforced limit is worse than an
     absent one, because the contract reads as protective while permitting the
-    very thing it names. Token usage is only observable where the framework
-    hands it to the tool -- Pydantic AI's ``ctx.usage``, and
-    ``ContractMiddleware``'s ``request.state``. Every other path is blind to it.
+    very thing it names.
+
+    Note the wording: these paths *do not* observe usage, which is not the same
+    as cannot. Pydantic AI's ``ctx.usage`` and ``ContractMiddleware``'s
+    ``request.state`` are wired; ``create_langchain_tools`` could be, by taking
+    a ``ToolRuntime`` parameter, and is not yet. Only the Claude Agent SDK path
+    is genuinely blind -- its tool callable receives an ``args`` dict and
+    nothing else. Saying "cannot" in a permanent runtime warning would be the
+    same declared-but-false failure in doc form.
 
     Lives here rather than in each adapter so the message cannot drift between
-    them; ``sdk.py`` and ``langchain.py`` both call it.
+    them; ``sdk.py``, ``langchain.py`` and ``middleware.py`` all call it.
     """
     resources = contract.schema.resources
     if resources is None or resources.token_budget is None:
         return
     logger.warning(
-        "Contract declares resources.token_budget=%s but %s cannot observe token"
-        " usage, so it will NOT be enforced. Feed it yourself via"
-        " ContractSession.observe_tokens(), or use the Pydantic AI adapter or"
-        " LangChain's ContractMiddleware.",
+        "Contract declares resources.token_budget=%s but %s does not observe"
+        " token usage, so it will NOT be enforced there. Use the Pydantic AI"
+        " adapter or LangChain's ContractMiddleware, or feed the session"
+        " yourself via ContractSession.observe_tokens().",
         resources.token_budget,
         path,
     )

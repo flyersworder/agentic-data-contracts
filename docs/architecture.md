@@ -245,14 +245,31 @@ only two paths expose it:
 | Path | Feeds `token_budget`? | Source |
 |---|---|---|
 | Pydantic AI tools / toolset | Yes | `ctx.usage.total_tokens`, scoped by `ctx.run_id` |
-| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]` |
-| LangChain `create_langchain_tools` | No | `StructuredTool` coroutines get arguments only |
-| Claude Agent SDK | No | the tool callable gets an `args` dict only |
+| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped by `thread_id` |
+| LangChain `create_langchain_tools` | Not yet | Could take a `ToolRuntime` parameter; not wired |
+| `contract_middleware` | No | its wrapper receives an `args` dict only |
+| Claude Agent SDK | No | the tool callable receives an `args` dict only |
 
-The two that cannot warn at wiring time, for the same reason `Validator` warns
-about unenforceable `forbidden_operations`: a declared-but-unenforced limit is
-worse than an absent one, because the contract reads as protective while
-permitting the thing it names.
+Note "not yet" rather than "cannot" for `create_langchain_tools`: a
+`StructuredTool` coroutine *can* be handed a `ToolRuntime` (and with it the
+message list and `thread_id`), so that row is a wiring gap, not a capability
+limit. Only the last two are genuinely blind. Stating it as a limit — in docs
+or, worse, in a permanent runtime warning — would be the same
+declared-but-false failure this section is about.
+
+The paths that do not feed it warn at wiring time, for the same reason
+`Validator` warns about unenforceable `forbidden_operations`: a
+declared-but-unenforced limit is worse than an absent one, because the contract
+reads as protective while permitting the thing it names. `create_langchain_tools`
+stays quiet when `apply_middleware=False`, since that is exactly how a caller
+signals it is delegating enforcement to `ContractMiddleware` — a warning that
+fires on a correct configuration is how the real ones get ignored.
+
+**Both LangChain enforcement pieces must share one `ContractSession`.** They
+each default to constructing their own, and a split pair enforces against the
+middleware's session while `run_query` reports `remaining()` from the tools'
+— so the model is told it has its full budget no matter what it spent. Build
+one session and pass it to both.
 
 `observe_tokens(cumulative, *, scope)` exists because framework counters report
 a running total for **their** scope (a Pydantic AI run, a LangGraph thread)

@@ -10,7 +10,10 @@ from typing import Any
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
-from agentic_data_contracts.tools.factory import _error_response
+from agentic_data_contracts.tools.factory import (
+    _error_response,
+    _warn_token_budget_unenforceable,
+)
 from agentic_data_contracts.validation.validator import Validator
 
 
@@ -20,6 +23,9 @@ def contract_middleware(
     adapter: DatabaseAdapter | None = None,
     session: ContractSession | None = None,
 ) -> Callable:
+    # Its wrapper receives an args dict only, same as the SDK path.
+    _warn_token_budget_unenforceable(contract, "contract_middleware")
+
     if session is None:
         session = ContractSession(contract)
 

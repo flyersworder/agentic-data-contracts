@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.1] - 2026-08-02
+
+### Fixed
+
+- **Two optional-extra floors were untrue, and the `test-lowest-floors` job now proves the rest are not.** 0.32.0 added that job but scoped it to core dependencies, because widening it revealed pre-existing floor breaks that would have made it permanently red. Both are now fixed, so the job runs the **full suite** against every declared minimum.
+
+  - **`agent-sdk`: `claude-agent-sdk>=0.1.58` → `>=0.2.96`.** An upstream constraint bug this package's floor inherited: 0.1.58 declared a bare `mcp>=0.1.0`, so resolving the extra at its floor pulled `mcp` 2.0.0 — which removed `Server.list_tools` and broke `claude_agent_sdk`'s own `create_sdk_mcp_server`. 0.2.96 is the first release bounding it (`mcp<2.0.0,>=1.23.0`).
+  - **`duckdb`: `>=1.0.0` → `>=1.1.0`.** DuckDB 1.0.0 renders the EXPLAIN cardinality as `EC: N`; 1.1.0 changed it to `~N Rows`, which is what `DuckDBAdapter._parse_row_estimate` matches. At 1.0.0 the estimate silently parsed as `None`, so `run_query`'s cost accounting had nothing to record.
+
+  Verified rather than assumed: `langchain`, `pydantic-ai`, and `agent-contracts` all pass at their existing floors unchanged. The `bigquery`, `snowflake`, and `postgres` extras stay out of the job by design — this package contains **no adapter code** for them (no import of those drivers exists in `src/`), so they are install conveniences for users writing their own `DatabaseAdapter` and their floors cannot affect it.
+
+### Compatibility
+
+- If you install the `agent-sdk` or `duckdb` extras with a pin below the new floors, you will get a resolution conflict rather than a working install. Both old floors were already broken at those versions, so nothing that worked before stops working.
+
 ## [0.32.0] - 2026-08-02
 
 ### Changed

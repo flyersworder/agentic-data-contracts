@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.32.0"
+version = "0.32.1"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -53,20 +53,25 @@ Issues = "https://github.com/flyersworder/agentic-data-contracts/issues"
 Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/main/docs/architecture.md"
 
 [project.optional-dependencies]
-agent-sdk = ["claude-agent-sdk>=0.1.58"]
+# 0.2.96 is the first release that bounds its own mcp dependency
+# (`mcp<2.0.0,>=1.23.0`). 0.1.58 declared a bare `mcp>=0.1.0`, so resolving this
+# extra at its floor pulled mcp 2.0.0, which removed `Server.list_tools` and
+# broke claude_agent_sdk's own create_sdk_mcp_server -- an upstream constraint
+# bug our floor inherited.
+agent-sdk = ["claude-agent-sdk>=0.2.96"]
 agent-contracts = ["ai-agent-contracts>=0.3.1"]
 langchain = ["langchain-core>=1.3.3", "langchain>=1.2.17", "langgraph>=1.1.10"]
 pydantic-ai = ["pydantic-ai-slim[anthropic]>=2.0.0"]
 bigquery = ["google-cloud-bigquery>=3.0.0"]
 snowflake = ["snowflake-connector-python>=3.6.0"]
 postgres = ["psycopg2-binary>=2.9.9"]
-duckdb = ["duckdb>=1.0.0"]
+duckdb = ["duckdb>=1.1.0"]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.10",
-    "duckdb>=1.0.0",
+    "duckdb>=1.1.0",
     "langchain-core>=1.3.3",
     "langchain>=1.2.17",
     "langgraph>=1.1.10",

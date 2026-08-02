@@ -277,10 +277,13 @@ cannot detect — declared but NOT enforced. Enforceable operations: [...]
 ```
 
 A declared-but-unenforced rule is worse than an absent one, so this fails loud
-rather than silent. The warning is `lru_cache`d on the operation set: `Validator`
-construction is not once-per-process (the deps-aware Pydantic AI toolset rebuilds
-one per model step under `per_run_step=True`), so an uncached warning would log
-on every step.
+rather than silent — and deliberately *uncached*, though it fires once per
+`Validator`. Memoising a logging side effect means a consumer who calls
+`logging.basicConfig()` after building its contracts loses the warning
+permanently, which is the opposite of what a fail-loud diagnostic should do. The
+five `logger.warning` calls in `create_tools` sit on the identical call path
+uncached; if the repetition ever matters, the fix belongs at contract-load time
+for all six.
 
 The residue is real, and not purely `exp.Command`:
 
@@ -495,10 +498,11 @@ shared one exhausts the retry budget and silently reroutes later cases to the
 session-limit branch.
 
 The key is additive on every path. `create_pydantic_ai_tools` reads only
-`content`; `create_langchain_tools` also returns the raw envelope as the
-`ToolMessage.artifact` under `response_format="content_and_artifact"`, so
-`is_error` rides along there — harmless, and arguably useful. Neither branches on
-it; both already
+`content`; `create_langchain_tools` returns the raw envelope as the `ToolMessage.artifact`
+under `response_format="content_and_artifact"`, so `is_error` rides along for
+non-`BLOCKED` errors (missing adapter, restricted table, invalid argument). For a
+governance block it raises `ToolException` before any artifact is produced, so
+the flag is not observable there. Neither wrapper branches on it; both already
 signalled errors natively (`ToolException`, `ModelRetry` / the terminal
 `ContractSessionLimitError`), which is why this gap was specific to the SDK
 path — the only path where the MCP envelope survives as MCP.
@@ -837,7 +841,7 @@ agentic-data-contracts/
 ```toml
 [project]
 dependencies = [
-    "sqlglot>=23.0",
+    "sqlglot>=28.0",   # see the floor comment in pyproject.toml
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]

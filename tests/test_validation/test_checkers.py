@@ -591,7 +591,12 @@ class TestEnforceableOperations:
         # import time and configures logging in main() must still see the
         # warning on the next Validator, not have it cached away forever.
         contract = _contract_forbidding(["NOSUCHOP"])
-        Validator(contract)  # first build, before caplog is capturing
+        Validator(contract)  # first build
+        # caplog's handler is attached for the whole test, so the first build's
+        # record is already captured — without this clear() the assertion below
+        # passes even if the second build emits nothing, which is exactly what
+        # a memoised warning would do.
+        caplog.clear()
         with caplog.at_level(logging.WARNING):
             Validator(contract)
         assert "NOSUCHOP" in caplog.text

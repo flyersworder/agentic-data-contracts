@@ -263,10 +263,10 @@ async def test_middleware_envelopes_carry_is_error(
     contract: DataContract, adapter: DuckDBAdapter
 ) -> None:
     # contract_middleware is the BYO-tool path, exported from the package root.
-    # Its envelopes are built by hand rather than through _error_response, so
-    # they need their own coverage -- the previous version of this invariant
-    # spanned only create_tools, which is exactly how its violations envelope
-    # shipped without the flag.
+    # Its envelopes now go through _error_response like the factory's, but this
+    # coverage stays: they were hand-rolled once, and that is exactly how the
+    # violations envelope shipped without the flag while an invariant test that
+    # spanned only create_tools reported green.
     from agentic_data_contracts.tools.middleware import contract_middleware
 
     @contract_middleware(contract, adapter=adapter)

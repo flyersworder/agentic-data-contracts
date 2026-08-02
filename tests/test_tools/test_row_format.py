@@ -225,9 +225,14 @@ def test_run_query_description_documents_compact_shape(
         ),
         "run_query",
     )
-    assert records.description == (
+    # Asserted by shape, not by full equality: the rest of this description
+    # carries the query protocol, which test_tool_protocol.py owns. What matters
+    # here is that the row-shape note is the suffix and the *only* difference
+    # between the two renderings.
+    assert records.description.startswith(
         "Validate and execute a SQL query, returning the results."
     )
+    assert not records.description.endswith(_COMPACT_ROWS_NOTE)
     assert compact.description == records.description + _COMPACT_ROWS_NOTE
 
 

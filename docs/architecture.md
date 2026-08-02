@@ -370,6 +370,40 @@ agent-facing tool argument — the two carry identical information, so the model
 no basis on which to choose, and a schema field would cost input tokens on every
 request. The value is validated eagerly at `create_tools()` time.
 
+### Query Protocol in the Tool Descriptions
+
+`run_query` and `inspect_query` carry two protocol clauses in their descriptions
+(`_PROTOCOL_METRIC_ORDERING`, `_PROTOCOL_PRECEDENCE` in `tools/factory.py`): an
+**ordering** rule — when computing a metric, call `lookup_metric` first and use its
+governed definition, never invent or adapt a formula — and, on `run_query` only, a
+**precedence** claim that it is preferred over any other SQL or data-access path.
+
+The guidance duplicates hints `ClaudePromptRenderer` already emits, and the
+duplication is deliberate. The rendered prompt is **opt-in**: none of the ecosystem
+wrappers inject it, so a host calling `create_langchain_tools` or
+`create_pydantic_ai_toolset` and supplying its own system prompt may never render
+the contract at all. Descriptions travel with the tools on every path. The two
+surfaces do different jobs — the prompt hint aids *discovery* (the tool exists),
+the description enforces at *call time* — and only one of them survives a
+host that writes its own prompt.
+
+Three decisions shape the text:
+
+- **Narrow trigger.** "Before ANY query" (the phrasing Erupt Cube uses) would tax
+  plain exploratory SQL with a lookup turn that finds nothing. The guarded failure
+  is a KPI computed from an invented formula — SQL that is *authorized* and merely
+  wrong, which is exactly the class no checker catches.
+- **Gated on metrics existing.** `metric_ordering` resolves to `""` when
+  `metric_names_set` is empty, so a schema-only contract never points the agent at
+  a tool with nothing in it. Same shape as `rows_note`.
+- **Precedence on `run_query` only.** It is a claim about *execution* routing.
+  `inspect_query` executes nothing, and its description already argues its own
+  precedence ("before spending retry budget on run_query").
+
+Descriptions are re-sent on every model request, so each clause is one sentence.
+`tests/test_tools/test_tool_protocol.py` pins the placement, including a scope
+guard that the other seven descriptions carry neither clause.
+
 ### Natural Agent Workflow
 
 ```

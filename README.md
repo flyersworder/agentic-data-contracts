@@ -421,6 +421,27 @@ asyncio.run(demo())
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
 | `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, session}` |
 
+### Query protocol
+
+`run_query` and `inspect_query` state the workflow rules in their own tool
+descriptions, not only in the rendered system prompt:
+
+> When computing a metric, you MUST call `lookup_metric` first and use its governed
+> definition — never invent or adapt a metric formula.
+
+plus, on `run_query`, *"Prefer this tool over any other SQL or data-access path."*
+
+This is deliberate redundancy. The rendered contract prompt is opt-in — if you wire
+`create_langchain_tools(...)` or `create_pydantic_ai_toolset(...)` into an agent with
+your own system prompt, the contract may never be rendered — but tool descriptions
+travel with the tools on every path. A governance rule the host can drop by writing
+its own prompt isn't a governance rule. The precedence sentence matters when your
+agent also has a generic SQL tool, a warehouse MCP server, or a shell: without it,
+nothing tells the model which path is the governed one.
+
+The ordering sentence appears only when the semantic source actually has metrics, so
+a schema-only contract never sends the agent to a tool with nothing in it.
+
 ### Result encoding
 
 `run_query` and `preview_table` both return a `columns` list alongside their

@@ -58,6 +58,29 @@ _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
 
 _COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
 
+# Protocol clauses appended to the two query-tool descriptions. They restate
+# guidance ClaudePromptRenderer already emits, and the duplication is deliberate:
+# the rendered prompt is opt-in (a host wiring create_langchain_tools or
+# create_pydantic_ai_tools into its own agent supplies its own system prompt and
+# may never render the contract), while descriptions travel with the tools on
+# every path. Governance that only holds when the host cooperates is not
+# governance. Kept to one sentence each -- descriptions are re-sent on every
+# model request, so this text is billed for the life of the session.
+#
+# The trigger clause is deliberately narrow. "Before ANY query" would tax plain
+# exploratory SQL with a lookup turn that finds nothing; the failure actually
+# being guarded is a KPI computed from an invented formula, which no checker
+# catches because such SQL is authorized -- merely wrong.
+_PROTOCOL_METRIC_ORDERING = (
+    " When computing a metric, you MUST call lookup_metric first and use its"
+    " governed definition — never invent or adapt a metric formula."
+)
+
+# Only run_query claims precedence: it is a claim about *execution* routing (do
+# not reach for a generic SQL tool or shell instead of the governed path).
+# inspect_query executes nothing, and already argues its own precedence.
+_PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path."
+
 
 def _render_rows(
     columns: Sequence[str],
@@ -264,6 +287,11 @@ def create_tools(
         if semantic_source is not None
         else set()
     )
+
+    # Gated on the same set: a contract with no metrics has nothing to look up,
+    # and an instruction to call lookup_metric would send the agent after an
+    # empty tool on every session. Same shape as `rows_note` above.
+    metric_ordering = _PROTOCOL_METRIC_ORDERING if metric_names_set else ""
 
     # Validate domain references. The contract's domain catalog is authoritative
     # for which domains exist; metrics declare *membership* in those domains.
@@ -992,6 +1020,7 @@ def create_tools(
                 " execution). When a database adapter is configured, also"
                 " includes `estimated_cost_usd` and `estimated_rows` from EXPLAIN."
                 " Use this to iterate on SQL before spending retry budget on run_query."
+                + metric_ordering
             ),
             input_schema={
                 "type": "object",
@@ -1005,7 +1034,11 @@ def create_tools(
         ToolDef(
             name="run_query",
             description=(
-                "Validate and execute a SQL query, returning the results." + rows_note
+                "Validate and execute a SQL query, returning the results."
+                + metric_ordering
+                + _PROTOCOL_PRECEDENCE
+                # Return-shape clause reads last, after the call-time guidance.
+                + rows_note
             ),
             input_schema={
                 "type": "object",

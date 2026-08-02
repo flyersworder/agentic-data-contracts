@@ -426,7 +426,7 @@ asyncio.run(demo())
 `run_query` and `inspect_query` state the workflow rules in their own tool
 descriptions, not only in the rendered system prompt:
 
-> When computing a metric, you MUST call `lookup_metric` first and use its governed
+> When computing a metric, you MUST call lookup_metric first and use its governed
 > definition — never invent or adapt a metric formula.
 
 plus, on `run_query`, *"Prefer this tool over any other SQL or data-access path."*
@@ -439,8 +439,10 @@ its own prompt isn't a governance rule. The precedence sentence matters when you
 agent also has a generic SQL tool, a warehouse MCP server, or a shell: without it,
 nothing tells the model which path is the governed one.
 
-The ordering sentence appears only when the semantic source actually has metrics, so
-a schema-only contract never sends the agent to a tool with nothing in it.
+Each sentence appears only when the capability it names exists — ordering when the
+semantic source actually has metrics, precedence when an adapter is configured (a
+validation-only setup can't execute, so claiming precedence there would point the
+agent at a tool that returns an error).
 
 ### Result encoding
 

@@ -387,18 +387,30 @@ surfaces do different jobs — the prompt hint aids *discovery* (the tool exists
 the description enforces at *call time* — and only one of them survives a
 host that writes its own prompt.
 
-Three decisions shape the text:
+One rule governs both clauses: **a clause appears only when the capability it names
+exists.**
 
-- **Narrow trigger.** "Before ANY query" (the phrasing Erupt Cube uses) would tax
-  plain exploratory SQL with a lookup turn that finds nothing. The guarded failure
-  is a KPI computed from an invented formula — SQL that is *authorized* and merely
-  wrong, which is exactly the class no checker catches.
-- **Gated on metrics existing.** `metric_ordering` resolves to `""` when
+- **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
   `metric_names_set` is empty, so a schema-only contract never points the agent at
-  a tool with nothing in it. Same shape as `rows_note`.
-- **Precedence on `run_query` only.** It is a claim about *execution* routing.
-  `inspect_query` executes nothing, and its description already argues its own
-  precedence ("before spending retry budget on run_query").
+  a tool with nothing in it.
+- **Precedence is gated on an adapter.** Without one, `run_query` returns "No
+  database adapter configured — cannot execute query", so the sentence would be a
+  false claim about the tool's capability, steering the agent off a path that works
+  and onto one that cannot run. Adapter-less `create_tools()` is a supported
+  configuration (validation-only deployments), so this is not a hypothetical.
+
+Both follow the conditional shape `rows_note` established. Two further decisions
+shape the text:
+
+- **Narrow trigger.** A broader "before any query" would tax plain exploratory SQL
+  with a lookup turn that finds nothing. The guarded failure is a KPI computed from
+  an invented formula — SQL that is *authorized* and merely wrong, which is exactly
+  the class no checker catches. (The design was informed by
+  [Erupt Cube × LLM](https://docs.erupt.xyz/en/topics/cube-llm), which enforces an
+  equivalent protocol in its tool descriptions but triggers on any query.)
+- **Precedence on `run_query` only,** never `inspect_query`, which executes nothing
+  and already argues its own precedence ("before spending retry budget on
+  run_query").
 
 Descriptions are re-sent on every model request, so each clause is one sentence.
 `tests/test_tools/test_tool_protocol.py` pins the placement, including a scope

@@ -59,7 +59,8 @@ _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
 _COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
 
 # Protocol clauses appended to the two query-tool descriptions. They restate
-# guidance ClaudePromptRenderer already emits, and the duplication is deliberate:
+# guidance ClaudePromptRenderer._render_metrics already emits, and the
+# duplication is deliberate:
 # the rendered prompt is opt-in (a host wiring create_langchain_tools or
 # create_pydantic_ai_tools into its own agent supplies its own system prompt and
 # may never render the contract), while descriptions travel with the tools on
@@ -79,6 +80,13 @@ _PROTOCOL_METRIC_ORDERING = (
 # Only run_query claims precedence: it is a claim about *execution* routing (do
 # not reach for a generic SQL tool or shell instead of the governed path).
 # inspect_query executes nothing, and already argues its own precedence.
+#
+# Gated on an adapter for the same reason the ordering clause is gated on
+# metrics: without one, run_query returns "No database adapter configured" and
+# the sentence becomes a false claim about the tool's capability -- steering the
+# agent away from a path that works and onto one that cannot execute. Both
+# clauses obey one rule: a clause appears only when the capability it names
+# exists.
 _PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path."
 
 
@@ -292,6 +300,7 @@ def create_tools(
     # and an instruction to call lookup_metric would send the agent after an
     # empty tool on every session. Same shape as `rows_note` above.
     metric_ordering = _PROTOCOL_METRIC_ORDERING if metric_names_set else ""
+    precedence = _PROTOCOL_PRECEDENCE if adapter is not None else ""
 
     # Validate domain references. The contract's domain catalog is authoritative
     # for which domains exist; metrics declare *membership* in those domains.
@@ -1036,7 +1045,7 @@ def create_tools(
             description=(
                 "Validate and execute a SQL query, returning the results."
                 + metric_ordering
-                + _PROTOCOL_PRECEDENCE
+                + precedence
                 # Return-shape clause reads last, after the call-time guidance.
                 + rows_note
             ),

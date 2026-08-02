@@ -75,7 +75,7 @@ def _error_response(text: str) -> dict[str, Any]:
 
 
 def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
-    """Warn when a contract declares a token budget the given path cannot enforce.
+    """Warn when a contract declares a token budget the given path does not enforce.
 
     Same shape, and the same reasoning, as the ``ENFORCEABLE_OPERATIONS``
     warning in ``Validator``: a declared-but-unenforced limit is worse than an

@@ -15,10 +15,10 @@ from pydantic_ai.usage import RunUsage  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
 from agentic_data_contracts.core.contract import DataContract  # noqa: E402
-from agentic_data_contracts.core.schema import (
+from agentic_data_contracts.core.schema import (  # noqa: E402
     AllowedTable,
     DataContractSchema,
-    ResourceConfig,  # noqa: E402
+    ResourceConfig,
     SemanticConfig,
 )
 from agentic_data_contracts.core.session import (  # noqa: E402

@@ -240,7 +240,7 @@ These are simple counters/timers with guard checks before each tool call. No for
 **Token usage is the one counter the session cannot produce itself,** because
 the tokens are spent by the *model* between tool calls, not by anything this
 library runs. It has to be fed from whatever the host framework exposes, and
-only two paths expose it:
+two paths currently read it:
 
 | Path | Feeds `token_budget`? | Source |
 |---|---|---|

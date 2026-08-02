@@ -120,3 +120,39 @@ async def test_middleware_offloads_validate_off_event_loop(
     assert seen["explain"] != threading.get_ident(), (
         "EXPLAIN ran on the event-loop thread"
     )
+
+
+def test_contract_middleware_warns_that_token_budget_is_inert(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    """This wrapper receives an args dict only, same as the SDK path.
+
+    It is exported from the package root, so a declared budget going
+    unenforced here needs to be as loud as it is on the other blind paths.
+    """
+    import logging
+
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        ResourceConfig,
+        SemanticConfig,
+    )
+
+    budgeted = DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=50_000),
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        contract_middleware(budgeted, adapter=adapter)
+    assert "token_budget" in caplog.text
+    assert "NOT be enforced" in caplog.text

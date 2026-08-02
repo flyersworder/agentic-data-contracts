@@ -125,9 +125,7 @@ def create_langchain_tools(
     # and a warning that fires when things are correct is how the real ones get
     # ignored.
     if apply_middleware:
-        _warn_token_budget_unenforceable(
-            contract, "create_langchain_tools (ContractMiddleware does)"
-        )
+        _warn_token_budget_unenforceable(contract, "create_langchain_tools")
 
     if session is None:
         session = ContractSession(contract)
@@ -240,21 +238,21 @@ class ContractMiddleware(AgentMiddleware):
         monotonically as messages append, which is what
         ``ContractSession.observe_tokens`` expects.
 
-        Scoped by ``thread_id``, not a constant: one middleware instance serves
-        every conversation an agent handles (the README wires exactly one), and
-        a shared key means the second thread's usage is silently dropped
+        Scoped per conversation, never by a constant: one middleware instance
+        serves every conversation an agent handles (the README wires exactly
+        one), and a shared key silently drops the second conversation's usage
         whenever its running sum sits below the first's peak -- under-enforcing
         *and* reporting a false ``tokens_remaining`` to the model, which is the
-        failure this feature exists to remove.
+        failure this feature exists to remove. See :meth:`_usage_scope`.
 
-        Two accepted limits. Concurrent threads still share one
-        ``ContractSession``, so the budget is a combined ceiling across
-        conversations rather than per-conversation -- correct for a per-user
-        session, worth knowing if you share one more widely. And a middleware
-        that trims or summarises history (``SummarizationMiddleware``,
-        ``trim_messages``) shrinks the sum; the monotone guard refuses to
-        subtract, so accrual pauses until the new sum passes the old peak. That
-        under-enforces rather than over-enforces, which is the safe direction.
+        Two accepted limits. Concurrent conversations still share one
+        ``ContractSession``, so the budget is a combined ceiling across them
+        rather than per-conversation -- correct for a per-user session, worth
+        knowing if you share one more widely. And a middleware that trims or
+        summarises history (``SummarizationMiddleware``, ``trim_messages``)
+        shrinks the sum; the monotone guard refuses to subtract, so accrual
+        pauses until the new sum passes the old peak. That under-enforces
+        rather than over-enforces, which is the safe direction.
         """
         state = getattr(request, "state", None)
         if not state:
@@ -273,12 +271,41 @@ class ContractMiddleware(AgentMiddleware):
 
     @staticmethod
     def _usage_scope(request: ToolCallRequest) -> str:
-        """Per-conversation scope key, falling back when no thread is set."""
+        """Identify the conversation whose running total is being observed.
+
+        Two sources, tried in order, because neither covers every wiring:
+
+        1. ``thread_id`` from the runtime config — present whenever a
+           checkpointer is configured, and stable across turns.
+        2. The id of the first message in state. LangGraph's ``add_messages``
+           reducer assigns a UUID as messages enter state, and the first one
+           stays put across turns, so it identifies a conversation even with no
+           checkpointer — which is the shape the README's own LangChain example
+           uses.
+
+        Falling back to a bare constant is the *last* resort and is the one
+        case that still under-counts: two conversations sharing it accrue only
+        the larger. It is reached only when there is neither a thread id nor an
+        identified first message, and it under-enforces rather than
+        over-enforces, which is the safe direction to fail.
+        """
         runtime = getattr(request, "runtime", None)
         config = getattr(runtime, "config", None) or {}
-        configurable = config.get("configurable") or {}
-        thread_id = configurable.get("thread_id")
-        return f"langchain:{thread_id}" if thread_id else "langchain"
+        thread_id = (config.get("configurable") or {}).get("thread_id")
+        if thread_id:
+            return f"langchain:thread:{thread_id}"
+
+        state = getattr(request, "state", None)
+        try:
+            messages = state["messages"] if state else None
+        except (KeyError, TypeError):
+            messages = None
+        if messages:
+            first_id = getattr(messages[0], "id", None)
+            if first_id:
+                return f"langchain:conv:{first_id}"
+
+        return "langchain"
 
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit

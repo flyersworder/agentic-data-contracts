@@ -486,13 +486,29 @@ def test_structured_tool_path_warns_that_budget_is_inert(
     caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
 ) -> None:
     # A declared-but-unenforced limit is worse than an absent one: the contract
-    # reads as protective while permitting the thing it names. This path cannot
-    # see token usage, so it must say so.
+    # reads as protective while permitting the thing it names. This path does
+    # not read run state, so it must say so.
     with caplog.at_level(logging.WARNING):
         create_langchain_tools(_budgeted_contract(), adapter=adapter)
     assert "token_budget" in caplog.text
     assert "NOT be enforced" in caplog.text
     assert "ContractMiddleware" in caplog.text
+
+
+def test_no_warning_when_delegating_to_the_middleware(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    """`apply_middleware=False` is how a caller signals delegation.
+
+    Warning then would fire on the configuration the README teaches, and a
+    warning that cries wolf on a correct setup is how the real ones get
+    filtered out.
+    """
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(
+            _budgeted_contract(), adapter=adapter, apply_middleware=False
+        )
+    assert "token_budget" not in caplog.text
 
 
 def test_no_warning_when_no_budget_declared(
@@ -505,13 +521,20 @@ def test_no_warning_when_no_budget_declared(
     assert "token_budget" not in caplog.text
 
 
-def _usage_request(total: int, thread_id: str | None = None) -> ToolCallRequest:
-    """A real ToolCallRequest carrying one usage-bearing AIMessage."""
+def _usage_request(
+    total: int, thread_id: str | None = None, message_id: str | None = None
+) -> ToolCallRequest:
+    """A real ToolCallRequest carrying one usage-bearing AIMessage.
+
+    ``thread_id`` mimics a configured checkpointer; ``message_id`` mimics the
+    UUID LangGraph's reducer stamps on messages entering state, which is what
+    separates conversations when no checkpointer is present.
+    """
     from langchain_core.messages import AIMessage
 
     # `runtime` is typed non-optional on ToolCallRequest, but the middleware
-    # reads it defensively because an agent without a checkpointer has no
-    # thread. `None` exercises that branch.
+    # reads it defensively: `None` stands for "outside a graph", the shape
+    # where neither a thread id nor a runtime config is available.
     runtime = cast(
         Any,
         SimpleNamespace(config={"configurable": {"thread_id": thread_id}})
@@ -526,6 +549,7 @@ def _usage_request(total: int, thread_id: str | None = None) -> ToolCallRequest:
             {
                 "messages": [
                     AIMessage(
+                        id=message_id,
                         content="x",
                         usage_metadata={
                             "input_tokens": total - 300,
@@ -571,12 +595,38 @@ def test_two_conversations_do_not_erase_each_other() -> None:
 
 
 def test_missing_thread_id_still_accrues() -> None:
-    # No checkpointer configured: one conversation, no thread id. Must still
-    # feed rather than silently no-op.
+    # Neither a thread id nor an identified message: the last-resort key. Must
+    # still feed rather than silently no-op.
     session = ContractSession(_budgeted_contract())
     middleware = ContractMiddleware(_budgeted_contract(), session=session)
     middleware._observe_token_usage(_usage_request(800))
     assert session.tokens_used == 800
+
+
+def test_unthreaded_conversations_separate_by_message_id() -> None:
+    """No checkpointer is the README's own LangChain wiring.
+
+    LangGraph stamps a UUID on the first message as it enters state, so
+    conversations are distinguishable even without a thread id. Without this,
+    a second conversation whose running sum sits below the first's peak accrues
+    nothing and is told it has its full budget — the same defect thread scoping
+    fixed, one configuration over.
+    """
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    middleware._observe_token_usage(_usage_request(1000, message_id="conv-a"))
+    middleware._observe_token_usage(_usage_request(1000, message_id="conv-b"))
+    assert session.tokens_used == 2000
+
+
+def test_thread_id_wins_over_message_id() -> None:
+    # A configured checkpointer is the stronger signal: it survives history
+    # trimming that could drop the first message entirely.
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    scope = middleware._usage_scope(_usage_request(10, thread_id="T", message_id="M"))
+    assert scope == "langchain:thread:T"
 
 
 def test_middleware_blocks_once_the_budget_is_spent() -> None:

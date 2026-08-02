@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.32.0"
+version = "0.33.0"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -41,7 +41,16 @@ dependencies = [
     # sqlglot, so a contract could enforce less in one environment than another
     # -- the exact declared-but-unenforced failure this checker prevents.
     "sqlglot>=28.0",
-    "pydantic>=2.0",
+    # 2.11 is the lowest release that both ships wheels for every interpreter
+    # this package supports AND works with the other declared floors. The old
+    # `>=2.0` was untrue twice over: pydantic 2.0 pins pydantic-core==2.0.1,
+    # whose wheels stop at cp311 (a PyO3 source build on 3.12 and 3.13), and
+    # anything below 2.11 fails against pydantic-ai-slim 2.0 with a
+    # `GenerateSchema.__init__()` signature mismatch. It went unnoticed because
+    # uv resolves the project universally, so transitive requirements float
+    # pydantic above its own floor and test-lowest-floors never exercised it --
+    # hence the explicit wheel-and-floor check in that job.
+    "pydantic>=2.11",
     "pyyaml>=6.0.3",
     "thefuzz>=0.22.1",
 ]
@@ -53,20 +62,27 @@ Issues = "https://github.com/flyersworder/agentic-data-contracts/issues"
 Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/main/docs/architecture.md"
 
 [project.optional-dependencies]
-agent-sdk = ["claude-agent-sdk>=0.1.58"]
+# `mcp` is a DIRECT dependency, not just claude-agent-sdk's: sdk.py imports
+# `mcp.types.ToolAnnotations` at runtime. Declaring it is the actual fix -- an
+# undeclared import is how this extra inherited an upstream constraint bug it
+# could have owned. The UPPER bound stays with claude-agent-sdk deliberately:
+# mcp 2.0 broke `Server.list_tools`, which is the SDK's call, not ours, and
+# duplicating someone else's ceiling here would go stale. 0.2.96 is the first
+# release that declares it (`mcp<2.0.0,>=1.23.0`); 0.1.x left `mcp` unbounded.
+agent-sdk = ["claude-agent-sdk>=0.2.96", "mcp>=1.23.0"]
 agent-contracts = ["ai-agent-contracts>=0.3.1"]
 langchain = ["langchain-core>=1.3.3", "langchain>=1.2.17", "langgraph>=1.1.10"]
 pydantic-ai = ["pydantic-ai-slim[anthropic]>=2.0.0"]
-bigquery = ["google-cloud-bigquery>=3.0.0"]
-snowflake = ["snowflake-connector-python>=3.6.0"]
-postgres = ["psycopg2-binary>=2.9.9"]
-duckdb = ["duckdb>=1.0.0"]
+bigquery = ["google-cloud-bigquery>=3.7.0"]
+snowflake = ["snowflake-connector-python>=3.14.1"]
+postgres = ["psycopg2-binary>=2.9.10"]
+duckdb = ["duckdb>=1.1.1"]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.10",
-    "duckdb>=1.0.0",
+    "agentic-data-contracts[duckdb]",
     "langchain-core>=1.3.3",
     "langchain>=1.2.17",
     "langgraph>=1.1.10",

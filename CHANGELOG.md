@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0] - 2026-08-02
+
+### Fixed
+
+- **Two optional-extra floors were untrue, and `mcp` was imported without being declared.** 0.32.0 added the `test-lowest-floors` job but scoped it to core dependencies, because widening it revealed pre-existing breaks that would have left the job permanently red. Those are fixed here, so the job now runs the **full suite** at every floor uv actually resolves to, matrixed over both supported Pythons — plus an explicit wheel check for the floors it cannot reach (see below).
+
+  - **`agent-sdk` now declares `mcp>=1.23.0` directly, and requires `claude-agent-sdk>=0.2.96`.** `tools/sdk.py` imports `mcp.types.ToolAnnotations` at runtime, so `mcp` was always a direct dependency — it simply was not declared, which is how this extra inherited an upstream constraint bug it could have owned. `claude-agent-sdk` 0.1.x declared a bare `mcp>=0.1.0`, so resolving the extra at its floor pulled `mcp` 2.0.0, which removed `Server.list_tools` and broke the SDK's own `create_sdk_mcp_server`. The **upper** bound is deliberately left with `claude-agent-sdk` (0.2.96 is the first release declaring `mcp<2.0.0,>=1.23.0`): mcp 2.0 broke *its* call, not ours, and duplicating another project's ceiling here would go stale.
+  - **`duckdb`: `>=1.0.0` → `>=1.1.1`.** DuckDB 1.0.0 renders the EXPLAIN cardinality as `EC: N`; 1.1.0 changed it to `~N Rows`, which is what `DuckDBAdapter._parse_row_estimate` matches. This was **not** merely lost telemetry: `Validator` gates the `max_rows_scanned` check on `estimated_rows is not None`, so on duckdb 1.0.0 a contract's row-scan limit was **silently unenforced** — the limit read as active and did nothing. 1.1.1 rather than 1.1.0 because 1.1.0 ships no cp313 wheel and this package supports Python 3.13; at that floor a 3.13 install would fall back to a from-source C++ build.
+
+  - **`pydantic`: `>=2.0` → `>=2.11`.** Untrue twice over. pydantic 2.0 pins `pydantic-core==2.0.1`, whose wheels stop at cp311 — so the declared floor meant a PyO3 source build on *both* supported interpreters — and anything below 2.11 fails against `pydantic-ai-slim` 2.0 with a `GenerateSchema.__init__()` signature mismatch. It survived because uv resolves the project **universally**: transitive requirements float pydantic to 2.12 even with no extras installed, so `--resolution lowest-direct` never exercised its floor.
+  - **Wheel-only floors for the driver extras:** `google-cloud-bigquery` `>=3.0.0` → `>=3.7.0` (3.0.0 drags in a `pyarrow` with no wheel), `snowflake-connector-python` `>=3.6.0` → `>=3.14.1` (3.6.0 has no cp312 *or* cp313 wheel, so it was unusable on every Python this package supports), `psycopg2-binary` `>=2.9.9` → `>=2.9.10` (no cp313 wheel). These extras install a driver for a `DatabaseAdapter` you write, so a floor that cannot install defeats their only purpose.
+
+  Verified rather than assumed: `langchain`, `pydantic-ai`, `agent-contracts`, `sqlglot`, `pyyaml`, and `thefuzz` all hold at their existing floors. The `bigquery`, `snowflake`, and `postgres` extras stay out of the job by design: this package contains **no adapter code** for them (no import of those drivers exists in `src/`), so they are install conveniences for users writing their own `DatabaseAdapter` and their floors cannot affect it.
+
+### Changed
+
+- **`test-lowest-floors` is matrixed over Python 3.12 and 3.13**, and gained a wheel check. A floor can be satisfiable on one interpreter and not the other — the duckdb cp313 gap above is exactly that, and a 3.12-only job could not see it. The job also now uses the `dev` extra instead of unbounded `--with pytest` flags, which additionally floor-tests `dev`.
+
+- **New `scripts/check_floor_wheels.py`, run by that job on both Pythons.** Resolution alone is not sufficient: uv resolves universally, so a transitive requirement can float a package above its own floor and the floor is never tested — which is precisely how `pydantic>=2.0` survived. The script reads every `>=` floor out of `pyproject.toml` (so a new dependency is covered without editing it), pins each to `==`, and asserts it resolves with wheels alone. It found the `google-cloud-bigquery` floor above while being written.
+
+### Compatibility
+
+- **The `agent-sdk` extra now requires `claude-agent-sdk>=0.2.96`, dropping support for the 0.1.x line.** To be clear, 0.1.x is not broken *per se* — it works when `mcp` resolves below 2.0. What it cannot do is guarantee that on its own, and the fix is to depend on a release that bounds it. If you are pinned to `claude-agent-sdk` 0.1.x you will get a resolution conflict and must upgrade.
+- **The `duckdb` extra now requires `>=1.1.1`.** Anything below that either mis-parses the row estimate (silently disabling `max_rows_scanned`) or, on Python 3.13, has no wheel.
+- Minor version rather than patch, deliberately: raising a floor can break a consumer's resolve, and this project puts changes that can do that in the minor slot.
+
 ## [0.32.0] - 2026-08-02
 
 ### Changed

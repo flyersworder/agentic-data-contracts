@@ -235,7 +235,7 @@ Same fail-closed contract as per-table scoping: a rule with `allowed_principals`
 Contract-aware tools are plain async functions, so they drop into any framework — expand the one you use.
 
 <details>
-<summary><b>Claude Agent SDK</b> — requires <code>claude-agent-sdk</code> 0.1.52+</summary>
+<summary><b>Claude Agent SDK</b> — requires <code>claude-agent-sdk</code> 0.2.96+</summary>
 
 ```python
 import asyncio
@@ -912,14 +912,14 @@ resources:
 
 | Extra | Package | Purpose |
 |-------|---------|---------|
-| `duckdb` | `duckdb` | DuckDB adapter |
-| `bigquery` | `google-cloud-bigquery` | BigQuery adapter |
-| `snowflake` | `snowflake-connector-python` | Snowflake adapter |
-| `postgres` | `psycopg2-binary` | PostgreSQL adapter |
-| `agent-sdk` | `claude-agent-sdk` | Claude Agent SDK integration |
-| `langchain` | `langchain-core`, `langchain` | LangChain / deepagents integration |
-| `pydantic-ai` | `pydantic-ai-slim[anthropic]` | Pydantic AI integration |
-| `agent-contracts` | `ai-agent-contracts>=0.2.0` | ai-agent-contracts bridge |
+| `duckdb` | `duckdb>=1.1.1` | DuckDB adapter (the one adapter that ships) |
+| `bigquery` | `google-cloud-bigquery>=3.7.0` | Driver only — for a `DatabaseAdapter` you write |
+| `snowflake` | `snowflake-connector-python>=3.14.1` | Driver only — for a `DatabaseAdapter` you write |
+| `postgres` | `psycopg2-binary>=2.9.10` | Driver only — for a `DatabaseAdapter` you write |
+| `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp>=1.23.0` | Claude Agent SDK integration |
+| `langchain` | `langchain-core>=1.3.3`, `langchain>=1.2.17`, `langgraph>=1.1.10` | LangChain / deepagents integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.0.0` | Pydantic AI integration |
+| `agent-contracts` | `ai-agent-contracts>=0.3.1` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts
 
@@ -992,7 +992,7 @@ DATA_PLUGIN_PATH=/tmp/kwp/data \
 
 **Do I need `ai-agent-contracts`?** No. The library works standalone with lightweight enforcement (session counters, cost/retry/token budgets). Install [`ai-agent-contracts`](#optional-formal-governance-with-ai-agent-contracts) only if you want the formal 7-tuple contract, weighted success scoring, or multi-agent coordination.
 
-**Which databases are supported?** Any, via the `DatabaseAdapter` protocol. DuckDB, BigQuery, Snowflake, and PostgreSQL adapters ship as [optional extras](#optional-dependencies). Layer 1 validation (static SQL analysis) runs even with no adapter configured; a database adapter adds the EXPLAIN dry-run and query execution.
+**Which databases are supported?** Any, via the `DatabaseAdapter` protocol. A **DuckDB** adapter ships in the box; the `bigquery`, `snowflake`, and `postgres` [extras](#optional-dependencies) install the driver only, so you implement the (small) adapter against your warehouse's client. Layer 1 validation (static SQL analysis) runs even with no adapter configured; a database adapter adds the EXPLAIN dry-run and query execution.
 
 **Does it execute my SQL?** Only `run_query` does, and only after validation passes (plus an optional EXPLAIN dry-run). `inspect_query` validates without executing, and forbidden operations (DELETE/DROP/UPDATE/…) are blocked before they ever reach the database.
 

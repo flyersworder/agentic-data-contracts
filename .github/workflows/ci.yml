@@ -88,6 +88,36 @@ jobs:
           --extra pydantic-ai --extra duckdb --extra dev
           pytest tests/test_tools/test_pydantic_ai.py -v
 
+  test-lowest-floors:
+    # The `test` jobs run `--frozen`, so they only ever exercise the *locked*
+    # versions -- a dependency floor in pyproject can be wrong for months without
+    # any job noticing. This resolves every direct dependency to its declared
+    # minimum instead. It exists because `sqlglot>=23.0` was untrue: the
+    # operation blocklist maps AST nodes (`exp.Revoke` and friends) that only
+    # appear in 27.10+, and because the map is built at import time the floor
+    # did not degrade a feature, it raised AttributeError on import.
+    # Not a release gate (omitted from publish.needs): a floor break should be
+    # loud, but it should not block shipping a fix for something else.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv python install 3.12
+      # Core dependencies only, deliberately. The optional extras declare no
+      # lower bounds at all, so `--resolution lowest-direct` drags them to
+      # unbuildable antiques (duckdb 0.0.0, psycopg2-binary 2.7.4) and the job
+      # would fail for a reason unrelated to what it is guarding. Giving the
+      # extras real floors is worth doing separately; this covers the runtime
+      # dependencies every install gets.
+      - run: >-
+          uv run --isolated --resolution lowest-direct --python 3.12
+          python -c "import agentic_data_contracts"
+
   security:
     runs-on: ubuntu-latest
     permissions:

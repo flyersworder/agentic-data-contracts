@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -37,22 +36,24 @@ from agentic_data_contracts.validation.explain import ExplainAdapter
 logger = logging.getLogger(__name__)
 
 
-@functools.cache
 def _warn_unenforceable_operations(forbidden: frozenset[str]) -> None:
-    """Warn once per distinct ``forbidden_operations`` set.
+    """Warn that a declared forbidden operation is not actually enforced.
 
     A forbidden operation the blocklist cannot detect is worse than no rule at
     all: the contract reads as protective while permitting the statement. Warn
     so the gap is visible — the same shape as ``create_tools``' warnings for
     unknown domain and metric-impact references.
 
-    Cached because ``Validator`` construction is not once-per-process. The
-    deps-aware Pydantic AI toolset rebuilds one per run — and per *model step*
-    under ``agent.toolset``'s default ``per_run_step=True`` — and
-    ``validate_examples`` builds one per distinct principal. Without the cache a
-    misconfigured contract would log on every model step. Keyed on the operation
-    set, so a second contract with a different mistake still gets its own
-    warning.
+    Deliberately **not** memoised, though it fires once per ``Validator``. An
+    earlier revision cached it on the operation set, to stay quiet when a
+    toolset rebuilds per model step. That was wrong twice over: caching a
+    *logging side effect* means a consumer who calls ``logging.basicConfig()``
+    after building its contracts loses the warning permanently — the opposite of
+    what a fail-loud diagnostic should do — and the five ``logger.warning``
+    calls in ``create_tools`` (unknown domain tables, unknown metric domains,
+    metric-impact references) sit on the identical call path uncached, so
+    caching only this one bought inconsistency. If the repetition ever becomes a
+    real problem, the fix belongs at contract-load time for all six.
     """
     unenforceable = forbidden - ENFORCEABLE_OPERATIONS
     if unenforceable:
@@ -159,7 +160,7 @@ class Validator:
         )
 
         # Covers the standalone validate_examples path too, not just
-        # create_tools. See the helper for why it is cached.
+        # create_tools. See the helper for why it is not memoised.
         _warn_unenforceable_operations(
             frozenset(op.upper() for op in semantic.forbidden_operations)
         )

@@ -1,4 +1,5 @@
 from agentic_data_contracts.validation.checkers import (
+    ENFORCEABLE_OPERATIONS,
     BlockedColumnsChecker,
     CheckResult,
     MaxJoinsChecker,
@@ -38,6 +39,7 @@ __all__ = [
     "ExplainResult",
     "MaxJoinsChecker",
     "NoSelectStarChecker",
+    "ENFORCEABLE_OPERATIONS",
     "OperationBlocklistChecker",
     "ReconciliationResult",
     "RelationshipChecker",

@@ -99,7 +99,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.10" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'" },
-    { name = "sqlglot", specifier = ">=23.0" },
+    { name = "sqlglot", specifier = ">=27.10" },
     { name = "thefuzz", specifier = ">=0.22.1" },
 ]
 provides-extras = ["agent-sdk", "agent-contracts", "langchain", "pydantic-ai", "bigquery", "snowflake", "postgres", "duckdb", "dev", "all"]

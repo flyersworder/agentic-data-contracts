@@ -28,7 +28,12 @@ from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    RowFormat,
+    ToolDef,
+    _error_response,
+    create_tools,
+)
 
 if TYPE_CHECKING:
     from mcp.types import ToolAnnotations
@@ -104,20 +109,11 @@ def _wrap_with_session_check(
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": _with_remaining(
-                            f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
-                            session,
-                        ),
-                    }
-                ],
-                # Same signal factory._error_response sets: this call did not
-                # perform its action. claude_agent_sdk maps it to MCP isError.
-                "is_error": True,
-            }
+            return _error_response(
+                _with_remaining(
+                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}", session
+                )
+            )
         return await inner(args)
 
     return wrapped

@@ -287,6 +287,12 @@ The residue is real, and not purely `exp.Command`:
 - `CALL proc()` and vendor-specific DDL parse as a bare `exp.Command` — no
   operation name reaches the blocklist, and the warning cannot fire for them
   either, since the contract never named them.
+- `ALTER WAREHOUSE wh RESUME` parses as a bare `exp.Command` on Snowflake, while
+  `ALTER TABLE ...` parses as `exp.Alter`. Two statements that read as the same
+  operation land on opposite sides of the blocklist. Note also that adding
+  `ALTER` to a contract blocks `ALTER SESSION SET TIMEZONE = 'UTC'`, which is
+  idiomatic Snowflake session setup — correct, but worth knowing before copying
+  the recommended list.
 - `SELECT a INTO newtbl FROM t` parses as a plain `exp.Select` (tsql, postgres).
   The operation blocklist never sees a write at all. It is caught by a
   *different* checker — `extract_tables` walks the `Into` node, so
@@ -458,6 +464,9 @@ guard that the other seven descriptions carry neither clause.
 
 Every tool return goes through one of two constructors in `tools/factory.py`:
 `_text_response` (success) or `_error_response`, which adds `is_error: True`.
+`middleware.py` and `sdk.py` build envelopes of their own and call the same
+helper — they used to hand-roll the dict, and that is exactly how
+`contract_middleware`'s violations envelope shipped without the flag.
 `claude_agent_sdk` reads that key off the envelope and maps it onto MCP's
 `isError` — the channel the spec designates for *tool execution errors* a model
 can self-correct from. Without it, a governance decision reaches the model as a
@@ -478,12 +487,18 @@ The last two rows are the load-bearing exclusions. Flagging a not-found would
 tell the model its call failed and distort fuzzy-search recovery; flagging an
 inspection that found violations would contradict the tool's entire purpose.
 
-An invariant test asserts that any envelope whose text opens with `BLOCKED —`
-also carries the flag — the gap originally arose from a block site that simply
-never set it, and this catches the next one.
+The single-constructor rule is what makes this hold: a new block site gets the
+flag by construction rather than by remembering. Tests exercise each block path
+individually — `run_query`'s four, `preview_table`'s gated site, and both
+`contract_middleware` envelopes — each with a fresh `ContractSession`, since a
+shared one exhausts the retry budget and silently reroutes later cases to the
+session-limit branch.
 
-The key is additive on every path. `create_langchain_tools` and
-`create_pydantic_ai_tools` read only `content` and ignore it; both already
+The key is additive on every path. `create_pydantic_ai_tools` reads only
+`content`; `create_langchain_tools` also returns the raw envelope as the
+`ToolMessage.artifact` under `response_format="content_and_artifact"`, so
+`is_error` rides along there — harmless, and arguably useful. Neither branches on
+it; both already
 signalled errors natively (`ToolException`, `ModelRetry` / the terminal
 `ContractSessionLimitError`), which is why this gap was specific to the SDK
 path — the only path where the MCP envelope survives as MCP.

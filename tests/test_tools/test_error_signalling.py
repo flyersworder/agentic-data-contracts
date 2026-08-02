@@ -179,26 +179,83 @@ async def test_successful_query_is_not_an_error(
 
 
 @pytest.mark.asyncio
-async def test_every_blocked_envelope_carries_is_error(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+@pytest.mark.parametrize(
+    ("label", "sql"),
+    [
+        ("missing required filter", "SELECT id FROM analytics.orders"),
+        ("select star", "SELECT * FROM analytics.orders"),
+        ("forbidden operation", "DROP TABLE analytics.orders"),
+        ("unparseable", "!! not sql at all"),
+    ],
+)
+async def test_every_run_query_block_carries_is_error(
+    contract: DataContract,
+    adapter: DuckDBAdapter,
+    semantic: YamlSource,
+    label: str,
+    sql: str,
 ) -> None:
-    # This is the guard that earns its keep: a future BLOCKED site added without
-    # the flag is exactly how the gap arose in the first place. Any envelope
-    # whose text announces a block must also say so structurally.
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
-    calls: list[tuple[str, dict[str, Any]]] = [
-        ("run_query", {"sql": "SELECT id FROM analytics.orders"}),  # no tenant
-        ("run_query", {"sql": "SELECT * FROM analytics.orders"}),  # SELECT *
-        ("run_query", {"sql": "DROP TABLE analytics.orders"}),  # forbidden op
-        ("run_query", {"sql": "!! not sql at all"}),  # unparseable
-    ]
-    seen_blocked = False
-    for name, args in calls:
-        result = await _tool(tools, name).callable(args)
-        if _text(result).startswith("BLOCKED —"):
-            seen_blocked = True
-            assert result.get("is_error") is True, f"{name} {args}"
-    assert seen_blocked, "no BLOCKED envelope produced — invariant untested"
+    # A FRESH session per case, deliberately. Sharing one made the earlier
+    # version of this test a lie: the first three blocks each call
+    # record_retry(), exhausting the 3-retry budget, so the "unparseable" case
+    # short-circuited at check_limits() and never reached the parser. Every case
+    # here now exercises the path its label names.
+    from agentic_data_contracts.core.session import ContractSession
+
+    tools = create_tools(
+        contract,
+        adapter=adapter,
+        semantic_source=semantic,
+        session=ContractSession(contract),
+    )
+    result = await _tool(tools, "run_query").callable({"sql": sql})
+    assert _text(result).startswith("BLOCKED —"), label
+    assert result.get("is_error") is True, label
+
+
+@pytest.mark.asyncio
+async def test_preview_table_gated_block_carries_is_error(
+    fixtures_dir: Path, adapter: DuckDBAdapter
+) -> None:
+    # preview_table's own BLOCKED site, which no other test reaches: it fires
+    # only when a block-enforcement rule declares blocked_columns, since
+    # preview implicitly does SELECT *.
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        QueryCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    gated = DataContract(
+        schema=DataContractSchema(
+            version="1.0",
+            name="gated-preview",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    )
+                ],
+                rules=[
+                    SemanticRule(
+                        name="pii_columns",
+                        description="Never expose tenant_id via SELECT *",
+                        enforcement=Enforcement.BLOCK,
+                        query_check=QueryCheck(blocked_columns=["tenant_id"]),
+                    )
+                ],
+            ),
+        )
+    )
+    tools = create_tools(gated, adapter=adapter)
+    result = await _tool(tools, "preview_table").callable(
+        {"schema": "analytics", "table": "orders"}
+    )
+    assert _text(result).startswith("BLOCKED —")
+    assert result.get("is_error") is True
 
 
 @pytest.mark.asyncio

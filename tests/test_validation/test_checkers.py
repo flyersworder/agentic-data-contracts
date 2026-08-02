@@ -22,10 +22,7 @@ from agentic_data_contracts.validation.checkers import (
     TableAllowlistChecker,
     extract_tables,
 )
-from agentic_data_contracts.validation.validator import (
-    Validator,
-    _warn_unenforceable_operations,
-)
+from agentic_data_contracts.validation.validator import Validator
 
 
 def _parse(sql: str) -> sqlglot.exp.Expression:
@@ -559,9 +556,6 @@ class TestEnforceableOperations:
     def test_unenforceable_operation_warns(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        # The warning is lru_cached per operation-set, so clear it first —
-        # otherwise this passes or fails depending on what ran before.
-        _warn_unenforceable_operations.cache_clear()
         contract = _contract_forbidding(["DELETE", "CALL", "VACUUM"])
         with caplog.at_level(logging.WARNING):
             Validator(contract)
@@ -574,34 +568,61 @@ class TestEnforceableOperations:
     def test_no_warning_when_all_enforceable(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        _warn_unenforceable_operations.cache_clear()
         contract = _contract_forbidding(sorted(ENFORCEABLE_OPERATIONS))
         with caplog.at_level(logging.WARNING):
             Validator(contract)
         assert "NOT enforced" not in caplog.text
 
-    def test_warns_once_per_operation_set(
+    def test_each_distinct_mistake_warns(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        # Validator construction is not once-per-process: the deps-aware
-        # Pydantic AI toolset rebuilds one per model step under the default
-        # per_run_step=True. Uncached, a misconfigured contract would log on
-        # every step.
-        _warn_unenforceable_operations.cache_clear()
-        contract = _contract_forbidding(["NOSUCHOP"])
-        with caplog.at_level(logging.WARNING):
-            for _ in range(5):
-                Validator(contract)
-        assert caplog.text.count("NOT enforced") == 1
-
-    def test_a_different_mistake_still_warns(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # Keyed on the operation set, so caching one contract's warning must
-        # not swallow another contract's.
-        _warn_unenforceable_operations.cache_clear()
+        # Uncached and stateless: two contracts with different mistakes each
+        # report their own, and no global state can swallow the second.
         with caplog.at_level(logging.WARNING):
             Validator(_contract_forbidding(["FIRSTOP"]))
             Validator(_contract_forbidding(["SECONDOP"]))
         assert "FIRSTOP" in caplog.text
         assert "SECONDOP" in caplog.text
+
+    def test_warning_survives_a_later_logging_reconfiguration(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The reason this is not memoised: a consumer that builds contracts at
+        # import time and configures logging in main() must still see the
+        # warning on the next Validator, not have it cached away forever.
+        contract = _contract_forbidding(["NOSUCHOP"])
+        Validator(contract)  # first build, before caplog is capturing
+        with caplog.at_level(logging.WARNING):
+            Validator(contract)
+        assert "NOSUCHOP" in caplog.text
+
+    def test_every_enforceable_operation_is_actually_blockable(self) -> None:
+        # The set exists to answer "what can a contract forbid?", and the
+        # warning message advertises it to users. A name in the set with no
+        # working map entry would make that answer a lie -- the same
+        # declared-but-unenforced shape the set was added to surface.
+        statements = {
+            "DELETE": "DELETE FROM analytics.orders WHERE id = 1",
+            "DROP": "DROP TABLE analytics.orders",
+            "INSERT": "INSERT INTO analytics.orders (id) VALUES (1)",
+            "UPDATE": "UPDATE analytics.orders SET id = 1",
+            "TRUNCATE": "TRUNCATE TABLE analytics.orders",
+            "CREATE": "CREATE TABLE analytics.t AS SELECT 1 AS x",
+            "ALTER": "ALTER TABLE analytics.orders ADD COLUMN c INT",
+            "MERGE": (
+                "MERGE INTO analytics.orders t USING analytics.customers s"
+                " ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.id = s.id"
+            ),
+            "GRANT": "GRANT SELECT ON analytics.orders TO analyst",
+            "REVOKE": "REVOKE SELECT ON analytics.orders FROM analyst",
+            "COPY": "COPY analytics.orders FROM 'data.csv'",
+        }
+        assert set(statements) == set(ENFORCEABLE_OPERATIONS), (
+            "add a statement here when extending ENFORCEABLE_OPERATIONS"
+        )
+        for operation, sql in statements.items():
+            result = OperationBlocklistChecker().check_ast(
+                _parse(sql), _contract_forbidding([operation])
+            )
+            assert not result.passed, f"{operation} is in the set but not blockable"
+            assert operation in result.message

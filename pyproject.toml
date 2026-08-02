@@ -30,7 +30,15 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "sqlglot>=23.0",
+    # 27.10 is the first release exposing every AST node OperationBlocklistChecker
+    # maps -- `exp.Revoke` landed there, `exp.Alter`/`Grant`/`Copy` earlier. The map
+    # is a class-body dict evaluated at import, so a lower version does not degrade
+    # a feature, it raises AttributeError on `import agentic_data_contracts`.
+    # Deliberately not `getattr(exp, ..., None)` with filtering: that would make
+    # ENFORCEABLE_OPERATIONS depend on the installed sqlglot, so a contract could
+    # silently enforce less in one environment than another -- the exact
+    # declared-but-unenforced failure this checker exists to prevent.
+    "sqlglot>=27.10",
     "pydantic>=2.0",
     "pyyaml>=6.0.3",
     "thefuzz>=0.22.1",

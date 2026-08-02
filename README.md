@@ -908,6 +908,22 @@ resources:
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
 ```
 
+`token_budget` is the one limit this library cannot measure on its own — the
+tokens are spent by the *model* between tool calls. It is fed from the host
+framework's own counter, which only two paths expose: the **Pydantic AI**
+adapter (`ctx.usage`) and LangChain's **`ContractMiddleware`** (`request.state`).
+`create_langchain_tools` and `create_sdk_mcp_server` cannot see usage and will
+warn at wiring time if your contract declares a budget, so it never fails
+silently. To enforce it elsewhere, feed the session yourself:
+
+```python
+session.observe_tokens(my_client.cumulative_tokens, scope="my-run-id")
+```
+
+Note that limits are checked *before* each tool call, so a breach stops the
+next one — an agent that exhausts its budget and then stops calling tools will
+not be interrupted mid-thought.
+
 ## Optional Dependencies
 
 | Extra | Package | Purpose |

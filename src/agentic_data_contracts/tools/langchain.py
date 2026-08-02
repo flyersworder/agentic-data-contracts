@@ -46,7 +46,12 @@ from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    RowFormat,
+    ToolDef,
+    _warn_token_budget_unenforceable,
+    create_tools,
+)
 from agentic_data_contracts.validation.validator import Validator
 
 _BLOCKED_PREFIX = "BLOCKED —"
@@ -112,6 +117,13 @@ def create_langchain_tools(
         A list of ``BaseTool`` instances; order matches the underlying
         ``create_tools()`` output.
     """
+    # This path's StructuredTool coroutines receive arguments only, with no
+    # access to run state, so a declared token_budget is inert here.
+    # ContractMiddleware can enforce it; say so rather than fail silently.
+    _warn_token_budget_unenforceable(
+        contract, "create_langchain_tools (use ContractMiddleware instead)"
+    )
+
     if session is None:
         session = ContractSession(contract)
 
@@ -209,6 +221,35 @@ class ContractMiddleware(AgentMiddleware):
             sql_normalizer=sql_normalizer,
         )
 
+    def _observe_token_usage(self, request: ToolCallRequest) -> None:
+        """Feed the contract's ``token_budget`` from the run's message history.
+
+        This middleware is the only LangChain path with access to run state;
+        ``create_langchain_tools``' ``StructuredTool`` coroutines receive
+        arguments alone, so a contract's token budget is inert there (the
+        factory warns about it).
+
+        ``usage_metadata`` totals are cumulative over the message list, so this
+        is a *cumulative* observation, not a delta — see
+        ``ContractSession.observe_tokens``. The scope key is fixed because one
+        middleware instance owns one session; a new conversation gets a new
+        middleware.
+        """
+        state = getattr(request, "state", None)
+        if not state:
+            return
+        try:
+            messages = state["messages"]
+        except (KeyError, TypeError):
+            return
+        total = 0
+        for message in messages or []:
+            usage = getattr(message, "usage_metadata", None)
+            if isinstance(usage, dict):
+                total += int(usage.get("total_tokens") or 0)
+        if total:
+            self._session.observe_tokens(total, scope="langchain")
+
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit
         ``ToolMessage`` on violation, ``None`` to continue."""
@@ -216,6 +257,8 @@ class ContractMiddleware(AgentMiddleware):
         name = tool_call.get("name", "")
         args = tool_call.get("args") or {}
         tool_call_id = tool_call.get("id", "")
+
+        self._observe_token_usage(request)
 
         # Session-limit breach: do NOT call ``record_retry()`` here. The
         # session is already past its cap; recording another retry would

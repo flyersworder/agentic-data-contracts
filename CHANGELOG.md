@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0] - 2026-08-02
+
+### Fixed
+
+- **`resources.token_budget` is now actually enforced.** It has always been declared in the schema and checked by `ContractSession.check_limits()`, but **nothing ever fed it** — `record_tokens()` was called only from tests. A contract could declare a 50,000-token ceiling and a run could burn 500,000 without the check firing, because the model's own consumption between tool calls never reached the session.
+
+  It was worse than an inert limit. `ContractSession.remaining()` reports `tokens_remaining = token_budget - tokens_used`, and `tokens_used` was permanently 0 — so every `BLOCKED —` envelope and every `run_query` response told the model *"tokens_remaining: 50000"* regardless of what it had spent. The library was not merely failing to enforce; it was asserting a false number to the agent.
+
+### Added
+
+- **`ContractSession.observe_tokens(cumulative, *, scope="")`** — records a *cumulative* total from an external counter, accruing only the per-scope delta. Neither obvious implementation is correct here: framework counters report a running total for **their** scope (a Pydantic AI run, a LangGraph thread) while a `ContractSession` deliberately spans several of them — `ContractDeps` instructs callers to keep one session per user across every turn so limits accumulate. Adding the total on each tool call multiplies it; assigning it resets the tally at each new run and silently discards earlier turns. A total lower than the last seen for a scope adds nothing rather than subtracting, so a counter restarting under a reused key cannot hand back spent budget. `record_tokens()` is unchanged and remains the delta-based path for framework-free callers.
+
+- **Token usage is fed on the two paths that can observe it.** The Pydantic AI wrapper now registers `takes_ctx=True` and reads `ctx.usage.total_tokens`, scoped by `ctx.run_id`, *before* the limit check — so a budget already exhausted by the model is caught on that call rather than the next. LangChain's `ContractMiddleware` sums `usage_metadata` across `request.state["messages"]`.
+
+- **A warning on the two paths that cannot.** `create_sdk_mcp_server` (the tool callable receives `args` alone) and `create_langchain_tools` (its `StructuredTool` coroutines get arguments with no run state) now warn at wiring time when a contract declares a `token_budget`, naming the adapters that can enforce it. Same shape and reasoning as the `ENFORCEABLE_OPERATIONS` warning: a declared-but-unenforced limit is worse than an absent one, because the contract reads as protective while permitting the very thing it names.
+
+### Known limitation
+
+- `check_limits()` runs **pre-tool-call**, so a budget breach is caught at the *next* tool call. An agent that exhausts its budget and then stops calling tools will not trip it. This is inherent to enforcing from inside tools and matches how `max_retries` and `cost_limit_usd` already behave. The mitigation is soft but real: now that usage is fed, `remaining()` reports honest `tokens_remaining` in every `run_query` response, so the model can self-regulate. Pydantic AI's `UsageLimits` (passed to `agent.run()`) is what would close the window; it is not wired here.
+
+### Compatibility
+
+- Purely additive at the API level — `observe_tokens` is new, `record_tokens` is unchanged. **But `token_budget` now actually stops runs.** A contract that has been carrying an aspirational budget will begin raising `ContractSessionLimitError` (Pydantic AI) or returning a blocked `ToolMessage` (LangChain middleware) once that budget is passed. Raise or remove the value if it was never meant to bind.
+- The Pydantic AI wrapper's internal function now takes a `RunContext` first argument (`takes_ctx=True`). This is invisible through `Agent(tools=...)`, which dispatches it; only code calling `Tool.function` directly is affected.
+
 ## [0.33.0] - 2026-08-02
 
 ### Fixed

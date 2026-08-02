@@ -74,6 +74,32 @@ def _error_response(text: str) -> dict[str, Any]:
     return {**_text_response(text), "is_error": True}
 
 
+def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
+    """Warn when a contract declares a token budget the given path cannot enforce.
+
+    Same shape, and the same reasoning, as the ``ENFORCEABLE_OPERATIONS``
+    warning in ``Validator``: a declared-but-unenforced limit is worse than an
+    absent one, because the contract reads as protective while permitting the
+    very thing it names. Token usage is only observable where the framework
+    hands it to the tool -- Pydantic AI's ``ctx.usage``, and
+    ``ContractMiddleware``'s ``request.state``. Every other path is blind to it.
+
+    Lives here rather than in each adapter so the message cannot drift between
+    them; ``sdk.py`` and ``langchain.py`` both call it.
+    """
+    resources = contract.schema.resources
+    if resources is None or resources.token_budget is None:
+        return
+    logger.warning(
+        "Contract declares resources.token_budget=%s but %s cannot observe token"
+        " usage, so it will NOT be enforced. Feed it yourself via"
+        " ContractSession.observe_tokens(), or use the Pydantic AI adapter or"
+        " LangChain's ContractMiddleware.",
+        resources.token_budget,
+        path,
+    )
+
+
 RowFormat = Literal["compact", "records"]
 
 _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")

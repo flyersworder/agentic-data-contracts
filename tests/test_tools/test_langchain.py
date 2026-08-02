@@ -1,7 +1,9 @@
 """Tests for LangChain / deepagents BaseTool adapter."""
 
+import logging
 import threading
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -17,6 +19,7 @@ from agentic_data_contracts.core.contract import DataContract  # noqa: E402
 from agentic_data_contracts.core.schema import (  # noqa: E402
     AllowedTable,
     DataContractSchema,
+    ResourceConfig,
     SemanticConfig,
 )
 from agentic_data_contracts.core.session import ContractSession  # noqa: E402
@@ -456,3 +459,76 @@ def test_top_level_imports_resolve_when_extra_installed() -> None:
 
     assert _CM is not None
     assert _ct is not None
+
+
+# ─── token budget (v0.34.0) ───────────────────────────────────────────────────
+
+
+def _budgeted_contract() -> DataContract:
+    return DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=50_000),
+        )
+    )
+
+
+def test_structured_tool_path_warns_that_budget_is_inert(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    # A declared-but-unenforced limit is worse than an absent one: the contract
+    # reads as protective while permitting the thing it names. This path cannot
+    # see token usage, so it must say so.
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(_budgeted_contract(), adapter=adapter)
+    assert "token_budget" in caplog.text
+    assert "NOT be enforced" in caplog.text
+    assert "ContractMiddleware" in caplog.text
+
+
+def test_no_warning_when_no_budget_declared(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    unbudgeted = _budgeted_contract()
+    unbudgeted.schema.resources = None
+    with caplog.at_level(logging.WARNING):
+        create_langchain_tools(unbudgeted, adapter=adapter)
+    assert "token_budget" not in caplog.text
+
+
+def test_middleware_feeds_the_budget_from_run_state() -> None:
+    # The middleware is the one LangChain path with run state, so it is the one
+    # that can make a declared token_budget real.
+    from langchain_core.messages import AIMessage
+
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+
+    class _Req:
+        tool_call = {"name": "describe_table", "args": {}, "id": "1"}
+        state = {
+            "messages": [
+                AIMessage(
+                    content="x",
+                    usage_metadata={
+                        "input_tokens": 900,
+                        "output_tokens": 300,
+                        "total_tokens": 1200,
+                    },
+                )
+            ]
+        }
+
+    middleware._observe_token_usage(cast(Any, _Req()))
+    assert session.tokens_used == 1200
+    # Cumulative, not additive: observing the same history again must not
+    # double-count it.
+    middleware._observe_token_usage(cast(Any, _Req()))
+    assert session.tokens_used == 1200

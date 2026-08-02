@@ -246,3 +246,40 @@ def test_create_sdk_mcp_server_default_is_apply_middleware_true(
         contract_with_limits, adapter=adapter, semantic_source=semantic
     )
     assert server is not None
+
+
+def test_sdk_path_warns_that_token_budget_is_inert(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+) -> None:
+    """The SDK tool callable receives args only, so usage is unobservable.
+
+    A declared-but-unenforced limit is worse than an absent one — the contract
+    reads as protective while permitting the thing it names — so this path says
+    so at wiring time rather than failing silently.
+    """
+    import logging
+
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        ResourceConfig,
+        SemanticConfig,
+    )
+
+    budgeted = DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=50_000),
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        create_sdk_mcp_server(budgeted, adapter=adapter)
+    assert "token_budget" in caplog.text
+    assert "NOT be enforced" in caplog.text

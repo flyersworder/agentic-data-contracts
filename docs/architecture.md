@@ -256,7 +256,29 @@ SQL is parsed once into a sqlglot AST. The Validator passes the AST to all appli
 | Checker | What it validates |
 |---|---|
 | `TableAllowlistChecker` | All referenced tables are in `allowed_tables`, filtered per `caller_principal` if supplied |
-| `OperationBlocklistChecker` | No forbidden SQL operations (DELETE, DROP, etc.) |
+| `OperationBlocklistChecker` | No forbidden SQL operations (see `ENFORCEABLE_OPERATIONS` below) |
+
+`OperationBlocklistChecker` only blocks what a contract explicitly lists, and it
+can only block operations it recognises. `ENFORCEABLE_OPERATIONS` — DELETE, DROP,
+INSERT, UPDATE, TRUNCATE, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY — is
+**derived from** `_OPERATION_MAP` rather than written out separately, because a
+hand-maintained duplicate would drift from the map and reintroduce exactly the
+bug the set exists to surface.
+
+An operation outside that set is *unenforceable*: naming it in
+`forbidden_operations` used to parse and store cleanly while enforcing nothing,
+so the contract read as protective and permitted the statement. `Validator`
+now warns at construction when a contract names one:
+
+```
+forbidden_operations names ['CALL', 'VACUUM'], which the operation blocklist
+cannot detect — declared but NOT enforced. Enforceable operations: [...]
+```
+
+A declared-but-unenforced rule is worse than an absent one, so this fails loud
+rather than silent. The residue is real and bounded: `CALL` and vendor-specific
+DDL parse as a bare `exp.Command`, which is why the warning exists rather than a
+claim of completeness — and why `run_query` carries no `readOnlyHint`.
 
 **Rule-based query checkers** (from `query_check` blocks):
 
@@ -455,10 +477,11 @@ path — the only path where the MCP envelope survives as MCP.
 `create_sdk_mcp_server` passes `ToolAnnotations(readOnlyHint=True)` for the eight
 tools that only read, via `_annotations_for(name)`. `run_query` is left
 **unannotated** rather than `False`: whether it can write depends on the
-contract's `forbidden_operations`, and `OperationBlocklistChecker` recognises
-only DELETE / DROP / INSERT / UPDATE / TRUNCATE — a `CREATE TABLE ... AS SELECT`
-passes unseen. An omitted hint means "unknown" in MCP; claiming read-only would
-invite a client to skip a confirmation prompt it should have shown.
+contract's `forbidden_operations`, and while the blocklist now covers every
+operation in `ENFORCEABLE_OPERATIONS`, `CALL` and vendor-specific DDL still
+parse as a bare `exp.Command` and pass unseen. An omitted hint means "unknown"
+in MCP; claiming read-only would invite a client to skip a confirmation prompt
+it should have shown.
 
 Annotations are an `mcp.types` concept, so they live in `tools/sdk.py` rather
 than on the framework-agnostic `ToolDef`, and `mcp.types` is imported lazily so

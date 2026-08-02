@@ -1,10 +1,17 @@
+import logging
 from pathlib import Path
 
 import pytest
 import sqlglot
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.schema import (
+    AllowedTable,
+    DataContractSchema,
+    SemanticConfig,
+)
 from agentic_data_contracts.validation.checkers import (
+    ENFORCEABLE_OPERATIONS,
     BlockedColumnsChecker,
     MaxJoinsChecker,
     NoSelectStarChecker,
@@ -15,6 +22,7 @@ from agentic_data_contracts.validation.checkers import (
     TableAllowlistChecker,
     extract_tables,
 )
+from agentic_data_contracts.validation.validator import Validator
 
 
 def _parse(sql: str) -> sqlglot.exp.Expression:
@@ -26,6 +34,24 @@ def _parse(sql: str) -> sqlglot.exp.Expression:
 @pytest.fixture
 def contract(fixtures_dir: Path) -> DataContract:
     return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+
+
+def _contract_forbidding(operations: list[str]) -> DataContract:
+    return DataContract(
+        schema=DataContractSchema(
+            version="1.0",
+            name="blocklist-test",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders", "customers", "t"]}
+                    )
+                ],
+                forbidden_operations=operations,
+                rules=[],
+            ),
+        )
+    )
 
 
 class TestExtractTables:
@@ -468,3 +494,79 @@ class TestMaxJoinsChecker:
         assert not result.passed
         assert "3" in result.message
         assert "2" in result.message
+
+
+class TestOperationBlocklistCoverage:
+    """Operations beyond the original DELETE/DROP/INSERT/UPDATE/TRUNCATE set.
+
+    Before this was fixed, `forbidden_operations: [CREATE]` parsed fine, stored
+    fine, and enforced nothing — a contract could declare a write forbidden and
+    silently permit it, which is the exact "confident wrong answer" failure this
+    library exists to prevent.
+    """
+
+    # (operation name, a statement of that kind)
+    CASES = [
+        ("CREATE", "CREATE TABLE analytics.t AS SELECT 1 AS x"),
+        ("ALTER", "ALTER TABLE analytics.orders ADD COLUMN c INT"),
+        (
+            "MERGE",
+            "MERGE INTO analytics.orders t USING analytics.customers s"
+            " ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.id = s.id",
+        ),
+        ("GRANT", "GRANT SELECT ON analytics.orders TO analyst"),
+        ("REVOKE", "REVOKE SELECT ON analytics.orders FROM analyst"),
+        ("COPY", "COPY analytics.orders FROM 'data.csv'"),
+    ]
+
+    @pytest.mark.parametrize(("operation", "sql"), CASES)
+    def test_blocked_when_forbidden(self, operation: str, sql: str) -> None:
+        contract = _contract_forbidding([operation])
+        result = OperationBlocklistChecker().check_ast(_parse(sql), contract)
+        assert not result.passed
+        assert operation in result.message
+
+    @pytest.mark.parametrize(("operation", "sql"), CASES)
+    def test_allowed_when_not_forbidden(self, operation: str, sql: str) -> None:
+        # The more dangerous regression: over-blocking a statement the contract
+        # never forbade would break working agents.
+        contract = _contract_forbidding(["DELETE"])
+        result = OperationBlocklistChecker().check_ast(_parse(sql), contract)
+        assert result.passed, f"{operation} blocked by a contract that never forbade it"
+
+    def test_select_still_passes_with_everything_forbidden(self) -> None:
+        contract = _contract_forbidding(sorted(ENFORCEABLE_OPERATIONS))
+        result = OperationBlocklistChecker().check_ast(
+            _parse("SELECT id FROM analytics.orders"), contract
+        )
+        assert result.passed
+
+
+class TestEnforceableOperations:
+    def test_derived_from_the_map(self) -> None:
+        # Derived, never hand-maintained: a second list would drift from the
+        # map, which is the failure mode being fixed.
+        assert set(OperationBlocklistChecker._OPERATION_MAP.values()) <= (
+            ENFORCEABLE_OPERATIONS
+        )
+        assert "TRUNCATE" in ENFORCEABLE_OPERATIONS
+
+    def test_unenforceable_operation_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        contract = _contract_forbidding(["DELETE", "CALL", "VACUUM"])
+        with caplog.at_level(logging.WARNING):
+            Validator(contract)
+        assert "NOT enforced" in caplog.text
+        # Asserted on the rendered unenforceable list rather than bare
+        # substrings: the message also names the enforceable operations (to be
+        # actionable), so DELETE legitimately appears elsewhere in the text.
+        assert "['CALL', 'VACUUM']" in caplog.text
+
+    def test_no_warning_when_all_enforceable(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        contract = _contract_forbidding(sorted(ENFORCEABLE_OPERATIONS))
+        with caplog.at_level(logging.WARNING):
+            Validator(contract)
+        assert "NOT enforced" not in caplog.text

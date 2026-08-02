@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -16,6 +17,7 @@ from agentic_data_contracts.core.principal import (
     resolve_principal,
 )
 from agentic_data_contracts.validation.checkers import (
+    ENFORCEABLE_OPERATIONS,
     BlockedColumnsChecker,
     CheckResult,
     MaxJoinsChecker,
@@ -30,6 +32,8 @@ from agentic_data_contracts.validation.checkers import (
     extract_tables,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter
+
+logger = logging.getLogger(__name__)
 
 # (allowed_principals, blocked_principals) snapshot taken at build time. None
 # means the rule has no principal restriction. Schema-level mutual exclusion
@@ -123,6 +127,24 @@ class Validator:
         self._operation_checker = (
             OperationBlocklistChecker() if semantic.forbidden_operations else None
         )
+
+        # A forbidden operation the blocklist cannot detect is worse than no
+        # rule at all: the contract reads as protective while permitting the
+        # statement. Warn once at construction — the same shape as
+        # create_tools' warnings for unknown domain and metric-impact
+        # references — so the gap is visible rather than silent. Covers the
+        # standalone validate_examples path too, not just create_tools.
+        unenforceable = {
+            op.upper() for op in semantic.forbidden_operations
+        } - ENFORCEABLE_OPERATIONS
+        if unenforceable:
+            logger.warning(
+                "forbidden_operations names %s, which the operation blocklist"
+                " cannot detect — declared but NOT enforced. Enforceable"
+                " operations: %s",
+                sorted(unenforceable),
+                sorted(ENFORCEABLE_OPERATIONS),
+            )
 
         self._query_checkers: list[_QueryRuleEntry] = []
         self._result_checkers: list[_ResultRuleEntry] = []

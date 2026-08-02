@@ -22,7 +22,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
@@ -30,7 +30,52 @@ from agentic_data_contracts.core.session import ContractSession, LimitExceededEr
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
 
+if TYPE_CHECKING:
+    from mcp.types import ToolAnnotations
+
 _BLOCKED_PREFIX = "BLOCKED —"
+
+# Tools that only read — from the contract, the semantic source, or the database
+# catalog. `run_query` is deliberately absent rather than annotated `False`:
+# whether it can write depends on the contract's `forbidden_operations`, and
+# OperationBlocklistChecker detects only DELETE / DROP / INSERT / UPDATE /
+# TRUNCATE, so a `CREATE TABLE ... AS SELECT` would pass unseen. An omitted hint
+# means "unknown" in MCP, which is honest; claiming readOnlyHint would invite a
+# client to skip a confirmation prompt it should have shown.
+#
+# MCP-only: annotations are an mcp.types concept, so they live here rather than
+# on the framework-agnostic ToolDef. The LangChain and Pydantic AI paths never
+# see them.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "describe_table",
+        "preview_table",
+        "list_metrics",
+        "lookup_metric",
+        "lookup_domain",
+        "lookup_relationships",
+        "trace_metric_impacts",
+        "inspect_query",
+    }
+)
+
+
+def _annotations_for(name: str) -> ToolAnnotations | None:
+    """MCP annotations for one tool, or ``None`` when nothing can be claimed.
+
+    ``mcp.types`` is imported lazily so this module stays importable without the
+    ``[agent-sdk]`` extra, matching ``create_sdk_mcp_server``'s own deferred
+    import of ``claude_agent_sdk``.
+
+    Note the ceiling: the MCP spec requires clients to treat annotations as
+    untrusted unless the server is trusted, so this improves client UX (skipping
+    confirmation prompts on safe tools) and is not itself enforcement.
+    """
+    if name not in _READ_ONLY_TOOLS:
+        return None
+    from mcp.types import ToolAnnotations
+
+    return ToolAnnotations(readOnlyHint=True)
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -66,7 +111,10 @@ def _wrap_with_session_check(
                             session,
                         ),
                     }
-                ]
+                ],
+                # Same signal factory._error_response sets: this call did not
+                # perform its action. claude_agent_sdk maps it to MCP isError.
+                "is_error": True,
             }
         return await inner(args)
 
@@ -155,9 +203,9 @@ def create_sdk_mcp_server(
             if apply_middleware
             else t.callable
         )
-        decorated = sdk_tool(t.name, t.description, t.input_schema)(
-            callable_to_register
-        )
+        decorated = sdk_tool(
+            t.name, t.description, t.input_schema, _annotations_for(t.name)
+        )(callable_to_register)
         sdk_tools.append(decorated)
 
     return _create_server(

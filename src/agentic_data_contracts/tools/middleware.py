@@ -43,7 +43,11 @@ def contract_middleware(
                             "type": "text",
                             "text": f"BLOCKED — Session limit exceeded: {e}",
                         }
-                    ]
+                    ],
+                    # Same signal factory._error_response sets: this call did
+                    # not perform its action. claude_agent_sdk maps it to MCP
+                    # isError.
+                    "is_error": True,
                 }
 
             sql = args.get("sql", "")

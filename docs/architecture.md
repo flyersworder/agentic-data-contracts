@@ -416,6 +416,56 @@ Descriptions are re-sent on every model request, so each clause is one sentence.
 `tests/test_tools/test_tool_protocol.py` pins the placement, including a scope
 guard that the other seven descriptions carry neither clause.
 
+### Error Signalling (`is_error` → MCP `isError`)
+
+Every tool return goes through one of two constructors in `tools/factory.py`:
+`_text_response` (success) or `_error_response`, which adds `is_error: True`.
+`claude_agent_sdk` reads that key off the envelope and maps it onto MCP's
+`isError` — the channel the spec designates for *tool execution errors* a model
+can self-correct from. Without it, a governance decision reaches the model as a
+successful tool result whose failure is discoverable only by reading the prose.
+
+The rule is **"the tool did not perform the action it advertises"**:
+
+| Group | `is_error` |
+|-------|-----------|
+| Governance blocks (`BLOCKED —` …) | Yes |
+| Access denials (not in allowed tables, restricted for caller) | Yes |
+| Misconfiguration (no adapter, no semantic source) | Yes |
+| Invalid arguments (bad `direction` / `kinds`) | Yes |
+| Lookup found nothing (`Metric 'x' not found.`) | **No** — a valid answer |
+| `inspect_query` reporting violations | **No** — that is its job |
+
+The last two rows are the load-bearing exclusions. Flagging a not-found would
+tell the model its call failed and distort fuzzy-search recovery; flagging an
+inspection that found violations would contradict the tool's entire purpose.
+
+An invariant test asserts that any envelope whose text opens with `BLOCKED —`
+also carries the flag — the gap originally arose from a block site that simply
+never set it, and this catches the next one.
+
+The key is additive on every path. `create_langchain_tools` and
+`create_pydantic_ai_tools` read only `content` and ignore it; both already
+signalled errors natively (`ToolException`, `ModelRetry` / the terminal
+`ContractSessionLimitError`), which is why this gap was specific to the SDK
+path — the only path where the MCP envelope survives as MCP.
+
+### MCP Tool Annotations (SDK path only)
+
+`create_sdk_mcp_server` passes `ToolAnnotations(readOnlyHint=True)` for the eight
+tools that only read, via `_annotations_for(name)`. `run_query` is left
+**unannotated** rather than `False`: whether it can write depends on the
+contract's `forbidden_operations`, and `OperationBlocklistChecker` recognises
+only DELETE / DROP / INSERT / UPDATE / TRUNCATE — a `CREATE TABLE ... AS SELECT`
+passes unseen. An omitted hint means "unknown" in MCP; claiming read-only would
+invite a client to skip a confirmation prompt it should have shown.
+
+Annotations are an `mcp.types` concept, so they live in `tools/sdk.py` rather
+than on the framework-agnostic `ToolDef`, and `mcp.types` is imported lazily so
+the module stays importable without the `[agent-sdk]` extra. Per the spec,
+clients must treat annotations as untrusted unless the server is trusted — this
+is client UX (skipping confirmations on safe tools), not enforcement.
+
 ### Natural Agent Workflow
 
 ```

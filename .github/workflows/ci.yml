@@ -133,6 +133,17 @@ jobs:
           uv run --isolated --resolution lowest-direct
           --python ${{ matrix.python-version }}
           python -c "import agentic_data_contracts"
+      # Resolution alone is not enough: uv resolves the project *universally*,
+      # so a transitive requirement can float a package above its own declared
+      # floor and the floor is never exercised. `pydantic>=2.0` sat untrue for
+      # the life of the project that way. This pins each declared floor to `==`
+      # and asks whether it resolves with wheels only -- catching floors that
+      # would force a source build (duckdb 1.1.0 had no cp313 wheel;
+      # google-cloud-bigquery 3.0.0 drags in a pyarrow with none).
+      - run: >-
+          uv run --isolated --no-project
+          --python ${{ matrix.python-version }}
+          python scripts/check_floor_wheels.py
       # `--extra dev` rather than `--with pytest --with pytest-asyncio`: those
       # are unbounded, so uv warns on every run, and the runner version is then
       # decided by the dev extra's floors participating in the universal resolve

@@ -913,12 +913,12 @@ resources:
 | Extra | Package | Purpose |
 |-------|---------|---------|
 | `duckdb` | `duckdb>=1.1.1` | DuckDB adapter (the one adapter that ships) |
-| `bigquery` | `google-cloud-bigquery` | Driver only — for a `DatabaseAdapter` you write |
-| `snowflake` | `snowflake-connector-python` | Driver only — for a `DatabaseAdapter` you write |
-| `postgres` | `psycopg2-binary` | Driver only — for a `DatabaseAdapter` you write |
-| `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp` | Claude Agent SDK integration |
-| `langchain` | `langchain-core`, `langchain` | LangChain / deepagents integration |
-| `pydantic-ai` | `pydantic-ai-slim[anthropic]` | Pydantic AI integration |
+| `bigquery` | `google-cloud-bigquery>=3.7.0` | Driver only — for a `DatabaseAdapter` you write |
+| `snowflake` | `snowflake-connector-python>=3.14.1` | Driver only — for a `DatabaseAdapter` you write |
+| `postgres` | `psycopg2-binary>=2.9.10` | Driver only — for a `DatabaseAdapter` you write |
+| `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp>=1.23.0` | Claude Agent SDK integration |
+| `langchain` | `langchain-core>=1.3.3`, `langchain>=1.2.17`, `langgraph>=1.1.10` | LangChain / deepagents integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.0.0` | Pydantic AI integration |
 | `agent-contracts` | `ai-agent-contracts>=0.3.1` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

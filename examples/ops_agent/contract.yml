@@ -19,7 +19,8 @@ semantic:
       blocked_principals:
         - intern@co.com
         - contractor@co.com
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
   domains:
     - name: reliability
       summary: "Service health, incident response, and post-mortem metrics"

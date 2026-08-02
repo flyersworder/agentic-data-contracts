@@ -101,7 +101,8 @@ semantic:
       tables: []                       # empty = nothing from this schema
 
   # What the agent must NOT do
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
 
   # Business domains — catalog metadata (description, owners, review cadence)
   # for domain-specific questions. Membership is metric-first: metrics declare
@@ -256,7 +257,53 @@ SQL is parsed once into a sqlglot AST. The Validator passes the AST to all appli
 | Checker | What it validates |
 |---|---|
 | `TableAllowlistChecker` | All referenced tables are in `allowed_tables`, filtered per `caller_principal` if supplied |
-| `OperationBlocklistChecker` | No forbidden SQL operations (DELETE, DROP, etc.) |
+| `OperationBlocklistChecker` | No forbidden SQL operations (see `ENFORCEABLE_OPERATIONS` below) |
+
+`OperationBlocklistChecker` only blocks what a contract explicitly lists, and it
+can only block operations it recognises. `ENFORCEABLE_OPERATIONS` — DELETE, DROP,
+INSERT, UPDATE, TRUNCATE, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY — is
+**derived from** `_OPERATION_MAP` rather than written out separately, because a
+hand-maintained duplicate would drift from the map and reintroduce exactly the
+bug the set exists to surface.
+
+An operation outside that set is *unenforceable*: naming it in
+`forbidden_operations` used to parse and store cleanly while enforcing nothing,
+so the contract read as protective and permitted the statement. `Validator`
+now warns at construction when a contract names one:
+
+```
+forbidden_operations names ['CALL', 'VACUUM'], which the operation blocklist
+cannot detect — declared but NOT enforced. Enforceable operations: [...]
+```
+
+A declared-but-unenforced rule is worse than an absent one, so this fails loud
+rather than silent — and deliberately *uncached*, though it fires once per
+`Validator`. Memoising a logging side effect means a consumer who calls
+`logging.basicConfig()` after building its contracts loses the warning
+permanently, which is the opposite of what a fail-loud diagnostic should do. The
+five `logger.warning` calls in `create_tools` sit on the identical call path
+uncached; if the repetition ever matters, the fix belongs at contract-load time
+for all six.
+
+The residue is real, and not purely `exp.Command`:
+
+- `CALL proc()` and vendor-specific DDL parse as a bare `exp.Command` — no
+  operation name reaches the blocklist, and the warning cannot fire for them
+  either, since the contract never named them.
+- `ALTER WAREHOUSE wh RESUME` parses as a bare `exp.Command` on Snowflake, while
+  `ALTER TABLE ...` parses as `exp.Alter`. Two statements that read as the same
+  operation land on opposite sides of the blocklist. Note also that adding
+  `ALTER` to a contract blocks `ALTER SESSION SET TIMEZONE = 'UTC'`, which is
+  idiomatic Snowflake session setup — correct, but worth knowing before copying
+  the recommended list.
+- `SELECT a INTO newtbl FROM t` parses as a plain `exp.Select` (tsql, postgres).
+  The operation blocklist never sees a write at all. It is caught by a
+  *different* checker — `extract_tables` walks the `Into` node, so
+  `TableAllowlistChecker` rejects it unless the target table happens to be
+  allowlisted.
+
+That is why the warning exists rather than a claim of completeness, and why
+`run_query` carries no `readOnlyHint`.
 
 **Rule-based query checkers** (from `query_check` blocks):
 
@@ -369,6 +416,125 @@ Both result-returning tools render `rows` according to `create_tools(row_format=
 agent-facing tool argument — the two carry identical information, so the model has
 no basis on which to choose, and a schema field would cost input tokens on every
 request. The value is validated eagerly at `create_tools()` time.
+
+### Query Protocol in the Tool Descriptions
+
+`run_query` and `inspect_query` carry two protocol clauses in their descriptions
+(`_PROTOCOL_METRIC_ORDERING`, `_PROTOCOL_PRECEDENCE` in `tools/factory.py`): an
+**ordering** rule — when computing a metric, call `lookup_metric` first and use its
+governed definition, never invent or adapt a formula — and, on `run_query` only, a
+**precedence** claim that it is preferred over any other SQL or data-access path.
+
+The guidance duplicates hints `ClaudePromptRenderer` already emits, and the
+duplication is deliberate. The rendered prompt is **opt-in**: none of the ecosystem
+wrappers inject it, so a host calling `create_langchain_tools` or
+`create_pydantic_ai_toolset` and supplying its own system prompt may never render
+the contract at all. Descriptions travel with the tools on every path. The two
+surfaces do different jobs — the prompt hint aids *discovery* (the tool exists),
+the description enforces at *call time* — and only one of them survives a
+host that writes its own prompt.
+
+One rule governs both clauses: **a clause appears only when the capability it names
+exists.**
+
+- **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
+  `metric_names_set` is empty, so a schema-only contract never points the agent at
+  a tool with nothing in it.
+- **Precedence is gated on an adapter.** Without one, `run_query` returns "No
+  database adapter configured — cannot execute query", so the sentence would be a
+  false claim about the tool's capability, steering the agent off a path that works
+  and onto one that cannot run. Adapter-less `create_tools()` is a supported
+  configuration (validation-only deployments), so this is not a hypothetical.
+
+Both follow the conditional shape `rows_note` established. Two further decisions
+shape the text:
+
+- **Narrow trigger.** A broader "before any query" would tax plain exploratory SQL
+  with a lookup turn that finds nothing. The guarded failure is a KPI computed from
+  an invented formula — SQL that is *authorized* and merely wrong, which is exactly
+  the class no checker catches. (The design was informed by
+  [Erupt Cube × LLM](https://docs.erupt.xyz/en/topics/cube-llm), which enforces an
+  equivalent protocol in its tool descriptions but triggers on any query.)
+- **Precedence on `run_query` only,** never `inspect_query`, which executes nothing
+  and already argues its own precedence ("before spending retry budget on
+  run_query").
+
+Descriptions are re-sent on every model request, so each clause is one sentence.
+`tests/test_tools/test_tool_protocol.py` pins the placement, including a scope
+guard that the other seven descriptions carry neither clause.
+
+### Error Signalling (`is_error` → MCP `isError`)
+
+Every tool return goes through one of two constructors in `tools/factory.py`:
+`_text_response` (success) or `_error_response`, which adds `is_error: True`.
+`middleware.py` and `sdk.py` build envelopes of their own and call the same
+helper — they used to hand-roll the dict, and that is exactly how
+`contract_middleware`'s violations envelope shipped without the flag.
+`claude_agent_sdk` reads that key off the envelope and maps it onto MCP's
+`isError` — the channel the spec designates for *tool execution errors* a model
+can self-correct from. Without it, a governance decision reaches the model as a
+successful tool result whose failure is discoverable only by reading the prose.
+
+The rule is **"the tool did not perform the action it advertises"**:
+
+| Group | `is_error` |
+|-------|-----------|
+| Governance blocks (`BLOCKED —` …) | Yes |
+| Access denials (not in allowed tables, restricted for caller) | Yes |
+| Misconfiguration (no adapter, no semantic source) | Yes |
+| Invalid arguments (bad `direction` / `kinds`) | Yes |
+| Lookup found nothing (`Metric 'x' not found.`) | **No** — a valid answer |
+| `inspect_query` reporting violations | **No** — that is its job |
+
+The last two rows are the load-bearing exclusions. Flagging a not-found would
+tell the model its call failed and distort fuzzy-search recovery; flagging an
+inspection that found violations would contradict the tool's entire purpose.
+
+The single-constructor rule is what makes this hold: a new block site gets the
+flag by construction rather than by remembering. Tests exercise each block path
+individually — `run_query`'s four, `preview_table`'s gated site, and both
+`contract_middleware` envelopes — each with a fresh `ContractSession`, since a
+shared one exhausts the retry budget and silently reroutes later cases to the
+session-limit branch.
+
+The key is additive on every path. `create_pydantic_ai_tools` reads only
+`content`; `create_langchain_tools` returns the raw envelope as the `ToolMessage.artifact`
+under `response_format="content_and_artifact"`, so `is_error` rides along for
+non-`BLOCKED` errors (missing adapter, restricted table, invalid argument). For a
+governance block it raises `ToolException` before any artifact is produced, so
+the flag is not observable there. Neither wrapper branches on it; both already
+signalled errors natively (`ToolException`, `ModelRetry` / the terminal
+`ContractSessionLimitError`), which is why this gap was specific to the SDK
+path — the only path where the MCP envelope survives as MCP.
+
+**Two error signals now coexist, deliberately.** The wrappers still branch on
+`text.startswith("BLOCKED —")` rather than reading `is_error`, so a denial like
+`Table x is not in the allowed tables list.` carries the flag but does not become
+a `ToolException` / `ModelRetry`. Switching them was considered and rejected: it
+is not the behaviour-preserving refactor it appears to be, because `is_error`
+covers strictly more than the prefix, so denials, misconfiguration, and invalid
+arguments would newly raise on two shipped adapters. And the inner
+`_SESSION_LIMIT_MARKER` sniff would have to stay regardless — one boolean cannot
+separate recoverable from terminal, which is the distinction those adapters exist
+to make. The prefix remains the wrappers' trigger; `is_error` is the MCP-facing
+signal. Revisit only with a deliberate decision to widen what the wrappers raise.
+
+### MCP Tool Annotations (SDK path only)
+
+`create_sdk_mcp_server` passes `ToolAnnotations(readOnlyHint=True)` for the eight
+tools that only read, via `_annotations_for(name)`. `run_query` is left
+**unannotated** rather than `False`: whether it can write depends on the
+contract's `forbidden_operations`, and while the blocklist now covers every
+operation in `ENFORCEABLE_OPERATIONS`, `CALL` and vendor-specific DDL still
+parse as a bare `exp.Command` and pass unseen. An omitted hint means "unknown"
+in MCP; claiming read-only would invite a client to skip a confirmation prompt
+it should have shown.
+
+Annotations are an `mcp.types` concept, so they live in `tools/sdk.py` rather
+than on the framework-agnostic `ToolDef`, and `mcp.types` is imported lazily so
+the module stays importable without the `[agent-sdk]` extra. Per the spec,
+clients must treat annotations as untrusted unless the server is trusted — this
+is client UX (skipping confirmations on safe tools), not enforcement.
 
 ### Natural Agent Workflow
 
@@ -675,7 +841,7 @@ agentic-data-contracts/
 ```toml
 [project]
 dependencies = [
-    "sqlglot>=23.0",
+    "sqlglot>=28.0",   # see the floor comment in pyproject.toml
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]

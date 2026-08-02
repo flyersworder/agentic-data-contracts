@@ -22,15 +22,67 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.tools.factory import RowFormat, ToolDef, create_tools
+from agentic_data_contracts.tools.factory import (
+    RowFormat,
+    ToolDef,
+    _error_response,
+    create_tools,
+)
+
+if TYPE_CHECKING:
+    from mcp.types import ToolAnnotations
 
 _BLOCKED_PREFIX = "BLOCKED —"
+
+# Tools that only read — from the contract, the semantic source, or the database
+# catalog. `run_query` is deliberately absent rather than annotated `False`:
+# whether it can write depends on the contract's `forbidden_operations`, and
+# the blocklist covers every operation in ENFORCEABLE_OPERATIONS, but `CALL` and
+# vendor-specific DDL parse as a bare `exp.Command` and pass unseen, and
+# `SELECT ... INTO newtbl` parses as a plain `exp.Select` (it is caught by the
+# table allowlist instead, not the operation blocklist). An omitted hint
+# means "unknown" in MCP, which is honest; claiming readOnlyHint would invite a
+# client to skip a confirmation prompt it should have shown.
+#
+# MCP-only: annotations are an mcp.types concept, so they live here rather than
+# on the framework-agnostic ToolDef. The LangChain and Pydantic AI paths never
+# see them.
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "describe_table",
+        "preview_table",
+        "list_metrics",
+        "lookup_metric",
+        "lookup_domain",
+        "lookup_relationships",
+        "trace_metric_impacts",
+        "inspect_query",
+    }
+)
+
+
+def _annotations_for(name: str) -> ToolAnnotations | None:
+    """MCP annotations for one tool, or ``None`` when nothing can be claimed.
+
+    ``mcp.types`` is imported lazily so this module stays importable without the
+    ``[agent-sdk]`` extra, matching ``create_sdk_mcp_server``'s own deferred
+    import of ``claude_agent_sdk``.
+
+    Note the ceiling: the MCP spec requires clients to treat annotations as
+    untrusted unless the server is trusted, so this improves client UX (skipping
+    confirmation prompts on safe tools) and is not itself enforcement.
+    """
+    if name not in _READ_ONLY_TOOLS:
+        return None
+    from mcp.types import ToolAnnotations
+
+    return ToolAnnotations(readOnlyHint=True)
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -57,17 +109,11 @@ def _wrap_with_session_check(
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": _with_remaining(
-                            f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
-                            session,
-                        ),
-                    }
-                ]
-            }
+            return _error_response(
+                _with_remaining(
+                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}", session
+                )
+            )
         return await inner(args)
 
     return wrapped
@@ -111,12 +157,16 @@ def create_sdk_mcp_server(
 
             Note on cross-adapter parity: with ``apply_middleware=False``,
             this adapter passes a tool's BLOCKED envelope through to the
-            agent as-is (the SDK MCP transport carries error context as
-            text content; there is no ``status="error"`` field). The
-            LangChain adapter additionally sniffs the ``BLOCKED —``
-            prefix and converts it into a ``ToolException``. Both surface
-            the same text to the agent; only the structured-error signal
-            differs.
+            agent as-is. That envelope now carries ``is_error``, which
+            ``claude_agent_sdk`` maps onto MCP's ``isError``, so the agent
+            receives a structured error signal on this path too. The
+            LangChain adapter instead raises a ``ToolException`` (and its
+            middleware returns ``ToolMessage(status="error")``); Pydantic AI
+            raises ``ModelRetry``, or the terminal
+            ``ContractSessionLimitError`` on a budget breach. All three
+            surface the same text; they differ in *shape* — one MCP boolean
+            here, native exception types there, which is why the other two
+            can distinguish recoverable from terminal and this one cannot.
         server_name: Name for the MCP server.
         server_version: Version for the MCP server.
 
@@ -155,9 +205,9 @@ def create_sdk_mcp_server(
             if apply_middleware
             else t.callable
         )
-        decorated = sdk_tool(t.name, t.description, t.input_schema)(
-            callable_to_register
-        )
+        decorated = sdk_tool(
+            t.name, t.description, t.input_schema, _annotations_for(t.name)
+        )(callable_to_register)
         sdk_tools.append(decorated)
 
     return _create_server(

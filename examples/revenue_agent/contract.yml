@@ -10,7 +10,8 @@ semantic:
       description: "Curated analytics tables — prefer these for all reporting queries"
       preferred: true
       tables: [orders, customers, subscriptions]
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
   domains:
     - name: revenue
       summary: "Financial metrics from completed orders"

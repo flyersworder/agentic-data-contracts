@@ -135,6 +135,16 @@ class ClaudePromptRenderer:
         contract: DataContract,
         semantic_source: SemanticSource | None,
     ) -> list[str]:
+        """Render the metric index and its lookup-before-computing hint.
+
+        The same imperative is duplicated onto the ``run_query`` /
+        ``inspect_query`` tool descriptions by ``_PROTOCOL_METRIC_ORDERING`` in
+        ``tools.factory``. That is deliberate, not drift: this prompt is opt-in
+        (no ecosystem wrapper injects it), while descriptions travel with the
+        tools on every path. The two are worded differently on purpose — this
+        one aids *discovery*, the description enforces at *call time* — so keep
+        them consistent in intent, not in text.
+        """
         if semantic_source is None:
             return []
 
@@ -147,9 +157,13 @@ class ClaudePromptRenderer:
 
         if compact:
             lines.append(f"  <count>{len(metrics)} metrics available.</count>")
+            # Carries the same "before computing" imperative as the detailed
+            # branch below. Dropping it here would leave the guidance weakest
+            # precisely where there are the most metrics to get wrong.
             lines.append(
                 "  <hint>Use list_metrics() to browse,"
-                ' lookup_metric("...") to get SQL definitions.</hint>'
+                ' lookup_metric("...") to get SQL definitions'
+                " before computing any KPI.</hint>"
             )
         else:
             for m in metrics:

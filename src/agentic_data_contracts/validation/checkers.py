@@ -160,11 +160,24 @@ class TableAllowlistChecker:
 class OperationBlocklistChecker:
     """Checks that the SQL statement type is not in forbidden_operations."""
 
+    # Every entry here is an operation a contract can actually forbid. An
+    # operation *not* listed is silently unenforceable: `forbidden_operations:
+    # [CREATE]` used to parse, validate, and store fine while permitting every
+    # CREATE — a contract declaring a write forbidden and quietly allowing it,
+    # which is the failure mode this library exists to prevent. Validator warns
+    # when a contract names something outside ENFORCEABLE_OPERATIONS, so the
+    # next gap announces itself instead of passing in silence.
     _OPERATION_MAP: dict[type[exp.Expression], str] = {
         exp.Delete: "DELETE",
         exp.Drop: "DROP",
         exp.Insert: "INSERT",
         exp.Update: "UPDATE",
+        exp.Create: "CREATE",
+        exp.Alter: "ALTER",
+        exp.Merge: "MERGE",
+        exp.Grant: "GRANT",
+        exp.Revoke: "REVOKE",
+        exp.Copy: "COPY",
     }
 
     def check_ast(self, ast: exp.Expression, contract: DataContract) -> CheckResult:
@@ -191,6 +204,16 @@ class OperationBlocklistChecker:
             )
 
         return CheckResult(passed=True, message="")
+
+
+# Operations a contract can name in `forbidden_operations` and have enforced.
+# Derived from the map rather than retyped: a hand-maintained second list would
+# drift from the first, which is precisely the bug this set exists to surface.
+# TRUNCATE is unioned in because it is matched outside the map — it needs the
+# `exp.Command` fallback for dialects that do not parse it structurally.
+ENFORCEABLE_OPERATIONS: frozenset[str] = frozenset(
+    OperationBlocklistChecker._OPERATION_MAP.values()
+) | {"TRUNCATE"}
 
 
 class NoSelectStarChecker:

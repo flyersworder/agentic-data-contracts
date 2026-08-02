@@ -88,6 +88,51 @@ jobs:
           --extra pydantic-ai --extra duckdb --extra dev
           pytest tests/test_tools/test_pydantic_ai.py -v
 
+  test-lowest-floors:
+    # The `test` jobs run `--frozen`, so they only exercise the *locked*
+    # versions -- a dependency floor in pyproject can be wrong for months with no
+    # job noticing. This resolves the core runtime dependencies to their declared
+    # minimums instead. It exists because `sqlglot>=23.0` was untrue: the
+    # operation blocklist maps AST nodes (`exp.Revoke` and friends) that only
+    # appear in 27.10+, and because the map is built at import time the wrong
+    # floor did not degrade a feature, it raised AttributeError on import.
+    #
+    # Scope is deliberately the CORE dependencies, no extras. The optional
+    # extras' floors are known to be wrong today and fixing them is separate
+    # work: `claude-agent-sdk>=0.1.58` resolves an `mcp` whose `Server` has no
+    # `list_tools`, and `duckdb>=1.0.0` changes EXPLAIN output the adapter test
+    # asserts on. Both predate this job; widening it before those are fixed
+    # would mean a permanently red job, which teaches everyone to ignore it.
+    #
+    # Not a release gate (omitted from publish.needs), matching
+    # test-pydantic-ai-latest: a floor break should be loud, but it should not
+    # block shipping a fix for something else.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv python install 3.12
+      # Import first: the failure this job guards happens at import time, and a
+      # bare ImportError reads far more clearly here than inside a pytest
+      # collection stack trace.
+      - run: >-
+          uv run --isolated --resolution lowest-direct --python 3.12
+          python -c "import agentic_data_contracts"
+      # Then the suites that need no optional extra. test_validation is the one
+      # that matters most -- it is where sqlglot is actually exercised. The two
+      # ignored files need the duckdb extra.
+      - run: >-
+          uv run --isolated --resolution lowest-direct --python 3.12
+          --with pytest --with pytest-asyncio
+          pytest tests/test_validation tests/test_core tests/test_semantic
+          --ignore=tests/test_validation/test_reconciliation.py
+          --ignore=tests/test_core/test_wildcard_tables.py -q
+
   security:
     runs-on: ubuntu-latest
     permissions:

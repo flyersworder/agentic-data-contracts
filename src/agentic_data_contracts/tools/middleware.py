@@ -10,6 +10,7 @@ from typing import Any
 from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
+from agentic_data_contracts.tools.factory import _error_response
 from agentic_data_contracts.validation.validator import Validator
 
 
@@ -37,14 +38,7 @@ def contract_middleware(
             try:
                 session.check_limits()
             except LimitExceededError as e:
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"BLOCKED — Session limit exceeded: {e}",
-                        }
-                    ]
-                }
+                return _error_response(f"BLOCKED — Session limit exceeded: {e}")
 
             sql = args.get("sql", "")
             if sql:
@@ -55,15 +49,10 @@ def contract_middleware(
                 result = await asyncio.to_thread(validator.validate, sql)
                 if result.blocked:
                     session.record_retry()
-                    return {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "BLOCKED — Violations:\n"
-                                + "\n".join(f"- {r}" for r in result.reasons),
-                            }
-                        ]
-                    }
+                    return _error_response(
+                        "BLOCKED — Violations:\n"
+                        + "\n".join(f"- {r}" for r in result.reasons)
+                    )
 
             return await fn(args)
 

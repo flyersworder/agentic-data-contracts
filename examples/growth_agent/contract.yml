@@ -10,7 +10,8 @@ semantic:
       description: "Product analytics — event stream, user table, and experiment metadata"
       preferred: true
       tables: [events, users, experiments]
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
   domains:
     - name: acquisition
       summary: "Top-of-funnel — how users find and sign up for the product"

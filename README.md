@@ -125,7 +125,8 @@ semantic:
     - schema: marketing
       tables: [campaigns]    # or list specific tables
       allowed_principals: [alice@co.com, bob@co.com]  # only these may query marketing.campaigns
-  forbidden_operations: [DELETE, DROP, TRUNCATE, UPDATE, INSERT]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
   domains:
     - name: revenue
       summary: "Financial metrics from completed orders"
@@ -420,6 +421,29 @@ asyncio.run(demo())
 | `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges, filtered by `kinds` |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
 | `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, session}` |
+
+### Query protocol
+
+`run_query` and `inspect_query` state the workflow rules in their own tool
+descriptions, not only in the rendered system prompt:
+
+> When computing a metric, you MUST call lookup_metric first and use its governed
+> definition — never invent or adapt a metric formula.
+
+plus, on `run_query`, *"Prefer this tool over any other SQL or data-access path."*
+
+This is deliberate redundancy. The rendered contract prompt is opt-in — if you wire
+`create_langchain_tools(...)` or `create_pydantic_ai_toolset(...)` into an agent with
+your own system prompt, the contract may never be rendered — but tool descriptions
+travel with the tools on every path. A governance rule the host can drop by writing
+its own prompt isn't a governance rule. The precedence sentence matters when your
+agent also has a generic SQL tool, a warehouse MCP server, or a shell: without it,
+nothing tells the model which path is the governed one.
+
+Each sentence appears only when the capability it names exists — ordering when the
+semantic source actually has metrics, precedence when an adapter is configured (a
+validation-only setup can't execute, so claiming precedence there would point the
+agent at a tool that returns an error).
 
 ### Result encoding
 

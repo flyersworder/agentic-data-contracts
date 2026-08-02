@@ -52,11 +52,64 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
+def _error_response(text: str) -> dict[str, Any]:
+    """Envelope for a call that did not perform the action it advertises.
+
+    ``claude_agent_sdk`` reads ``is_error`` off this dict and maps it onto MCP's
+    ``isError``, the channel the spec designates for tool execution errors a
+    model can self-correct from. Without it a governance decision -- a forbidden
+    operation, a missing tenant filter, a restricted table -- reaches the model
+    as a *successful* tool result, discoverable only by reading the prose.
+
+    Covers denials (governance blocks, access gates), misconfiguration (no
+    adapter, no semantic source), and invalid arguments. It does NOT cover a
+    lookup that legitimately found nothing: "metric not found" answered the
+    question it was asked, and flagging it would tell the model its call failed
+    and distort fuzzy-search recovery.
+
+    Consumers that never see MCP ignore the extra key -- the LangChain and
+    Pydantic AI wrappers read only ``content`` -- so this is additive on every
+    path.
+    """
+    return {**_text_response(text), "is_error": True}
+
+
 RowFormat = Literal["compact", "records"]
 
 _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
 
 _COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
+
+# Protocol clauses appended to the two query-tool descriptions. They restate
+# guidance ClaudePromptRenderer._render_metrics already emits, and the
+# duplication is deliberate:
+# the rendered prompt is opt-in (a host wiring create_langchain_tools or
+# create_pydantic_ai_tools into its own agent supplies its own system prompt and
+# may never render the contract), while descriptions travel with the tools on
+# every path. Governance that only holds when the host cooperates is not
+# governance. Kept to one sentence each -- descriptions are re-sent on every
+# model request, so this text is billed for the life of the session.
+#
+# The trigger clause is deliberately narrow. "Before ANY query" would tax plain
+# exploratory SQL with a lookup turn that finds nothing; the failure actually
+# being guarded is a KPI computed from an invented formula, which no checker
+# catches because such SQL is authorized -- merely wrong.
+_PROTOCOL_METRIC_ORDERING = (
+    " When computing a metric, you MUST call lookup_metric first and use its"
+    " governed definition — never invent or adapt a metric formula."
+)
+
+# Only run_query claims precedence: it is a claim about *execution* routing (do
+# not reach for a generic SQL tool or shell instead of the governed path).
+# inspect_query executes nothing, and already argues its own precedence.
+#
+# Gated on an adapter for the same reason the ordering clause is gated on
+# metrics: without one, run_query returns "No database adapter configured" and
+# the sentence becomes a false claim about the tool's capability -- steering the
+# agent away from a path that works and onto one that cannot execute. Both
+# clauses obey one rule: a clause appears only when the capability it names
+# exists.
+_PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path."
 
 
 def _render_rows(
@@ -265,6 +318,12 @@ def create_tools(
         else set()
     )
 
+    # Gated on the same set: a contract with no metrics has nothing to look up,
+    # and an instruction to call lookup_metric would send the agent after an
+    # empty tool on every session. Same shape as `rows_note` above.
+    metric_ordering = _PROTOCOL_METRIC_ORDERING if metric_names_set else ""
+    precedence = _PROTOCOL_PRECEDENCE if adapter is not None else ""
+
     # Validate domain references. The contract's domain catalog is authoritative
     # for which domains exist; metrics declare *membership* in those domains.
     catalog_domain_names = {d.name for d in contract.schema.semantic.domains}
@@ -315,17 +374,17 @@ def create_tools(
         table_name = args.get("table", "")
         qualified = f"{schema_name}.{table_name}"
         if qualified not in contract.allowed_table_names():
-            return _text_response(
+            return _error_response(
                 f"Table {qualified} is not in the allowed tables list."
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
-            return _text_response(
+            return _error_response(
                 f"Table {qualified} is restricted"
                 f" (caller: {_caller_label(principal)!r})."
             )
         if adapter is None:
-            return _text_response(
+            return _error_response(
                 f"No database adapter configured — table description unavailable"
                 f" for {qualified}."
             )
@@ -371,17 +430,17 @@ def create_tools(
             limit = 5
         qualified = f"{schema}.{table}"
         if qualified not in contract.allowed_table_names():
-            return _text_response(
+            return _error_response(
                 f"Table {qualified} is not in the allowed tables list."
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
-            return _text_response(
+            return _error_response(
                 f"Table {qualified} is restricted"
                 f" (caller: {_caller_label(principal)!r})."
             )
         if adapter is None:
-            return _text_response(
+            return _error_response(
                 "No database adapter configured — preview unavailable."
             )
 
@@ -435,7 +494,7 @@ def create_tools(
                 log_msgs.append(message)
 
         if block_msgs:
-            return _text_response(
+            return _error_response(
                 f"BLOCKED — preview_table SELECT * gated for caller"
                 f" {_caller_label(principal)!r}:\n"
                 + "\n".join(f"- {m}" for m in block_msgs)
@@ -473,7 +532,7 @@ def create_tools(
     # ── Tool 3: list_metrics ──────────────────────────────────────────────────
     async def list_metrics(args: dict[str, Any]) -> dict[str, Any]:
         if semantic_source is None:
-            return _text_response("No semantic source configured.")
+            return _error_response("No semantic source configured.")
         metrics = semantic_source.get_metrics()
         domain_filter = args.get("domain")
         if domain_filter:
@@ -522,7 +581,7 @@ def create_tools(
     async def lookup_metric(args: dict[str, Any]) -> dict[str, Any]:
         metric_name = args.get("metric_name", "")
         if semantic_source is None:
-            return _text_response("No semantic source configured.")
+            return _error_response("No semantic source configured.")
         today = date.today()
         # Try exact match first
         metric = semantic_source.get_metric(metric_name)
@@ -610,6 +669,12 @@ def create_tools(
             limit=3,
         )
         if not results:
+            # Stays a success, unlike trace_metric_impacts' `direction must be
+            # ...` which is an _error_response. The boundary: a domain name is
+            # *data* the caller was searching for, so "not found" is the answer
+            # to the question asked (and this branch is reached only after fuzzy
+            # search, so the reply carries suggestions). An invalid enum is
+            # *schema* — the argument was never callable.
             available = sorted(d.name for d in all_domains)
             return _text_response(
                 f"Domain '{name}' not found. Available domains: {available}"
@@ -646,7 +711,7 @@ def create_tools(
         table = args.get("table", "")
         target_table = args.get("target_table")
         if semantic_source is None:
-            return _text_response("No semantic source configured.")
+            return _error_response("No semantic source configured.")
 
         if target_table:
             # Graph walk: find join path between two tables
@@ -709,17 +774,17 @@ def create_tools(
             max_depth = 2
 
         if direction not in ("upstream", "downstream"):
-            return _text_response(
+            return _error_response(
                 f"direction must be 'upstream' or 'downstream', got {direction!r}."
             )
         if semantic_source is None:
-            return _text_response("No semantic source configured.")
+            return _error_response("No semantic source configured.")
         if semantic_source.get_metric(metric_name) is None:
             return _text_response(f"Metric '{metric_name}' not found.")
 
         kinds = args.get("kinds", "all")
         if kinds not in ("all", "identity", "influence"):
-            return _text_response(
+            return _error_response(
                 f"kinds must be 'all', 'identity', or 'influence', got {kinds!r}."
             )
         graph_edges: list[MetricEdge] = []
@@ -795,7 +860,7 @@ def create_tools(
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return _text_response(
+            return _error_response(
                 _with_remaining(f"BLOCKED — Session limit exceeded: {e}")
             )
 
@@ -809,7 +874,7 @@ def create_tools(
             msg = "BLOCKED — Violations:\n" + "\n".join(
                 f"- {r}" for r in vresult.reasons
             )
-            return _text_response(_with_remaining(msg))
+            return _error_response(_with_remaining(msg))
 
         # Record estimated cost from EXPLAIN — charged before execution because
         # the cost budget tracks database resource consumption, not successful
@@ -819,7 +884,7 @@ def create_tools(
             session.record_cost(vresult.estimated_cost_usd)
 
         if adapter is None:
-            return _text_response(
+            return _error_response(
                 "No database adapter configured — cannot execute query."
             )
 
@@ -830,7 +895,7 @@ def create_tools(
             qresult = await asyncio.to_thread(adapter.execute, sql)
         except Exception as e:  # noqa: BLE001
             session.record_retry()
-            return _text_response(
+            return _error_response(
                 _with_remaining(f"BLOCKED — Query execution failed: {e}")
             )
 
@@ -843,7 +908,7 @@ def create_tools(
             msg = "BLOCKED — Result check violations:\n" + "\n".join(
                 f"- {r}" for r in rresult.reasons
             )
-            return _text_response(_with_remaining(msg))
+            return _error_response(_with_remaining(msg))
 
         data = {
             "columns": qresult.columns,
@@ -992,6 +1057,7 @@ def create_tools(
                 " execution). When a database adapter is configured, also"
                 " includes `estimated_cost_usd` and `estimated_rows` from EXPLAIN."
                 " Use this to iterate on SQL before spending retry budget on run_query."
+                + metric_ordering
             ),
             input_schema={
                 "type": "object",
@@ -1005,7 +1071,11 @@ def create_tools(
         ToolDef(
             name="run_query",
             description=(
-                "Validate and execute a SQL query, returning the results." + rows_note
+                "Validate and execute a SQL query, returning the results."
+                + metric_ordering
+                + precedence
+                # Return-shape clause reads last, after the call-time guidance.
+                + rows_note
             ),
             input_schema={
                 "type": "object",

@@ -312,8 +312,54 @@ exhausts its budget and then stops calling tools: nothing runs, so nothing
 checks. That is inherent to enforcing from inside tools, and identical to how
 `max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
 `remaining()` reports honest `tokens_remaining` in every `run_query` response,
-which lets the model self-regulate; Pydantic AI's `UsageLimits` is what would
-close the window entirely.
+which lets the model self-regulate.
+
+**Narrowing the window (Pydantic AI).** `usage_limits_from_contract(contract,
+session)` translates `token_budget` into a `UsageLimits` for `agent.run()`,
+which Pydantic AI checks on every model request — no tool call required, so
+*within a run* the blind case above disappears. The session argument is
+mandatory: `UsageLimits` is scoped to one `agent.run()` while a
+`ContractSession` spans every turn, so the helper limits each run to
+`token_budget - session.tokens_used`. Mapping the raw budget would re-grant it
+per turn — a 50,000-token contract authorising 500,000 across ten turns, which
+is the declared-but-unenforced shape this layer exists to prevent.
+
+**It bounds the budget rather than enforcing it exactly**, and the reason is
+worth stating precisely. The subtracted figure is `session.tokens_used`, which
+is fed only from inside the tool wrapper, so every model request after a run's
+last tool call — including answer generation, usually the largest — is never
+observed. Each run is granted slightly more than the true remainder, and the
+shortfall compounds. Measured on a two-request-per-turn agent with a 500-token
+budget, real spend reached ~2× the ceiling by the first refusal. That factor is
+not a constant — it tracks the tool-call-to-request ratio (~1.4× measured for a
+three-tool-call turn), and an agent that calls **no** tools is unbounded across
+turns entirely, since `session.tokens_used` never leaves 0: 12 turns of a
+500-token budget spent 1200 with zero refusals. Within a run such an agent *is*
+now stopped, which is the hole this closes. The exact fix is to carry one
+`RunUsage` across turns via `agent.run(usage=...)`, so pydantic-ai's own counter
+sees every request; that needs a design pass (the carried counter is global
+while `observe_tokens` scopes per `run_id` and would double-count it) and is
+tracked as issue #56.
+
+Two knock-on effects. Callers should catch
+`pydantic_ai.exceptions.UsageLimitExceeded` **as well as**
+`ContractSessionLimitError` — not instead of it. The framework usually stops the
+run first, because a tool can only execute on a response that already passed
+`check_tokens`; but the contract-side exception still fires whenever the session
+is fed from outside the run, which a session shared with another adapter or a
+direct `observe_tokens()` call both do (verified on either `apply_middleware`
+value). And the session's tally freezes once runs start being refused, since no
+further tools execute to feed it — while each refused turn still costs one
+billed model request, so cumulative spend keeps climbing past that ~2×.
+
+Two things are deliberately not mapped. `max_retries` must **not** become
+`request_limit`: ours counts blocked query attempts, theirs counts model
+requests, and conflating them would silently redefine existing contracts.
+`cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
+session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
+the SDK path cannot observe usage at all, so the helper lives in a module that
+imports only under the `[pydantic-ai]` extra rather than anywhere implying
+coverage it lacks.
 
 When `ai-agent-contracts` IS installed, enforcement is delegated to the formal framework via the bridge layer (see below).
 
@@ -877,7 +923,7 @@ agentic-data-contracts/
 │   │   ├── middleware.py        # contract_middleware decorator
 │   │   ├── sdk.py               # Claude Agent SDK adapter (create_sdk_mcp_server)
 │   │   ├── langchain.py         # LangChain / deepagents adapter (create_langchain_tools)
-│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools; create_pydantic_ai_toolset for one shared Agent across users)
+│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools; create_pydantic_ai_toolset for one shared Agent across users; usage_limits_from_contract for per-request budget enforcement)
 │   ├── semantic/
 │   │   ├── __init__.py
 │   │   ├── base.py              # SemanticSource protocol

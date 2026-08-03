@@ -44,11 +44,13 @@ try:
         ContractDeps,
         create_pydantic_ai_tools,
         create_pydantic_ai_toolset,
+        usage_limits_from_contract,
     )
 except ImportError:  # pragma: no cover — exercised only without the extra
     ContractDeps = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_tools = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
+    usage_limits_from_contract = None  # ty: ignore[invalid-assignment]
 
 __all__ = [
     "ClaudePromptRenderer",
@@ -75,4 +77,5 @@ __all__ = [
     "create_sdk_mcp_server",
     "create_tools",
     "resolve_principal",
+    "usage_limits_from_contract",
 ]

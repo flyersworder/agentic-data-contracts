@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0] - 2026-08-03
+
+### Added
+
+- **`usage_limits_from_contract(contract, session)`** (Pydantic AI) — narrows the pre-tool-call window that v0.34.0 shipped as a known limitation. `ContractSession.check_limits()` only runs when a tool is about to be invoked, so an agent that exhausts its budget and then stops calling tools was never interrupted. Pydantic AI checks `UsageLimits` on every *model request*, which needs no tool call at all, closing that hole **within a run**:
+
+  ```python
+  result = await agent.run(
+      prompt,
+      deps=ContractDeps(session=session),
+      usage_limits=usage_limits_from_contract(dc, session),  # per run, not once
+  )
+  ```
+
+- **The `session` argument is required, and is the substance of the change.** `total_tokens_limit` is checked against `RunUsage` — usage for *one* `agent.run()` — while a contract's `token_budget` is a ceiling for the user across every turn (`ContractDeps` instructs callers to reuse one session so limits accumulate). The obvious mapping, `total_tokens_limit = token_budget`, is therefore **wrong in the unsafe direction**: it re-grants the full budget on each turn, so a 50,000-token contract authorises 500,000 across ten turns — declared-but-unenforced, the failure this library exists to prevent. Limiting each run to `max(0, token_budget - session.tokens_used)` bounds the total instead. Call it per run; the value is a snapshot, and a stale one re-grants spend that already happened.
+
+### Known limitations
+
+- **This bounds the budget; it does not enforce it exactly.** The subtracted figure is `session.tokens_used`, and the session is fed only from inside the tool wrapper — so every model request *after a run's last tool call*, including the final answer generation (typically the largest context), goes unobserved. Each run is therefore granted more than the true remainder, and the shortfall compounds per turn. Measured on a two-request-per-turn agent with a 500-token budget, real spend reached **~2× the ceiling by the first refusal** — and that factor is a property of the tool-call-to-request ratio, not a constant: ~1.4× measured for a three-tool-call turn, and see the next point for the case with no ratio at all. It is a large improvement on the unbounded behaviour without the helper, but not the identity a quick read might assume. Tracked as #56, which carries the design that would make it exact.
+
+- **An agent that calls no tools at all is still unbounded across turns.** Within a run it is now stopped, which is the hole this release closes. But `session.tokens_used` never leaves 0 if no tool ever executes, so every subsequent run is granted the full budget again. Measured: 12 turns, 500-token budget, 1200 tokens spent, zero refusals. The v0.34.0 limitation is narrowed to "across runs", not removed.
+
+- **Catch `pydantic_ai.exceptions.UsageLimitExceeded` *as well as* `ContractSessionLimitError`.** Once the helper is wired the framework usually stops the run first, because a tool can only execute on a response that already passed `check_tokens` — so a budget breach normally surfaces as the framework exception rather than the contract one. It is **not** a replacement, though: `ContractSessionLimitError` still fires whenever the session is fed from outside the run, which is exactly what a session shared with another adapter or a direct `observe_tokens()` call does (verified on both `apply_middleware` values). Keep the existing handler and add the new one. The session's token tally also freezes once runs start being refused, since no further tools execute to feed it, while each refused turn still costs one billed model request — so cumulative spend keeps climbing past the ~2× first-refusal figure.
+
+- **Do not combine with `agent.run(usage=...)`.** A carried counter is subtracted twice — once by this helper, once inside the counter — and the run locks out permanently below the declared budget. Concurrent runs sharing one session each snapshot the same `tokens_used` and are each granted the full remainder; correct for the sequential turns `ContractDeps` describes, worth knowing if you fan out.
+
+### Not mapped, deliberately
+
+- **`max_retries` is not mapped onto `request_limit`.** They count different things — `max_retries` counts *blocked query attempts* here (`record_retry()` fires on a validation block), while `request_limit` counts *model requests*. A contract saying `max_retries: 3` means "three bad queries and you are done", not "three LLM calls"; conflating them would silently change what an existing contract means. `request_limit` is left at Pydantic AI's own default, which is its runaway guard and not ours to reinterpret.
+- **`cost_limit_usd` and `max_duration_seconds`** have no `UsageLimits` equivalent and stay session-side.
+- **A contract with no `token_budget`** gets `UsageLimits()` with no token ceiling. Inventing a limit nothing declared is the mirror image of failing to enforce one that was.
+
+### Scope
+
+- Pydantic AI only. LangChain has no per-request ceiling to map onto, and the Claude Agent SDK path cannot observe usage at all — so this lives in a module that imports only under the `[pydantic-ai]` extra, rather than anywhere that would imply cross-framework coverage it does not have.
+
+### Compatibility
+
+- Additive and entirely opt-in at the API level: nothing changes unless you pass the helper's output to `agent.run()`. The *code* for in-tool enforcement is untouched — but wiring the helper changes which exception a budget breach raises, per the second known limitation above. Adjust your `except` clause when you adopt it.
+
 ## [0.35.0] - 2026-08-03
 
 ### Added

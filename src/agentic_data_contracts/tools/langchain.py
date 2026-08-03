@@ -19,6 +19,11 @@ Two integration paths are offered:
    at the graph boundary. Pair with ``apply_middleware=False`` to avoid
    double work.
 
+Both paths observe token usage from the run's message history, so a contract's
+``resources.token_budget`` is enforced either way; the accounting is shared
+(:func:`_observe_usage`) precisely so the two cannot disagree about a session's
+total when a caller wires both.
+
 Important divergence from ``contract_middleware`` in ``tools.middleware``:
 that decorator validates SQL on *every* tool that has an ``args["sql"]``
 key — including ``inspect_query``, whose explicit purpose is to *report*
@@ -38,6 +43,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
+
+# Imported at module level, not inside the coroutine, because that is what makes
+# the injection work: LangGraph's ToolNode decides whether to hand a tool its
+# ToolRuntime by calling `get_type_hints()` on the coroutine, and this module
+# uses `from __future__ import annotations`, so the hint is the *string*
+# "ToolRuntime | None" and must resolve against these module globals.
+from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langgraph.types import Command
@@ -49,7 +61,6 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
     RowFormat,
     ToolDef,
-    _warn_token_budget_unenforceable,
     create_tools,
 )
 from agentic_data_contracts.validation.validator import Validator
@@ -79,6 +90,110 @@ def _unwrap_mcp_text(envelope: dict[str, Any]) -> str:
         return ""
     except (AttributeError, TypeError):
         return ""
+
+
+def _messages_in(state: Any) -> list[Any]:
+    """Pull the message list out of a graph state, tolerating its absence.
+
+    Both callers receive state from the framework rather than constructing it,
+    and both can legitimately be handed nothing: a middleware invoked outside a
+    graph, or a tool invoked directly with no ``ToolRuntime`` to inject.
+    """
+    if not state:
+        return []
+    try:
+        return list(state["messages"] or [])
+    except (KeyError, TypeError):
+        return []
+
+
+def _usage_scope_for(state: Any, config: Any) -> str:
+    """Identify the conversation whose running total is being observed.
+
+    Two sources, tried in order, because neither covers every wiring:
+
+    1. ``thread_id`` from the runtime config — present whenever a checkpointer
+       is configured, and stable across turns.
+    2. The id of the first message in state. LangGraph's ``add_messages``
+       reducer assigns a UUID as messages enter state, and the first one stays
+       put across turns, so it identifies a conversation even with no
+       checkpointer — which is the shape the README's own LangChain example
+       uses.
+
+    Falling back to a bare constant is the *last* resort, reached only when
+    there is neither a thread id nor an identified first message.
+
+    Two known under-counts, both of them collisions -- distinct runs landing on
+    one key, where ``observe_tokens``' monotone guard then keeps only the
+    larger:
+
+    1. That bare constant, when two conversations share it.
+    2. A **nested run inheriting its parent's thread id** -- a sub-agent or
+       subgraph, which ``create_deep_agent`` produces. Its own history is
+       shorter than the parent's, so its usage is dropped whole rather than
+       merely mixed: a 5000-token parent turn followed by an 800-token
+       sub-agent turn accrues 5000, not 5800.
+
+    The tempting fix for (2) -- appending the config's ``checkpoint_ns`` to
+    separate nested runs -- is wrong, and measurably so: that value is
+    ``tools:<task-id>`` and carries a *fresh* id on every tool call, so it
+    would mint a new scope each time and re-accrue the whole cumulative total,
+    multiplying rather than separating. Fixing this needs a key that is stable
+    within a run and distinct across nesting; there is no such field to hand.
+
+    Both cases under-enforce rather than over-enforce, which is the safe
+    direction to fail, and both are strictly better than the nothing this path
+    observed before v0.35.0.
+
+    Deriving the key from ``(state, config)`` rather than from a caller-specific
+    object is what lets the middleware and the ``StructuredTool`` path agree:
+    fed the same run, they compute the same key, so a session wired to both
+    observes one cumulative total instead of two competing ones.
+    """
+    thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+    if thread_id:
+        return f"langchain:thread:{thread_id}"
+
+    messages = _messages_in(state)
+    if messages:
+        first_id = getattr(messages[0], "id", None)
+        if first_id:
+            return f"langchain:conv:{first_id}"
+
+    return "langchain"
+
+
+def _observe_usage(session: ContractSession, state: Any, config: Any) -> None:
+    """Feed the contract's ``token_budget`` from a run's message history.
+
+    ``usage_metadata`` is **per message**, so the running total is the *sum*
+    over the list -- do not "simplify" this to the last message's total, which
+    would undercount by an order of magnitude. The sum grows monotonically as
+    messages append, which is what ``ContractSession.observe_tokens`` expects.
+
+    Scoped per conversation, never by a constant: one middleware instance (and
+    one tool list) serves every conversation an agent handles, and a shared key
+    silently drops the second conversation's usage whenever its running sum sits
+    below the first's peak -- under-enforcing *and* reporting a false
+    ``tokens_remaining`` to the model, which is the failure this feature exists
+    to remove. See :func:`_usage_scope_for`.
+
+    Two accepted limits. Concurrent conversations still share one
+    ``ContractSession``, so the budget is a combined ceiling across them rather
+    than per-conversation -- correct for a per-user session, worth knowing if
+    you share one more widely. And a middleware that trims or summarises history
+    (``SummarizationMiddleware``, ``trim_messages``) shrinks the sum; the
+    monotone guard refuses to subtract, so accrual pauses until the new sum
+    passes the old peak. That under-enforces rather than over-enforces, which is
+    the safe direction.
+    """
+    total = 0
+    for message in _messages_in(state):
+        usage = getattr(message, "usage_metadata", None)
+        if isinstance(usage, dict):
+            total += int(usage.get("total_tokens") or 0)
+    if total:
+        session.observe_tokens(total, scope=_usage_scope_for(state, config))
 
 
 def create_langchain_tools(
@@ -117,16 +232,6 @@ def create_langchain_tools(
         A list of ``BaseTool`` instances; order matches the underlying
         ``create_tools()`` output.
     """
-    # This path's StructuredTool coroutines are not wired for run state, so a
-    # declared token_budget is inert here -- say so rather than fail silently.
-    # But `apply_middleware=False` is exactly how a caller signals it is
-    # delegating enforcement to ContractMiddleware, which *does* observe usage,
-    # so warning then would cry wolf in the configuration the README teaches --
-    # and a warning that fires when things are correct is how the real ones get
-    # ignored.
-    if apply_middleware:
-        _warn_token_budget_unenforceable(contract, "create_langchain_tools")
-
     if session is None:
         session = ContractSession(contract)
 
@@ -152,10 +257,44 @@ def _to_structured_tool(
     The coroutine returns ``(content_str, raw_envelope)`` so the original
     MCP dict survives on ``ToolMessage.artifact`` while the model sees
     plain text on ``ToolMessage.content``.
+
+    The ``runtime`` parameter is how a declared ``token_budget`` reaches this
+    path: LangGraph's ``ToolNode`` injects a ``ToolRuntime`` carrying the run's
+    message history and thread id. It triggers on the parameter being *named*
+    ``runtime`` **or** annotated ``ToolRuntime`` — either alone suffices, so
+    renaming this parameter would keep working while dropping the annotation
+    would not. The annotation is therefore the load-bearing half. It never
+    reaches the model — ``infer_schema=False`` means the advertised schema is
+    ``tool_def.input_schema`` verbatim, not this signature.
+
+    It is optional, and defaults to ``None``, because injection only happens
+    inside a graph: ``await tool.ainvoke({"sql": ...})`` is a supported way to
+    call these tools and passes no runtime at all. A required parameter would
+    break every such caller to catch a mis-wiring that degrades to the previous
+    behaviour anyway — usage simply goes unobserved, exactly as it did before.
     """
     inner = tool_def.callable
 
-    async def _coroutine(**kwargs: Any) -> tuple[str, dict[str, Any]]:
+    async def _coroutine(
+        runtime: ToolRuntime | None = None, **kwargs: Any
+    ) -> tuple[str, dict[str, Any]]:
+        # Observe before checking, so a breach that this very run caused blocks
+        # now rather than one tool call later. Unconditional, unlike the limit
+        # check below: `apply_middleware=False` delegates *enforcement* to
+        # ContractMiddleware, and observation is not enforcement. Both feeding
+        # one session is harmless -- they derive the same scope key from the
+        # same run, so the second observation of a total is a no-op.
+        # Read defensively, matching ContractMiddleware._state_and_config: a
+        # non-LangGraph harness that forwards raw tool-call args could put
+        # anything under this key, and an AttributeError from accounting must
+        # not be how a governed query fails.
+        if runtime is not None:
+            _observe_usage(
+                session,
+                getattr(runtime, "state", None),
+                getattr(runtime, "config", None),
+            )
+
         if apply_middleware:
             try:
                 session.check_limits()
@@ -224,88 +363,26 @@ class ContractMiddleware(AgentMiddleware):
             sql_normalizer=sql_normalizer,
         )
 
+    @staticmethod
+    def _state_and_config(request: ToolCallRequest) -> tuple[Any, Any]:
+        """Unpack the two things usage accounting needs from a request.
+
+        ``runtime`` is typed non-optional on ``ToolCallRequest`` but read
+        defensively: a hand-built request, or one from outside a graph, has
+        neither a runtime nor a config.
+        """
+        runtime = getattr(request, "runtime", None)
+        return getattr(request, "state", None), getattr(runtime, "config", None)
+
     def _observe_token_usage(self, request: ToolCallRequest) -> None:
         """Feed the contract's ``token_budget`` from the run's message history.
 
-        This middleware is the only LangChain path that currently reads run
-        state; ``create_langchain_tools``' ``StructuredTool`` coroutines are not
-        wired for it, so a contract's token budget is inert there (the factory
-        warns about it).
-
-        ``usage_metadata`` is **per message**, so the running total is the
-        *sum* over the list -- do not "simplify" this to the last message's
-        total, which would undercount by an order of magnitude. The sum grows
-        monotonically as messages append, which is what
-        ``ContractSession.observe_tokens`` expects.
-
-        Scoped per conversation, never by a constant: one middleware instance
-        serves every conversation an agent handles (the README wires exactly
-        one), and a shared key silently drops the second conversation's usage
-        whenever its running sum sits below the first's peak -- under-enforcing
-        *and* reporting a false ``tokens_remaining`` to the model, which is the
-        failure this feature exists to remove. See :meth:`_usage_scope`.
-
-        Two accepted limits. Concurrent conversations still share one
-        ``ContractSession``, so the budget is a combined ceiling across them
-        rather than per-conversation -- correct for a per-user session, worth
-        knowing if you share one more widely. And a middleware that trims or
-        summarises history (``SummarizationMiddleware``, ``trim_messages``)
-        shrinks the sum; the monotone guard refuses to subtract, so accrual
-        pauses until the new sum passes the old peak. That under-enforces
-        rather than over-enforces, which is the safe direction.
+        The accounting lives in :func:`_observe_usage`, shared with the
+        ``StructuredTool`` path in :func:`_to_structured_tool` — both observe
+        the same run, and copying the summing or the scope derivation would let
+        the two drift into disagreeing about one session's total.
         """
-        state = getattr(request, "state", None)
-        if not state:
-            return
-        try:
-            messages = state["messages"]
-        except (KeyError, TypeError):
-            return
-        total = 0
-        for message in messages or []:
-            usage = getattr(message, "usage_metadata", None)
-            if isinstance(usage, dict):
-                total += int(usage.get("total_tokens") or 0)
-        if total:
-            self._session.observe_tokens(total, scope=self._usage_scope(request))
-
-    @staticmethod
-    def _usage_scope(request: ToolCallRequest) -> str:
-        """Identify the conversation whose running total is being observed.
-
-        Two sources, tried in order, because neither covers every wiring:
-
-        1. ``thread_id`` from the runtime config — present whenever a
-           checkpointer is configured, and stable across turns.
-        2. The id of the first message in state. LangGraph's ``add_messages``
-           reducer assigns a UUID as messages enter state, and the first one
-           stays put across turns, so it identifies a conversation even with no
-           checkpointer — which is the shape the README's own LangChain example
-           uses.
-
-        Falling back to a bare constant is the *last* resort and is the one
-        case that still under-counts: two conversations sharing it accrue only
-        the larger. It is reached only when there is neither a thread id nor an
-        identified first message, and it under-enforces rather than
-        over-enforces, which is the safe direction to fail.
-        """
-        runtime = getattr(request, "runtime", None)
-        config = getattr(runtime, "config", None) or {}
-        thread_id = (config.get("configurable") or {}).get("thread_id")
-        if thread_id:
-            return f"langchain:thread:{thread_id}"
-
-        state = getattr(request, "state", None)
-        try:
-            messages = state["messages"] if state else None
-        except (KeyError, TypeError):
-            messages = None
-        if messages:
-            first_id = getattr(messages[0], "id", None)
-            if first_id:
-                return f"langchain:conv:{first_id}"
-
-        return "langchain"
+        _observe_usage(self._session, *self._state_and_config(request))
 
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit

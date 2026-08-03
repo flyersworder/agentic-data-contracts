@@ -240,34 +240,60 @@ These are simple counters/timers with guard checks before each tool call. No for
 **Token usage is the one counter the session cannot produce itself,** because
 the tokens are spent by the *model* between tool calls, not by anything this
 library runs. It has to be fed from whatever the host framework exposes, and
-two paths currently read it:
+three paths currently read it:
 
 | Path | Feeds `token_budget`? | Source |
 |---|---|---|
 | Pydantic AI tools / toolset | Yes | `ctx.usage.total_tokens`, scoped by `ctx.run_id` |
-| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped by `thread_id` |
-| LangChain `create_langchain_tools` | Not yet | Could take a `ToolRuntime` parameter; not wired |
+| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped per conversation |
+| LangChain `create_langchain_tools` | Yes | the same, from an injected `ToolRuntime` |
 | `contract_middleware` | No | its wrapper receives an `args` dict only |
 | Claude Agent SDK | No | the tool callable receives an `args` dict only |
 
-Note "not yet" rather than "cannot" for `create_langchain_tools`: a
-`StructuredTool` coroutine *can* be handed a `ToolRuntime` (and with it the
-message list and `thread_id`), so that row is a wiring gap, not a capability
-limit. Only the last two are genuinely blind. Stating it as a limit — in docs
-or, worse, in a permanent runtime warning — would be the same
-declared-but-false failure this section is about.
+The two LangChain rows share one implementation (`_observe_usage`), keyed on
+`(state, config)` — the shape both callers can produce. That is deliberate:
+fed the same run they derive the same scope key and observe the same cumulative
+total, so wiring both does not double-count, and neither can drift into
+disagreeing about a session's total.
 
-The paths that do not feed it warn at wiring time, for the same reason
+`create_langchain_tools` gets there by declaring a `runtime: ToolRuntime | None`
+parameter on its `StructuredTool` coroutine, which LangGraph's `ToolNode`
+injects. Three things about that are easy to get wrong:
+
+- **It never reaches the model.** `infer_schema=False` means the advertised
+  schema is the tool's JSON Schema dict verbatim, not the coroutine signature.
+- **It is optional on purpose.** Injection only happens inside a graph;
+  `await tool.ainvoke({"sql": ...})` is a supported call shape and passes no
+  runtime. A required parameter would break every direct caller to catch a
+  mis-wiring that degrades to the old behaviour anyway.
+- **The annotation is what carries it, not the name.** `ToolNode` triggers on
+  a parameter *named* `runtime` **or** annotated `ToolRuntime` — so renaming
+  this parameter would keep working, while dropping its annotation would
+  silently stop injection. Either way it reads the hints via `get_type_hints()`,
+  and since `tools/langchain.py` uses `from __future__ import annotations`, the
+  `ToolRuntime` import must stay at module level to resolve. A test drives a
+  real `create_agent` for exactly this reason — every test that passes
+  `runtime` itself would still pass with injection broken.
+
+Two conversations are told apart by `thread_id`, falling back to the id
+LangGraph stamps on the first message. Both under-count on a *collision*: two
+conversations sharing the last-resort constant key, or a **nested run
+inheriting its parent's `thread_id`** (a sub-agent or subgraph, which
+`create_deep_agent` produces), whose shorter history is then dropped whole by
+the monotone guard rather than added. Appending the config's `checkpoint_ns`
+looks like the fix and is not — it is `tools:<task-id>` and changes on every
+tool call, so it would re-accrue the full total each time. Both cases
+under-enforce, which is the safe direction, and both beat the nothing this
+path observed before v0.35.0.
+
+The two paths that remain blind warn at wiring time, for the same reason
 `Validator` warns about unenforceable `forbidden_operations`: a
 declared-but-unenforced limit is worse than an absent one, because the contract
-reads as protective while permitting the thing it names. `create_langchain_tools`
-stays quiet when `apply_middleware=False`, since that is exactly how a caller
-signals it is delegating enforcement to `ContractMiddleware` — a warning that
-fires on a correct configuration is how the real ones get ignored.
+reads as protective while permitting the thing it names.
 
-**Both LangChain enforcement pieces must share one `ContractSession`.** They
-each default to constructing their own, and a split pair enforces against the
-middleware's session while `run_query` reports `remaining()` from the tools'
+**Both LangChain enforcement pieces should still share one `ContractSession`.**
+They each default to constructing their own, and a split pair enforces against
+the middleware's session while `run_query` reports `remaining()` from the tools'
 — so the model is told it has its full budget no matter what it spent. Build
 one session and pass it to both.
 
@@ -279,10 +305,12 @@ on each call multiplies it; assigning it resets the session at each new run.
 Only the per-scope delta accrues. `record_tokens()` remains the delta-based
 entry point for framework-free callers.
 
-**Known window:** `check_limits()` runs *before* a tool call, so a breach is
-caught at the *next* one. An agent that exhausts its budget and stops calling
-tools never trips it — inherent to enforcing from inside tools, and identical to
-how `max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
+**Known window:** the paths that observe usage do so *before* running
+`check_limits()`, so a budget the current turn has already blown stops that
+call rather than the next. What no amount of ordering fixes is an agent that
+exhausts its budget and then stops calling tools: nothing runs, so nothing
+checks. That is inherent to enforcing from inside tools, and identical to how
+`max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
 `remaining()` reports honest `tokens_remaining` in every `run_query` response,
 which lets the model self-regulate; Pydantic AI's `UsageLimits` is what would
 close the window entirely.

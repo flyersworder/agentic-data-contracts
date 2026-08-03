@@ -30,6 +30,7 @@ from agentic_data_contracts.tools.factory import create_tools  # noqa: E402
 from agentic_data_contracts.tools.pydantic_ai import (  # noqa: E402
     ContractDeps,
     _unwrap_mcp_text,
+    contract_run_kwargs,
     create_pydantic_ai_tools,
     create_pydantic_ai_toolset,
     usage_limits_from_contract,
@@ -907,3 +908,195 @@ async def test_a_fresh_budget_does_not_stop_a_run() -> None:
         usage_limits=usage_limits_from_contract(contract, session),
     )
     assert result.output
+
+
+# ─── contract_run_kwargs — exact enforcement (v0.37.0) ────────────────────────
+
+
+def _tool_calling_model(spend: list[int]) -> Any:
+    """A model that calls one tool, then answers. Appends per-request spend."""
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    def _fn(messages: list[Any], info: AgentInfo) -> ModelResponse:
+        spend.append(100)
+        usage = RequestUsage(input_tokens=50, output_tokens=50)
+        called = any(
+            getattr(part, "part_kind", "") == "tool-return"
+            for message in messages
+            for part in getattr(message, "parts", [])
+        )
+        if called:
+            return ModelResponse(parts=[TextPart("done")], usage=usage)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "describe_table", {"schema": "analytics", "table": "orders"}
+                )
+            ],
+            usage=usage,
+        )
+
+    return FunctionModel(_fn)
+
+
+def test_run_kwargs_returns_both_halves_paired() -> None:
+    """The pairing is the point: one call, both keys, impossible to half-wire."""
+    from pydantic_ai.usage import RunUsage
+
+    contract = _budgeted_contract()
+    kwargs = contract_run_kwargs(contract, ContractSession(contract))
+
+    assert set(kwargs) == {"usage", "usage_limits"}
+    assert isinstance(kwargs["usage"], RunUsage)
+    assert kwargs["usage_limits"].total_tokens_limit == 50_000
+
+
+def test_run_kwargs_limit_stays_flat_after_the_session_has_spent() -> None:
+    """The double-subtraction footgun, guarded rather than only documented.
+
+    A fresh session cannot catch this: ``budget - 0 == budget``, so the
+    subtracting and flat versions agree and the bug ships. Spending first is
+    what separates them. Subtracting here would take the spend off twice —
+    once in the limit, once inside the carried counter — and lock the run out
+    below its declared budget.
+
+    Found by mutation: replacing the flat limit with a subtracting one passed
+    every other test in this file.
+    """
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    kwargs = contract_run_kwargs(contract, session)
+    kwargs["usage"].input_tokens = 30_000  # a previous turn, on the carried counter
+
+    again = contract_run_kwargs(contract, session)
+    assert session.tokens_used == 30_000  # the session was reconciled...
+    assert again["usage_limits"].total_tokens_limit == 50_000  # ...the limit was not
+
+
+def test_run_kwargs_carries_the_same_counter_across_turns() -> None:
+    # One counter per session, or it is not carried at all.
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+
+    first = contract_run_kwargs(contract, session)["usage"]
+    second = contract_run_kwargs(contract, session)["usage"]
+    assert first is second
+
+    other = contract_run_kwargs(contract, ContractSession(contract))["usage"]
+    assert other is not first
+
+
+@pytest.mark.asyncio
+async def test_carried_counter_enforces_the_budget_exactly(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The whole point of #56: the session tracks true spend, not an under-count.
+
+    Under the v0.36.0 snapshot design the session is fed per-run deltas and
+    misses everything after a run's last tool call. With a carried counter the
+    tool wrapper observes one global running total under a stable scope, so
+    ``session.tokens_used`` equals what was actually spent — no drift to
+    compound, and no false positive from double-counting either.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    budget = 500
+    contract = _budgeted_contract(budget)
+    session = ContractSession(contract)
+    spend: list[int] = []
+    agent = Agent(
+        _tool_calling_model(spend),
+        tools=create_pydantic_ai_tools(contract, adapter=adapter, session=session),
+    )
+
+    refused = 0
+    for _ in range(8):
+        try:
+            await agent.run("go", **contract_run_kwargs(contract, session))
+        except UsageLimitExceeded:
+            refused += 1
+
+    assert refused, "the framework must refuse once the budget is gone"
+
+    # Exact, with one caveat about *when*. The tool wrapper can only observe
+    # while a tool is executing, so mid-run it still lags by whatever the
+    # current turn spent after its last tool call. `contract_run_kwargs`
+    # reconciles at the start of the next run, so between runs — which is when
+    # a caller would read it — the tally is the true spend, not an estimate.
+    contract_run_kwargs(contract, session)
+    assert session.tokens_used == sum(spend)
+
+    # True spend overshoots by the requests already in flight when the ceiling
+    # was crossed, not by a multiple of the budget: ~1.2x here against ~3.4x
+    # measured for the bounded helper over the same turns.
+    assert sum(spend) <= budget + 200
+
+
+@pytest.mark.asyncio
+async def test_refused_turns_cost_nothing_once_the_budget_is_gone(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The other half of the win, and the one a bound cannot give you.
+
+    ``check_before_request`` sees a carried total already past the limit and
+    refuses *before* issuing a request. Under the bounded design each refused
+    turn still bought one billed model request, forever.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    contract = _budgeted_contract(500)
+    session = ContractSession(contract)
+    spend: list[int] = []
+    agent = Agent(
+        _tool_calling_model(spend),
+        tools=create_pydantic_ai_tools(contract, adapter=adapter, session=session),
+    )
+
+    while True:
+        try:
+            await agent.run("go", **contract_run_kwargs(contract, session))
+        except UsageLimitExceeded:
+            break
+
+    settled = len(spend)
+    for _ in range(5):
+        with pytest.raises(UsageLimitExceeded):
+            await agent.run("go", **contract_run_kwargs(contract, session))
+
+    assert len(spend) == settled, "a refused turn must not issue a model request"
+
+
+@pytest.mark.asyncio
+async def test_ignoring_the_helper_degrades_rather_than_corrupts(
+    adapter: DuckDBAdapter,
+) -> None:
+    """Mis-wiring must fail safe.
+
+    The wrapper switches to the stable scope only when ``ctx.usage`` *is* the
+    counter registered for this session. A caller who passes a limit but no
+    carried counter therefore gets v0.36.0's per-run scoping — bounded, not
+    double-counted, which is the failure this design must not reintroduce.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    contract = _budgeted_contract(500)
+    session = ContractSession(contract)
+    spend: list[int] = []
+    agent = Agent(
+        _tool_calling_model(spend),
+        tools=create_pydantic_ai_tools(contract, adapter=adapter, session=session),
+    )
+
+    for _ in range(6):
+        try:
+            await agent.run(
+                "go", usage_limits=usage_limits_from_contract(contract, session)
+            )
+        except (UsageLimitExceeded, ContractSessionLimitError):
+            break
+
+    # Under-counts (the documented v0.36.0 bound); never over-counts, which is
+    # what would stop a run that is still within budget.
+    assert session.tokens_used <= sum(spend)

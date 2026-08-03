@@ -42,12 +42,14 @@ except ImportError:  # pragma: no cover — exercised only without the extra
 try:
     from agentic_data_contracts.tools.pydantic_ai import (
         ContractDeps,
+        contract_run_kwargs,
         create_pydantic_ai_tools,
         create_pydantic_ai_toolset,
         usage_limits_from_contract,
     )
 except ImportError:  # pragma: no cover — exercised only without the extra
     ContractDeps = None  # ty: ignore[invalid-assignment]
+    contract_run_kwargs = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_tools = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
     usage_limits_from_contract = None  # ty: ignore[invalid-assignment]
@@ -71,6 +73,7 @@ __all__ = [
     "contract_canonical_bytes",
     "contract_digest",
     "contract_middleware",
+    "contract_run_kwargs",
     "create_langchain_tools",
     "create_pydantic_ai_toolset",
     "create_pydantic_ai_tools",

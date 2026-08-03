@@ -11,7 +11,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import Agent, ModelRetry, RunContext, Tool  # noqa: E402
 from pydantic_ai.models.test import TestModel  # noqa: E402
-from pydantic_ai.usage import RunUsage  # noqa: E402
+from pydantic_ai.usage import RunUsage, UsageLimits  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
 from agentic_data_contracts.core.contract import DataContract  # noqa: E402
@@ -32,6 +32,7 @@ from agentic_data_contracts.tools.pydantic_ai import (  # noqa: E402
     _unwrap_mcp_text,
     create_pydantic_ai_tools,
     create_pydantic_ai_toolset,
+    usage_limits_from_contract,
 )
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -668,3 +669,152 @@ async def test_exhausted_token_budget_is_terminal(adapter: DuckDBAdapter) -> Non
             schema="analytics",
             table="orders",
         )
+
+
+# ─── usage_limits_from_contract (v0.36.0) ─────────────────────────────────────
+
+
+def _budgeted_contract(budget: int | None = 50_000) -> DataContract:
+    return DataContract(
+        DataContractSchema(
+            name="budgeted",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(token_budget=budget) if budget else None,
+        )
+    )
+
+
+def test_usage_limits_maps_token_budget() -> None:
+    session = ContractSession(_budgeted_contract())
+    assert (
+        usage_limits_from_contract(_budgeted_contract(), session).total_tokens_limit
+        == 50_000
+    )
+
+
+def test_usage_limits_subtracts_what_the_session_already_spent() -> None:
+    """The whole reason the helper takes a session.
+
+    ``UsageLimits`` is checked against ``RunUsage`` — per ``agent.run()`` call —
+    while a ``ContractSession``'s budget is per *user across every turn*
+    (``ContractDeps`` says to reuse one session so limits accumulate). Mapping
+    the raw budget would therefore grant it afresh on every turn: a 50k
+    contract would authorise 50k *per turn*, which is not what it declares.
+    """
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    session.observe_tokens(30_000, scope="turn-1")
+
+    limits = usage_limits_from_contract(contract, session)
+    assert limits.total_tokens_limit == 20_000
+
+
+def test_usage_limits_floor_at_zero_never_goes_negative() -> None:
+    # A negative limit would be nonsense to pydantic-ai; an exhausted budget
+    # must clamp to 0, which aborts the run on its first usage check.
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    session.observe_tokens(70_000, scope="over")
+
+    assert usage_limits_from_contract(contract, session).total_tokens_limit == 0
+
+
+def test_usage_limits_leaves_token_limit_unset_without_a_budget() -> None:
+    # No declared budget means no token ceiling to translate. Inventing one
+    # would be the mirror image of the declared-but-unenforced bug.
+    contract = _budgeted_contract(budget=None)
+    limits = usage_limits_from_contract(contract, ContractSession(contract))
+    assert limits.total_tokens_limit is None
+
+
+def test_usage_limits_does_not_map_max_retries_onto_request_limit() -> None:
+    """The trap this helper exists partly to prevent.
+
+    ``max_retries`` counts *blocked query attempts* in this library;
+    ``request_limit`` counts *model requests*. A contract saying
+    ``max_retries: 3`` means "three bad queries", not "three LLM calls" —
+    mapping one onto the other silently changes what an existing contract
+    means. ``request_limit`` is therefore left at pydantic-ai's own default.
+    """
+    contract = DataContract(
+        DataContractSchema(
+            name="retries",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    ),
+                ],
+            ),
+            resources=ResourceConfig(max_retries=3, token_budget=50_000),
+        )
+    )
+    limits = usage_limits_from_contract(contract, ContractSession(contract))
+    assert limits.request_limit == UsageLimits().request_limit
+    assert limits.request_limit != 3
+
+
+def test_usage_limits_agrees_with_the_session_ceiling() -> None:
+    """Two enforcers, one number — the property that makes this safe to pair.
+
+    Whatever the helper allows a run to spend, spending exactly that much must
+    leave the session at its declared budget and not past it. If these ever
+    disagree, a user gets "why did it stop at 47k when my budget is 50k?".
+    """
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    session.observe_tokens(12_345, scope="turn-1")
+
+    allowed = usage_limits_from_contract(contract, session).total_tokens_limit
+    assert allowed is not None
+    session.observe_tokens(allowed, scope="turn-2")
+
+    assert session.tokens_used == 50_000
+    session.check_limits()  # exactly at budget is not a breach
+
+
+@pytest.mark.asyncio
+async def test_limits_actually_stop_a_real_run() -> None:
+    """The load-bearing test: does the helper's output bind through agent.run()?
+
+    Every other test in this section checks arithmetic on the returned object,
+    and all of them would still pass if ``UsageLimits`` were ignored entirely —
+    which is the whole feature. This drives a real ``Agent.run`` with a budget
+    the session has all but spent, and asserts the run is refused.
+
+    That refusal arrives from Pydantic AI on a *model request*, with no tool
+    call needed — which is precisely the window ``check_limits()`` cannot
+    close, since it only ever runs when a tool is about to be invoked.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    session.observe_tokens(49_999, scope="earlier-turns")
+
+    agent = Agent(TestModel())
+    with pytest.raises(UsageLimitExceeded):
+        await agent.run(
+            "anything",
+            usage_limits=usage_limits_from_contract(contract, session),
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_budget_does_not_stop_a_run() -> None:
+    # The other half: the limit must not be so tight that it refuses everything.
+    # Without this, the test above would pass on a helper that always returns 0.
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+
+    result = await Agent(TestModel()).run(
+        "anything",
+        usage_limits=usage_limits_from_contract(contract, session),
+    )
+    assert result.output

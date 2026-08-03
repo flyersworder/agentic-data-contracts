@@ -312,8 +312,26 @@ exhausts its budget and then stops calling tools: nothing runs, so nothing
 checks. That is inherent to enforcing from inside tools, and identical to how
 `max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
 `remaining()` reports honest `tokens_remaining` in every `run_query` response,
-which lets the model self-regulate; Pydantic AI's `UsageLimits` is what would
-close the window entirely.
+which lets the model self-regulate.
+
+**Closing the window (Pydantic AI).** `usage_limits_from_contract(contract,
+session)` translates `token_budget` into a `UsageLimits` for `agent.run()`,
+which Pydantic AI checks on every model request — no tool call required, so the
+blind case above disappears. The session argument is mandatory and is what makes
+the two enforcers agree rather than diverge: `UsageLimits` is scoped to one
+`agent.run()` while a `ContractSession` spans every turn, so the helper limits
+each run to `token_budget - session.tokens_used`. Mapping the raw budget would
+re-grant it per turn — a 50,000-token contract authorising 500,000 across ten
+turns, which is the declared-but-unenforced shape this layer exists to prevent.
+
+Two things are deliberately not mapped. `max_retries` must **not** become
+`request_limit`: ours counts blocked query attempts, theirs counts model
+requests, and conflating them would silently redefine existing contracts.
+`cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
+session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
+the SDK path cannot observe usage at all, so the helper lives in a module that
+imports only under the `[pydantic-ai]` extra rather than anywhere implying
+coverage it lacks.
 
 When `ai-agent-contracts` IS installed, enforcement is delegated to the formal framework via the bridge layer (see below).
 

@@ -34,6 +34,7 @@ from typing import Any
 
 from pydantic_ai import ModelRetry, RunContext, Tool
 from pydantic_ai.toolsets import FunctionToolset, ToolsetFunc
+from pydantic_ai.usage import UsageLimits
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
@@ -199,6 +200,75 @@ def _to_pydantic_ai_tool(
         json_schema=tool_def.input_schema,
         takes_ctx=True,
     )
+
+
+def usage_limits_from_contract(
+    contract: DataContract, session: ContractSession
+) -> UsageLimits:
+    """Translate a contract's ``token_budget`` into Pydantic AI ``UsageLimits``.
+
+    Closes the window that in-tool enforcement cannot::
+
+        await agent.run(
+            prompt,
+            deps=ContractDeps(session=session),
+            usage_limits=usage_limits_from_contract(contract, session),
+        )
+
+    ``ContractSession.check_limits()`` runs *pre-tool-call*, so a breach stops
+    the next tool call — and an agent that exhausts its budget and then stops
+    calling tools is never interrupted at all. ``UsageLimits`` is checked by
+    Pydantic AI on every model request, which is strictly earlier, so pairing
+    the two makes the framework the hard stop and leaves the session as the
+    accounting.
+
+    **The ``session`` argument is required, and is the whole point.**
+    ``total_tokens_limit`` is checked against ``RunUsage`` — usage for *one*
+    ``agent.run()`` call — while a contract's ``token_budget`` is a ceiling for
+    the user across every turn (:class:`ContractDeps` instructs callers to
+    reuse one session so limits accumulate). Passing the raw budget would
+    therefore grant it afresh on each turn: a 50,000-token contract would
+    authorise 50,000 *per turn*, so ten turns spend 500,000 under a contract
+    that says 50,000 — declared-but-unenforced, the failure this library exists
+    to prevent. Limiting each run to what the session has *left* makes the two
+    enforcers agree by construction rather than by coincidence.
+
+    Call it **per run**, not once at wiring time: the value is a snapshot of
+    remaining budget, and a stale one re-grants spend that already happened.
+
+    What is deliberately not mapped:
+
+    - **``max_retries`` is NOT mapped onto ``request_limit``.** They count
+      different things — ``max_retries`` counts *blocked query attempts* here
+      (``record_retry()`` fires on a validation block), while ``request_limit``
+      counts *model requests*. A contract saying ``max_retries: 3`` means
+      "three bad queries and you are done", not "three LLM calls". Conflating
+      them would silently change what an existing contract means.
+      ``request_limit`` is left at Pydantic AI's own default, which is its
+      runaway guard and not ours to reinterpret.
+    - **``cost_limit_usd`` and ``max_duration_seconds``** have no
+      ``UsageLimits`` equivalent and stay session-side.
+
+    Returns ``UsageLimits`` with ``total_tokens_limit`` unset when the contract
+    declares no ``token_budget`` — inventing a ceiling nothing declared would be
+    the mirror image of failing to enforce one that was.
+
+    An exhausted budget yields ``total_tokens_limit=0``. Pydantic AI's
+    pre-request check compares ``total_tokens > limit`` against a run that has
+    not started, so ``0 > 0`` is false and one model request still goes out
+    before the post-request check aborts the run. The session's own pre-tool
+    check is what stops the tool call itself.
+
+    Pydantic AI only. LangChain has no per-request ceiling to map onto, and the
+    Claude Agent SDK path cannot observe usage at all — so this lives here, in
+    a module that only imports under the ``[pydantic-ai]`` extra, rather than
+    anywhere that would imply cross-framework coverage it does not have.
+    """
+    resources = contract.schema.resources
+    budget = resources.token_budget if resources is not None else None
+    if budget is None:
+        return UsageLimits()
+    return UsageLimits(total_tokens_limit=max(0, budget - session.tokens_used))
 
 
 @dataclass

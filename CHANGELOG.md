@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0] - 2026-08-03
+
+### Added
+
+- **`usage_limits_from_contract(contract, session)`** (Pydantic AI) — closes the pre-tool-call window that v0.34.0 shipped as a known limitation. `ContractSession.check_limits()` only runs when a tool is about to be invoked, so an agent that exhausts its budget and then stops calling tools was never interrupted. Pydantic AI checks `UsageLimits` on every *model request*, which needs no tool call at all:
+
+  ```python
+  result = await agent.run(
+      prompt,
+      deps=ContractDeps(session=session),
+      usage_limits=usage_limits_from_contract(dc, session),  # per run, not once
+  )
+  ```
+
+- **The `session` argument is required, and is the substance of the change.** `total_tokens_limit` is checked against `RunUsage` — usage for *one* `agent.run()` — while a contract's `token_budget` is a ceiling for the user across every turn (`ContractDeps` instructs callers to reuse one session so limits accumulate). The obvious mapping, `total_tokens_limit = token_budget`, is therefore **wrong in the unsafe direction**: it re-grants the full budget on each turn, so a 50,000-token contract authorises 500,000 across ten turns — declared-but-unenforced, the failure this library exists to prevent. Limiting each run to `max(0, token_budget - session.tokens_used)` makes the framework limit and the session ceiling agree by construction instead of by coincidence, and Pydantic AI then always fires first because per-request is strictly earlier than pre-tool-call. Call it per run; the value is a snapshot, and a stale one re-grants spend that already happened.
+
+### Not mapped, deliberately
+
+- **`max_retries` is not mapped onto `request_limit`.** They count different things — `max_retries` counts *blocked query attempts* here (`record_retry()` fires on a validation block), while `request_limit` counts *model requests*. A contract saying `max_retries: 3` means "three bad queries and you are done", not "three LLM calls"; conflating them would silently change what an existing contract means. `request_limit` is left at Pydantic AI's own default, which is its runaway guard and not ours to reinterpret.
+- **`cost_limit_usd` and `max_duration_seconds`** have no `UsageLimits` equivalent and stay session-side.
+- **A contract with no `token_budget`** gets `UsageLimits()` with no token ceiling. Inventing a limit nothing declared is the mirror image of failing to enforce one that was.
+
+### Scope
+
+- Pydantic AI only. LangChain has no per-request ceiling to map onto, and the Claude Agent SDK path cannot observe usage at all — so this lives in a module that imports only under the `[pydantic-ai]` extra, rather than anywhere that would imply cross-framework coverage it does not have.
+
+### Compatibility
+
+- Purely additive and entirely opt-in: nothing changes unless you pass the helper's output to `agent.run()`. Existing in-tool enforcement is untouched.
+
 ## [0.35.0] - 2026-08-03
 
 ### Added

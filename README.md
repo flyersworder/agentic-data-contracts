@@ -388,6 +388,10 @@ The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
 `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
 
+Pair with `usage_limits_from_contract(dc, user_session)` on each `run()` to have
+Pydantic AI enforce the token budget per model request — see
+[Resource Limits](#resource-limits).
+
 </details>
 
 <details>
@@ -954,6 +958,26 @@ exhausts its budget and then stops calling tools is never interrupted, because
 nothing runs to check. And a sub-agent or subgraph inherits its parent's
 `thread_id`, so its own usage is under-counted rather than added; the budget
 binds on the parent's spend.
+
+**On Pydantic AI you can close the first of those** by letting the framework
+enforce per model request, which never needs a tool call to happen:
+
+```python
+from agentic_data_contracts import usage_limits_from_contract
+
+result = await agent.run(
+    prompt,
+    deps=ContractDeps(session=session),
+    usage_limits=usage_limits_from_contract(dc, session),  # per run, not once
+)
+```
+
+The session is required, and is the point: `UsageLimits` applies to one
+`agent.run()` while `token_budget` is a ceiling across every turn, so the helper
+limits each run to what the session has *left*. Passing the raw budget instead
+would re-grant it each turn — a 50,000-token contract authorising 50,000 *per
+turn*. `max_retries` is deliberately **not** mapped onto `request_limit`: ours
+counts blocked queries, theirs counts LLM calls.
 
 ## Optional Dependencies
 

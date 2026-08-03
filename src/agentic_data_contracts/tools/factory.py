@@ -83,15 +83,16 @@ def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
     very thing it names.
 
     Note the wording: these paths *do not* observe usage, which is not the same
-    as cannot. Pydantic AI's ``ctx.usage`` and ``ContractMiddleware``'s
-    ``request.state`` are wired; ``create_langchain_tools`` could be, by taking
-    a ``ToolRuntime`` parameter, and is not yet. Only the Claude Agent SDK path
-    is genuinely blind -- its tool callable receives an ``args`` dict and
-    nothing else. Saying "cannot" in a permanent runtime warning would be the
-    same declared-but-false failure in doc form.
+    as cannot. The distinction earned its keep -- ``create_langchain_tools``
+    used to warn from here, and closing that gap was a matter of declaring one
+    ``ToolRuntime`` parameter, not of any new capability. What remains is
+    genuinely blind: ``contract_middleware`` and the Claude Agent SDK path both
+    hand their tool callable an ``args`` dict and nothing else. Still, saying
+    "cannot" in a permanent runtime warning would be the same
+    declared-but-false failure in doc form.
 
     Lives here rather than in each adapter so the message cannot drift between
-    them; ``sdk.py``, ``langchain.py`` and ``middleware.py`` all call it.
+    them; ``sdk.py`` and ``middleware.py`` call it.
     """
     resources = contract.schema.resources
     if resources is None or resources.token_budget is None:

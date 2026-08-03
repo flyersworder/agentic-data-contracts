@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0] - 2026-08-03
+
+### Added
+
+- **`create_langchain_tools` now feeds `token_budget` itself.** v0.34.0 gave the budget a producer on two of four paths; this closes the third. The `StructuredTool` coroutine declares a `runtime: ToolRuntime | None` parameter, which LangGraph's `ToolNode` injects with the run's message history and thread id — the same material `ContractMiddleware` already read. A declared budget therefore binds on a plain `create_langchain_tools(...)` wiring, with no middleware and no manual `observe_tokens()` call. Verified end-to-end through a real `create_agent`, and at the declared floors (`langchain` 1.2.17 / `langchain-core` 1.3.3 / `langgraph` 1.1.10) — no floor bump was needed.
+
+  Three properties worth knowing, each of which had a way of going wrong:
+
+  - **The model never sees the parameter.** `infer_schema=False` means the advertised schema is the tool's JSON Schema dict verbatim, not the coroutine signature; `tool.args` is unchanged.
+  - **It is optional, defaulting to `None`.** Injection happens inside a graph; `await tool.ainvoke({"sql": ...})` is a supported call shape that passes no runtime. A required parameter would break every direct caller in order to catch a mis-wiring whose worst case is the *previous* behaviour — usage simply unobserved.
+  - **Observation precedes the limit check**, matching the Pydantic AI adapter, so a budget the current run has already blown stops that call rather than the next.
+
+- **The usage accounting is now shared** between `ContractMiddleware` and the tool path (`_observe_usage` / `_usage_scope_for`, keyed on `(state, config)` — the one shape both callers can produce) rather than duplicated. Fed the same run, both derive the same per-conversation scope key and observe the same cumulative total, so **wiring both does not double-count**: whichever runs second is a no-op. That property is what makes the tool-path observation safe to leave unconditional instead of gating it on `apply_middleware`, which governs *enforcement*, not observation. Sharing was the point — a duplicated envelope in `middleware.py` is what let a bug through in v0.32.0, and two copies of a scope derivation could drift into disagreeing about one session's total.
+
+### Removed
+
+- **The wiring-time `token_budget` warning on `create_langchain_tools`**, and with it the `apply_middleware` special case that suppressed it. Both existed only to describe this gap. `contract_middleware` and the Claude Agent SDK path still warn; they receive an `args` dict and nothing else, and remain genuinely blind. The warning's *"does not observe"* wording — chosen over *"cannot"* in v0.34.0 — earned its keep: closing this gap took one parameter declaration, not a new capability.
+
+### Compatibility
+
+- Additive. Existing calls are unchanged, direct `tool.ainvoke({...})` still works, and the advertised tool arguments are unchanged (asserted by test, not assumed). **But a `token_budget` declared alongside `create_langchain_tools` now binds where it previously did not** — a contract carrying an aspirational budget will start raising `ToolException` once it is passed. Raise or remove the value if it was never meant to bind; the v0.34.0 warning was the notice for this.
+- One caveat for the direct-invocation path: outside a graph nothing injects a runtime, so usage still goes unobserved there. This is unchanged behaviour, not a new gap, and is why the parameter is optional.
+
 ## [0.34.0] - 2026-08-02
 
 ### Fixed

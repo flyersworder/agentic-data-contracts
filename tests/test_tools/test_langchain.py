@@ -14,6 +14,7 @@ pytest.importorskip("langchain_core")
 pytest.importorskip("langchain")
 
 from langchain.agents.middleware.types import ToolCallRequest  # noqa: E402
+from langchain.tools import ToolRuntime  # noqa: E402
 from langchain_core.tools import BaseTool, ToolException  # noqa: E402
 
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter  # noqa: E402
@@ -482,42 +483,21 @@ def _budgeted_contract() -> DataContract:
     )
 
 
-def test_structured_tool_path_warns_that_budget_is_inert(
-    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
+@pytest.mark.parametrize("apply_middleware", [True, False])
+def test_no_wiring_time_warning_now_that_this_path_observes_usage(
+    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter, apply_middleware: bool
 ) -> None:
-    # A declared-but-unenforced limit is worse than an absent one: the contract
-    # reads as protective while permitting the thing it names. This path does
-    # not read run state, so it must say so.
-    with caplog.at_level(logging.WARNING):
-        create_langchain_tools(_budgeted_contract(), adapter=adapter)
-    assert "token_budget" in caplog.text
-    assert "NOT be enforced" in caplog.text
-    assert "ContractMiddleware" in caplog.text
+    """v0.35.0 removed the warning by removing what it warned about.
 
-
-def test_no_warning_when_delegating_to_the_middleware(
-    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
-) -> None:
-    """`apply_middleware=False` is how a caller signals delegation.
-
-    Warning then would fire on the configuration the README teaches, and a
-    warning that cries wolf on a correct setup is how the real ones get
-    filtered out.
+    Both flag values are checked because the warning used to be gated on this
+    flag -- `apply_middleware=False` meant "delegating to ContractMiddleware,
+    do not cry wolf". With the tools themselves observing usage, neither value
+    leaves a budget inert, so the gate went with the warning.
     """
     with caplog.at_level(logging.WARNING):
         create_langchain_tools(
-            _budgeted_contract(), adapter=adapter, apply_middleware=False
+            _budgeted_contract(), adapter=adapter, apply_middleware=apply_middleware
         )
-    assert "token_budget" not in caplog.text
-
-
-def test_no_warning_when_no_budget_declared(
-    caplog: pytest.LogCaptureFixture, adapter: DuckDBAdapter
-) -> None:
-    unbudgeted = _budgeted_contract()
-    unbudgeted.schema.resources = None
-    with caplog.at_level(logging.WARNING):
-        create_langchain_tools(unbudgeted, adapter=adapter)
     assert "token_budget" not in caplog.text
 
 
@@ -637,3 +617,232 @@ def test_middleware_blocks_once_the_budget_is_spent() -> None:
     blocked = middleware._check(_usage_request(50_001, thread_id="A"))
     assert blocked is not None
     assert "token budget exceeded" in str(blocked.content)
+
+
+# ─── token budget on the StructuredTool path (v0.35.0) ────────────────────────
+
+
+def _tool_runtime(
+    total: int, thread_id: str | None = None, message_id: str | None = None
+) -> Any:
+    """A real ToolRuntime carrying one usage-bearing AIMessage.
+
+    The same run, described from the tool's side rather than the middleware's:
+    ``ToolNode`` builds one of these per tool call and injects it into any
+    parameter named ``runtime``.
+    """
+    from langchain_core.messages import AIMessage
+
+    return ToolRuntime(
+        state=cast(
+            Any,
+            {
+                "messages": [
+                    AIMessage(
+                        id=message_id,
+                        content="x",
+                        usage_metadata={
+                            "input_tokens": total - 300,
+                            "output_tokens": 300,
+                            "total_tokens": total,
+                        },
+                    )
+                ]
+            },
+        ),
+        context=None,
+        config=cast(
+            Any, {"configurable": {"thread_id": thread_id}} if thread_id else {}
+        ),
+        stream_writer=cast(Any, lambda _: None),
+        tool_call_id="call-1",
+        store=None,
+    )
+
+
+def _budgeted_query_tool(
+    session: ContractSession, adapter: DuckDBAdapter, **kwargs: Any
+) -> BaseTool:
+    tools = create_langchain_tools(
+        _budgeted_contract(), adapter=adapter, session=session, **kwargs
+    )
+    return next(t for t in tools if t.name == "run_query")
+
+
+_QUERY = {"sql": "SELECT * FROM analytics.orders"}
+
+
+async def test_structured_tool_feeds_the_budget_from_run_state(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The gap this release closes: no middleware, budget still enforced."""
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1200, thread_id="T1")})
+    assert session.tokens_used == 1200
+    # Cumulative, not additive: re-observing the same history must not
+    # double-count it.
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1200, thread_id="T1")})
+    assert session.tokens_used == 1200
+
+
+async def test_structured_tool_keeps_two_conversations_apart(
+    adapter: DuckDBAdapter,
+) -> None:
+    """One tool list serves every conversation, exactly as one middleware does.
+
+    A constant scope key drops thread B entirely -- 1000 is not greater than
+    A's 1000 -- and then reports B its full budget. That defect was caught on
+    the middleware during the v0.34.0 review; sharing the scope derivation is
+    what stops it being reintroduced here.
+    """
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1000, thread_id="A")})
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1000, thread_id="B")})
+    assert session.tokens_used == 2000
+
+
+async def test_structured_tool_separates_unthreaded_conversations(
+    adapter: DuckDBAdapter,
+) -> None:
+    # No checkpointer is the README's own LangChain wiring; the first message's
+    # reducer-assigned UUID is what distinguishes conversations there.
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1000, message_id="conv-a")})
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1000, message_id="conv-b")})
+    assert session.tokens_used == 2000
+
+
+async def test_structured_tool_blocks_once_the_budget_is_spent(
+    adapter: DuckDBAdapter,
+) -> None:
+    """Observation precedes the limit check, so the breaching run stops itself.
+
+    Checking first would let the offending call through and block the *next*
+    one -- and if the agent stops calling tools after it, never block at all.
+    """
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+
+    with pytest.raises(ToolException) as excinfo:
+        await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(50_001, thread_id="A")})
+    assert "token budget exceeded" in str(excinfo.value)
+
+
+async def test_tools_and_middleware_on_one_session_do_not_double_count(
+    adapter: DuckDBAdapter,
+) -> None:
+    """Wiring both is legal, so it must not halve the effective budget.
+
+    Fed the same run, the two paths derive the same scope key and observe the
+    same cumulative total, so whichever runs second is a no-op. This is the
+    property that makes the tool-path observation safe to leave unconditional
+    rather than gating it on ``apply_middleware``.
+    """
+    session = ContractSession(_budgeted_contract())
+    middleware = ContractMiddleware(_budgeted_contract(), session=session)
+    tool = _budgeted_query_tool(session, adapter, apply_middleware=False)
+
+    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
+    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1200, thread_id="T1")})
+    assert session.tokens_used == 1200
+
+
+async def test_direct_invocation_without_a_runtime_still_works(
+    adapter: DuckDBAdapter,
+) -> None:
+    """``runtime`` is injected by ToolNode, not by ``ainvoke``.
+
+    Calling a tool directly is a supported shape -- most of this file does it --
+    so the parameter has to be optional. Nothing is observed, which is exactly
+    the pre-v0.35.0 behaviour rather than a new failure.
+    """
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+
+    result = await tool.ainvoke(_QUERY)
+    assert "acme" in str(result)
+    assert session.tokens_used == 0
+
+
+async def test_budget_is_fed_through_a_real_agent(adapter: DuckDBAdapter) -> None:
+    """The load-bearing test: does ToolNode actually inject the runtime?
+
+    Every other test in this section hands ``runtime`` over itself, so all of
+    them would still pass if injection never happened -- and injection is the
+    entire feature. It hinges on something invisible at the call site:
+    ``ToolNode`` runs ``get_type_hints()`` over the coroutine to decide whether
+    to inject, and because ``tools/langchain.py`` uses ``from __future__ import
+    annotations`` that resolution needs ``ToolRuntime`` in the module's globals.
+
+    Verified by mutation: moving that import into function scope fails this
+    test and no other. It fails loudly there (``NameError`` from the hint
+    evaluation), but renaming the parameter or dropping its annotation would
+    stop injection in silence, and only a real graph run notices either.
+    """
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+
+    class _ToolCallingModel(GenericFakeChatModel):
+        # The fake model does not implement tool binding; create_agent only
+        # needs the bound object back, and the replies are scripted anyway.
+        def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+            return self
+
+    replies = iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "run_query",
+                        "args": _QUERY,
+                        "id": "c1",
+                        "type": "tool_call",
+                    }
+                ],
+                usage_metadata={
+                    "input_tokens": 700,
+                    "output_tokens": 300,
+                    "total_tokens": 1000,
+                },
+            ),
+            AIMessage(content="1 row."),
+        ]
+    )
+
+    session = ContractSession(_budgeted_contract())
+    agent = create_agent(
+        model=_ToolCallingModel(messages=replies),
+        tools=create_langchain_tools(
+            _budgeted_contract(), adapter=adapter, session=session
+        ),
+    )
+
+    result = await agent.ainvoke(
+        {"messages": [("user", "count the orders")]},
+        config={"configurable": {"thread_id": "T1"}},
+    )
+
+    # The tool ran, and the assistant turn that requested it was billed to the
+    # session -- which before this release stayed at zero forever.
+    assert any(m.type == "tool" for m in result["messages"])
+    assert session.tokens_used == 1000
+
+
+def test_runtime_is_never_advertised_to_the_model(adapter: DuckDBAdapter) -> None:
+    """``infer_schema=False`` means the dict schema is the schema.
+
+    If the coroutine signature ever started driving the advertised arguments,
+    the model would see a ``runtime`` parameter it cannot fill and would try.
+    """
+    session = ContractSession(_budgeted_contract())
+    tool = _budgeted_query_tool(session, adapter)
+    assert "runtime" not in tool.args
+    assert set(tool.args) == {"sql"}

@@ -245,29 +245,41 @@ two paths currently read it:
 | Path | Feeds `token_budget`? | Source |
 |---|---|---|
 | Pydantic AI tools / toolset | Yes | `ctx.usage.total_tokens`, scoped by `ctx.run_id` |
-| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped by `thread_id` |
-| LangChain `create_langchain_tools` | Not yet | Could take a `ToolRuntime` parameter; not wired |
+| LangChain `ContractMiddleware` | Yes | `usage_metadata` summed over `request.state["messages"]`, scoped per conversation |
+| LangChain `create_langchain_tools` | Yes | the same, from an injected `ToolRuntime` |
 | `contract_middleware` | No | its wrapper receives an `args` dict only |
 | Claude Agent SDK | No | the tool callable receives an `args` dict only |
 
-Note "not yet" rather than "cannot" for `create_langchain_tools`: a
-`StructuredTool` coroutine *can* be handed a `ToolRuntime` (and with it the
-message list and `thread_id`), so that row is a wiring gap, not a capability
-limit. Only the last two are genuinely blind. Stating it as a limit — in docs
-or, worse, in a permanent runtime warning — would be the same
-declared-but-false failure this section is about.
+The two LangChain rows share one implementation (`_observe_usage`), keyed on
+`(state, config)` — the shape both callers can produce. That is deliberate:
+fed the same run they derive the same scope key and observe the same cumulative
+total, so wiring both does not double-count, and neither can drift into
+disagreeing about a session's total.
 
-The paths that do not feed it warn at wiring time, for the same reason
+`create_langchain_tools` gets there by declaring a `runtime: ToolRuntime | None`
+parameter on its `StructuredTool` coroutine, which LangGraph's `ToolNode`
+injects. Three things about that are easy to get wrong:
+
+- **It never reaches the model.** `infer_schema=False` means the advertised
+  schema is the tool's JSON Schema dict verbatim, not the coroutine signature.
+- **It is optional on purpose.** Injection only happens inside a graph;
+  `await tool.ainvoke({"sql": ...})` is a supported call shape and passes no
+  runtime. A required parameter would break every direct caller to catch a
+  mis-wiring that degrades to the old behaviour anyway.
+- **Detection is by type hint.** `ToolNode` calls `get_type_hints()` on the
+  coroutine, and since `tools/langchain.py` uses `from __future__ import
+  annotations`, that import must stay at module level to resolve. A test drives
+  a real `create_agent` for exactly this reason — every test that passes
+  `runtime` itself would still pass with injection broken.
+
+The two paths that remain blind warn at wiring time, for the same reason
 `Validator` warns about unenforceable `forbidden_operations`: a
 declared-but-unenforced limit is worse than an absent one, because the contract
-reads as protective while permitting the thing it names. `create_langchain_tools`
-stays quiet when `apply_middleware=False`, since that is exactly how a caller
-signals it is delegating enforcement to `ContractMiddleware` — a warning that
-fires on a correct configuration is how the real ones get ignored.
+reads as protective while permitting the thing it names.
 
-**Both LangChain enforcement pieces must share one `ContractSession`.** They
-each default to constructing their own, and a split pair enforces against the
-middleware's session while `run_query` reports `remaining()` from the tools'
+**Both LangChain enforcement pieces should still share one `ContractSession`.**
+They each default to constructing their own, and a split pair enforces against
+the middleware's session while `run_query` reports `remaining()` from the tools'
 — so the model is told it has its full budget no matter what it spent. Build
 one session and pass it to both.
 

@@ -318,8 +318,10 @@ from deepagents import create_deep_agent
 tools = create_langchain_tools(dc, adapter=adapter)
 
 # Enforcement is auto-applied: session limits and BLOCKED envelopes from the
-# underlying tools surface as ToolMessage(status="error"). Pair with
-# ContractMiddleware (and apply_middleware=False) for graph-level interception.
+# underlying tools surface as ToolMessage(status="error"). Running inside an
+# agent graph, each tool also reads the run's token usage, so a declared
+# token_budget binds here without the middleware. Pair with ContractMiddleware
+# (and apply_middleware=False) for graph-level interception.
 agent = create_deep_agent(tools=tools)
 ```
 
@@ -918,15 +920,16 @@ resources:
 
 `token_budget` is the one limit this library cannot measure on its own — the
 tokens are spent by the *model* between tool calls. It is fed from the host
-framework's own counter, which two paths currently read: the **Pydantic AI**
-adapter (`ctx.usage`) and LangChain's **`ContractMiddleware`** (`request.state`,
-scoped per conversation). The other paths warn at wiring time if your contract
-declares a budget, so an inert budget is not silent — with one deliberate
-exception: `create_langchain_tools(..., apply_middleware=False)` stays quiet,
-because that flag is how you signal you are delegating enforcement to
-`ContractMiddleware`. Wire the middleware if you set it.
+framework's own counter, which the **Pydantic AI** adapter (`ctx.usage`) and
+both **LangChain** paths read — `create_langchain_tools` and
+`ContractMiddleware` alike, each from the run's own message history. The
+remaining paths (`contract_middleware` and the Claude Agent SDK) receive an
+`args` dict and nothing else; they warn at wiring time if your contract declares
+a budget, so an inert budget is never silent.
 
-With LangChain, **share one session between the tools and the middleware** — each
+With LangChain you no longer need the middleware just to make a budget bind.
+Wiring both is still fine — they agree on a per-conversation key, so the same
+usage is counted once — but **share one session between them** if you do. Each
 otherwise builds its own, and a split pair enforces against one while reporting
 `tokens_remaining` from the other:
 

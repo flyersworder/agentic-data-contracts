@@ -20,6 +20,10 @@ All notable changes to this project will be documented in this file.
 
 - **The wiring-time `token_budget` warning on `create_langchain_tools`**, and with it the `apply_middleware` special case that suppressed it. Both existed only to describe this gap. `contract_middleware` and the Claude Agent SDK path still warn; they receive an `args` dict and nothing else, and remain genuinely blind. The warning's *"does not observe"* wording — chosen over *"cannot"* in v0.34.0 — earned its keep: closing this gap took one parameter declaration, not a new capability.
 
+### Known limitation
+
+- **A nested run under-counts.** A sub-agent or subgraph inherits its parent's `thread_id`, so it collides on the scope key while carrying its own, shorter history — and because `observe_tokens` keeps the larger total per scope, its usage is dropped whole rather than added: a 5000-token parent turn followed by an 800-token sub-agent turn accrues 5000, not 5800. This is not a regression (the tools observed nothing at all before), and it under-enforces rather than over-enforces, but v0.35.0 makes it reachable automatically in `create_deep_agent(tools=tools)`, which is the README's own headline wiring. The obvious fix does not work: the config's `checkpoint_ns` is `tools:<task-id>` and changes on *every* tool call, so keying on it would re-accrue the full total each time and multiply rather than separate. Pinned by `test_nested_run_sharing_a_thread_id_under_counts` so it cannot drift unnoticed.
+
 ### Compatibility
 
 - Additive. Existing calls are unchanged, direct `tool.ainvoke({...})` still works, and the advertised tool arguments are unchanged (asserted by test, not assumed). **But a `token_budget` declared alongside `create_langchain_tools` now binds where it previously did not** — a contract carrying an aspirational budget will start raising `ToolException` once it is passed. Raise or remove the value if it was never meant to bind; the v0.34.0 warning was the notice for this.

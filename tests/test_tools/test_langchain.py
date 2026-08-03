@@ -30,7 +30,9 @@ from agentic_data_contracts.semantic.yaml_source import YamlSource  # noqa: E402
 from agentic_data_contracts.tools.factory import create_tools  # noqa: E402
 from agentic_data_contracts.tools.langchain import (  # noqa: E402
     ContractMiddleware,
+    _observe_usage,
     _unwrap_mcp_text,
+    _usage_scope_for,
     create_langchain_tools,
 )
 
@@ -545,8 +547,9 @@ def _usage_request(
 
 
 def test_middleware_feeds_the_budget_from_run_state() -> None:
-    # The middleware is the one LangChain path that reads run state, so it is
-    # the one that can make a declared token_budget real.
+    # Reading run state is what makes a declared token_budget real. As of
+    # v0.35.0 the StructuredTool path does it too, from the same helpers --
+    # see the tool-path section below.
     session = ContractSession(_budgeted_contract())
     middleware = ContractMiddleware(_budgeted_contract(), session=session)
 
@@ -603,10 +606,37 @@ def test_unthreaded_conversations_separate_by_message_id() -> None:
 def test_thread_id_wins_over_message_id() -> None:
     # A configured checkpointer is the stronger signal: it survives history
     # trimming that could drop the first message entirely.
-    session = ContractSession(_budgeted_contract())
-    middleware = ContractMiddleware(_budgeted_contract(), session=session)
-    scope = middleware._usage_scope(_usage_request(10, thread_id="T", message_id="M"))
+    request = _usage_request(10, thread_id="T", message_id="M")
+    scope = _usage_scope_for(*ContractMiddleware._state_and_config(request))
     assert scope == "langchain:thread:T"
+
+
+def test_nested_run_sharing_a_thread_id_under_counts() -> None:
+    """A documented limitation, pinned so it cannot change unnoticed.
+
+    A sub-agent or subgraph inherits its parent's ``thread_id`` but carries a
+    shorter history of its own, so it collides on the scope key and the
+    monotone guard drops its usage whole rather than mixing it: 5000 + 800
+    accrues 5000. The obvious key extension does not work -- the config's
+    ``checkpoint_ns`` is ``tools:<task-id>`` and changes on *every* tool call,
+    so keying on it would re-accrue the full total each time, multiplying
+    instead of separating.
+
+    Asserted rather than merely commented because the failure is silent and in
+    the safe direction, which is exactly the kind that survives for releases.
+    """
+    session = ContractSession(_budgeted_contract())
+    state, config = ContractMiddleware._state_and_config(
+        _usage_request(5000, thread_id="T1")
+    )
+    _observe_usage(session, state, config)
+
+    nested_state, nested_config = ContractMiddleware._state_and_config(
+        _usage_request(800, thread_id="T1")
+    )
+    _observe_usage(session, nested_state, nested_config)
+
+    assert session.tokens_used == 5000  # true spend is 5800
 
 
 def test_middleware_blocks_once_the_budget_is_spent() -> None:
@@ -734,25 +764,6 @@ async def test_structured_tool_blocks_once_the_budget_is_spent(
     assert "token budget exceeded" in str(excinfo.value)
 
 
-async def test_tools_and_middleware_on_one_session_do_not_double_count(
-    adapter: DuckDBAdapter,
-) -> None:
-    """Wiring both is legal, so it must not halve the effective budget.
-
-    Fed the same run, the two paths derive the same scope key and observe the
-    same cumulative total, so whichever runs second is a no-op. This is the
-    property that makes the tool-path observation safe to leave unconditional
-    rather than gating it on ``apply_middleware``.
-    """
-    session = ContractSession(_budgeted_contract())
-    middleware = ContractMiddleware(_budgeted_contract(), session=session)
-    tool = _budgeted_query_tool(session, adapter, apply_middleware=False)
-
-    middleware._observe_token_usage(_usage_request(1200, thread_id="T1"))
-    await tool.ainvoke({**_QUERY, "runtime": _tool_runtime(1200, thread_id="T1")})
-    assert session.tokens_used == 1200
-
-
 async def test_direct_invocation_without_a_runtime_still_works(
     adapter: DuckDBAdapter,
 ) -> None:
@@ -770,29 +781,21 @@ async def test_direct_invocation_without_a_runtime_still_works(
     assert session.tokens_used == 0
 
 
-async def test_budget_is_fed_through_a_real_agent(adapter: DuckDBAdapter) -> None:
-    """The load-bearing test: does ToolNode actually inject the runtime?
+def _scripted_agent(tools: list[BaseTool], turn_tokens: int, **kwargs: Any) -> Any:
+    """A real ``create_agent`` whose model is scripted to call ``run_query`` once.
 
-    Every other test in this section hands ``runtime`` over itself, so all of
-    them would still pass if injection never happened -- and injection is the
-    entire feature. It hinges on something invisible at the call site:
-    ``ToolNode`` runs ``get_type_hints()`` over the coroutine to decide whether
-    to inject, and because ``tools/langchain.py`` uses ``from __future__ import
-    annotations`` that resolution needs ``ToolRuntime`` in the module's globals.
-
-    Verified by mutation: moving that import into function scope fails this
-    test and no other. It fails loudly there (``NameError`` from the hint
-    evaluation), but renaming the parameter or dropping its annotation would
-    stop injection in silence, and only a real graph run notices either.
+    Real graph, real ``ToolNode``, real injection — only the model is faked,
+    and only so the tool call and its ``usage_metadata`` are deterministic.
+    ``bind_tools`` is overridden because the fake does not implement it;
+    ``create_agent`` only needs the bound object back, and binding happens
+    upstream of injection either way.
     """
     from langchain.agents import create_agent
     from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
     from langchain_core.messages import AIMessage
 
     class _ToolCallingModel(GenericFakeChatModel):
-        # The fake model does not implement tool binding; create_agent only
-        # needs the bound object back, and the replies are scripted anyway.
-        def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        def bind_tools(self, tools: Any, **kw: Any) -> Any:
             return self
 
     replies = iter(
@@ -808,21 +811,41 @@ async def test_budget_is_fed_through_a_real_agent(adapter: DuckDBAdapter) -> Non
                     }
                 ],
                 usage_metadata={
-                    "input_tokens": 700,
+                    "input_tokens": turn_tokens - 300,
                     "output_tokens": 300,
-                    "total_tokens": 1000,
+                    "total_tokens": turn_tokens,
                 },
             ),
             AIMessage(content="1 row."),
         ]
     )
+    return create_agent(
+        model=_ToolCallingModel(messages=replies), tools=tools, **kwargs
+    )
 
+
+async def test_budget_is_fed_through_a_real_agent(adapter: DuckDBAdapter) -> None:
+    """The load-bearing test: does ToolNode actually inject the runtime?
+
+    Every other test in this section hands ``runtime`` over itself, so all of
+    them would still pass if injection never happened -- and injection is the
+    entire feature. It hinges on something invisible at the call site:
+    ``ToolNode`` runs ``get_type_hints()`` over the coroutine to decide whether
+    to inject, and because ``tools/langchain.py`` uses ``from __future__ import
+    annotations`` that resolution needs ``ToolRuntime`` in the module's globals.
+
+    Verified by mutation, twice. Moving that import into function scope fails
+    this test and no other (loudly -- ``NameError`` out of the hint
+    evaluation). Dropping the parameter's annotation also fails this test and
+    no other, and *that* one is silent. Renaming the parameter, contrary to
+    what one might assume, does not break injection at all: ToolNode triggers
+    on the name ``runtime`` **or** the ``ToolRuntime`` annotation, so the
+    annotation is the half that carries the feature.
+    """
     session = ContractSession(_budgeted_contract())
-    agent = create_agent(
-        model=_ToolCallingModel(messages=replies),
-        tools=create_langchain_tools(
-            _budgeted_contract(), adapter=adapter, session=session
-        ),
+    agent = _scripted_agent(
+        create_langchain_tools(_budgeted_contract(), adapter=adapter, session=session),
+        turn_tokens=1000,
     )
 
     result = await agent.ainvoke(
@@ -833,6 +856,67 @@ async def test_budget_is_fed_through_a_real_agent(adapter: DuckDBAdapter) -> Non
     # The tool ran, and the assistant turn that requested it was billed to the
     # session -- which before this release stayed at zero forever.
     assert any(m.type == "tool" for m in result["messages"])
+    assert session.tokens_used == 1000
+
+
+async def test_tools_and_middleware_on_one_session_do_not_double_count(
+    adapter: DuckDBAdapter,
+) -> None:
+    """Wiring both is legal, so it must not halve the effective budget.
+
+    Driven through a real graph on purpose. Asserting this against two
+    hand-built inputs would only prove ``observe_tokens`` is idempotent for an
+    equal ``(scope, total)`` pair, which was never in doubt -- the claim worth
+    guarding is that the two paths *derive* the same scope and the same total
+    from one run, having reached it by different routes (``request.state`` and
+    ``request.runtime.config`` versus ``ToolRuntime.state`` and
+    ``.config``). That derivation agreeing is what makes the tool-path
+    observation safe to leave unconditional instead of gating it on
+    ``apply_middleware``, which governs enforcement rather than observation.
+    """
+    session = ContractSession(_budgeted_contract())
+    agent = _scripted_agent(
+        create_langchain_tools(
+            _budgeted_contract(),
+            adapter=adapter,
+            session=session,
+            apply_middleware=False,
+        ),
+        turn_tokens=1000,
+        middleware=[ContractMiddleware(_budgeted_contract(), session=session)],
+    )
+
+    await agent.ainvoke(
+        {"messages": [("user", "count the orders")]},
+        config={"configurable": {"thread_id": "T1"}},
+    )
+
+    # Both observed; counted once. 2000 here would mean the scope keys or the
+    # totals diverged between the two paths.
+    assert session.tokens_used == 1000
+
+
+async def test_both_paths_agree_without_a_checkpointer(adapter: DuckDBAdapter) -> None:
+    """The same agreement, on the ``conv:`` branch of the scope key.
+
+    Without a ``thread_id`` the key falls back to the id LangGraph stamps on
+    the first message -- a different branch of ``_usage_scope_for``, and the
+    README's own LangChain wiring. Both paths must land on the same id.
+    """
+    session = ContractSession(_budgeted_contract())
+    agent = _scripted_agent(
+        create_langchain_tools(
+            _budgeted_contract(),
+            adapter=adapter,
+            session=session,
+            apply_middleware=False,
+        ),
+        turn_tokens=1000,
+        middleware=[ContractMiddleware(_budgeted_contract(), session=session)],
+    )
+
+    await agent.ainvoke({"messages": [("user", "count the orders")]})
+
     assert session.tokens_used == 1000
 
 

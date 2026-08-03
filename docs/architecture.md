@@ -240,7 +240,7 @@ These are simple counters/timers with guard checks before each tool call. No for
 **Token usage is the one counter the session cannot produce itself,** because
 the tokens are spent by the *model* between tool calls, not by anything this
 library runs. It has to be fed from whatever the host framework exposes, and
-two paths currently read it:
+three paths currently read it:
 
 | Path | Feeds `token_budget`? | Source |
 |---|---|---|
@@ -266,11 +266,25 @@ injects. Three things about that are easy to get wrong:
   `await tool.ainvoke({"sql": ...})` is a supported call shape and passes no
   runtime. A required parameter would break every direct caller to catch a
   mis-wiring that degrades to the old behaviour anyway.
-- **Detection is by type hint.** `ToolNode` calls `get_type_hints()` on the
-  coroutine, and since `tools/langchain.py` uses `from __future__ import
-  annotations`, that import must stay at module level to resolve. A test drives
-  a real `create_agent` for exactly this reason — every test that passes
+- **The annotation is what carries it, not the name.** `ToolNode` triggers on
+  a parameter *named* `runtime` **or** annotated `ToolRuntime` — so renaming
+  this parameter would keep working, while dropping its annotation would
+  silently stop injection. Either way it reads the hints via `get_type_hints()`,
+  and since `tools/langchain.py` uses `from __future__ import annotations`, the
+  `ToolRuntime` import must stay at module level to resolve. A test drives a
+  real `create_agent` for exactly this reason — every test that passes
   `runtime` itself would still pass with injection broken.
+
+Two conversations are told apart by `thread_id`, falling back to the id
+LangGraph stamps on the first message. Both under-count on a *collision*: two
+conversations sharing the last-resort constant key, or a **nested run
+inheriting its parent's `thread_id`** (a sub-agent or subgraph, which
+`create_deep_agent` produces), whose shorter history is then dropped whole by
+the monotone guard rather than added. Appending the config's `checkpoint_ns`
+looks like the fix and is not — it is `tools:<task-id>` and changes on every
+tool call, so it would re-accrue the full total each time. Both cases
+under-enforce, which is the safe direction, and both beat the nothing this
+path observed before v0.35.0.
 
 The two paths that remain blind warn at wiring time, for the same reason
 `Validator` warns about unenforceable `forbidden_operations`: a
@@ -291,10 +305,12 @@ on each call multiplies it; assigning it resets the session at each new run.
 Only the per-scope delta accrues. `record_tokens()` remains the delta-based
 entry point for framework-free callers.
 
-**Known window:** `check_limits()` runs *before* a tool call, so a breach is
-caught at the *next* one. An agent that exhausts its budget and stops calling
-tools never trips it — inherent to enforcing from inside tools, and identical to
-how `max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
+**Known window:** the paths that observe usage do so *before* running
+`check_limits()`, so a budget the current turn has already blown stops that
+call rather than the next. What no amount of ordering fixes is an agent that
+exhausts its budget and then stops calling tools: nothing runs, so nothing
+checks. That is inherent to enforcing from inside tools, and identical to how
+`max_retries` and `cost_limit_usd` already behave. Now that usage is fed,
 `remaining()` reports honest `tokens_remaining` in every `run_query` response,
 which lets the model self-regulate; Pydantic AI's `UsageLimits` is what would
 close the window entirely.

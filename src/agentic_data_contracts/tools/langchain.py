@@ -14,15 +14,15 @@ Two integration paths are offered:
    ``ToolException``. The agent runtime renders those as
    ``ToolMessage(status="error")``.
 
-Both paths observe token usage from the run's message history, so a contract's
-``resources.token_budget`` is enforced either way; the accounting is shared
-(:func:`_observe_usage`) precisely so the two cannot disagree about a session's
-total when a caller wires both.
-
 2. **Graph-level enforcement** — ``ContractMiddleware`` subclasses
    ``langchain.agents.middleware.AgentMiddleware`` and intercepts tool calls
    at the graph boundary. Pair with ``apply_middleware=False`` to avoid
    double work.
+
+Both paths observe token usage from the run's message history, so a contract's
+``resources.token_budget`` is enforced either way; the accounting is shared
+(:func:`_observe_usage`) precisely so the two cannot disagree about a session's
+total when a caller wires both.
 
 Important divergence from ``contract_middleware`` in ``tools.middleware``:
 that decorator validates SQL on *every* tool that has an ``args["sql"]``
@@ -120,11 +120,30 @@ def _usage_scope_for(state: Any, config: Any) -> str:
        checkpointer — which is the shape the README's own LangChain example
        uses.
 
-    Falling back to a bare constant is the *last* resort and is the one case
-    that still under-counts: two conversations sharing it accrue only the
-    larger. It is reached only when there is neither a thread id nor an
-    identified first message, and it under-enforces rather than over-enforces,
-    which is the safe direction to fail.
+    Falling back to a bare constant is the *last* resort, reached only when
+    there is neither a thread id nor an identified first message.
+
+    Two known under-counts, both of them collisions -- distinct runs landing on
+    one key, where ``observe_tokens``' monotone guard then keeps only the
+    larger:
+
+    1. That bare constant, when two conversations share it.
+    2. A **nested run inheriting its parent's thread id** -- a sub-agent or
+       subgraph, which ``create_deep_agent`` produces. Its own history is
+       shorter than the parent's, so its usage is dropped whole rather than
+       merely mixed: a 5000-token parent turn followed by an 800-token
+       sub-agent turn accrues 5000, not 5800.
+
+    The tempting fix for (2) -- appending the config's ``checkpoint_ns`` to
+    separate nested runs -- is wrong, and measurably so: that value is
+    ``tools:<task-id>`` and carries a *fresh* id on every tool call, so it
+    would mint a new scope each time and re-accrue the whole cumulative total,
+    multiplying rather than separating. Fixing this needs a key that is stable
+    within a run and distinct across nesting; there is no such field to hand.
+
+    Both cases under-enforce rather than over-enforce, which is the safe
+    direction to fail, and both are strictly better than the nothing this path
+    observed before v0.35.0.
 
     Deriving the key from ``(state, config)`` rather than from a caller-specific
     object is what lets the middleware and the ``StructuredTool`` path agree:
@@ -240,10 +259,13 @@ def _to_structured_tool(
     plain text on ``ToolMessage.content``.
 
     The ``runtime`` parameter is how a declared ``token_budget`` reaches this
-    path: LangGraph's ``ToolNode`` injects a ``ToolRuntime`` into any tool
-    parameter of that name, carrying the run's message history and thread id.
-    It never reaches the model — ``infer_schema=False`` means the advertised
-    schema is ``tool_def.input_schema`` verbatim, not this signature.
+    path: LangGraph's ``ToolNode`` injects a ``ToolRuntime`` carrying the run's
+    message history and thread id. It triggers on the parameter being *named*
+    ``runtime`` **or** annotated ``ToolRuntime`` — either alone suffices, so
+    renaming this parameter would keep working while dropping the annotation
+    would not. The annotation is therefore the load-bearing half. It never
+    reaches the model — ``infer_schema=False`` means the advertised schema is
+    ``tool_def.input_schema`` verbatim, not this signature.
 
     It is optional, and defaults to ``None``, because injection only happens
     inside a graph: ``await tool.ainvoke({"sql": ...})`` is a supported way to
@@ -262,8 +284,16 @@ def _to_structured_tool(
         # ContractMiddleware, and observation is not enforcement. Both feeding
         # one session is harmless -- they derive the same scope key from the
         # same run, so the second observation of a total is a no-op.
+        # Read defensively, matching ContractMiddleware._state_and_config: a
+        # non-LangGraph harness that forwards raw tool-call args could put
+        # anything under this key, and an AttributeError from accounting must
+        # not be how a governed query fails.
         if runtime is not None:
-            _observe_usage(session, runtime.state, runtime.config)
+            _observe_usage(
+                session,
+                getattr(runtime, "state", None),
+                getattr(runtime, "config", None),
+            )
 
         if apply_middleware:
             try:
@@ -353,10 +383,6 @@ class ContractMiddleware(AgentMiddleware):
         the two drift into disagreeing about one session's total.
         """
         _observe_usage(self._session, *self._state_and_config(request))
-
-    def _usage_scope(self, request: ToolCallRequest) -> str:
-        """Conversation key for this request. See :func:`_usage_scope_for`."""
-        return _usage_scope_for(*self._state_and_config(request))
 
     def _check(self, request: ToolCallRequest) -> ToolMessage | None:
         """Run enforcement against a request. Returns a short-circuit

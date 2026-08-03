@@ -928,10 +928,10 @@ remaining paths (`contract_middleware` and the Claude Agent SDK) receive an
 a budget, so an inert budget is never silent.
 
 With LangChain you no longer need the middleware just to make a budget bind.
-Wiring both is still fine — they agree on a per-conversation key, so the same
-usage is counted once — but **share one session between them** if you do. Each
-otherwise builds its own, and a split pair enforces against one while reporting
-`tokens_remaining` from the other:
+Wiring both is still fine — they derive the same per-conversation key from the
+same run, so usage is counted once, not twice — but **share one session between
+them** if you do. Each otherwise builds its own, and a split pair enforces
+against one while reporting `tokens_remaining` from the other:
 
 ```python
 from agentic_data_contracts.core.session import ContractSession
@@ -948,9 +948,12 @@ To enforce it elsewhere, feed the session yourself:
 session.observe_tokens(my_client.cumulative_tokens, scope="my-run-id")
 ```
 
-Note that limits are checked *before* each tool call, so a breach stops the
-next one — an agent that exhausts its budget and then stops calling tools will
-not be interrupted mid-thought.
+Two limits worth knowing. Usage is observed just before the limit check, so a
+budget the current turn has already blown stops *that* call — but an agent that
+exhausts its budget and then stops calling tools is never interrupted, because
+nothing runs to check. And a sub-agent or subgraph inherits its parent's
+`thread_id`, so its own usage is under-counted rather than added; the budget
+binds on the parent's spend.
 
 ## Optional Dependencies
 

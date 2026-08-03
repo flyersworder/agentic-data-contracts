@@ -314,15 +314,35 @@ checks. That is inherent to enforcing from inside tools, and identical to how
 `remaining()` reports honest `tokens_remaining` in every `run_query` response,
 which lets the model self-regulate.
 
-**Closing the window (Pydantic AI).** `usage_limits_from_contract(contract,
+**Narrowing the window (Pydantic AI).** `usage_limits_from_contract(contract,
 session)` translates `token_budget` into a `UsageLimits` for `agent.run()`,
-which Pydantic AI checks on every model request — no tool call required, so the
-blind case above disappears. The session argument is mandatory and is what makes
-the two enforcers agree rather than diverge: `UsageLimits` is scoped to one
-`agent.run()` while a `ContractSession` spans every turn, so the helper limits
-each run to `token_budget - session.tokens_used`. Mapping the raw budget would
-re-grant it per turn — a 50,000-token contract authorising 500,000 across ten
-turns, which is the declared-but-unenforced shape this layer exists to prevent.
+which Pydantic AI checks on every model request — no tool call required, so
+*within a run* the blind case above disappears. The session argument is
+mandatory: `UsageLimits` is scoped to one `agent.run()` while a
+`ContractSession` spans every turn, so the helper limits each run to
+`token_budget - session.tokens_used`. Mapping the raw budget would re-grant it
+per turn — a 50,000-token contract authorising 500,000 across ten turns, which
+is the declared-but-unenforced shape this layer exists to prevent.
+
+**It bounds the budget rather than enforcing it exactly**, and the reason is
+worth stating precisely. The subtracted figure is `session.tokens_used`, which
+is fed only from inside the tool wrapper, so every model request after a run's
+last tool call — including answer generation, usually the largest — is never
+observed. Each run is granted slightly more than the true remainder, and the
+shortfall compounds. Measured on a two-request-per-turn agent with a 500-token
+budget, real spend reached ~2× the ceiling before the framework fired. The exact
+fix is to carry one `RunUsage` across turns via `agent.run(usage=...)`, so
+pydantic-ai's own counter sees every request; that needs a design pass, because
+the carried counter is global while `observe_tokens` scopes per `run_id` and
+would double-count it.
+
+Two knock-on effects. Once the helper is wired, a tool can only run on a
+response that already passed `check_tokens`, so the session's `token_budget`
+branch is effectively unreachable and callers must catch
+`pydantic_ai.exceptions.UsageLimitExceeded` rather than
+`ContractSessionLimitError`. And the session's tally freezes once runs start
+being refused, since no further tools execute to feed it — while each refused
+turn still costs one billed model request.
 
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts blocked query attempts, theirs counts model

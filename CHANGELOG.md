@@ -16,7 +16,15 @@ All notable changes to this project will be documented in this file.
   )
   ```
 
-- **The `session` argument is required, and is the substance of the change.** `total_tokens_limit` is checked against `RunUsage` — usage for *one* `agent.run()` — while a contract's `token_budget` is a ceiling for the user across every turn (`ContractDeps` instructs callers to reuse one session so limits accumulate). The obvious mapping, `total_tokens_limit = token_budget`, is therefore **wrong in the unsafe direction**: it re-grants the full budget on each turn, so a 50,000-token contract authorises 500,000 across ten turns — declared-but-unenforced, the failure this library exists to prevent. Limiting each run to `max(0, token_budget - session.tokens_used)` makes the framework limit and the session ceiling agree by construction instead of by coincidence, and Pydantic AI then always fires first because per-request is strictly earlier than pre-tool-call. Call it per run; the value is a snapshot, and a stale one re-grants spend that already happened.
+- **The `session` argument is required, and is the substance of the change.** `total_tokens_limit` is checked against `RunUsage` — usage for *one* `agent.run()` — while a contract's `token_budget` is a ceiling for the user across every turn (`ContractDeps` instructs callers to reuse one session so limits accumulate). The obvious mapping, `total_tokens_limit = token_budget`, is therefore **wrong in the unsafe direction**: it re-grants the full budget on each turn, so a 50,000-token contract authorises 500,000 across ten turns — declared-but-unenforced, the failure this library exists to prevent. Limiting each run to `max(0, token_budget - session.tokens_used)` bounds the total instead. Call it per run; the value is a snapshot, and a stale one re-grants spend that already happened.
+
+### Known limitations
+
+- **This bounds the budget; it does not enforce it exactly.** The subtracted figure is `session.tokens_used`, and the session is fed only from inside the tool wrapper — so every model request *after a run's last tool call*, including the final answer generation (typically the largest context), goes unobserved. Each run is granted slightly more than the true remainder and the shortfall compounds per turn. Measured on a two-request-per-turn agent with a 500-token budget, real spend reached **~2× the ceiling** before the framework stopped it. Still a large improvement on the unbounded behaviour without the helper, but not the identity a quick read might assume. Carrying one `RunUsage` across turns via `agent.run(usage=...)` is what would make the two exact; it needs its own design pass, because that counter is global while `observe_tokens` scopes per `run_id` and would double-count today.
+
+- **`ContractSessionLimitError` becomes effectively unreachable for token budgets** once the helper is wired, because a tool can only run on a response that already passed `check_tokens`. Callers get `pydantic_ai.exceptions.UsageLimitExceeded` — a framework exception, not a contract one — so an `except ContractSessionLimitError` around a run loop silently stops catching budget breaches. The session's token tally also freezes at that point, since no further tools execute to feed it, while each refused turn still costs one billed model request.
+
+- **Do not combine with `agent.run(usage=...)`.** A carried counter is subtracted twice — once by this helper, once inside the counter — and the run locks out permanently below the declared budget. Concurrent runs sharing one session each snapshot the same `tokens_used` and are each granted the full remainder; correct for the sequential turns `ContractDeps` describes, worth knowing if you fan out.
 
 ### Not mapped, deliberately
 
@@ -30,7 +38,7 @@ All notable changes to this project will be documented in this file.
 
 ### Compatibility
 
-- Purely additive and entirely opt-in: nothing changes unless you pass the helper's output to `agent.run()`. Existing in-tool enforcement is untouched.
+- Additive and entirely opt-in at the API level: nothing changes unless you pass the helper's output to `agent.run()`. The *code* for in-tool enforcement is untouched — but wiring the helper changes which exception a budget breach raises, per the second known limitation above. Adjust your `except` clause when you adopt it.
 
 ## [0.35.0] - 2026-08-03
 

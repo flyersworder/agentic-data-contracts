@@ -685,7 +685,9 @@ def _budgeted_contract(budget: int | None = 50_000) -> DataContract:
                     ),
                 ],
             ),
-            resources=ResourceConfig(token_budget=budget) if budget else None,
+            resources=(
+                ResourceConfig(token_budget=budget) if budget is not None else None
+            ),
         )
     )
 
@@ -760,23 +762,80 @@ def test_usage_limits_does_not_map_max_retries_onto_request_limit() -> None:
     assert limits.request_limit != 3
 
 
-def test_usage_limits_agrees_with_the_session_ceiling() -> None:
-    """Two enforcers, one number — the property that makes this safe to pair.
+@pytest.mark.asyncio
+async def test_multi_turn_spend_is_bounded_but_not_exact(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The honest property, measured through the wiring users actually write.
 
-    Whatever the helper allows a run to spend, spending exactly that much must
-    leave the session at its declared budget and not past it. If these ever
-    disagree, a user gets "why did it stop at 47k when my budget is 50k?".
+    An earlier version of this test asserted that spending exactly what the
+    helper allows leaves the session exactly at its budget. That was arithmetic
+    dressed up as a guarantee: it *stipulated* the session observes the full
+    run, which is the one thing that does not happen. The session is fed only
+    inside the tool wrapper, so every model request after a run's last tool
+    call — including answer generation — goes unobserved, and the subtraction
+    compounds that shortfall each turn.
+
+    So the real property is a bound, not an identity: the framework does stop
+    the agent, at a multiple of the budget rather than at it. Asserted with a
+    ceiling loose enough to be true and tight enough to fail if the helper ever
+    stopped subtracting at all — which is the regression that matters, since
+    the unsubtracted mapping is unbounded.
     """
-    contract = _budgeted_contract()
+    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    budget = 500
+    per_request = 100
+    contract = _budgeted_contract(budget)
+    spent = 0
+
+    def _model(messages: list[Any], info: AgentInfo) -> ModelResponse:
+        # One tool call, then a text answer — the shape that leaves an
+        # unobserved tail on every turn.
+        nonlocal spent
+        spent += per_request
+        usage = RequestUsage(
+            input_tokens=per_request // 2, output_tokens=per_request // 2
+        )
+        called = any(
+            getattr(part, "part_kind", "") == "tool-return"
+            for message in messages
+            for part in getattr(message, "parts", [])
+        )
+        if called:
+            return ModelResponse(parts=[TextPart("done")], usage=usage)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "describe_table", {"schema": "analytics", "table": "orders"}
+                )
+            ],
+            usage=usage,
+        )
+
     session = ContractSession(contract)
-    session.observe_tokens(12_345, scope="turn-1")
+    agent = Agent(
+        FunctionModel(_model),
+        tools=create_pydantic_ai_tools(contract, adapter=adapter, session=session),
+    )
 
-    allowed = usage_limits_from_contract(contract, session).total_tokens_limit
-    assert allowed is not None
-    session.observe_tokens(allowed, scope="turn-2")
+    stopped = False
+    for _ in range(12):
+        try:
+            await agent.run(
+                "go", usage_limits=usage_limits_from_contract(contract, session)
+            )
+        except UsageLimitExceeded:
+            stopped = True
+            break
 
-    assert session.tokens_used == 50_000
-    session.check_limits()  # exactly at budget is not a breach
+    assert stopped, "the framework must eventually refuse the run"
+    # Bounded. Without the subtraction the limit resets every turn and this
+    # loop never stops, so a large multiple still catches that regression.
+    assert spent <= budget * 3
 
 
 @pytest.mark.asyncio

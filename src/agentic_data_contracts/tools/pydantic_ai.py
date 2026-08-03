@@ -216,11 +216,10 @@ def usage_limits_from_contract(
         )
 
     ``ContractSession.check_limits()`` runs *pre-tool-call*, so a breach stops
-    the next tool call — and an agent that exhausts its budget and then stops
-    calling tools is never interrupted at all. ``UsageLimits`` is checked by
-    Pydantic AI on every model request, which is strictly earlier, so pairing
-    the two makes the framework the hard stop and leaves the session as the
-    accounting.
+    the next tool call — and an agent that burns its budget without calling
+    tools is never interrupted at all. ``UsageLimits`` is checked by Pydantic
+    AI on every model request, no tool call required, which closes that hole
+    **within a run**.
 
     **The ``session`` argument is required, and is the whole point.**
     ``total_tokens_limit`` is checked against ``RunUsage`` — usage for *one*
@@ -230,11 +229,49 @@ def usage_limits_from_contract(
     therefore grant it afresh on each turn: a 50,000-token contract would
     authorise 50,000 *per turn*, so ten turns spend 500,000 under a contract
     that says 50,000 — declared-but-unenforced, the failure this library exists
-    to prevent. Limiting each run to what the session has *left* makes the two
-    enforcers agree by construction rather than by coincidence.
+    to prevent. Limiting each run to what the session has *left* bounds the
+    total instead.
 
     Call it **per run**, not once at wiring time: the value is a snapshot of
     remaining budget, and a stale one re-grants spend that already happened.
+
+    **This bounds the budget; it does not enforce it exactly.** The number
+    subtracted is ``session.tokens_used``, and the session is fed only from
+    inside the tool wrapper — so every model request *after a run's last tool
+    call*, including the final answer generation (typically the largest
+    context), is never observed. Each run is therefore granted slightly more
+    than the true remainder, and the shortfall compounds per turn. Measured on
+    a two-request-per-turn agent with a 500-token budget, real spend reached
+    ~2x the ceiling before the framework stopped it. That is a large
+    improvement on the unbounded behaviour without this helper, and it is not
+    the identity a quick read might assume. Carrying one ``RunUsage`` across
+    turns via ``agent.run(usage=...)`` is what would make the two exact, and
+    needs a design pass of its own — the counter is global while
+    ``observe_tokens`` scopes per ``run_id``, so it would double-count today.
+
+    Three consequences of wiring this, none of them obvious:
+
+    - **Callers must catch ``pydantic_ai.exceptions.UsageLimitExceeded``**, not
+      just :class:`ContractSessionLimitError`. Because a tool can only run on a
+      response that already passed ``check_tokens``, the session's own
+      ``token_budget`` branch becomes effectively unreachable and the framework
+      exception replaces it. An ``except ContractSessionLimitError`` around the
+      run loop silently stops catching budget breaches.
+    - **The session's token tally freezes** once the framework starts refusing
+      runs, since no further tools execute to feed it. ``remaining()`` will sit
+      at a stale figure while each refused turn still costs one billed model
+      request.
+    - **Do not combine with ``agent.run(usage=...)``.** A carried counter is
+      subtracted twice — once here, once inside the counter — and the run locks
+      out permanently below the declared budget.
+
+    Concurrent runs sharing one session each snapshot the same ``tokens_used``
+    and are each granted the full remainder. Correct for sequential turns,
+    which is what :class:`ContractDeps` describes; worth knowing if you fan out.
+
+    To add limits this contract does not express, copy the result::
+
+        dataclasses.replace(usage_limits_from_contract(dc, s), tool_calls_limit=5)
 
     What is deliberately not mapped:
 
@@ -256,8 +293,8 @@ def usage_limits_from_contract(
     An exhausted budget yields ``total_tokens_limit=0``. Pydantic AI's
     pre-request check compares ``total_tokens > limit`` against a run that has
     not started, so ``0 > 0`` is false and one model request still goes out
-    before the post-request check aborts the run. The session's own pre-tool
-    check is what stops the tool call itself.
+    before the post-request check aborts the run — a per-refused-turn cost, not
+    a one-off.
 
     Pydantic AI only. LangChain has no per-request ceiling to map onto, and the
     Claude Agent SDK path cannot observe usage at all — so this lives here, in

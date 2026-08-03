@@ -959,7 +959,7 @@ nothing runs to check. And a sub-agent or subgraph inherits its parent's
 `thread_id`, so its own usage is under-counted rather than added; the budget
 binds on the parent's spend.
 
-**On Pydantic AI you can close the first of those** by letting the framework
+**On Pydantic AI you can narrow the first of those** by letting the framework
 enforce per model request, which never needs a tool call to happen:
 
 ```python
@@ -978,6 +978,18 @@ limits each run to what the session has *left*. Passing the raw budget instead
 would re-grant it each turn — a 50,000-token contract authorising 50,000 *per
 turn*. `max_retries` is deliberately **not** mapped onto `request_limit`: ours
 counts blocked queries, theirs counts LLM calls.
+
+Two things to know before adopting it:
+
+- **This bounds the budget, it does not enforce it exactly.** The session is fed
+  only from inside the tools, so model requests after a run's last tool call —
+  answer generation included — go uncounted, and each run is granted a little
+  more than it should be. Measured overshoot on a small test agent was ~2×.
+  Much better than the unbounded alternative, but plan for a ceiling, not a
+  number.
+- **Catch `pydantic_ai.exceptions.UsageLimitExceeded`**, not
+  `ContractSessionLimitError`. With the helper wired the framework stops the run
+  first, so the contract-side exception no longer fires for token budgets.
 
 ## Optional Dependencies
 

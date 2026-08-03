@@ -321,17 +321,18 @@ ceiling. Pydantic AI checks it on every model request — no tool call required 
 so the blind case above disappears, and because the counter spans turns it sees
 *every* request, including the answer generation the tools never observe.
 Nothing is missed, so nothing is estimated. Measured on a 500-token budget:
-true spend settles at 600 and stays there however many turns run, where the
-superseded helper grows linearly with turns (1100 at 6, 1700 at 12, 2500 at
-20). A refused turn also costs nothing, because `check_before_request` fires
-before the request is issued.
+true spend settles at 600 and stays there however many turns run. Deriving
+each run's allowance from the session's own tally instead grows linearly with
+turns (1100 at 6, 1700 at 12, 2500 at 20), because that tally never sees what a
+run spends after its last tool call. A refused turn also costs nothing, because
+`check_before_request` fires before the request is issued.
 
 Three details carry the design:
 
 - **The limit is flat, not the remainder.** The carried counter already holds
   the spend; subtracting it again would take it off twice and lock the run out
-  below its budget. That is the same double-subtraction the older helper warns
-  against when combined with `usage=`.
+  below its budget — the spend is deducted once in the limit and again inside
+  the counter.
 - **The counter lives in a module-private `WeakKeyDictionary` keyed on the
   session**, not on `ContractSession` — `RunUsage` is a Pydantic AI type and
   `core/` stays framework-agnostic. Weak keys because the caller owns session
@@ -339,8 +340,8 @@ Three details carry the design:
 - **The tool wrapper picks its scope by identity**, not a flag: if `ctx.usage`
   *is* the counter registered for this session it accrues under one constant
   key, otherwise it falls back to `run_id`. So a caller who ignores the helper,
-  or passes its `usage_limits` without its `usage`, gets the older bounded
-  behaviour rather than a corrupted tally. Getting a boolean wrong is not a
+  or passes its `usage_limits` without its `usage`, gets plain per-run
+  scoping rather than a corrupted tally. Getting a boolean wrong is not a
   failure mode because there is no boolean. Treating a carried counter as
   per-run would inflate the session's tally and block runs still within budget —
   measured at 900 recorded against 600 truly spent, before the identity check
@@ -355,17 +356,6 @@ Callers should catch `pydantic_ai.exceptions.UsageLimitExceeded` **as well as**
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and still fires when
 fed from outside the run (a shared session, or a direct `observe_tokens()`
 call, on either `apply_middleware` value).
-
-**The earlier helper.** `usage_limits_from_contract(contract, session)` returns
-only a `UsageLimits`, whose ceiling is the budget minus what the session has
-recorded. It is superseded but supported — it needs nothing but the limit, so it
-suits a caller who cannot carry a counter. It does **not** bound the budget: the
-subtracted figure misses everything after each run's last tool call, so the
-shortfall compounds and spend grows linearly with turns — ~2× the ceiling at
-first refusal, 3.4× by 12 turns, 5× by 20. (The slope tracks the
-tool-call-to-request ratio; an agent calling no tools at all never accrues at
-all.) Every refused turn also still buys one billed request while the tally
-sits frozen.
 
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts blocked query attempts, theirs counts model

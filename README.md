@@ -993,21 +993,6 @@ Keep catching `ContractSessionLimitError` alongside
 outside the run. Sequential turns only: one counter per session is shared
 mutable state.
 
-<details>
-<summary><code>usage_limits_from_contract</code> — the earlier, weaker helper</summary>
-
-v0.36.0 shipped `usage_limits_from_contract(dc, session)`, which returns only a
-`UsageLimits` whose ceiling is the budget *minus what the session has recorded*.
-It still works and is still supported — it needs nothing but the limit, so it
-suits a caller who cannot carry a counter — but it **bounds** the budget rather
-than enforcing it, and "bounds" flatters it: because each run is granted a
-remainder computed from a tally that misses whatever the previous run spent
-after its last tool call, spend grows **linearly with the number of turns** —
-~2× the ceiling at first refusal, 3.4× by 12 turns, 5× by 20. Prefer
-`contract_run_kwargs`.
-
-</details>
-
 ## Optional Dependencies
 
 | Extra | Package | Purpose |

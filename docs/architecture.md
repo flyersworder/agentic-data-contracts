@@ -356,17 +356,6 @@ Callers should catch `pydantic_ai.exceptions.UsageLimitExceeded` **as well as**
 fed from outside the run (a shared session, or a direct `observe_tokens()`
 call, on either `apply_middleware` value).
 
-**The earlier helper.** `usage_limits_from_contract(contract, session)` returns
-only a `UsageLimits`, whose ceiling is the budget minus what the session has
-recorded. It is superseded but supported — it needs nothing but the limit, so it
-suits a caller who cannot carry a counter. It does **not** bound the budget: the
-subtracted figure misses everything after each run's last tool call, so the
-shortfall compounds and spend grows linearly with turns — ~2× the ceiling at
-first refusal, 3.4× by 12 turns, 5× by 20. (The slope tracks the
-tool-call-to-request ratio; an agent calling no tools at all never accrues at
-all.) Every refused turn also still buys one billed request while the tally
-sits frozen.
-
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts blocked query attempts, theirs counts model
 requests, and conflating them would silently redefine existing contracts.

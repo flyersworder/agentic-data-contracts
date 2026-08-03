@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0] - 2026-08-03
+
+### Removed
+
+- **`usage_limits_from_contract()` is deleted.** Added in v0.36.0 and superseded by `contract_run_kwargs()` in v0.37.0 — **28 minutes later**, by release timestamp. It has no remaining use case, and keeping it was actively harmful rather than merely untidy.
+
+  The justification for keeping it was that it "suits a caller who cannot carry a counter across turns". That describes an empty set: every Pydantic AI run API accepting `usage_limits=` also accepts `usage=` — `run`, `run_sync`, `run_stream`, `run_stream_events`, `iter`. There is no call path where the limit can be passed but the counter cannot, so there was never a caller the older helper served and the newer one does not.
+
+  Meanwhile the two behave differently in a way a reader cannot see from the signatures: `usage_limits_from_contract` derives each run's allowance from `session.tokens_used`, which misses every model request after a run's last tool call, so spend grows **linearly with turns** — 2.2× the declared budget at 6 turns, 3.4× at 12, 5.0× at 20. `contract_run_kwargs` is flat at 1.2× regardless. Offering both meant the README presented two ways to do one thing where the simpler-looking one silently under-enforces — the exact failure class v0.32.0–v0.37.0 have been removing, reintroduced as a menu choice.
+
+  Removed outright rather than deprecated: a deprecation window's value scales with adoption, and a symbol that was the latest release for 28 minutes has none to speak of. This is a `0.x` project at Beta status, where SemVer permits a breaking change in a minor bump.
+
+  **Migration** — one line, and it strictly improves enforcement:
+
+  ```diff
+  - usage_limits=usage_limits_from_contract(dc, session),
+  + **contract_run_kwargs(dc, session),
+  ```
+
+### Changed
+
+- **The `max_retries` → `request_limit` caveat moved to `contract_run_kwargs`,** along with the `cost_limit_usd` / `max_duration_seconds` note, the zero-versus-absent budget distinction, and the `dataclasses.replace` composition path. These lived only in the deleted docstring. The caveat is a property of translating contracts into `UsageLimits` at all, not of whichever function does it — `max_retries` counts *blocked query attempts* here while `request_limit` counts *model requests*, and conflating them would silently redefine existing contracts. Its guarding test moved too.
+
+### Compatibility
+
+- **Breaking**, for anyone who adopted `usage_limits_from_contract` during the 28 minutes it was current. `from agentic_data_contracts import usage_limits_from_contract` now raises `ImportError`. The replacement is a one-line change and enforces the budget more tightly.
+
 ## [0.37.0] - 2026-08-03
 
 ### Added

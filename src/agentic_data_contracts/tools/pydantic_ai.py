@@ -335,6 +335,14 @@ def contract_run_kwargs(
     fed from outside the run — so keep that handler alongside
     ``pydantic_ai.exceptions.UsageLimitExceeded``.
 
+    ``contract`` supplies the budget and ``session`` supplies both the spend
+    and the counter, so pass the session built for *that* contract. A
+    mismatched pair enforces one contract's ceiling against another's usage
+    **and** writes the reconciled total into the wrong session — this function
+    does not only read the session, it feeds it. Deliberately not asserted:
+    ``ContractSession`` holds its contract, but comparing identity would reject
+    the legitimate case of an equivalent contract reloaded from YAML.
+
     **Adopt it from the start of a session.** The carried counter begins at
     zero and knows nothing of spend the session recorded before the first call
     — from a plain ``agent.run`` without these kwargs, from another adapter

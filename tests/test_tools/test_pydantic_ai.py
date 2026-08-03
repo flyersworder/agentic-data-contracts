@@ -815,9 +815,10 @@ async def test_carried_counter_enforces_the_budget_exactly(
 
     # True spend overshoots only by the requests already in flight when the
     # ceiling was crossed, and then STOPS -- running more turns does not spend
-    # more. The superseded helper grows linearly instead: 2.6x over these same
-    # 8 turns, 3.4x over 12, 5x over 20. Flat-versus-linear is the property;
-    # the tolerance below just pins the one-run overshoot.
+    # more. Deriving each run's allowance from the session's own tally instead
+    # grows linearly: 2.6x over these same 8 turns, 3.4x over 12, 5x over 20.
+    # Flat-versus-linear is the property; the tolerance below just pins the
+    # one-run overshoot.
     assert sum(spend) <= budget + 200
 
 
@@ -863,8 +864,9 @@ async def test_ignoring_the_helper_degrades_rather_than_corrupts(
 
     The wrapper switches to the stable scope only when ``ctx.usage`` *is* the
     counter registered for this session. A caller who passes a limit but no
-    carried counter therefore gets v0.36.0's per-run scoping — bounded, not
-    double-counted, which is the failure this design must not reintroduce.
+    carried counter therefore gets plain per-run scoping, which under-counts —
+    never the double-count that would block a run still within budget, which is
+    the failure this design must not reintroduce.
     """
     from pydantic_ai.exceptions import UsageLimitExceeded
 
@@ -882,8 +884,8 @@ async def test_ignoring_the_helper_degrades_rather_than_corrupts(
         except (UsageLimitExceeded, ContractSessionLimitError):
             break
 
-    # Under-counts (the documented v0.36.0 bound); never over-counts, which is
-    # what would stop a run that is still within budget.
+    # Under-counts; never over-counts, which is what would stop a run that is
+    # still within budget.
     assert session.tokens_used <= sum(spend)
 
 
@@ -954,7 +956,7 @@ def test_contract_session_stays_usable_as_a_weak_key() -> None:
 
 
 def test_run_kwargs_does_not_map_max_retries_onto_request_limit() -> None:
-    """The mapping trap, kept alive through the removal of the older helper.
+    """The mapping trap, kept alive through the removal of its first home.
 
     ``max_retries`` counts *blocked query attempts* in this library;
     ``request_limit`` counts *model requests*. A contract saying

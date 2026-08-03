@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - **`usage_limits_from_contract()` is deleted.** Added in v0.36.0 and superseded by `contract_run_kwargs()` in v0.37.0 — **28 minutes later**, by release timestamp. It has no remaining use case, and keeping it was actively harmful rather than merely untidy.
 
-  The justification for keeping it was that it "suits a caller who cannot carry a counter across turns". That describes an empty set: every Pydantic AI run API accepting `usage_limits=` also accepts `usage=` — `run`, `run_sync`, `run_stream`, `run_stream_events`, `iter`. There is no call path where the limit can be passed but the counter cannot, so there was never a caller the older helper served and the newer one does not.
+  The justification for keeping it was that it "suits a caller who cannot carry a counter across turns". That describes an empty set: every Pydantic AI run API accepting `usage_limits=` also accepts `usage=` — all six of `run`, `run_sync`, `run_stream`, `run_stream_sync`, `run_stream_events`, `iter`. There is no call path where the limit can be passed but the counter cannot, so there was never a caller the older helper served and the newer one does not.
 
   Meanwhile the two behave differently in a way a reader cannot see from the signatures: `usage_limits_from_contract` derives each run's allowance from `session.tokens_used`, which misses every model request after a run's last tool call, so spend grows **linearly with turns** — 2.2× the declared budget at 6 turns, 3.4× at 12, 5.0× at 20. `contract_run_kwargs` is flat at 1.2× regardless. Offering both meant the README presented two ways to do one thing where the simpler-looking one silently under-enforces — the exact failure class v0.32.0–v0.37.0 have been removing, reintroduced as a menu choice.
 
@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
   - usage_limits=usage_limits_from_contract(dc, session),
   + **contract_run_kwargs(dc, session),
   ```
+
+  One caveat when migrating a **live** session: the carried counter starts at zero, so spend that session already recorded under the old wiring is not deducted from the flat ceiling. In-tool `check_limits()` still sees the full tally and stops the next tool call, so this degrades rather than escapes — but a fresh session per user is the clean way to adopt it.
 
 ### Changed
 

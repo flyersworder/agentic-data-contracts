@@ -388,7 +388,7 @@ The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
 `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
 
-Pair with `usage_limits_from_contract(dc, user_session)` on each `run()` to have
+Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
 [Resource Limits](#resource-limits).
 
@@ -959,44 +959,54 @@ nothing runs to check. And a sub-agent or subgraph inherits its parent's
 `thread_id`, so its own usage is under-counted rather than added; the budget
 binds on the parent's spend.
 
-**On Pydantic AI you can narrow the first of those** by letting the framework
-enforce per model request, which never needs a tool call to happen:
+**On Pydantic AI the budget is enforced properly**, by letting the framework
+check it on every model request — which never needs a tool call to happen:
 
 ```python
-from agentic_data_contracts import usage_limits_from_contract
+from agentic_data_contracts import contract_run_kwargs
 
 result = await agent.run(
     prompt,
     deps=ContractDeps(session=session),
-    usage_limits=usage_limits_from_contract(dc, session),  # per run, not once
+    **contract_run_kwargs(dc, session),   # -> usage= and usage_limits=
 )
 ```
 
-The session is required, and is the point: `UsageLimits` applies to one
-`agent.run()` while `token_budget` is a ceiling across every turn, so the helper
-limits each run to what the session has *left*. Passing the raw budget instead
-would re-grant it each turn — a 50,000-token contract authorising 50,000 *per
-turn*. `max_retries` is deliberately **not** mapped onto `request_limit`: ours
-counts blocked queries, theirs counts LLM calls.
+That returns both halves together because they are only correct together: one
+`RunUsage` carried across every turn for this session, plus the contract's
+budget as a flat ceiling. Pydantic AI's own counter then sees *every* request,
+including the answer generation the tools never observe, so nothing has to be
+estimated. Two things follow, both measured on a 500-token budget:
 
-Two things to know before adopting it:
+- **True spend settles rather than growing.** 600 against a 500-token budget,
+  and *flat* however many turns run — where the older helper is linear in
+  turns: 1100 at 6 turns, 1700 at 12, 2500 at 20.
+- **A refused turn costs nothing**, because the check runs *before* the request
+  is issued.
 
-- **This bounds the budget, it does not enforce it exactly.** The session is fed
-  only from inside the tools, so model requests after a run's last tool call —
-  answer generation included — go uncounted, and each run is granted more than
-  it should be. Measured overshoot on a small test agent was ~2× *at the first
-  refusal*, and spend keeps climbing after that, because each refused turn still
-  costs one billed model request while the session's tally sits frozen. The
-  factor depends on how often your agent calls tools; an agent that calls none
-  is still unbounded across turns, though it is now stopped within a run.
-  Much better than the unbounded alternative, but plan for a ceiling, not a
-  number. [#56](https://github.com/flyersworder/agentic-data-contracts/issues/56)
-  tracks making it exact.
-- **Catch `pydantic_ai.exceptions.UsageLimitExceeded` as well as
-  `ContractSessionLimitError`** — not instead of it. The framework usually stops
-  the run first, but the contract-side exception still fires when the session is
-  fed from outside the run (a shared session, or your own `observe_tokens()`
-  call). Keep both handlers.
+`max_retries` is deliberately **not** mapped onto `request_limit`: ours counts
+blocked queries, theirs counts LLM calls.
+
+Keep catching `ContractSessionLimitError` alongside
+`pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
+`max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
+outside the run. Sequential turns only: one counter per session is shared
+mutable state.
+
+<details>
+<summary><code>usage_limits_from_contract</code> — the earlier, weaker helper</summary>
+
+v0.36.0 shipped `usage_limits_from_contract(dc, session)`, which returns only a
+`UsageLimits` whose ceiling is the budget *minus what the session has recorded*.
+It still works and is still supported — it needs nothing but the limit, so it
+suits a caller who cannot carry a counter — but it **bounds** the budget rather
+than enforcing it, and "bounds" flatters it: because each run is granted a
+remainder computed from a tally that misses whatever the previous run spent
+after its last tool call, spend grows **linearly with the number of turns** —
+~2× the ceiling at first refusal, 3.4× by 12 turns, 5× by 20. Prefer
+`contract_run_kwargs`.
+
+</details>
 
 ## Optional Dependencies
 

@@ -388,7 +388,7 @@ The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
 `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
 
-Pair with `usage_limits_from_contract(dc, user_session)` on each `run()` to have
+Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
 [Resource Limits](#resource-limits).
 
@@ -978,8 +978,9 @@ budget as a flat ceiling. Pydantic AI's own counter then sees *every* request,
 including the answer generation the tools never observe, so nothing has to be
 estimated. Two things follow, both measured on a 500-token budget:
 
-- **True spend lands just past the ceiling** — 600 rather than 1700 over the
-  same turns.
+- **True spend settles rather than growing.** 600 against a 500-token budget,
+  and *flat* however many turns run — where the older helper is linear in
+  turns: 1100 at 6 turns, 1700 at 12, 2500 at 20.
 - **A refused turn costs nothing**, because the check runs *before* the request
   is issued.
 
@@ -999,10 +1000,11 @@ v0.36.0 shipped `usage_limits_from_contract(dc, session)`, which returns only a
 `UsageLimits` whose ceiling is the budget *minus what the session has recorded*.
 It still works and is still supported — it needs nothing but the limit, so it
 suits a caller who cannot carry a counter — but it **bounds** the budget rather
-than enforcing it. The session is fed only from inside the tools, so requests
-after a run's last tool call go uncounted and each run is granted a little too
-much: ~2× the ceiling at first refusal, climbing after that because every
-refused turn still buys one billed request. Prefer `contract_run_kwargs`.
+than enforcing it, and "bounds" flatters it: because each run is granted a
+remainder computed from a tally that misses whatever the previous run spent
+after its last tool call, spend grows **linearly with the number of turns** —
+~2× the ceiling at first refusal, 3.4× by 12 turns, 5× by 20. Prefer
+`contract_run_kwargs`.
 
 </details>
 

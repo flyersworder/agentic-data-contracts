@@ -63,7 +63,7 @@ _BLOCKED_PREFIX = "BLOCKED —"
 # Module-private rather than an attribute on ``ContractSession`` deliberately —
 # ``RunUsage`` is a Pydantic AI type and ``core/`` stays framework-agnostic.
 # Keyed on identity, which is also how the tool wrapper decides whether the
-# counter it was handed is the carried one; see ``_carried_usage_scope``.
+# counter it was handed is the carried one; see ``_usage_scope``.
 _CARRIED_USAGE: WeakKeyDictionary[ContractSession, RunUsage] = WeakKeyDictionary()
 
 # Scope for a carried counter. Constant on purpose: the counter is already
@@ -167,10 +167,9 @@ def _to_pydantic_ai_tool(
     into a dict is safe.
 
     ``takes_ctx=True`` so the wrapper can read ``ctx.usage`` — this is the only
-    place the contract's ``token_budget`` can be fed on this path. Pydantic AI
-    reports usage cumulatively *per run*, while a session may span many runs
-    (see :class:`ContractDeps`), so ``ctx.run_id`` scopes it and
-    ``observe_tokens`` accrues the delta.
+    place the contract's ``token_budget`` can be fed on this path. Which span
+    that reading belongs to depends on how the caller wired the run, so the key
+    it accrues under is chosen by :func:`_usage_scope` rather than fixed here.
     """
     inner = tool_def.callable
 
@@ -255,8 +254,8 @@ def contract_run_kwargs(
 ) -> dict[str, Any]:
     """Both halves of exact ``token_budget`` enforcement, for ``agent.run()``.
 
-    Supersedes :func:`usage_limits_from_contract`, which bounds the budget at
-    roughly twice the declared ceiling rather than enforcing it::
+    Supersedes :func:`usage_limits_from_contract`, whose spend grows linearly
+    with the number of turns rather than settling at the declared ceiling::
 
         session = ContractSession(contract)          # one per user
         tools = create_pydantic_ai_tools(contract, adapter=adapter,
@@ -279,8 +278,10 @@ def contract_run_kwargs(
     Two consequences follow, both measured on an agent spending 100 tokens per
     request against a 500-token budget:
 
-    - **True spend lands just past the ceiling instead of at a multiple of it**
-      — 600 rather than 1700 over the same turns.
+    - **True spend settles instead of growing.** 600 against a 500-token
+      budget and *flat* however many turns run, where the superseded helper is
+      linear in turns: 1100 at 6, 1700 at 12, 2500 at 20. Flat-versus-linear is
+      the real difference; any single pair of numbers understates it.
     - **A refused turn costs nothing.** With the whole history in the counter,
       ``check_before_request`` refuses *before* issuing a request. The bounded
       helper cannot do this: its per-run counter starts at zero, so every
@@ -306,9 +307,22 @@ def contract_run_kwargs(
     fed from outside the run — so keep that handler alongside
     ``pydantic_ai.exceptions.UsageLimitExceeded``.
 
+    **Adopt it from the start of a session.** The carried counter begins at
+    zero and knows nothing of spend the session recorded before the first call
+    — from a plain ``agent.run`` without these kwargs, from another adapter
+    sharing the session, or from a direct ``observe_tokens()``. The flat
+    ceiling is then measured against the counter alone, so that earlier spend
+    is not deducted. In-tool ``check_limits()`` still sees the session's full
+    tally and stops the next tool call, so this degrades rather than escapes,
+    but mixing wirings mid-session gives up the exactness that is the whole
+    point of this helper.
+
     Sequential turns only. One counter per session is shared mutable state, so
     concurrent runs for the same user race on it; that is the same shape
-    :class:`ContractDeps` already describes for sessions themselves.
+    :class:`ContractDeps` already describes for sessions themselves. The
+    registration below is likewise get-then-set, so two threads calling this
+    for the *same new* session both build a counter and one wins — the loser's
+    run falls back to per-run scoping, which under-counts rather than inflating.
     """
     usage = _CARRIED_USAGE.get(session)
     if usage is None:
@@ -335,11 +349,15 @@ def usage_limits_from_contract(
 ) -> UsageLimits:
     """Translate a contract's ``token_budget`` into Pydantic AI ``UsageLimits``.
 
-    **Superseded by :func:`contract_run_kwargs`**, which enforces the budget
-    instead of bounding it at roughly twice the declared ceiling, and makes a
-    refused turn cost nothing. Prefer it. This remains supported and correct
-    for what it claims — it needs nothing but the limit, so it still suits a
-    caller who cannot carry a counter across turns.
+    **Superseded by :func:`contract_run_kwargs`.** The ceiling here is not a
+    ceiling: spend grows *linearly with the number of turns* — measured at
+    2.2x the budget by 6 turns, 3.4x by 12, 5.0x by 20 — because each run is
+    granted a remainder computed from a tally that misses whatever the previous
+    run spent after its last tool call. ``contract_run_kwargs`` is flat at 1.2x
+    no matter how many turns run, and makes a refused turn cost nothing. Prefer
+    it. This remains supported and correct for what it claims — it needs
+    nothing but the limit, so it still suits a caller who cannot carry a
+    counter across turns.
 
     Closes the window that in-tool enforcement cannot::
 

@@ -6,14 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **`contract_run_kwargs(contract, session)`** (Pydantic AI) — enforces `token_budget` exactly, where v0.36.0's `usage_limits_from_contract` only bounded it at roughly twice the declared ceiling. Returns both halves of the wiring, because they are only correct together:
+- **`contract_run_kwargs(contract, session)`** (Pydantic AI) — makes `token_budget` accounting exact, where v0.36.0's `usage_limits_from_contract` lets spend grow *linearly with the number of turns*. Returns both halves of the wiring, because they are only correct together:
 
   ```python
   await agent.run(prompt, **contract_run_kwargs(dc, session))
   # -> {"usage": <carried RunUsage>, "usage_limits": <flat ceiling>}
   ```
 
-  One `RunUsage` is carried across every `agent.run()` for the session, so Pydantic AI's own counter sees **every** request — including the answer generation after a run's last tool call, which the tool wrapper can never observe and whose omission is what made the previous helper approximate. Nothing is missed, so nothing is estimated. Measured on an agent spending 100 tokens per request against a 500-token budget: **true spend 600, against 1700 for the bounded helper over the same turns**. And a refused turn now **costs nothing** — with the whole history in the counter, `check_before_request` refuses before issuing a request, where the bounded helper's per-run counter started at zero and so bought one billed request on every refused turn, forever.
+  One `RunUsage` is carried across every `agent.run()` for the session, so Pydantic AI's own counter sees **every** request — including the answer generation after a run's last tool call, which the tool wrapper can never observe and whose omission is what made the previous helper approximate. Nothing is missed, so nothing is estimated. Measured on an agent spending 100 tokens per request against a 500-token budget: **true spend settles at 600 and stays flat however many turns run**, where the superseded helper is linear — 1100 at 6 turns, 1700 at 12, 2500 at 20. Flat-versus-linear is the real difference; any single pair of numbers understates it. The *accounting* is exact; spend still overshoots the ceiling by the requests in flight when it is crossed (600 against 500 here), which is a bounded overshoot rather than a growing one. And a refused turn now **costs nothing** — with the whole history in the counter, `check_before_request` refuses before issuing a request, where the bounded helper's per-run counter started at zero and so bought one billed request on every refused turn, forever.
 
 ### Design notes
 
@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - **The counter lives in a module-private `WeakKeyDictionary` keyed on the session**, not on `ContractSession`: `RunUsage` is a Pydantic AI type and `core/` stays framework-agnostic. Weak keys because the caller owns session lifetime.
 - **The tool wrapper chooses its usage scope by identity, not a flag.** If `ctx.usage` *is* the counter registered for that session it accrues under one constant key; otherwise it falls back to `run_id`. So ignoring the helper, or passing its `usage_limits` without its `usage`, degrades to the older bounded behaviour instead of corrupting the tally — and no boolean exists to get wrong. This matters in both directions: treating a carried counter as per-run re-accrues the running total on every run, measured at **900 recorded against 600 truly spent**, and the inflated tally then blocked a run that was still within budget.
 - `session.tokens_used` still lags mid-run, since the wrapper only observes while a tool executes. `contract_run_kwargs` reconciles it at the start of each run, so between runs — when a caller would read it — it is the true spend.
+- **Adopt it from the start of a session.** The carried counter begins at zero and knows nothing of spend recorded before the first call — from a plain `agent.run` without these kwargs, from another adapter sharing the session, or from a direct `observe_tokens()`. The flat ceiling is measured against the counter alone, so that earlier spend is not deducted from it. In-tool `check_limits()` still sees the session's full tally and stops the next tool call, so this degrades rather than escapes; but mixing wirings mid-session gives up the exactness that is the point.
 
 ### Superseded
 

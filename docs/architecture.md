@@ -321,8 +321,10 @@ ceiling. Pydantic AI checks it on every model request — no tool call required 
 so the blind case above disappears, and because the counter spans turns it sees
 *every* request, including the answer generation the tools never observe.
 Nothing is missed, so nothing is estimated. Measured on a 500-token budget:
-true spend 600 rather than 1700, and a refused turn costs nothing because
-`check_before_request` fires before the request is issued.
+true spend settles at 600 and stays there however many turns run, where the
+superseded helper grows linearly with turns (1100 at 6, 1700 at 12, 2500 at
+20). A refused turn also costs nothing, because `check_before_request` fires
+before the request is issued.
 
 Three details carry the design:
 
@@ -357,12 +359,13 @@ call, on either `apply_middleware` value).
 **The earlier helper.** `usage_limits_from_contract(contract, session)` returns
 only a `UsageLimits`, whose ceiling is the budget minus what the session has
 recorded. It is superseded but supported — it needs nothing but the limit, so it
-suits a caller who cannot carry a counter. It **bounds** rather than enforces:
-the subtracted figure misses everything after each run's last tool call, so the
-shortfall compounds to ~2× the ceiling at first refusal (the factor tracks the
-tool-call-to-request ratio; an agent calling no tools at all is unbounded across
-runs), and every refused turn still buys one billed request while the tally sits
-frozen.
+suits a caller who cannot carry a counter. It does **not** bound the budget: the
+subtracted figure misses everything after each run's last tool call, so the
+shortfall compounds and spend grows linearly with turns — ~2× the ceiling at
+first refusal, 3.4× by 12 turns, 5× by 20. (The slope tracks the
+tool-call-to-request ratio; an agent calling no tools at all never accrues at
+all.) Every refused turn also still buys one billed request while the tally
+sits frozen.
 
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts blocked query attempts, theirs counts model

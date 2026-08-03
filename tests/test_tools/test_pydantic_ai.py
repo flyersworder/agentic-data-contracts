@@ -30,6 +30,7 @@ from agentic_data_contracts.tools.factory import create_tools  # noqa: E402
 from agentic_data_contracts.tools.pydantic_ai import (  # noqa: E402
     ContractDeps,
     _unwrap_mcp_text,
+    _usage_scope,
     contract_run_kwargs,
     create_pydantic_ai_tools,
     create_pydantic_ai_toolset,
@@ -1028,9 +1029,11 @@ async def test_carried_counter_enforces_the_budget_exactly(
     contract_run_kwargs(contract, session)
     assert session.tokens_used == sum(spend)
 
-    # True spend overshoots by the requests already in flight when the ceiling
-    # was crossed, not by a multiple of the budget: ~1.2x here against ~3.4x
-    # measured for the bounded helper over the same turns.
+    # True spend overshoots only by the requests already in flight when the
+    # ceiling was crossed, and then STOPS -- running more turns does not spend
+    # more. The superseded helper grows linearly instead: 2.6x over these same
+    # 8 turns, 3.4x over 12, 5x over 20. Flat-versus-linear is the property;
+    # the tolerance below just pins the one-run overshoot.
     assert sum(spend) <= budget + 200
 
 
@@ -1100,3 +1103,69 @@ async def test_ignoring_the_helper_degrades_rather_than_corrupts(
     # Under-counts (the documented v0.36.0 bound); never over-counts, which is
     # what would stop a run that is still within budget.
     assert session.tokens_used <= sum(spend)
+
+
+def test_carried_counter_is_matched_by_identity_not_equality() -> None:
+    """``is``, not ``==`` — and the difference is reachable in principle.
+
+    ``RunUsage`` compares structurally, so a *copy* of the carried counter is
+    ``==`` to it while being a different object with its own future. Matching
+    by equality would treat that copy as carried and accrue it under the shared
+    key, under-counting every run that used it.
+
+    Found by mutation: swapping ``is`` for ``==`` passed every other test here,
+    because through a real ``agent.run`` the counter has already advanced by
+    tool-call time and equality breaks on its own. That makes this a property
+    worth pinning directly rather than relying on a coincidence of timing.
+    """
+    import copy
+
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+    carried = contract_run_kwargs(contract, session)["usage"]
+    twin = copy.copy(carried)
+
+    assert twin == carried  # structurally equal ...
+    assert twin is not carried  # ... but not the registered object
+
+    ctx = RunContext(deps=None, model=TestModel(), usage=twin, run_id="run-xyz")
+    assert _usage_scope(ctx, session) == "run-xyz"
+
+    same = RunContext(deps=None, model=TestModel(), usage=carried, run_id="run-xyz")
+    assert _usage_scope(same, session) == "pydantic-ai:carried"
+
+
+def test_run_kwargs_without_a_budget_still_carries_a_counter() -> None:
+    """No declared ceiling is not the same as no accounting.
+
+    ``remaining()`` and the other session limits still want an honest tally, so
+    the counter is carried either way; only the token ceiling is omitted, since
+    inventing one nothing declared is the failure this library exists to catch.
+    """
+    from pydantic_ai.usage import RunUsage
+
+    contract = _budgeted_contract(budget=None)
+    kwargs = contract_run_kwargs(contract, ContractSession(contract))
+
+    assert isinstance(kwargs["usage"], RunUsage)
+    assert kwargs["usage_limits"].total_tokens_limit is None
+
+
+def test_contract_session_stays_usable_as_a_weak_key() -> None:
+    """Pins the coupling that ``_CARRIED_USAGE`` depends on but cannot see.
+
+    ``core/session.py`` has no reason to know this module exists, so adding
+    ``__slots__`` without ``__weakref__``, or ``__eq__`` without ``__hash__``,
+    would break the registry from a file whose author had no way to know. This
+    fails there rather than at a user's first carried run.
+    """
+    import weakref
+
+    contract = _budgeted_contract()
+    session = ContractSession(contract)
+
+    assert weakref.ref(session)() is session
+    # Identity keying, not equality: two sessions on one contract are distinct
+    # budgets and must never share a counter.
+    assert ContractSession.__hash__ is object.__hash__
+    assert ContractSession(contract) != session

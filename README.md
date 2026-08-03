@@ -983,13 +983,20 @@ Two things to know before adopting it:
 
 - **This bounds the budget, it does not enforce it exactly.** The session is fed
   only from inside the tools, so model requests after a run's last tool call —
-  answer generation included — go uncounted, and each run is granted a little
-  more than it should be. Measured overshoot on a small test agent was ~2×.
+  answer generation included — go uncounted, and each run is granted more than
+  it should be. Measured overshoot on a small test agent was ~2× *at the first
+  refusal*, and spend keeps climbing after that, because each refused turn still
+  costs one billed model request while the session's tally sits frozen. The
+  factor depends on how often your agent calls tools; an agent that calls none
+  is still unbounded across turns, though it is now stopped within a run.
   Much better than the unbounded alternative, but plan for a ceiling, not a
-  number.
-- **Catch `pydantic_ai.exceptions.UsageLimitExceeded`**, not
-  `ContractSessionLimitError`. With the helper wired the framework stops the run
-  first, so the contract-side exception no longer fires for token budgets.
+  number. [#56](https://github.com/flyersworder/agentic-data-contracts/issues/56)
+  tracks making it exact.
+- **Catch `pydantic_ai.exceptions.UsageLimitExceeded` as well as
+  `ContractSessionLimitError`** — not instead of it. The framework usually stops
+  the run first, but the contract-side exception still fires when the session is
+  fed from outside the run (a shared session, or your own `observe_tokens()`
+  call). Keep both handlers.
 
 ## Optional Dependencies
 

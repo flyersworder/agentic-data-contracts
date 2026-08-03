@@ -239,28 +239,35 @@ def usage_limits_from_contract(
     subtracted is ``session.tokens_used``, and the session is fed only from
     inside the tool wrapper — so every model request *after a run's last tool
     call*, including the final answer generation (typically the largest
-    context), is never observed. Each run is therefore granted slightly more
-    than the true remainder, and the shortfall compounds per turn. Measured on
-    a two-request-per-turn agent with a 500-token budget, real spend reached
-    ~2x the ceiling before the framework stopped it. That is a large
-    improvement on the unbounded behaviour without this helper, and it is not
-    the identity a quick read might assume. Carrying one ``RunUsage`` across
-    turns via ``agent.run(usage=...)`` is what would make the two exact, and
-    needs a design pass of its own — the counter is global while
-    ``observe_tokens`` scopes per ``run_id``, so it would double-count today.
+    context), is never observed. Each run is therefore granted more than the
+    true remainder, and the shortfall compounds per turn. Measured on a
+    two-request-per-turn agent with a 500-token budget, real spend reached ~2x
+    the ceiling *by the first refusal* — and that factor is not a constant, it
+    tracks how often the agent calls tools (~1.4x for a three-tool-call turn).
+    An agent that calls **no** tools is stopped within a run but remains
+    unbounded across them, since the session never accrues at all: 12 turns of
+    a 500-token budget spent 1200 with zero refusals. All of which is a large
+    improvement on the unbounded behaviour without this helper, and is not the
+    identity a quick read might assume. Issue #56 carries the design that would
+    make it exact (carry one ``RunUsage`` across turns via
+    ``agent.run(usage=...)``); it needs its own pass, because that counter is
+    global while ``observe_tokens`` scopes per ``run_id`` and would
+    double-count it today.
 
     Three consequences of wiring this, none of them obvious:
 
-    - **Callers must catch ``pydantic_ai.exceptions.UsageLimitExceeded``**, not
-      just :class:`ContractSessionLimitError`. Because a tool can only run on a
-      response that already passed ``check_tokens``, the session's own
-      ``token_budget`` branch becomes effectively unreachable and the framework
-      exception replaces it. An ``except ContractSessionLimitError`` around the
-      run loop silently stops catching budget breaches.
+    - **Catch ``pydantic_ai.exceptions.UsageLimitExceeded`` as well as**
+      :class:`ContractSessionLimitError` — not instead of it. The framework
+      usually stops the run first, because a tool can only execute on a
+      response that already passed ``check_tokens``. But the contract-side
+      error still fires whenever the session is fed from outside the run — a
+      session shared with another adapter, or a direct ``observe_tokens()``
+      call — on either ``apply_middleware`` value. Dropping the existing
+      handler would leave those unhandled.
     - **The session's token tally freezes** once the framework starts refusing
       runs, since no further tools execute to feed it. ``remaining()`` will sit
       at a stale figure while each refused turn still costs one billed model
-      request.
+      request, so cumulative spend keeps climbing past that ~2x.
     - **Do not combine with ``agent.run(usage=...)``.** A carried counter is
       subtracted twice — once here, once inside the counter — and the run locks
       out permanently below the declared budget.
@@ -268,6 +275,12 @@ def usage_limits_from_contract(
     Concurrent runs sharing one session each snapshot the same ``tokens_used``
     and are each granted the full remainder. Correct for sequential turns,
     which is what :class:`ContractDeps` describes; worth knowing if you fan out.
+
+    ``contract`` supplies the budget and ``session`` supplies the spend, so
+    pass the session built for *that* contract — a mismatched pair silently
+    enforces one contract's ceiling against another's usage. Not asserted:
+    ``ContractSession`` holds its contract, but comparing identity would reject
+    the legitimate case of an equivalent contract reloaded from YAML.
 
     To add limits this contract does not express, copy the result::
 

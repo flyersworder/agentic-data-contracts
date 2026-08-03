@@ -552,10 +552,12 @@ def test_top_level_import_resolves_when_extra_installed() -> None:
     from agentic_data_contracts import ContractDeps as _CD
     from agentic_data_contracts import create_pydantic_ai_tools as _ct
     from agentic_data_contracts import create_pydantic_ai_toolset as _cts
+    from agentic_data_contracts import usage_limits_from_contract as _ul
 
     assert _ct is not None
     assert _cts is not None
     assert _CD is not None
+    assert _ul is not None
 
 
 # ─── token budget (v0.34.0) ───────────────────────────────────────────────────
@@ -727,6 +729,22 @@ def test_usage_limits_floor_at_zero_never_goes_negative() -> None:
     assert usage_limits_from_contract(contract, session).total_tokens_limit == 0
 
 
+def test_usage_limits_distinguishes_a_zero_budget_from_no_budget() -> None:
+    """``token_budget: 0`` is a declaration, not an absence.
+
+    Zero means "spend nothing"; absent means "no ceiling". Collapsing them
+    would turn the strictest possible budget into no budget at all, which is
+    the same declared-but-unenforced shape this helper exists to avoid.
+    """
+    contract = _budgeted_contract(0)
+    assert (
+        usage_limits_from_contract(
+            contract, ContractSession(contract)
+        ).total_tokens_limit
+        == 0
+    )
+
+
 def test_usage_limits_leaves_token_limit_unset_without_a_budget() -> None:
     # No declared budget means no token ceiling to translate. Inventing one
     # would be the mirror image of the declared-but-unenforced bug.
@@ -777,10 +795,15 @@ async def test_multi_turn_spend_is_bounded_but_not_exact(
     compounds that shortfall each turn.
 
     So the real property is a bound, not an identity: the framework does stop
-    the agent, at a multiple of the budget rather than at it. Asserted with a
-    ceiling loose enough to be true and tight enough to fail if the helper ever
-    stopped subtracting at all — which is the regression that matters, since
-    the unsubtracted mapping is unbounded.
+    the agent, at a multiple of the budget rather than at it.
+
+    The regression this guards is the unsubtracted mapping from issue #53. Note
+    *how* that one dies here — not by running away until the loop gives up, but
+    by the session's own in-tool enforcement raising ``ContractSessionLimitError``
+    on the third turn, because the per-run limit stops constraining anything and
+    the tools hit the ceiling first. That is caught explicitly below rather than
+    left to propagate, so the failure names the cause instead of surfacing as an
+    unrelated error.
     """
     from pydantic_ai.exceptions import UsageLimitExceeded
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
@@ -823,7 +846,7 @@ async def test_multi_turn_spend_is_bounded_but_not_exact(
     )
 
     stopped = False
-    for _ in range(12):
+    for turn in range(12):
         try:
             await agent.run(
                 "go", usage_limits=usage_limits_from_contract(contract, session)
@@ -831,10 +854,17 @@ async def test_multi_turn_spend_is_bounded_but_not_exact(
         except UsageLimitExceeded:
             stopped = True
             break
+        except ContractSessionLimitError as e:  # pragma: no cover — regression guard
+            pytest.fail(
+                f"turn {turn}: the session enforcer fired before the framework"
+                f" did, which means the per-run limit stopped constraining the"
+                f" run — the unsubtracted mapping from issue #53. ({e})"
+            )
 
     assert stopped, "the framework must eventually refuse the run"
-    # Bounded. Without the subtraction the limit resets every turn and this
-    # loop never stops, so a large multiple still catches that regression.
+    # The framework fires while spend is still a small multiple of the budget.
+    # Loose because the overshoot tracks the tool-call-to-request ratio, not a
+    # constant — see the module's known limitations.
     assert spent <= budget * 3
 
 

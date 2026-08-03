@@ -330,19 +330,27 @@ is fed only from inside the tool wrapper, so every model request after a run's
 last tool call — including answer generation, usually the largest — is never
 observed. Each run is granted slightly more than the true remainder, and the
 shortfall compounds. Measured on a two-request-per-turn agent with a 500-token
-budget, real spend reached ~2× the ceiling before the framework fired. The exact
-fix is to carry one `RunUsage` across turns via `agent.run(usage=...)`, so
-pydantic-ai's own counter sees every request; that needs a design pass, because
-the carried counter is global while `observe_tokens` scopes per `run_id` and
-would double-count it.
+budget, real spend reached ~2× the ceiling by the first refusal. That factor is
+not a constant — it tracks the tool-call-to-request ratio (~1.4× measured for a
+three-tool-call turn), and an agent that calls **no** tools is unbounded across
+turns entirely, since `session.tokens_used` never leaves 0: 12 turns of a
+500-token budget spent 1200 with zero refusals. Within a run such an agent *is*
+now stopped, which is the hole this closes. The exact fix is to carry one
+`RunUsage` across turns via `agent.run(usage=...)`, so pydantic-ai's own counter
+sees every request; that needs a design pass (the carried counter is global
+while `observe_tokens` scopes per `run_id` and would double-count it) and is
+tracked as issue #56.
 
-Two knock-on effects. Once the helper is wired, a tool can only run on a
-response that already passed `check_tokens`, so the session's `token_budget`
-branch is effectively unreachable and callers must catch
-`pydantic_ai.exceptions.UsageLimitExceeded` rather than
-`ContractSessionLimitError`. And the session's tally freezes once runs start
-being refused, since no further tools execute to feed it — while each refused
-turn still costs one billed model request.
+Two knock-on effects. Callers should catch
+`pydantic_ai.exceptions.UsageLimitExceeded` **as well as**
+`ContractSessionLimitError` — not instead of it. The framework usually stops the
+run first, because a tool can only execute on a response that already passed
+`check_tokens`; but the contract-side exception still fires whenever the session
+is fed from outside the run, which a session shared with another adapter or a
+direct `observe_tokens()` call both do (verified on either `apply_middleware`
+value). And the session's tally freezes once runs start being refused, since no
+further tools execute to feed it — while each refused turn still costs one
+billed model request, so cumulative spend keeps climbing past that ~2×.
 
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts blocked query attempts, theirs counts model
@@ -915,7 +923,7 @@ agentic-data-contracts/
 │   │   ├── middleware.py        # contract_middleware decorator
 │   │   ├── sdk.py               # Claude Agent SDK adapter (create_sdk_mcp_server)
 │   │   ├── langchain.py         # LangChain / deepagents adapter (create_langchain_tools)
-│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools; create_pydantic_ai_toolset for one shared Agent across users)
+│   │   └── pydantic_ai.py       # Pydantic AI adapter (create_pydantic_ai_tools; create_pydantic_ai_toolset for one shared Agent across users; usage_limits_from_contract for per-request budget enforcement)
 │   ├── semantic/
 │   │   ├── __init__.py
 │   │   ├── base.py              # SemanticSource protocol

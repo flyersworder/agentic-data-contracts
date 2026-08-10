@@ -531,14 +531,26 @@ def test_relationship_threshold_none_never_degrades() -> None:
     assert "join_count=" not in prompt
 
 
-def test_relationship_threshold_int_degrades() -> None:
+def test_threshold_below_default_degrades_earlier_than_the_class_default() -> None:
+    """5 relationships degrade at 3 but would NOT degrade at the class default 30."""
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(5),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=3),
+    )
+    assert "join_count=" in prompt
+    assert "<from>analytics.t0.id</from>" not in prompt
+
+
+def test_threshold_above_default_keeps_detail_the_class_default_would_drop() -> None:
+    """52 relationships keep detail at 100 but WOULD degrade at the class default 30."""
     contract = _make_minimal_contract()
     prompt = contract.to_system_prompt(
         _rel_source(52),
-        renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=100),
     )
-    assert "<from>analytics.t0.id</from>" not in prompt
-    assert "join_count=" in prompt
+    assert "<from>analytics.t0.id</from>" in prompt
+    assert "join_count=" not in prompt
 
 
 def test_omitted_threshold_falls_back_to_class_attribute() -> None:
@@ -564,3 +576,23 @@ def test_metric_threshold_none_never_degrades() -> None:
     )
     assert '<metric name="metric_0">' in prompt
     assert "metrics available" not in prompt
+
+
+def test_metric_threshold_below_default_degrades_earlier() -> None:
+    """5 metrics go compact at 3 but would stay detailed at the class default 20."""
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(5),
+        renderer=XmlPromptRenderer(metric_detail_threshold=3),
+    )
+    assert "5 metrics available" in prompt
+    assert '<metric name="metric_0">' not in prompt
+
+
+def test_metric_subclass_class_attribute_still_wins_over_default() -> None:
+    class Loose(XmlPromptRenderer):
+        METRIC_DETAIL_THRESHOLD = 100
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(FakeSemanticSource(30), renderer=Loose())
+    assert '<metric name="metric_0">' in prompt

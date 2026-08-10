@@ -493,3 +493,74 @@ def test_fallback_omits_path_for_frozen_contract(fixtures_dir: Path) -> None:
     prompt = dc.to_system_prompt()  # no semantic_source -> fallback renders
     assert "<path>None</path>" not in prompt
     assert "<path>" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Constructor-parameter detail thresholds
+# ---------------------------------------------------------------------------
+
+
+def _rel_source(count: int):  # noqa: ANN202
+    """A source carrying `count` distinct relationships and nothing else."""
+
+    class _Source(FakeSemanticSource):
+        def __init__(self) -> None:
+            super().__init__(0)
+            self._rels = [
+                Relationship(
+                    from_=f"analytics.t{i}.id",
+                    to=f"analytics.t{i + 1}.t{i}_id",
+                    description=f"join {i}",
+                )
+                for i in range(count)
+            ]
+
+        def get_relationships(self) -> list[Relationship]:
+            return list(self._rels)
+
+    return _Source()
+
+
+def test_relationship_threshold_none_never_degrades() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=None),
+    )
+    assert "<from>analytics.t0.id</from>" in prompt
+    assert "join_count=" not in prompt
+
+
+def test_relationship_threshold_int_degrades() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+    )
+    assert "<from>analytics.t0.id</from>" not in prompt
+    assert "join_count=" in prompt
+
+
+def test_omitted_threshold_falls_back_to_class_attribute() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(_rel_source(52), renderer=XmlPromptRenderer())
+    assert "join_count=" in prompt  # class default of 30 still applies
+
+
+def test_subclass_class_attribute_still_wins_over_default() -> None:
+    class Loose(XmlPromptRenderer):
+        RELATIONSHIP_DETAIL_THRESHOLD = 100
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(_rel_source(52), renderer=Loose())
+    assert "<from>analytics.t0.id</from>" in prompt
+
+
+def test_metric_threshold_none_never_degrades() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(30),
+        renderer=XmlPromptRenderer(metric_detail_threshold=None),
+    )
+    assert '<metric name="metric_0">' in prompt
+    assert "metrics available" not in prompt

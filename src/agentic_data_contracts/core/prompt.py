@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import enum
+import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentic_data_contracts.core.contract import DataContract
     from agentic_data_contracts.core.schema import SemanticRule
     from agentic_data_contracts.semantic.base import SemanticSource
+
+logger = logging.getLogger(__name__)
+
+
+class _Unset(enum.Enum):
+    """Sentinel distinguishing "argument omitted" from an explicit ``None``.
+
+    An enum rather than ``object()``: ty narrows enum members inside a union, so
+    ``int | None | _Unset`` resolves to ``int | None`` after an ``is _UNSET``
+    check without needing a cast at the use site.
+    """
+
+    TOKEN = 0
+
+
+_UNSET = _Unset.TOKEN
 
 
 @runtime_checkable
@@ -37,9 +55,34 @@ class XmlPromptRenderer:
     not vendor.
     """
 
-    # Max metrics to list individually before switching to compact summaries.
+    # Defaults for the constructor parameters below. Kept as class attributes so
+    # an existing subclass that overrides them keeps working; an explicit
+    # constructor argument takes precedence over the class attribute.
     METRIC_DETAIL_THRESHOLD = 20
     RELATIONSHIP_DETAIL_THRESHOLD = 30
+
+    def __init__(
+        self,
+        *,
+        metric_detail_threshold: int | None | _Unset = _UNSET,
+        relationship_detail_threshold: int | None | _Unset = _UNSET,
+    ) -> None:
+        """``None`` for either threshold means "never degrade".
+
+        These were class constants until v0.40.0, which made the only opt-out
+        subclassing — so the consumer who knows their own prompt budget could not
+        express it. The budget call belongs where the budget knowledge is.
+        """
+        self.metric_detail_threshold: int | None = (
+            self.METRIC_DETAIL_THRESHOLD
+            if metric_detail_threshold is _UNSET
+            else metric_detail_threshold
+        )
+        self.relationship_detail_threshold: int | None = (
+            self.RELATIONSHIP_DETAIL_THRESHOLD
+            if relationship_detail_threshold is _UNSET
+            else relationship_detail_threshold
+        )
 
     def render(
         self,
@@ -160,7 +203,8 @@ class XmlPromptRenderer:
             return []
 
         lines: list[str] = ["<available_metrics>"]
-        compact = len(metrics) > self.METRIC_DETAIL_THRESHOLD
+        threshold = self.metric_detail_threshold
+        compact = threshold is not None and len(metrics) > threshold
 
         if compact:
             lines.append(f"  <count>{len(metrics)} metrics available.</count>")
@@ -215,7 +259,8 @@ class XmlPromptRenderer:
 
         lines = ["<table_relationships>"]
 
-        if len(rels) > self.RELATIONSHIP_DETAIL_THRESHOLD:
+        threshold = self.relationship_detail_threshold
+        if threshold is not None and len(rels) > threshold:
             table_counts: dict[str, int] = {}
             for r in rels:
                 from_table = r.from_.rsplit(".", 1)[0]

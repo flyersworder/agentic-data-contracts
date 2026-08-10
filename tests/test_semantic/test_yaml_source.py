@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from pathlib import Path
 
@@ -135,3 +136,52 @@ def test_get_extras_returns_a_copy() -> None:
     src = YamlSource.from_raw({"metrics": [], "notes": ["a"]})
     src.get_extras()["notes"] = ["mutated"]
     assert src.get_extras() == {"notes": ["a"]}
+
+
+def test_extras_warn_by_default(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        YamlSource.from_raw({"metrics": [], "widget_hints": []})
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "widget_hints" in joined
+    assert "get_extras()" in joined
+
+
+def test_no_warning_when_there_are_no_extras(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        YamlSource.from_raw({"metrics": []})
+    assert caplog.records == []
+
+
+def test_expected_extras_silences_declared_sections(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        src = YamlSource.from_raw(
+            {"metrics": [], "column_hints": []},
+            expected_extras={"column_hints"},
+        )
+    assert caplog.records == []
+    assert set(src.get_extras()) == {"column_hints"}
+
+
+def test_expected_extras_raises_on_an_undeclared_key() -> None:
+    with pytest.raises(ValueError, match="widget_hints"):
+        YamlSource.from_raw(
+            {"metrics": [], "widget_hints": []},
+            expected_extras={"column_hints"},
+        )
+
+
+def test_empty_expected_extras_is_strict_mode() -> None:
+    with pytest.raises(ValueError, match="anything"):
+        YamlSource.from_raw({"metrics": [], "anything": 1}, expected_extras=frozenset())
+
+
+def test_typo_in_a_supported_key_is_caught_by_expected_extras() -> None:
+    """`relationship:` for `relationships:` silently deleted a section before."""
+    with pytest.raises(ValueError, match="relationship"):
+        YamlSource.from_raw(
+            {"metrics": [], "relationship": [{"from": "a.b.c", "to": "d.e.f"}]},
+            expected_extras=frozenset(),
+        )

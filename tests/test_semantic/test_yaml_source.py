@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.semantic.yaml_source import YamlSource, _parse_date
+from agentic_data_contracts.semantic.yaml_source import (
+    SEMANTIC_KEYS,
+    YamlSource,
+    _parse_date,
+)
 
 
 @pytest.fixture
@@ -90,3 +94,44 @@ def test_parse_date_malformed_string_raises_clear_error() -> None:
     """A bad ISO string fails fast with a message naming the offending value."""
     with pytest.raises(ValueError, match="last_reviewed must be an ISO date"):
         _parse_date("2020-13-01")
+
+
+def test_unknown_top_level_keys_are_kept_as_extras() -> None:
+    """Issue #60's reproduction: an unsupported section must not vanish."""
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "widget_hints": [{"table": "t", "prefer": "a", "over": "b"}],
+        }
+    )
+    assert src.get_extras() == {
+        "widget_hints": [{"table": "t", "prefer": "a", "over": "b"}]
+    }
+
+
+def test_interpreted_keys_never_appear_in_extras() -> None:
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "tables": [],
+            "relationships": [],
+            "metric_impacts": [],
+            "column_hints": [{"table": "t", "prefer": "a"}],
+        }
+    )
+    assert set(src.get_extras()) == {"column_hints"}
+
+
+def test_no_extras_is_an_empty_dict() -> None:
+    assert YamlSource.from_raw({"metrics": []}).get_extras() == {}
+
+
+def test_semantic_keys_matches_what_the_parser_reads() -> None:
+    """Guards the constant against drift when a new section is added."""
+    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
+
+
+def test_get_extras_returns_a_copy() -> None:
+    src = YamlSource.from_raw({"metrics": [], "notes": ["a"]})
+    src.get_extras()["notes"] = ["mutated"]
+    assert src.get_extras() == {"notes": ["a"]}

@@ -21,6 +21,12 @@ from agentic_data_contracts.semantic.base import (
     validate_drill_by,
 )
 
+#: Top-level keys ``_load_from_raw`` interprets. Everything else in a semantic
+#: YAML is carried verbatim as "extras" — see ``YamlSource.get_extras``. Exported
+#: so a consumer can assert against it instead of hardcoding a list that drifts on
+#: the next release.
+SEMANTIC_KEYS = frozenset({"metrics", "tables", "relationships", "metric_impacts"})
+
 
 def _parse_date(value: Any) -> date | None:
     """Accept a YAML-native date/datetime, an ISO-8601 string, or None.
@@ -68,6 +74,9 @@ class YamlSource:
         return obj
 
     def _load_from_raw(self, raw: dict[str, Any]) -> None:
+        self._extras: dict[str, Any] = {
+            k: v for k, v in raw.items() if k not in SEMANTIC_KEYS
+        }
         self._metrics = []
         for m in raw.get("metrics", []):
             tier_raw = m.get("tier", [])
@@ -168,3 +177,15 @@ class YamlSource:
 
     def get_metric_impacts(self) -> list[MetricImpact]:
         return list(self._metric_impacts)
+
+    def get_extras(self) -> dict[str, Any]:
+        """Top-level keys this parser does not interpret, carried verbatim.
+
+        The framework never interprets, validates, indexes, or computes over this
+        content — it only carries it and, on request, places it in the prompt.
+        Anything needing interpretation is a candidate for real vocabulary, not
+        for extras.
+
+        Shallow copy, consistent with ``get_metrics`` and ``get_relationships``.
+        """
+        return dict(self._extras)

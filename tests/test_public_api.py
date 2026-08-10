@@ -97,11 +97,17 @@ def test_adapter_imports() -> None:
 
 
 def test_semantic_imports() -> None:
-    from agentic_data_contracts.semantic.base import MetricDefinition, SemanticSource  # noqa: F401, I001
-    from agentic_data_contracts.semantic.yaml_source import YamlSource
+    from agentic_data_contracts.semantic.base import (  # noqa: F401, I001
+        ExtensibleSemanticSource,
+        MetricDefinition,
+        SemanticSource,
+    )
+    from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS, YamlSource
 
     assert SemanticSource is not None
+    assert ExtensibleSemanticSource is not None
     assert YamlSource is not None
+    assert SEMANTIC_KEYS
 
 
 def test_tools_imports() -> None:

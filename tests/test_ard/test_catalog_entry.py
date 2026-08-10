@@ -20,6 +20,7 @@ from agentic_data_contracts.core.schema import (
     DataContractSchema,
     SemanticConfig,
 )
+from agentic_data_contracts.core.schema import SemanticSource as SemanticSourceConfig
 from agentic_data_contracts.validation.validator import Validator
 
 _SEMANTIC_DEPENDENT_SQL = (
@@ -43,6 +44,24 @@ def _entry(fixtures_dir: Path, contract: DataContract | None = None) -> dict:
         publisher_domain=PUBLISHER,
         mcp_card_url=MCP_URL,
         contract_url=CONTRACT_URL,
+    )
+
+
+def _contract_with_inline_semantics(inline: dict) -> DataContract:
+    """A ``DataContract`` whose semantic source is already frozen inline.
+
+    No filesystem, no ``tmp_path`` — that is the point of ``inline``: it is
+    the self-contained snapshot ``freeze_semantic_source`` would otherwise
+    produce from a file. Mirrors the inline-construction style already used
+    by ``test_tags_include_wildcard_schemas`` below.
+    """
+    return DataContract(
+        DataContractSchema(
+            name="inline-semantics",
+            semantic=SemanticConfig(
+                source=SemanticSourceConfig(type="yaml", inline=inline),
+            ),
+        )
     )
 
 
@@ -170,3 +189,28 @@ def test_tags_include_wildcard_schemas() -> None:
         contract_url="https://acme.com/c.json",
     )
     assert "warehouse" in entry["tags"]
+
+
+def test_extras_change_the_contract_digest() -> None:
+    """Extras are resident prompt text, so they belong to the contract identity.
+
+    Routes both inline payloads through ``dump_semantic_source`` — the same
+    function ``freeze_semantic_source`` calls — rather than hand-rolling the
+    ``inline`` dicts directly. A hand-rolled pair of differing dicts would
+    make the digests differ regardless of whether ``dump_semantic_source``
+    itself carries extras, which would not actually exercise the behaviour
+    this test exists to protect: that freezing a source with extras (as
+    opposed to constructing ``inline=`` by hand) moves the digest.
+    """
+    from agentic_data_contracts.ard import contract_digest
+    from agentic_data_contracts.semantic.base import dump_semantic_source
+    from agentic_data_contracts.semantic.yaml_source import YamlSource
+
+    hints = [{"table": "analytics.orders", "prefer": "order_total", "over": "total"}]
+    base_inline = dump_semantic_source(YamlSource.from_raw({"metrics": []}))
+    hinted_inline = dump_semantic_source(
+        YamlSource.from_raw({"metrics": [], "column_hints": hints})
+    )
+    base = _contract_with_inline_semantics(base_inline)
+    hinted = _contract_with_inline_semantics(hinted_inline)
+    assert contract_digest(base) != contract_digest(hinted)

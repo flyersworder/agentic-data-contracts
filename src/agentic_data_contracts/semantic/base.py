@@ -223,6 +223,30 @@ class SemanticSource(Protocol):
     def get_metric_impacts(self) -> list[MetricImpact]: ...
 
 
+@runtime_checkable
+class ExtensibleSemanticSource(Protocol):
+    """A source carrying consumer-authored sections the framework never reads.
+
+    Deliberately a *sibling* of :class:`SemanticSource` rather than an extension
+    of it. ``runtime_checkable`` isinstance checks method *presence*, so folding
+    ``get_extras`` into ``SemanticSource`` would make every external custom
+    source fail ``isinstance(src, SemanticSource)`` on upgrade. A sibling breaks
+    nobody and stays fully typed.
+
+    The framework carries extras and, on request, places them in the prompt. It
+    does not interpret, validate, index, or compute over their content — the
+    boundary the ``verified-examples`` corpus already draws in
+    ``validation/examples.py``.
+    """
+
+    def get_extras(self) -> dict[str, Any]: ...
+
+
+def _iso(d: date | None) -> str | None:
+    """ISO-format a date, passing ``None`` through."""
+    return d.isoformat() if d is not None else None
+
+
 def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
     """Serialize a source's enumerable semantics into the YAML-source raw format.
 
@@ -233,9 +257,6 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
     authored description — column ``nullable`` is not carried by the YAML-source
     format and defaults on rehydrate).
     """
-
-    def _iso(d: date | None) -> str | None:
-        return d.isoformat() if d is not None else None
 
     def _dump_metric(m: MetricDefinition) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -280,7 +301,7 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
             }
         )
 
-    return {
+    payload: dict[str, Any] = {
         "tables": tables,
         "metrics": [_dump_metric(m) for m in source.get_metrics()],
         "relationships": [
@@ -307,6 +328,13 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
             for i in source.get_metric_impacts()
         ],
     }
+    # Extras are the complement of SEMANTIC_KEYS by construction, so they cannot
+    # collide with the four keys above. Empty extras update nothing, which is why
+    # a contract without them still dumps byte-identically and no published ARD
+    # digest moves — the same omit-when-empty reasoning as decompositions.
+    if isinstance(source, ExtensibleSemanticSource):
+        payload.update(source.get_extras())
+    return payload
 
 
 def fuzzy_search_metrics(

@@ -14,6 +14,7 @@ from agentic_data_contracts.core.contract import (
 from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.core.prompt import PromptRenderer, XmlPromptRenderer
 from agentic_data_contracts.semantic.base import (
+    ExtensibleSemanticSource,
     MetricDefinition,
     MetricImpact,
     Relationship,
@@ -56,6 +57,7 @@ __all__ = [
     "ContractDeps",
     "ContractMiddleware",
     "DataContract",
+    "ExtensibleSemanticSource",
     "MetricDefinition",
     "MetricImpact",
     "Principal",

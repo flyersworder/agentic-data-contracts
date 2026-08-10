@@ -40,6 +40,8 @@ No single existing tool addresses both. Semantic layers (dbt metrics, Cube) hand
 | Enforcement | Configurable per-rule | `block` / `warn` / `log` per rule |
 | Tool delivery | Factory + middleware | Quick start via factory, composable via middleware |
 | Dependency management | uv | Modern, fast, lockfile-based |
+| Consumer-authored semantics | Carried, never interpreted | Every first-class section is *computed on* — relationships are indexed and BFS-walked, decompositions are cycle-checked, drill_by is validated against schemas. A section that is only interpolated into a string is carriage, and carriage gets a generic mechanism (`get_extras`, `extra_sections`) rather than bespoke vocabulary. Generalises the boundary `validation/examples.py` already draws for verified examples |
+| Prompt renderer naming | Named by output format | `XmlPromptRenderer`, not `ClaudePromptRenderer`: the class holds no Claude-specific logic, and `PromptRenderer` implementations differ by format (XML vs Markdown), not by vendor |
 
 ## Architecture
 

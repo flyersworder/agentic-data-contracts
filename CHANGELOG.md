@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.0] - 2026-08-10
+
+### Added
+
+- **`YamlSource` now carries every top-level key it does not interpret**, reachable via `get_extras()` and exported as `SEMANTIC_KEYS`. Previously `_load_from_raw` read exactly four keys and discarded the rest with no error, no warning, and no log line — so adding an unsupported section was indistinguishable from success. A downstream consumer carried two custom sections in a production semantic YAML for roughly three weeks: well-formed, internally consistent, covered by a dedicated lint job and ~240 lines of tests, and contributing nothing to any rendered prompt or tool output the entire time. There was no symptom to investigate; it surfaced only when someone rendered `to_system_prompt()` in a scratch script and grepped the output for their own content.
+
+  A one-character typo had the same consequence — `relationship:` for `relationships:` deleted a whole section while the library reported success — and that is the more common way this gets hit.
+
+- **`YamlSource(..., expected_extras=...)`** and the same parameter on `from_raw`. Left as `None` (the default) uninterpreted keys are logged at WARNING and carried anyway, so every existing contract keeps loading. Pass a collection and any key outside it raises at load; `frozenset()` is therefore a strict mode. One parameter instead of a `strict=True` flag, which would have fired forever on a consumer's own deliberate sections.
+
+- **`ExtensibleSemanticSource`**, a `runtime_checkable` protocol carrying only `get_extras()`. Deliberately a sibling of `SemanticSource` rather than an extension of it: `runtime_checkable` isinstance checks method *presence*, so folding `get_extras` into `SemanticSource` would have made every external custom source fail `isinstance(src, SemanticSource)` on upgrade.
+
+- **`XmlPromptRenderer(extra_sections=...)`**, accepting a sequence of section names (default YAML-in-a-tag formatter) or a mapping of name → callable. Nothing renders unless named, so a section kept for internal bookkeeping never leaks into a prompt; naming a section the source does not carry warns rather than failing quietly.
+
+### Changed
+
+- **Extras travel through `freeze_semantic_source()` and into `contract_digest`.** They are resident prompt text, so they shape agent behaviour; a digest that ignored them would let the ARD publish→verify loop attest to something different from what the agent saw. Editing a hint's prose therefore moves the digest and invalidates a pinned attestation. Contracts *without* extras dump byte-identically to before, so no existing frozen contract or published digest moves.
+
+- **Extras values are normalised to JSON-safe types at load.** Dates and datetimes become ISO strings — the shape this exists to carry explicitly wants a verification date — and anything else unserializable raises immediately, naming the key path. At load rather than at freeze, so a bad value fails where it was authored instead of months later inside an ARD publish.
+
+### Compatibility
+
+The framework carries extras and places them in the prompt on request. It does not interpret, validate, index, or compute over their content: no schema checking, no staleness detection, no tool serves them. That boundary is the same one `validation/examples.py` draws for verified examples, and it is why `column_hints` and `join_paths` — the two sections that prompted #60 — ship as the documented *example* of extras rather than as framework vocabulary.
+
+Closes #60.
+
 ## [0.40.0] - 2026-08-10
 
 ### Added

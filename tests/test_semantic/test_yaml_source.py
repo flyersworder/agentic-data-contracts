@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import date, datetime
 from pathlib import Path
@@ -185,3 +186,32 @@ def test_typo_in_a_supported_key_is_caught_by_expected_extras() -> None:
             {"metrics": [], "relationship": [{"from": "a.b.c", "to": "d.e.f"}]},
             expected_extras=frozenset(),
         )
+
+
+def test_yaml_native_date_in_extras_becomes_an_iso_string() -> None:
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "column_hints": [{"table": "t", "verified": date(2026, 3, 14)}],
+        }
+    )
+    assert src.get_extras()["column_hints"][0]["verified"] == "2026-03-14"
+
+
+def test_datetime_in_extras_is_normalised_to_a_date_string() -> None:
+    src = YamlSource.from_raw(
+        {"metrics": [], "notes": {"at": datetime(2026, 3, 14, 12, 0, 0)}}
+    )
+    assert src.get_extras()["notes"]["at"] == "2026-03-14"
+
+
+def test_normalised_extras_are_json_serialisable() -> None:
+    src = YamlSource.from_raw(
+        {"metrics": [], "column_hints": [{"verified": date(2026, 3, 14)}]}
+    )
+    assert json.dumps(src.get_extras())  # must not raise
+
+
+def test_unserialisable_extras_value_raises_naming_the_path() -> None:
+    with pytest.raises(ValueError, match=r"column_hints\[0\]\.owner"):
+        YamlSource.from_raw({"metrics": [], "column_hints": [{"owner": {1, 2, 3}}]})

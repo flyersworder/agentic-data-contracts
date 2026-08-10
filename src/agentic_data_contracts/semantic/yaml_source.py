@@ -46,10 +46,10 @@ def _apply_extras_policy(
     ``strict=True`` flag could not do, since it would fire forever on a
     consumer's own deliberate extras.
 
-    Deliberately not memoised, for the reason recorded on ``_warn_unenforceable``
-    in ``validation/validator.py``: caching a logging side effect means a
-    consumer that calls ``logging.basicConfig()`` after building its contracts
-    loses the diagnostic permanently.
+    Deliberately not memoised, for the reason recorded on
+    ``_warn_unenforceable_operations`` in ``validation/validator.py``: caching a
+    logging side effect means a consumer that calls ``logging.basicConfig()``
+    after building its contracts loses the diagnostic permanently.
     """
     if not extras:
         return
@@ -71,6 +71,49 @@ def _apply_extras_policy(
             f" expected_extras={sorted(expected_extras)}, interpreted keys="
             f"{sorted(SEMANTIC_KEYS)}"
         )
+
+
+def _normalize_extras(extras: dict[str, Any]) -> dict[str, Any]:
+    """Return *extras* with dates ISO-coerced and JSON-safety enforced.
+
+    Extras ride inside ``SemanticSource.inline`` and therefore through
+    ``contract_canonical_bytes``' ``json.dumps``. A YAML-native date is not JSON,
+    and the guidance extras exist to carry explicitly wants one ("verified
+    against the database on ..."). Checking at load means a bad value fails where
+    it was authored, rather than months later inside an ARD publish.
+    """
+    return {k: _jsonify(v, (k,)) for k, v in extras.items()}
+
+
+def _jsonify(value: Any, path: tuple[str | int, ...]) -> Any:
+    """Recursively coerce *value* to JSON-safe types, or raise naming *path*.
+
+    ``datetime`` is checked before ``date`` because it subclasses ``date`` — the
+    same ordering trap ``_parse_date`` documents.
+    """
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _jsonify(v, (*path, str(k))) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonify(v, (*path, i)) for i, v in enumerate(value)]
+    if value is None or isinstance(value, str | int | float):
+        return value
+    raise ValueError(
+        f"YamlSource: extras value at {_fmt_path(path)} is not JSON-serializable"
+        f" ({type(value).__name__}). Extras are carried into the frozen contract"
+        f" and its digest, so they must be JSON-safe."
+    )
+
+
+def _fmt_path(path: tuple[str | int, ...]) -> str:
+    """Render a key path as ``section[0].field`` for an actionable error."""
+    rendered = str(path[0])
+    for part in path[1:]:
+        rendered += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return rendered
 
 
 def _parse_date(value: Any) -> date | None:
@@ -138,7 +181,7 @@ class YamlSource:
     ) -> None:
         extras = {k: v for k, v in raw.items() if k not in SEMANTIC_KEYS}
         _apply_extras_policy(extras, expected_extras)
-        self._extras: dict[str, Any] = extras
+        self._extras: dict[str, Any] = _normalize_extras(extras)
         self._metrics = []
         for m in raw.get("metrics", []):
             tier_raw = m.get("tier", [])

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.prompt import PromptRenderer, XmlPromptRenderer
@@ -656,3 +659,99 @@ def test_no_log_when_not_degrading(caplog) -> None:  # noqa: ANN001
     with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
         contract.to_system_prompt(_rel_source(5), renderer=XmlPromptRenderer())
     assert _prompt_logs(caplog) == []
+
+
+# ---------------------------------------------------------------------------
+# Consumer-named extras sections (opt-in by name, in both directions)
+# ---------------------------------------------------------------------------
+
+
+class _ExtrasSource(FakeSemanticSource):
+    """A FakeSemanticSource that also satisfies ExtensibleSemanticSource."""
+
+    def __init__(self, extras: dict[str, Any]) -> None:
+        super().__init__(0)
+        self._extras = extras
+
+    def get_extras(self) -> dict[str, Any]:
+        return dict(self._extras)
+
+
+_EXTRAS = {"column_hints": [{"table": "analytics.orders", "prefer": "order_total"}]}
+
+
+def test_extras_do_not_render_unless_named() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS), renderer=XmlPromptRenderer()
+    )
+    assert "column_hints" not in prompt
+
+
+def test_named_extra_renders_with_the_default_formatter() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS),
+        renderer=XmlPromptRenderer(extra_sections=["column_hints"]),
+    )
+    assert "<column_hints>" in prompt
+    assert "</column_hints>" in prompt
+    assert "prefer: order_total" in prompt
+    assert prompt.index("<column_hints>") < prompt.index("</data_contract>")
+
+
+def test_custom_callable_receives_name_and_payload_and_is_used_verbatim() -> None:
+    seen: list[tuple[str, Any]] = []
+
+    def render(name: str, payload: Any) -> list[str]:
+        seen.append((name, payload))
+        return [f"<{name}>CUSTOM</{name}>"]
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS),
+        renderer=XmlPromptRenderer(extra_sections={"column_hints": render}),
+    )
+    assert "<column_hints>CUSTOM</column_hints>" in prompt
+    assert seen == [("column_hints", _EXTRAS["column_hints"])]
+
+
+def test_named_sections_render_in_the_order_given() -> None:
+    contract = _make_minimal_contract()
+    src = _ExtrasSource({"b_section": ["b"], "a_section": ["a"]})
+    prompt = contract.to_system_prompt(
+        src, renderer=XmlPromptRenderer(extra_sections=["b_section", "a_section"])
+    )
+    assert prompt.index("<b_section>") < prompt.index("<a_section>")
+
+
+def test_naming_an_absent_section_warns_and_renders_nothing(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.WARNING, logger=_PROMPT_LOGGER):
+        prompt = contract.to_system_prompt(
+            _ExtrasSource(_EXTRAS),
+            renderer=XmlPromptRenderer(extra_sections=["colum_hints"]),
+        )
+    assert "colum_hints" not in prompt
+    assert any("colum_hints" in m for m in _prompt_logs(caplog))
+
+
+def test_a_raising_custom_renderer_propagates() -> None:
+    def boom(name: str, payload: Any) -> list[str]:
+        raise RuntimeError("bad renderer")
+
+    contract = _make_minimal_contract()
+    with pytest.raises(RuntimeError, match="bad renderer"):
+        contract.to_system_prompt(
+            _ExtrasSource(_EXTRAS),
+            renderer=XmlPromptRenderer(extra_sections={"column_hints": boom}),
+        )
+
+
+def test_non_extensible_source_renders_no_extras() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(3),
+        renderer=XmlPromptRenderer(extra_sections=["column_hints"]),
+    )
+    assert "column_hints" not in prompt

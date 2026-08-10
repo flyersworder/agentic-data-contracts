@@ -1,11 +1,11 @@
-"""Tests for PromptRenderer protocol and ClaudePromptRenderer."""
+"""Tests for PromptRenderer protocol and XmlPromptRenderer."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRenderer
+from agentic_data_contracts.core.prompt import PromptRenderer, XmlPromptRenderer
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
@@ -121,7 +121,7 @@ def _make_minimal_contract() -> DataContract:
 
 
 def test_claude_renderer_satisfies_protocol() -> None:
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     assert isinstance(renderer, PromptRenderer)
 
 
@@ -132,7 +132,7 @@ def test_claude_renderer_satisfies_protocol() -> None:
 
 def test_claude_renderer_allowed_tables(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert '<data_contract name="revenue-analysis">' in output
@@ -170,7 +170,7 @@ def test_claude_renderer_allowed_tables_with_schema_annotations() -> None:
             ],
         ),
     )
-    output = ClaudePromptRenderer().render(DataContract(schema))
+    output = XmlPromptRenderer().render(DataContract(schema))
 
     # Annotated schemas appear with their metadata.
     assert 'name="analytics"' in output
@@ -192,7 +192,7 @@ def test_claude_renderer_allowed_tables_with_schema_annotations() -> None:
 
 def test_claude_renderer_constraints(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<constraints>" in output
@@ -222,7 +222,7 @@ def test_claude_renderer_constraints(fixtures_dir: Path) -> None:
 
 def test_claude_renderer_resource_limits(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<resource_limits>" in output
@@ -246,7 +246,7 @@ def test_claude_renderer_resource_limits(fixtures_dir: Path) -> None:
 
 def test_claude_renderer_no_resources() -> None:
     contract = _make_minimal_contract()
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<resource_limits>" not in output
@@ -255,7 +255,7 @@ def test_claude_renderer_no_resources() -> None:
 def test_claude_renderer_no_constraints() -> None:
     """Contracts with no forbidden ops or rules omit the constraints section."""
     contract = _make_minimal_contract()
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<constraints>" not in output
@@ -269,7 +269,7 @@ def test_claude_renderer_no_constraints() -> None:
 def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
     source = YamlSource(fixtures_dir / "semantic_source.yml")
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     # valid_contract.yml has domains, so we get <available_domains> instead
@@ -287,7 +287,7 @@ def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
 def test_claude_renderer_metrics_large_set_with_domains() -> None:
     contract = _make_contract_with_domains()
     source = FakeSemanticSource(30)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<available_domains>" in output
@@ -312,7 +312,7 @@ def test_claude_renderer_metrics_large_set_no_domains() -> None:
     )
     contract = DataContract(schema)
     source = FakeSemanticSource(30)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<available_metrics>" in output
@@ -331,7 +331,7 @@ def test_claude_renderer_no_semantic_source_with_config_and_domains(
 ) -> None:
     """Contract with domains + source config but no source object → domain index."""
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
     assert "<available_domains>" in output
@@ -355,7 +355,7 @@ def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
         ),
     )
     contract = DataContract(schema)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
     assert "<semantic_source>" in output
@@ -373,7 +373,7 @@ def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
 def test_claude_renderer_relationships(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
     source = YamlSource(fixtures_dir / "semantic_source.yml")
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<table_relationships>" in output
@@ -397,7 +397,7 @@ def test_claude_renderer_relationship_preferred_attribute(
             ],
         ),
     )
-    output = ClaudePromptRenderer().render(DataContract(schema), semantic_source=source)
+    output = XmlPromptRenderer().render(DataContract(schema), semantic_source=source)
 
     # Preferred edge carries the attribute on its <relationship> tag.
     assert 'preferred="true"' in output
@@ -413,7 +413,7 @@ def test_claude_renderer_relationship_preferred_attribute(
 def test_claude_renderer_no_relationships() -> None:
     contract = _make_minimal_contract()
     source = FakeSemanticSource(5)  # get_relationships() returns []
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<table_relationships>" not in output

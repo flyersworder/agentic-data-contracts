@@ -1,4 +1,4 @@
-"""PromptRenderer protocol and ClaudePromptRenderer implementation."""
+"""PromptRenderer protocol and XmlPromptRenderer implementation."""
 
 from __future__ import annotations
 
@@ -27,8 +27,15 @@ class PromptRenderer(Protocol):
     ) -> str: ...
 
 
-class ClaudePromptRenderer:
-    """Renders a DataContract as XML-structured output for Claude agents."""
+class XmlPromptRenderer:
+    """Renders a DataContract as XML-structured output for LLM agents.
+
+    XML tags mark section boundaries. That convention originates in Anthropic's
+    prompting guidance, but nothing here is Claude-specific — no SDK import, no
+    model-specific handling — and every frontier model reads it. The name states
+    the axis on which ``PromptRenderer`` implementations differ: output format,
+    not vendor.
+    """
 
     # Max metrics to list individually before switching to compact summaries.
     METRIC_DETAIL_THRESHOLD = 20

@@ -3,13 +3,13 @@
 
 def test_top_level_imports() -> None:
     from agentic_data_contracts import (
-        ClaudePromptRenderer,
         DataContract,
         MetricDefinition,
         MetricImpact,
         PromptRenderer,
         Relationship,
         SemanticSource,
+        XmlPromptRenderer,
         contract_middleware,
         create_tools,
     )
@@ -18,11 +18,19 @@ def test_top_level_imports() -> None:
     assert create_tools is not None
     assert contract_middleware is not None
     assert PromptRenderer is not None
-    assert ClaudePromptRenderer is not None
+    assert XmlPromptRenderer is not None
     assert MetricDefinition is not None
     assert MetricImpact is not None
     assert Relationship is not None
     assert SemanticSource is not None
+
+
+def test_claude_prompt_renderer_is_gone() -> None:
+    """v0.39.0 renamed it with no alias — a stale import must fail loudly."""
+    import agentic_data_contracts
+
+    assert not hasattr(agentic_data_contracts, "ClaudePromptRenderer")
+    assert "ClaudePromptRenderer" not in agentic_data_contracts.__all__
 
 
 def test_ard_publish_imports() -> None:

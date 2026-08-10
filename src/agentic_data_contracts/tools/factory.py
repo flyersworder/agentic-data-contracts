@@ -114,7 +114,7 @@ _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
 _COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
 
 # Protocol clauses appended to the two query-tool descriptions. They restate
-# guidance ClaudePromptRenderer._render_metrics already emits, and the
+# guidance XmlPromptRenderer._render_metrics already emits, and the
 # duplication is deliberate:
 # the rendered prompt is opt-in (a host wiring create_langchain_tools or
 # create_pydantic_ai_tools into its own agent supplies its own system prompt and

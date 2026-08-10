@@ -208,13 +208,13 @@ async def _run_demo(tools: list, prompt: str) -> None:
 
     # ── Discovery ─────────────────────────────────────────────────────────────
     # Note: allowed schemas/tables are now injected into the system prompt by
-    # ClaudePromptRenderer, so the agent reads its allowlist directly from the
+    # XmlPromptRenderer, so the agent reads its allowlist directly from the
     # prompt rather than calling a discovery tool. Column-level discovery is
     # still available via describe_table.
     print("=== Discovery ===")
     print(
         "Allowed schemas/tables are injected into the system prompt by "
-        "ClaudePromptRenderer. Agents see them without a discovery tool call.\n"
+        "XmlPromptRenderer. Agents see them without a discovery tool call.\n"
         "Column-level discovery is still available via describe_table:"
     )
     describe = next(t for t in tools if t.name == "describe_table")

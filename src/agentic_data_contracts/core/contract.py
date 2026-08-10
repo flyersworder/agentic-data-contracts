@@ -296,13 +296,13 @@ class DataContract:
 
         Args:
             semantic_source: Optional semantic source for metric/relationship data.
-            renderer: Optional custom prompt renderer. Defaults to ClaudePromptRenderer.
+            renderer: Optional custom prompt renderer. Defaults to XmlPromptRenderer.
             principal: Resolved caller identity. Renderers use this to filter
                 per-principal sections (e.g. `required_filter_values`) so the
                 prompt only exposes policy that applies to this caller.
         """
         if renderer is None:
-            from agentic_data_contracts.core.prompt import ClaudePromptRenderer
+            from agentic_data_contracts.core.prompt import XmlPromptRenderer
 
-            renderer = ClaudePromptRenderer()
+            renderer = XmlPromptRenderer()
         return renderer.render(self, semantic_source, principal=principal)

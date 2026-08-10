@@ -1,6 +1,6 @@
 """Protocol enforcement carried by the tool descriptions themselves.
 
-The same workflow guidance also appears in ``ClaudePromptRenderer`` output, but
+The same workflow guidance also appears in ``XmlPromptRenderer`` output, but
 that surface is opt-in: a host wiring ``create_langchain_tools`` or
 ``create_pydantic_ai_tools`` into its own agent supplies its own system prompt
 and may never render the contract at all. Descriptions travel with the tools on

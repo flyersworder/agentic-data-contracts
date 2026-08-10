@@ -554,7 +554,7 @@ request. The value is validated eagerly at `create_tools()` time.
 governed definition, never invent or adapt a formula — and, on `run_query` only, a
 **precedence** claim that it is preferred over any other SQL or data-access path.
 
-The guidance duplicates hints `ClaudePromptRenderer` already emits, and the
+The guidance duplicates hints `XmlPromptRenderer` already emits, and the
 duplication is deliberate. The rendered prompt is **opt-in**: none of the ecosystem
 wrappers inject it, so a host calling `create_langchain_tools` or
 `create_pydantic_ai_toolset` and supplying its own system prompt may never render

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0] - 2026-08-10
+
+### Changed
+
+- **`ClaudePromptRenderer` is renamed to `XmlPromptRenderer`.** The class contains no Claude- or Anthropic-specific logic: the only matches for `Claude|anthropic` in `core/prompt.py` were the class name and its docstring. It emits XML tags — an Anthropic-originated prompting convention, but the artifact is plain XML that any frontier model reads.
+
+  The name had aged against the codebase. `tools/langchain.py` and `tools/pydantic_ai.py` both ship, so a Pydantic AI user's system prompt was being rendered by a class named after a runtime they had deliberately left.
+
+  A protocol implementation should be named for the axis on which implementations differ. `PromptRenderer` exists so alternatives can exist, and a second implementation would differ by output *format* — Markdown sections instead of XML tags — not by vendor. Naming by vendor invites a `GptPromptRenderer` that emits the same tags and differs in nothing.
+
+  Renamed with no deprecated alias, consistent with v0.38.0 removing `usage_limits_from_contract` outright. This is a `0.x` project at Beta status, where SemVer permits a breaking change in a minor bump.
+
+  **Migration** — one line:
+
+  ```diff
+  - from agentic_data_contracts import ClaudePromptRenderer
+  + from agentic_data_contracts import XmlPromptRenderer
+  ```
+
 ## [0.38.0] - 2026-08-03
 
 ### Removed

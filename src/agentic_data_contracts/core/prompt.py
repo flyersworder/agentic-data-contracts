@@ -207,7 +207,20 @@ class XmlPromptRenderer:
         compact = threshold is not None and len(metrics) > threshold
 
         if compact:
-            lines.append(f"  <count>{len(metrics)} metrics available.</count>")
+            logger.info(
+                "XmlPromptRenderer: %d metrics exceeds"
+                " metric_detail_threshold=%d — per-metric names and descriptions"
+                " omitted from the prompt; agents must call list_metrics to"
+                " browse. Pass metric_detail_threshold=None to render them"
+                " inline.",
+                len(metrics),
+                threshold,
+            )
+            lines.append(
+                f"  <count>{len(metrics)} metrics available;"
+                f" per-metric descriptions omitted above threshold"
+                f" {threshold}.</count>"
+            )
             # Carries the same "before computing" imperative as the detailed
             # branch below. Dropping it here would leave the guidance weakest
             # precisely where there are the most metrics to get wrong.
@@ -261,6 +274,15 @@ class XmlPromptRenderer:
 
         threshold = self.relationship_detail_threshold
         if threshold is not None and len(rels) > threshold:
+            logger.info(
+                "XmlPromptRenderer: %d relationships exceeds"
+                " relationship_detail_threshold=%d — per-relationship join keys"
+                " omitted from the prompt; agents must call"
+                " lookup_relationships to get them. Pass"
+                " relationship_detail_threshold=None to render them inline.",
+                len(rels),
+                threshold,
+            )
             table_counts: dict[str, int] = {}
             for r in rels:
                 from_table = r.from_.rsplit(".", 1)[0]
@@ -271,7 +293,8 @@ class XmlPromptRenderer:
             for table, count in sorted(table_counts.items()):
                 lines.append(f'  <table name="{table}" join_count="{count}" />')
             lines.append(
-                f"  <hint>{len(rels)} relationships defined."
+                f"  <hint>{len(rels)} relationships defined; per-relationship"
+                f" join keys omitted above threshold {threshold}."
                 ' Use lookup_relationships(table="schema.table")'
                 " to get join details and required filters.</hint>"
             )

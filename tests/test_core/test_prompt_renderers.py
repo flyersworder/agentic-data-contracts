@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from agentic_data_contracts.core.contract import DataContract
@@ -596,3 +597,62 @@ def test_metric_subclass_class_attribute_still_wins_over_default() -> None:
     contract = _make_minimal_contract()
     prompt = contract.to_system_prompt(FakeSemanticSource(30), renderer=Loose())
     assert '<metric name="metric_0">' in prompt
+
+
+# ---------------------------------------------------------------------------
+# Degradation is logged and disclosed, not silent
+# ---------------------------------------------------------------------------
+
+_PROMPT_LOGGER = "agentic_data_contracts.core.prompt"
+
+
+def _prompt_logs(caplog) -> list[str]:  # noqa: ANN001
+    """Fully-formatted messages from the prompt logger only.
+
+    ``caplog.records`` collects records from *every* logger that propagates, so
+    filtering by name is what keeps these assertions from breaking when an
+    unrelated library logs during the same call.
+    """
+    return [r.getMessage() for r in caplog.records if r.name == _PROMPT_LOGGER]
+
+
+def test_relationship_degradation_logs(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(
+            _rel_source(52),
+            renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+        )
+    assert any(
+        "52 relationships exceeds relationship_detail_threshold=30" in m
+        for m in _prompt_logs(caplog)
+    )
+
+
+def test_relationship_degradation_hint_names_what_it_dropped() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+    )
+    assert "join keys omitted above threshold 30" in prompt
+
+
+def test_metric_degradation_logs(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(
+            FakeSemanticSource(30),
+            renderer=XmlPromptRenderer(metric_detail_threshold=20),
+        )
+    assert any(
+        "30 metrics exceeds metric_detail_threshold=20" in m
+        for m in _prompt_logs(caplog)
+    )
+
+
+def test_no_log_when_not_degrading(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(_rel_source(5), renderer=XmlPromptRenderer())
+    assert _prompt_logs(caplog) == []

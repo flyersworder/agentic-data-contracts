@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.0] - 2026-08-10
+
+### Added
+
+- **`XmlPromptRenderer(metric_detail_threshold=…, relationship_detail_threshold=…)`.** Both were class constants, so the only way to opt out of prompt degradation was to subclass the renderer — meaning the consumer who actually knows their prompt budget could not express it. `None` disables degradation entirely. Omitting an argument still reads the class attribute, so existing subclass overrides are unaffected.
+
+### Changed
+
+- **Both degrading branches now log at INFO and disclose what they dropped.** Above `relationship_detail_threshold`, `_render_relationships` drops every per-relationship `<from>`/`<to>` — the actual join keys — and substitutes per-table `join_count` summaries. On a 52-relationship contract that suppresses roughly 3.1× the whole fragment (9,658 rendered chars versus 29,852 detailed). Gating large content is reasonable; gating it silently means the only way to discover it is to render the prompt and diff it against expectations, which nobody thinks to do because the block looks populated.
+
+  The rendered hint now names the omission and the threshold, and a log line names the count, the threshold, and the parameter that turns it off. `_render_metrics` gets the same treatment against `metric_detail_threshold`, which had the identical shape and the same gap.
+
+  `logger.info`, not `warning`: degradation is intended behaviour under a configured budget, unlike an ignored contract key.
+
+  Reported in #60.
+
 ## [0.39.0] - 2026-08-10
 
 ### Changed

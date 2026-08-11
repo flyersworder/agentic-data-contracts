@@ -900,6 +900,31 @@ dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt(renderer=MarkdownRenderer()))
 ```
 
+### Detail thresholds
+
+`XmlPromptRenderer` degrades its own output above two counts, to keep a large
+contract from dominating the prompt:
+
+| Above | The prompt loses | The agent recovers it with |
+|---|---|---|
+| `metric_detail_threshold` (default 20) | per-metric names and descriptions, replaced by a count | `list_metrics()` / `lookup_metric("...")` |
+| `relationship_detail_threshold` (default 30) | per-relationship `<from>` / `<to>` join keys, replaced by per-table `join_count` | `lookup_relationships(table="...")` |
+
+Both are constructor parameters, and `None` disables degradation entirely:
+
+```python
+# Render every join key inline, however many there are.
+dc.to_system_prompt(source, renderer=XmlPromptRenderer(relationship_detail_threshold=None))
+```
+
+The suppressed content is not small — on a 52-relationship contract the join
+keys are roughly 3x the whole `<table_relationships>` fragment. So when either
+threshold trips, the renderer logs at `INFO` naming the count, the threshold,
+and the parameter that turns it off, and the rendered block says what it
+dropped rather than looking complete. Omitting an argument reads the
+`METRIC_DETAIL_THRESHOLD` / `RELATIONSHIP_DETAIL_THRESHOLD` class attributes, so
+a subclass that overrides them still works.
+
 ### Consumer-authored sections (extras)
 
 `YamlSource` interprets four top-level keys — `metrics`, `tables`,
@@ -967,6 +992,11 @@ bytes falls back to warn-and-carry and sees the WARNING you silenced. That is th
 right way round: the declaration is a lint on *your* authoring, and buying the
 consumer's silence with a digest change would invalidate every attestation
 pinned to the contract.
+
+The exclusion is field-level, so the same applies to any `model_dump()` — a tool
+that round-trips a contract through `model_dump()` locally and reloads it drops
+the declaration too, and the warning comes back. Re-read the contract from YAML
+rather than from a dump if you need the setting to survive.
 
 Nothing renders unless you name it in `extra_sections`, so a section kept for
 internal bookkeeping never reaches a prompt. Naming a section the source does not
@@ -1134,7 +1164,7 @@ Three end-to-end working examples, each demonstrating a different governance arc
 
 | Example | Archetype | Governance patterns it teaches |
 |---|---|---|
-| [`examples/revenue_agent/`](examples/revenue_agent/) | Finance / lagging KPIs / audit-strict | Tenant isolation, `hypothesized` impact edges, north-star metric tier, undefined-metric policy recipe |
+| [`examples/revenue_agent/`](examples/revenue_agent/) | Finance / lagging KPIs / audit-strict | Tenant isolation, `hypothesized` impact edges, north-star metric tier, undefined-metric policy recipe, **the full extras loop** — `column_hints` + `join_paths` in `semantic.yml`, `expected_extras` in `contract.yml`, `XmlPromptRenderer(extra_sections=...)` in the agent, and a live typo-refusal |
 | [`examples/growth_agent/`](examples/growth_agent/) | Experimentation / leading indicators | `verified` / `correlated` / `hypothesized` metric impacts with real-ish A/B evidence, time-bounded events rule, `log`-level PII audit invisible to the agent, stale-review detection, **`preferred: true` on the canonical `events.user_id → users.id` join** (alongside a non-preferred `events.referrer_user_id → users.id` for referral-mechanics questions) |
 | [`examples/ops_agent/`](examples/ops_agent/) | SRE reliability / real-time dashboards | `blocked_columns` for PII, two `log`-level audit rules (governance trail), `require_limit` + `max_joins` caps, **negative-direction** metric impact (DORA pattern), aggressive resource limits, **`blocked_principals` on `sre.deploys`** (try `--caller intern@co.com` to see a per-table principal denial) |
 

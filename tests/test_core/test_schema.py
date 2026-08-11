@@ -275,3 +275,53 @@ def test_required_filter_values_extra_field_rejected() -> None:
                 "typo_field": "oops",
             }
         )
+
+
+def test_expected_extras_survives_a_model_dump_round_trip() -> None:
+    """Excluded from the *digest*, not from serialization in general.
+
+    ``contract_canonical_bytes`` must not carry this field — see
+    ``test_expected_extras_is_not_digest_bearing`` in the ARD suite for the other
+    half of this decision. But excluding it at the *field* drops it from every
+    ``model_dump()``, so a tool that round-trips a contract locally loses the
+    declaration and the warning it silenced comes back. The exclusion belongs at
+    the one call site that computes the content address, not on the field.
+    """
+    raw = {
+        "version": "1.0",
+        "name": "extras-round-trip",
+        "semantic": {
+            "source": {
+                "type": "yaml",
+                "path": "./semantic.yml",
+                "expected_extras": ["column_hints", "join_paths"],
+            },
+            "allowed_tables": [{"schema": "analytics", "tables": ["orders"]}],
+        },
+    }
+    schema = DataContractSchema.model_validate(raw)
+    rebuilt = DataContractSchema.model_validate(schema.model_dump())
+
+    assert rebuilt.semantic.source is not None
+    assert rebuilt.semantic.source.expected_extras == ["column_hints", "join_paths"]
+
+
+def test_empty_expected_extras_survives_a_model_dump_round_trip() -> None:
+    """``[]`` is strict mode — a real value, distinct from an absent key.
+
+    A round trip that collapsed it to ``None`` would silently downgrade strict
+    mode to warn-and-carry, which is the failure this whole feature removes.
+    """
+    raw = {
+        "version": "1.0",
+        "name": "extras-strict",
+        "semantic": {
+            "source": {"type": "yaml", "path": "./s.yml", "expected_extras": []},
+            "allowed_tables": [{"schema": "analytics", "tables": ["orders"]}],
+        },
+    }
+    schema = DataContractSchema.model_validate(raw)
+    rebuilt = DataContractSchema.model_validate(schema.model_dump())
+
+    assert rebuilt.semantic.source is not None
+    assert rebuilt.semantic.source.expected_extras == []

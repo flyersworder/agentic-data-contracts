@@ -993,10 +993,9 @@ right way round: the declaration is a lint on *your* authoring, and buying the
 consumer's silence with a digest change would invalidate every attestation
 pinned to the contract.
 
-The exclusion is field-level, so the same applies to any `model_dump()` — a tool
-that round-trips a contract through `model_dump()` locally and reloads it drops
-the declaration too, and the warning comes back. Re-read the contract from YAML
-rather than from a dump if you need the setting to survive.
+The exclusion is scoped to the content-addressed bytes, not to the field, so an
+ordinary `model_dump()` still carries it and a local round trip keeps your
+declaration. Only what gets published drops it.
 
 Nothing renders unless you name it in `extra_sections`, so a section kept for
 internal bookkeeping never reaches a prompt. Naming a section the source does not

@@ -39,6 +39,18 @@ MCP_SERVER_CARD_MEDIA_TYPE = "application/mcp-server-card+json"
 #: registered well-known value.
 DATA_CONTRACT_ATTESTATION_TYPE = "data-contract"
 
+#: Fields kept out of the content-addressed bytes. ``semantic.source
+#: .expected_extras`` is a load-time lint policy — it does not change what the
+#: agent sees — so serializing it would move every published digest for a
+#: setting no consumer of the bytes can act on.
+#:
+#: Excluded here rather than with ``Field(exclude=True)`` on the model: a
+#: field-level exclusion applies to *every* ``model_dump()``, which silently
+#: drops the declaration from an ordinary local round trip. The exclusion
+#: belongs to the digest, so it lives with the digest. Paths use pydantic
+#: **field** names, not aliases, even under ``by_alias=True``.
+_CANONICAL_EXCLUDE = {"semantic": {"source": {"expected_extras"}}}
+
 
 def contract_canonical_bytes(contract: DataContract) -> bytes:
     """The frozen, canonical JSON bytes of a contract — the portable artifact you
@@ -53,7 +65,9 @@ def contract_canonical_bytes(contract: DataContract) -> bytes:
     # by_alias so the published, content-addressed bytes use the documented YAML
     # keys (e.g. ``schema``), not pydantic field names (``schema_``) — a non-library
     # consumer reads the same shape the contract was authored in.
-    payload = contract.schema.model_dump(mode="json", by_alias=True)
+    payload = contract.schema.model_dump(
+        mode="json", by_alias=True, exclude=_CANONICAL_EXCLUDE
+    )
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 

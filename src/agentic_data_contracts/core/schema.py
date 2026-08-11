@@ -30,13 +30,15 @@ class SemanticSource(BaseModel):
     # mode — makes any undeclared top-level key a load error. Ignored by the dbt
     # and cube loaders, which have no extras concept.
     #
-    # ``exclude=True`` is load-bearing: ``contract_canonical_bytes`` dumps this
-    # model with ``model_dump(mode="json", by_alias=True)`` to produce
-    # ``contract_digest``, so a serialized field — even as ``null`` — would move
-    # every existing digest and invalidate every published ARD attestation. This
-    # is a policy about *reading* the source, not part of what the agent sees, so
-    # it must not be digest-bearing.
-    expected_extras: list[str] | None = Field(default=None, exclude=True)
+    # Must not reach ``contract_digest``: a serialized field — even as ``null``
+    # — would move every existing digest and invalidate every published ARD
+    # attestation, and this is a policy about *reading* the source, not part of
+    # what the agent sees. That exclusion lives in ``contract_canonical_bytes``
+    # (``_CANONICAL_EXCLUDE``), NOT here as ``Field(exclude=True)``: a
+    # field-level exclusion applies to every ``model_dump()``, so a tool that
+    # round-trips a contract locally would silently lose the declaration and get
+    # back the warning it had silenced.
+    expected_extras: list[str] | None = None
 
     @model_validator(mode="after")
     def path_or_inline_required(self) -> Self:

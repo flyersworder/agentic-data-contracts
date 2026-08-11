@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.1] - 2026-08-11
+
+### Fixed
+
+- **`semantic.source.expected_extras` no longer disappears from an ordinary `model_dump()`.** v0.41.0 kept the field out of `contract_digest` with `Field(exclude=True)`, which was too blunt: a field-level exclusion applies to *every* serialization, so a tool that round-tripped a contract through `model_dump()` locally and revalidated it silently lost the declaration — and got back the warning it had just silenced. The empty-list form (strict mode) collapsed to `None` on the same path, quietly downgrading strict to warn-and-carry.
+
+  The exclusion now lives where it belongs, at the one call site that computes the content address (`_CANONICAL_EXCLUDE` in `contract_canonical_bytes`), rather than on the field. Published bytes are unchanged in every respect: `contract_digest` for a contract with no extras is still `sha256:898c842e…`, and `expected_extras` still never appears in `contract_canonical_bytes` in any form. The rule the field-level exclusion was reaching for — a lint policy about *reading* the source should not move the digest — is intact; it just no longer costs correctness everywhere else.
+
+  Found by the whole-branch review of #62 and documented as a known limitation at the time.
+
 ## [0.41.0] - 2026-08-11
 
 Closes #60, whose three defects share one shape: **the library delivered less

@@ -171,7 +171,10 @@ class DataContract:
         if source_config.inline is not None:
             from agentic_data_contracts.semantic.yaml_source import YamlSource
 
-            return YamlSource.from_raw(source_config.inline)
+            return YamlSource.from_raw(
+                source_config.inline,
+                expected_extras=source_config.expected_extras,
+            )
 
         return self._load_semantic_source_from_file(source_config)
 
@@ -207,6 +210,14 @@ class DataContract:
             )
             raise ValueError(msg)
 
+        # Only YamlSource has an extras concept, so only it takes the policy;
+        # dbt/cube would raise TypeError on the keyword.
+        kwargs: dict[str, object] = (
+            {"expected_extras": source_config.expected_extras}
+            if loader_cls is YamlSource
+            else {}
+        )
+
         # Fail closed: a declared source that cannot be loaded must raise a
         # governance-specific error, not a raw OSError/parse error an app might
         # catch as routine file handling and proceed under-enforcing. OSError
@@ -217,7 +228,7 @@ class DataContract:
         # malformed-but-present source, which still fails loud, just not as this
         # type.)
         try:
-            return loader_cls(path)
+            return loader_cls(path, **kwargs)
         except (OSError, yaml.YAMLError, json.JSONDecodeError) as exc:
             raise SemanticSourceUnavailableError(
                 f"Contract {self.name!r} declares a {source_type!r} semantic"

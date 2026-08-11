@@ -24,6 +24,19 @@ class SemanticSource(BaseModel):
     # one of the two must be set.
     path: str | None = None
     inline: dict[str, Any] | None = None
+    # Load-time lint policy for a ``yaml`` source, threaded into
+    # ``YamlSource(expected_extras=...)``. ``None`` (absent) keeps the
+    # warn-and-carry default; a list — including the empty list, which is strict
+    # mode — makes any undeclared top-level key a load error. Ignored by the dbt
+    # and cube loaders, which have no extras concept.
+    #
+    # ``exclude=True`` is load-bearing: ``contract_canonical_bytes`` dumps this
+    # model with ``model_dump(mode="json", by_alias=True)`` to produce
+    # ``contract_digest``, so a serialized field — even as ``null`` — would move
+    # every existing digest and invalidate every published ARD attestation. This
+    # is a policy about *reading* the source, not part of what the agent sees, so
+    # it must not be digest-bearing.
+    expected_extras: list[str] | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def path_or_inline_required(self) -> Self:

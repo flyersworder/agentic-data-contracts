@@ -941,6 +941,33 @@ anyway, so no existing contract stops loading. Pass a collection to turn a typo 
 `relationship:` for `relationships:` — into a load-time error instead of a
 silently deleted section.
 
+When the contract loads the source for you (`DataContract.from_yaml` →
+`load_semantic_source()`), declare the sections in the contract instead — there
+is no `YamlSource` call of your own to pass the argument to:
+
+```yaml
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: [column_hints, join_paths]
+```
+
+`expected_extras: []` is strict mode (any uninterpreted key raises); omitting the
+key keeps the warn-and-carry default. The setting applies on both load paths —
+the external `path` and the frozen `inline` snapshot — so declaring your sections
+does not stop working the moment the contract is frozen. It is ignored for `dbt`
+and `cube` sources, which have no extras concept.
+
+`expected_extras` is a policy about *reading* the source, not part of what the
+agent sees, so it is deliberately excluded from `contract_canonical_bytes`:
+adding, changing, or removing it never moves `contract_digest`. The trade is that
+it does not travel with a published contract — a consumer rehydrating your frozen
+bytes falls back to warn-and-carry and sees the WARNING you silenced. That is the
+right way round: the declaration is a lint on *your* authoring, and buying the
+consumer's silence with a digest change would invalidate every attestation
+pinned to the contract.
+
 Nothing renders unless you name it in `extra_sections`, so a section kept for
 internal bookkeeping never reaches a prompt. Naming a section the source does not
 carry warns rather than failing quietly. A mapping value replaces the default

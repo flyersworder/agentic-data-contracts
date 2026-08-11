@@ -20,6 +20,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     SemanticSource,
 )
+from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS
 from agentic_data_contracts.tools.factory import RowFormat, create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
@@ -54,6 +55,7 @@ except ImportError:  # pragma: no cover — exercised only without the extra
     create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
 
 __all__ = [
+    "SEMANTIC_KEYS",
     "ContractDeps",
     "ContractMiddleware",
     "DataContract",

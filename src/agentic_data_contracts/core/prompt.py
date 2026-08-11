@@ -101,6 +101,17 @@ class XmlPromptRenderer:
         subclassing — so the consumer who knows their own prompt budget could not
         express it. The budget call belongs where the budget knowledge is.
         """
+        # ``str`` satisfies ``Sequence[str]`` structurally, so a bare string
+        # would silently iterate characters — eleven one-character section names,
+        # none of them carried. Against a non-extensible source that failure
+        # produces no warning at all, which is the exact class of silence this
+        # release exists to remove.
+        if isinstance(extra_sections, str):
+            raise TypeError(
+                "XmlPromptRenderer(extra_sections=...) takes a sequence or"
+                " mapping of section names, not a bare string — pass"
+                f" [{extra_sections!r}], not {extra_sections!r}."
+            )
         # Opt-in by name in both directions: nothing renders unless named, so a
         # section authored as internal bookkeeping never leaks into a prompt.
         # A mapping value of None selects the default formatter.
@@ -242,7 +253,14 @@ class XmlPromptRenderer:
             return []
 
         lines: list[str] = ["<available_metrics>"]
-        threshold = self.metric_detail_threshold
+        # Read through the class attribute: before v0.40.0 there was no
+        # ``__init__`` here, so a subclass could legally define one of its own
+        # and never call ``super().__init__()``. Such an instance has no
+        # ``metric_detail_threshold`` attribute at all, and the class constants
+        # were kept precisely so those subclasses keep working.
+        threshold = getattr(
+            self, "metric_detail_threshold", self.METRIC_DETAIL_THRESHOLD
+        )
         compact = threshold is not None and len(metrics) > threshold
 
         if compact:
@@ -311,7 +329,12 @@ class XmlPromptRenderer:
 
         lines = ["<table_relationships>"]
 
-        threshold = self.relationship_detail_threshold
+        # Same fallback as ``_render_metrics``: a pre-v0.40.0 subclass with its
+        # own ``__init__`` and no ``super().__init__()`` has no instance
+        # attribute here, only the class constant.
+        threshold = getattr(
+            self, "relationship_detail_threshold", self.RELATIONSHIP_DETAIL_THRESHOLD
+        )
         if threshold is not None and len(rels) > threshold:
             logger.info(
                 "XmlPromptRenderer: %d relationships exceeds"
@@ -371,7 +394,14 @@ class XmlPromptRenderer:
         you cannot render is a bug, and swallowing it would silently drop content
         — the exact failure this whole feature removes.
         """
-        if not self.extra_sections or semantic_source is None:
+        # Same fallback as the two thresholds, but with no class constant to fall
+        # back to: a pre-v0.40.0 subclass with its own ``__init__`` and no
+        # ``super().__init__()`` never opted any section in, so an empty mapping
+        # is the correct reading of its intent.
+        sections: dict[str, ExtraSectionRenderer | None] = getattr(
+            self, "extra_sections", {}
+        )
+        if not sections or semantic_source is None:
             return []
         # Imported locally to keep core decoupled from semantic at module scope,
         # matching _render_domains.
@@ -381,7 +411,7 @@ class XmlPromptRenderer:
             return []
         extras = semantic_source.get_extras()
         lines: list[str] = []
-        for name, render in self.extra_sections.items():
+        for name, render in sections.items():
             if name not in extras:
                 logger.warning(
                     "XmlPromptRenderer: extra_sections names %r, which the"

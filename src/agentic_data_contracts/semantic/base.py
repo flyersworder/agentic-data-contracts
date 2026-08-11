@@ -328,12 +328,29 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
             for i in source.get_metric_impacts()
         ],
     }
-    # Extras are the complement of SEMANTIC_KEYS by construction, so they cannot
-    # collide with the four keys above. Empty extras update nothing, which is why
-    # a contract without them still dumps byte-identically and no published ARD
-    # digest moves — the same omit-when-empty reasoning as decompositions.
+    # Empty extras update nothing, which is why a contract without them still
+    # dumps byte-identically and no published ARD digest moves — the same
+    # omit-when-empty reasoning as decompositions.
+    #
+    # ``YamlSource`` cannot collide here (its extras are the complement of
+    # ``SEMANTIC_KEYS``), but ``ExtensibleSemanticSource`` is public and
+    # top-level exported, so a third-party implementation returning ``metrics``
+    # would silently replace the dumped vocabulary — and ``contract_digest``
+    # would then attest to the corrupted payload. Checked against
+    # ``payload.keys()`` rather than ``SEMANTIC_KEYS``: that is the invariant
+    # that actually matters here, and importing the constant from
+    # ``yaml_source`` would be circular.
     if isinstance(source, ExtensibleSemanticSource):
-        payload.update(source.get_extras())
+        extras = source.get_extras()
+        if clash := sorted(extras.keys() & payload.keys()):
+            raise ValueError(
+                f"{type(source).__name__}.get_extras() returned key(s) {clash},"
+                " which collide with the semantic vocabulary this dump already"
+                " carries. Extras are uninterpreted carriage and must not shadow"
+                " metrics/tables/relationships/metric_impacts — the frozen"
+                " contract and its digest would attest to the overwritten value."
+            )
+        payload.update(extras)
     return payload
 
 

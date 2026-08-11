@@ -755,3 +755,60 @@ def test_non_extensible_source_renders_no_extras() -> None:
         renderer=XmlPromptRenderer(extra_sections=["column_hints"]),
     )
     assert "column_hints" not in prompt
+
+
+def test_a_bare_string_of_extra_sections_is_rejected() -> None:
+    """``str`` satisfies ``Sequence[str]``, so this would iterate characters.
+
+    Against a non-extensible source that failure is completely silent: eleven
+    single-character section names, none of them carried, nothing rendered.
+    """
+    with pytest.raises(TypeError, match=r"\['column_hints'\]"):
+        XmlPromptRenderer(extra_sections="column_hints")
+
+
+# ---------------------------------------------------------------------------
+# Pre-v0.40.0 subclasses that define their own __init__
+# ---------------------------------------------------------------------------
+
+
+class _LegacySubclass(XmlPromptRenderer):
+    """The shape that was legal before v0.40.0 gave the renderer a constructor.
+
+    With no ``__init__`` on the base class, a subclass could define its own and
+    never call ``super().__init__()``. Such a subclass has none of the instance
+    attributes the render path now reads.
+    """
+
+    def __init__(self, tag: str) -> None:  # deliberately no super().__init__()
+        self.tag = tag
+
+
+def test_legacy_subclass_without_super_init_still_renders() -> None:
+    contract = _make_minimal_contract()
+    prompt = _LegacySubclass("x").render(contract, _rel_source(5))
+    assert "<from>analytics.t0.id</from>" in prompt
+
+
+def test_legacy_subclass_falls_back_to_the_class_attribute_thresholds() -> None:
+    """Not just "does not crash": the class constants must still govern.
+
+    They were kept at v0.40.0 precisely so subclass overrides keep working, so
+    a subclass overriding the constant must degrade at *its* number.
+    """
+
+    class _LegacyLoose(_LegacySubclass):
+        RELATIONSHIP_DETAIL_THRESHOLD = 3
+        METRIC_DETAIL_THRESHOLD = 2
+
+    contract = _make_minimal_contract()
+    renderer = _LegacyLoose("x")
+    assert "join_count=" in renderer.render(contract, _rel_source(5))
+    assert "5 metrics available" in renderer.render(contract, FakeSemanticSource(5))
+
+
+def test_legacy_subclass_renders_no_extras() -> None:
+    """No ``extra_sections`` attribute means the opt-in list is empty, not a crash."""
+    contract = _make_minimal_contract()
+    prompt = _LegacySubclass("x").render(contract, _ExtrasSource(_EXTRAS))
+    assert "column_hints" not in prompt

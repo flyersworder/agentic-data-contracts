@@ -3,6 +3,7 @@
 
 def test_top_level_imports() -> None:
     from agentic_data_contracts import (
+        SEMANTIC_KEYS,
         DataContract,
         MetricDefinition,
         MetricImpact,
@@ -23,6 +24,8 @@ def test_top_level_imports() -> None:
     assert MetricImpact is not None
     assert Relationship is not None
     assert SemanticSource is not None
+    # README and the v0.41.0 CHANGELOG both promise this name at the top level.
+    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
 
 
 def test_claude_prompt_renderer_is_gone() -> None:

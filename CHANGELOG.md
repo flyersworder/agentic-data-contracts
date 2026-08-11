@@ -12,9 +12,27 @@ All notable changes to this project will be documented in this file.
 
 - **`YamlSource(..., expected_extras=...)`** and the same parameter on `from_raw`. Left as `None` (the default) uninterpreted keys are logged at WARNING and carried anyway, so every existing contract keeps loading. Pass a collection and any key outside it raises at load; `frozenset()` is therefore a strict mode. One parameter instead of a `strict=True` flag, which would have fired forever on a consumer's own deliberate sections.
 
+- **`semantic.source.expected_extras` in the contract YAML**, threading the same policy through `DataContract.from_yaml` → `load_semantic_source()`. Without it the parameter was unreachable on every path the framework itself uses: the library constructs `YamlSource` internally, so a consumer with a deliberate extras section got the "if one of these is a typo, that section is not being read at all" warning on every load and could not silence it — the "train readers to ignore the log" failure that is the whole reason not to warn on absent sections.
+
+  ```yaml
+  semantic:
+    source:
+      type: yaml
+      path: ./semantic.yml
+      expected_extras: [column_hints, join_paths]
+  ```
+
+  Applies on both load paths — the external `path` and the frozen `inline` snapshot — so declaring your sections does not stop working the moment the contract is frozen. `[]` is strict mode; an omitted key keeps warn-and-carry. Ignored for `dbt` and `cube` sources.
+
+  Deliberately **not digest-bearing**: it is a policy about reading the source, not part of what the agent sees, so it is excluded from `contract_canonical_bytes` and never moves `contract_digest`. A naively added pydantic field would have serialized as `"expected_extras": null` into every contract's canonical bytes and silently invalidated every published ARD attestation. The trade is that the declaration does not travel with a published contract: a consumer rehydrating the frozen bytes falls back to warn-and-carry.
+
 - **`ExtensibleSemanticSource`**, a `runtime_checkable` protocol carrying only `get_extras()`. Deliberately a sibling of `SemanticSource` rather than an extension of it: `runtime_checkable` isinstance checks method *presence*, so folding `get_extras` into `SemanticSource` would have made every external custom source fail `isinstance(src, SemanticSource)` on upgrade.
 
+  Because the protocol is public, `dump_semantic_source` no longer assumes extras cannot collide with the vocabulary it dumps. A third-party implementation returning `{"metrics": [...]}` would have silently replaced the dumped metrics and left `contract_digest` attesting to the corrupted payload; it now raises, naming the clashing keys.
+
 - **`XmlPromptRenderer(extra_sections=...)`**, accepting a sequence of section names (default YAML-in-a-tag formatter) or a mapping of name → callable. Nothing renders unless named, so a section kept for internal bookkeeping never leaks into a prompt; naming a section the source does not carry warns rather than failing quietly.
+
+  A bare string raises `TypeError` naming the fix. `str` satisfies `Sequence[str]` structurally, so `extra_sections="column_hints"` would have iterated characters — and against a non-extensible source that produced no warning at all, which is precisely the silence this release exists to remove.
 
 ### Changed
 

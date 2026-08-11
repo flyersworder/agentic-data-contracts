@@ -207,7 +207,7 @@ jobs:
       - run: uvx uv-secure uv.lock
 
   publish:
-    needs: [lint, test, security]
+    needs: [lint, test, examples, security]
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_publish == 'true')
     runs-on: ubuntu-latest
     permissions:

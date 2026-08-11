@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.41.0] - 2026-08-10
+## [0.41.0] - 2026-08-11
+
+Closes #60, whose three defects share one shape: **the library delivered less
+than it appeared to, with no signal to the consumer.**
+
+This release bundles three units of work, developed as 0.39.0, 0.40.0, and
+0.41.0. Neither intermediate version was published, so the upgrade path is
+**0.38.0 → 0.41.0** and the breaking rename below applies to every upgrader.
+
+### Breaking
+
+- **`ClaudePromptRenderer` is renamed to `XmlPromptRenderer`.** The class contains no Claude- or Anthropic-specific logic: the only matches for `Claude|anthropic` in `core/prompt.py` were the class name and its docstring. It emits XML tags — an Anthropic-originated prompting convention, but the artifact is plain XML that any frontier model reads.
+
+  The name had aged against the codebase. `tools/langchain.py` and `tools/pydantic_ai.py` both ship, so a Pydantic AI user's system prompt was being rendered by a class named after a runtime they had deliberately left.
+
+  A protocol implementation should be named for the axis on which implementations differ. `PromptRenderer` exists so alternatives can exist, and a second implementation would differ by output *format* — Markdown sections instead of XML tags — not by vendor. Naming by vendor invites a `GptPromptRenderer` that emits the same tags and differs in nothing.
+
+  Renamed with no deprecated alias, consistent with v0.38.0 removing `usage_limits_from_contract` outright. This is a `0.x` project at Beta status, where SemVer permits a breaking change in a minor bump.
+
+  **Migration** — one line:
+
+  ```diff
+  - from agentic_data_contracts import ClaudePromptRenderer
+  + from agentic_data_contracts import XmlPromptRenderer
+  ```
 
 ### Added
 
@@ -46,13 +70,9 @@ The framework carries extras and places them in the prompt on request. It does n
 
 Closes #60.
 
-## [0.40.0] - 2026-08-10
-
-### Added
+### Also in this release: honest prompt degradation
 
 - **`XmlPromptRenderer(metric_detail_threshold=…, relationship_detail_threshold=…)`.** Both were class constants, so the only way to opt out of prompt degradation was to subclass the renderer — meaning the consumer who actually knows their prompt budget could not express it. `None` disables degradation entirely. Omitting an argument still reads the class attribute, so existing subclass overrides are unaffected.
-
-### Changed
 
 - **Both degrading branches now log at INFO and disclose what they dropped.** Above `relationship_detail_threshold`, `_render_relationships` drops every per-relationship `<from>`/`<to>` — the actual join keys — and substitutes per-table `join_count` summaries. On a 52-relationship contract that suppresses roughly 3.1× the whole fragment (9,658 rendered chars versus 29,852 detailed). Gating large content is reasonable; gating it silently means the only way to discover it is to render the prompt and diff it against expectations, which nobody thinks to do because the block looks populated.
 
@@ -61,25 +81,6 @@ Closes #60.
   `logger.info`, not `warning`: degradation is intended behaviour under a configured budget, unlike an ignored contract key.
 
   Reported in #60.
-
-## [0.39.0] - 2026-08-10
-
-### Changed
-
-- **`ClaudePromptRenderer` is renamed to `XmlPromptRenderer`.** The class contains no Claude- or Anthropic-specific logic: the only matches for `Claude|anthropic` in `core/prompt.py` were the class name and its docstring. It emits XML tags — an Anthropic-originated prompting convention, but the artifact is plain XML that any frontier model reads.
-
-  The name had aged against the codebase. `tools/langchain.py` and `tools/pydantic_ai.py` both ship, so a Pydantic AI user's system prompt was being rendered by a class named after a runtime they had deliberately left.
-
-  A protocol implementation should be named for the axis on which implementations differ. `PromptRenderer` exists so alternatives can exist, and a second implementation would differ by output *format* — Markdown sections instead of XML tags — not by vendor. Naming by vendor invites a `GptPromptRenderer` that emits the same tags and differs in nothing.
-
-  Renamed with no deprecated alias, consistent with v0.38.0 removing `usage_limits_from_contract` outright. This is a `0.x` project at Beta status, where SemVer permits a breaking change in a minor bump.
-
-  **Migration** — one line:
-
-  ```diff
-  - from agentic_data_contracts import ClaudePromptRenderer
-  + from agentic_data_contracts import XmlPromptRenderer
-  ```
 
 ## [0.38.0] - 2026-08-03
 

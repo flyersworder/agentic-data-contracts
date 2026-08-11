@@ -3,13 +3,14 @@
 
 def test_top_level_imports() -> None:
     from agentic_data_contracts import (
-        ClaudePromptRenderer,
+        SEMANTIC_KEYS,
         DataContract,
         MetricDefinition,
         MetricImpact,
         PromptRenderer,
         Relationship,
         SemanticSource,
+        XmlPromptRenderer,
         contract_middleware,
         create_tools,
     )
@@ -18,11 +19,21 @@ def test_top_level_imports() -> None:
     assert create_tools is not None
     assert contract_middleware is not None
     assert PromptRenderer is not None
-    assert ClaudePromptRenderer is not None
+    assert XmlPromptRenderer is not None
     assert MetricDefinition is not None
     assert MetricImpact is not None
     assert Relationship is not None
     assert SemanticSource is not None
+    # README and the v0.41.0 CHANGELOG both promise this name at the top level.
+    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
+
+
+def test_claude_prompt_renderer_is_gone() -> None:
+    """v0.39.0 renamed it with no alias — a stale import must fail loudly."""
+    import agentic_data_contracts
+
+    assert not hasattr(agentic_data_contracts, "ClaudePromptRenderer")
+    assert "ClaudePromptRenderer" not in agentic_data_contracts.__all__
 
 
 def test_ard_publish_imports() -> None:
@@ -89,11 +100,17 @@ def test_adapter_imports() -> None:
 
 
 def test_semantic_imports() -> None:
-    from agentic_data_contracts.semantic.base import MetricDefinition, SemanticSource  # noqa: F401, I001
-    from agentic_data_contracts.semantic.yaml_source import YamlSource
+    from agentic_data_contracts.semantic.base import (  # noqa: F401, I001
+        ExtensibleSemanticSource,
+        MetricDefinition,
+        SemanticSource,
+    )
+    from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS, YamlSource
 
     assert SemanticSource is not None
+    assert ExtensibleSemanticSource is not None
     assert YamlSource is not None
+    assert SEMANTIC_KEYS
 
 
 def test_tools_imports() -> None:

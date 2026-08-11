@@ -2,6 +2,86 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.0] - 2026-08-11
+
+Closes #60, whose three defects share one shape: **the library delivered less
+than it appeared to, with no signal to the consumer.**
+
+This release bundles three units of work, developed as 0.39.0, 0.40.0, and
+0.41.0. Neither intermediate version was published, so the upgrade path is
+**0.38.0 → 0.41.0** and the breaking rename below applies to every upgrader.
+
+### Breaking
+
+- **`ClaudePromptRenderer` is renamed to `XmlPromptRenderer`.** The class contains no Claude- or Anthropic-specific logic: the only matches for `Claude|anthropic` in `core/prompt.py` were the class name and its docstring. It emits XML tags — an Anthropic-originated prompting convention, but the artifact is plain XML that any frontier model reads.
+
+  The name had aged against the codebase. `tools/langchain.py` and `tools/pydantic_ai.py` both ship, so a Pydantic AI user's system prompt was being rendered by a class named after a runtime they had deliberately left.
+
+  A protocol implementation should be named for the axis on which implementations differ. `PromptRenderer` exists so alternatives can exist, and a second implementation would differ by output *format* — Markdown sections instead of XML tags — not by vendor. Naming by vendor invites a `GptPromptRenderer` that emits the same tags and differs in nothing.
+
+  Renamed with no deprecated alias, consistent with v0.38.0 removing `usage_limits_from_contract` outright. This is a `0.x` project at Beta status, where SemVer permits a breaking change in a minor bump.
+
+  **Migration** — one line:
+
+  ```diff
+  - from agentic_data_contracts import ClaudePromptRenderer
+  + from agentic_data_contracts import XmlPromptRenderer
+  ```
+
+### Added
+
+- **`YamlSource` now carries every top-level key it does not interpret**, reachable via `get_extras()` and exported as `SEMANTIC_KEYS`. Previously `_load_from_raw` read exactly four keys and discarded the rest with no error, no warning, and no log line — so adding an unsupported section was indistinguishable from success. A downstream consumer carried two custom sections in a production semantic YAML for roughly three weeks: well-formed, internally consistent, covered by a dedicated lint job and ~240 lines of tests, and contributing nothing to any rendered prompt or tool output the entire time. There was no symptom to investigate; it surfaced only when someone rendered `to_system_prompt()` in a scratch script and grepped the output for their own content.
+
+  A one-character typo had the same consequence — `relationship:` for `relationships:` deleted a whole section while the library reported success — and that is the more common way this gets hit.
+
+- **`YamlSource(..., expected_extras=...)`** and the same parameter on `from_raw`. Left as `None` (the default) uninterpreted keys are logged at WARNING and carried anyway, so every existing contract keeps loading. Pass a collection and any key outside it raises at load; `frozenset()` is therefore a strict mode. One parameter instead of a `strict=True` flag, which would have fired forever on a consumer's own deliberate sections.
+
+- **`semantic.source.expected_extras` in the contract YAML**, threading the same policy through `DataContract.from_yaml` → `load_semantic_source()`. Without it the parameter was unreachable on every path the framework itself uses: the library constructs `YamlSource` internally, so a consumer with a deliberate extras section got the "if one of these is a typo, that section is not being read at all" warning on every load and could not silence it — the "train readers to ignore the log" failure that is the whole reason not to warn on absent sections.
+
+  ```yaml
+  semantic:
+    source:
+      type: yaml
+      path: ./semantic.yml
+      expected_extras: [column_hints, join_paths]
+  ```
+
+  Applies on both load paths — the external `path` and the frozen `inline` snapshot — so declaring your sections does not stop working the moment the contract is frozen. `[]` is strict mode; an omitted key keeps warn-and-carry. Ignored for `dbt` and `cube` sources.
+
+  Deliberately **not digest-bearing**: it is a policy about reading the source, not part of what the agent sees, so it is excluded from `contract_canonical_bytes` and never moves `contract_digest`. A naively added pydantic field would have serialized as `"expected_extras": null` into every contract's canonical bytes and silently invalidated every published ARD attestation. The trade is that the declaration does not travel with a published contract: a consumer rehydrating the frozen bytes falls back to warn-and-carry.
+
+- **`ExtensibleSemanticSource`**, a `runtime_checkable` protocol carrying only `get_extras()`. Deliberately a sibling of `SemanticSource` rather than an extension of it: `runtime_checkable` isinstance checks method *presence*, so folding `get_extras` into `SemanticSource` would have made every external custom source fail `isinstance(src, SemanticSource)` on upgrade.
+
+  Because the protocol is public, `dump_semantic_source` no longer assumes extras cannot collide with the vocabulary it dumps. A third-party implementation returning `{"metrics": [...]}` would have silently replaced the dumped metrics and left `contract_digest` attesting to the corrupted payload; it now raises, naming the clashing keys.
+
+- **`XmlPromptRenderer(extra_sections=...)`**, accepting a sequence of section names (default YAML-in-a-tag formatter) or a mapping of name → callable. Nothing renders unless named, so a section kept for internal bookkeeping never leaks into a prompt; naming a section the source does not carry warns rather than failing quietly.
+
+  A bare string raises `TypeError` naming the fix. `str` satisfies `Sequence[str]` structurally, so `extra_sections="column_hints"` would have iterated characters — and against a non-extensible source that produced no warning at all, which is precisely the silence this release exists to remove.
+
+### Changed
+
+- **Extras travel through `freeze_semantic_source()` and into `contract_digest`.** They are resident prompt text, so they shape agent behaviour; a digest that ignored them would let the ARD publish→verify loop attest to something different from what the agent saw. Editing a hint's prose therefore moves the digest and invalidates a pinned attestation. Contracts *without* extras dump byte-identically to before, so no existing frozen contract or published digest moves.
+
+- **Extras values are normalised to JSON-safe types at load.** Dates and datetimes become ISO strings — the shape this exists to carry explicitly wants a verification date — and anything else unserializable raises immediately, naming the key path. At load rather than at freeze, so a bad value fails where it was authored instead of months later inside an ARD publish.
+
+### Compatibility
+
+The framework carries extras and places them in the prompt on request. It does not interpret, validate, index, or compute over their content: no schema checking, no staleness detection, no tool serves them. That boundary is the same one `validation/examples.py` draws for verified examples, and it is why `column_hints` and `join_paths` — the two sections that prompted #60 — ship as the documented *example* of extras rather than as framework vocabulary.
+
+Closes #60.
+
+### Also in this release: honest prompt degradation
+
+- **`XmlPromptRenderer(metric_detail_threshold=…, relationship_detail_threshold=…)`.** Both were class constants, so the only way to opt out of prompt degradation was to subclass the renderer — meaning the consumer who actually knows their prompt budget could not express it. `None` disables degradation entirely. Omitting an argument still reads the class attribute, so existing subclass overrides are unaffected.
+
+- **Both degrading branches now log at INFO and disclose what they dropped.** Above `relationship_detail_threshold`, `_render_relationships` drops every per-relationship `<from>`/`<to>` — the actual join keys — and substitutes per-table `join_count` summaries. On a 52-relationship contract that suppresses roughly 3.1× the whole fragment (9,658 rendered chars versus 29,852 detailed). Gating large content is reasonable; gating it silently means the only way to discover it is to render the prompt and diff it against expectations, which nobody thinks to do because the block looks populated.
+
+  The rendered hint now names the omission and the threshold, and a log line names the count, the threshold, and the parameter that turns it off. `_render_metrics` gets the same treatment against `metric_detail_threshold`, which had the identical shape and the same gap.
+
+  `logger.info`, not `warning`: degradation is intended behaviour under a configured budget, unlike an ignored contract key.
+
+  Reported in #60.
+
 ## [0.38.0] - 2026-08-03
 
 ### Removed

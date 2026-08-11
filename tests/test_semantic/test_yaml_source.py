@@ -1,10 +1,16 @@
+import json
+import logging
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
 from agentic_data_contracts.semantic.base import SemanticSource
-from agentic_data_contracts.semantic.yaml_source import YamlSource, _parse_date
+from agentic_data_contracts.semantic.yaml_source import (
+    SEMANTIC_KEYS,
+    YamlSource,
+    _parse_date,
+)
 
 
 @pytest.fixture
@@ -90,3 +96,122 @@ def test_parse_date_malformed_string_raises_clear_error() -> None:
     """A bad ISO string fails fast with a message naming the offending value."""
     with pytest.raises(ValueError, match="last_reviewed must be an ISO date"):
         _parse_date("2020-13-01")
+
+
+def test_unknown_top_level_keys_are_kept_as_extras() -> None:
+    """Issue #60's reproduction: an unsupported section must not vanish."""
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "widget_hints": [{"table": "t", "prefer": "a", "over": "b"}],
+        }
+    )
+    assert src.get_extras() == {
+        "widget_hints": [{"table": "t", "prefer": "a", "over": "b"}]
+    }
+
+
+def test_interpreted_keys_never_appear_in_extras() -> None:
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "tables": [],
+            "relationships": [],
+            "metric_impacts": [],
+            "column_hints": [{"table": "t", "prefer": "a"}],
+        }
+    )
+    assert set(src.get_extras()) == {"column_hints"}
+
+
+def test_no_extras_is_an_empty_dict() -> None:
+    assert YamlSource.from_raw({"metrics": []}).get_extras() == {}
+
+
+def test_semantic_keys_matches_what_the_parser_reads() -> None:
+    """Guards the constant against drift when a new section is added."""
+    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
+
+
+def test_get_extras_returns_a_copy() -> None:
+    src = YamlSource.from_raw({"metrics": [], "notes": ["a"]})
+    src.get_extras()["notes"] = ["mutated"]
+    assert src.get_extras() == {"notes": ["a"]}
+
+
+def test_extras_warn_by_default(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        YamlSource.from_raw({"metrics": [], "widget_hints": []})
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "widget_hints" in joined
+    assert "get_extras()" in joined
+
+
+def test_no_warning_when_there_are_no_extras(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        YamlSource.from_raw({"metrics": []})
+    assert caplog.records == []
+
+
+def test_expected_extras_silences_declared_sections(caplog) -> None:  # noqa: ANN001
+    logger_name = "agentic_data_contracts.semantic.yaml_source"
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        src = YamlSource.from_raw(
+            {"metrics": [], "column_hints": []},
+            expected_extras={"column_hints"},
+        )
+    assert caplog.records == []
+    assert set(src.get_extras()) == {"column_hints"}
+
+
+def test_expected_extras_raises_on_an_undeclared_key() -> None:
+    with pytest.raises(ValueError, match="widget_hints"):
+        YamlSource.from_raw(
+            {"metrics": [], "widget_hints": []},
+            expected_extras={"column_hints"},
+        )
+
+
+def test_empty_expected_extras_is_strict_mode() -> None:
+    with pytest.raises(ValueError, match="anything"):
+        YamlSource.from_raw({"metrics": [], "anything": 1}, expected_extras=frozenset())
+
+
+def test_typo_in_a_supported_key_is_caught_by_expected_extras() -> None:
+    """`relationship:` for `relationships:` silently deleted a section before."""
+    with pytest.raises(ValueError, match="relationship"):
+        YamlSource.from_raw(
+            {"metrics": [], "relationship": [{"from": "a.b.c", "to": "d.e.f"}]},
+            expected_extras=frozenset(),
+        )
+
+
+def test_yaml_native_date_in_extras_becomes_an_iso_string() -> None:
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "column_hints": [{"table": "t", "verified": date(2026, 3, 14)}],
+        }
+    )
+    assert src.get_extras()["column_hints"][0]["verified"] == "2026-03-14"
+
+
+def test_datetime_in_extras_is_normalised_to_a_date_string() -> None:
+    src = YamlSource.from_raw(
+        {"metrics": [], "notes": {"at": datetime(2026, 3, 14, 12, 0, 0)}}
+    )
+    assert src.get_extras()["notes"]["at"] == "2026-03-14"
+
+
+def test_normalised_extras_are_json_serialisable() -> None:
+    src = YamlSource.from_raw(
+        {"metrics": [], "column_hints": [{"verified": date(2026, 3, 14)}]}
+    )
+    assert json.dumps(src.get_extras())  # must not raise
+
+
+def test_unserialisable_extras_value_raises_naming_the_path() -> None:
+    with pytest.raises(ValueError, match=r"column_hints\[0\]\.owner"):
+        YamlSource.from_raw({"metrics": [], "column_hints": [{"owner": {1, 2, 3}}]})

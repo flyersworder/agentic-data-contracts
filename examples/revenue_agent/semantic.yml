@@ -90,3 +90,55 @@ metric_impacts:
     evidence: "Directional hypothesis — not yet backed by an A/B test"
     description: "More distinct active customers in a period typically lifts total revenue."
     last_reviewed: 2026-04-18  # bump when you re-verify the causal claim
+
+# ── Extras ────────────────────────────────────────────────────────────────────
+# Everything below is a *consumer-authored* section. The library carries it
+# verbatim and places it in the prompt when asked; it never interprets it. The
+# contract declares both names in `semantic.source.expected_extras`, so a typo
+# here raises at load instead of silently deleting the section.
+#
+# Both exist to prevent an error *before* the model writes SQL, which is why
+# they live in the resident prompt rather than behind a tool: a tool only helps
+# an agent that already suspects it is wrong.
+
+column_hints:
+  # A hint is not a constraint. A constraint says "you may not use this"; a hint
+  # says "this isn't there — here is the real name."
+  - table: analytics.orders
+    prefer: amount
+    over: revenue
+    blocked: [total, order_total]
+    reason: >-
+      The money column is `amount`. Models reach for `revenue` because the
+      metrics are named that way, but no such column exists.
+      Verified against the warehouse on 2026-05-15.
+  - table: analytics.orders
+    prefer: created_at
+    over: order_date
+    reason: >-
+      Order timestamps are `created_at`. Verified 2026-05-15.
+  - table: analytics.subscriptions
+    prefer: analytics.customers.region
+    over: region
+    reason: >-
+      Subscriptions carry no geography of their own — region lives on the
+      customer. Use the orders_to_subscriptions path below rather than
+      inventing a column.
+
+join_paths:
+  # Note the quoted "on": unquoted, YAML 1.1 resolves `on` to boolean true, so
+  # the key would silently become `True` and your join column would vanish.
+  # Quoting is the fix; the same applies to `yes`, `no`, and `off`.
+  - name: orders_to_subscriptions
+    description: >-
+      Attribute an order to the customer's subscription plan. There is no
+      direct edge; both hops route through `customers`.
+    path:
+      - {from: analytics.orders, to: analytics.customers, "on": customer_id}
+      - {from: analytics.subscriptions, to: analytics.customers, "on": customer_id}
+    notes: >-
+      The orders→customers hop carries `required_filter: status != 'cancelled'`.
+      Traversing without it counts cancelled orders against a plan and inflates
+      per-plan revenue — the query still validates, so nothing tells you.
+      Only 3 of 5 customers have a subscription, so use a LEFT JOIN unless you
+      deliberately want to drop unsubscribed customers.

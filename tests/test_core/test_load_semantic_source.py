@@ -1,5 +1,6 @@
 """Tests for DataContract.load_semantic_source() auto-loading."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -267,3 +268,136 @@ def test_freeze_is_idempotent_and_noop_without_source() -> None:
     sentinel = source.inline
     dc.freeze_semantic_source()
     assert source.inline is sentinel
+
+
+# ---------------------------------------------------------------------------
+# semantic.source.expected_extras — declaring extras from the contract YAML
+# ---------------------------------------------------------------------------
+
+_YAML_SOURCE_LOGGER = "agentic_data_contracts.semantic.yaml_source"
+
+_SEMANTIC_WITH_EXTRAS = (
+    "metrics: []\ncolumn_hints:\n  - table: analytics.orders\n    prefer: order_total\n"
+)
+
+
+def _write_contract(tmp_path: Path, *, expected_extras: str = "") -> DataContract:
+    """A contract at ``tmp_path`` pointing at a semantic YAML carrying extras.
+
+    *expected_extras* is spliced in as raw YAML so these tests exercise the real
+    parse path — the distinction between an omitted key and an empty list is
+    exactly what is under test, and building the model by hand would skip it.
+    """
+    (tmp_path / "semantic.yml").write_text(_SEMANTIC_WITH_EXTRAS)
+    (tmp_path / "contract.yml").write_text(
+        "name: test\n"
+        "semantic:\n"
+        "  source:\n"
+        "    type: yaml\n"
+        "    path: semantic.yml\n" + expected_extras
+    )
+    return DataContract.from_yaml(tmp_path / "contract.yml")
+
+
+def _yaml_source_logs(caplog) -> list[str]:  # noqa: ANN001
+    return [r.getMessage() for r in caplog.records if r.name == _YAML_SOURCE_LOGGER]
+
+
+def test_expected_extras_from_yaml_silences_the_load_warning(
+    tmp_path: Path,
+    caplog,  # noqa: ANN001
+) -> None:
+    """The whole point: a consumer with deliberate extras can stop the warning.
+
+    With no way to declare them from the contract, ``from_yaml`` +
+    ``load_semantic_source`` warned on every load and could not be silenced —
+    which trains readers to ignore the log.
+    """
+    dc = _write_contract(
+        tmp_path, expected_extras="    expected_extras: [column_hints]\n"
+    )
+    with caplog.at_level(logging.WARNING, logger=_YAML_SOURCE_LOGGER):
+        source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert source.get_extras() == {
+        "column_hints": [{"table": "analytics.orders", "prefer": "order_total"}]
+    }
+    assert _yaml_source_logs(caplog) == []
+
+
+def test_expected_extras_from_yaml_turns_a_typo_into_a_load_error(
+    tmp_path: Path,
+) -> None:
+    dc = _write_contract(
+        tmp_path, expected_extras="    expected_extras: [join_paths]\n"
+    )
+    with pytest.raises(ValueError, match="column_hints"):
+        dc.load_semantic_source()
+
+
+def test_empty_expected_extras_from_yaml_is_strict_mode(tmp_path: Path) -> None:
+    """``[]`` must not collapse to ``None``: it means "no extras at all"."""
+    dc = _write_contract(tmp_path, expected_extras="    expected_extras: []\n")
+    source_config = dc.schema.semantic.source
+    assert source_config is not None
+    assert source_config.expected_extras == []  # survived the parse as a list
+    with pytest.raises(ValueError, match="column_hints"):
+        dc.load_semantic_source()
+
+
+def test_omitted_expected_extras_still_warns_and_carries(
+    tmp_path: Path,
+    caplog,  # noqa: ANN001
+) -> None:
+    """Absent means warn-and-carry, so every existing contract keeps loading."""
+    dc = _write_contract(tmp_path)
+    source_config = dc.schema.semantic.source
+    assert source_config is not None
+    assert source_config.expected_extras is None
+    with caplog.at_level(logging.WARNING, logger=_YAML_SOURCE_LOGGER):
+        source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert set(source.get_extras()) == {"column_hints"}
+    assert any("column_hints" in m for m in _yaml_source_logs(caplog))
+
+
+def test_expected_extras_applies_to_the_inline_branch_too(tmp_path: Path) -> None:
+    """A frozen contract rehydrates through ``from_raw``, which must see it too.
+
+    Otherwise declaring the sections silences the warning right up until the
+    contract is frozen for publication, and then it returns forever.
+    """
+    dc = _write_contract(
+        tmp_path, expected_extras="    expected_extras: [column_hints]\n"
+    )
+    dc.freeze_semantic_source()
+    source_config = dc.schema.semantic.source
+    assert source_config is not None
+    assert source_config.inline is not None
+    assert source_config.path is None  # the inline branch from here on
+    assert source_config.expected_extras == ["column_hints"]  # survives the freeze
+
+    source = dc.load_semantic_source()
+    assert isinstance(source, YamlSource)
+    assert set(source.get_extras()) == {"column_hints"}
+
+    # And it is genuinely enforced on that branch, not merely tolerated.
+    source_config.expected_extras = []
+    with pytest.raises(ValueError, match="column_hints"):
+        dc.load_semantic_source()
+
+
+def test_expected_extras_is_ignored_for_non_yaml_sources(fixtures_dir: Path) -> None:
+    """Only ``YamlSource`` takes the parameter; dbt/cube must not be passed it."""
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="dbt",
+                path=str(fixtures_dir / "sample_dbt_manifest.json"),
+                expected_extras=["column_hints"],
+            ),
+        ),
+    )
+    source = DataContract(schema).load_semantic_source()
+    assert isinstance(source, DbtSource)

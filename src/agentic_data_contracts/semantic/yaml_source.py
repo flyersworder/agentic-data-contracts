@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Collection
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,98 @@ from agentic_data_contracts.semantic.base import (
     validate_decompositions,
     validate_drill_by,
 )
+
+logger = logging.getLogger(__name__)
+
+#: Top-level keys ``_load_from_raw`` interprets. Everything else in a semantic
+#: YAML is carried verbatim as "extras" — see ``YamlSource.get_extras``. Exported
+#: so a consumer can assert against it instead of hardcoding a list that drifts on
+#: the next release.
+SEMANTIC_KEYS = frozenset({"metrics", "tables", "relationships", "metric_impacts"})
+
+
+def _apply_extras_policy(
+    extras: dict[str, Any],
+    expected_extras: Collection[str] | None,
+) -> None:
+    """Warn about, or reject, top-level keys the parser does not interpret.
+
+    A deliberate custom section and a typo (``relationship:`` for
+    ``relationships:``) are indistinguishable at this layer, so the default
+    warning must serve both: it names the keys, the interpreted set, and the
+    remedy. Passing *expected_extras* turns the typo case into a load-time error
+    while staying silent for sections the consumer declared — which a bare
+    ``strict=True`` flag could not do, since it would fire forever on a
+    consumer's own deliberate extras.
+
+    Deliberately not memoised, for the reason recorded on
+    ``_warn_unenforceable_operations`` in ``validation/validator.py``: caching a
+    logging side effect means a consumer that calls ``logging.basicConfig()``
+    after building its contracts loses the diagnostic permanently.
+    """
+    if not extras:
+        return
+    if expected_extras is None:
+        logger.warning(
+            "YamlSource: top-level keys not interpreted as semantic vocabulary:"
+            " %s (interpreted keys: %s). They are carried and reachable via"
+            " get_extras(), but reach a prompt only if named in"
+            " XmlPromptRenderer(extra_sections=...). If one of these is a typo,"
+            " that section is not being read at all.",
+            sorted(extras),
+            sorted(SEMANTIC_KEYS),
+        )
+        return
+    unexpected = sorted(set(extras) - set(expected_extras))
+    if unexpected:
+        raise ValueError(
+            f"YamlSource: unexpected top-level keys {unexpected}; declared"
+            f" expected_extras={sorted(expected_extras)}, interpreted keys="
+            f"{sorted(SEMANTIC_KEYS)}"
+        )
+
+
+def _normalize_extras(extras: dict[str, Any]) -> dict[str, Any]:
+    """Return *extras* with dates ISO-coerced and JSON-safety enforced.
+
+    Extras ride inside ``SemanticSource.inline`` and therefore through
+    ``contract_canonical_bytes``' ``json.dumps``. A YAML-native date is not JSON,
+    and the guidance extras exist to carry explicitly wants one ("verified
+    against the database on ..."). Checking at load means a bad value fails where
+    it was authored, rather than months later inside an ARD publish.
+    """
+    return {k: _jsonify(v, (k,)) for k, v in extras.items()}
+
+
+def _jsonify(value: Any, path: tuple[str | int, ...]) -> Any:
+    """Recursively coerce *value* to JSON-safe types, or raise naming *path*.
+
+    ``datetime`` is checked before ``date`` because it subclasses ``date`` — the
+    same ordering trap ``_parse_date`` documents.
+    """
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _jsonify(v, (*path, str(k))) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonify(v, (*path, i)) for i, v in enumerate(value)]
+    if value is None or isinstance(value, str | int | float):
+        return value
+    raise ValueError(
+        f"YamlSource: extras value at {_fmt_path(path)} is not JSON-serializable"
+        f" ({type(value).__name__}). Extras are carried into the frozen contract"
+        f" and its digest, so they must be JSON-safe."
+    )
+
+
+def _fmt_path(path: tuple[str | int, ...]) -> str:
+    """Render a key path as ``section[0].field`` for an actionable error."""
+    rendered = str(path[0])
+    for part in path[1:]:
+        rendered += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return rendered
 
 
 def _parse_date(value: Any) -> date | None:
@@ -52,22 +146,42 @@ def _parse_date(value: Any) -> date | None:
 class YamlSource:
     """Loads metric and table definitions from a YAML file."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        expected_extras: Collection[str] | None = None,
+    ) -> None:
         raw = yaml.safe_load(Path(path).read_text())
-        self._load_from_raw(raw if raw is not None else {})
+        self._load_from_raw(
+            raw if raw is not None else {}, expected_extras=expected_extras
+        )
 
     @classmethod
-    def from_raw(cls, raw: dict[str, Any]) -> YamlSource:
+    def from_raw(
+        cls,
+        raw: dict[str, Any],
+        *,
+        expected_extras: Collection[str] | None = None,
+    ) -> YamlSource:
         """Build a source from already-parsed semantic data — no file access.
 
         The inverse of :func:`dump_semantic_source`; lets a frozen contract carry
         its semantics inline and rebuild them on a consumer with no filesystem.
         """
         obj = cls.__new__(cls)
-        obj._load_from_raw(raw)
+        obj._load_from_raw(raw, expected_extras=expected_extras)
         return obj
 
-    def _load_from_raw(self, raw: dict[str, Any]) -> None:
+    def _load_from_raw(
+        self,
+        raw: dict[str, Any],
+        *,
+        expected_extras: Collection[str] | None = None,
+    ) -> None:
+        extras = {k: v for k, v in raw.items() if k not in SEMANTIC_KEYS}
+        _apply_extras_policy(extras, expected_extras)
+        self._extras: dict[str, Any] = _normalize_extras(extras)
         self._metrics = []
         for m in raw.get("metrics", []):
             tier_raw = m.get("tier", [])
@@ -168,3 +282,15 @@ class YamlSource:
 
     def get_metric_impacts(self) -> list[MetricImpact]:
         return list(self._metric_impacts)
+
+    def get_extras(self) -> dict[str, Any]:
+        """Top-level keys this parser does not interpret, carried verbatim.
+
+        The framework never interprets, validates, indexes, or computes over this
+        content — it only carries it and, on request, places it in the prompt.
+        Anything needing interpretation is a candidate for real vocabulary, not
+        for extras.
+
+        Shallow copy, consistent with ``get_metrics`` and ``get_relationships``.
+        """
+        return dict(self._extras)

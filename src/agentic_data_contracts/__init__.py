@@ -12,13 +12,15 @@ from agentic_data_contracts.core.contract import (
     SemanticSourceUnavailableError,
 )
 from agentic_data_contracts.core.principal import Principal, resolve_principal
-from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRenderer
+from agentic_data_contracts.core.prompt import PromptRenderer, XmlPromptRenderer
 from agentic_data_contracts.semantic.base import (
+    ExtensibleSemanticSource,
     MetricDefinition,
     MetricImpact,
     Relationship,
     SemanticSource,
 )
+from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS
 from agentic_data_contracts.tools.factory import RowFormat, create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
@@ -53,10 +55,11 @@ except ImportError:  # pragma: no cover — exercised only without the extra
     create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
 
 __all__ = [
-    "ClaudePromptRenderer",
+    "SEMANTIC_KEYS",
     "ContractDeps",
     "ContractMiddleware",
     "DataContract",
+    "ExtensibleSemanticSource",
     "MetricDefinition",
     "MetricImpact",
     "Principal",
@@ -66,6 +69,7 @@ __all__ = [
     "SemanticSource",
     "SemanticSourceUnavailableError",
     "SqlNormalizer",
+    "XmlPromptRenderer",
     "build_ai_catalog",
     "build_catalog_entry",
     "contract_canonical_bytes",

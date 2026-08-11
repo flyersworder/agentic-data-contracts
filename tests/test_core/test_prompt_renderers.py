@@ -1,11 +1,15 @@
-"""Tests for PromptRenderer protocol and ClaudePromptRenderer."""
+"""Tests for PromptRenderer protocol and XmlPromptRenderer."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.core.prompt import ClaudePromptRenderer, PromptRenderer
+from agentic_data_contracts.core.prompt import PromptRenderer, XmlPromptRenderer
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
@@ -121,7 +125,7 @@ def _make_minimal_contract() -> DataContract:
 
 
 def test_claude_renderer_satisfies_protocol() -> None:
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     assert isinstance(renderer, PromptRenderer)
 
 
@@ -132,7 +136,7 @@ def test_claude_renderer_satisfies_protocol() -> None:
 
 def test_claude_renderer_allowed_tables(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert '<data_contract name="revenue-analysis">' in output
@@ -170,7 +174,7 @@ def test_claude_renderer_allowed_tables_with_schema_annotations() -> None:
             ],
         ),
     )
-    output = ClaudePromptRenderer().render(DataContract(schema))
+    output = XmlPromptRenderer().render(DataContract(schema))
 
     # Annotated schemas appear with their metadata.
     assert 'name="analytics"' in output
@@ -192,7 +196,7 @@ def test_claude_renderer_allowed_tables_with_schema_annotations() -> None:
 
 def test_claude_renderer_constraints(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<constraints>" in output
@@ -222,7 +226,7 @@ def test_claude_renderer_constraints(fixtures_dir: Path) -> None:
 
 def test_claude_renderer_resource_limits(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<resource_limits>" in output
@@ -246,7 +250,7 @@ def test_claude_renderer_resource_limits(fixtures_dir: Path) -> None:
 
 def test_claude_renderer_no_resources() -> None:
     contract = _make_minimal_contract()
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<resource_limits>" not in output
@@ -255,7 +259,7 @@ def test_claude_renderer_no_resources() -> None:
 def test_claude_renderer_no_constraints() -> None:
     """Contracts with no forbidden ops or rules omit the constraints section."""
     contract = _make_minimal_contract()
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract)
 
     assert "<constraints>" not in output
@@ -269,7 +273,7 @@ def test_claude_renderer_no_constraints() -> None:
 def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
     source = YamlSource(fixtures_dir / "semantic_source.yml")
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     # valid_contract.yml has domains, so we get <available_domains> instead
@@ -287,7 +291,7 @@ def test_claude_renderer_metrics_small_set(fixtures_dir: Path) -> None:
 def test_claude_renderer_metrics_large_set_with_domains() -> None:
     contract = _make_contract_with_domains()
     source = FakeSemanticSource(30)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<available_domains>" in output
@@ -312,7 +316,7 @@ def test_claude_renderer_metrics_large_set_no_domains() -> None:
     )
     contract = DataContract(schema)
     source = FakeSemanticSource(30)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<available_metrics>" in output
@@ -331,7 +335,7 @@ def test_claude_renderer_no_semantic_source_with_config_and_domains(
 ) -> None:
     """Contract with domains + source config but no source object → domain index."""
     contract = _load(fixtures_dir)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
     assert "<available_domains>" in output
@@ -355,7 +359,7 @@ def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
         ),
     )
     contract = DataContract(schema)
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=None)
 
     assert "<semantic_source>" in output
@@ -373,7 +377,7 @@ def test_claude_renderer_no_semantic_source_with_config_no_domains() -> None:
 def test_claude_renderer_relationships(fixtures_dir: Path) -> None:
     contract = _load(fixtures_dir)
     source = YamlSource(fixtures_dir / "semantic_source.yml")
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<table_relationships>" in output
@@ -397,7 +401,7 @@ def test_claude_renderer_relationship_preferred_attribute(
             ],
         ),
     )
-    output = ClaudePromptRenderer().render(DataContract(schema), semantic_source=source)
+    output = XmlPromptRenderer().render(DataContract(schema), semantic_source=source)
 
     # Preferred edge carries the attribute on its <relationship> tag.
     assert 'preferred="true"' in output
@@ -413,7 +417,7 @@ def test_claude_renderer_relationship_preferred_attribute(
 def test_claude_renderer_no_relationships() -> None:
     contract = _make_minimal_contract()
     source = FakeSemanticSource(5)  # get_relationships() returns []
-    renderer = ClaudePromptRenderer()
+    renderer = XmlPromptRenderer()
     output = renderer.render(contract, semantic_source=source)
 
     assert "<table_relationships>" not in output
@@ -493,3 +497,318 @@ def test_fallback_omits_path_for_frozen_contract(fixtures_dir: Path) -> None:
     prompt = dc.to_system_prompt()  # no semantic_source -> fallback renders
     assert "<path>None</path>" not in prompt
     assert "<path>" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Constructor-parameter detail thresholds
+# ---------------------------------------------------------------------------
+
+
+def _rel_source(count: int):  # noqa: ANN202
+    """A source carrying `count` distinct relationships and nothing else."""
+
+    class _Source(FakeSemanticSource):
+        def __init__(self) -> None:
+            super().__init__(0)
+            self._rels = [
+                Relationship(
+                    from_=f"analytics.t{i}.id",
+                    to=f"analytics.t{i + 1}.t{i}_id",
+                    description=f"join {i}",
+                )
+                for i in range(count)
+            ]
+
+        def get_relationships(self) -> list[Relationship]:
+            return list(self._rels)
+
+    return _Source()
+
+
+def test_relationship_threshold_none_never_degrades() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=None),
+    )
+    assert "<from>analytics.t0.id</from>" in prompt
+    assert "join_count=" not in prompt
+
+
+def test_threshold_below_default_degrades_earlier_than_the_class_default() -> None:
+    """5 relationships degrade at 3 but would NOT degrade at the class default 30."""
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(5),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=3),
+    )
+    assert "join_count=" in prompt
+    assert "<from>analytics.t0.id</from>" not in prompt
+
+
+def test_threshold_above_default_keeps_detail_the_class_default_would_drop() -> None:
+    """52 relationships keep detail at 100 but WOULD degrade at the class default 30."""
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=100),
+    )
+    assert "<from>analytics.t0.id</from>" in prompt
+    assert "join_count=" not in prompt
+
+
+def test_omitted_threshold_falls_back_to_class_attribute() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(_rel_source(52), renderer=XmlPromptRenderer())
+    assert "join_count=" in prompt  # class default of 30 still applies
+
+
+def test_subclass_class_attribute_still_wins_over_default() -> None:
+    class Loose(XmlPromptRenderer):
+        RELATIONSHIP_DETAIL_THRESHOLD = 100
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(_rel_source(52), renderer=Loose())
+    assert "<from>analytics.t0.id</from>" in prompt
+
+
+def test_metric_threshold_none_never_degrades() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(30),
+        renderer=XmlPromptRenderer(metric_detail_threshold=None),
+    )
+    assert '<metric name="metric_0">' in prompt
+    assert "metrics available" not in prompt
+
+
+def test_metric_threshold_below_default_degrades_earlier() -> None:
+    """5 metrics go compact at 3 but would stay detailed at the class default 20."""
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(5),
+        renderer=XmlPromptRenderer(metric_detail_threshold=3),
+    )
+    assert "5 metrics available" in prompt
+    assert '<metric name="metric_0">' not in prompt
+
+
+def test_metric_subclass_class_attribute_still_wins_over_default() -> None:
+    class Loose(XmlPromptRenderer):
+        METRIC_DETAIL_THRESHOLD = 100
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(FakeSemanticSource(30), renderer=Loose())
+    assert '<metric name="metric_0">' in prompt
+
+
+# ---------------------------------------------------------------------------
+# Degradation is logged and disclosed, not silent
+# ---------------------------------------------------------------------------
+
+_PROMPT_LOGGER = "agentic_data_contracts.core.prompt"
+
+
+def _prompt_logs(caplog) -> list[str]:  # noqa: ANN001
+    """Fully-formatted messages from the prompt logger only.
+
+    ``caplog.records`` collects records from *every* logger that propagates, so
+    filtering by name is what keeps these assertions from breaking when an
+    unrelated library logs during the same call.
+    """
+    return [r.getMessage() for r in caplog.records if r.name == _PROMPT_LOGGER]
+
+
+def test_relationship_degradation_logs(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(
+            _rel_source(52),
+            renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+        )
+    assert any(
+        "52 relationships exceeds relationship_detail_threshold=30" in m
+        for m in _prompt_logs(caplog)
+    )
+
+
+def test_relationship_degradation_hint_names_what_it_dropped() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _rel_source(52),
+        renderer=XmlPromptRenderer(relationship_detail_threshold=30),
+    )
+    assert "join keys omitted above threshold 30" in prompt
+
+
+def test_metric_degradation_logs(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(
+            FakeSemanticSource(30),
+            renderer=XmlPromptRenderer(metric_detail_threshold=20),
+        )
+    assert any(
+        "30 metrics exceeds metric_detail_threshold=20" in m
+        for m in _prompt_logs(caplog)
+    )
+
+
+def test_no_log_when_not_degrading(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.INFO, logger=_PROMPT_LOGGER):
+        contract.to_system_prompt(_rel_source(5), renderer=XmlPromptRenderer())
+    assert _prompt_logs(caplog) == []
+
+
+# ---------------------------------------------------------------------------
+# Consumer-named extras sections (opt-in by name, in both directions)
+# ---------------------------------------------------------------------------
+
+
+class _ExtrasSource(FakeSemanticSource):
+    """A FakeSemanticSource that also satisfies ExtensibleSemanticSource."""
+
+    def __init__(self, extras: dict[str, Any]) -> None:
+        super().__init__(0)
+        self._extras = extras
+
+    def get_extras(self) -> dict[str, Any]:
+        return dict(self._extras)
+
+
+_EXTRAS = {"column_hints": [{"table": "analytics.orders", "prefer": "order_total"}]}
+
+
+def test_extras_do_not_render_unless_named() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS), renderer=XmlPromptRenderer()
+    )
+    assert "column_hints" not in prompt
+
+
+def test_named_extra_renders_with_the_default_formatter() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS),
+        renderer=XmlPromptRenderer(extra_sections=["column_hints"]),
+    )
+    assert "<column_hints>" in prompt
+    assert "</column_hints>" in prompt
+    assert "prefer: order_total" in prompt
+    assert prompt.index("<column_hints>") < prompt.index("</data_contract>")
+
+
+def test_custom_callable_receives_name_and_payload_and_is_used_verbatim() -> None:
+    seen: list[tuple[str, Any]] = []
+
+    def render(name: str, payload: Any) -> list[str]:
+        seen.append((name, payload))
+        return [f"<{name}>CUSTOM</{name}>"]
+
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        _ExtrasSource(_EXTRAS),
+        renderer=XmlPromptRenderer(extra_sections={"column_hints": render}),
+    )
+    assert "<column_hints>CUSTOM</column_hints>" in prompt
+    assert seen == [("column_hints", _EXTRAS["column_hints"])]
+
+
+def test_named_sections_render_in_the_order_given() -> None:
+    contract = _make_minimal_contract()
+    src = _ExtrasSource({"b_section": ["b"], "a_section": ["a"]})
+    prompt = contract.to_system_prompt(
+        src, renderer=XmlPromptRenderer(extra_sections=["b_section", "a_section"])
+    )
+    assert prompt.index("<b_section>") < prompt.index("<a_section>")
+
+
+def test_naming_an_absent_section_warns_and_renders_nothing(caplog) -> None:  # noqa: ANN001
+    contract = _make_minimal_contract()
+    with caplog.at_level(logging.WARNING, logger=_PROMPT_LOGGER):
+        prompt = contract.to_system_prompt(
+            _ExtrasSource(_EXTRAS),
+            renderer=XmlPromptRenderer(extra_sections=["colum_hints"]),
+        )
+    assert "colum_hints" not in prompt
+    assert any("colum_hints" in m for m in _prompt_logs(caplog))
+
+
+def test_a_raising_custom_renderer_propagates() -> None:
+    def boom(name: str, payload: Any) -> list[str]:
+        raise RuntimeError("bad renderer")
+
+    contract = _make_minimal_contract()
+    with pytest.raises(RuntimeError, match="bad renderer"):
+        contract.to_system_prompt(
+            _ExtrasSource(_EXTRAS),
+            renderer=XmlPromptRenderer(extra_sections={"column_hints": boom}),
+        )
+
+
+def test_non_extensible_source_renders_no_extras() -> None:
+    contract = _make_minimal_contract()
+    prompt = contract.to_system_prompt(
+        FakeSemanticSource(3),
+        renderer=XmlPromptRenderer(extra_sections=["column_hints"]),
+    )
+    assert "column_hints" not in prompt
+
+
+def test_a_bare_string_of_extra_sections_is_rejected() -> None:
+    """``str`` satisfies ``Sequence[str]``, so this would iterate characters.
+
+    Against a non-extensible source that failure is completely silent: eleven
+    single-character section names, none of them carried, nothing rendered.
+    """
+    with pytest.raises(TypeError, match=r"\['column_hints'\]"):
+        XmlPromptRenderer(extra_sections="column_hints")
+
+
+# ---------------------------------------------------------------------------
+# Pre-v0.40.0 subclasses that define their own __init__
+# ---------------------------------------------------------------------------
+
+
+class _LegacySubclass(XmlPromptRenderer):
+    """The shape that was legal before v0.40.0 gave the renderer a constructor.
+
+    With no ``__init__`` on the base class, a subclass could define its own and
+    never call ``super().__init__()``. Such a subclass has none of the instance
+    attributes the render path now reads.
+    """
+
+    def __init__(self, tag: str) -> None:  # deliberately no super().__init__()
+        self.tag = tag
+
+
+def test_legacy_subclass_without_super_init_still_renders() -> None:
+    contract = _make_minimal_contract()
+    prompt = _LegacySubclass("x").render(contract, _rel_source(5))
+    assert "<from>analytics.t0.id</from>" in prompt
+
+
+def test_legacy_subclass_falls_back_to_the_class_attribute_thresholds() -> None:
+    """Not just "does not crash": the class constants must still govern.
+
+    They were kept at v0.40.0 precisely so subclass overrides keep working, so
+    a subclass overriding the constant must degrade at *its* number.
+    """
+
+    class _LegacyLoose(_LegacySubclass):
+        RELATIONSHIP_DETAIL_THRESHOLD = 3
+        METRIC_DETAIL_THRESHOLD = 2
+
+    contract = _make_minimal_contract()
+    renderer = _LegacyLoose("x")
+    assert "join_count=" in renderer.render(contract, _rel_source(5))
+    assert "5 metrics available" in renderer.render(contract, FakeSemanticSource(5))
+
+
+def test_legacy_subclass_renders_no_extras() -> None:
+    """No ``extra_sections`` attribute means the opt-in list is empty, not a crash."""
+    contract = _make_minimal_contract()
+    prompt = _LegacySubclass("x").render(contract, _ExtrasSource(_EXTRAS))
+    assert "column_hints" not in prompt

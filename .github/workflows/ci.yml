@@ -62,6 +62,47 @@ jobs:
       - run: uv sync --all-extras --dev --frozen
       - run: uv run pytest --cov=agentic_data_contracts --cov-report=term-missing
 
+  examples:
+    # The examples are executable documentation, and until now nothing ran them:
+    # a rename that compiles and keeps the suite green can still leave every
+    # example broken. The v0.39.0 renderer rename touched
+    # examples/revenue_agent/agent.py and no test would have caught a miss.
+    # They run offline in demo mode — no API key, no network, ~30s total.
+    #
+    # Each step greps for a marker as well as exiting zero, because a broken
+    # example can still exit zero while printing nothing. Output is redirected
+    # to a file rather than piped: a pipeline would mask the interpreter's exit
+    # status behind grep's.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv python install 3.13
+      - run: uv sync --all-extras --dev --frozen
+      - name: revenue_agent (governed tools + extras in the prompt)
+        run: |
+          uv run python examples/revenue_agent/agent.py > out.txt
+          grep -q '<column_hints>' out.txt
+          grep -q '<join_paths>' out.txt
+          grep -q 'refused at load' out.txt
+      - name: growth_agent (metric impacts + stale review detection)
+        run: |
+          uv run python examples/growth_agent/agent.py > out.txt
+          grep -q 'Stale-review findings' out.txt
+      - name: ops_agent (blocked columns + per-table principal denial)
+        run: |
+          uv run python examples/ops_agent/agent.py > out.txt
+          grep -q 'Blocked columns in SELECT' out.txt
+      - name: verified-examples corpus validation
+        run: |
+          uv run python examples/revenue_agent/verify_examples.py > out.txt
+          grep -q 'Example validation:' out.txt
+
   test-pydantic-ai-latest:
     # Early-warning job. pyproject allows pydantic-ai-slim >=2.0 (unbounded), and
     # Pydantic AI's version policy only guarantees ~3 months between breaking majors.
@@ -166,7 +207,7 @@ jobs:
       - run: uvx uv-secure uv.lock
 
   publish:
-    needs: [lint, test, security]
+    needs: [lint, test, examples, security]
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_publish == 'true')
     runs-on: ubuntu-latest
     permissions:

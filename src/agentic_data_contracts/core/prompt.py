@@ -1,13 +1,58 @@
-"""PromptRenderer protocol and ClaudePromptRenderer implementation."""
+"""PromptRenderer protocol and XmlPromptRenderer implementation."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+import enum
+import logging
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+import yaml
 
 if TYPE_CHECKING:
     from agentic_data_contracts.core.contract import DataContract
     from agentic_data_contracts.core.schema import SemanticRule
     from agentic_data_contracts.semantic.base import SemanticSource
+
+logger = logging.getLogger(__name__)
+
+
+#: Renders one extras section. Receives ``(section_name, payload)`` and returns
+#: the **complete** section, its own enclosing tags included — the renderer
+#: contributes placement and ordering only, never wrapping. Taking the name lets
+#: one function serve several sections.
+ExtraSectionRenderer = Callable[[str, Any], list[str]]
+
+
+def _default_extra_section(name: str, payload: Any) -> list[str]:
+    """Wrap an extras payload in an XML tag, body dumped back as YAML.
+
+    The payload has arbitrary nesting and no schema, so a hand-rolled XML walker
+    would be guessing at its shape. Dumping the author's own structure back is
+    faithful, handles nesting for free, stays compact, and models read YAML. The
+    XML tag keeps the section boundary consistent with the rest of the prompt.
+
+    Authored content is not escaped, so prose containing ``</name>`` would break
+    the enclosing tag. That matches the existing ``description="..."``
+    attributes, which do not escape quotes either: contract content is trusted
+    at one level throughout.
+    """
+    body = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True).rstrip("\n")
+    return [f"<{name}>", body, f"</{name}>"]
+
+
+class _Unset(enum.Enum):
+    """Sentinel distinguishing "argument omitted" from an explicit ``None``.
+
+    An enum rather than ``object()``: ty narrows enum members inside a union, so
+    ``int | None | _Unset`` resolves to ``int | None`` after an ``is _UNSET``
+    check without needing a cast at the use site.
+    """
+
+    TOKEN = 0
+
+
+_UNSET = _Unset.TOKEN
 
 
 @runtime_checkable
@@ -27,12 +72,64 @@ class PromptRenderer(Protocol):
     ) -> str: ...
 
 
-class ClaudePromptRenderer:
-    """Renders a DataContract as XML-structured output for Claude agents."""
+class XmlPromptRenderer:
+    """Renders a DataContract as XML-structured output for LLM agents.
 
-    # Max metrics to list individually before switching to compact summaries.
+    XML tags mark section boundaries. That convention originates in Anthropic's
+    prompting guidance, but nothing here is Claude-specific — no SDK import, no
+    model-specific handling — and every frontier model reads it. The name states
+    the axis on which ``PromptRenderer`` implementations differ: output format,
+    not vendor.
+    """
+
+    # Defaults for the constructor parameters below. Kept as class attributes so
+    # an existing subclass that overrides them keeps working; an explicit
+    # constructor argument takes precedence over the class attribute.
     METRIC_DETAIL_THRESHOLD = 20
     RELATIONSHIP_DETAIL_THRESHOLD = 30
+
+    def __init__(
+        self,
+        *,
+        extra_sections: Sequence[str] | Mapping[str, ExtraSectionRenderer | None] = (),
+        metric_detail_threshold: int | None | _Unset = _UNSET,
+        relationship_detail_threshold: int | None | _Unset = _UNSET,
+    ) -> None:
+        """``None`` for either threshold means "never degrade".
+
+        These were class constants until v0.40.0, which made the only opt-out
+        subclassing — so the consumer who knows their own prompt budget could not
+        express it. The budget call belongs where the budget knowledge is.
+        """
+        # ``str`` satisfies ``Sequence[str]`` structurally, so a bare string
+        # would silently iterate characters — eleven one-character section names,
+        # none of them carried. Against a non-extensible source that failure
+        # produces no warning at all, which is the exact class of silence this
+        # release exists to remove.
+        if isinstance(extra_sections, str):
+            raise TypeError(
+                "XmlPromptRenderer(extra_sections=...) takes a sequence or"
+                " mapping of section names, not a bare string — pass"
+                f" [{extra_sections!r}], not {extra_sections!r}."
+            )
+        # Opt-in by name in both directions: nothing renders unless named, so a
+        # section authored as internal bookkeeping never leaks into a prompt.
+        # A mapping value of None selects the default formatter.
+        self.extra_sections: dict[str, ExtraSectionRenderer | None]
+        if isinstance(extra_sections, Mapping):
+            self.extra_sections = dict(extra_sections)
+        else:
+            self.extra_sections = dict.fromkeys(extra_sections)
+        self.metric_detail_threshold: int | None = (
+            self.METRIC_DETAIL_THRESHOLD
+            if metric_detail_threshold is _UNSET
+            else metric_detail_threshold
+        )
+        self.relationship_detail_threshold: int | None = (
+            self.RELATIONSHIP_DETAIL_THRESHOLD
+            if relationship_detail_threshold is _UNSET
+            else relationship_detail_threshold
+        )
 
     def render(
         self,
@@ -63,6 +160,9 @@ class ClaudePromptRenderer:
         rel_lines = self._render_relationships(semantic_source)
         if rel_lines:
             lines.extend(rel_lines)
+
+        # 3b. Consumer-authored extras (opt-in by name, in the order given)
+        lines.extend(self._render_extras(semantic_source))
 
         # 4. Resource limits (resources + temporal merged)
         resource_lines = self._render_resource_limits(contract)
@@ -153,10 +253,31 @@ class ClaudePromptRenderer:
             return []
 
         lines: list[str] = ["<available_metrics>"]
-        compact = len(metrics) > self.METRIC_DETAIL_THRESHOLD
+        # Read through the class attribute: before v0.40.0 there was no
+        # ``__init__`` here, so a subclass could legally define one of its own
+        # and never call ``super().__init__()``. Such an instance has no
+        # ``metric_detail_threshold`` attribute at all, and the class constants
+        # were kept precisely so those subclasses keep working.
+        threshold = getattr(
+            self, "metric_detail_threshold", self.METRIC_DETAIL_THRESHOLD
+        )
+        compact = threshold is not None and len(metrics) > threshold
 
         if compact:
-            lines.append(f"  <count>{len(metrics)} metrics available.</count>")
+            logger.info(
+                "XmlPromptRenderer: %d metrics exceeds"
+                " metric_detail_threshold=%d — per-metric names and descriptions"
+                " omitted from the prompt; agents must call list_metrics to"
+                " browse. Pass metric_detail_threshold=None to render them"
+                " inline.",
+                len(metrics),
+                threshold,
+            )
+            lines.append(
+                f"  <count>{len(metrics)} metrics available;"
+                f" per-metric descriptions omitted above threshold"
+                f" {threshold}.</count>"
+            )
             # Carries the same "before computing" imperative as the detailed
             # branch below. Dropping it here would leave the guidance weakest
             # precisely where there are the most metrics to get wrong.
@@ -208,7 +329,22 @@ class ClaudePromptRenderer:
 
         lines = ["<table_relationships>"]
 
-        if len(rels) > self.RELATIONSHIP_DETAIL_THRESHOLD:
+        # Same fallback as ``_render_metrics``: a pre-v0.40.0 subclass with its
+        # own ``__init__`` and no ``super().__init__()`` has no instance
+        # attribute here, only the class constant.
+        threshold = getattr(
+            self, "relationship_detail_threshold", self.RELATIONSHIP_DETAIL_THRESHOLD
+        )
+        if threshold is not None and len(rels) > threshold:
+            logger.info(
+                "XmlPromptRenderer: %d relationships exceeds"
+                " relationship_detail_threshold=%d — per-relationship join keys"
+                " omitted from the prompt; agents must call"
+                " lookup_relationships to get them. Pass"
+                " relationship_detail_threshold=None to render them inline.",
+                len(rels),
+                threshold,
+            )
             table_counts: dict[str, int] = {}
             for r in rels:
                 from_table = r.from_.rsplit(".", 1)[0]
@@ -219,7 +355,8 @@ class ClaudePromptRenderer:
             for table, count in sorted(table_counts.items()):
                 lines.append(f'  <table name="{table}" join_count="{count}" />')
             lines.append(
-                f"  <hint>{len(rels)} relationships defined."
+                f"  <hint>{len(rels)} relationships defined; per-relationship"
+                f" join keys omitted above threshold {threshold}."
                 ' Use lookup_relationships(table="schema.table")'
                 " to get join details and required filters.</hint>"
             )
@@ -244,6 +381,48 @@ class ClaudePromptRenderer:
                 )
 
         lines.append("</table_relationships>")
+        return lines
+
+    def _render_extras(self, semantic_source: SemanticSource | None) -> list[str]:
+        """Render consumer-authored sections the caller explicitly named.
+
+        Naming a section the source does not carry warns rather than rendering
+        nothing quietly — it is the same typo class as a top-level key the parser
+        ignores, and gets the same treatment.
+
+        A consumer renderer that raises is allowed to propagate. Naming a section
+        you cannot render is a bug, and swallowing it would silently drop content
+        — the exact failure this whole feature removes.
+        """
+        # Same fallback as the two thresholds, but with no class constant to fall
+        # back to: a pre-v0.40.0 subclass with its own ``__init__`` and no
+        # ``super().__init__()`` never opted any section in, so an empty mapping
+        # is the correct reading of its intent.
+        sections: dict[str, ExtraSectionRenderer | None] = getattr(
+            self, "extra_sections", {}
+        )
+        if not sections or semantic_source is None:
+            return []
+        # Imported locally to keep core decoupled from semantic at module scope,
+        # matching _render_domains.
+        from agentic_data_contracts.semantic.base import ExtensibleSemanticSource
+
+        if not isinstance(semantic_source, ExtensibleSemanticSource):
+            return []
+        extras = semantic_source.get_extras()
+        lines: list[str] = []
+        for name, render in sections.items():
+            if name not in extras:
+                logger.warning(
+                    "XmlPromptRenderer: extra_sections names %r, which the"
+                    " semantic source does not carry (available: %s) — nothing"
+                    " rendered for it.",
+                    name,
+                    sorted(extras),
+                )
+                continue
+            renderer = _default_extra_section if render is None else render
+            lines.extend(renderer(name, extras[name]))
         return lines
 
     def _render_resource_limits(self, contract: DataContract) -> list[str]:

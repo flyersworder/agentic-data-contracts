@@ -5,6 +5,12 @@ semantic:
   source:
     type: yaml
     path: "./semantic.yml"
+    # Declares the consumer-authored sections semantic.yml is allowed to carry.
+    # Any other uninterpreted top-level key raises at load instead of warning —
+    # so `relationship:` for `relationships:` fails here rather than silently
+    # deleting the section. Omit the key for warn-and-carry; use `[]` for
+    # strict mode (no extras at all).
+    expected_extras: [column_hints, join_paths]
   allowed_tables:
     - schema: analytics
       description: "Curated analytics tables — prefer these for all reporting queries"

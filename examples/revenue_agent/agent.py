@@ -25,7 +25,13 @@ import os
 import sys
 from pathlib import Path
 
-from agentic_data_contracts import DataContract, create_tools
+from agentic_data_contracts import (
+    DataContract,
+    ExtensibleSemanticSource,
+    SemanticSource,
+    XmlPromptRenderer,
+    create_tools,
+)
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
@@ -92,7 +98,12 @@ def main() -> None:
     )
 
     dc = DataContract.from_yaml(EXAMPLE_DIR / "contract.yml")
-    semantic = YamlSource(EXAMPLE_DIR / "semantic.yml")
+    # Load through the contract rather than constructing YamlSource directly:
+    # the contract's `semantic.source.expected_extras` only reaches the loader on
+    # this path, so a hand-built source would warn about the very sections the
+    # contract declares. It also keeps the semantic.yml path in one place.
+    semantic = dc.load_semantic_source()
+    assert semantic is not None  # contract.yml always declares a source
 
     db_path = EXAMPLE_DIR / "sample_data.duckdb"
     sys.path.insert(0, str(EXAMPLE_DIR))
@@ -108,7 +119,7 @@ def main() -> None:
         asyncio.run(_run_with_sdk(dc, tools, prompt))
     except (ImportError, AttributeError):
         print("claude-agent-sdk not available or incompatible. Running demo mode.\n")
-        asyncio.run(_run_demo(tools, prompt))
+        asyncio.run(_run_demo(dc, semantic, tools, prompt))
 
 
 async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
@@ -203,7 +214,9 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
                     print(block.text)
 
 
-async def _run_demo(tools: list, prompt: str) -> None:
+async def _run_demo(
+    dc: DataContract, semantic: SemanticSource, tools: list, prompt: str
+) -> None:
     print(f"Query: {prompt}\n")
 
     # ── Discovery ─────────────────────────────────────────────────────────────
@@ -313,6 +326,44 @@ async def _run_demo(tools: list, prompt: str) -> None:
         # Query was blocked or adapter unavailable — print the raw message so
         # the demo still surfaces the reason rather than silently failing.
         print(result["content"][0]["text"])
+
+    # ── Consumer-authored sections (extras) ──────────────────────────────────
+    # `column_hints` and `join_paths` are not framework vocabulary — the library
+    # carries them verbatim and never interprets them. They earn a place in the
+    # *resident* prompt rather than behind a tool because both exist to stop a
+    # wrong query before it is written, and a tool only helps an agent that
+    # already suspects it is wrong.
+    #
+    # Nothing renders unless it is named here, so a section kept for internal
+    # bookkeeping never inflates the prompt.
+    renderer = XmlPromptRenderer(extra_sections=["column_hints", "join_paths"])
+    rendered = dc.to_system_prompt(semantic, renderer=renderer)
+    start = rendered.index("<column_hints>")
+    end = rendered.index("</join_paths>") + len("</join_paths>")
+    print("\n=== Extras resident in the system prompt ===")
+    print(rendered[start:end])
+
+    # The same sections are reachable programmatically, unchanged. `get_extras`
+    # lives on ExtensibleSemanticSource — a *sibling* of SemanticSource, not an
+    # extension of it, so a dbt or Cube source stays a valid SemanticSource
+    # without pretending to carry extras. Hence the isinstance check.
+    print("\n=== get_extras() ===")
+    if isinstance(semantic, ExtensibleSemanticSource):
+        print(f"  carried sections: {sorted(semantic.get_extras())}")
+
+    # ── Typo protection ──────────────────────────────────────────────────────
+    # contract.yml declares `expected_extras: [column_hints, join_paths]`, so a
+    # mistyped key is refused at load rather than silently deleting the section.
+    # Before this existed, `relationship:` for `relationships:` removed every
+    # join from the contract and the library still reported success.
+    print("\n=== Typo protection (expected_extras) ===")
+    try:
+        YamlSource.from_raw(
+            {"metrics": [], "relationship": [{"from": "a.b.c", "to": "d.e.f"}]},
+            expected_extras={"column_hints", "join_paths"},
+        )
+    except ValueError as exc:
+        print(f"  refused at load: {exc}")
 
 
 if __name__ == "__main__":

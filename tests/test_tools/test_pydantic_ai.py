@@ -1010,3 +1010,33 @@ def test_run_kwargs_distinguishes_a_zero_budget_from_no_budget() -> None:
         ].total_tokens_limit
         is None
     )
+
+
+async def test_terminal_limit_error_escapes_agent_run(adapter: DuckDBAdapter) -> None:
+    """A terminal breach must propagate out of ``agent.run()`` uncaught.
+
+    Every other terminal-limit test in this file invokes the tool function
+    directly, which proves *our* wrapper raises. This one runs the exception
+    through Pydantic AI's own tool-execution machinery, which is the part we
+    do not own: if a future release ever caught non-``ModelRetry`` exceptions
+    from a tool and converted them into a retry or a run-level failure, a
+    breached contract budget would stop being terminal and no other test here
+    would notice.
+
+    That failure mode is why ``docs/architecture.md`` declines Pydantic AI's
+    first-party run cancellation for this path — the argument assumes the
+    exception escapes. This test is the assumption, written down.
+
+    Deliberately no ``usage_limits``: passing one lets ``UsageLimitExceeded``
+    fire on the model side first, which would pass the assertion below for the
+    wrong reason and hide a swallowed ``ContractSessionLimitError``.
+    """
+    contract = _budgeted_contract(1)
+    session = ContractSession(contract)
+    agent = Agent(
+        _tool_calling_model([]),
+        tools=create_pydantic_ai_tools(contract, adapter=adapter, session=session),
+    )
+
+    with pytest.raises(ContractSessionLimitError, match="token"):
+        await agent.run("go")

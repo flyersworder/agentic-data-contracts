@@ -35,8 +35,15 @@ try:
         create_langchain_tools,
     )
 except ImportError:  # pragma: no cover — exercised only without the extra
+    # ty gives each imported name a declared type of the class/function itself,
+    # so rebinding to ``None`` reads as implicit shadowing. Which names it flags
+    # is not derivable from their signatures and shifts between ty versions —
+    # v0.0.72 dropped two of the six suppressions this block and the next one
+    # used to carry. Don't add or remove these by hand: ty errors on a missing
+    # suppression and reports `unused-ignore-comment` on a dead one, so the
+    # pinned hook keeps the list honest in both directions.
     ContractMiddleware = None  # ty: ignore[invalid-assignment]
-    create_langchain_tools = None  # ty: ignore[invalid-assignment]
+    create_langchain_tools = None
 
 # Optional [pydantic-ai] extra — module top-level imports pydantic_ai, so this
 # fails fast when the extra isn't installed. We fall through to ``None`` so
@@ -52,7 +59,7 @@ except ImportError:  # pragma: no cover — exercised only without the extra
     ContractDeps = None  # ty: ignore[invalid-assignment]
     contract_run_kwargs = None  # ty: ignore[invalid-assignment]
     create_pydantic_ai_tools = None  # ty: ignore[invalid-assignment]
-    create_pydantic_ai_toolset = None  # ty: ignore[invalid-assignment]
+    create_pydantic_ai_toolset = None
 
 __all__ = [
     "SEMANTIC_KEYS",

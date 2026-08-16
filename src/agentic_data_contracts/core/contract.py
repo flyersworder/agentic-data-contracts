@@ -184,6 +184,7 @@ class DataContract:
         """Load a semantic source from its external ``path``, failing closed."""
         from agentic_data_contracts.semantic.cube import CubeSource
         from agentic_data_contracts.semantic.dbt import DbtSource
+        from agentic_data_contracts.semantic.ossie import OssieSource
         from agentic_data_contracts.semantic.yaml_source import YamlSource
 
         source_type = source_config.type.lower()
@@ -200,6 +201,7 @@ class DataContract:
             "yaml": YamlSource,
             "dbt": DbtSource,
             "cube": CubeSource,
+            "ossie": OssieSource,
         }
 
         loader_cls = loaders.get(source_type)
@@ -210,8 +212,12 @@ class DataContract:
             )
             raise ValueError(msg)
 
-        # Only YamlSource has an extras concept, so only it takes the policy;
-        # dbt/cube would raise TypeError on the keyword.
+        # Only YamlSource takes the policy; the others would raise TypeError on
+        # the keyword. OssieSource is the near-miss: it *does* produce extras,
+        # but they are synthesized by the parser under fixed keys, not authored
+        # as free top-level sections — and Ossie's schema sets
+        # ``additionalProperties: false`` throughout, so the typo this policy
+        # guards against fails in the model's own validator, not here.
         kwargs: dict[str, object] = (
             {"expected_extras": source_config.expected_extras}
             if loader_cls is YamlSource

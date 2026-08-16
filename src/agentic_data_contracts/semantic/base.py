@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from thefuzz import fuzz, process
@@ -113,6 +113,38 @@ def identity_edges_from_metrics(
                     )
                 )
     return edges
+
+
+def parse_review_date(value: Any) -> date | None:
+    """Accept a YAML-native date/datetime, an ISO-8601 string, or None.
+
+    ``datetime`` is checked before ``date`` because it subclasses ``date`` — a
+    YAML scalar with a time component (``2020-01-01 12:00:00``) parses to
+    ``datetime`` and must be normalised to ``date``, otherwise downstream
+    ``date - datetime`` staleness arithmetic raises ``TypeError``.
+
+    Shared rather than per-source: every format that can carry a review date
+    reaches the same ``last_reviewed`` field and the same staleness
+    arithmetic, so a second copy of this would be a second chance to get the
+    subclass ordering wrong.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"last_reviewed must be an ISO date (YYYY-MM-DD), got {value!r}"
+            ) from exc
+    raise TypeError(
+        f"last_reviewed must be a date or ISO string, "
+        f"got {type(value).__name__}: {value!r}"
+    )
 
 
 VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})

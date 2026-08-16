@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.0] - 2026-08-16
+
+### Added
+
+- **`OssieSource` — read semantics from an Apache Ossie (incubating) model.** [Apache Ossie](https://ossie.apache.org/), formerly Open Semantic Interchange, is the vendor-neutral spec for exchanging semantic models across analytics, AI, and BI platforms; it entered the Apache Incubator with 50+ participating organizations behind it. Declare it like any other source:
+
+  ```yaml
+  semantic:
+    source:
+      type: ossie
+      path: "./semantic/model.yml"
+  ```
+
+  The strategic read is that Ossie standardises what a metric *is*, while this library enforces what an agent may *do* with it. Nothing in the spec or its roadmap validates a generated query against a policy — their `validation/` checks models against the JSON Schema, and the planned reference engine *compiles* semantic queries into SQL. So Ossie is a fourth input to `SemanticSource`, not a competitor to the enforcement layer, and the protocol was built for exactly this.
+
+  Four decisions define the adapter, each one a place where the easy choice is a silent correctness bug:
+
+  - **Table keys drop the database qualifier.** Ossie sources are `database.schema.table`; our keys are two-part because `Relationship` endpoints are `schema.table.column` and `build_relationship_index` recovers the table with a single `rsplit`. A three-part key would make every endpoint four deep. Collisions are logged; query-backed datasets register no table.
+  - **Cardinality is derived, not defaulted.** Ossie never writes the join type down — it is implicit in the keys. An edge is `one_to_one` exactly when `from_columns` is also a key of the `from` dataset, `many_to_one` otherwise. Hardcoding `many_to_one` would have passed every test except the one that exists to catch it.
+  - **Composite joins are skipped, not split.** Ossie carries parallel `from_columns`/`to_columns` lists; our `Relationship` has single-column endpoints. One edge per column pair would assert two joins that are each individually wrong, and the join planner walks those edges. The skip is logged with the relationship's name, matching the precedent `CubeSource` set for Cube's `AND`-chained joins.
+  - **Dialect is an opaque string.** Resolution is deterministic as the spec requires — caller's choice, then `ANSI_SQL`, then `Ossie_SQL_2026`, then the first declared entry — but never validated against the enum. The accepted expression-language proposal adds `Ossie_SQL_2026` and makes it the default, so a closed check would break on the next spec bump for no benefit.
+
+- **Governance vocabulary round-trips through Ossie's `custom_extensions`.** Ownership, review dates, tiers, domains, `decompositions`, `drill_by`, and the metric-impact graph have no home in the Ossie spec — every `$def` in `osi-schema.json` sets `additionalProperties: false`, so they cannot be smuggled in as extra keys. They ride in the spec's own escape hatch under the `AGENTIC_DATA_CONTRACTS` vendor name, whose `data` is a JSON *string* per the spec. Restored `decompositions` / `drill_by` pass through the same `validate_decompositions` / `validate_drill_by` as `YamlSource`, so a bad identity still fails loudly at load.
+
+  This makes `OssieSource` the second source after `YamlSource` to populate `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by`; dbt and Cube still leave them unset.
+
+- **`ai_context` and foreign vendor blocks are carried, not interpreted.** Every `ai_context` in the model (Ossie's AI-grounding channel — instructions, synonyms, example questions, in either its string or object form) reaches `get_extras()["ossie_ai_context"]`, and every non-`AGENTIC_DATA_CONTRACTS` vendor block reaches `get_extras()["ossie_custom_extensions"]`. This is the boundary `YamlSource.get_extras` already draws: the framework carries extras and, on request, places them in the prompt, but never interprets, validates, indexes, or computes over them. In particular `search_metrics` still matches on name and description only — Ossie synonyms do not silently change retrieval.
+
+  A foreign vendor's malformed JSON payload is carried verbatim and logged rather than raised on. Another vendor's typo must not stop this library from enforcing a contract.
+
+### Changed
+
+- **`_parse_date` moved from `semantic/yaml_source.py` to `semantic/base.parse_review_date`.** Two sources now parse review dates, and the helper's whole reason for existing is a trap worth stating once: `datetime` must be checked before `date` because it subclasses it, or downstream `date - datetime` staleness arithmetic raises `TypeError`. A second copy would have been a second chance to get that ordering wrong. It sits alongside the other shared helpers (`build_relationship_index`, `fuzzy_search_metrics`, the validators) rather than being reached into privately from a sibling module.
+
+- **All locked dependencies upgraded.** Notably `sqlglot` 30.14.0 → 30.17.0 (Layer 1 static analysis), `pydantic-ai-slim` 2.22.0 → 2.31.0, `starlette` 1.3.1 → 1.6.0, and `xxhash` 3.8.1 → 4.0.0. The pinned `contract_digest` guard in `tests/test_ard/test_catalog_entry.py` still holds, so published contract bytes and every existing ARD attestation are unaffected.
+
 ## [0.41.1] - 2026-08-11
 
 ### Fixed

@@ -19,7 +19,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 - **Resource governance built in** — per-session cost, retry, row, and token budgets, and wall-clock limits.
 - **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
 - **Framework-agnostic** — plain-function tools for the Claude Agent SDK, LangChain/deepagents, Pydantic AI, or no framework at all.
-- **Bring your own semantics** — read metrics from dbt, Cube, or inline YAML.
+- **Bring your own semantics** — read metrics from dbt, Cube, Apache Ossie, or inline YAML.
 
 ### Without a contract vs. with one
 
@@ -652,9 +652,9 @@ tables:
         type: VARCHAR
 ```
 
-`tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names.
+`tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names. For Ossie, they live in the model's `custom_extensions` block (see [Apache Ossie](#apache-ossie) below).
 
-**Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** today; dbt/Cube metrics default to unset.
+**Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** and from an **Ossie** model's `custom_extensions` block; dbt/Cube metrics default to unset.
 
 **dbt** — point to a `manifest.json`:
 ```yaml
@@ -708,6 +708,63 @@ cubes:
 ```
 
 Joins whose SQL doesn't match the single-equality pattern (composite keys with `AND`-chained equalities) or whose target cube can't be resolved by name are skipped silently — fall back to declaring those in your contract YAML via `YamlSource`.
+
+### Apache Ossie
+
+[Apache Ossie (incubating)](https://ossie.apache.org/) — formerly Open Semantic Interchange — is the vendor-neutral spec for exchanging semantic models across analytics, AI, and BI tools. Point at a model file:
+
+```yaml
+semantic:
+  source:
+    type: ossie
+    path: "./semantic/model.yml"
+```
+
+Ossie standardises what a metric *is*; this library enforces what an agent may *do* with it. So the spec is a strict subset of the vocabulary here — an Ossie `Metric` carries only `name`, `expression`, `description`, `datatype`, and `ai_context`.
+
+| Ossie | Read as |
+| --- | --- |
+| `datasets[].source` + `fields[]` | Table schemas. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
+| `metrics[].expression.dialects[]` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then `Ossie_SQL_2026`, then the first declared entry |
+| `relationships[]` | `Relationship`, with cardinality *derived*: `one_to_one` when `from_columns` is also a key of the `from` dataset, `many_to_one` otherwise |
+| `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, never interpreted |
+| `custom_extensions[]` | Ours read as real vocabulary; every other vendor's carried into `get_extras()["ossie_custom_extensions"]` |
+
+Composite-key relationships are **skipped with a warning** rather than split into one edge per column pair — our `Relationship` has single-column endpoints, and splitting would assert two joins that are each individually wrong. Declare those in a `YamlSource` overlay.
+
+**Governance fields.** Ownership, review dates, tiers, decompositions, and the metric-impact graph have no home in the Ossie spec, and every `$def` in its JSON Schema sets `additionalProperties: false` — so they cannot be added as extra keys. They ride in the spec's own escape hatch, `custom_extensions`, under this project's vendor name:
+
+```yaml
+    custom_extensions:
+      - vendor_name: AGENTIC_DATA_CONTRACTS
+        data: |
+          {
+            "metrics": {
+              "total_sales": {
+                "business_owner": "revenue-analytics",
+                "operational_owner": "data-platform",
+                "last_reviewed": "2026-05-01",
+                "tier": ["gold"],
+                "domains": ["sales"],
+                "decompositions": [
+                  {"operator": "sum", "operands": ["total_profit", "total_cost"]}
+                ],
+                "drill_by": [
+                  {"dimension": "region", "column": "public.customer.c_region"}
+                ]
+              }
+            },
+            "metric_impacts": [
+              {"from": "total_cost", "to": "total_profit",
+               "direction": "negative", "confidence": "verified",
+               "evidence": "Margin bridge reconciled 2026-Q1."}
+            ]
+          }
+```
+
+Ossie stores extension payloads as a JSON *string*, so `data` is JSON nested inside YAML. Restored decompositions and `drill_by` go through the same validators as `YamlSource`, failing loudly at load. Another vendor's malformed payload is carried verbatim and logged rather than raised on — a neighbour's typo must not stop your contract from being enforced.
+
+> The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated against the enum, since the accepted expression-language proposal adds `Ossie_SQL_2026` and makes it the default.
 
 ## Table Relationships
 
@@ -849,7 +906,7 @@ await trace.callable({
 #                      "kind": "identity", "operator": "product"}
 ```
 
-Today `decompositions` / `drill_by` are declared directly in YAML contracts; dbt/Cube extraction and a variance-diagnosis tool are deferred.
+Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction and a variance-diagnosis tool are deferred.
 
 ## Validating a verified-examples corpus
 
@@ -1205,7 +1262,7 @@ DATA_PLUGIN_PATH=/tmp/kwp/data \
 
 **Does it execute my SQL?** Only `run_query` does, and only after validation passes (plus an optional EXPLAIN dry-run). `inspect_query` validates without executing, and forbidden operations (DELETE/DROP/UPDATE/…) are blocked before they ever reach the database.
 
-**Do I have to use dbt or Cube?** No. Author metrics inline in a `semantic.yml` with `YamlSource`. dbt (`manifest.json`) and Cube are supported if you already have them — the agent-facing behavior is identical regardless of source.
+**Do I have to use dbt or Cube?** No. Author metrics inline in a `semantic.yml` with `YamlSource`. dbt (`manifest.json`), Cube, and Apache Ossie are supported if you already have them — the agent-facing behavior is identical regardless of source.
 
 **Does it work without the Claude Agent SDK?** Yes. The tools are plain async functions usable from LangChain/deepagents, Pydantic AI, or directly; the example agents fall back to a no-SDK demo mode.
 

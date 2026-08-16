@@ -19,6 +19,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     build_relationship_index,
     fuzzy_search_metrics,
+    parse_review_date,
     validate_decompositions,
     validate_drill_by,
 )
@@ -89,7 +90,7 @@ def _jsonify(value: Any, path: tuple[str | int, ...]) -> Any:
     """Recursively coerce *value* to JSON-safe types, or raise naming *path*.
 
     ``datetime`` is checked before ``date`` because it subclasses ``date`` — the
-    same ordering trap ``_parse_date`` documents.
+    same ordering trap ``parse_review_date`` documents.
     """
     if isinstance(value, datetime):
         return value.date().isoformat()
@@ -114,33 +115,6 @@ def _fmt_path(path: tuple[str | int, ...]) -> str:
     for part in path[1:]:
         rendered += f"[{part}]" if isinstance(part, int) else f".{part}"
     return rendered
-
-
-def _parse_date(value: Any) -> date | None:
-    """Accept a YAML-native date/datetime, an ISO-8601 string, or None.
-
-    ``datetime`` is checked before ``date`` because it subclasses ``date`` — a
-    YAML scalar with a time component (``2020-01-01 12:00:00``) parses to
-    ``datetime`` and must be normalised to ``date``, otherwise downstream
-    ``date - datetime`` staleness arithmetic raises ``TypeError``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        try:
-            return date.fromisoformat(value)
-        except ValueError as exc:
-            raise ValueError(
-                f"last_reviewed must be an ISO date (YYYY-MM-DD), got {value!r}"
-            ) from exc
-    raise TypeError(
-        f"last_reviewed must be a date or ISO string, "
-        f"got {type(value).__name__}: {value!r}"
-    )
 
 
 class YamlSource:
@@ -202,7 +176,7 @@ class YamlSource:
                     indicator_kind=m.get("indicator_kind"),
                     business_owner=m.get("business_owner"),
                     operational_owner=m.get("operational_owner"),
-                    last_reviewed=_parse_date(m.get("last_reviewed")),
+                    last_reviewed=parse_review_date(m.get("last_reviewed")),
                     decompositions=[
                         Decomposition(
                             operator=d["operator"],
@@ -249,7 +223,7 @@ class YamlSource:
                 confidence=i.get("confidence", "hypothesized"),
                 evidence=i.get("evidence", ""),
                 description=i.get("description", ""),
-                last_reviewed=_parse_date(i.get("last_reviewed")),
+                last_reviewed=parse_review_date(i.get("last_reviewed")),
             )
             for i in raw.get("metric_impacts", [])
         ]

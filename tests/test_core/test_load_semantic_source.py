@@ -18,6 +18,7 @@ from agentic_data_contracts.core.schema import (
 )
 from agentic_data_contracts.semantic.cube import CubeSource
 from agentic_data_contracts.semantic.dbt import DbtSource
+from agentic_data_contracts.semantic.ossie import OssieSource
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 
@@ -67,6 +68,22 @@ def test_load_cube_source(fixtures_dir: Path) -> None:
     source = dc.load_semantic_source()
     assert isinstance(source, CubeSource)
     assert len(source.get_metrics()) == 1
+
+
+def test_load_ossie_source(fixtures_dir: Path) -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="ossie",
+                path=str(fixtures_dir / "sample_ossie_model.yml"),
+            ),
+        ),
+    )
+    dc = DataContract(schema)
+    source = dc.load_semantic_source()
+    assert isinstance(source, OssieSource)
+    assert len(source.get_metrics()) == 4
 
 
 def test_load_no_source_returns_none() -> None:

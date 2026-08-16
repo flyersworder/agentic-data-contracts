@@ -726,9 +726,20 @@ Ossie standardises what a metric *is*; this library enforces what an agent may *
 | --- | --- |
 | `datasets[].source` + `fields[]` | Table schemas. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
 | `metrics[].expression.dialects[]` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then `Ossie_SQL_2026`, then the first declared entry |
-| `relationships[]` | `Relationship`, with cardinality *derived*: `one_to_one` when `from_columns` is also a key of the `from` dataset, `many_to_one` otherwise |
-| `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, never interpreted |
-| `custom_extensions[]` | Ours read as real vocabulary; every other vendor's carried into `get_extras()["ossie_custom_extensions"]` |
+| `relationships[]` | `Relationship`, with cardinality *derived from both sides* — see below |
+| `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, keyed by model then entity kind, never interpreted |
+| `custom_extensions[]` | Ours read as real vocabulary; every other vendor's carried into `get_extras()["ossie_custom_extensions"]`, keyed by model then vendor |
+
+**Cardinality.** Ossie never writes the join type down; it is implied by which endpoints are keys. The spec documents `to` as the one side, but nothing validates that — and trusting it is not free, because `RelationshipChecker` fires its fan-out warning only on `one_to_many`. So both sides are checked:
+
+| `from_columns` a key | `to_columns` a key | Type |
+| --- | --- | --- |
+| ✓ | ✓ | `one_to_one` |
+| ✗ | ✓ | `many_to_one` |
+| ✓ | ✗ | `one_to_many` |
+| ✗ | ✗ | `many_to_many` |
+
+Keys are optional in Ossie, and their absence is not evidence of fan-out — when the `to` dataset declares no keys at all, the spec's declaration stands and the join reads as `many_to_one`.
 
 Composite-key relationships are **skipped with a warning** rather than split into one edge per column pair — our `Relationship` has single-column endpoints, and splitting would assert two joins that are each individually wrong. Declare those in a `YamlSource` overlay.
 
@@ -762,7 +773,9 @@ Composite-key relationships are **skipped with a warning** rather than split int
           }
 ```
 
-Ossie stores extension payloads as a JSON *string*, so `data` is JSON nested inside YAML. Restored decompositions and `drill_by` go through the same validators as `YamlSource`, failing loudly at load. Another vendor's malformed payload is carried verbatim and logged rather than raised on — a neighbour's typo must not stop your contract from being enforced.
+Ossie stores extension payloads as a JSON *string*, so `data` is JSON nested inside YAML (a plain YAML mapping is accepted too). Restored decompositions and `drill_by` go through the same validators as `YamlSource`, failing loudly at load, and a bare `"tier": "gold"` is promoted to a list exactly as `YamlSource` does. Another vendor's malformed payload is carried verbatim and logged rather than raised on — a neighbour's typo must not stop your contract from being enforced.
+
+`expected_extras` does not apply to an Ossie source: its extras are synthesized by the parser under fixed keys, not authored as free top-level sections. Declaring it on a non-`yaml` source logs a warning rather than being silently dropped.
 
 > The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated against the enum, since the accepted expression-language proposal adds `Ossie_SQL_2026` and makes it the default.
 

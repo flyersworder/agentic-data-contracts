@@ -1,0 +1,55 @@
+# Two semantic models in one file. Ossie's top level is a *list*, and it
+# namespaces entity names per model, so `customer` may mean a different
+# dataset in each. Exercises that per-model content is not silently merged.
+version: "0.2.0.dev0"
+
+semantic_model:
+  - name: retail_model
+    datasets:
+      - name: customer
+        source: warehouse.retail.customer
+        primary_key: [c_customer_sk]
+        ai_context:
+          synonyms: ["retail shopper"]
+        fields:
+          - name: c_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: c_customer_sk
+            datatype: Integer
+    metrics:
+      - name: retail_revenue
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(customer.c_spend)
+        description: Retail revenue
+    custom_extensions:
+      - vendor_name: SALESFORCE
+        data: '{"workbook": "retail"}'
+
+  - name: wholesale_model
+    datasets:
+      - name: customer
+        source: warehouse.wholesale.customer
+        primary_key: [w_customer_sk]
+        ai_context:
+          synonyms: ["wholesale account"]
+        fields:
+          - name: w_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: w_customer_sk
+            datatype: Integer
+    metrics:
+      - name: wholesale_revenue
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(customer.w_spend)
+        description: Wholesale revenue
+    custom_extensions:
+      - vendor_name: SALESFORCE
+        data: '{"workbook": "wholesale"}'

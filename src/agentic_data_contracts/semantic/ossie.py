@@ -48,6 +48,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     build_relationship_index,
     fuzzy_search_metrics,
+    jsonify_extras,
     parse_review_date,
     validate_decompositions,
     validate_drill_by,
@@ -64,6 +65,15 @@ OSSIE_VENDOR = "AGENTIC_DATA_CONTRACTS"
 #: language proposal promotes to default, listed ahead of its arrival.
 _DEFAULT_DIALECT_PREFERENCE = ("ANSI_SQL", "Ossie_SQL_2026")
 
+#: Cardinality by ``(from_columns are a key, to_columns are a key)``. Ossie
+#: never states the join type, so it is read off which endpoints are unique.
+_CARDINALITY: dict[tuple[bool, bool], str] = {
+    (True, True): "one_to_one",
+    (False, True): "many_to_one",
+    (True, False): "one_to_many",
+    (False, False): "many_to_many",
+}
+
 
 def _normalize_ai_context(value: Any) -> dict[str, Any] | None:
     """Coerce Ossie's ``ai_context`` union to its object form.
@@ -79,6 +89,32 @@ def _normalize_ai_context(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return dict(value)
     return None
+
+
+def _as_list(value: Any) -> list[str]:
+    """Promote a bare string to a one-element list.
+
+    ``YamlSource`` deliberately accepts ``tier: gold`` alongside
+    ``tier: [gold]``; the same authoring slip inside an Ossie vendor block has
+    to behave identically. ``list("gold")`` would silently yield
+    ``['g', 'o', 'l', 'd']`` and then drive tier policy and domain filtering.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
+def _looks_like_query(source: str) -> bool:
+    """Whether a ``dataset.source`` is a query rather than a table reference.
+
+    Ossie allows either. Whitespace is the discriminator: a table reference is
+    a dotted identifier path, and while a quoted identifier *may* contain a
+    space, that is rare enough that treating it as a query only costs a
+    debug-level log instead of a warning.
+    """
+    return any(c.isspace() for c in source.strip())
 
 
 def _table_key(source: str) -> str | None:
@@ -136,8 +172,12 @@ class OssieSource:
         self._tables: dict[str, TableSchema] = {}
         self._relationships: list[Relationship] = []
         self._metric_impacts: list[MetricImpact] = []
-        self._ai_context: dict[str, dict[str, Any]] = {}
-        self._foreign_extensions: dict[str, Any] = {}
+        # Both keyed by semantic-model name first. Ossie namespaces entity
+        # names per model and its top level is a *list*, so two models in
+        # one file may each declare a `customer` dataset or a block from
+        # the same vendor. A flat key would silently drop the first.
+        self._ai_context: dict[str, dict[str, dict[str, Any]]] = {}
+        self._foreign_extensions: dict[str, dict[str, Any]] = {}
 
         for model in raw.get("semantic_model", []) or []:
             self._load_model(model)
@@ -155,7 +195,8 @@ class OssieSource:
         Ossie scopes names inside a model, so two models in one file may each
         declare a ``customer`` dataset pointing at different tables.
         """
-        self._record_ai_context("models", model.get("name", ""), model)
+        model_name = str(model.get("name", ""))
+        self._record_ai_context(model_name, "models", model_name, model)
 
         name_to_table: dict[str, str] = {}
         keys_by_dataset: dict[str, list[tuple[str, ...]]] = {}
@@ -164,14 +205,30 @@ class OssieSource:
             name = dataset.get("name")
             if not name:
                 continue
-            self._record_ai_context("datasets", name, dataset)
+            self._record_ai_context(model_name, "datasets", name, dataset)
             keys_by_dataset[name] = self._unique_key_sets(dataset)
 
             for f in dataset.get("fields", []) or []:
-                self._record_ai_context("fields", f"{name}.{f.get('name', '')}", f)
+                self._record_ai_context(
+                    model_name, "fields", f"{name}.{f.get('name', '')}", f
+                )
 
-            key = _table_key(str(dataset.get("source", "")))
+            raw_source = str(dataset.get("source", ""))
+            key = _table_key(raw_source)
             if key is None:
+                # A query-defined dataset legitimately has no table to key on,
+                # so that case stays at debug. A single-part or empty source is
+                # an authoring error worth a warning: an undeclared table makes
+                # `validate_drill_by` soft-skip, so the typo turns column
+                # validation off rather than failing.
+                log = logger.debug if _looks_like_query(raw_source) else logger.warning
+                log(
+                    "OssieSource: dataset %r has no resolvable schema.table in"
+                    " its source %r, so no table schema is registered for it."
+                    " Expected `database.schema.table` or `schema.table`.",
+                    name,
+                    raw_source,
+                )
                 continue
             if key in self._tables:
                 logger.warning(
@@ -196,9 +253,9 @@ class OssieSource:
                 ]
             )
 
-        self._load_relationships(model, name_to_table, keys_by_dataset)
-        overlay = self._vendor_overlay(model)
-        self._load_metrics(model, overlay.get("metrics", {}))
+        self._load_relationships(model, model_name, name_to_table, keys_by_dataset)
+        overlay = self._vendor_overlay(model, model_name)
+        self._load_metrics(model, model_name, overlay.get("metrics", {}))
         self._load_metric_impacts(overlay.get("metric_impacts", []))
 
     @staticmethod
@@ -216,16 +273,29 @@ class OssieSource:
     def _load_relationships(
         self,
         model: dict[str, Any],
+        model_name: str,
         name_to_table: dict[str, str],
         keys_by_dataset: dict[str, list[tuple[str, ...]]],
     ) -> None:
         """Translate Ossie relationships into single-column edges.
 
         Ossie relationships are dataset-to-dataset with parallel
-        ``from_columns``/``to_columns`` lists, and cardinality is implicit:
-        the ``to`` side is a key by construction, so the edge is one-to-one
-        when the ``from`` columns are also a key of the ``from`` dataset and
-        many-to-one otherwise.
+        ``from_columns``/``to_columns`` lists, and cardinality is never
+        written down — it is implied by which endpoints are keys, so it is
+        derived from *both* sides here.
+
+        The spec documents ``to`` as the one side, but nothing validates that,
+        and trusting it is not free: ``RelationshipChecker._check_fan_out``
+        fires only on ``one_to_many``, so reading a backwards-declared join as
+        ``one_to_one`` silently disables the row-multiplication warning on an
+        aggregate. When ``to_columns`` are demonstrably not a key of the
+        ``to`` dataset, the join fans out and is reported as such.
+
+        Keys are optional in Ossie, though, and absence of a key is not
+        evidence of fan-out. When the ``to`` dataset declares no keys at all
+        there is nothing to contradict the spec's declaration, so it stands —
+        otherwise every model that simply omits keys would flood the fan-out
+        checker with false positives.
 
         Composite joins are skipped rather than split. Our ``Relationship``
         has single-column endpoints, so emitting one edge per column pair
@@ -259,26 +329,32 @@ class OssieSource:
                 )
                 continue
 
-            self._record_ai_context("relationships", rel_name, rel)
+            self._record_ai_context(model_name, "relationships", rel_name, rel)
             ai = _normalize_ai_context(rel.get("ai_context")) or {}
             from_keys = keys_by_dataset.get(rel.get("from", ""), [])
-            is_unique = tuple(from_cols) in {tuple(k) for k in from_keys}
+            to_keys = keys_by_dataset.get(rel.get("to", ""), [])
+            from_unique = tuple(from_cols) in {tuple(k) for k in from_keys}
+            # No keys declared on the target: nothing contradicts the spec's
+            # "``to`` is the one side", so take it at its word.
+            to_unique = not to_keys or tuple(to_cols) in {tuple(k) for k in to_keys}
 
             self._relationships.append(
                 Relationship(
                     from_=f"{from_table}.{from_cols[0]}",
                     to=f"{to_table}.{to_cols[0]}",
-                    type="one_to_one" if is_unique else "many_to_one",
+                    type=_CARDINALITY[(from_unique, to_unique)],
                     description=str(ai.get("instructions", "")),
                 )
             )
 
-    def _load_metrics(self, model: dict[str, Any], overlay: dict[str, Any]) -> None:
+    def _load_metrics(
+        self, model: dict[str, Any], model_name: str, overlay: dict[str, Any]
+    ) -> None:
         for metric in model.get("metrics", []) or []:
             name = metric.get("name")
             if not name:
                 continue
-            self._record_ai_context("metrics", name, metric)
+            self._record_ai_context(model_name, "metrics", name, metric)
             extra = overlay.get(name, {})
             self._metrics.append(
                 MetricDefinition(
@@ -286,9 +362,9 @@ class OssieSource:
                     description=metric.get("description", ""),
                     sql_expression=self._pick_expression(metric),
                     source_model=extra.get("source_model", ""),
-                    filters=list(extra.get("filters", [])),
-                    domains=list(extra.get("domains", [])),
-                    tier=list(extra.get("tier", [])),
+                    filters=_as_list(extra.get("filters")),
+                    domains=_as_list(extra.get("domains")),
+                    tier=_as_list(extra.get("tier")),
                     indicator_kind=extra.get("indicator_kind"),
                     business_owner=extra.get("business_owner"),
                     operational_owner=extra.get("operational_owner"),
@@ -343,13 +419,18 @@ class OssieSource:
 
     # -- extensions -------------------------------------------------------
 
-    def _vendor_overlay(self, model: dict[str, Any]) -> dict[str, Any]:
+    def _vendor_overlay(self, model: dict[str, Any], model_name: str) -> dict[str, Any]:
         """Split ``custom_extensions`` into our vocabulary and foreign extras.
 
         Ossie stores extension payloads as a JSON *string*, so a neighbouring
         vendor's malformed block is a real possibility. It is carried verbatim
         rather than raised on: another vendor's typo must not stop this
         library from enforcing a contract.
+
+        Only string payloads are put through ``json.loads``. Authors do write
+        the block as a YAML mapping despite the spec, and that value is
+        already usable — parsing it would raise ``TypeError`` and produce a
+        "not valid JSON" warning pointing at a non-problem.
         """
         ours: dict[str, Any] = {}
         for extension in model.get("custom_extensions", []) or []:
@@ -357,14 +438,15 @@ class OssieSource:
             if not vendor:
                 continue
             payload: Any = extension.get("data", "")
-            try:
-                payload = json.loads(payload)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "OssieSource: custom_extensions payload for vendor %r is"
-                    " not valid JSON; carried verbatim as a string.",
-                    vendor,
-                )
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except ValueError:
+                    logger.warning(
+                        "OssieSource: custom_extensions payload for vendor %r is"
+                        " not valid JSON; carried verbatim as a string.",
+                        vendor,
+                    )
             if vendor == self._vendor:
                 if isinstance(payload, dict):
                     ours = payload
@@ -375,14 +457,17 @@ class OssieSource:
                         vendor,
                     )
                 continue
-            self._foreign_extensions[vendor] = payload
+            self._foreign_extensions.setdefault(model_name, {})[vendor] = payload
         return ours
 
-    def _record_ai_context(self, kind: str, name: str, entity: dict[str, Any]) -> None:
+    def _record_ai_context(
+        self, model_name: str, kind: str, name: str, entity: dict[str, Any]
+    ) -> None:
         context = _normalize_ai_context(entity.get("ai_context"))
         if context is None or not name:
             return
-        self._ai_context.setdefault(kind, {})[name] = context
+        model = self._ai_context.setdefault(model_name, {})
+        model.setdefault(kind, {})[name] = context
 
     # -- SemanticSource ---------------------------------------------------
 
@@ -418,26 +503,37 @@ class OssieSource:
     def get_extras(self) -> dict[str, Any]:
         """Ossie content this library carries but does not interpret.
 
-        Two sections:
+        Two sections, each keyed by semantic-model name first:
 
         ``ossie_ai_context``
-            Every ``ai_context`` in the model, grouped by entity kind. The
-            spec's AI-grounding channel — synonyms, instructions, example
-            questions — which has no counterpart in our vocabulary. Carried,
-            not indexed: ``search_metrics`` still matches on name and
-            description only.
+            Every ``ai_context`` in the file, grouped by model then by entity
+            kind. The spec's AI-grounding channel — synonyms, instructions,
+            example questions — which has no counterpart in our vocabulary.
+            Carried, not indexed: ``search_metrics`` still matches on name and
+            description only, so Ossie synonyms never silently change
+            retrieval.
 
         ``ossie_custom_extensions``
-            Every vendor block *except* ours, keyed by vendor name, parsed
-            from its JSON string where possible.
+            Every vendor block *except* ours, grouped by model then by vendor
+            name, parsed from its JSON string where possible.
+
+        A section is omitted entirely when empty rather than emitted as ``{}``.
+        Extras ride into the contract's inline snapshot and its canonical
+        bytes, so an always-present empty dict would add a noise key to every
+        Ossie contract's digest and would trip a contract that declares
+        ``expected_extras`` on rehydrate.
 
         Reachable in a prompt only when named in
         ``XmlPromptRenderer(extra_sections=...)``, like any other extras.
         """
         extras: dict[str, Any] = {}
         if self._ai_context:
-            extras["ossie_ai_context"] = {
-                kind: dict(entries) for kind, entries in self._ai_context.items()
-            }
-        extras["ossie_custom_extensions"] = dict(self._foreign_extensions)
-        return extras
+            extras["ossie_ai_context"] = self._ai_context
+        if self._foreign_extensions:
+            extras["ossie_custom_extensions"] = self._foreign_extensions
+        # Vendor payloads and ai_context are author-controlled and reach
+        # ``contract_canonical_bytes`` through ``json.dumps``, so they get the
+        # same coercion YamlSource applies to its own extras. This also
+        # deep-copies, keeping ``get_extras`` a non-aliasing read like
+        # ``get_metrics`` and ``get_relationships``.
+        return jsonify_extras(extras, source="OssieSource")

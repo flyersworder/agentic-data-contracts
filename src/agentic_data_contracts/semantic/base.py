@@ -147,6 +147,51 @@ def parse_review_date(value: Any) -> date | None:
     )
 
 
+def jsonify_extras(extras: dict[str, Any], *, source: str) -> dict[str, Any]:
+    """Return *extras* with dates ISO-coerced and JSON-safety enforced.
+
+    Extras ride inside ``SemanticSource.inline`` and therefore through
+    ``contract_canonical_bytes``' ``json.dumps``. A YAML-native date is not
+    JSON, and the guidance extras exist to carry explicitly wants one
+    ("verified against the database on ..."). Checking at load means a bad
+    value fails where it was authored, rather than months later inside an ARD
+    publish. *source* names the parser in the error, since every source that
+    carries extras shares this path.
+    """
+    return {k: _jsonify(v, (k,), source) for k, v in extras.items()}
+
+
+def _jsonify(value: Any, path: tuple[str | int, ...], source: str) -> Any:
+    """Recursively coerce *value* to JSON-safe types, or raise naming *path*.
+
+    ``datetime`` is checked before ``date`` because it subclasses ``date`` —
+    the same ordering trap ``parse_review_date`` documents.
+    """
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _jsonify(v, (*path, str(k)), source) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonify(v, (*path, i), source) for i, v in enumerate(value)]
+    if value is None or isinstance(value, str | int | float):
+        return value
+    raise ValueError(
+        f"{source}: extras value at {_fmt_path(path)} is not JSON-serializable"
+        f" ({type(value).__name__}). Extras are carried into the frozen contract"
+        f" and its digest, so they must be JSON-safe."
+    )
+
+
+def _fmt_path(path: tuple[str | int, ...]) -> str:
+    """Render a key path as ``section[0].field`` for an actionable error."""
+    rendered = str(path[0])
+    for part in path[1:]:
+        rendered += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return rendered
+
+
 VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})
 _BINARY_OPERATORS = frozenset({"ratio", "difference"})
 

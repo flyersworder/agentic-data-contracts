@@ -102,9 +102,9 @@ def test_search_metrics_matches_on_description(source: OssieSource) -> None:
 
 
 def test_relationship_endpoints_are_schema_table_column(source: OssieSource) -> None:
-    rels = {r.from_: r for r in source.get_relationships()}
-    rel = rels["public.store_sales.ss_customer_sk"]
-    assert rel.to == "public.customer.c_customer_sk"
+    assert ("public.store_sales.ss_customer_sk", "public.customer.c_customer_sk") in {
+        (r.from_, r.to) for r in source.get_relationships()
+    }
 
 
 def test_relationship_defaults_to_many_to_one(source: OssieSource) -> None:
@@ -124,6 +124,7 @@ def test_relationship_is_one_to_one_when_from_columns_are_a_unique_key(
         r
         for r in source.get_relationships()
         if r.from_ == "public.customer.c_customer_sk"
+        and r.to == "public.customer_profile.cp_customer_sk"
     )
     assert rel.type == "one_to_one"
 
@@ -153,9 +154,10 @@ def test_relationship_description_comes_from_ai_context_instructions(
 
 def test_relationships_are_indexed_by_table(source: OssieSource) -> None:
     rels = source.get_relationships_for_table("public.customer")
-    assert {r.from_ for r in rels} == {
-        "public.store_sales.ss_customer_sk",
-        "public.customer.c_customer_sk",
+    assert {(r.from_, r.to) for r in rels} == {
+        ("public.store_sales.ss_customer_sk", "public.customer.c_customer_sk"),
+        ("public.customer.c_customer_sk", "public.customer_profile.cp_customer_sk"),
+        ("public.customer.c_customer_sk", "public.store_sales.ss_customer_sk"),
     }
 
 
@@ -223,7 +225,7 @@ def test_invalid_decomposition_in_vendor_extension_is_rejected(
 
 def test_foreign_vendor_extension_lands_in_extras(source: OssieSource) -> None:
     extras = source.get_extras()
-    assert extras["ossie_custom_extensions"]["SALESFORCE"] == {
+    assert extras["ossie_custom_extensions"]["retail_model"]["SALESFORCE"] == {
         "tableau_workbook_id": "retail_dashboard"
     }
 
@@ -241,14 +243,12 @@ def test_unparseable_extension_data_is_carried_verbatim(
     source: OssieSource,
 ) -> None:
     """Another vendor's malformed JSON must not fail the load."""
-    assert (
-        source.get_extras()["ossie_custom_extensions"]["BROKEN_VENDOR"]
-        == "not valid json {"
-    )
+    extensions = source.get_extras()["ossie_custom_extensions"]["retail_model"]
+    assert extensions["BROKEN_VENDOR"] == "not valid json {"
 
 
 def test_ai_context_is_collected_into_extras(source: OssieSource) -> None:
-    ai = source.get_extras()["ossie_ai_context"]
+    ai = source.get_extras()["ossie_ai_context"]["retail_model"]
     assert ai["metrics"]["total_sales"]["synonyms"] == ["revenue", "gross sales"]
     assert ai["datasets"]["store_sales"]["synonyms"] == [
         "sales transactions",
@@ -260,7 +260,7 @@ def test_string_form_ai_context_is_normalised_to_instructions(
     source: OssieSource,
 ) -> None:
     """`ai_context` is a string or an object; both reach extras as an object."""
-    ai = source.get_extras()["ossie_ai_context"]
+    ai = source.get_extras()["ossie_ai_context"]["retail_model"]
     assert ai["datasets"]["customer"] == {"instructions": "One row per customer."}
 
 
@@ -268,3 +268,157 @@ def test_extras_are_json_safe(source: OssieSource) -> None:
     import json
 
     json.dumps(source.get_extras())
+
+
+# --- cardinality is derived from both sides -------------------------------
+
+
+def test_relationship_is_one_to_many_when_to_columns_are_not_a_key(
+    source: OssieSource,
+) -> None:
+    """A relationship declared "backwards" must not read as one-to-one.
+
+    Ossie documents `to` as the one side, but nothing validates it. If the
+    `to` columns are not a key of the `to` dataset, the join fans out — and
+    `RelationshipChecker._check_fan_out` fires only on `one_to_many`, so
+    trusting the declaration here silently disables the row-multiplication
+    warning on an aggregate.
+    """
+    rel = next(
+        r
+        for r in source.get_relationships()
+        if r.from_ == "public.customer.c_customer_sk"
+        and r.to == "public.store_sales.ss_customer_sk"
+    )
+    assert rel.type == "one_to_many"
+
+
+def test_relationship_trusts_the_declaration_when_to_declares_no_keys(
+    source: OssieSource,
+) -> None:
+    """Keys are optional in Ossie; absence is not evidence of fan-out.
+
+    Downgrading every keyless target to `one_to_many` would flood the
+    fan-out checker with false positives on models that simply omit keys.
+    """
+    rel = next(
+        r for r in source.get_relationships() if r.to == "public.keyless_dim.k_id"
+    )
+    assert rel.type == "many_to_one"
+
+
+# --- scalar coercion parity with YamlSource -------------------------------
+
+
+def test_scalar_tier_is_promoted_to_a_list(tmp_path: Path) -> None:
+    """`"tier": "gold"` must not become `['g', 'o', 'l', 'd']`.
+
+    `YamlSource` deliberately promotes a bare string; the same authoring
+    slip in an Ossie vendor block has to behave identically, or it silently
+    corrupts the values that drive tier policy and domain filtering.
+    """
+    path = tmp_path / "scalar.yml"
+    path.write_text(
+        FIXTURE.read_text()
+        .replace('"tier": ["gold"]', '"tier": "gold"')
+        .replace('"domains": ["sales"]', '"domains": "sales"')
+    )
+    metric = OssieSource(path).get_metric("total_sales")
+    assert metric is not None
+    assert metric.tier == ["gold"]
+    assert metric.domains == ["sales"]
+
+
+# --- extras hygiene -------------------------------------------------------
+
+
+def test_empty_custom_extensions_key_is_omitted(tmp_path: Path) -> None:
+    """An always-present empty dict breaks freeze -> rehydrate.
+
+    `dump_semantic_source` writes extras into the contract's inline
+    snapshot, which `YamlSource` then reloads under the contract's
+    `expected_extras` policy. A synthesized `ossie_custom_extensions: {}`
+    turns a strict contract into a load error, and adds a noise key to
+    `contract_canonical_bytes` for every Ossie contract.
+    """
+    path = tmp_path / "no_vendors.yml"
+    model = FIXTURE.read_text()
+    path.write_text(model[: model.index("    custom_extensions:")])
+    assert "ossie_custom_extensions" not in OssieSource(path).get_extras()
+
+
+def test_extras_are_normalised_to_json_safe_values(tmp_path: Path) -> None:
+    """A YAML-native date in `ai_context` must not reach canonical bytes.
+
+    Extras ride into `contract_canonical_bytes` via `json.dumps`, so the
+    coercion `YamlSource` applies has to apply here too.
+    """
+    path = tmp_path / "dated.yml"
+    path.write_text(
+        FIXTURE.read_text().replace(
+            '      instructions: "Use for retail revenue analysis."',
+            "      instructions: verified\n      verified_on: 2026-05-01",
+        )
+    )
+    extras = OssieSource(path).get_extras()
+    models = extras["ossie_ai_context"]["retail_model"]["models"]
+    assert models["retail_model"]["verified_on"] == "2026-05-01"
+
+
+def test_mapping_extension_payload_does_not_warn_about_json(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A YAML mapping under `data:` is usable, not "not valid JSON"."""
+    path = tmp_path / "mapping.yml"
+    path.write_text(
+        FIXTURE.read_text().replace(
+            """      - vendor_name: SALESFORCE
+        data: '{"tableau_workbook_id": "retail_dashboard"}'""",
+            """      - vendor_name: SALESFORCE
+        data:
+          tableau_workbook_id: retail_dashboard""",
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        source = OssieSource(path)
+    extensions = source.get_extras()["ossie_custom_extensions"]["retail_model"]
+    assert extensions["SALESFORCE"] == {"tableau_workbook_id": "retail_dashboard"}
+    assert "SALESFORCE" not in caplog.text
+
+
+def test_unresolvable_dataset_source_is_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A typo'd `source:` silently turns off drill-by column validation."""
+    path = tmp_path / "bad_source.yml"
+    path.write_text(
+        FIXTURE.read_text().replace(
+            "        source: warehouse.public.customer\n",
+            "        source: customer\n",
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        OssieSource(path)
+    assert "no resolvable schema.table" in caplog.text
+
+
+# --- multiple semantic models in one file ---------------------------------
+
+
+MULTI = Path(__file__).parent.parent / "fixtures" / "sample_ossie_multi_model.yml"
+
+
+def test_each_model_keeps_its_own_vendor_extensions() -> None:
+    """Two models may each carry a block from the same vendor."""
+    extensions = OssieSource(MULTI).get_extras()["ossie_custom_extensions"]
+    assert extensions["retail_model"]["SALESFORCE"] == {"workbook": "retail"}
+    assert extensions["wholesale_model"]["SALESFORCE"] == {"workbook": "wholesale"}
+
+
+def test_each_model_keeps_its_own_ai_context() -> None:
+    """Ossie namespaces entity names per model, so `customer` differs."""
+    ai = OssieSource(MULTI).get_extras()["ossie_ai_context"]
+    assert ai["retail_model"]["datasets"]["customer"]["synonyms"] == ["retail shopper"]
+    assert ai["wholesale_model"]["datasets"]["customer"]["synonyms"] == [
+        "wholesale account"
+    ]

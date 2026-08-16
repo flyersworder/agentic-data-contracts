@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     )
     from agentic_data_contracts.core.staleness import StaleFinding
     from agentic_data_contracts.semantic.base import SemanticSource
+
+
+logger = logging.getLogger(__name__)
 
 
 class SemanticSourceUnavailableError(RuntimeError):
@@ -218,11 +222,21 @@ class DataContract:
         # as free top-level sections — and Ossie's schema sets
         # ``additionalProperties: false`` throughout, so the typo this policy
         # guards against fails in the model's own validator, not here.
-        kwargs: dict[str, object] = (
-            {"expected_extras": source_config.expected_extras}
-            if loader_cls is YamlSource
-            else {}
-        )
+        kwargs: dict[str, object] = {}
+        if loader_cls is YamlSource:
+            kwargs["expected_extras"] = source_config.expected_extras
+        elif source_config.expected_extras is not None:
+            # Say so rather than dropping it. An author who writes
+            # `expected_extras: []` believes strict mode is on; for an ossie
+            # source — which does produce extras — the mismatch would otherwise
+            # surface much later, as a load error on a frozen contract.
+            logger.warning(
+                "Contract %r declares expected_extras on a %r semantic source,"
+                " but the policy applies only to 'yaml' sources and is being"
+                " ignored. Remove it, or move the declaration to a yaml source.",
+                self.name,
+                source_type,
+            )
 
         # Fail closed: a declared source that cannot be loaded must raise a
         # governance-specific error, not a raw OSError/parse error an app might

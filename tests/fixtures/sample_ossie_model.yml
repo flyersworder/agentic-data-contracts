@@ -106,6 +106,20 @@ semantic_model:
                   expression: sr_ticket_number
             datatype: Integer
 
+      # Declares no primary_key and no unique_keys at all — keys are optional
+      # in Ossie, so cardinality cannot be derived and the spec's own
+      # "`to` is the one side" declaration has to be trusted.
+      - name: keyless_dim
+        source: warehouse.public.keyless_dim
+        description: Dimension with no declared keys
+        fields:
+          - name: k_id
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: k_id
+            datatype: Integer
+
       # A query-backed dataset: no physical table to key a schema on.
       - name: active_customers
         source: SELECT * FROM warehouse.public.customer WHERE c_active
@@ -133,6 +147,23 @@ semantic_model:
         to: customer_profile
         from_columns: [c_customer_sk]
         to_columns: [cp_customer_sk]
+
+      # Declared "backwards": `to_columns` are NOT a key of store_sales
+      # (whose key is the composite [ss_item_sk, ss_ticket_number]), so the
+      # one side is `from`, not `to`. This is a fan-out join.
+      - name: customer_to_sales
+        from: customer
+        to: store_sales
+        from_columns: [c_customer_sk]
+        to_columns: [ss_customer_sk]
+
+      # `to` declares no keys, so nothing can be derived and the spec's
+      # "`to` is the one side" declaration stands.
+      - name: sales_to_keyless
+        from: store_sales
+        to: keyless_dim
+        from_columns: [ss_customer_sk]
+        to_columns: [k_id]
 
       # Composite join: our Relationship has single-column endpoints.
       - name: sales_to_returns

@@ -5,11 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from agentic_data_contracts.semantic.base import SemanticSource
+from agentic_data_contracts.semantic.base import SemanticSource, parse_review_date
 from agentic_data_contracts.semantic.yaml_source import (
     SEMANTIC_KEYS,
     YamlSource,
-    _parse_date,
 )
 
 
@@ -81,21 +80,21 @@ def test_parse_date_normalizes_datetime_to_date() -> None:
     datetime subclasses date, so without normalization it would slip through and
     later crash the staleness arithmetic with `date - datetime`.
     """
-    assert _parse_date(datetime(2020, 1, 1, 12, 30, 0)) == date(2020, 1, 1)
+    assert parse_review_date(datetime(2020, 1, 1, 12, 30, 0)) == date(2020, 1, 1)
 
 
 def test_parse_date_passes_through_native_date() -> None:
-    assert _parse_date(date(2020, 1, 1)) == date(2020, 1, 1)
+    assert parse_review_date(date(2020, 1, 1)) == date(2020, 1, 1)
 
 
 def test_parse_date_none_is_none() -> None:
-    assert _parse_date(None) is None
+    assert parse_review_date(None) is None
 
 
 def test_parse_date_malformed_string_raises_clear_error() -> None:
     """A bad ISO string fails fast with a message naming the offending value."""
     with pytest.raises(ValueError, match="last_reviewed must be an ISO date"):
-        _parse_date("2020-13-01")
+        parse_review_date("2020-13-01")
 
 
 def test_unknown_top_level_keys_are_kept_as_extras() -> None:

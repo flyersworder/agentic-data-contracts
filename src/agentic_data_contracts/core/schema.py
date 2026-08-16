@@ -16,7 +16,7 @@ class Enforcement(StrEnum):
 
 
 class SemanticSource(BaseModel):
-    type: str  # dbt | cube | yaml | custom
+    type: str  # dbt | cube | ossie | yaml | custom
     # ``path`` references an external file; ``inline`` is a self-contained
     # snapshot of the semantics (YAML-source raw format) written by
     # ``DataContract.freeze_semantic_source()``. When ``inline`` is present it
@@ -27,8 +27,10 @@ class SemanticSource(BaseModel):
     # Load-time lint policy for a ``yaml`` source, threaded into
     # ``YamlSource(expected_extras=...)``. ``None`` (absent) keeps the
     # warn-and-carry default; a list — including the empty list, which is strict
-    # mode — makes any undeclared top-level key a load error. Ignored by the dbt
-    # and cube loaders, which have no extras concept.
+    # mode — makes any undeclared top-level key a load error. Ignored by the
+    # dbt, cube, and ossie loaders: the first two have no extras concept, and
+    # an Ossie model's extras are synthesized by the parser under fixed keys
+    # rather than authored as free top-level sections.
     #
     # Must not reach ``contract_digest``: a serialized field — even as ``null``
     # — would move every existing digest and invalidate every published ARD

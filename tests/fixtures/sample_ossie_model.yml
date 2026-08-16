@@ -1,0 +1,250 @@
+# Apache Ossie semantic model, spec 0.2.0.dev0.
+#
+# Exercises the parts of the spec an OssieSource must handle: three-part
+# dataset sources, multi-dialect expressions, both `ai_context` shapes,
+# composite and single-column relationships, and `custom_extensions` from
+# both this project and a foreign vendor.
+version: "0.2.0.dev0"
+
+semantic_model:
+  - name: retail_model
+    description: Retail sales semantic model
+    ai_context:
+      instructions: "Use for retail revenue analysis."
+
+    datasets:
+      - name: store_sales
+        source: warehouse.public.store_sales
+        primary_key: [ss_item_sk, ss_ticket_number]
+        description: Store sales fact table
+        ai_context:
+          synonyms:
+            - "sales transactions"
+            - "POS data"
+        fields:
+          - name: ss_item_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ss_item_sk
+            description: Foreign key to item
+            datatype: Integer
+          - name: ss_ticket_number
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ss_ticket_number
+            datatype: Integer
+          - name: ss_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ss_customer_sk
+            description: Foreign key to customer
+            datatype: Integer
+          - name: ss_ext_sales_price
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ss_ext_sales_price
+            description: Extended sales price
+            datatype: Decimal
+          - name: ss_net_profit
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: ss_net_profit
+            datatype: Decimal
+
+      - name: customer
+        source: warehouse.public.customer
+        primary_key: [c_customer_sk]
+        description: Customer dimension
+        ai_context: "One row per customer."
+        fields:
+          - name: c_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: c_customer_sk
+            datatype: Integer
+          - name: c_region
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: c_region
+            description: Sales region
+            datatype: String
+
+      - name: customer_profile
+        source: warehouse.public.customer_profile
+        primary_key: [cp_customer_sk]
+        description: One-to-one customer enrichment
+        fields:
+          - name: cp_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: cp_customer_sk
+            datatype: Integer
+
+      - name: store_returns
+        source: warehouse.public.store_returns
+        primary_key: [sr_item_sk, sr_ticket_number]
+        description: Returns fact table
+        fields:
+          - name: sr_item_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sr_item_sk
+            datatype: Integer
+          - name: sr_ticket_number
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sr_ticket_number
+            datatype: Integer
+
+      # Declares no primary_key and no unique_keys at all — keys are optional
+      # in Ossie, so cardinality cannot be derived and the spec's own
+      # "`to` is the one side" declaration has to be trusted.
+      - name: keyless_dim
+        source: warehouse.public.keyless_dim
+        description: Dimension with no declared keys
+        fields:
+          - name: k_id
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: k_id
+            datatype: Integer
+
+      # A query-backed dataset: no physical table to key a schema on.
+      - name: active_customers
+        source: SELECT * FROM warehouse.public.customer WHERE c_active
+        description: Query-defined dataset
+        fields:
+          - name: c_customer_sk
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: c_customer_sk
+            datatype: Integer
+
+    relationships:
+      - name: sales_to_customer
+        from: store_sales
+        to: customer
+        from_columns: [ss_customer_sk]
+        to_columns: [c_customer_sk]
+        ai_context:
+          instructions: "Join sales to the buying customer."
+
+      # from_columns are the primary key of `customer`, so this is one-to-one.
+      - name: customer_to_profile
+        from: customer
+        to: customer_profile
+        from_columns: [c_customer_sk]
+        to_columns: [cp_customer_sk]
+
+      # Declared "backwards": `to_columns` are NOT a key of store_sales
+      # (whose key is the composite [ss_item_sk, ss_ticket_number]), so the
+      # one side is `from`, not `to`. This is a fan-out join.
+      - name: customer_to_sales
+        from: customer
+        to: store_sales
+        from_columns: [c_customer_sk]
+        to_columns: [ss_customer_sk]
+
+      # `to` declares no keys, so nothing can be derived and the spec's
+      # "`to` is the one side" declaration stands.
+      - name: sales_to_keyless
+        from: store_sales
+        to: keyless_dim
+        from_columns: [ss_customer_sk]
+        to_columns: [k_id]
+
+      # Composite join: our Relationship has single-column endpoints.
+      - name: sales_to_returns
+        from: store_sales
+        to: store_returns
+        from_columns: [ss_item_sk, ss_ticket_number]
+        to_columns: [sr_item_sk, sr_ticket_number]
+
+    metrics:
+      - name: total_sales
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(store_sales.ss_ext_sales_price)
+            - dialect: BIGQUERY
+              expression: SUM(store_sales.ss_ext_sales_price) /* bigquery */
+        description: Total sales revenue
+        datatype: Decimal
+        ai_context:
+          synonyms:
+            - "revenue"
+            - "gross sales"
+
+      - name: total_profit
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(store_sales.ss_net_profit)
+        description: Total net profit
+        datatype: Decimal
+
+      - name: total_cost
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: >-
+                SUM(store_sales.ss_ext_sales_price) - SUM(store_sales.ss_net_profit)
+        description: Total cost of goods sold
+        datatype: Decimal
+
+      # Only a non-default dialect: exercises fallback to the first entry.
+      - name: snowflake_only_metric
+        expression:
+          dialects:
+            - dialect: SNOWFLAKE
+              expression: SUM(store_sales.ss_ext_sales_price)
+        description: Metric expressed only in a vendor dialect
+
+    custom_extensions:
+      - vendor_name: AGENTIC_DATA_CONTRACTS
+        data: |
+          {
+            "metrics": {
+              "total_sales": {
+                "business_owner": "revenue-analytics",
+                "operational_owner": "data-platform",
+                "last_reviewed": "2026-05-01",
+                "tier": ["gold"],
+                "domains": ["sales"],
+                "indicator_kind": "lagging",
+                "decompositions": [
+                  {"operator": "sum", "operands": ["total_profit", "total_cost"]}
+                ],
+                "drill_by": [
+                  {"dimension": "region", "column": "public.customer.c_region"}
+                ]
+              }
+            },
+            "metric_impacts": [
+              {
+                "from": "total_cost",
+                "to": "total_profit",
+                "direction": "negative",
+                "confidence": "verified",
+                "evidence": "Margin bridge reconciled 2026-Q1."
+              }
+            ]
+          }
+
+      - vendor_name: SALESFORCE
+        data: '{"tableau_workbook_id": "retail_dashboard"}'
+
+      - vendor_name: BROKEN_VENDOR
+        data: "not valid json {"

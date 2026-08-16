@@ -18,6 +18,7 @@ from agentic_data_contracts.core.schema import (
 )
 from agentic_data_contracts.semantic.cube import CubeSource
 from agentic_data_contracts.semantic.dbt import DbtSource
+from agentic_data_contracts.semantic.ossie import OssieSource
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
 
@@ -67,6 +68,22 @@ def test_load_cube_source(fixtures_dir: Path) -> None:
     source = dc.load_semantic_source()
     assert isinstance(source, CubeSource)
     assert len(source.get_metrics()) == 1
+
+
+def test_load_ossie_source(fixtures_dir: Path) -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="ossie",
+                path=str(fixtures_dir / "sample_ossie_model.yml"),
+            ),
+        ),
+    )
+    dc = DataContract(schema)
+    source = dc.load_semantic_source()
+    assert isinstance(source, OssieSource)
+    assert len(source.get_metrics()) == 4
 
 
 def test_load_no_source_returns_none() -> None:
@@ -401,3 +418,29 @@ def test_expected_extras_is_ignored_for_non_yaml_sources(fixtures_dir: Path) -> 
     )
     source = DataContract(schema).load_semantic_source()
     assert isinstance(source, DbtSource)
+
+
+def test_expected_extras_on_a_non_yaml_source_warns(
+    fixtures_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Silently ignoring the policy lets an author believe strict mode is on.
+
+    `expected_extras` is threaded only into `YamlSource`. An ossie source does
+    produce extras, so declaring the policy there looks like it should work —
+    and the mismatch would otherwise surface much later, as a load failure on
+    a frozen contract.
+    """
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            source=SemanticSourceConfig(
+                type="ossie",
+                path=str(fixtures_dir / "sample_ossie_model.yml"),
+                expected_extras=[],
+            ),
+        ),
+    )
+    with caplog.at_level(logging.WARNING):
+        DataContract(schema).load_semantic_source()
+    assert "expected_extras" in caplog.text
+    assert "ossie" in caplog.text

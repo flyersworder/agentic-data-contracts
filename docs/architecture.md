@@ -368,6 +368,38 @@ the SDK path cannot observe usage at all, so the helper lives in a module that
 imports only under the `[pydantic-ai]` extra rather than anywhere implying
 coverage it lacks.
 
+**Run cancellation is a third deliberate non-adoption (assessed 2026-08-16,
+against Pydantic AI 2.31).** Pydantic AI 2.26 added first-party cancellation —
+`AgentRun.cancel()`, `RunContext.cancel()`, `RunCancelled` — and a terminal
+budget breach looks like exactly the condition it was built for. It is not
+adopted, for three reasons:
+
+- **Framework neutrality is a stated property of this library.** A terminal
+  breach raises `ContractSessionLimitError` identically on the Agent SDK,
+  LangChain and Pydantic AI paths. Routing one adapter through a
+  framework-native mechanism would make governance behave differently depending
+  on which agent framework the caller happened to pick — the divergence this
+  library exists to remove.
+- **A governance stop is not a cancellation.** `RunCancelled` reads as *someone
+  asked to stop*; a breached budget is *policy refused*. A caller catching
+  `RunCancelled` to handle a user pressing Stop would silently swallow a limit
+  breach. Distinct meanings need distinct types.
+- **It would add a third path, not unify two.** A limit already trips on either
+  the tool side (`ContractSessionLimitError`) or the model side
+  (`UsageLimitExceeded`), and callers are told above to catch both. Cancellation
+  does not collapse that pair; it appends to it.
+
+The third reason assumes the exception escapes `agent.run()` at all, so that
+assumption is a test rather than a belief:
+`test_terminal_limit_error_escapes_agent_run` runs a breach through Pydantic
+AI's own tool-execution machinery and asserts `ContractSessionLimitError`
+propagates uncaught. Every other terminal-limit test invokes the tool function
+directly, proving only that *our* wrapper raises. Because
+`test-pydantic-ai-latest` runs this module against the newest release the floor
+allows, a future version that caught non-`ModelRetry` tool exceptions — turning
+a breached budget into a retry — would surface there rather than in a user's
+install. Revisit this decision if that job ever goes red on it.
+
 When `ai-agent-contracts` IS installed, enforcement is delegated to the formal framework via the bridge layer (see below).
 
 ## Validation Layer

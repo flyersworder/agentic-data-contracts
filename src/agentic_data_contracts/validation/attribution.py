@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,7 +123,11 @@ def _place(
         for name in contributions:
             contributions[name] += share
     elif convention == "fold_into":
-        assert convention_operand is not None  # validated at load and above
+        # Unreachable in practice: attribute_change validates convention and
+        # convention_operand before calling here (and validate_decompositions
+        # does the same at load time), so this documents the invariant this
+        # function relies on rather than guarding against a real call path.
+        assert convention_operand is not None
         contributions[convention_operand] += interaction
     # "explicit" (and the linear operators) leave the residual where it is.
     return contributions
@@ -144,7 +148,10 @@ def attribute_change(
     that declares none raises, because the answer would otherwise be one of
     several defensible numbers with no way to tell which was used.
     """
-    from agentic_data_contracts.semantic.base import _CROSS_TERM_OPERATORS
+    from agentic_data_contracts.semantic.base import (
+        _CROSS_TERM_OPERATORS,
+        VALID_CONVENTIONS,
+    )
     from agentic_data_contracts.validation.reconciliation import _apply_operator
 
     decomp = _resolve(metric, decomposition)
@@ -157,6 +164,25 @@ def attribute_change(
             f"metric {metric.name!r} decomposition declares no attribution "
             f"convention; a {decomp.operator!r} identity has a cross term whose "
             f"placement changes the answer, so it must be declared"
+        )
+    # attribute_change accepts an arbitrary MetricDefinition and cannot assume
+    # it came through validate_decompositions at load time, so re-validate the
+    # convention here rather than let a malformed one reach _place -- which
+    # would otherwise assert (or, under python -O, KeyError on contributions
+    # [None]) partway through the arithmetic instead of raising cleanly.
+    if decomp.convention is not None and decomp.convention not in VALID_CONVENTIONS:
+        raise ValueError(
+            f"metric {metric.name!r} decomposition has unknown attribution "
+            f"convention {decomp.convention!r}; expected one of "
+            f"{sorted(VALID_CONVENTIONS)}"
+        )
+    if decomp.convention == "fold_into" and (
+        decomp.convention_operand is None or decomp.convention_operand not in operands
+    ):
+        raise ValueError(
+            f"metric {metric.name!r} decomposition convention 'fold_into' "
+            f"requires 'convention_operand' naming one of its operands "
+            f"{operands}, got {decomp.convention_operand!r}"
         )
     if decomp.operator == "ratio":
         for label, values in (("before", before), ("after", after)):
@@ -187,4 +213,67 @@ def attribute_change(
         contributions=contributions,
         interaction=interaction,
         shares=shares,
+    )
+
+
+def check_attribution(
+    metric: MetricDefinition,
+    *,
+    before: Mapping[str, float],
+    after: Mapping[str, float],
+    reported: Mapping[str, float],
+    rel_tol: float = 1e-4,
+    abs_tol: float = 0.0,
+    decomposition: int = 0,
+) -> AttributionResult:
+    """Check a reported breakdown against the contract's declared convention.
+
+    The intended caller is an **eval harness**, not CI and not production: a
+    ``reported`` breakdown exists only inside an agent's written answer, and
+    post-hoc checking is the wrong shape for a failure with an agent in the
+    loop by construction. What it is good for is measuring whether declaring a
+    convention changes what an agent reports.
+
+    Under ``explicit``, *reported* must also carry the residual under
+    ``INTERACTION_KEY``; under the other conventions that key is rejected,
+    because the residual has already been distributed and reporting it again
+    double-counts. Every deviation is judged against
+    ``max(abs_tol, rel_tol * abs(delta_parent))`` -- a contribution is
+    meaningful as a share of the total change, and a per-contribution relative
+    tolerance explodes when a contribution is near zero.
+    """
+    expected = attribute_change(
+        metric, before=before, after=after, decomposition=decomposition
+    )
+    target = dict(expected.contributions)
+    if expected.convention == "explicit":
+        target[INTERACTION_KEY] = expected.interaction
+
+    if set(reported) != set(target):
+        raise ValueError(
+            f"reported keys {sorted(reported)} do not match the expected "
+            f"breakdown {sorted(target)} for metric {metric.name!r} under "
+            f"convention {expected.convention!r}"
+        )
+
+    tolerance = max(abs_tol, rel_tol * abs(expected.delta_parent))
+    deviations = {name: reported[name] - value for name, value in target.items()}
+    matches = all(abs(d) <= tolerance for d in deviations.values())
+    sums_to_delta = (
+        abs(math.fsum(reported.values()) - expected.delta_parent) <= tolerance
+    )
+    return replace(
+        expected,
+        reported=dict(reported),
+        deviations=deviations,
+        matches=matches,
+        sums_to_delta=sums_to_delta,
+        rel_tol=rel_tol,
+        abs_tol=abs_tol,
+        reason=(
+            None
+            if matches
+            else "reported contributions do not match the declared convention "
+            "within tolerance"
+        ),
     )

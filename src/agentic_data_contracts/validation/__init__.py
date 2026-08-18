@@ -1,3 +1,9 @@
+from agentic_data_contracts.validation.attribution import (
+    INTERACTION_KEY,
+    AttributionResult,
+    attribute_change,
+    check_attribution,
+)
 from agentic_data_contracts.validation.checkers import (
     ENFORCEABLE_OPERATIONS,
     BlockedColumnsChecker,
@@ -30,6 +36,7 @@ from agentic_data_contracts.validation.validator import (
 )
 
 __all__ = [
+    "AttributionResult",
     "BlockedColumnsChecker",
     "CheckResult",
     "Checker",
@@ -37,6 +44,7 @@ __all__ = [
     "ExampleValidationReport",
     "ExplainAdapter",
     "ExplainResult",
+    "INTERACTION_KEY",
     "MaxJoinsChecker",
     "ENFORCEABLE_OPERATIONS",
     "NoSelectStarChecker",
@@ -50,6 +58,8 @@ __all__ = [
     "ValidationResult",
     "Validator",
     "VerifiedExample",
+    "attribute_change",
+    "check_attribution",
     "extract_tables",
     "reconcile_decomposition",
     "validate_examples",

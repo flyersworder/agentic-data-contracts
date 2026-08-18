@@ -7,6 +7,7 @@ from agentic_data_contracts.validation.attribution import (
     INTERACTION_KEY,
     AttributionResult,
     attribute_change,
+    check_attribution,
 )
 
 # The #67 worked example. parent = volume * rate.
@@ -168,6 +169,24 @@ class TestPreconditions:
                 after={"num": 1.0, "den": 2.0},
             )
 
+    def test_unknown_convention_raises(self) -> None:
+        # A hand-built Decomposition can carry any string; attribute_change
+        # must not assume it came through the load-time validator.
+        with pytest.raises(ValueError, match="unknown attribution convention"):
+            attribute_change(_metric("nonsense"), before=BEFORE, after=AFTER)
+
+    def test_fold_into_without_convention_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="convention_operand"):
+            attribute_change(_metric("fold_into"), before=BEFORE, after=AFTER)
+
+    def test_fold_into_convention_operand_not_in_operands_raises(self) -> None:
+        with pytest.raises(ValueError, match="convention_operand"):
+            attribute_change(
+                _metric("fold_into", convention_operand="bogus"),
+                before=BEFORE,
+                after=AFTER,
+            )
+
 
 def test_result_is_frozen() -> None:
     # Matches the AttributeError + type-ignore-comment style TestResultType
@@ -180,3 +199,101 @@ def test_result_is_frozen() -> None:
 
 def test_interaction_key_is_exported() -> None:
     assert INTERACTION_KEY == "interaction"
+
+
+class TestCheckAttribution:
+    def test_matching_breakdown_passes(self) -> None:
+        r = check_attribution(
+            _metric("split_evenly"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 2000.0, "rate": 1250.0},
+        )
+        assert r.matches is True
+        assert r.sums_to_delta is True
+        assert r.reason is None
+
+    def test_wrong_convention_is_caught_even_though_it_sums(self) -> None:
+        # This is the #67 failure exactly: correct arithmetic, wrong split.
+        r = check_attribution(
+            _metric("split_evenly"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 1750.0, "rate": 1500.0},
+        )
+        assert r.sums_to_delta is True
+        assert r.matches is False
+        assert r.reason is not None
+        assert r.deviations is not None
+        assert abs(r.deviations["volume"] - (-250.0)) < 1e-6
+
+    def test_explicit_requires_the_interaction_key(self) -> None:
+        r = check_attribution(
+            _metric("explicit"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 1750.0, "rate": 1000.0, INTERACTION_KEY: 500.0},
+        )
+        assert r.matches is True
+
+    def test_explicit_without_the_interaction_key_raises(self) -> None:
+        with pytest.raises(ValueError, match="do not match"):
+            check_attribution(
+                _metric("explicit"),
+                before=BEFORE,
+                after=AFTER,
+                reported={"volume": 1750.0, "rate": 1000.0},
+            )
+
+    def test_interaction_key_rejected_when_already_distributed(self) -> None:
+        # Under split_evenly the residual is inside the contributions;
+        # reporting it separately double-counts.
+        with pytest.raises(ValueError, match="do not match"):
+            check_attribution(
+                _metric("split_evenly"),
+                before=BEFORE,
+                after=AFTER,
+                reported={"volume": 2000.0, "rate": 1250.0, INTERACTION_KEY: 500.0},
+            )
+
+    def test_tolerance_is_scaled_to_delta_parent(self) -> None:
+        # rel_tol * |delta| = 1e-3 * 3250 = 3.25, so a 3.0 deviation passes
+        # and a 4.0 deviation does not.
+        inside = check_attribution(
+            _metric("split_evenly"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 2003.0, "rate": 1250.0},
+            rel_tol=1e-3,
+        )
+        assert inside.matches is True
+        outside = check_attribution(
+            _metric("split_evenly"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 2004.0, "rate": 1250.0},
+            rel_tol=1e-3,
+        )
+        assert outside.matches is False
+
+    def test_expected_fields_are_still_populated(self) -> None:
+        r = check_attribution(
+            _metric("split_evenly"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 2000.0, "rate": 1250.0},
+        )
+        assert abs(r.contributions["volume"] - 2000.0) < 1e-6
+        assert r.rel_tol == 1e-4
+        assert r.abs_tol == 0.0
+
+
+def test_attribution_is_exported_from_the_validation_package() -> None:
+    from agentic_data_contracts.validation import (
+        AttributionResult as Exported,
+    )
+    from agentic_data_contracts.validation import attribute_change, check_attribution
+
+    assert Exported is AttributionResult
+    assert attribute_change is not None
+    assert check_attribution is not None

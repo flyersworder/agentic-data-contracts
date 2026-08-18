@@ -420,3 +420,78 @@ class TestInteractionKeyCollision:
             reported={INTERACTION_KEY: 15.0, "users": 25.0},
         )
         assert r.matches is True
+
+
+class TestOperatorAndArityPreconditions:
+    """Mirrors the up-front block ``reconcile_decomposition`` already has.
+
+    ``attribute_change`` is public and accepts an arbitrary
+    ``MetricDefinition``; its own comments say it cannot assume the object came
+    through ``validate_decompositions`` at load. Before this, malformed shapes
+    surfaced as interpreter errors from inside the arithmetic — ``IndexError``,
+    an unpacking ``ValueError`` naming nothing about the contract, or
+    ``ZeroDivisionError`` — rather than the ``ValueError`` the module commits
+    to. See #72.
+    """
+
+    def test_unknown_operator_raises_before_any_arithmetic(self) -> None:
+        with pytest.raises(ValueError, match="unknown decomposition operator"):
+            attribute_change(
+                _metric(None, operator="power", operands=["a", "b"]),
+                before={"a": 1.0, "b": 2.0},
+                after={"a": 2.0, "b": 3.0},
+            )
+
+    def test_ratio_with_one_operand_raises(self) -> None:
+        # Previously IndexError from the zero-denominator guard's operands[1].
+        with pytest.raises(ValueError, match="requires exactly 2 operands"):
+            attribute_change(
+                _metric("explicit", operator="ratio", operands=["n"]),
+                before={"n": 1.0},
+                after={"n": 2.0},
+            )
+
+    def test_ratio_with_three_operands_raises(self) -> None:
+        # Previously "too many values to unpack (expected 2, got 3)".
+        with pytest.raises(ValueError, match="requires exactly 2 operands"):
+            attribute_change(
+                _metric("explicit", operator="ratio", operands=["a", "b", "c"]),
+                before={"a": 1.0, "b": 2.0, "c": 3.0},
+                after={"a": 2.0, "b": 3.0, "c": 4.0},
+            )
+
+    def test_difference_with_three_operands_raises(self) -> None:
+        with pytest.raises(ValueError, match="requires exactly 2 operands"):
+            attribute_change(
+                _metric(None, operator="difference", operands=["a", "b", "c"]),
+                before={"a": 1.0, "b": 2.0, "c": 3.0},
+                after={"a": 2.0, "b": 3.0, "c": 4.0},
+            )
+
+    def test_product_with_no_operands_raises(self) -> None:
+        # Previously ZeroDivisionError from split_evenly dividing by len().
+        with pytest.raises(ValueError, match="requires at least 2 operands"):
+            attribute_change(
+                _metric("split_evenly", operator="product", operands=[]),
+                before={},
+                after={},
+            )
+
+    def test_sum_with_one_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="requires at least 2 operands"):
+            attribute_change(
+                _metric(None, operator="sum", operands=["a"]),
+                before={"a": 1.0},
+                after={"a": 2.0},
+            )
+
+    def test_check_attribution_inherits_the_guards(self) -> None:
+        # check_attribution wraps attribute_change, so it must raise the same
+        # way rather than reaching its own key-set comparison first.
+        with pytest.raises(ValueError, match="requires exactly 2 operands"):
+            check_attribution(
+                _metric("explicit", operator="ratio", operands=["n"]),
+                before={"n": 1.0},
+                after={"n": 2.0},
+                reported={"n": 1.0},
+            )

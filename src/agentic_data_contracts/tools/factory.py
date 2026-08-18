@@ -248,10 +248,18 @@ def _metric_details(
     if metric.indicator_kind:
         data["indicator_kind"] = metric.indicator_kind
     if metric.decompositions:
-        data["decompositions"] = [
-            {"operator": d.operator, "operands": list(d.operands)}
-            for d in metric.decompositions
-        ]
+        decompositions: list[dict[str, Any]] = []
+        for d in metric.decompositions:
+            entry: dict[str, Any] = {
+                "operator": d.operator,
+                "operands": list(d.operands),
+            }
+            if d.convention is not None:
+                entry["convention"] = d.convention
+            if d.convention_operand is not None:
+                entry["convention_operand"] = d.convention_operand
+            decompositions.append(entry)
+        data["decompositions"] = decompositions
     if metric.drill_by:
         data["drill_by"] = [
             {"dimension": dd.dimension, "column": dd.column} for dd in metric.drill_by
@@ -840,6 +848,14 @@ def create_tools(
             }
             if isinstance(edge, IdentityEdge):
                 entry["operator"] = edge.operator
+                # The convention rides here too: an agent following this tool's
+                # own root-cause guidance ("walk 'identity' first") may never
+                # call lookup_metric, and the operator alone does not say where
+                # the cross term goes.
+                if edge.convention is not None:
+                    entry["convention"] = edge.convention
+                if edge.convention_operand is not None:
+                    entry["convention_operand"] = edge.convention_operand
             else:
                 entry["direction"] = edge.direction
                 entry["confidence"] = edge.confidence

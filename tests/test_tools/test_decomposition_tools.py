@@ -45,9 +45,12 @@ class TestLookupMetricSurfacesDecomposition:
     @pytest.mark.asyncio
     async def test_includes_decompositions_and_drill_by(self) -> None:
         data = await _call(_tools()["lookup_metric"], metric_name="revenue")
-        assert {"operator": "product", "operands": ["paying_users", "arpu"]} in data[
-            "decompositions"
-        ]
+        assert {
+            "operator": "product",
+            "operands": ["paying_users", "arpu"],
+            "convention": "fold_into",
+            "convention_operand": "arpu",
+        } in data["decompositions"]
         assert {
             "dimension": "region",
             "column": "analytics.dim_customer.region",
@@ -106,3 +109,45 @@ class TestTraceWalksIdentity:
             {"metric_name": "revenue", "kinds": "bogus"}
         )
         assert "kinds must be" in result["content"][0]["text"]
+
+
+class TestConventionDelivery:
+    @pytest.mark.asyncio
+    async def test_lookup_metric_omits_an_undeclared_convention(self) -> None:
+        # revenue's `sum` decomposition declares none: the keys must be absent,
+        # not present-and-null. An always-present key would move every
+        # published contract digest.
+        data = await _call(_tools()["lookup_metric"], metric_name="revenue")
+        sums = [d for d in data["decompositions"] if d["operator"] == "sum"]
+        assert sums
+        assert "convention" not in sums[0]
+        assert "convention_operand" not in sums[0]
+
+    @pytest.mark.asyncio
+    async def test_trace_identity_edges_carry_the_convention(self) -> None:
+        # trace_metric_impacts' own description tells the agent to walk
+        # 'identity' first for root cause -- that is the attribution workflow.
+        # It must not hand over the operator without the convention.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="arpu",
+            direction="upstream",
+            kinds="identity",
+        )
+        product_edges = [e for e in data["edges"] if e["operator"] == "product"]
+        assert product_edges
+        for edge in product_edges:
+            assert edge["convention"] == "fold_into"
+            assert edge["convention_operand"] == "arpu"
+
+    @pytest.mark.asyncio
+    async def test_trace_omits_an_undeclared_convention(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="new_revenue",
+            direction="upstream",
+            kinds="identity",
+        )
+        sum_edges = [e for e in data["edges"] if e["operator"] == "sum"]
+        assert sum_edges
+        assert all("convention" not in e for e in sum_edges)

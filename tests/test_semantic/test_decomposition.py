@@ -539,3 +539,41 @@ class TestConventionRoundTrip:
             "operator": "product",
             "operands": ["volume", "rate"],
         }
+
+
+class TestIdentityEdgeConvention:
+    def test_every_operand_edge_carries_the_convention(self) -> None:
+        # The convention is a property of the identity, and an edge is one
+        # operand of it, so all edges from one decomposition share the pair.
+        metrics = [
+            MetricDefinition(
+                name="activations",
+                description="",
+                sql_expression="",
+                decompositions=[
+                    Decomposition(
+                        operator="product",
+                        operands=["volume", "rate"],
+                        convention="fold_into",
+                        convention_operand="rate",
+                    )
+                ],
+            )
+        ]
+        edges = identity_edges_from_metrics(metrics)
+        assert len(edges) == 2
+        assert all(e.convention == "fold_into" for e in edges)
+        assert all(e.convention_operand == "rate" for e in edges)
+
+    def test_undeclared_convention_leaves_edges_unset(self) -> None:
+        metrics = [
+            MetricDefinition(
+                name="net",
+                description="",
+                sql_expression="",
+                decompositions=[Decomposition(operator="sum", operands=["a", "b"])],
+            )
+        ]
+        edges = identity_edges_from_metrics(metrics)
+        assert all(e.convention is None for e in edges)
+        assert all(e.convention_operand is None for e in edges)

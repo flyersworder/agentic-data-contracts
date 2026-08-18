@@ -98,6 +98,11 @@ class IdentityEdge:
     from_metric: str  # parent metric
     to_metric: str  # operand metric
     operator: str  # the decomposition operator that produced this edge
+    # Carried from the producing decomposition so a root-cause walk that never
+    # calls lookup_metric still learns where the cross term goes. Every edge
+    # from one decomposition shares the pair.
+    convention: str | None = None
+    convention_operand: str | None = None
 
     @property
     def kind(self) -> str:
@@ -125,6 +130,8 @@ def identity_edges_from_metrics(
                         from_metric=metric.name,
                         to_metric=operand,
                         operator=decomp.operator,
+                        convention=decomp.convention,
+                        convention_operand=decomp.convention_operand,
                     )
                 )
     return edges

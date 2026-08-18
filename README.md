@@ -924,8 +924,8 @@ metrics:
     decompositions:
       - operator: product
         operands: [volume, rate]
-        convention: fold_into    # explicit | split_evenly | fold_into
-        convention_operand: rate # required for fold_into, overrides the default
+        convention: fold_into    # explicit | split_evenly | fold_into, overrides the default
+        convention_operand: rate # required for fold_into
 ```
 
 | Convention | Cross term | Known as |
@@ -991,11 +991,11 @@ measured is the caller's business:
 from agentic_data_contracts.validation import attribute_change
 
 result = attribute_change(
-    contract.semantic_source.get_metric("activations"),
+    contract.load_semantic_source().get_metric("activations"),
     before={"volume": 10_000, "rate": 0.35},
     after={"volume": 15_000, "rate": 0.45},
 )
-result.contributions   # {"volume": 2000.0, "rate": 1250.0} under split_evenly
+result.contributions   # {"volume": 1750.0, "rate": 1500.0} under fold_into: rate
 result.interaction     # 500.0 — the raw residual, so the placement is auditable
 ```
 
@@ -1054,8 +1054,9 @@ a subclass that overrides them still works.
 
 ### Consumer-authored sections (extras)
 
-`YamlSource` interprets four top-level keys — `metrics`, `tables`,
-`relationships`, `metric_impacts` (exported as `SEMANTIC_KEYS`). Every other
+`YamlSource` interprets five top-level keys — `metrics`, `tables`,
+`relationships`, `metric_impacts`, `decomposition_convention` (exported as
+`SEMANTIC_KEYS`). Every other
 top-level key is carried verbatim as an *extra*: reachable, portable, and
 renderable, but never interpreted.
 

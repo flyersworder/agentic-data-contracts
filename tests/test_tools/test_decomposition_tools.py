@@ -151,3 +151,4 @@ class TestConventionDelivery:
         sum_edges = [e for e in data["edges"] if e["operator"] == "sum"]
         assert sum_edges
         assert all("convention" not in e for e in sum_edges)
+        assert all("convention_operand" not in e for e in sum_edges)

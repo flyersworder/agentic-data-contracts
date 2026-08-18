@@ -236,6 +236,30 @@ class TestCheckAttribution:
         )
         assert r.matches is True
 
+    def test_explicit_sums_to_delta_only_with_the_interaction_key_correct(
+        self,
+    ) -> None:
+        # explicit is the only convention where sums_to_delta depends on
+        # INTERACTION_KEY being summed in -- the other conventions fold the
+        # residual into a factor before check_attribution ever sees it.
+        exact = check_attribution(
+            _metric("explicit"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 1750.0, "rate": 1000.0, INTERACTION_KEY: 500.0},
+        )
+        assert exact.matches is True
+        assert exact.sums_to_delta is True
+
+        wrong_interaction = check_attribution(
+            _metric("explicit"),
+            before=BEFORE,
+            after=AFTER,
+            reported={"volume": 1750.0, "rate": 1000.0, INTERACTION_KEY: 600.0},
+        )
+        assert wrong_interaction.matches is False
+        assert wrong_interaction.sums_to_delta is False
+
     def test_explicit_without_the_interaction_key_raises(self) -> None:
         with pytest.raises(ValueError, match="do not match"):
             check_attribution(

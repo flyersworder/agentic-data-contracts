@@ -33,6 +33,17 @@ INTERACTION_KEY = "interaction"
 
 @dataclass(frozen=True)
 class AttributionResult:
+    """Result of applying (or checking) a declared attribution convention.
+
+    Under ``explicit``, ``shares`` sums to *less than* 1: the residual stays
+    parked in ``interaction`` rather than folded into ``contributions``, and
+    is deliberately attributed to no factor. A consumer that normalizes
+    ``shares`` to sum to 1 (an eval harness computing "percent of change
+    explained", say) should account for this on purpose rather than read it
+    as a bug -- add ``interaction`` back in before normalizing if a full
+    partition is what's wanted.
+    """
+
     metric: str
     operator: str
     convention: str | None

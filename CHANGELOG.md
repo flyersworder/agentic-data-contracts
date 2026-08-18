@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ### Unchanged
 
-- **Digests.** A contract that declares no convention produces byte-identical `contract_canonical_bytes` — both `convention` and `decomposition_convention` are omitted wherever they are unset, in `dump_semantic_source`, the tool payloads, and the frozen inline snapshot alike, so adopting this feature costs nothing for a contract that doesn't use it.
+- **Digests.** A contract that declares no convention produces byte-identical `contract_canonical_bytes` — `convention` and `convention_operand` are omitted from `dump_semantic_source`, the tool payloads, and the frozen inline snapshot alike whenever they are unset, so adopting this feature costs nothing for a contract that doesn't use it. `decomposition_convention` is a different case: it is never emitted by `dump_semantic_source`, set or unset, because its effect is resolved onto each decomposition's `convention` at load — so it does not survive a freeze, by design, rather than being merely omitted when empty.
 
 ## [0.42.0] - 2026-08-16
 

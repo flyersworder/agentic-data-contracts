@@ -470,6 +470,10 @@ class TestConventionValidation:
                 self._metrics(convention="split_evenly", convention_operand="rate")
             )
 
+    def test_convention_operand_without_any_convention_raises(self) -> None:
+        with pytest.raises(ValueError, match="declares no convention"):
+            validate_decompositions(self._metrics(convention_operand="rate"))
+
 
 class TestConventionRoundTrip:
     def test_declared_convention_survives_dump_and_reload(self) -> None:

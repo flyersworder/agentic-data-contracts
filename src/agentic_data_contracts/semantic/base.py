@@ -15,7 +15,14 @@ from agentic_data_contracts.adapters.base import TableSchema
 
 @dataclass
 class Decomposition:
-    """An arithmetic identity: how a metric is reconstructed from other metrics."""
+    """An arithmetic identity: how a metric is reconstructed from other metrics.
+
+    Operands must be in units the declared operator composes — this is not
+    validated, and cannot be without expression semantics the semantic layer
+    does not carry. A rate declared as a rounded percentage makes a ``product``
+    identity false by ~100x. See ``reconcile_decomposition`` for how an operand
+    declared at limited precision interacts with its tolerance.
+    """
 
     operator: str  # "sum" | "product" | "ratio" | "difference"
     operands: list[str] = field(default_factory=list)

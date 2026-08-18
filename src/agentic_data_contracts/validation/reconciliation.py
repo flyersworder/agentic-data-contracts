@@ -106,6 +106,15 @@ def reconcile_decomposition(
     ``parent_sql`` measures the parent. All queries are executed via ``adapter``.
     The result reports the numbers and whether they reconcile within tolerance;
     it never infers *why* a mismatch occurred.
+
+    The default ``rel_tol`` assumes the operands are **exact**. An operand
+    declared at limited precision (a rate carried at three decimals, say) makes
+    the identity approximate by construction, and its residual — ~0.03% for that
+    rate — is reported identically to real drift. Widen ``rel_tol`` to the
+    precision the operands actually have rather than reading it as a finding.
+    Units are the author's responsibility too: a percentage-scaled operand makes
+    a ``product`` identity false by ~100x, which ``implied_parent`` against
+    ``actual_parent`` names on sight.
     """
     # Reuse the operator vocabulary from the semantic layer as the single source
     # of truth (so a change there can't silently disagree here). Imported inside

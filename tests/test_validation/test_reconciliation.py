@@ -377,3 +377,79 @@ class TestReconcilePopulationMismatch:
         assert result.operands == {"first_purchase_users": 2.0, "cohort_signups": 4.0}
         assert result.implied_parent == 0.5
         assert abs(result.actual_parent - 2 / 3) < 1e-9
+
+
+class TestReconcileOperandUnitsAndPrecision:
+    """Operands must be in units the operator composes, at exact precision.
+
+    ``reconcile_decomposition`` folds operand values with the declared operator
+    and has no view of their units or precision, so two ordinary authoring
+    conventions collide: rate metrics are commonly declared as rounded
+    percentages, while ``parent = volume x rate`` is the canonical ``product``
+    identity. See docs/architecture.md (v0.29.0 section) and issue #68.
+    """
+
+    def test_percentage_scaled_operand_is_self_diagnosing(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        # A rate declared as ROUND(100.0 * n / d, 1) makes the identity false by
+        # ~100x. No library help is needed: implied_parent vs actual_parent
+        # (350,100 against 3,500) names the scale error on sight.
+        metric = _metric("product", ["volume", "rate"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 3500",
+            operand_sql={"volume": "SELECT 9000", "rate": "SELECT 38.9"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+        assert result.implied_parent == 350100.0
+        assert result.actual_parent == 3500.0
+        assert abs(result.rel_diff - 346600.0 / 3500.0) < 1e-9  # ~99x
+
+    def test_exact_fraction_operand_reconciles(self, adapter: DuckDBAdapter) -> None:
+        # Same identity in fraction units, operand carried at full precision.
+        metric = _metric("product", ["volume", "rate"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 3500",
+            operand_sql={"volume": "SELECT 9000", "rate": "SELECT 3500.0 / 9000.0"},
+            adapter=adapter,
+        )
+        assert result.reconciles is True
+
+    def test_rounded_operand_reads_as_drift_at_the_default_tolerance(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        # The quiet case. Scale is right; the rate is simply declared at three
+        # decimals (0.389 for a true 0.3888...). The residual is 0.03% -- too
+        # large for float noise, too small to look like a units bug, and
+        # reported with the same `reason` as real ETL drift.
+        metric = _metric("product", ["volume", "rate"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 3500",
+            operand_sql={"volume": "SELECT 9000", "rate": "SELECT 0.389"},
+            adapter=adapter,
+        )
+        assert result.reconciles is False
+        assert result.reason == "identity does not hold within tolerance"
+        assert abs(result.implied_parent - 3501.0) < 1e-9
+        assert abs(result.rel_diff - 1.0 / 3500.0) < 1e-9
+
+    def test_widening_rel_tol_to_the_operand_precision_reconciles(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        # The documented lever. An identity declared over a 3-decimal operand is
+        # approximate by construction, so it must be checked at the precision it
+        # actually has -- not by loosening the check everywhere.
+        metric = _metric("product", ["volume", "rate"])
+        result = reconcile_decomposition(
+            metric,
+            parent_sql="SELECT 3500",
+            operand_sql={"volume": "SELECT 9000", "rate": "SELECT 0.389"},
+            adapter=adapter,
+            rel_tol=1e-3,
+        )
+        assert result.reconciles is True
+        assert result.reason is None

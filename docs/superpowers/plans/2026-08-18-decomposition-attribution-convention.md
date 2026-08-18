@@ -652,91 +652,144 @@ git commit -m "feat: convention round-trips through dump_semantic_source, digest
 ### Task 4: `OssieSource` round-trip
 
 **Files:**
-- Modify: `src/agentic_data_contracts/semantic/ossie.py` — `_load_metrics`, `_load_model`
+- Modify: `src/agentic_data_contracts/semantic/ossie.py` — `_load_model`, `_load_metrics`
 - Test: `tests/test_semantic/test_ossie.py`
 
 **Interfaces:**
 - Consumes: Task 1's fields, Task 2's `_parse_convention_default` and `_apply_convention_default`
 - Produces: nothing new; parity with `YamlSource`.
 
-- [ ] **Step 1: Write the failing test**
+**Two facts about this loader that the tests depend on.** Read them before writing anything:
 
-Append to `tests/test_semantic/test_ossie.py`:
+1. The top-level key is **`semantic_model`** — singular — not `semantic_models`. `OssieSource.__init__` iterates `raw.get("semantic_model", []) or []`. The plural spelling builds a file the loader silently ignores, and the test fails with a confusing "metric not found".
+2. `self._metrics` **accumulates across models** in that loop, and `validate_decompositions` runs once after it. So a default must be applied only to the metrics *this* model contributed — otherwise a second model's house convention is stamped onto the first model's metrics. That is silent, and it is exactly the class of bug this feature exists to prevent.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_semantic/test_ossie.py`. The file already imports
+`Path`, `pytest`, and `OssieSource`; add `import json` and `import yaml` if
+absent.
 
 ```python
-class TestOssieDecompositionConvention:
-    def _model(self, extension: dict[str, object]) -> dict[str, object]:
-        return {
-            "semantic_models": [
-                {
-                    "name": "sales",
-                    "metrics": [
-                        {"name": "activations"},
-                        {"name": "volume"},
-                        {"name": "rate"},
-                    ],
-                    "custom_extensions": [
-                        {
-                            "vendor_name": "AGENTIC_DATA_CONTRACTS",
-                            "data": json.dumps(extension),
-                        }
-                    ],
-                }
+# --- attribution convention ------------------------------------------------
+
+
+def _convention_model(extension: dict, *, name: str = "retail") -> dict:
+    """One Ossie semantic_model carrying our vendor block as a JSON string."""
+    return {
+        "name": name,
+        "metrics": [
+            {"name": "activations"},
+            {"name": "volume"},
+            {"name": "rate"},
+        ],
+        "custom_extensions": [
+            {
+                "vendor_name": "AGENTIC_DATA_CONTRACTS",
+                "data": json.dumps(extension),
+            }
+        ],
+    }
+
+
+_PRODUCT_DECOMP = {
+    "metrics": {
+        "activations": {
+            "decompositions": [
+                {"operator": "product", "operands": ["volume", "rate"]}
             ]
         }
+    }
+}
 
-    def test_per_decomposition_convention_round_trips(self, tmp_path: Path) -> None:
-        model = self._model(
-            {
-                "metrics": {
-                    "activations": {
-                        "decompositions": [
-                            {
-                                "operator": "product",
-                                "operands": ["volume", "rate"],
-                                "convention": "fold_into",
-                                "convention_operand": "rate",
-                            }
-                        ]
+
+def test_ossie_per_decomposition_convention_round_trips(tmp_path: Path) -> None:
+    extension = {
+        "metrics": {
+            "activations": {
+                "decompositions": [
+                    {
+                        "operator": "product",
+                        "operands": ["volume", "rate"],
+                        "convention": "fold_into",
+                        "convention_operand": "rate",
                     }
+                ]
+            }
+        }
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(
+        yaml.safe_dump({"semantic_model": [_convention_model(extension)]})
+    )
+    metric = OssieSource(path).get_metric("activations")
+    assert metric is not None
+    assert metric.decompositions[0].convention == "fold_into"
+    assert metric.decompositions[0].convention_operand == "rate"
+
+
+def test_ossie_source_level_default_round_trips(tmp_path: Path) -> None:
+    extension = {
+        "decomposition_convention": {"convention": "split_evenly"},
+        **_PRODUCT_DECOMP,
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(
+        yaml.safe_dump({"semantic_model": [_convention_model(extension)]})
+    )
+    metric = OssieSource(path).get_metric("activations")
+    assert metric is not None
+    assert metric.decompositions[0].convention == "split_evenly"
+
+
+def test_ossie_default_does_not_leak_across_models(tmp_path: Path) -> None:
+    """A second model's house convention must not reach the first model's metrics.
+
+    ``self._metrics`` accumulates across the ``semantic_model`` loop, so
+    applying the default to the whole list would stamp model B's convention
+    onto model A. Ossie namespaces entities per model; the default is scoped
+    the same way.
+    """
+    plain = _convention_model(_PRODUCT_DECOMP, name="plain")
+    defaulted = _convention_model(
+        {"decomposition_convention": {"convention": "split_evenly"}, **_PRODUCT_DECOMP},
+        name="defaulted",
+    )
+    # Rename the second model's metrics so both models can coexist in one file.
+    for metric in defaulted["metrics"]:
+        metric["name"] = f"b_{metric['name']}"
+    defaulted["custom_extensions"][0]["data"] = json.dumps(
+        {
+            "decomposition_convention": {"convention": "split_evenly"},
+            "metrics": {
+                "b_activations": {
+                    "decompositions": [
+                        {"operator": "product", "operands": ["b_volume", "b_rate"]}
+                    ]
                 }
-            }
-        )
-        path = tmp_path / "model.yml"
-        path.write_text(yaml.safe_dump(model))
-        metric = OssieSource(str(path)).get_metric("activations")
-        assert metric is not None
-        assert metric.decompositions[0].convention == "fold_into"
-        assert metric.decompositions[0].convention_operand == "rate"
+            },
+        }
+    )
+    path = tmp_path / "two_models.yml"
+    path.write_text(yaml.safe_dump({"semantic_model": [plain, defaulted]}))
+    source = OssieSource(path)
 
-    def test_source_level_default_round_trips(self, tmp_path: Path) -> None:
-        model = self._model(
-            {
-                "decomposition_convention": {"convention": "split_evenly"},
-                "metrics": {
-                    "activations": {
-                        "decompositions": [
-                            {"operator": "product", "operands": ["volume", "rate"]}
-                        ]
-                    }
-                },
-            }
-        )
-        path = tmp_path / "model.yml"
-        path.write_text(yaml.safe_dump(model))
-        metric = OssieSource(str(path)).get_metric("activations")
-        assert metric is not None
-        assert metric.decompositions[0].convention == "split_evenly"
+    first = source.get_metric("activations")
+    assert first is not None
+    assert first.decompositions[0].convention is None  # declares no default
+
+    second = source.get_metric("b_activations")
+    assert second is not None
+    assert second.decompositions[0].convention == "split_evenly"
 ```
 
-Read the top of `tests/test_semantic/test_ossie.py` first: if it already has a helper that serializes a model dict to `tmp_path`, reuse it and delete `_model` above. Add `json`, `yaml`, `Path`, and `OssieSource` to the imports if absent.
+- [ ] **Step 2: Run the tests to verify they fail**
 
-- [ ] **Step 2: Run the test to verify it fails**
+Run: `uv run pytest tests/test_semantic/test_ossie.py -k convention -v`
+Expected: FAIL — `convention is None` on the first two. The leak test passes
+vacuously today (nothing is ever stamped); it becomes a real guard in Step 3.
 
-Run: `uv run pytest tests/test_semantic/test_ossie.py::TestOssieDecompositionConvention -v`
-Expected: FAIL — `convention is None`.
-
-- [ ] **Step 3: Parse both fields and the default**
+- [ ] **Step 3: Parse both fields and apply the default per model**
 
 In `ossie.py`, import the two helpers:
 
@@ -761,28 +814,38 @@ In `_load_metrics`, replace the decomposition comprehension:
                     ],
 ```
 
-In `_load_model`, where `overlay` is built and `_load_metrics` is called, apply the
-default after metrics are loaded — insert immediately after the
-`self._load_metrics(...)` call:
+In `_load_model`, wrap the existing `self._load_metrics(...)` call so the
+default reaches only this model's metrics:
 
 ```python
+        overlay = self._vendor_overlay(model, model_name)
+        # Scoped to the metrics this model contributes: ``self._metrics``
+        # accumulates across the ``semantic_model`` loop, so applying the
+        # default to the whole list would stamp one model's house convention
+        # onto another's. Ossie namespaces entities per model; so does this.
+        first_metric = len(self._metrics)
+        self._load_metrics(model, model_name, overlay.get("metrics", {}))
         _apply_convention_default(
-            self._metrics,
+            self._metrics[first_metric:],
             _parse_convention_default(overlay.get("decomposition_convention")),
         )
+        self._load_metric_impacts(overlay.get("metric_impacts", []))
 ```
+
+Keep the surrounding lines of `_load_model` exactly as they are — only the
+`first_metric` capture and the `_apply_convention_default` call are new.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_semantic/test_ossie.py -v`
-Expected: PASS.
+Expected: PASS, including every pre-existing test in the file.
 
 - [ ] **Step 5: Lint and commit**
 
 ```bash
 prek run --all-files
 git add src/agentic_data_contracts/semantic/ossie.py tests/test_semantic/test_ossie.py
-git commit -m "feat: OssieSource carries the attribution convention"
+git commit -m "feat: OssieSource carries the attribution convention, scoped per model"
 ```
 
 ---

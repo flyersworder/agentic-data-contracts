@@ -321,3 +321,102 @@ def test_attribution_is_exported_from_the_validation_package() -> None:
     assert Exported is AttributionResult
     assert attribute_change is not None
     assert check_attribution is not None
+
+
+class TestDegenerateDelta:
+    """A metric whose factors offset is flat, and flat broke every scale.
+
+    ``delta_parent`` was the module's only reference magnitude, which assumes
+    the total change is non-zero. Offsetting factors — customers double while
+    spend halves — are the attribution question most worth asking, and there
+    the delta is zero while the contributions are ±100. Found by review of the
+    v0.43.0 PR.
+    """
+
+    _FLAT_BEFORE = {"customers": 10.0, "spend": 10.0}
+    _FLAT_AFTER = {"customers": 20.0, "spend": 5.0}
+
+    def test_flat_metric_still_attributes(self) -> None:
+        r = attribute_change(
+            _metric("explicit", operands=["customers", "spend"]),
+            before=self._FLAT_BEFORE,
+            after=self._FLAT_AFTER,
+        )
+        assert abs(r.delta_parent) < 1e-9
+        assert abs(r.contributions["customers"] - 100.0) < 1e-9
+        assert abs(r.contributions["spend"] - (-50.0)) < 1e-9
+        assert abs(r.interaction - (-50.0)) < 1e-9
+
+    def test_flat_metric_tolerance_is_not_exact_equality(self) -> None:
+        # Previously the tolerance was rel_tol * abs(delta_parent) == 0.0, so a
+        # 1e-7 rounding in a written answer failed the check.
+        r = check_attribution(
+            _metric("explicit", operands=["customers", "spend"]),
+            before=self._FLAT_BEFORE,
+            after=self._FLAT_AFTER,
+            reported={
+                "customers": 100.0,
+                "spend": -50.0,
+                INTERACTION_KEY: -50.0000001,
+            },
+        )
+        assert r.matches is True
+
+    def test_flat_metric_still_rejects_a_real_deviation(self) -> None:
+        # The looser scale must not make the check toothless: scale is 100, so
+        # rel_tol 1e-4 gives a tolerance of 0.01 — 5.0 is far outside it.
+        r = check_attribution(
+            _metric("explicit", operands=["customers", "spend"]),
+            before=self._FLAT_BEFORE,
+            after=self._FLAT_AFTER,
+            reported={
+                "customers": 105.0,
+                "spend": -50.0,
+                INTERACTION_KEY: -50.0,
+            },
+        )
+        assert r.matches is False
+
+    def test_float_noise_delta_yields_undefined_shares(self) -> None:
+        # 0.1*3.0 and 0.3*1.0 are equal in decimal but differ by 5.6e-17 in
+        # binary. An exact `delta == 0` guard missed it and produced shares of
+        # ~1e16 where the docstring promises None.
+        r = attribute_change(
+            _metric("explicit", operands=["a", "b"]),
+            before={"a": 0.1, "b": 3.0},
+            after={"a": 0.3, "b": 1.0},
+        )
+        assert r.delta_parent != 0.0  # genuinely noise, not exactly zero
+        assert r.shares is None
+
+    def test_real_delta_still_produces_shares(self) -> None:
+        r = attribute_change(_metric("split_evenly"), before=BEFORE, after=AFTER)
+        assert r.shares is not None
+        assert abs(r.shares["volume"] - 2000.0 / 3250.0) < 1e-9
+
+
+class TestInteractionKeyCollision:
+    def test_operand_named_interaction_is_refused_under_explicit(self) -> None:
+        # Nothing at load time forbids a metric named `interaction` from being
+        # an operand, but under `explicit` the residual is reported under that
+        # same key — so the operand's own contribution is overwritten, a correct
+        # breakdown is inexpressible, and the verdict came back self-
+        # contradictory (matches True with sums_to_delta False).
+        with pytest.raises(ValueError, match="collides"):
+            check_attribution(
+                _metric("explicit", operands=[INTERACTION_KEY, "users"]),
+                before={INTERACTION_KEY: 2.0, "users": 10.0},
+                after={INTERACTION_KEY: 3.0, "users": 20.0},
+                reported={INTERACTION_KEY: 10.0, "users": 20.0},
+            )
+
+    def test_operand_named_interaction_is_fine_without_explicit(self) -> None:
+        # Only `explicit` reports a separate residual line, so only `explicit`
+        # collides. The other conventions stay usable.
+        r = check_attribution(
+            _metric("split_evenly", operands=[INTERACTION_KEY, "users"]),
+            before={INTERACTION_KEY: 2.0, "users": 10.0},
+            after={INTERACTION_KEY: 3.0, "users": 20.0},
+            reported={INTERACTION_KEY: 15.0, "users": 25.0},
+        )
+        assert r.matches is True

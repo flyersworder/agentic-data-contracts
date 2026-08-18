@@ -121,6 +121,30 @@ def _main_effects(
     }
 
 
+#: Below this multiple of the breakdown's own magnitude, ``delta_parent`` is
+#: float noise rather than a real change, and shares of it are meaningless.
+_DEGENERATE_DELTA = 1e-9
+
+
+def _breakdown_scale(
+    delta: float, contributions: dict[str, float], interaction: float
+) -> float:
+    """The magnitude the breakdown should be judged against.
+
+    ``delta_parent`` alone is the wrong reference: a metric whose factors
+    offset (customers double while spend halves) has a delta of zero and
+    contributions of +/-100, and scaling to the delta would collapse every
+    tolerance to exact float equality on precisely the attribution question
+    most worth asking. Falling back to the largest term keeps the scale
+    meaningful when the total change is not.
+    """
+    return max(
+        abs(delta),
+        abs(interaction),
+        *(abs(value) for value in contributions.values()),
+    )
+
+
 def _place(
     convention: str | None,
     convention_operand: str | None,
@@ -210,9 +234,15 @@ def attribute_change(
     contributions = _place(
         decomp.convention, decomp.convention_operand, effects, interaction
     )
+    scale = _breakdown_scale(delta, contributions, interaction)
+    # Undefined, not "all zero", when the metric is flat. The exact ``delta ==
+    # 0`` test this replaces missed the case that actually occurs: factors that
+    # offset are flat in decimal but land on float noise in binary
+    # (0.1*3.0 vs 0.3*1.0 differ by 5.6e-17), which produced shares of ~1e16
+    # rather than None.
     shares = (
         None
-        if delta == 0
+        if abs(delta) <= _DEGENERATE_DELTA * scale
         else {name: value / delta for name, value in contributions.items()}
     )
     return AttributionResult(
@@ -249,15 +279,28 @@ def check_attribution(
     ``INTERACTION_KEY``; under the other conventions that key is rejected,
     because the residual has already been distributed and reporting it again
     double-counts. Every deviation is judged against
-    ``max(abs_tol, rel_tol * abs(delta_parent))`` -- a contribution is
-    meaningful as a share of the total change, and a per-contribution relative
-    tolerance explodes when a contribution is near zero.
+    ``max(abs_tol, rel_tol * scale)``, where *scale* is the largest magnitude
+    in the breakdown (see ``_breakdown_scale``). A per-contribution relative
+    tolerance explodes when one contribution is near zero, and scaling to
+    ``delta_parent`` alone collapses to exact float equality when the factors
+    offset -- so the breakdown's own magnitude is the reference.
     """
     expected = attribute_change(
         metric, before=before, after=after, decomposition=decomposition
     )
     target = dict(expected.contributions)
     if expected.convention == "explicit":
+        # An operand of this name would be overwritten by the residual, making
+        # a correct breakdown inexpressible and yielding a self-contradictory
+        # verdict (matches with sums_to_delta False). Nothing forbids the name
+        # at load time, so refuse the ambiguous check rather than score it.
+        if INTERACTION_KEY in target:
+            raise ValueError(
+                f"metric {metric.name!r} declares an operand named "
+                f"{INTERACTION_KEY!r}, which collides with the key an "
+                f"'explicit' breakdown reports its residual under; rename the "
+                f"operand or declare a different convention"
+            )
         target[INTERACTION_KEY] = expected.interaction
 
     if set(reported) != set(target):
@@ -267,7 +310,16 @@ def check_attribution(
             f"convention {expected.convention!r}"
         )
 
-    tolerance = max(abs_tol, rel_tol * abs(expected.delta_parent))
+    # Scaled to the breakdown, not to delta_parent alone: see
+    # ``_breakdown_scale``. With the old delta-only scale a flat metric gave a
+    # tolerance of exactly 0.0, so any rounding in a reported figure failed.
+    tolerance = max(
+        abs_tol,
+        rel_tol
+        * _breakdown_scale(
+            expected.delta_parent, expected.contributions, expected.interaction
+        ),
+    )
     deviations = {name: reported[name] - value for name, value in target.items()}
     matches = all(abs(d) <= tolerance for d in deviations.values())
     sums_to_delta = (

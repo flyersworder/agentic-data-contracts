@@ -55,9 +55,15 @@ metrics:
     # returns a MIXED graph — walk kinds="identity" first (what arithmetically
     # moved: numerator or denominator?), then kinds="influence" for candidate
     # causal drivers.
+    # `convention` says where the residual goes when this ratio's *change* is
+    # split between numerator and denominator. `explicit` keeps it on its own
+    # line rather than folding it into either factor — the honest default when
+    # the question is literally "numerator or denominator?", since folding
+    # would silently credit one of them with movement it did not cause.
     decompositions:
       - operator: ratio
         operands: [first_purchase_users, cohort_signups]
+        convention: explicit   # explicit | split_evenly | fold_into
     drill_by:
       - {dimension: acquisition_source, column: analytics.users.acquisition_source}
 

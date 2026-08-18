@@ -224,6 +224,22 @@ async def _run_demo(
     print("\n=== Trace Metric Impacts (upstream drivers of conversion_rate) ===")
     print(result["content"][0]["text"])
 
+    # The identity half of that mixed graph. semantic.yml tells the agent to
+    # walk kinds="identity" first for root cause — this is that walk. Each edge
+    # carries the declared `convention`, so an agent that never calls
+    # lookup_metric still learns where the cross term goes before it attributes
+    # the movement. Without it the agent gets the operator and picks a
+    # placement silently.
+    result = await trace.callable(
+        {
+            "metric_name": "conversion_rate",
+            "direction": "downstream",
+            "kinds": "identity",
+        }
+    )
+    print("\n=== Trace Metric Impacts (identity: what arithmetically moved) ===")
+    print(result["content"][0]["text"])
+
     # ── 3. Time-bounded events block rule fires ──────────────────────────────
     inspect = next(t for t in tools if t.name == "inspect_query")
     unbounded_sql = (

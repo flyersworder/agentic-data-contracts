@@ -469,3 +469,73 @@ class TestConventionValidation:
             validate_decompositions(
                 self._metrics(convention="split_evenly", convention_operand="rate")
             )
+
+
+class TestConventionRoundTrip:
+    def test_declared_convention_survives_dump_and_reload(self) -> None:
+        raw = {
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {
+                            "operator": "product",
+                            "operands": ["volume", "rate"],
+                            "convention": "fold_into",
+                            "convention_operand": "rate",
+                        }
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ]
+        }
+        reloaded = YamlSource.from_raw(dump_semantic_source(YamlSource.from_raw(raw)))
+        metric = reloaded.get_metric("activations")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "fold_into"
+        assert metric.decompositions[0].convention_operand == "rate"
+
+    def test_resolved_default_survives_dump_and_reload(self) -> None:
+        # The frozen artifact states the effective convention outright, rather
+        # than carrying the source-level key for a consumer to re-apply.
+        raw = {
+            "decomposition_convention": {"convention": "split_evenly"},
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["volume", "rate"]}
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ],
+        }
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert dumped["metrics"][0]["decompositions"][0]["convention"] == "split_evenly"
+        reloaded = YamlSource.from_raw(dumped)
+        metric = reloaded.get_metric("activations")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "split_evenly"
+
+    def test_undeclared_convention_emits_no_keys(self) -> None:
+        # Digest stability: a contract that declares no convention must dump
+        # byte-identically to the pre-0.43 format.
+        raw = {
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["volume", "rate"]}
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ]
+        }
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert dumped["metrics"][0]["decompositions"][0] == {
+            "operator": "product",
+            "operands": ["volume", "rate"],
+        }

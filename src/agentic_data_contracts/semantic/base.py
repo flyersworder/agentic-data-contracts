@@ -420,10 +420,23 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
         # across the upgrade, and it matches the omit-when-empty convention the
         # tools layer already uses (``_metric_details``).
         if m.decompositions:
-            data["decompositions"] = [
-                {"operator": d.operator, "operands": list(d.operands)}
-                for d in m.decompositions
-            ]
+            decompositions: list[dict[str, Any]] = []
+            for d in m.decompositions:
+                entry: dict[str, Any] = {
+                    "operator": d.operator,
+                    "operands": list(d.operands),
+                }
+                # Omitted when unset for the same reason ``decompositions``
+                # itself is omitted when empty: a contract that declares no
+                # convention must keep byte-identical canonical bytes, since
+                # ``contract_canonical_bytes`` dumps with no ``exclude_none``
+                # and any always-present key moves every published digest.
+                if d.convention is not None:
+                    entry["convention"] = d.convention
+                if d.convention_operand is not None:
+                    entry["convention_operand"] = d.convention_operand
+                decompositions.append(entry)
+            data["decompositions"] = decompositions
         if m.drill_by:
             data["drill_by"] = [
                 {"dimension": dd.dimension, "column": dd.column} for dd in m.drill_by

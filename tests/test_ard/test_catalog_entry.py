@@ -195,14 +195,69 @@ def test_tags_include_wildcard_schemas() -> None:
 # A digest published against this fixture. Hardcoded on purpose: comparing two
 # freshly-built contracts to each other passes just as happily when *both* have
 # shifted, which is precisely the failure a new schema field causes.
+#
+# Re-pinned once, in the commit that fixed #73. The old value was computed over a
+# semantic source with no `metrics:` key at all, so it could not see any change
+# to metric serialization — every optional field added to `_dump_metric` since it
+# was written could have been made unconditional with this test still green, while
+# moving the digest of every real contract. The fixture now carries metrics
+# exercising each of those fields, and the value below is the digest over them.
+#
+# Changing this constant is the one edit that can launder a real regression into
+# the baseline. Any commit that touches it must show the fixture change beside it
+# and say why the new value is expected.
 _PINNED_ROUNDTRIP_DIGEST = (
-    "sha256:898c842e0b97e06f50eeef694869432530ebc8ab8340d7d5c1e9d735cb052673"
+    "sha256:d5aac3e3b76c8ff2458d8388c19de0111c58e9a5fd376f9cebe7c76220d793f8"
 )
 
 
 def test_roundtrip_contract_digest_is_pinned(fixtures_dir: Path) -> None:
     """Any new field that serializes moves every published ARD attestation."""
     assert contract_digest(_contract(fixtures_dir)) == _PINNED_ROUNDTRIP_DIGEST
+
+
+def test_pinned_contract_actually_exercises_metric_serialization(
+    fixtures_dir: Path,
+) -> None:
+    """Guard on the guard: the pin is only broad if the fixture has metrics.
+
+    This is the regression test for #73. The pin spent its whole life over a
+    semantic source with no ``metrics:`` key, so it silently covered nothing in
+    ``_dump_metric`` — a state indistinguishable from working, because the
+    assertion passed either way. Anyone who strips the metrics back out fails
+    here rather than quietly narrowing the pin to relationships again.
+
+    Asserting on the *canonical bytes* rather than the loaded source is
+    deliberate: what matters is that these fields reach the digest, not merely
+    that the fixture declares them.
+    """
+    payload = json.loads(contract_canonical_bytes(_contract(fixtures_dir)))
+    metrics = payload["semantic"]["source"]["inline"]["metrics"]
+    assert metrics, "pinned fixture declares no metrics — the pin covers nothing"
+
+    parent = next(m for m in metrics if m["name"] == "roundtrip_revenue")
+    # Every optional field `_dump_metric` writes, so making any of them
+    # unconditional moves the pin instead of passing unnoticed.
+    for field in (
+        "source_model",
+        "filters",
+        "domains",
+        "tier",
+        "indicator_kind",
+        "business_owner",
+        "operational_owner",
+        "last_reviewed",
+        "decompositions",
+        "drill_by",
+    ):
+        assert field in parent, f"pinned fixture no longer exercises {field!r}"
+    assert parent["decompositions"][0]["convention"] == "fold_into"
+
+    # And a leaf metric, so the omit-when-empty branches are exercised too: a
+    # regression that emits `"decompositions": []` for leaves must move the pin.
+    leaf = next(m for m in metrics if m["name"] == "roundtrip_arpu")
+    assert "decompositions" not in leaf
+    assert "drill_by" not in leaf
 
 
 def test_expected_extras_is_not_digest_bearing(fixtures_dir: Path) -> None:

@@ -46,16 +46,14 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    _apply_convention_default,
+    _parse_convention_default,
     build_relationship_index,
     fuzzy_search_metrics,
     jsonify_extras,
     parse_review_date,
     validate_decompositions,
     validate_drill_by,
-)
-from agentic_data_contracts.semantic.yaml_source import (
-    _apply_convention_default,
-    _parse_convention_default,
 )
 
 logger = logging.getLogger(__name__)

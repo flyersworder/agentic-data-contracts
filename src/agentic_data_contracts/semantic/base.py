@@ -331,6 +331,60 @@ def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:
         visit(node, [])
 
 
+# Shared by every source that can carry a house convention, for the reason
+# ``parse_review_date`` records just above: both ``YamlSource`` and
+# ``OssieSource`` resolve a default onto the same ``Decomposition.convention``
+# field, and a second copy would be a second chance to get the
+# fold_into-is-not-a-default rule wrong.
+def _parse_convention_default(raw: Any) -> str | None:
+    """Read and validate the source-level ``decomposition_convention`` block.
+
+    ``fold_into`` is rejected: it names an operand, and no operand name is
+    meaningful across metrics. Declaring it source-wide is always a mistake.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "decomposition_convention must be a mapping with a 'convention' key,"
+            f" got {type(raw).__name__}"
+        )
+    convention = raw.get("convention")
+    if convention is None:
+        raise ValueError("decomposition_convention must set 'convention'")
+    if convention not in VALID_CONVENTIONS:
+        raise ValueError(
+            f"decomposition_convention has unknown attribution convention"
+            f" {convention!r}; expected one of {sorted(VALID_CONVENTIONS)}"
+        )
+    if convention == "fold_into":
+        raise ValueError(
+            "convention 'fold_into' cannot be a source-level default: it names"
+            " an operand, and no operand name is meaningful across metrics."
+            " Declare it per decomposition."
+        )
+    return convention
+
+
+def _apply_convention_default(
+    metrics: list[MetricDefinition], default: str | None
+) -> None:
+    """Stamp *default* onto every cross-term decomposition that declares none.
+
+    Resolved at load rather than carried, so the effective value survives
+    ``freeze_semantic_source`` (which re-serializes from parsed objects) and a
+    frozen contract states its convention outright instead of leaving a
+    consumer to re-derive it. Linear operators are skipped: a convention on
+    them fails ``validate_decompositions``.
+    """
+    if default is None:
+        return
+    for metric in metrics:
+        for decomp in metric.decompositions:
+            if decomp.convention is None and decomp.operator in _CROSS_TERM_OPERATORS:
+                decomp.convention = default
+
+
 def validate_drill_by(
     metrics: list[MetricDefinition],
     table_schemas: dict[str, TableSchema],

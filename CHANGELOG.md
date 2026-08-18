@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.43.0] - 2026-08-18
+
+### Added
+
+- **Declared attribution convention for decompositions.** A 16-session pilot (#67) found the arithmetic was never the problem — 16/16 runs summed correctly — but the *placement* of the `ΔC·ΔP` cross term was: three distinct placements appeared on identical data, a 13.5% span on the headline contribution, and the narrative conclusion flipped between them. Every placement sums correctly, so nothing downstream of the number can tell which one an agent used; that makes it a non-inferable business fact rather than an implementation detail, the same species as "active users excludes staff." `Decomposition` now accepts `convention` (`explicit` | `split_evenly` | `fold_into`) and, for `fold_into`, `convention_operand` naming which operand absorbs the term:
+
+  ```yaml
+  metrics:
+    - name: activations
+      decompositions:
+        - operator: product
+          operands: [volume, rate]
+          convention: fold_into
+          convention_operand: rate
+  ```
+
+  The operand is named, not positional (no `fold_into_last`), because `product` takes two or more operands and order is otherwise semantically free — a positional scheme would make operand order load-bearing and hand the agent an index to count instead of a name.
+
+- **Source-level `decomposition_convention` default.** A YAML source (or an Ossie vendor block) can set a house default, restricted to the conventions that need no operand — `fold_into` cannot be a default because there is no metric-agnostic operand to fold into. The default is **resolved onto each cross-term decomposition at load**, not carried by reference, so the resolved value survives `freeze_semantic_source` (which re-serializes from parsed objects) and a frozen contract states its effective convention outright instead of leaving a consumer to re-derive it from a default that may since have changed.
+
+- **`attribute_change` / `check_attribution` (`validation/attribution.py`).** `attribute_change` applies a declared convention to measured before/after values — pure arithmetic, no adapter, because *when* each value was measured is the caller's business, not the library's. `check_attribution` scores a *reported* breakdown against the same convention; its intended caller is an **eval harness** measuring whether an agent follows the contract, not CI and not production — a reported breakdown exists only inside a written answer, the same species of grounding as `drill_by`, and it is never wired into anything that blocks a query. Neither function is registered in `create_tools()`: the pilot shows the arithmetic itself is not where agents fail (16/16 correct), the tool's only real content would be the convention, and both `lookup_metric` and `trace_metric_impacts` already deliver that. A tenth tool here would dilute attention on the checkers that actually gate queries.
+
+### Changed
+
+- **`SEMANTIC_KEYS` gained `decomposition_convention`.** This is a **public API change** — the constant is re-exported at the package top level, both the README and the v0.41.0 CHANGELOG entry name it exactly, and `tests/test_public_api.py` asserts its precise contents. A contract that previously listed `decomposition_convention` under `expected_extras` should drop it: it is interpreted vocabulary now, resolved and validated at load rather than carried through `get_extras()` as an opaque extra.
+
+### Unchanged
+
+- **Digests.** A contract that declares no convention produces byte-identical `contract_canonical_bytes` — both `convention` and `decomposition_convention` are omitted wherever they are unset, in `dump_semantic_source`, the tool payloads, and the frozen inline snapshot alike, so adopting this feature costs nothing for a contract that doesn't use it.
+
 ## [0.42.0] - 2026-08-16
 
 ### Added

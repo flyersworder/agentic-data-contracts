@@ -1,3 +1,41 @@
+# Relationship fixture for RelationshipChecker and the validator suites.
+#
+# It also backs tests/fixtures/roundtrip_contract.yml, whose digest is pinned by
+# test_roundtrip_contract_digest_is_pinned. That pin is the repo's broadest guard
+# against canonical-bytes drift, so the metrics below exist to put the *metric*
+# serialization path inside it: every optional field `_dump_metric` writes is
+# represented here, so making any of them unconditional moves the pin instead of
+# passing unnoticed. See #73 — before this, the pinned contract had no metrics at
+# all and could not see a single change to metric serialization.
+
+metrics:
+  - name: roundtrip_revenue
+    description: "Revenue, carrying every optional field the dump writes"
+    sql_expression: "SUM(amount)"
+    source_model: analytics.orders
+    filters: ["status != 'cancelled'"]
+    domains: [revenue]
+    tier: [north_star]
+    indicator_kind: lagging
+    business_owner: revenue-analytics
+    operational_owner: data-platform
+    last_reviewed: 2026-05-01
+    decompositions:
+      - operator: product
+        operands: [roundtrip_customers, roundtrip_arpu]
+        convention: fold_into
+        convention_operand: roundtrip_arpu
+    drill_by:
+      - {dimension: region, column: analytics.customers.region}
+
+  - name: roundtrip_customers
+    description: "Paying customers — leaf operand"
+    sql_expression: "COUNT(DISTINCT customer_id)"
+
+  - name: roundtrip_arpu
+    description: "Revenue per customer — leaf operand"
+    sql_expression: "SUM(amount) / NULLIF(COUNT(DISTINCT customer_id), 0)"
+
 relationships:
   - from: analytics.orders.customer_id
     to: analytics.customers.id

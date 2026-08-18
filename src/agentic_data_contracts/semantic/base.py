@@ -22,10 +22,18 @@ class Decomposition:
     does not carry. A rate declared as a rounded percentage makes a ``product``
     identity false by ~100x. See ``reconcile_decomposition`` for how an operand
     declared at limited precision interacts with its tolerance.
+
+    ``convention`` names where the cross term goes when the identity's *change*
+    is attributed to its factors. It is a non-inferable business fact: an agent
+    told only the factors will pick a placement silently and present it as
+    canonical, and two such reports are indistinguishable because both sum
+    correctly. Only ``product`` and ``ratio`` have a cross term.
     """
 
     operator: str  # "sum" | "product" | "ratio" | "difference"
     operands: list[str] = field(default_factory=list)
+    convention: str | None = None  # None = undeclared, agent picks (status quo)
+    convention_operand: str | None = None  # required iff convention == "fold_into"
 
 
 @dataclass
@@ -201,6 +209,10 @@ def _fmt_path(path: tuple[str | int, ...]) -> str:
 
 VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})
 _BINARY_OPERATORS = frozenset({"ratio", "difference"})
+VALID_CONVENTIONS = frozenset({"explicit", "split_evenly", "fold_into"})
+#: Only these have a ``ΔC·ΔP`` cross term to place. ``sum`` and ``difference``
+#: are linear, so a convention on them states nothing.
+_CROSS_TERM_OPERATORS = frozenset({"product", "ratio"})
 
 
 def validate_decompositions(metrics: list[MetricDefinition]) -> None:
@@ -230,6 +242,7 @@ def validate_decompositions(metrics: list[MetricDefinition]) -> None:
                     f"metric {metric.name!r} decomposition {decomp.operator!r} "
                     f"requires at least 2 operands, got {count}"
                 )
+            _validate_convention(metric.name, decomp)
             for operand in decomp.operands:
                 if operand == metric.name:
                     raise ValueError(
@@ -242,6 +255,52 @@ def validate_decompositions(metrics: list[MetricDefinition]) -> None:
                     )
             adjacency.setdefault(metric.name, []).extend(decomp.operands)
     _assert_identity_acyclic(adjacency)
+
+
+def _validate_convention(metric_name: str, decomp: Decomposition) -> None:
+    """Validate a decomposition's attribution convention; raise on any fault.
+
+    Undeclared is valid — it is the pre-0.43 state and means the agent picks.
+    """
+    if decomp.convention is None:
+        if decomp.convention_operand is not None:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition sets 'convention_operand' "
+                f"but declares no convention; it is only meaningful with "
+                f"convention 'fold_into'"
+            )
+        return
+    if decomp.convention not in VALID_CONVENTIONS:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition has unknown attribution "
+            f"convention {decomp.convention!r}; expected one of "
+            f"{sorted(VALID_CONVENTIONS)}"
+        )
+    if decomp.operator not in _CROSS_TERM_OPERATORS:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition {decomp.operator!r} has no "
+            f"cross term to place, so convention {decomp.convention!r} states "
+            f"nothing; conventions apply to {sorted(_CROSS_TERM_OPERATORS)}"
+        )
+    if decomp.convention == "fold_into":
+        if decomp.convention_operand is None:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition convention 'fold_into' "
+                f"requires 'convention_operand' naming which operand absorbs "
+                f"the cross term"
+            )
+        if decomp.convention_operand not in decomp.operands:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition convention_operand "
+                f"{decomp.convention_operand!r} is not one of its operands "
+                f"{list(decomp.operands)}"
+            )
+    elif decomp.convention_operand is not None:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition sets 'convention_operand' "
+            f"with convention {decomp.convention!r}; it is only meaningful "
+            f"with 'fold_into'"
+        )
 
 
 def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:

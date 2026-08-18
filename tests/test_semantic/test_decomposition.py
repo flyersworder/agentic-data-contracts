@@ -387,3 +387,85 @@ class TestMixedGraphTraversal:
         index = build_metric_impact_index([*influence, *identity])
         kinds = {e.kind for edges in index.values() for e in edges}
         assert kinds == {"influence", "identity"}
+
+
+class TestConventionValidation:
+    def _metrics(
+        self,
+        *,
+        convention: str | None = None,
+        convention_operand: str | None = None,
+        operator: str = "product",
+        operands: list[str] | None = None,
+    ) -> list[MetricDefinition]:
+        return [
+            MetricDefinition(
+                name="activations",
+                description="",
+                sql_expression="",
+                decompositions=[
+                    Decomposition(
+                        operator=operator,
+                        operands=operands
+                        if operands is not None
+                        else ["volume", "rate"],
+                        convention=convention,
+                        convention_operand=convention_operand,
+                    )
+                ],
+            ),
+            MetricDefinition(name="volume", description="", sql_expression=""),
+            MetricDefinition(name="rate", description="", sql_expression=""),
+        ]
+
+    def test_undeclared_convention_is_valid(self) -> None:
+        validate_decompositions(self._metrics())
+
+    def test_each_vocabulary_value_is_accepted(self) -> None:
+        validate_decompositions(self._metrics(convention="explicit"))
+        validate_decompositions(self._metrics(convention="split_evenly"))
+        validate_decompositions(
+            self._metrics(convention="fold_into", convention_operand="rate")
+        )
+
+    def test_unknown_convention_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown attribution convention"):
+            validate_decompositions(self._metrics(convention="laspeyres"))
+
+    def test_convention_on_sum_raises(self) -> None:
+        # sum is linear: there is no cross term to place, so declaring where it
+        # goes is a misunderstanding worth surfacing at authoring time.
+        with pytest.raises(ValueError, match="no cross term"):
+            validate_decompositions(
+                self._metrics(
+                    operator="sum",
+                    operands=["volume", "rate"],
+                    convention="split_evenly",
+                )
+            )
+
+    def test_convention_on_difference_raises(self) -> None:
+        with pytest.raises(ValueError, match="no cross term"):
+            validate_decompositions(
+                self._metrics(
+                    operator="difference",
+                    operands=["volume", "rate"],
+                    convention="explicit",
+                )
+            )
+
+    def test_fold_into_without_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="requires 'convention_operand'"):
+            validate_decompositions(self._metrics(convention="fold_into"))
+
+    def test_fold_into_unknown_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="is not one of its operands"):
+            validate_decompositions(
+                self._metrics(convention="fold_into", convention_operand="margin")
+            )
+
+    def test_convention_operand_without_fold_into_raises(self) -> None:
+        with pytest.raises(ValueError, match="only meaningful with"):
+            validate_decompositions(
+                self._metrics(convention="split_evenly", convention_operand="rate")
+            )

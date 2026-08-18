@@ -129,7 +129,13 @@ def test_no_extras_is_an_empty_dict() -> None:
 
 def test_semantic_keys_matches_what_the_parser_reads() -> None:
     """Guards the constant against drift when a new section is added."""
-    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
+    assert SEMANTIC_KEYS == {
+        "metrics",
+        "tables",
+        "relationships",
+        "metric_impacts",
+        "decomposition_convention",
+    }
 
 
 def test_get_extras_returns_a_copy() -> None:
@@ -214,3 +220,81 @@ def test_normalised_extras_are_json_serialisable() -> None:
 def test_unserialisable_extras_value_raises_naming_the_path() -> None:
     with pytest.raises(ValueError, match=r"column_hints\[0\]\.owner"):
         YamlSource.from_raw({"metrics": [], "column_hints": [{"owner": {1, 2, 3}}]})
+
+
+class TestDecompositionConventionDefault:
+    _RAW = {
+        "decomposition_convention": {"convention": "split_evenly"},
+        "metrics": [
+            {
+                "name": "activations",
+                "decompositions": [
+                    {"operator": "product", "operands": ["volume", "rate"]}
+                ],
+            },
+            {
+                "name": "signups",
+                "decompositions": [
+                    {
+                        "operator": "product",
+                        "operands": ["volume", "rate"],
+                        "convention": "fold_into",
+                        "convention_operand": "rate",
+                    }
+                ],
+            },
+            {
+                "name": "net",
+                "decompositions": [{"operator": "sum", "operands": ["volume", "rate"]}],
+            },
+            {"name": "volume"},
+            {"name": "rate"},
+        ],
+    }
+
+    def test_default_is_stamped_onto_undeclared_cross_term_decomposition(self) -> None:
+        source = YamlSource.from_raw(self._RAW)
+        metric = source.get_metric("activations")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "split_evenly"
+
+    def test_per_decomposition_declaration_wins(self) -> None:
+        source = YamlSource.from_raw(self._RAW)
+        metric = source.get_metric("signups")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "fold_into"
+        assert metric.decompositions[0].convention_operand == "rate"
+
+    def test_default_is_not_stamped_onto_a_linear_operator(self) -> None:
+        # Stamping a convention onto `sum` would trip its own validation.
+        source = YamlSource.from_raw(self._RAW)
+        metric = source.get_metric("net")
+        assert metric is not None
+        assert metric.decompositions[0].convention is None
+
+    def test_default_key_is_vocabulary_not_an_extra(self) -> None:
+        # expected_extras=[] is strict mode: an uninterpreted top-level key
+        # raises. The default must be recognised, not warned about as a typo.
+        source = YamlSource.from_raw(self._RAW, expected_extras=[])
+        assert "decomposition_convention" not in source.get_extras()
+
+    def test_fold_into_as_a_source_default_raises(self) -> None:
+        with pytest.raises(ValueError, match="cannot be a source-level default"):
+            YamlSource.from_raw(
+                {
+                    "decomposition_convention": {
+                        "convention": "fold_into",
+                        "convention_operand": "rate",
+                    },
+                    "metrics": [{"name": "volume"}],
+                }
+            )
+
+    def test_unknown_default_convention_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown attribution convention"):
+            YamlSource.from_raw(
+                {
+                    "decomposition_convention": {"convention": "shapley"},
+                    "metrics": [{"name": "volume"}],
+                }
+            )

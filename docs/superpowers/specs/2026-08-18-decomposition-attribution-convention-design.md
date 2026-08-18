@@ -34,8 +34,11 @@ The artifact outcome #2 implies is declared vocabulary. This spec commits to it.
 3. Loud load-time validation of both.
 4. Round-trip through `YamlSource`, `OssieSource`, and `dump_semantic_source`.
 5. The pair in the `lookup_metric` payload.
-6. A pure attribution kernel in `validation/attribution.py`, exported from
-   `agentic_data_contracts.validation`, **not** wired into `create_tools()`.
+6. The pair on `IdentityEdge`, propagated onto identity edges and emitted by
+   `trace_metric_impacts`.
+7. A pure attribution kernel in `validation/attribution.py`, exported from
+   `agentic_data_contracts.validation`, **not** wired into `create_tools()` —
+   an eval instrument, not a runtime path.
 
 ## 1. Vocabulary and data model
 
@@ -57,6 +60,10 @@ class Decomposition:
 | `explicit` | The interaction residual is reported as its own line, attributed to no factor. |
 | `split_evenly` | The residual is divided equally among the operands. At two operands this is the Shapley value. |
 | `fold_into` | The whole residual is absorbed by the operand named in `convention_operand`. |
+
+`IdentityEdge` gains the same two fields, carried from the decomposition that
+produced the edge — see §5b. It is derived rather than serialized, so it has no
+digest consequence.
 
 **Why a named operand rather than a positional enum.** `product` takes two or
 more operands, so "fold into one factor" must say which. Naming it is
@@ -144,18 +151,56 @@ governance fact from the attestation that is supposed to describe the contract.
 
 ## 5. Delivery to the agent
 
-`tools/factory.py` adds both keys to the `lookup_metric` payload, beside
-`operator` and `operands`, omitted when unset:
+A decomposition reaches the agent through **two** tool channels, and the
+convention must ride both. Patching only the first is the defect this section
+exists to prevent.
+
+### 5a. `lookup_metric`
+
+`tools/factory.py` adds both keys to the payload beside `operator` and
+`operands`, omitted when unset:
 
 ```python
 {"operator": "product", "operands": ["volume", "rate"],
  "convention": "fold_into", "convention_operand": "rate"}
 ```
 
-Pull-only, via the channel decompositions already use. No prompt change: the
-`XmlPromptRenderer` does not carry decompositions today, and pushing them would
-cost prompt real estate on every contract to serve a question most sessions never
-ask.
+### 5b. `trace_metric_impacts`
+
+`IdentityEdge` gains `convention` / `convention_operand`,
+`identity_edges_from_metrics()` propagates them from the producing
+decomposition onto every edge it emits, and the edge renderer in
+`trace_metric_impacts` emits them beside `operator`, omitted when unset:
+
+```python
+{"depth": 1, "from": "activations", "to": "rate",
+ "kind": "identity", "operator": "product",
+ "convention": "fold_into", "convention_operand": "rate"}
+```
+
+All edges from one decomposition carry the same pair; the convention is a
+property of the identity, and an edge is one operand of it.
+
+**Why this channel is not optional.** `trace_metric_impacts`' own description
+instructs the agent: *"For root-cause, walk 'identity' first to localize the
+change, then 'influence' for candidate explanations."* That is the attribution
+workflow, named in the tool that serves it. An agent following that guidance
+would receive the operator and not the convention — the one tool whose
+description says "why did revenue drop?" would omit the field that governs the
+answer.
+
+### Why pull-only is sufficient here
+
+The general worry — the agent may never look the metric up — does not apply to
+this question class. **An attribution question cannot be answered without
+pulling the decomposition**, because the agent cannot name the factors
+otherwise. Both channels that supply the factors now supply the convention with
+them, so the fact arrives exactly when it is needed and costs nothing when it is
+not.
+
+No prompt change: `XmlPromptRenderer` does not carry decompositions today, and
+pushing them would cost prompt real estate on every contract to serve a question
+most sessions never ask.
 
 **This is grounding, not enforcement.** An attribution report is prose; it never
 passes a checker the way SQL does. The honest claim is the one `drill_by` makes —
@@ -164,6 +209,18 @@ the contract states a non-inferable fact and makes departures from it visible.
 ## 6. The attribution kernel
 
 `validation/attribution.py`, exported from `agentic_data_contracts.validation`.
+
+**Scope it honestly: the kernel's customer is the measurement, not the
+runtime.** The pilot disconfirmed the failure a runtime calculator would
+prevent — the agent's arithmetic was correct in every run — and §7 records why
+no tool wiring follows. What is still unmeasured is whether *declaring* the
+convention changes anything, and `check_attribution` is the instrument that
+answers it: it is the scoring pass #67 hand-wrote, made reusable for a third
+arm. `attribute_change` is its computed half, exported because it is the
+natural public surface and costs nothing extra.
+
+This is a smaller claim than "the library now governs attribution". It is the
+claim the evidence supports.
 
 ```python
 attribute_change(metric, *, before, after, decomposition=0) -> AttributionResult
@@ -277,22 +334,31 @@ can see it.
 
 Stated honestly, because the answer shaped the design:
 
-- **`attribute_change`** — a consuming agent's own toolbox, wrapping it as a tool
-  so the agent asks for the breakdown instead of computing one in its head. Not
-  wired into `create_tools()` here: the architecture doc puts variance diagnosis
-  on the agent-owned side of the Spec B split, and says the kernel "could live
-  here or in the agent's own toolbox". Shipping the arithmetic here unwired
-  resolves that sentence — the arithmetic is governance-adjacent, the
+- **`check_attribution`** — the primary caller, an eval harness. The #67 pilot
+  hand-wrote this scoring pass; arm 3 (does declaring the convention change
+  behavior?) needs it again, and that experiment is the point of shipping it.
+  It is **not** a CI or production path: it needs a `reported` breakdown, which
+  exists only inside an agent's prose answer, and post-hoc checking is the wrong
+  shape for a failure with an agent in the loop by construction.
+- **`attribute_change`** — available to a consuming agent's own toolbox if that
+  team wants a deterministic path, but not expected to be the common case: once
+  §5 delivers the convention, the agent can apply it, and the pilot shows it
+  can. Not wired into `create_tools()` here — the architecture doc puts variance
+  diagnosis on the agent-owned side of the Spec B split, and says the kernel
+  "could live here or in the agent's own toolbox". Shipping the arithmetic here
+  unwired resolves that sentence: the arithmetic is governance-adjacent, the
   orchestration is not.
-- **`check_attribution`** — an eval harness. The #67 pilot hand-wrote this
-  scoring pass; any follow-up arm needs it again. It is **not** a CI or
-  production path: it needs a `reported` breakdown, which exists only inside an
-  agent's prose answer, and post-hoc checking is the wrong shape for a failure
-  with an agent in the loop by construction.
 
 ## 7. Deliberately not built
 
-- **No tool wiring.** See above.
+- **No tenth tool.** An attribution tool would fire at the *last* step, after
+  every hard part is done: by then the agent has measured the operands at both
+  points and all that remains is arithmetic it performs correctly (16/16 in the
+  pilot). Its only real content is the convention, which §5 already delivers
+  through two channels — so the tool would add a round-trip and no information.
+  Tool descriptions are re-read every turn, so a narrow arithmetic tool for a
+  rare question class costs attention on `inspect_query` and `run_query`, where
+  this library actually blocks things.
 - **No prompt push.** `XmlPromptRenderer` is untouched.
 - **No change to `reconcile_decomposition`.** It checks a *level* identity at one
   point in time; a convention governs attributing a *change between two*. The
@@ -309,7 +375,7 @@ Stated honestly, because the answer shaped the design:
 | `tests/test_semantic/test_yaml_source.py` | `decomposition_convention` accepted as vocabulary, not flagged as an extra under `expected_extras=[]` |
 | `tests/test_semantic/test_ossie.py` | Both fields and the default round-trip through `custom_extensions` |
 | `tests/test_ard.py` | A contract declaring no convention produces byte-identical `contract_canonical_bytes`; one that declares it round-trips through freeze → rehydrate |
-| `tests/test_tools/test_decomposition_tools.py` | `lookup_metric` payload carries both keys, omits them when unset |
+| `tests/test_tools/test_decomposition_tools.py` | `lookup_metric` payload carries both keys and omits them when unset; `trace_metric_impacts` identity edges carry both keys, influence edges are untouched; `identity_edges_from_metrics()` propagates the pair onto every operand edge |
 | `tests/test_validation/test_attribution.py` | All four rows of the worked example; `ratio`, `sum`, `difference`; `check_attribution` verdicts at and across the tolerance boundary; every `ValueError` in §6 |
 
 Fixtures extend `tests/fixtures/decomposition_source.yml` and
@@ -319,8 +385,10 @@ Fixtures extend `tests/fixtures/decomposition_source.yml` and
 
 - **README** — the convention block in "Metric decomposition and drill
   dimensions", with the Laspeyres / Paasche / Shapley names given as the
-  analyst-facing gloss; a short `attribute_change` example beside the
-  `reconcile_decomposition` paragraph.
+  analyst-facing gloss; the `trace_metric_impacts` identity-edge example updated
+  to show the pair; a short `attribute_change` example beside the
+  `reconcile_decomposition` paragraph, labelled as an eval instrument rather
+  than a runtime path.
 - **`docs/architecture.md`** — a v0.43.0 section; and the Future Extensions
   variance-diagnosis entry updated to close the open question: outcome #2 fired,
   outcome #1 disconfirmed, the kernel ships as a pure unwired helper, the

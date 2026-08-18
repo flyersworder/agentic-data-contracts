@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.43.1] - 2026-08-18
+
+### Fixed
+
+- **`attribute_change` validates operator and arity, like the sibling it mirrors.** It is public, accepts an arbitrary `MetricDefinition`, and its own comments state it cannot assume the object came through `validate_decompositions` at load — but it re-validated only the *convention*. `reconcile_decomposition` validates operator **and** arity up front for exactly that reason, before running a single query. Without the same block, malformed decompositions surfaced as interpreter errors from inside the arithmetic rather than the `ValueError` the module commits to: a 1-operand `ratio` raised `IndexError` from the zero-denominator guard's `operands[1]`, a 3-operand `ratio` or `difference` raised `too many values to unpack` naming nothing about the contract, and an operand-less `product` raised `ZeroDivisionError` from inside `_place`. Unreachable for any contract-loaded metric, since `validate_decompositions` rejects all four shapes at load — but the asymmetry between two kernels with the same stated precondition posture is the kind that gets copied. ([#72](https://github.com/flyersworder/agentic-data-contracts/issues/72))
+
+### Internal
+
+- **The pinned round-trip digest now covers metric serialization.** `_PINNED_ROUNDTRIP_DIGEST` is the repo's broadest guard against canonical-bytes drift, but it was computed over a semantic source with no `metrics:` key at all, so `_dump_metric` was never called and it could not see any change to metric serialization. That is worse than a missing test, because the assertion passed either way: every optional field added to `_dump_metric` since the pin was written could have been made unconditional — moving the digest of every real contract and invalidating every published ARD attestation — with the test still green. The fixture now carries a metric exercising every optional field the dump writes plus two leaves for the omit-when-empty branches, verified by mutation (removing the `if m.decompositions:` guard now fails the pin), and a companion test asserts the pinned contract's canonical bytes still carry those fields so the coverage cannot be silently narrowed again. No shipped code changed. ([#73](https://github.com/flyersworder/agentic-data-contracts/issues/73))
+
 ## [0.43.0] - 2026-08-18
 
 ### Added

@@ -184,8 +184,10 @@ def attribute_change(
     several defensible numbers with no way to tell which was used.
     """
     from agentic_data_contracts.semantic.base import (
+        _BINARY_OPERATORS,
         _CROSS_TERM_OPERATORS,
         VALID_CONVENTIONS,
+        VALID_OPERATORS,
     )
     from agentic_data_contracts.validation.reconciliation import _apply_operator
 
@@ -193,6 +195,30 @@ def attribute_change(
     operands = list(decomp.operands)
     _check_keys(before, "before", operands, metric.name)
     _check_keys(after, "after", operands, metric.name)
+
+    # Operator and arity, before any arithmetic — the same up-front block
+    # ``reconcile_decomposition`` runs before its first query, and for the same
+    # reason: this function cannot assume the decomposition came through
+    # ``validate_decompositions``. Without it a malformed shape surfaced from
+    # inside the arithmetic instead — a 1-operand ratio as ``IndexError`` on the
+    # zero-denominator guard below, a 3-operand ratio as an unpacking error
+    # naming nothing about the contract, an operand-less product as
+    # ``ZeroDivisionError`` in ``_place``.
+    if decomp.operator not in VALID_OPERATORS:
+        raise ValueError(
+            f"unknown decomposition operator {decomp.operator!r}; "
+            f"expected one of {sorted(VALID_OPERATORS)}"
+        )
+    if decomp.operator in _BINARY_OPERATORS and len(operands) != 2:
+        raise ValueError(
+            f"operator {decomp.operator!r} requires exactly 2 operands, "
+            f"got {len(operands)}"
+        )
+    if decomp.operator not in _BINARY_OPERATORS and len(operands) < 2:
+        raise ValueError(
+            f"operator {decomp.operator!r} requires at least 2 operands, "
+            f"got {len(operands)}"
+        )
 
     if decomp.operator in _CROSS_TERM_OPERATORS and decomp.convention is None:
         raise ValueError(

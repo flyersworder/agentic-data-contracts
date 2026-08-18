@@ -6,6 +6,7 @@ contract-governed MCP server, with the frozen contract as a digest-pinned
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from agentic_data_contracts.ard import (
@@ -248,3 +249,28 @@ def test_extras_change_the_contract_digest() -> None:
     base = _contract_with_inline_semantics(base_inline)
     hinted = _contract_with_inline_semantics(hinted_inline)
     assert contract_digest(base) != contract_digest(hinted)
+
+
+def test_contract_without_convention_keeps_stable_canonical_bytes(
+    tmp_path: Path,
+) -> None:
+    # A metric declaring a decomposition but no convention must serialize
+    # exactly as it did pre-0.43, or every published ARD attestation moves.
+    semantic = tmp_path / "semantic.yml"
+    semantic.write_text(
+        "metrics:\n"
+        "  - name: activations\n"
+        "    decompositions:\n"
+        "      - operator: product\n"
+        "        operands: [volume, rate]\n"
+        "  - name: volume\n"
+        "  - name: rate\n"
+    )
+    contract_file = tmp_path / "contract.yml"
+    contract_file.write_text(
+        f"name: t\nsemantic:\n  source:\n    type: yaml\n    path: {semantic}\n"
+    )
+    contract = DataContract.from_yaml(str(contract_file))
+    payload = json.loads(contract_canonical_bytes(contract))
+    decomp = payload["semantic"]["source"]["inline"]["metrics"][0]["decompositions"][0]
+    assert decomp == {"operator": "product", "operands": ["volume", "rate"]}

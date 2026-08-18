@@ -5,6 +5,8 @@ metrics:
     decompositions:
       - operator: product
         operands: [paying_users, arpu]
+        convention: fold_into
+        convention_operand: arpu
       - operator: sum
         operands: [new_revenue, expansion_revenue]
     drill_by:

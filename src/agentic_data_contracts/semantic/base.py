@@ -22,10 +22,18 @@ class Decomposition:
     does not carry. A rate declared as a rounded percentage makes a ``product``
     identity false by ~100x. See ``reconcile_decomposition`` for how an operand
     declared at limited precision interacts with its tolerance.
+
+    ``convention`` names where the cross term goes when the identity's *change*
+    is attributed to its factors. It is a non-inferable business fact: an agent
+    told only the factors will pick a placement silently and present it as
+    canonical, and two such reports are indistinguishable because both sum
+    correctly. Only ``product`` and ``ratio`` have a cross term.
     """
 
     operator: str  # "sum" | "product" | "ratio" | "difference"
     operands: list[str] = field(default_factory=list)
+    convention: str | None = None  # None = undeclared, agent picks (status quo)
+    convention_operand: str | None = None  # required iff convention == "fold_into"
 
 
 @dataclass
@@ -90,6 +98,11 @@ class IdentityEdge:
     from_metric: str  # parent metric
     to_metric: str  # operand metric
     operator: str  # the decomposition operator that produced this edge
+    # Carried from the producing decomposition so a root-cause walk that never
+    # calls lookup_metric still learns where the cross term goes. Every edge
+    # from one decomposition shares the pair.
+    convention: str | None = None
+    convention_operand: str | None = None
 
     @property
     def kind(self) -> str:
@@ -117,6 +130,8 @@ def identity_edges_from_metrics(
                         from_metric=metric.name,
                         to_metric=operand,
                         operator=decomp.operator,
+                        convention=decomp.convention,
+                        convention_operand=decomp.convention_operand,
                     )
                 )
     return edges
@@ -201,6 +216,10 @@ def _fmt_path(path: tuple[str | int, ...]) -> str:
 
 VALID_OPERATORS = frozenset({"sum", "product", "ratio", "difference"})
 _BINARY_OPERATORS = frozenset({"ratio", "difference"})
+VALID_CONVENTIONS = frozenset({"explicit", "split_evenly", "fold_into"})
+#: Only these have a ``ΔC·ΔP`` cross term to place. ``sum`` and ``difference``
+#: are linear, so a convention on them states nothing.
+_CROSS_TERM_OPERATORS = frozenset({"product", "ratio"})
 
 
 def validate_decompositions(metrics: list[MetricDefinition]) -> None:
@@ -230,6 +249,7 @@ def validate_decompositions(metrics: list[MetricDefinition]) -> None:
                     f"metric {metric.name!r} decomposition {decomp.operator!r} "
                     f"requires at least 2 operands, got {count}"
                 )
+            _validate_convention(metric.name, decomp)
             for operand in decomp.operands:
                 if operand == metric.name:
                     raise ValueError(
@@ -242,6 +262,52 @@ def validate_decompositions(metrics: list[MetricDefinition]) -> None:
                     )
             adjacency.setdefault(metric.name, []).extend(decomp.operands)
     _assert_identity_acyclic(adjacency)
+
+
+def _validate_convention(metric_name: str, decomp: Decomposition) -> None:
+    """Validate a decomposition's attribution convention; raise on any fault.
+
+    Undeclared is valid — it is the pre-0.43 state and means the agent picks.
+    """
+    if decomp.convention is None:
+        if decomp.convention_operand is not None:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition sets 'convention_operand' "
+                f"but declares no convention; it is only meaningful with "
+                f"convention 'fold_into'"
+            )
+        return
+    if decomp.convention not in VALID_CONVENTIONS:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition has unknown attribution "
+            f"convention {decomp.convention!r}; expected one of "
+            f"{sorted(VALID_CONVENTIONS)}"
+        )
+    if decomp.operator not in _CROSS_TERM_OPERATORS:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition {decomp.operator!r} has no "
+            f"cross term to place, so convention {decomp.convention!r} states "
+            f"nothing; conventions apply to {sorted(_CROSS_TERM_OPERATORS)}"
+        )
+    if decomp.convention == "fold_into":
+        if decomp.convention_operand is None:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition convention 'fold_into' "
+                f"requires 'convention_operand' naming which operand absorbs "
+                f"the cross term"
+            )
+        if decomp.convention_operand not in decomp.operands:
+            raise ValueError(
+                f"metric {metric_name!r} decomposition convention_operand "
+                f"{decomp.convention_operand!r} is not one of its operands "
+                f"{list(decomp.operands)}"
+            )
+    elif decomp.convention_operand is not None:
+        raise ValueError(
+            f"metric {metric_name!r} decomposition sets 'convention_operand' "
+            f"with convention {decomp.convention!r}; it is only meaningful "
+            f"with 'fold_into'"
+        )
 
 
 def _assert_identity_acyclic(adjacency: dict[str, list[str]]) -> None:
@@ -361,10 +427,23 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
         # across the upgrade, and it matches the omit-when-empty convention the
         # tools layer already uses (``_metric_details``).
         if m.decompositions:
-            data["decompositions"] = [
-                {"operator": d.operator, "operands": list(d.operands)}
-                for d in m.decompositions
-            ]
+            decompositions: list[dict[str, Any]] = []
+            for d in m.decompositions:
+                entry: dict[str, Any] = {
+                    "operator": d.operator,
+                    "operands": list(d.operands),
+                }
+                # Omitted when unset for the same reason ``decompositions``
+                # itself is omitted when empty: a contract that declares no
+                # convention must keep byte-identical canonical bytes, since
+                # ``contract_canonical_bytes`` dumps with no ``exclude_none``
+                # and any always-present key moves every published digest.
+                if d.convention is not None:
+                    entry["convention"] = d.convention
+                if d.convention_operand is not None:
+                    entry["convention_operand"] = d.convention_operand
+                decompositions.append(entry)
+            data["decompositions"] = decompositions
         if m.drill_by:
             data["drill_by"] = [
                 {"dimension": dd.dimension, "column": dd.column} for dd in m.drill_by

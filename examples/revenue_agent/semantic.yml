@@ -1,6 +1,20 @@
 # Semantic source — define only what the database can't tell the agent.
 # Table columns are discovered at runtime via the describe_table tool.
 
+# House convention for attributing a *change* in a metric to its factors.
+# When total_revenue moves, the customers x spend cross term has to land
+# somewhere, and every placement sums to the observed change — so two reports
+# using different placements are indistinguishable, and the agent will pick one
+# silently. Declaring it makes the choice the contract's, not the model's.
+# Resolved onto each cross-term decomposition at load, so lookup_metric reports
+# the effective value and a frozen contract states it outright.
+#
+# Note this is interpreted vocabulary, not a consumer extra: contract.yml sets
+# `expected_extras: [column_hints, join_paths]`, and this key loads cleanly
+# anyway because it belongs to SEMANTIC_KEYS.
+decomposition_convention:
+  convention: split_evenly    # explicit | split_evenly (fold_into names an operand, so it is per-decomposition)
+
 metrics:
   # Owners are teams, not individuals: business_owner owns the definition +
   # review cadence; operational_owner owns data health. last_reviewed feeds

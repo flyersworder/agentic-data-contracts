@@ -387,3 +387,197 @@ class TestMixedGraphTraversal:
         index = build_metric_impact_index([*influence, *identity])
         kinds = {e.kind for edges in index.values() for e in edges}
         assert kinds == {"influence", "identity"}
+
+
+class TestConventionValidation:
+    def _metrics(
+        self,
+        *,
+        convention: str | None = None,
+        convention_operand: str | None = None,
+        operator: str = "product",
+        operands: list[str] | None = None,
+    ) -> list[MetricDefinition]:
+        return [
+            MetricDefinition(
+                name="activations",
+                description="",
+                sql_expression="",
+                decompositions=[
+                    Decomposition(
+                        operator=operator,
+                        operands=operands
+                        if operands is not None
+                        else ["volume", "rate"],
+                        convention=convention,
+                        convention_operand=convention_operand,
+                    )
+                ],
+            ),
+            MetricDefinition(name="volume", description="", sql_expression=""),
+            MetricDefinition(name="rate", description="", sql_expression=""),
+        ]
+
+    def test_undeclared_convention_is_valid(self) -> None:
+        validate_decompositions(self._metrics())
+
+    def test_each_vocabulary_value_is_accepted(self) -> None:
+        validate_decompositions(self._metrics(convention="explicit"))
+        validate_decompositions(self._metrics(convention="split_evenly"))
+        validate_decompositions(
+            self._metrics(convention="fold_into", convention_operand="rate")
+        )
+
+    def test_unknown_convention_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown attribution convention"):
+            validate_decompositions(self._metrics(convention="laspeyres"))
+
+    def test_convention_on_sum_raises(self) -> None:
+        # sum is linear: there is no cross term to place, so declaring where it
+        # goes is a misunderstanding worth surfacing at authoring time.
+        with pytest.raises(ValueError, match="no cross term"):
+            validate_decompositions(
+                self._metrics(
+                    operator="sum",
+                    operands=["volume", "rate"],
+                    convention="split_evenly",
+                )
+            )
+
+    def test_convention_on_difference_raises(self) -> None:
+        with pytest.raises(ValueError, match="no cross term"):
+            validate_decompositions(
+                self._metrics(
+                    operator="difference",
+                    operands=["volume", "rate"],
+                    convention="explicit",
+                )
+            )
+
+    def test_fold_into_without_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="requires 'convention_operand'"):
+            validate_decompositions(self._metrics(convention="fold_into"))
+
+    def test_fold_into_unknown_operand_raises(self) -> None:
+        with pytest.raises(ValueError, match="is not one of its operands"):
+            validate_decompositions(
+                self._metrics(convention="fold_into", convention_operand="margin")
+            )
+
+    def test_convention_operand_without_fold_into_raises(self) -> None:
+        with pytest.raises(ValueError, match="only meaningful with"):
+            validate_decompositions(
+                self._metrics(convention="split_evenly", convention_operand="rate")
+            )
+
+    def test_convention_operand_without_any_convention_raises(self) -> None:
+        with pytest.raises(ValueError, match="declares no convention"):
+            validate_decompositions(self._metrics(convention_operand="rate"))
+
+
+class TestConventionRoundTrip:
+    def test_declared_convention_survives_dump_and_reload(self) -> None:
+        raw = {
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {
+                            "operator": "product",
+                            "operands": ["volume", "rate"],
+                            "convention": "fold_into",
+                            "convention_operand": "rate",
+                        }
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ]
+        }
+        reloaded = YamlSource.from_raw(dump_semantic_source(YamlSource.from_raw(raw)))
+        metric = reloaded.get_metric("activations")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "fold_into"
+        assert metric.decompositions[0].convention_operand == "rate"
+
+    def test_resolved_default_survives_dump_and_reload(self) -> None:
+        # The frozen artifact states the effective convention outright, rather
+        # than carrying the source-level key for a consumer to re-apply.
+        raw = {
+            "decomposition_convention": {"convention": "split_evenly"},
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["volume", "rate"]}
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ],
+        }
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert dumped["metrics"][0]["decompositions"][0]["convention"] == "split_evenly"
+        reloaded = YamlSource.from_raw(dumped)
+        metric = reloaded.get_metric("activations")
+        assert metric is not None
+        assert metric.decompositions[0].convention == "split_evenly"
+
+    def test_undeclared_convention_emits_no_keys(self) -> None:
+        # Digest stability: a contract that declares no convention must dump
+        # byte-identically to the pre-0.43 format.
+        raw = {
+            "metrics": [
+                {
+                    "name": "activations",
+                    "decompositions": [
+                        {"operator": "product", "operands": ["volume", "rate"]}
+                    ],
+                },
+                {"name": "volume"},
+                {"name": "rate"},
+            ]
+        }
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert dumped["metrics"][0]["decompositions"][0] == {
+            "operator": "product",
+            "operands": ["volume", "rate"],
+        }
+
+
+class TestIdentityEdgeConvention:
+    def test_every_operand_edge_carries_the_convention(self) -> None:
+        # The convention is a property of the identity, and an edge is one
+        # operand of it, so all edges from one decomposition share the pair.
+        metrics = [
+            MetricDefinition(
+                name="activations",
+                description="",
+                sql_expression="",
+                decompositions=[
+                    Decomposition(
+                        operator="product",
+                        operands=["volume", "rate"],
+                        convention="fold_into",
+                        convention_operand="rate",
+                    )
+                ],
+            )
+        ]
+        edges = identity_edges_from_metrics(metrics)
+        assert len(edges) == 2
+        assert all(e.convention == "fold_into" for e in edges)
+        assert all(e.convention_operand == "rate" for e in edges)
+
+    def test_undeclared_convention_leaves_edges_unset(self) -> None:
+        metrics = [
+            MetricDefinition(
+                name="net",
+                description="",
+                sql_expression="",
+                decompositions=[Decomposition(operator="sum", operands=["a", "b"])],
+            )
+        ]
+        edges = identity_edges_from_metrics(metrics)
+        assert all(e.convention is None for e in edges)
+        assert all(e.convention_operand is None for e in edges)

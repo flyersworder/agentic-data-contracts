@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agentic_data_contracts.semantic.base import (
     ExtensibleSemanticSource,
@@ -422,3 +424,109 @@ def test_each_model_keeps_its_own_ai_context() -> None:
     assert ai["wholesale_model"]["datasets"]["customer"]["synonyms"] == [
         "wholesale account"
     ]
+
+
+# --- attribution convention ------------------------------------------------
+
+
+def _convention_model(extension: dict, *, name: str = "retail") -> dict:
+    """One Ossie semantic_model carrying our vendor block as a JSON string."""
+    return {
+        "name": name,
+        "metrics": [
+            {"name": "activations"},
+            {"name": "volume"},
+            {"name": "rate"},
+        ],
+        "custom_extensions": [
+            {
+                "vendor_name": "AGENTIC_DATA_CONTRACTS",
+                "data": json.dumps(extension),
+            }
+        ],
+    }
+
+
+_PRODUCT_DECOMP = {
+    "metrics": {
+        "activations": {
+            "decompositions": [{"operator": "product", "operands": ["volume", "rate"]}]
+        }
+    }
+}
+
+
+def test_ossie_per_decomposition_convention_round_trips(tmp_path: Path) -> None:
+    extension = {
+        "metrics": {
+            "activations": {
+                "decompositions": [
+                    {
+                        "operator": "product",
+                        "operands": ["volume", "rate"],
+                        "convention": "fold_into",
+                        "convention_operand": "rate",
+                    }
+                ]
+            }
+        }
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump({"semantic_model": [_convention_model(extension)]}))
+    metric = OssieSource(path).get_metric("activations")
+    assert metric is not None
+    assert metric.decompositions[0].convention == "fold_into"
+    assert metric.decompositions[0].convention_operand == "rate"
+
+
+def test_ossie_source_level_default_round_trips(tmp_path: Path) -> None:
+    extension = {
+        "decomposition_convention": {"convention": "split_evenly"},
+        **_PRODUCT_DECOMP,
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump({"semantic_model": [_convention_model(extension)]}))
+    metric = OssieSource(path).get_metric("activations")
+    assert metric is not None
+    assert metric.decompositions[0].convention == "split_evenly"
+
+
+def test_ossie_default_does_not_leak_across_models(tmp_path: Path) -> None:
+    """A second model's house convention must not reach the first model's metrics.
+
+    ``self._metrics`` accumulates across the ``semantic_model`` loop, so
+    applying the default to the whole list would stamp model B's convention
+    onto model A. Ossie namespaces entities per model; the default is scoped
+    the same way.
+    """
+    plain = _convention_model(_PRODUCT_DECOMP, name="plain")
+    defaulted = _convention_model(
+        {"decomposition_convention": {"convention": "split_evenly"}, **_PRODUCT_DECOMP},
+        name="defaulted",
+    )
+    # Rename the second model's metrics so both models can coexist in one file.
+    for metric in defaulted["metrics"]:
+        metric["name"] = f"b_{metric['name']}"
+    defaulted["custom_extensions"][0]["data"] = json.dumps(
+        {
+            "decomposition_convention": {"convention": "split_evenly"},
+            "metrics": {
+                "b_activations": {
+                    "decompositions": [
+                        {"operator": "product", "operands": ["b_volume", "b_rate"]}
+                    ]
+                }
+            },
+        }
+    )
+    path = tmp_path / "two_models.yml"
+    path.write_text(yaml.safe_dump({"semantic_model": [plain, defaulted]}))
+    source = OssieSource(path)
+
+    first = source.get_metric("activations")
+    assert first is not None
+    assert first.decompositions[0].convention is None  # declares no default
+
+    second = source.get_metric("b_activations")
+    assert second is not None
+    assert second.decompositions[0].convention == "split_evenly"

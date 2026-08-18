@@ -25,7 +25,14 @@ def test_top_level_imports() -> None:
     assert Relationship is not None
     assert SemanticSource is not None
     # README and the v0.41.0 CHANGELOG both promise this name at the top level.
-    assert SEMANTIC_KEYS == {"metrics", "tables", "relationships", "metric_impacts"}
+    # v0.43.0 added decomposition_convention as interpreted vocabulary.
+    assert SEMANTIC_KEYS == {
+        "metrics",
+        "tables",
+        "relationships",
+        "metric_impacts",
+        "decomposition_convention",
+    }
 
 
 def test_claude_prompt_renderer_is_gone() -> None:

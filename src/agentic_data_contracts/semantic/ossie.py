@@ -53,6 +53,10 @@ from agentic_data_contracts.semantic.base import (
     validate_decompositions,
     validate_drill_by,
 )
+from agentic_data_contracts.semantic.yaml_source import (
+    _apply_convention_default,
+    _parse_convention_default,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +259,16 @@ class OssieSource:
 
         self._load_relationships(model, model_name, name_to_table, keys_by_dataset)
         overlay = self._vendor_overlay(model, model_name)
+        # Scoped to the metrics this model contributes: ``self._metrics``
+        # accumulates across the ``semantic_model`` loop, so applying the
+        # default to the whole list would stamp one model's house convention
+        # onto another's. Ossie namespaces entities per model; so does this.
+        first_metric = len(self._metrics)
         self._load_metrics(model, model_name, overlay.get("metrics", {}))
+        _apply_convention_default(
+            self._metrics[first_metric:],
+            _parse_convention_default(overlay.get("decomposition_convention")),
+        )
         self._load_metric_impacts(overlay.get("metric_impacts", []))
 
     @staticmethod
@@ -373,6 +386,8 @@ class OssieSource:
                         Decomposition(
                             operator=d["operator"],
                             operands=list(d.get("operands", [])),
+                            convention=d.get("convention"),
+                            convention_operand=d.get("convention_operand"),
                         )
                         for d in extra.get("decompositions", [])
                     ],

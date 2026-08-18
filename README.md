@@ -907,6 +907,39 @@ An identity decomposition is *exhaustive and exact* — nothing else can move `t
 
 **Operand units and precision are yours to get right.** The library folds operand values with the declared operator and has no view of either. A conversion rate declared as a rounded percentage (`ROUND(100.0 * n / d, 1)`) makes a `product` identity false by ~100× — declare the identity in fraction units. The quieter trap is precision: an operand carried at three decimals leaves a ~0.03% residual, which [`reconcile_decomposition`](#validating-a-verified-examples-corpus) reports identically to ETL drift. Widen its `rel_tol` to the precision the operands actually have; the default `1e-4` assumes they are exact.
 
+**Declaring where the cross term goes.** When an agent attributes a *change* in
+`total_revenue` to its factors, the `ΔC·ΔP` cross term has to land somewhere —
+and every placement sums correctly, so two reports built on different
+placements are indistinguishable. A pilot across 16 sessions found three
+distinct placements on identical data, with a 13.5% swing on the headline
+contribution and the narrative conclusion flipping between them. That makes the
+placement a non-inferable business fact, so declare it:
+
+```yaml
+decomposition_convention:
+  convention: split_evenly       # source-wide default
+
+metrics:
+  - name: activations
+    decompositions:
+      - operator: product
+        operands: [volume, rate]
+        convention: fold_into    # explicit | split_evenly | fold_into, overrides the default
+        convention_operand: rate # required for fold_into
+```
+
+| Convention | Cross term | Known as |
+|---|---|---|
+| `explicit` | reported on its own line, attributed to no factor | — |
+| `split_evenly` | divided equally among the operands | Shapley, at two operands |
+| `fold_into` | absorbed entirely by `convention_operand` | Laspeyres / Paasche, at two operands |
+
+Only `product` and `ratio` have a cross term; declaring a convention on `sum`
+or `difference` raises at load. The default is resolved onto each decomposition
+when the source loads, so a frozen contract states its effective convention
+outright. Both `lookup_metric` and `trace_metric_impacts` carry the declaration
+to the agent.
+
 `drill_by` lists the dimensional cuts a metric can be sliced by, in priority order (`schema.table.column`) — the exhaustive `GROUP BY` axes ("revenue by region") that dominate weekly-review diagnosis. Its column reference is soft-validated: a malformed shape raises, but a reference to a table the contract hasn't declared is allowed (schemas are optional).
 
 Decomposition operands become identity edges in the same graph as impacts, so `trace_metric_impacts` walks both. Its `kinds` argument selects which — `identity` (arithmetic), `influence` (causal), or `all` (default) — and every returned edge is tagged with its `kind`:
@@ -918,7 +951,8 @@ await trace.callable({
     "kinds": "identity",           # walk the arithmetic skeleton first
 })
 # Returns edges like: {"depth": 1, "from": "total_revenue", "to": "arpu",
-#                      "kind": "identity", "operator": "product"}
+#                      "kind": "identity", "operator": "product",
+#                      "convention": "split_evenly"}
 ```
 
 Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction and a variance-diagnosis tool are deferred.
@@ -948,6 +982,27 @@ Each example lands in exactly one `status` — `valid` (statically contract-chec
 It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with your review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
 
 Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance. Its default `rel_tol=1e-4` assumes the operands are exact — see [operand units and precision](#metric-decomposition-and-drill-dimensions) when one of them is a rounded percentage or carries limited decimals.
+
+`attribute_change(...)` applies a declared convention to measured values —
+values in, contributions out, no database access, because *when* each value was
+measured is the caller's business:
+
+```python
+from agentic_data_contracts.validation import attribute_change
+
+result = attribute_change(
+    contract.load_semantic_source().get_metric("activations"),
+    before={"volume": 10_000, "rate": 0.35},
+    after={"volume": 15_000, "rate": 0.45},
+)
+result.contributions   # {"volume": 1750.0, "rate": 1500.0} under fold_into: rate
+result.interaction     # 500.0 — the raw residual, so the placement is auditable
+```
+
+Its sibling `check_attribution(...)` scores a *reported* breakdown against the
+declared convention. Its intended caller is an **eval harness** measuring
+whether an agent follows the contract — not CI and not production, since a
+reported breakdown exists only inside a written answer.
 
 ## Custom Prompt Rendering
 
@@ -999,8 +1054,9 @@ a subclass that overrides them still works.
 
 ### Consumer-authored sections (extras)
 
-`YamlSource` interprets four top-level keys — `metrics`, `tables`,
-`relationships`, `metric_impacts` (exported as `SEMANTIC_KEYS`). Every other
+`YamlSource` interprets five top-level keys — `metrics`, `tables`,
+`relationships`, `metric_impacts`, `decomposition_convention` (exported as
+`SEMANTIC_KEYS`). Every other
 top-level key is carried verbatim as an *extra*: reachable, portable, and
 renderable, but never interpreted.
 

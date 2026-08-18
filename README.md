@@ -905,6 +905,8 @@ metrics:
 
 An identity decomposition is *exhaustive and exact* — nothing else can move `total_revenue` except `paying_customers` and `arpu` — so an agent diagnosing a change can localize it deterministically before reaching for the speculative impact edges. `ratio` and `difference` are binary; `sum` and `product` take two or more operands. Decompositions are validated at load time: every operand must resolve to a declared metric, and the identity edges must form a DAG (a metric cannot transitively decompose into itself). A metric with no decomposition is a valid leaf.
 
+**Operand units and precision are yours to get right.** The library folds operand values with the declared operator and has no view of either. A conversion rate declared as a rounded percentage (`ROUND(100.0 * n / d, 1)`) makes a `product` identity false by ~100× — declare the identity in fraction units. The quieter trap is precision: an operand carried at three decimals leaves a ~0.03% residual, which [`reconcile_decomposition`](#validating-a-verified-examples-corpus) reports identically to ETL drift. Widen its `rel_tol` to the precision the operands actually have; the default `1e-4` assumes they are exact.
+
 `drill_by` lists the dimensional cuts a metric can be sliced by, in priority order (`schema.table.column`) — the exhaustive `GROUP BY` axes ("revenue by region") that dominate weekly-review diagnosis. Its column reference is soft-validated: a malformed shape raises, but a reference to a table the contract hasn't declared is allowed (schemas are optional).
 
 Decomposition operands become identity edges in the same graph as impacts, so `trace_metric_impacts` walks both. Its `kinds` argument selects which — `identity` (arithmetic), `influence` (causal), or `all` (default) — and every returned edge is tagged with its `kind`:
@@ -945,7 +947,7 @@ Each example lands in exactly one `status` — `valid` (statically contract-chec
 
 It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with your review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
 
-Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance.
+Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance. Its default `rel_tol=1e-4` assumes the operands are exact — see [operand units and precision](#metric-decomposition-and-drill-dimensions) when one of them is a rounded percentage or carries limited decimals.
 
 ## Custom Prompt Rendering
 

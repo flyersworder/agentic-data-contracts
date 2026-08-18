@@ -172,6 +172,14 @@ check_attribution(metric, *, before, after, reported,
 ```
 
 `before` / `after` map each declared operand to its measured value.
+`reported` is the breakdown being checked, keyed the same way; under `explicit`
+it must also carry the residual under the key `INTERACTION_KEY`
+(`"interaction"`, a module constant so callers need not hardcode it), and under
+the other conventions that key is rejected — the residual has been distributed,
+so reporting it separately double-counts.
+
+`check_attribution` shares every precondition and every error below with
+`attribute_change`; it wraps it.
 
 **No adapter, no SQL — deliberately unlike `reconcile_decomposition`.** The
 architecture doc rules out time-series execution semantics (calendar vs. cohort
@@ -223,14 +231,29 @@ does not claim at higher arity.
 
 ### Result type
 
-`AttributionResult`, frozen, mirroring `ReconciliationResult`: `metric`,
-`operator`, `convention`, `convention_operand`, `delta_parent`, `contributions`,
-`interaction`, `shares`, and — populated only by `check_attribution` —
+`AttributionResult`, frozen, mirroring `ReconciliationResult`.
+
+Always populated: `metric`, `operator`, `convention`, `convention_operand`,
+`delta_parent`, `contributions`, `interaction`, `shares`.
+
+Populated only by `check_attribution`, and `None` from `attribute_change`:
 `reported`, `deviations`, `matches`, `sums_to_delta`, `rel_tol`, `abs_tol`,
 `reason`.
 
-`shares` is each contribution over `delta_parent`, omitted when `delta_parent`
-is zero.
+`contributions` maps each declared operand to its contribution. Under
+`explicit` it does **not** contain the residual — that stays in `interaction`,
+which is what "attributed to no factor" means. Under `split_evenly` and
+`fold_into` the residual has been distributed into `contributions`, and
+`interaction` still reports the raw residual so the placement is auditable
+rather than lost.
+
+`shares` is each contribution over `delta_parent`, and is `None` — not an empty
+mapping — when `delta_parent` is zero, so "undefined" is distinguishable from
+"all zero".
+
+`matches` is `True` only when every deviation is within tolerance. It is
+independent of `sums_to_delta`: a breakdown can sum correctly and still use the
+wrong convention, which is exactly the #67 failure.
 
 ### Verdict scale
 

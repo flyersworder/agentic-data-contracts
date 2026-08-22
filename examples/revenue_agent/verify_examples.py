@@ -122,8 +122,10 @@ def main() -> None:
     print("\n=== Answer checks (does the compliant SQL return the right number?) ===\n")
     answers = check_example_answers(report, adapter=adapter)
     for r in answers.results:
-        label = r.example.id or r.example.question or "<unnamed>"
-        print(f"[{r.status.upper():12}] {label}")
+        # r.label, not a recomputed one: the field exists precisely so this
+        # listing and the answers.summary() block printed below cannot disagree
+        # about what to call an unnamed row.
+        print(f"[{r.status.upper():12}] {r.label}")
         if r.status in ("match", "mismatch"):
             print(f"             expected={r.expected}  actual={r.actual}")
         if r.reason:

@@ -116,15 +116,39 @@ class VerifiedExample:
             raise ValueError(
                 f"'time_scoped' must be a boolean, got {type(time_scoped).__name__}"
             )
+        expected = _numeric(raw.get("expected"), "expected")
+        rel_tol = _numeric(raw.get("rel_tol"), "rel_tol", allow_negative=False)
+        abs_tol = _numeric(raw.get("abs_tol"), "abs_tol", allow_negative=False)
+        if expected is None:
+            # These three only ever modify how an `expected` is compared, so
+            # setting one without it is dead configuration — and the likeliest
+            # cause is a typo'd or dropped `expected` key, which would
+            # otherwise land inertly in metadata and quietly cost the corpus an
+            # assertion that no gate can miss. Fail loudly instead.
+            orphaned = [
+                key
+                for key, value in (
+                    ("rel_tol", rel_tol),
+                    ("abs_tol", abs_tol),
+                    ("time_scoped", time_scoped or None),
+                )
+                if value is not None
+            ]
+            if orphaned:
+                raise ValueError(
+                    f"{', '.join(orphaned)} set without 'expected' — these only "
+                    "affect how a certified answer is compared, so the row "
+                    "asserts nothing. Add 'expected', or remove them."
+                )
         return cls(
             sql=raw["sql"],
             question=raw.get("question", ""),
             id=raw.get("id"),
             principal=raw.get("principal"),
             metadata=metadata,
-            expected=_numeric(raw.get("expected"), "expected"),
-            rel_tol=_numeric(raw.get("rel_tol"), "rel_tol", allow_negative=False),
-            abs_tol=_numeric(raw.get("abs_tol"), "abs_tol", allow_negative=False),
+            expected=expected,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
             time_scoped=time_scoped,
         )
 
@@ -599,17 +623,33 @@ def _relative_time_node(statement: exp.Expression) -> str | None:
     if node is not None:
         return type(node).__name__
     for call in statement.find_all(exp.Anonymous):
-        # Zero-arg only: UNIX_TIMESTAMP(created_at) is a deterministic
-        # conversion, not a clock read. Every name listed here is relative
-        # only in its no-argument form; the precision-argument spellings
-        # (LOCALTIMESTAMP(3), CURRENT_TIMESTAMP(6)) are typed nodes and are
-        # caught by the arm above.
-        if call.expressions:
-            continue
         name = str(call.this)
-        if name.lower() in _TIME_FUNC_NAMES:
+        if name.lower() in _TIME_FUNC_NAMES and _is_clock_read(call):
             return f"{name.upper()}()"
     return None
+
+
+def _is_clock_read(call: exp.Anonymous) -> bool:
+    """True when a named time call reads the clock rather than converting a value.
+
+    The name alone is not enough, because one spelling can be both. Three cases:
+
+    * **No arguments** — ``NOW()``, ``GETDATE()``. The common form, always a
+      clock read.
+    * **One integer literal** — ``NOW(3)``, ``SYSDATE(6)``, ``CURTIME(3)``. A
+      fractional-seconds precision spec, still a clock read. Note this cannot
+      be assumed away by saying the precision spellings are typed nodes: it is
+      true of ``CURRENT_TIMESTAMP(6)`` and ``LOCALTIMESTAMP(3)``, but ``NOW``
+      and ``SYSDATE`` are exactly the names that only ever reach *this* arm.
+    * **Anything else** — ``UNIX_TIMESTAMP(created_at)`` converts the column it
+      is handed and is perfectly deterministic. Refusing it would make the
+      checker reject a pinnable assertion, whose only escape would be
+      ``time_scoped: true`` asserting something untrue.
+    """
+    args = call.expressions
+    if not args:
+        return True
+    return len(args) == 1 and isinstance(args[0], exp.Literal) and args[0].is_int
 
 
 def check_example_answers(

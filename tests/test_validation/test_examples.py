@@ -997,6 +997,70 @@ def test_every_time_func_name_is_detected(contract: DataContract, name: str) -> 
     assert adapter.calls == []
 
 
+@pytest.mark.parametrize("name", sorted(_TIME_FUNC_NAMES))
+def test_every_time_func_name_is_detected_with_a_precision_argument(
+    contract: DataContract, name: str
+) -> None:
+    # The sibling test above only ever renders NAME(). MySQL's fractional-
+    # seconds forms — NOW(3), SYSDATE(6) — are the same clock read with a
+    # precision spec, and NOW/SYSDATE are exactly the names that reach only the
+    # Anonymous arm, so a zero-arg-only guard silently let them through.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND created_at >= {name.upper()}(3)"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "unassertable"
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "duckdb"])
+@pytest.mark.parametrize("fragment", ["NOW(3)", "SYSDATE(6)"])
+def test_fractional_second_clock_reads_are_detected(
+    contract: DataContract, dialect: str, fragment: str
+) -> None:
+    # Regression: the arity guard added for UNIX_TIMESTAMP(created_at)
+    # originally disqualified ANY argument, which let these through.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND created_at >= {fragment}"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract),
+        adapter=adapter,
+        dialect=dialect,
+    )
+    assert answers.results[0].status == "unassertable"
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"sql": "SELECT 1", "rel_tol": 0.01},
+        {"sql": "SELECT 1", "abs_tol": 1.0},
+        {"sql": "SELECT 1", "time_scoped": True},
+    ],
+)
+def test_from_dict_rejects_tolerances_without_an_expected(row: dict) -> None:
+    # A typo'd `expcted:` lands in metadata by design, so the row silently
+    # stops being an assertion and no gate can see the loss. The orphaned
+    # tolerance is the evidence of intent — fail on it.
+    with pytest.raises(ValueError, match="without 'expected'"):
+        VerifiedExample.from_dict(row)
+
+
+def test_from_dict_allows_tolerances_alongside_an_expected() -> None:
+    ex = VerifiedExample.from_dict(
+        {"sql": "SELECT 1", "expected": 10.0, "rel_tol": 0.01, "time_scoped": True}
+    )
+    assert (ex.expected, ex.rel_tol, ex.time_scoped) == (10.0, 0.01, True)
+
+
 def test_unix_timestamp_with_an_argument_is_not_flagged(
     contract: DataContract,
 ) -> None:

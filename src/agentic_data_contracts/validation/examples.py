@@ -9,6 +9,7 @@ for usage and the boundary rationale.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -22,18 +23,60 @@ from agentic_data_contracts.validation.validator import ValidationResult, Valida
 if TYPE_CHECKING:
     from agentic_data_contracts.semantic.base import SemanticSource
 
-_KNOWN_KEYS = frozenset({"sql", "question", "id", "principal", "metadata"})
+_KNOWN_KEYS = frozenset(
+    {
+        "sql",
+        "question",
+        "id",
+        "principal",
+        "metadata",
+        "expected",
+        "rel_tol",
+        "abs_tol",
+        "time_scoped",
+    }
+)
+
+
+def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
+    """Validate one optional numeric field from an untrusted corpus row.
+
+    ``bool`` is rejected explicitly: it is an ``int`` subclass, so
+    ``expected: true`` would otherwise pass an isinstance check and silently
+    assert against ``1.0``.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(f"'{field_name}' must be a number, got {type(raw).__name__}")
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"'{field_name}' must be finite, got {value}")
+    if not allow_negative and value < 0:
+        raise ValueError(f"'{field_name}' must be non-negative, got {value}")
+    return value
 
 
 @dataclass
 class VerifiedExample:
-    """One example to validate. Only ``sql`` is load-bearing."""
+    """One example to validate. Only ``sql`` is load-bearing.
+
+    An example that sets ``expected`` is additionally an *assertion*: the
+    certified answer its SQL must return, checked by ``check_example_answers``.
+    ``rel_tol`` / ``abs_tol`` override the call-level tolerances for this row
+    alone; ``time_scoped`` is the author's assertion that the query's time
+    window is pinned, which suppresses the relative-time-window refusal.
+    """
 
     sql: str
     question: str = ""
     id: str | None = None
     principal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    expected: float | None = None
+    rel_tol: float | None = None
+    abs_tol: float | None = None
+    time_scoped: bool = False
 
     @classmethod
     def from_dict(cls, raw: Any) -> VerifiedExample:
@@ -60,12 +103,21 @@ class VerifiedExample:
         for key, value in raw.items():
             if key not in _KNOWN_KEYS:
                 metadata[key] = value
+        time_scoped = raw.get("time_scoped", False)
+        if not isinstance(time_scoped, bool):
+            raise ValueError(
+                f"'time_scoped' must be a boolean, got {type(time_scoped).__name__}"
+            )
         return cls(
             sql=raw["sql"],
             question=raw.get("question", ""),
             id=raw.get("id"),
             principal=raw.get("principal"),
             metadata=metadata,
+            expected=_numeric(raw.get("expected"), "expected"),
+            rel_tol=_numeric(raw.get("rel_tol"), "rel_tol", allow_negative=False),
+            abs_tol=_numeric(raw.get("abs_tol"), "abs_tol", allow_negative=False),
+            time_scoped=time_scoped,
         )
 
 

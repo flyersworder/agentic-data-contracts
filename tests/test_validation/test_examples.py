@@ -445,3 +445,68 @@ def test_row_limit_block_marks_engine_checked(contract: DataContract) -> None:
     r = report.results[0]
     assert r.status == "violation"
     assert r.engine_checked
+
+
+def test_from_dict_maps_assertion_fields() -> None:
+    ex = VerifiedExample.from_dict(
+        {
+            "sql": "SELECT 1",
+            "expected": 1204338.55,
+            "rel_tol": 1e-6,
+            "abs_tol": 0.5,
+            "time_scoped": True,
+        }
+    )
+    assert ex.expected == 1204338.55
+    assert ex.rel_tol == 1e-6
+    assert ex.abs_tol == 0.5
+    assert ex.time_scoped is True
+    # They are first-class fields now, not unknown keys.
+    assert ex.metadata == {}
+
+
+def test_from_dict_defaults_assertion_fields_to_absent() -> None:
+    ex = VerifiedExample.from_dict({"sql": "SELECT 1"})
+    assert ex.expected is None
+    assert ex.rel_tol is None
+    assert ex.abs_tol is None
+    assert ex.time_scoped is False
+
+
+def test_from_dict_coerces_integer_expected_to_float() -> None:
+    ex = VerifiedExample.from_dict({"sql": "SELECT 1", "expected": 940})
+    assert ex.expected == 940.0
+    assert isinstance(ex.expected, float)
+
+
+def test_from_dict_rejects_boolean_expected() -> None:
+    # bool is an int subclass in Python, so a naive isinstance check would let
+    # `expected: true` through and assert against 1.0.
+    with pytest.raises(ValueError, match="expected"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "expected": True})
+
+
+def test_from_dict_rejects_non_numeric_expected() -> None:
+    with pytest.raises(ValueError, match="expected"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "expected": "1.2M"})
+
+
+def test_from_dict_rejects_non_finite_expected() -> None:
+    # A YAML `.nan` / `.inf` is a malformed answer, not an assertion that can
+    # ever match.
+    with pytest.raises(ValueError, match="finite"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "expected": float("nan")})
+    with pytest.raises(ValueError, match="finite"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "expected": float("inf")})
+
+
+def test_from_dict_rejects_negative_tolerance() -> None:
+    with pytest.raises(ValueError, match="rel_tol"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "rel_tol": -1e-6})
+    with pytest.raises(ValueError, match="abs_tol"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "abs_tol": -0.5})
+
+
+def test_from_dict_rejects_non_boolean_time_scoped() -> None:
+    with pytest.raises(ValueError, match="time_scoped"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "time_scoped": "yes"})

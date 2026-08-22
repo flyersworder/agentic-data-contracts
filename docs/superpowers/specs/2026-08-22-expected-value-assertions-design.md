@@ -160,14 +160,31 @@ For each row of `report.results`, in input order:
    None`. Skipped rows produce no `ExampleAnswerResult` — they are already
    accounted for by `ExampleValidationReport`.
 2. **Time-scope scan.** Parse the SQL and walk the AST for non-deterministic
-   time functions: sqlglot's `CurrentDate`, `CurrentTimestamp`, `CurrentTime`,
-   and `CurrentDatetime` nodes, which is where the dialect spellings normalise
-   to. Verified against sqlglot: `NOW()` (postgres), `GETDATE()` (tsql),
-   `SYSDATE` (oracle), and `CURRENT_TIMESTAMP()` (bigquery) all parse to
-   `CurrentTimestamp`; `CURRENT_DATE` (duckdb) and `CURRENT_DATE()` (snowflake)
-   to `CurrentDate`. `CurrentTime` and `CurrentDatetime` are covered for
-   completeness. A hit, with `time_scoped` False, yields `unassertable` and
-   **no execution**.
+   time functions. The scan has **two arms**, and both are required:
+
+   - **Typed nodes** — `exp.CurrentDate`, `exp.CurrentTimestamp`,
+     `exp.CurrentTime`, `exp.CurrentDatetime`. Only the bare keywords
+     `CURRENT_DATE` and `CURRENT_TIMESTAMP` normalise here in *every* dialect.
+   - **Named `exp.Anonymous` calls** — a function call whose name (lowercased)
+     is in `_TIME_FUNC_NAMES`: `now`, `getdate`, `sysdate`, `sysdatetime`,
+     `today`, `curdate`, `curtime`, `localtime`, `localtimestamp`,
+     `current_date`, `current_timestamp`, `current_time`, `unix_timestamp`.
+
+   The second arm is not belt-and-braces. sqlglot normalises a spelling to a
+   typed node only in the dialects that own it: `NOW()` becomes
+   `CurrentTimestamp` under postgres but stays `Anonymous` under duckdb, mysql,
+   snowflake, bigquery, tsql and oracle; `GETDATE()` is typed under tsql and
+   snowflake and anonymous elsewhere; `TODAY()` is typed under duckdb only. A
+   typed-node-only scan would therefore miss `NOW()` — the most common relative
+   spelling in the wild — under the dialect most likely to be running it.
+
+   Matching only `exp.Anonymous` keeps this precise: a *column* named
+   `now_flag` or `sysdate` is not a function call and is never flagged.
+   Verified across duckdb, postgres, snowflake, bigquery, tsql, mysql and
+   oracle: every listed spelling is detected in every dialect, and neither a
+   pinned `DATE '2026-01-01'` literal nor a `make_date(...)` call is.
+
+   A hit, with `time_scoped` False, yields `unassertable` and **no execution**.
 
    Should the re-parse fail despite the row being `valid` — a normalizer or
    dialect mismatch between the two passes — the row degrades to `error`. It is
@@ -329,7 +346,12 @@ Tests are written first, from this spec.
   called** (asserted against a spy adapter, not merely inferred from the
   status — the no-execution guarantee is the security-relevant property).
 - The same SQL with `time_scoped: true` executes and compares normally.
-- `NOW()` and `CURRENT_TIMESTAMP` are detected alongside `CURRENT_DATE`.
+- `CURRENT_TIMESTAMP` is detected alongside `CURRENT_DATE` (typed arm).
+- `NOW()` is detected **under the duckdb dialect**, where it parses to
+  `exp.Anonymous` rather than a typed node — the case a typed-node-only scan
+  misses. `GETDATE()` and `TODAY()` likewise.
+- A column named `now_flag` and a pinned `DATE '2026-01-01'` literal are NOT
+  flagged: the anonymous arm matches function calls only.
 - A row whose SQL fails to re-parse degrades to `error` and is never executed
   (spy adapter).
 - `dialect` is taken from `adapter.dialect` when the argument is omitted, and

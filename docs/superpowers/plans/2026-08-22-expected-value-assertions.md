@@ -681,7 +681,9 @@ The filtering rule is the security-relevant part: **only rows that are `status =
 
 **Interfaces:**
 - Consumes: `_compare`, `_label`, `_scalar`, `ExampleAnswerResult`, `ExampleAnswerReport`, `ExampleValidationReport`.
-- Produces: `check_example_answers(report: ExampleValidationReport, *, adapter: DatabaseAdapter, dialect: str | None = None, sql_normalizer: SqlNormalizer | None = None, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> ExampleAnswerReport`.
+- Produces: `check_example_answers(report: ExampleValidationReport, *, adapter: DatabaseAdapter, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> ExampleAnswerReport` and `_check_one(example, label, *, adapter, rel_tol, abs_tol)`.
+
+**Controller ruling (preflight):** the spec's signature also carries `dialect` and `sql_normalizer`. They serve only the time-scope scan, so **Task 6 adds them** — this task must not declare parameters nothing reads. Task 8 exports the API only after Task 6, so the narrower signature is never visible outside the branch.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -898,8 +900,6 @@ def check_example_answers(
     report: ExampleValidationReport,
     *,
     adapter: DatabaseAdapter,
-    dialect: str | None = None,
-    sql_normalizer: SqlNormalizer | None = None,
     rel_tol: float = _DEFAULT_REL_TOL,
     abs_tol: float = _DEFAULT_ABS_TOL,
 ) -> ExampleAnswerReport:
@@ -917,14 +917,7 @@ def check_example_answers(
     it plans, via ``ExplainAdapter``, and nothing more. The execute-capable
     ``DatabaseAdapter`` enters only here.
 
-    ``sql_normalizer`` must be the same value passed to ``validate_examples``:
-    a corpus whose SQL only parses after normalization reached ``valid``
-    through the normalizer. ``dialect`` defaults to ``adapter.dialect``, since
-    ``DatabaseAdapter`` exposes one (unlike the bare ``ExplainAdapter`` that
-    forces ``validate_examples`` to be told); pass it explicitly only when the
-    corpus is authored in a different dialect than the adapter speaks.
     """
-    effective_dialect = dialect if dialect is not None else adapter.dialect
     results: list[ExampleAnswerResult] = []
     for index, row in enumerate(report.results):
         example = row.example
@@ -935,8 +928,6 @@ def check_example_answers(
                 example,
                 _label(example, index),
                 adapter=adapter,
-                dialect=effective_dialect,
-                sql_normalizer=sql_normalizer,
                 rel_tol=example.rel_tol if example.rel_tol is not None else rel_tol,
                 abs_tol=example.abs_tol if example.abs_tol is not None else abs_tol,
             )
@@ -949,8 +940,6 @@ def _check_one(
     label: str,
     *,
     adapter: DatabaseAdapter,
-    dialect: str | None,
-    sql_normalizer: SqlNormalizer | None,
     rel_tol: float,
     abs_tol: float,
 ) -> ExampleAnswerResult:
@@ -999,7 +988,9 @@ git commit -m "feat: check_example_answers executes compliant assertions"
 
 An expected value attached to `WHERE d > CURRENT_DATE - 30` decays: green today, red in 30 days, for no real reason. Such a row is refused, not executed.
 
-Verified against sqlglot: `NOW()` (postgres), `GETDATE()` (tsql), `SYSDATE` (oracle) and `CURRENT_TIMESTAMP()` (bigquery) all parse to `exp.CurrentTimestamp`; `CURRENT_DATE` (duckdb) and `CURRENT_DATE()` (snowflake) to `exp.CurrentDate`.
+The scan needs **two arms**. sqlglot normalises a spelling to a typed node only in the dialects that own it: `NOW()` is `exp.CurrentTimestamp` under postgres but plain `exp.Anonymous` under duckdb, mysql, snowflake, bigquery, tsql and oracle. Only bare `CURRENT_DATE` / `CURRENT_TIMESTAMP` are typed everywhere. So arm one matches the typed nodes, arm two matches `exp.Anonymous` calls by name. Matching `Anonymous` (a *call*) rather than any identifier is what keeps a column named `now_flag` from being flagged.
+
+This task also adds the `dialect` and `sql_normalizer` parameters that Task 5 deliberately omitted — the scan is their only consumer.
 
 **Files:**
 - Modify: `src/agentic_data_contracts/validation/examples.py`
@@ -1043,15 +1034,20 @@ def test_time_scoped_flag_permits_a_relative_window(contract: DataContract) -> N
 
 
 @pytest.mark.parametrize(
-    ("fragment", "node"),
+    ("fragment", "marker"),
     [
+        # Typed arm — the only two spellings sqlglot types in every dialect.
         ("CURRENT_DATE", "CurrentDate"),
         ("CURRENT_TIMESTAMP", "CurrentTimestamp"),
-        ("NOW()", "CurrentTimestamp"),
+        # Anonymous arm — under duckdb (what SpyAdapter reports) these stay
+        # exp.Anonymous, so a typed-node-only scan would miss them. NOW() is
+        # the common case and the reason the second arm exists.
+        ("NOW()", "NOW()"),
+        ("GETDATE()", "GETDATE()"),
     ],
 )
 def test_each_relative_time_spelling_is_detected(
-    contract: DataContract, fragment: str, node: str
+    contract: DataContract, fragment: str, marker: str
 ) -> None:
     sql = (
         "SELECT SUM(amount) FROM analytics.orders "
@@ -1062,8 +1058,33 @@ def test_each_relative_time_spelling_is_detected(
         validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
     )
     assert answers.results[0].status == "unassertable"
-    assert node in (answers.results[0].reason or "")
+    assert marker in (answers.results[0].reason or "")
     assert adapter.calls == []
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        "now_flag = 1",  # a COLUMN whose name looks like a time function
+        "created_at >= DATE '2026-01-01'",  # a pinned literal
+        "created_at >= make_date(2026, 1, 1)",  # an unrelated function call
+    ],
+)
+def test_pinned_and_lookalike_predicates_are_not_flagged(
+    contract: DataContract, predicate: str
+) -> None:
+    # The anonymous arm matches function CALLS by name; it must not fire on a
+    # column that merely reads like one, or the checker refuses valid work.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND {predicate}"
+    )
+    adapter = SpyAdapter({sql: 1.0})
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "match"
+    assert adapter.calls == [sql]
 
 
 def test_dialect_defaults_to_the_adapters(contract: DataContract) -> None:
@@ -1101,15 +1122,37 @@ from sqlglot import exp
 Add above `check_example_answers`:
 
 ```python
-# Where every dialect's relative-time spelling lands after sqlglot parses it:
-# NOW() / GETDATE() / SYSDATE / CURRENT_TIMESTAMP() all become CurrentTimestamp,
-# CURRENT_DATE / CURRENT_DATE() become CurrentDate. CurrentTime and
-# CurrentDatetime are covered for completeness.
+# Arm one: the spellings sqlglot gives a dedicated node. Only bare CURRENT_DATE
+# and CURRENT_TIMESTAMP land here in EVERY dialect.
 _TIME_FUNCS = (
     exp.CurrentDate,
     exp.CurrentTimestamp,
     exp.CurrentTime,
     exp.CurrentDatetime,
+)
+
+# Arm two: the same idea spelled as a function call sqlglot did not model for
+# this dialect. NOW() is CurrentTimestamp under postgres but Anonymous under
+# duckdb, mysql, snowflake, bigquery, tsql and oracle; GETDATE() is typed only
+# under tsql and snowflake; TODAY() only under duckdb. Without this arm the
+# checker would miss the most common relative spelling under the dialect most
+# likely to be running it.
+_TIME_FUNC_NAMES = frozenset(
+    {
+        "now",
+        "getdate",
+        "sysdate",
+        "sysdatetime",
+        "today",
+        "curdate",
+        "curtime",
+        "localtime",
+        "localtimestamp",
+        "current_date",
+        "current_timestamp",
+        "current_time",
+        "unix_timestamp",
+    }
 )
 
 
@@ -1119,12 +1162,46 @@ def _relative_time_node(statement: exp.Expression) -> str | None:
     An expected value attached to a relative window decays: correct today,
     wrong in a month, for no reason the corpus author did anything about. Such
     a row is refused rather than executed.
+
+    Matching ``exp.Anonymous`` — a function *call* — rather than any identifier
+    is deliberate: a column named ``now_flag`` or ``sysdate`` is not a call and
+    must not be flagged, or the checker would refuse valid assertions.
     """
     node = statement.find(*_TIME_FUNCS)
-    return type(node).__name__ if node is not None else None
+    if node is not None:
+        return type(node).__name__
+    for call in statement.find_all(exp.Anonymous):
+        name = str(call.this)
+        if name.lower() in _TIME_FUNC_NAMES:
+            return f"{name.upper()}()"
+    return None
 ```
 
-In `_check_one`, insert the scan between the `_make` helper and the `_scalar` call:
+Add `dialect` and `sql_normalizer` to both signatures. `check_example_answers` gains:
+
+```python
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
+```
+
+placed after `adapter`, with this added to its docstring:
+
+```
+    ``sql_normalizer`` must be the same value passed to ``validate_examples``:
+    a corpus whose SQL only parses after normalization reached ``valid``
+    through the normalizer. ``dialect`` defaults to ``adapter.dialect``, since
+    ``DatabaseAdapter`` exposes one (unlike the bare ``ExplainAdapter`` that
+    forces ``validate_examples`` to be told); pass it explicitly only when the
+    corpus is authored in a different dialect than the adapter speaks.
+```
+
+and its body resolves the dialect once, before the loop, passing it through to `_check_one` (which gains `dialect: str | None` and `sql_normalizer: SqlNormalizer | None` keyword parameters):
+
+```python
+    effective_dialect = dialect if dialect is not None else adapter.dialect
+```
+
+Then, in `_check_one`, insert the scan between the `_make` helper and the `_scalar` call:
 
 ```python
     if not example.time_scoped:

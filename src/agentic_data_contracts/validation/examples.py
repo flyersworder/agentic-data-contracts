@@ -133,6 +133,16 @@ def _label(example: VerifiedExample, index: int) -> str:
     return example.id or example.question or f"#{index}"
 
 
+def _fmt(value: float | None) -> str:
+    """Render a numeric for a report line, tolerating an unset field.
+
+    ``summary()`` is what a CI operator reads when a check has already failed;
+    it must not raise. A field left unset renders as ``?`` rather than
+    crashing the whole report.
+    """
+    return "?" if value is None else f"{value:.3g}"
+
+
 @dataclass
 class ExampleResult:
     """The verdict for one example.
@@ -307,8 +317,8 @@ class ExampleAnswerReport:
             if r.status == "mismatch":
                 lines.append(
                     f"- mismatch `{_label(r.example, i)}`: expected {r.expected}, "
-                    f"actual {r.actual} (rel diff {r.rel_diff:.3g}, "
-                    f"rel_tol {r.rel_tol:.3g}, abs_tol {r.abs_tol:.3g})"
+                    f"actual {r.actual} (rel diff {_fmt(r.rel_diff)}, "
+                    f"rel_tol {_fmt(r.rel_tol)}, abs_tol {_fmt(r.abs_tol)})"
                 )
             elif r.status in ("unassertable", "error"):
                 lines.append(f"- {r.status} `{_label(r.example, i)}`: {r.reason}")

@@ -568,3 +568,14 @@ def test_label_falls_back_from_id_to_question_to_index() -> None:
     assert _label(VerifiedExample(sql="s", id="ident", question="q"), 3) == "ident"
     assert _label(VerifiedExample(sql="s", question="q"), 3) == "q"
     assert _label(VerifiedExample(sql="s"), 3) == "#3"
+
+
+def test_summary_tolerates_a_mismatch_with_unset_diffs() -> None:
+    # summary() is read when something already went wrong; it must never be
+    # the thing that raises.
+    report = ExampleAnswerReport(
+        results=[_ans("mismatch", expected=100.0, actual=98.0)]
+    )
+    text = report.summary()
+    assert "mismatch" in text
+    assert "?" in text

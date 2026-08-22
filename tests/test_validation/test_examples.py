@@ -674,8 +674,23 @@ class SpyAdapter:
 _SUM_SQL = "SELECT SUM(amount) FROM analytics.orders WHERE tenant_id = 'acme'"
 
 
-def _asserted(sql: str, expected: float, **kw: object) -> VerifiedExample:
-    return VerifiedExample(sql=sql, expected=expected, **kw)  # ty: ignore[invalid-argument-type]
+def _asserted(
+    sql: str,
+    expected: float,
+    *,
+    id: str | None = None,
+    rel_tol: float | None = None,
+    abs_tol: float | None = None,
+    time_scoped: bool = False,
+) -> VerifiedExample:
+    return VerifiedExample(
+        sql=sql,
+        expected=expected,
+        id=id,
+        rel_tol=rel_tol,
+        abs_tol=abs_tol,
+        time_scoped=time_scoped,
+    )
 
 
 def test_matching_assertion_is_a_match(contract: DataContract) -> None:
@@ -764,7 +779,7 @@ def test_per_example_tolerance_beats_the_call_level_default(
 ) -> None:
     # An answer certified from a dashboard rounded to cents against a
     # full-precision SUM: rescued by the row's own rel_tol.
-    adapter = SpyAdapter({_SUM_SQL: 1204338.5512})
+    adapter = SpyAdapter({_SUM_SQL: 1204338.5612})
     ex = _asserted(_SUM_SQL, 1204338.55, rel_tol=1e-6)
     answers = check_example_answers(validate_examples([ex], contract), adapter=adapter)
     assert answers.results[0].status == "match"

@@ -979,7 +979,7 @@ Each example lands in exactly one `status` — `valid` (statically contract-chec
 - **MR gate** — validate the corpus in CI *before* a human reviews it; fail on `not report.ok`, so the human is no longer the only check.
 - **Drift sweep** — re-run against a *changed* contract; `report.violations` are the examples the change just broke. With an `explain_adapter`, the live EXPLAIN also catches a dropped or renamed column that static checks can't see.
 
-It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with your review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
+It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL. Result correctness is the second pass's job, [below](#asserting-the-certified-answer-not-just-compliance). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
 
 ### Asserting the certified answer, not just compliance
 

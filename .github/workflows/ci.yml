@@ -98,10 +98,16 @@ jobs:
         run: |
           uv run python examples/ops_agent/agent.py > out.txt
           grep -q 'Blocked columns in SELECT' out.txt
-      - name: verified-examples corpus validation
+      - name: verified-examples corpus validation + answer checks
         run: |
           uv run python examples/revenue_agent/verify_examples.py > out.txt
           grep -q 'Example validation:' out.txt
+          # The second pass is the half that executes SQL, so assert it ran AND
+          # that both failure statuses still surface — a silently-empty answer
+          # report would otherwise leave this job green.
+          grep -q 'Answer checks:' out.txt
+          grep -q 'MISMATCH' out.txt
+          grep -q 'UNASSERTABLE' out.txt
 
   test-pydantic-ai-latest:
     # Early-warning job. pyproject allows pydantic-ai-slim >=2.0 (unbounded), and

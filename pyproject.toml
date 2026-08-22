@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.44.0"
+version = "0.44.1"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -76,9 +76,15 @@ Documentation = "https://github.com/flyersworder/agentic-data-contracts/blob/mai
 # `mcp.types.ToolAnnotations` at runtime. Declaring it is the actual fix -- an
 # undeclared import is how this extra inherited an upstream constraint bug it
 # could have owned. The UPPER bound stays with claude-agent-sdk deliberately:
-# mcp 2.0 broke `Server.list_tools`, which is the SDK's call, not ours, and
-# duplicating someone else's ceiling here would go stale. 0.2.96 is the first
-# release that declares it (`mcp<2.0.0,>=1.23.0`); 0.1.x left `mcp` unbounded.
+# the `Server.list_tools` call mcp 2.0 changed is the SDK's, not ours, so
+# duplicating someone else's ceiling here would go stale. It since did: the SDK
+# adapted and widened to `mcp<3.0.0,>=1.23.0` in 0.2.144, and this extra picked
+# mcp 2.0 up with no edit. 0.2.96 is the first release to declare mcp at all
+# (then `<2.0.0,>=1.23.0`); 0.1.x left it unbounded.
+#
+# Our own floor stays at 1.23.0 and unbounded above, so `mcp.types` must be used
+# in the one form valid across the 1.x/2.0 attribute rename -- see
+# `_annotations_for` in tools/sdk.py.
 agent-sdk = ["claude-agent-sdk>=0.2.96", "mcp>=1.23.0"]
 agent-contracts = ["ai-agent-contracts>=0.3.1"]
 langchain = ["langchain-core>=1.3.3", "langchain>=1.2.17", "langgraph>=1.1.10"]

@@ -17,10 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.validator import ValidationResult, Validator
 
 if TYPE_CHECKING:
+    from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.semantic.base import SemanticSource
 
 _KNOWN_KEYS = frozenset(
@@ -488,4 +490,77 @@ def _to_result(
         ],
         contract_checked=False,
         engine_checked=True,
+    )
+
+
+def check_example_answers(
+    report: ExampleValidationReport,
+    *,
+    adapter: DatabaseAdapter,
+    rel_tol: float = _DEFAULT_REL_TOL,
+    abs_tol: float = _DEFAULT_ABS_TOL,
+) -> ExampleAnswerReport:
+    """Execute each *asserted*, contract-compliant example and check its answer.
+
+    Takes the report from ``validate_examples`` rather than raw examples, and
+    that is the load-bearing choice: an example that failed contract validation
+    must never be executed, and consuming the report makes that ordering a
+    property of the signature rather than a rule in a docstring. A row is
+    executed only when it is ``status == "valid"`` AND declares an ``expected``;
+    everything else produces no result at all (it is already accounted for by
+    ``ExampleValidationReport``).
+
+    ``validate_examples`` keeps its own property of never executing a query —
+    it plans, via ``ExplainAdapter``, and nothing more. The execute-capable
+    ``DatabaseAdapter`` enters only here.
+
+    """
+    results: list[ExampleAnswerResult] = []
+    for index, row in enumerate(report.results):
+        example = row.example
+        if row.status != "valid" or example.expected is None:
+            continue
+        results.append(
+            _check_one(
+                example,
+                _label(example, index),
+                adapter=adapter,
+                rel_tol=example.rel_tol if example.rel_tol is not None else rel_tol,
+                abs_tol=example.abs_tol if example.abs_tol is not None else abs_tol,
+            )
+        )
+    return ExampleAnswerReport(results=results)
+
+
+def _check_one(
+    example: VerifiedExample,
+    label: str,
+    *,
+    adapter: DatabaseAdapter,
+    rel_tol: float,
+    abs_tol: float,
+) -> ExampleAnswerResult:
+    expected = example.expected
+    assert expected is not None  # guarded by the caller's filter
+
+    def _make(status: str, **kw: Any) -> ExampleAnswerResult:
+        return ExampleAnswerResult(
+            example=example,
+            status=status,
+            expected=expected,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+            **kw,
+        )
+
+    actual, reason = _scalar(adapter, example.sql, label)
+    if actual is None:
+        return _make("error", reason=reason)
+    diff, rel_diff, matched = _compare(actual, expected, rel_tol, abs_tol)
+    return _make(
+        "match" if matched else "mismatch",
+        actual=actual,
+        abs_diff=diff,
+        rel_diff=rel_diff,
+        reason=None if matched else "answer differs from the certified value",
     )

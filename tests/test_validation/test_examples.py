@@ -1,8 +1,10 @@
 import math
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from agentic_data_contracts.adapters.base import QueryResult, TableSchema
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation.examples import (
     ExampleAnswerReport,
@@ -12,6 +14,7 @@ from agentic_data_contracts.validation.examples import (
     VerifiedExample,
     _compare,
     _label,
+    check_example_answers,
     validate_examples,
 )
 from agentic_data_contracts.validation.explain import ExplainResult
@@ -626,3 +629,170 @@ class TestCompare:
         # (or on max(|a|,|b|), as math.isclose does) it would be 150 and pass.
         _, _, matched = _compare(200.0, 100.0, 0.75, 0.0)
         assert not matched
+
+
+_NO_ROWS = object()
+_TWO_COLS = object()
+
+
+class SpyAdapter:
+    """A DatabaseAdapter that returns canned scalars and records every call."""
+
+    def __init__(self, values: dict[str, object] | None = None) -> None:
+        self.values = values or {}
+        self.calls: list[str] = []
+
+    def execute(self, sql: str) -> QueryResult:
+        self.calls.append(sql)
+        if sql not in self.values:
+            raise AssertionError(f"SpyAdapter has no canned value for: {sql}")
+        value = self.values[sql]
+        if isinstance(value, Exception):
+            raise value
+        if value is _NO_ROWS:
+            return QueryResult(columns=["v"], rows=[])
+        if value is _TWO_COLS:
+            return QueryResult(columns=["a", "b"], rows=[(1, 2)])
+        return QueryResult(columns=["v"], rows=[(value,)])
+
+    def explain(self, sql: str) -> ExplainResult:
+        return ExplainResult(
+            estimated_cost_usd=None, estimated_rows=1, schema_valid=True
+        )
+
+    def describe_table(self, schema: str, table: str) -> TableSchema:
+        return TableSchema(columns=[])
+
+    def list_tables(self, schema: str) -> list[str]:
+        return []
+
+    @property
+    def dialect(self) -> str:
+        return "duckdb"
+
+
+_SUM_SQL = "SELECT SUM(amount) FROM analytics.orders WHERE tenant_id = 'acme'"
+
+
+def _asserted(sql: str, expected: float, **kw: object) -> VerifiedExample:
+    return VerifiedExample(sql=sql, expected=expected, **kw)  # ty: ignore[invalid-argument-type]
+
+
+def test_matching_assertion_is_a_match(contract: DataContract) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 1204338.55})
+    report = validate_examples([_asserted(_SUM_SQL, 1204338.55)], contract)
+    answers = check_example_answers(report, adapter=adapter)
+    assert answers.ok
+    r = answers.results[0]
+    assert r.status == "match"
+    assert r.expected == 1204338.55
+    assert r.actual == 1204338.55
+    assert adapter.calls == [_SUM_SQL]
+
+
+def test_wrong_number_is_a_mismatch(contract: DataContract) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 1198000.0})
+    report = validate_examples([_asserted(_SUM_SQL, 1204338.55)], contract)
+    answers = check_example_answers(report, adapter=adapter)
+    assert not answers.ok
+    r = answers.results[0]
+    assert r.status == "mismatch"
+    assert r.expected == 1204338.55
+    assert r.actual == 1198000.0
+    assert r.abs_diff is not None and r.abs_diff > 0
+    assert r.rel_diff is not None and r.rel_diff > 0
+
+
+def test_violation_row_is_never_executed(contract: DataContract) -> None:
+    # The security-relevant guarantee: a query that failed the contract must
+    # not be run against the warehouse to see what it returns.
+    bad = _asserted("SELECT SUM(amount) FROM raw.payments WHERE tenant_id = 'x'", 1.0)
+    adapter = SpyAdapter()
+    report = validate_examples([bad], contract)
+    assert report.results[0].status == "violation"
+    answers = check_example_answers(report, adapter=adapter)
+    assert answers.results == []
+    assert adapter.calls == []
+
+
+def test_unchecked_row_is_never_executed(contract: DataContract) -> None:
+    adapter = SpyAdapter()
+    report = validate_examples([_asserted("SELECT * FROM (", 1.0)], contract)
+    assert report.results[0].status == "unchecked"
+    answers = check_example_answers(report, adapter=adapter)
+    assert answers.results == []
+    assert adapter.calls == []
+
+
+def test_unverified_row_is_never_executed(contract: DataContract) -> None:
+    # Decision-B: the engine planned it but contract policy was never statically
+    # checked, so it is not vouched-valid and must not be executed either.
+    explain = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=None, estimated_rows=1, schema_valid=True)
+    )
+    adapter = SpyAdapter()
+    report = validate_examples(
+        [_asserted("SELECT * FROM (", 1.0)], contract, explain_adapter=explain
+    )
+    assert report.results[0].status == "unverified"
+    answers = check_example_answers(report, adapter=adapter)
+    assert answers.results == []
+    assert adapter.calls == []
+
+
+def test_a_decimal_result_compares_as_a_number(contract: DataContract) -> None:
+    # A money column comes back as DECIMAL from DuckDB/Postgres, not float.
+    # _scalar's float() coercion handles it; this pins that it keeps doing so.
+    adapter = SpyAdapter({_SUM_SQL: Decimal("10700.00")})
+    answers = check_example_answers(
+        validate_examples([_asserted(_SUM_SQL, 10700.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "match"
+    assert answers.results[0].actual == 10700.0
+
+
+def test_row_without_expected_produces_no_result(contract: DataContract) -> None:
+    adapter = SpyAdapter()
+    report = validate_examples([VerifiedExample(sql=_SUM_SQL)], contract)
+    answers = check_example_answers(report, adapter=adapter)
+    assert answers.results == []
+    assert adapter.calls == []
+
+
+def test_per_example_tolerance_beats_the_call_level_default(
+    contract: DataContract,
+) -> None:
+    # An answer certified from a dashboard rounded to cents against a
+    # full-precision SUM: rescued by the row's own rel_tol.
+    adapter = SpyAdapter({_SUM_SQL: 1204338.5512})
+    ex = _asserted(_SUM_SQL, 1204338.55, rel_tol=1e-6)
+    answers = check_example_answers(validate_examples([ex], contract), adapter=adapter)
+    assert answers.results[0].status == "match"
+    assert answers.results[0].rel_tol == 1e-6
+
+
+def test_call_level_tolerance_applies_when_the_row_sets_none(
+    contract: DataContract,
+) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 1204338.5612})
+    report = validate_examples([_asserted(_SUM_SQL, 1204338.55)], contract)
+    assert check_example_answers(report, adapter=adapter).results[0].status == (
+        "mismatch"
+    )
+    report2 = validate_examples([_asserted(_SUM_SQL, 1204338.55)], contract)
+    loose = check_example_answers(report2, adapter=adapter, rel_tol=1e-6)
+    assert loose.results[0].status == "match"
+
+
+def test_a_row_may_override_one_tolerance_without_the_other(
+    contract: DataContract,
+) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 100.5})
+    ex = _asserted(_SUM_SQL, 100.0, abs_tol=1.0)
+    answers = check_example_answers(
+        validate_examples([ex], contract), adapter=adapter, rel_tol=1e-3
+    )
+    r = answers.results[0]
+    assert r.status == "match"
+    assert r.abs_tol == 1.0  # from the row
+    assert r.rel_tol == 1e-3  # from the call

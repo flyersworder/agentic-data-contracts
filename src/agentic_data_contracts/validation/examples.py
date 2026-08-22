@@ -293,6 +293,12 @@ class ExampleAnswerResult:
 
     ``rel_tol`` / ``abs_tol`` record the tolerances actually applied to this
     row, so a mismatch names the threshold it missed.
+
+    ``label`` is the display name computed by the caller (``_label(example,
+    index)`` against ``ExampleValidationReport.results``) and stored here so
+    ``ExampleAnswerReport.summary()`` can reuse it verbatim instead of
+    recomputing it against a different, filtered index — see the module's
+    ``check_example_answers`` for why those two indices differ.
     """
 
     example: VerifiedExample
@@ -304,6 +310,7 @@ class ExampleAnswerResult:
     rel_tol: float = _DEFAULT_REL_TOL
     abs_tol: float = _DEFAULT_ABS_TOL
     reason: str | None = None
+    label: str = ""
 
 
 @dataclass
@@ -341,7 +348,15 @@ class ExampleAnswerReport:
         return bool(self.results) and all(r.status == "match" for r in self.results)
 
     def summary(self) -> str:
-        """A compact markdown report, suitable for an MR comment."""
+        """A compact markdown report, suitable for an MR comment.
+
+        Uses each result's own ``label`` (computed once by the caller against
+        the full validation report) rather than recomputing ``_label`` against
+        ``self.results`` here — ``self.results`` is already filtered down to
+        the asserted rows, so a positional index into it does not match the
+        index a row had when its label was first computed. Recomputing here
+        would give an unnamed row two different ``#N`` labels.
+        """
         counts = Counter(r.status for r in self.results)
         lines = [
             f"**Answer checks:** {counts['match']} match, "
@@ -349,15 +364,15 @@ class ExampleAnswerReport:
             f"{counts['unassertable']} unassertable, "
             f"{counts['error']} error(s).",
         ]
-        for i, r in enumerate(self.results):
+        for r in self.results:
             if r.status == "mismatch":
                 lines.append(
-                    f"- mismatch `{_label(r.example, i)}`: expected {r.expected}, "
+                    f"- mismatch `{r.label}`: expected {r.expected}, "
                     f"actual {r.actual} (rel diff {_fmt(r.rel_diff)}, "
                     f"rel_tol {_fmt(r.rel_tol)}, abs_tol {_fmt(r.abs_tol)})"
                 )
             elif r.status in ("unassertable", "error"):
-                lines.append(f"- {r.status} `{_label(r.example, i)}`: {r.reason}")
+                lines.append(f"- {r.status} `{r.label}`: {r.reason}")
         return "\n".join(lines)
 
 
@@ -503,6 +518,10 @@ _TIME_FUNCS = (
     exp.CurrentTimestamp,
     exp.CurrentTime,
     exp.CurrentDatetime,
+    exp.Localtime,
+    exp.Localtimestamp,
+    exp.Systimestamp,
+    exp.UtcTimestamp,
 )
 
 # Arm two: the same idea spelled as a function call sqlglot did not model for
@@ -511,6 +530,13 @@ _TIME_FUNCS = (
 # under tsql and snowflake; TODAY() only under duckdb. Without this arm the
 # checker would miss the most common relative spelling under the dialect most
 # likely to be running it.
+#
+# ``localtime`` / ``localtimestamp`` are also typed nodes now (see
+# ``_TIME_FUNCS`` above), which makes their entries here currently
+# unreachable. KEEP them anyway: sqlglot's typing is dialect-dependent and has
+# changed before — that is the whole reason this second arm exists — so a
+# redundant name today is a cheap backstop against a future dialect that
+# stops typing it.
 _TIME_FUNC_NAMES = frozenset(
     {
         "now",
@@ -526,6 +552,10 @@ _TIME_FUNC_NAMES = frozenset(
         "current_timestamp",
         "current_time",
         "unix_timestamp",
+        "getutcdate",
+        "statement_timestamp",
+        "transaction_timestamp",
+        "timeofday",
     }
 )
 
@@ -545,6 +575,13 @@ def _relative_time_node(statement: exp.Expression) -> str | None:
     if node is not None:
         return type(node).__name__
     for call in statement.find_all(exp.Anonymous):
+        # Zero-arg only: UNIX_TIMESTAMP(created_at) is a deterministic
+        # conversion, not a clock read. Every name listed here is relative
+        # only in its no-argument form; the precision-argument spellings
+        # (LOCALTIMESTAMP(3), CURRENT_TIMESTAMP(6)) are typed nodes and are
+        # caught by the arm above.
+        if call.expressions:
+            continue
         name = str(call.this)
         if name.lower() in _TIME_FUNC_NAMES:
             return f"{name.upper()}()"
@@ -613,6 +650,7 @@ def check_example_answers(
                     rel_tol=row_rel_tol,
                     abs_tol=row_abs_tol,
                     reason=f"answer check error: {exc}",
+                    label=_label(example, index),
                 )
             )
     return ExampleAnswerReport(results=results)
@@ -638,6 +676,7 @@ def _check_one(
             expected=expected,
             rel_tol=rel_tol,
             abs_tol=abs_tol,
+            label=label,
             **kw,
         )
 

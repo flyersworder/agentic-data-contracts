@@ -3,10 +3,13 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from sqlglot import exp
 
 from agentic_data_contracts.adapters.base import QueryResult, TableSchema
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation.examples import (
+    _TIME_FUNC_NAMES,
+    _TIME_FUNCS,
     ExampleAnswerReport,
     ExampleAnswerResult,
     ExampleResult,
@@ -508,6 +511,15 @@ def test_from_dict_rejects_non_finite_expected() -> None:
         VerifiedExample.from_dict({"sql": "SELECT 1", "expected": float("inf")})
 
 
+def test_from_dict_rejects_non_numeric_tolerance() -> None:
+    # Only the negative-value case existed; a wrong-typed tolerance (e.g. a
+    # YAML string) must raise the same clear error _numeric gives 'expected'.
+    with pytest.raises(ValueError, match="rel_tol"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "rel_tol": "tight"})
+    with pytest.raises(ValueError, match="abs_tol"):
+        VerifiedExample.from_dict({"sql": "SELECT 1", "abs_tol": "loose"})
+
+
 def test_from_dict_rejects_negative_tolerance() -> None:
     with pytest.raises(ValueError, match="rel_tol"):
         VerifiedExample.from_dict({"sql": "SELECT 1", "rel_tol": -1e-6})
@@ -584,6 +596,30 @@ def test_summary_tolerates_a_mismatch_with_unset_diffs() -> None:
     text = report.summary()
     assert "mismatch" in text
     assert "?" in text
+
+
+def test_answer_summary_reuses_the_validation_report_label(
+    contract: DataContract,
+) -> None:
+    # Minor-B regression: an unnamed row's label must be computed once, against
+    # its index in the FULL validation report, and reused verbatim in
+    # summary() — not recomputed against the filtered, asserted-only results
+    # (where the same row would land at a different index and render a
+    # different #N).
+    other = "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"
+    adapter = SpyAdapter({_SUM_SQL: 1.0, other: 999.0})
+    report = validate_examples(
+        [
+            VerifiedExample(sql=other, id="skipped"),  # no expected; #0 in report
+            _asserted(_SUM_SQL, 2.0),  # unnamed; #1 in report, #0 once filtered
+        ],
+        contract,
+    )
+    answers = check_example_answers(report, adapter=adapter)
+    r = answers.results[0]
+    assert r.label == "#1"  # its position in report.results, not answers.results
+    assert "`#1`" in answers.summary()
+    assert "`#0`" not in answers.summary()
 
 
 class TestCompare:
@@ -852,6 +888,12 @@ def test_time_scoped_flag_permits_a_relative_window(contract: DataContract) -> N
         # the common case and the reason the second arm exists.
         ("NOW()", "NOW()"),
         ("GETDATE()", "GETDATE()"),
+        ("TODAY()", "CurrentDate"),  # typed under duckdb, per the spec
+        # Important-1 regression: LOCALTIMESTAMP / LOCALTIME parse to typed
+        # nodes (exp.Localtimestamp / exp.Localtime) that used to be missing
+        # from _TIME_FUNCS entirely, so they slipped past both arms.
+        ("LOCALTIMESTAMP", "Localtimestamp"),
+        ("LOCALTIME", "Localtime"),
     ],
 )
 def test_each_relative_time_spelling_is_detected(
@@ -868,6 +910,100 @@ def test_each_relative_time_spelling_is_detected(
     assert answers.results[0].status == "unassertable"
     assert marker in (answers.results[0].reason or "")
     assert adapter.calls == []
+
+
+def test_current_time_is_detected_under_snowflake(contract: DataContract) -> None:
+    # Important-1 regression: CURRENT_TIME parses to exp.CurrentTime under
+    # duckdb (and most dialects) but to exp.Localtime under snowflake — the
+    # exp.CurrentTime entry alone misses Snowflake.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        "WHERE tenant_id = 'acme' AND created_at >= CURRENT_TIME"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract),
+        adapter=adapter,
+        dialect="snowflake",
+    )
+    assert answers.results[0].status == "unassertable"
+    assert "Localtime" in (answers.results[0].reason or "")
+    assert adapter.calls == []
+
+
+# fragment + dialect (None -> the adapter's own duckdb) that produces each
+# _TIME_FUNCS node type. Systimestamp is typed only under oracle; every other
+# entry is reachable, and stays reachable, under plain duckdb.
+_TIME_FUNCS_FRAGMENTS: dict[type[exp.Expression], tuple[str, str | None]] = {
+    exp.CurrentDate: ("CURRENT_DATE", None),
+    exp.CurrentTimestamp: ("CURRENT_TIMESTAMP", None),
+    exp.CurrentTime: ("CURRENT_TIME", None),
+    exp.CurrentDatetime: ("CURRENT_DATETIME()", None),
+    exp.Localtime: ("LOCALTIME", None),
+    exp.Localtimestamp: ("LOCALTIMESTAMP", None),
+    exp.Systimestamp: ("SYSTIMESTAMP", "oracle"),
+    exp.UtcTimestamp: ("UTC_TIMESTAMP()", None),
+}
+
+
+@pytest.mark.parametrize("node_type", _TIME_FUNCS)
+def test_every_time_funcs_entry_is_detected(
+    contract: DataContract, node_type: type[exp.Expression]
+) -> None:
+    # Guards Important 1 going forward: a node type added to _TIME_FUNCS
+    # without a matching fixture here fails loudly (KeyError) rather than a
+    # node type quietly missing from _TIME_FUNCS hiding behind untested code.
+    fragment, dialect = _TIME_FUNCS_FRAGMENTS[node_type]
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND created_at >= {fragment}"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract),
+        adapter=adapter,
+        dialect=dialect,
+    )
+    assert answers.results[0].status == "unassertable"
+    assert node_type.__name__ in (answers.results[0].reason or "")
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize("name", sorted(_TIME_FUNC_NAMES))
+def test_every_time_func_name_is_detected(contract: DataContract, name: str) -> None:
+    # Every entry in _TIME_FUNC_NAMES, called as NAME() under plain duckdb,
+    # must be flagged — whether it lands via the typed arm (a name that
+    # became a typed node, e.g. "localtime") or the Anonymous arm. An entry
+    # that stops being detected (typo, renamed, or a dialect change that
+    # neither arm covers) fails here instead of silently passing rows through.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND created_at >= {name.upper()}()"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "unassertable"
+    assert adapter.calls == []
+
+
+def test_unix_timestamp_with_an_argument_is_not_flagged(
+    contract: DataContract,
+) -> None:
+    # Important 2 regression: UNIX_TIMESTAMP(created_at) is MySQL/Spark's
+    # deterministic datetime-to-epoch conversion, not a clock read. Only the
+    # zero-arg spelling is a relative-time function.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        "WHERE tenant_id = 'acme' AND UNIX_TIMESTAMP(created_at) > 100"
+    )
+    adapter = SpyAdapter({sql: 1.0})
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "match"
+    assert adapter.calls == [sql]
 
 
 @pytest.mark.parametrize(

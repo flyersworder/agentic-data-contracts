@@ -84,6 +84,12 @@ def reconcile_decomposition(
     Units are the author's responsibility too: a percentage-scaled operand makes
     a ``product`` identity false by ~100x, which ``implied_parent`` against
     ``actual_parent`` names on sight.
+
+    The relative term here is anchored on the measured parent (``actual_parent``),
+    unlike ``check_example_answers``'s ``_compare``, which anchors on ``expected``.
+    That is deliberate in both places: this function compares two *measurements*
+    with no privileged side, while ``check_example_answers`` has a certified
+    reference to anchor against.
     """
     # Reuse the operator vocabulary from the semantic layer as the single source
     # of truth (so a change there can't silently disagree here). Imported inside

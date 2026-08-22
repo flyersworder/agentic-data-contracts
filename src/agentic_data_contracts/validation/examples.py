@@ -86,6 +86,47 @@ class VerifiedExample:
     abs_tol: float | None = None
     time_scoped: bool = False
 
+    def __post_init__(self) -> None:
+        """Validate the four assertion fields, however the record was built.
+
+        ``from_dict`` is not the only door into this record: a corpus loader
+        that constructs it directly would otherwise bypass every check below.
+        The failure that buys is silent — an ``expected`` of ``nan`` reaches
+        ``_compare``, where ``nan <= threshold`` is False, so the row reports a
+        permanent ``mismatch`` with ``nan`` diffs instead of a load-time error
+        naming the bad row. Validating here makes the invariant belong to the
+        record rather than to one constructor.
+        """
+        if not isinstance(self.time_scoped, bool):
+            raise ValueError(
+                f"'time_scoped' must be a boolean, "
+                f"got {type(self.time_scoped).__name__}"
+            )
+        self.expected = _numeric(self.expected, "expected")
+        self.rel_tol = _numeric(self.rel_tol, "rel_tol", allow_negative=False)
+        self.abs_tol = _numeric(self.abs_tol, "abs_tol", allow_negative=False)
+        if self.expected is None:
+            # These three only ever modify how an `expected` is compared, so
+            # setting one without it is dead configuration — and the likeliest
+            # cause is a typo'd or dropped `expected` key, which would
+            # otherwise land inertly in metadata and quietly cost the corpus an
+            # assertion that no gate can miss. Fail loudly instead.
+            orphaned = [
+                key
+                for key, value in (
+                    ("rel_tol", self.rel_tol),
+                    ("abs_tol", self.abs_tol),
+                    ("time_scoped", self.time_scoped or None),
+                )
+                if value is not None
+            ]
+            if orphaned:
+                raise ValueError(
+                    f"{', '.join(orphaned)} set without 'expected' — these only "
+                    "affect how a certified answer is compared, so the row "
+                    "asserts nothing. Add 'expected', or remove them."
+                )
+
     @classmethod
     def from_dict(cls, raw: Any) -> VerifiedExample:
         """Map an already-parsed mapping to a VerifiedExample.
@@ -111,45 +152,19 @@ class VerifiedExample:
         for key, value in raw.items():
             if key not in _KNOWN_KEYS:
                 metadata[key] = value
-        time_scoped = raw.get("time_scoped", False)
-        if not isinstance(time_scoped, bool):
-            raise ValueError(
-                f"'time_scoped' must be a boolean, got {type(time_scoped).__name__}"
-            )
-        expected = _numeric(raw.get("expected"), "expected")
-        rel_tol = _numeric(raw.get("rel_tol"), "rel_tol", allow_negative=False)
-        abs_tol = _numeric(raw.get("abs_tol"), "abs_tol", allow_negative=False)
-        if expected is None:
-            # These three only ever modify how an `expected` is compared, so
-            # setting one without it is dead configuration — and the likeliest
-            # cause is a typo'd or dropped `expected` key, which would
-            # otherwise land inertly in metadata and quietly cost the corpus an
-            # assertion that no gate can miss. Fail loudly instead.
-            orphaned = [
-                key
-                for key, value in (
-                    ("rel_tol", rel_tol),
-                    ("abs_tol", abs_tol),
-                    ("time_scoped", time_scoped or None),
-                )
-                if value is not None
-            ]
-            if orphaned:
-                raise ValueError(
-                    f"{', '.join(orphaned)} set without 'expected' — these only "
-                    "affect how a certified answer is compared, so the row "
-                    "asserts nothing. Add 'expected', or remove them."
-                )
+        # The four assertion fields are validated in __post_init__ rather than
+        # here, so a corpus row and a directly-constructed record are held to
+        # the same rules.
         return cls(
             sql=raw["sql"],
             question=raw.get("question", ""),
             id=raw.get("id"),
             principal=raw.get("principal"),
             metadata=metadata,
-            expected=expected,
-            rel_tol=rel_tol,
-            abs_tol=abs_tol,
-            time_scoped=time_scoped,
+            expected=raw.get("expected"),
+            rel_tol=raw.get("rel_tol"),
+            abs_tol=raw.get("abs_tol"),
+            time_scoped=raw.get("time_scoped", False),
         )
 
 

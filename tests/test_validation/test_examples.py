@@ -1061,12 +1061,44 @@ def test_from_dict_allows_tolerances_alongside_an_expected() -> None:
     assert (ex.expected, ex.rel_tol, ex.time_scoped) == (10.0, 0.01, True)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"rel_tol": 0.01},
+        {"abs_tol": 1.0},
+        {"time_scoped": True},
+    ],
+)
+def test_direct_construction_rejects_tolerances_without_an_expected(
+    kwargs: dict,
+) -> None:
+    # from_dict is not the only door: a loader that builds records directly
+    # must hit the same orphan check, or the invariant belongs to one
+    # constructor rather than to the record.
+    with pytest.raises(ValueError, match="without 'expected'"):
+        VerifiedExample(sql="SELECT 1", **kwargs)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, "10"])
+def test_direct_construction_rejects_a_non_numeric_expected(bad: object) -> None:
+    # A nan `expected` is the one that fails silently if unchecked: nan <=
+    # threshold is False, so the row reports a permanent mismatch with nan
+    # diffs instead of naming itself at load time.
+    with pytest.raises(ValueError, match="'expected' must be"):
+        VerifiedExample(sql="SELECT 1", expected=bad)  # ty: ignore[invalid-argument-type]
+
+
+def test_direct_construction_coerces_an_integer_expected() -> None:
+    assert VerifiedExample(sql="SELECT 1", expected=10).expected == 10.0
+
+
 def test_unix_timestamp_with_an_argument_is_not_flagged(
     contract: DataContract,
 ) -> None:
     # Important 2 regression: UNIX_TIMESTAMP(created_at) is MySQL/Spark's
-    # deterministic datetime-to-epoch conversion, not a clock read. Only the
-    # zero-arg spelling is a relative-time function.
+    # deterministic datetime-to-epoch conversion, not a clock read. Its
+    # argument is a COLUMN, which is what distinguishes it from NOW(3)'s
+    # integer precision literal — the arity alone would not.
     sql = (
         "SELECT SUM(amount) FROM analytics.orders "
         "WHERE tenant_id = 'acme' AND UNIX_TIMESTAMP(created_at) > 100"

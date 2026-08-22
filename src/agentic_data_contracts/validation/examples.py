@@ -37,6 +37,9 @@ _KNOWN_KEYS = frozenset(
     }
 )
 
+_DEFAULT_REL_TOL = 1e-9
+_DEFAULT_ABS_TOL = 0.0
+
 
 def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
     """Validate one optional numeric field from an untrusted corpus row.
@@ -121,6 +124,15 @@ class VerifiedExample:
         )
 
 
+def _label(example: VerifiedExample, index: int) -> str:
+    """A row's display name: ``id`` → ``question`` → positional ``#index``.
+
+    Shared by both reports' ``summary()`` and by the answer checker's error
+    messages, so two unnamed rows never render identically.
+    """
+    return example.id or example.question or f"#{index}"
+
+
 @dataclass
 class ExampleResult:
     """The verdict for one example.
@@ -190,14 +202,10 @@ class ExampleValidationReport:
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment.
 
-        Iterates ``enumerate(self.results)`` once so each row can fall back to
-        its positional index (``id → question → #index``, per the spec) — two
-        unnamed rows never render identically.
+        Uses the shared ``_label`` helper so each row can fall back to its
+        positional index (``id → question → #index``) — two unnamed rows
+        never render identically.
         """
-
-        def _label(result: ExampleResult, index: int) -> str:
-            return result.example.id or result.example.question or f"#{index}"
-
         # One pass over results; each has exactly one status, so the four counts
         # sum to the total (avoids re-scanning via the status properties).
         counts = Counter(r.status for r in self.results)
@@ -209,11 +217,101 @@ class ExampleValidationReport:
         ]
         for i, r in enumerate(self.results):
             if r.status == "violation":
-                lines.append(f"- violation `{_label(r, i)}`: {'; '.join(r.reasons)}")
+                lines.append(
+                    f"- violation `{_label(r.example, i)}`: {'; '.join(r.reasons)}"
+                )
             elif r.status == "unverified":
-                lines.append(f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}")
+                lines.append(
+                    f"- unverified `{_label(r.example, i)}`: {'; '.join(r.warnings)}"
+                )
             elif r.status == "unchecked":
-                lines.append(f"- unchecked `{_label(r, i)}`: {'; '.join(r.reasons)}")
+                lines.append(
+                    f"- unchecked `{_label(r.example, i)}`: {'; '.join(r.reasons)}"
+                )
+        return "\n".join(lines)
+
+
+@dataclass
+class ExampleAnswerResult:
+    """The verdict for one asserted example.
+
+    ``status`` (each result has exactly one):
+      - ``"match"``        — executed and equal within tolerance.
+      - ``"mismatch"``     — executed and outside tolerance. Both numbers and
+                             both diffs are populated.
+      - ``"unassertable"`` — the SQL uses a relative time window, so the
+                             expected value decays. NOT executed.
+      - ``"error"``        — no verdict was possible: not scalar-shaped, no
+                             rows, NULL, non-finite, unparseable, or the
+                             adapter raised.
+
+    ``rel_tol`` / ``abs_tol`` record the tolerances actually applied to this
+    row, so a mismatch names the threshold it missed.
+    """
+
+    example: VerifiedExample
+    status: str
+    expected: float | None = None
+    actual: float | None = None
+    abs_diff: float | None = None
+    rel_diff: float | None = None
+    rel_tol: float = _DEFAULT_REL_TOL
+    abs_tol: float = _DEFAULT_ABS_TOL
+    reason: str | None = None
+
+
+@dataclass
+class ExampleAnswerReport:
+    results: list[ExampleAnswerResult]
+
+    @property
+    def matches(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "match"]
+
+    @property
+    def mismatches(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "mismatch"]
+
+    @property
+    def unassertable(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "unassertable"]
+
+    @property
+    def errors(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "error"]
+
+    @property
+    def ok(self) -> bool:
+        """True only when there is ≥1 assertion and every one is ``match``.
+
+        An **empty** report is NOT ok, mirroring ``ExampleValidationReport.ok``:
+        calling the checker on a corpus where nothing declared an ``expected``
+        means a filter, a schema change, or an emptied file dropped every
+        assertion, and that must surface rather than pass a no-op gate. It
+        does mean the second gate can only be wired into CI once at least one
+        row carries an ``expected`` — add the first assertion, then the gate. A
+        consumer wanting the laxer view meanwhile tests ``mismatches`` directly.
+        """
+        return bool(self.results) and all(r.status == "match" for r in self.results)
+
+    def summary(self) -> str:
+        """A compact markdown report, suitable for an MR comment."""
+        counts = Counter(r.status for r in self.results)
+        lines = [
+            f"**Answer checks:** {counts['match']} match, "
+            f"{counts['mismatch']} mismatch(es), "
+            f"{counts['unassertable']} unassertable, "
+            f"{counts['error']} error(s).",
+        ]
+        for i, r in enumerate(self.results):
+            if r.status == "mismatch":
+                lines.append(
+                    f"- mismatch `{_label(r.example, i)}`: expected {r.expected}, "
+                    f"actual {r.actual} (rel diff {r.rel_diff:.3g}, "
+                    f"rel_tol {r.rel_tol:.3g}, abs_tol {r.abs_tol:.3g})"
+                )
+            elif r.status in ("unassertable", "error"):
+                lines.append(f"- {r.status} `{_label(r.example, i)}`: {r.reason}")
         return "\n".join(lines)
 
 

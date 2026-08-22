@@ -4,9 +4,12 @@ import pytest
 
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation.examples import (
+    ExampleAnswerReport,
+    ExampleAnswerResult,
     ExampleResult,
     ExampleValidationReport,
     VerifiedExample,
+    _label,
     validate_examples,
 )
 from agentic_data_contracts.validation.explain import ExplainResult
@@ -510,3 +513,58 @@ def test_from_dict_rejects_negative_tolerance() -> None:
 def test_from_dict_rejects_non_boolean_time_scoped() -> None:
     with pytest.raises(ValueError, match="time_scoped"):
         VerifiedExample.from_dict({"sql": "SELECT 1", "time_scoped": "yes"})
+
+
+def _ans(status: str, **kw: object) -> ExampleAnswerResult:
+    return ExampleAnswerResult(
+        example=VerifiedExample(sql="SELECT 1", id=status, expected=1.0),
+        status=status,
+        **kw,  # type: ignore
+    )
+
+
+def test_answer_report_partitions_by_status() -> None:
+    report = ExampleAnswerReport(
+        results=[
+            _ans("match"),
+            _ans("mismatch"),
+            _ans("unassertable"),
+            _ans("error"),
+        ]
+    )
+    assert [r.status for r in report.matches] == ["match"]
+    assert [r.status for r in report.mismatches] == ["mismatch"]
+    assert [r.status for r in report.unassertable] == ["unassertable"]
+    assert [r.status for r in report.errors] == ["error"]
+
+
+def test_answer_report_ok_requires_every_assertion_to_match() -> None:
+    assert ExampleAnswerReport(results=[_ans("match")]).ok
+    assert not ExampleAnswerReport(results=[_ans("mismatch")]).ok
+    assert not ExampleAnswerReport(results=[_ans("unassertable")]).ok
+    assert not ExampleAnswerReport(results=[_ans("error")]).ok
+    assert not ExampleAnswerReport(results=[_ans("match"), _ans("error")]).ok
+
+
+def test_empty_answer_report_is_not_ok() -> None:
+    # Nothing declared an `expected`: a filter, a schema change, or an emptied
+    # file dropped every assertion. That must fail rather than pass a no-op gate.
+    assert not ExampleAnswerReport(results=[]).ok
+
+
+def test_answer_summary_mentions_counts_and_offenders() -> None:
+    report = ExampleAnswerReport(
+        results=[
+            _ans("match"),
+            _ans("mismatch", expected=100.0, actual=98.0, abs_diff=2.0, rel_diff=0.02),
+        ]
+    )
+    text = report.summary()
+    assert "mismatch" in text
+    assert "100" in text and "98" in text
+
+
+def test_label_falls_back_from_id_to_question_to_index() -> None:
+    assert _label(VerifiedExample(sql="s", id="ident", question="q"), 3) == "ident"
+    assert _label(VerifiedExample(sql="s", question="q"), 3) == "q"
+    assert _label(VerifiedExample(sql="s"), 3) == "#3"

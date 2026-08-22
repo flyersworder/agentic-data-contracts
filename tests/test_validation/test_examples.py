@@ -911,3 +911,79 @@ def test_explicit_dialect_wins_over_the_adapters(contract: DataContract) -> None
         dialect="postgres",
     )
     assert answers.results[0].status == "match"
+
+
+def test_non_scalar_sql_is_an_error(contract: DataContract) -> None:
+    sql = (
+        "SELECT SUM(amount) AS a, COUNT(id) AS b "
+        "FROM analytics.orders WHERE tenant_id = 'acme'"
+    )
+    adapter = SpyAdapter({sql: _TWO_COLS})
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    r = answers.results[0]
+    assert r.status == "error"
+    assert r.reason is not None and "exactly one column" in r.reason
+
+
+@pytest.mark.parametrize(
+    ("value", "fragment"),
+    [(_NO_ROWS, "no rows"), (None, "NULL"), (float("nan"), "non-finite")],
+)
+def test_unusable_scalar_is_an_error(
+    contract: DataContract, value: object, fragment: str
+) -> None:
+    adapter = SpyAdapter({_SUM_SQL: value})
+    answers = check_example_answers(
+        validate_examples([_asserted(_SUM_SQL, 1.0)], contract), adapter=adapter
+    )
+    r = answers.results[0]
+    assert r.status == "error"
+    assert r.reason is not None and fragment in r.reason
+
+
+def test_a_raising_adapter_degrades_only_its_own_row(contract: DataContract) -> None:
+    other = "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"
+    adapter = SpyAdapter({_SUM_SQL: RuntimeError("connection reset"), other: 42.0})
+    report = validate_examples(
+        [_asserted(_SUM_SQL, 1.0, id="boom"), _asserted(other, 42.0, id="fine")],
+        contract,
+    )
+    answers = check_example_answers(report, adapter=adapter)
+    assert [r.status for r in answers.results] == ["error", "match"]
+    assert "connection reset" in (answers.results[0].reason or "")
+
+
+def test_unparseable_sql_is_an_error_and_is_never_executed(
+    contract: DataContract,
+) -> None:
+    # A normalizer or dialect mismatch between the two passes. An unparseable
+    # statement cannot be cleared of a relative time window, so it must not run.
+    class BrokenNormalizer:
+        def normalize_sql(self, sql: str) -> str:
+            return "SELECT * FROM ("
+
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(_SUM_SQL, 1.0)], contract),
+        adapter=adapter,
+        sql_normalizer=BrokenNormalizer(),
+    )
+    assert answers.results[0].status == "error"
+    assert adapter.calls == []
+
+
+def test_results_preserve_report_order(contract: DataContract) -> None:
+    other = "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"
+    adapter = SpyAdapter({_SUM_SQL: 1.0, other: 2.0})
+    report = validate_examples(
+        [
+            _asserted(_SUM_SQL, 1.0, id="a"),
+            VerifiedExample(sql=other, id="skipped"),  # no expected
+            _asserted(other, 2.0, id="c"),
+        ],
+        contract,
+    )
+    answers = check_example_answers(report, adapter=adapter)
+    assert [r.example.id for r in answers.results] == ["a", "c"]

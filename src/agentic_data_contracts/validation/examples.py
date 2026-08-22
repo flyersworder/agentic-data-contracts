@@ -587,17 +587,34 @@ def check_example_answers(
         example = row.example
         if row.status != "valid" or example.expected is None:
             continue
-        results.append(
-            _check_one(
-                example,
-                _label(example, index),
-                adapter=adapter,
-                rel_tol=example.rel_tol if example.rel_tol is not None else rel_tol,
-                abs_tol=example.abs_tol if example.abs_tol is not None else abs_tol,
-                dialect=effective_dialect,
-                sql_normalizer=sql_normalizer,
+        row_rel_tol = example.rel_tol if example.rel_tol is not None else rel_tol
+        row_abs_tol = example.abs_tol if example.abs_tol is not None else abs_tol
+        try:
+            results.append(
+                _check_one(
+                    example,
+                    _label(example, index),
+                    adapter=adapter,
+                    dialect=effective_dialect,
+                    sql_normalizer=sql_normalizer,
+                    rel_tol=row_rel_tol,
+                    abs_tol=row_abs_tol,
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001 — batch resilience
+            # A non-scalar result (_scalar raises), an unparseable statement, a
+            # driver error, a timeout: this row gets no verdict, and the rest of
+            # the corpus still gets one. Mirrors validate_examples' own guard.
+            results.append(
+                ExampleAnswerResult(
+                    example=example,
+                    status="error",
+                    expected=example.expected,
+                    rel_tol=row_rel_tol,
+                    abs_tol=row_abs_tol,
+                    reason=f"answer check error: {exc}",
+                )
+            )
     return ExampleAnswerReport(results=results)
 
 

@@ -127,3 +127,34 @@ def test_tools_imports() -> None:
     assert ToolDef is not None
     assert create_tools is not None
     assert contract_middleware is not None
+
+
+def test_answer_checking_exports_live_in_the_validation_submodule() -> None:
+    """v0.44.0's corpus tooling is submodule-only, like its siblings.
+
+    `validate_examples`, `VerifiedExample` and `reconcile_decomposition` are all
+    reached through `.validation`; the package root carries the agent-building
+    surface. Promoting only the answer-checking half would have been worse than
+    either choice on its own: `check_example_answers` needs an
+    `ExampleValidationReport`, which only `validate_examples` can build, so a
+    root-level import would have been unusable without a submodule import
+    anyway.
+    """
+    import agentic_data_contracts as pkg
+    from agentic_data_contracts.validation import (
+        ExampleAnswerReport,
+        ExampleAnswerResult,
+        check_example_answers,
+    )
+
+    assert callable(check_example_answers)
+    assert ExampleAnswerResult is not None
+    # The empty-is-not-ok rule is part of the published contract.
+    assert ExampleAnswerReport(results=[]).ok is False
+
+    # The three new names stay off the root, matching their siblings.
+    for name in ("ExampleAnswerReport", "ExampleAnswerResult", "check_example_answers"):
+        assert not hasattr(pkg, name), f"{name} leaked onto the package root"
+        assert name not in pkg.__all__
+    for sibling in ("validate_examples", "VerifiedExample", "reconcile_decomposition"):
+        assert not hasattr(pkg, sibling), f"convention changed: {sibling} now at root"

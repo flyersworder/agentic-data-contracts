@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentic_data_contracts.validation._scalar import _scalar
+
 if TYPE_CHECKING:
     # Deferred to avoid a circular import: adapters.base imports
     # validation.explain, which initializes this package (validation/__init__)
@@ -39,39 +41,6 @@ class ReconciliationResult:
     rel_tol: float
     abs_tol: float
     reason: str | None = None
-
-
-def _scalar(
-    adapter: DatabaseAdapter, sql: str, label: str
-) -> tuple[float | None, str | None]:
-    """Measure ``sql`` as a single scalar.
-
-    Returns ``(value, None)`` for a usable finite number, or ``(None, reason)``
-    when the query yields no usable value: an empty result, a SQL ``NULL``, or a
-    non-finite float (``NaN`` / ±``inf``, valid SQL floats distinct from
-    ``NULL``). Distinguishing these lets the caller report *which* condition it
-    hit rather than mislabelling every one as a NULL. Raises ``ValueError`` if
-    the query is not scalar-shaped (not exactly one column, or more than one
-    row).
-    """
-    result = adapter.execute(sql)
-    if len(result.columns) != 1:
-        raise ValueError(
-            f"{label} query must return exactly one column, got {len(result.columns)}"
-        )
-    if len(result.rows) > 1:
-        raise ValueError(
-            f"{label} query must return at most one row, got {len(result.rows)}"
-        )
-    if not result.rows:
-        return None, f"{label} returned no rows"
-    value = result.rows[0][0]
-    if value is None:
-        return None, f"{label} returned NULL"
-    number = float(value)
-    if not math.isfinite(number):
-        return None, f"{label} returned a non-finite value: {number}"
-    return number, None
 
 
 def _apply_operator(operator: str, values: list[float]) -> float:
@@ -115,6 +84,12 @@ def reconcile_decomposition(
     Units are the author's responsibility too: a percentage-scaled operand makes
     a ``product`` identity false by ~100x, which ``implied_parent`` against
     ``actual_parent`` names on sight.
+
+    The relative term here is anchored on the measured parent (``actual_parent``),
+    unlike ``check_example_answers``'s ``_compare``, which anchors on ``expected``.
+    That is deliberate in both places: this function compares two *measurements*
+    with no privileged side, while ``check_example_answers`` has a certified
+    reference to anchor against.
     """
     # Reuse the operator vocabulary from the semantic layer as the single source
     # of truth (so a change there can't silently disagree here). Imported inside

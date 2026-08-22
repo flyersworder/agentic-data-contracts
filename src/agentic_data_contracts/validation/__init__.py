@@ -19,9 +19,12 @@ from agentic_data_contracts.validation.checkers import (
     extract_tables,
 )
 from agentic_data_contracts.validation.examples import (
+    ExampleAnswerReport,
+    ExampleAnswerResult,
     ExampleResult,
     ExampleValidationReport,
     VerifiedExample,
+    check_example_answers,
     validate_examples,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter, ExplainResult
@@ -40,6 +43,8 @@ __all__ = [
     "BlockedColumnsChecker",
     "CheckResult",
     "Checker",
+    "ExampleAnswerReport",
+    "ExampleAnswerResult",
     "ExampleResult",
     "ExampleValidationReport",
     "ExplainAdapter",
@@ -60,6 +65,7 @@ __all__ = [
     "VerifiedExample",
     "attribute_change",
     "check_attribution",
+    "check_example_answers",
     "extract_tables",
     "reconcile_decomposition",
     "validate_examples",

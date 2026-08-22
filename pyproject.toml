@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.43.1"
+version = "0.44.0"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,17 +30,27 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    # 28.0 is the lowest release the suite passes on. 27.10 is the lowest that
+    # 28.6 is the lowest release the suite passes on. 27.10 is the lowest that
     # *imports* (`exp.Revoke` landed there, `exp.Alter`/`Grant`/`Copy` earlier --
     # and _OPERATION_MAP is a class-body dict, so a missing node is an
     # AttributeError at `import agentic_data_contracts`, not a degraded feature).
     # But `WHERE x IS x` only parses from 28.0, and the tautology-bypass checks
     # depend on it, so 27.10 would declare support for a version failing our own
-    # governance tests. Deliberately not `getattr(exp, ..., None)` with
-    # filtering: that would make ENFORCEABLE_OPERATIONS depend on the installed
+    # governance tests. 28.6 raises that again: `exp.Localtime`, `Localtimestamp`
+    # and `Systimestamp` first exist there, and the relative-time scan in
+    # validation/examples.py names them in a module-level tuple -- so on 28.0
+    # through 28.5 the package does not import at all.
+    #
+    # Deliberately not `getattr(exp, ..., None)` with filtering, in either
+    # place: that would make what the library enforces depend on the installed
     # sqlglot, so a contract could enforce less in one environment than another
-    # -- the exact declared-but-unenforced failure this checker prevents.
-    "sqlglot>=28.0",
+    # -- the exact declared-but-unenforced failure this checker prevents. It is
+    # not hypothetical for the time scan. Below 28.6 a bare `LOCALTIMESTAMP`
+    # parses as an `exp.Column`, and the name arm matches only function *calls*
+    # (so a column named `now_flag` is never flagged) -- so a filtered tuple
+    # would not degrade to a fallback, it would silently execute a row whose
+    # certified answer is pinned to a decaying window.
+    "sqlglot>=28.6",
     # 2.11 is the lowest release that both ships wheels for every interpreter
     # this package supports AND works with the other declared floors. The old
     # `>=2.0` was untrue twice over: pydantic 2.0 pins pydantic-core==2.0.1,

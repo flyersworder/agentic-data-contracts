@@ -33,6 +33,22 @@ Two real uses of the same call:
 Note: the decision-B engine fallback (asking the engine to parse SQL sqlglot
 cannot) never triggers here — DuckDB and sqlglot both parse standard SQL. It
 earns its keep on engines sqlglot does not model, e.g. Denodo/VDP.
+
+Compliance is not correctness — a second pass
+-----------------------------------------------
+The first pass only proves an example is *allowed*: the right tables, an
+explicit column list, a tenant filter, a schema that still matches. None of
+that says the query still returns the right *number*. A handful of rows below
+also carry an ``expected`` value — the certified answer — and
+``check_example_answers`` executes exactly those rows (and only the ones that
+came back ``valid`` from the first pass; a contract violation is never run)
+and compares the live result against it within tolerance. It takes the first
+pass's *report*, not the raw examples, so there is no way to hand it SQL that
+was never cleared — an example that fails the tenant-filter rule is precisely
+the kind of query that must not be sent to the warehouse to see what it
+returns. The result is a distinct verdict for a distinct failure mode: a
+`mismatch` on an otherwise-compliant row is a wrong number, not a policy
+violation.
 """
 
 from __future__ import annotations
@@ -45,7 +61,11 @@ import yaml
 from agentic_data_contracts import DataContract
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.semantic.yaml_source import YamlSource
-from agentic_data_contracts.validation import VerifiedExample, validate_examples
+from agentic_data_contracts.validation import (
+    VerifiedExample,
+    check_example_answers,
+    validate_examples,
+)
 
 EXAMPLE_DIR = Path(__file__).parent
 
@@ -95,7 +115,35 @@ def main() -> None:
         f"{len(report.unchecked)} unchecked, "
         f"{len(report.unverified_compliance)} plannable-but-unverified)"
     )
-    # In CI you would gate the merge on this:  if not report.ok: sys.exit(1)
+
+    # === Second pass: does the compliant SQL return the right number? ===
+    # Consumes `report`, not `examples` — a violation can never be executed.
+    # Only rows that are `valid` AND carry an `expected` produce a result.
+    print("\n=== Answer checks (does the compliant SQL return the right number?) ===\n")
+    answers = check_example_answers(report, adapter=adapter)
+    for r in answers.results:
+        # r.label, not a recomputed one: the field exists precisely so this
+        # listing and the answers.summary() block printed below cannot disagree
+        # about what to call an unnamed row.
+        print(f"[{r.status.upper():12}] {r.label}")
+        if r.status in ("match", "mismatch"):
+            print(f"             expected={r.expected}  actual={r.actual}")
+        if r.reason:
+            print(f"             reason:  {r.reason}")
+
+    print("\n--- answers.summary() (ready to post as an MR comment) ---")
+    print(answers.summary())
+
+    print(
+        f"\nGate: ok={answers.ok}  "
+        f"({len(answers.matches)} match, {len(answers.mismatches)} mismatch(es), "
+        f"{len(answers.unassertable)} unassertable, {len(answers.errors)} error(s))"
+    )
+    # This demo deliberately includes a mismatch (stale certified answer) and an
+    # unassertable row (a relative time window) — that is the whole point of
+    # the second pass. Like the contract-violation rows above, we REPORT the
+    # outcome rather than sys.exit(1); a real CI gate composes both reports:
+    #     if not (report.ok and answers.ok): sys.exit(1)
 
 
 if __name__ == "__main__":

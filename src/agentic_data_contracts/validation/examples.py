@@ -9,31 +9,123 @@ for usage and the boundary rationale.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import sqlglot
+from sqlglot import exp
+
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.validator import ValidationResult, Validator
 
 if TYPE_CHECKING:
+    from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.semantic.base import SemanticSource
 
-_KNOWN_KEYS = frozenset({"sql", "question", "id", "principal", "metadata"})
+_KNOWN_KEYS = frozenset(
+    {
+        "sql",
+        "question",
+        "id",
+        "principal",
+        "metadata",
+        "expected",
+        "rel_tol",
+        "abs_tol",
+        "time_scoped",
+    }
+)
+
+_DEFAULT_REL_TOL = 1e-9
+_DEFAULT_ABS_TOL = 0.0
+
+
+def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
+    """Validate one optional numeric field from an untrusted corpus row.
+
+    ``bool`` is rejected explicitly: it is an ``int`` subclass, so
+    ``expected: true`` would otherwise pass an isinstance check and silently
+    assert against ``1.0``.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(f"'{field_name}' must be a number, got {type(raw).__name__}")
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"'{field_name}' must be finite, got {value}")
+    if not allow_negative and value < 0:
+        raise ValueError(f"'{field_name}' must be non-negative, got {value}")
+    return value
 
 
 @dataclass
 class VerifiedExample:
-    """One example to validate. Only ``sql`` is load-bearing."""
+    """One example to validate. Only ``sql`` is load-bearing.
+
+    An example that sets ``expected`` is additionally an *assertion*: the
+    certified answer its SQL must return, checked by ``check_example_answers``.
+    ``rel_tol`` / ``abs_tol`` override the call-level tolerances for this row
+    alone; ``time_scoped`` is the author's assertion that the query's time
+    window is pinned, which suppresses the relative-time-window refusal.
+    """
 
     sql: str
     question: str = ""
     id: str | None = None
     principal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    expected: float | None = None
+    rel_tol: float | None = None
+    abs_tol: float | None = None
+    time_scoped: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the four assertion fields, however the record was built.
+
+        ``from_dict`` is not the only door into this record: a corpus loader
+        that constructs it directly would otherwise bypass every check below.
+        The failure that buys is silent — an ``expected`` of ``nan`` reaches
+        ``_compare``, where ``nan <= threshold`` is False, so the row reports a
+        permanent ``mismatch`` with ``nan`` diffs instead of a load-time error
+        naming the bad row. Validating here makes the invariant belong to the
+        record rather than to one constructor.
+        """
+        if not isinstance(self.time_scoped, bool):
+            raise ValueError(
+                f"'time_scoped' must be a boolean, "
+                f"got {type(self.time_scoped).__name__}"
+            )
+        self.expected = _numeric(self.expected, "expected")
+        self.rel_tol = _numeric(self.rel_tol, "rel_tol", allow_negative=False)
+        self.abs_tol = _numeric(self.abs_tol, "abs_tol", allow_negative=False)
+        if self.expected is None:
+            # These three only ever modify how an `expected` is compared, so
+            # setting one without it is dead configuration — and the likeliest
+            # cause is a typo'd or dropped `expected` key, which would
+            # otherwise land inertly in metadata and quietly cost the corpus an
+            # assertion that no gate can miss. Fail loudly instead.
+            orphaned = [
+                key
+                for key, value in (
+                    ("rel_tol", self.rel_tol),
+                    ("abs_tol", self.abs_tol),
+                    ("time_scoped", self.time_scoped or None),
+                )
+                if value is not None
+            ]
+            if orphaned:
+                raise ValueError(
+                    f"{', '.join(orphaned)} set without 'expected' — these only "
+                    "affect how a certified answer is compared, so the row "
+                    "asserts nothing. Add 'expected', or remove them."
+                )
 
     @classmethod
     def from_dict(cls, raw: Any) -> VerifiedExample:
@@ -60,13 +152,70 @@ class VerifiedExample:
         for key, value in raw.items():
             if key not in _KNOWN_KEYS:
                 metadata[key] = value
+        # The four assertion fields are validated in __post_init__ rather than
+        # here, so a corpus row and a directly-constructed record are held to
+        # the same rules.
         return cls(
             sql=raw["sql"],
             question=raw.get("question", ""),
             id=raw.get("id"),
             principal=raw.get("principal"),
             metadata=metadata,
+            expected=raw.get("expected"),
+            rel_tol=raw.get("rel_tol"),
+            abs_tol=raw.get("abs_tol"),
+            time_scoped=raw.get("time_scoped", False),
         )
+
+
+def _label(example: VerifiedExample, index: int) -> str:
+    """A row's display name: ``id`` → ``question`` → positional ``#index``.
+
+    Shared by both reports' ``summary()`` and by the answer checker's error
+    messages, so two unnamed rows never render identically.
+    """
+    return example.id or example.question or f"#{index}"
+
+
+def _fmt(value: float | None) -> str:
+    """Render a numeric for a report line, tolerating an unset field.
+
+    ``summary()`` is what a CI operator reads when a check has already failed;
+    it must not raise. A field left unset renders as ``?`` rather than
+    crashing the whole report.
+    """
+    return "?" if value is None else f"{value:.3g}"
+
+
+def _compare(
+    actual: float, expected: float, rel_tol: float, abs_tol: float
+) -> tuple[float, float, bool]:
+    """Compare a measured value against a certified answer.
+
+    Returns ``(abs_diff, rel_diff, matched)``.
+
+    ``rel_diff`` is guarded against a zero reference — a certified answer of
+    zero is legitimate, and dividing by it would raise or report a meaningless
+    ``inf`` for an exact match. The three-branch form is the same one
+    ``reconcile_decomposition`` uses for a zero parent.
+
+    The relative term is anchored on ``expected``, deliberately unlike
+    ``reconcile_decomposition`` (which compares two measurements and has no
+    privileged side) and unlike ``math.isclose`` (which anchors on the larger
+    magnitude). An assertion *has* a reference: the certified answer is the
+    fixed point and the query result is what varies against it. Anchoring on
+    ``expected`` keeps the tolerance's meaning stable — "within 0.1% of the
+    certified number" — however far the query has drifted.
+    """
+    abs_diff = abs(actual - expected)
+    if abs_diff == 0:
+        rel_diff = 0.0
+    elif expected != 0:
+        rel_diff = abs_diff / abs(expected)
+    else:
+        rel_diff = math.inf
+    matched = abs_diff <= max(abs_tol, rel_tol * abs(expected))
+    return abs_diff, rel_diff, matched
 
 
 @dataclass
@@ -138,14 +287,10 @@ class ExampleValidationReport:
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment.
 
-        Iterates ``enumerate(self.results)`` once so each row can fall back to
-        its positional index (``id → question → #index``, per the spec) — two
-        unnamed rows never render identically.
+        Uses the shared ``_label`` helper so each row can fall back to its
+        positional index (``id → question → #index``) — two unnamed rows
+        never render identically.
         """
-
-        def _label(result: ExampleResult, index: int) -> str:
-            return result.example.id or result.example.question or f"#{index}"
-
         # One pass over results; each has exactly one status, so the four counts
         # sum to the total (avoids re-scanning via the status properties).
         counts = Counter(r.status for r in self.results)
@@ -157,11 +302,132 @@ class ExampleValidationReport:
         ]
         for i, r in enumerate(self.results):
             if r.status == "violation":
-                lines.append(f"- violation `{_label(r, i)}`: {'; '.join(r.reasons)}")
+                lines.append(
+                    f"- violation `{_label(r.example, i)}`: {'; '.join(r.reasons)}"
+                )
             elif r.status == "unverified":
-                lines.append(f"- unverified `{_label(r, i)}`: {'; '.join(r.warnings)}")
+                lines.append(
+                    f"- unverified `{_label(r.example, i)}`: {'; '.join(r.warnings)}"
+                )
             elif r.status == "unchecked":
-                lines.append(f"- unchecked `{_label(r, i)}`: {'; '.join(r.reasons)}")
+                lines.append(
+                    f"- unchecked `{_label(r.example, i)}`: {'; '.join(r.reasons)}"
+                )
+        return "\n".join(lines)
+
+
+@dataclass
+class ExampleAnswerResult:
+    """The verdict for one asserted example.
+
+    ``status`` (each result has exactly one):
+      - ``"match"``        — executed and equal within tolerance.
+      - ``"mismatch"``     — executed and outside tolerance. Both numbers and
+                             both diffs are populated.
+      - ``"unassertable"`` — the SQL uses a relative time window, so the
+                             expected value decays. NOT executed.
+      - ``"error"``        — no verdict was possible: not scalar-shaped, no
+                             rows, NULL, non-finite, unparseable, or the
+                             adapter raised.
+
+    ``rel_tol`` / ``abs_tol`` record the tolerances actually applied to this
+    row, so a mismatch names the threshold it missed.
+
+    ``label`` is the display name computed by the caller (``_label(example,
+    index)`` against ``ExampleValidationReport.results``) and stored here so
+    ``ExampleAnswerReport.summary()`` can reuse it verbatim instead of
+    recomputing it against a different, filtered index — see the module's
+    ``check_example_answers`` for why those two indices differ.
+    """
+
+    example: VerifiedExample
+    status: str
+    expected: float | None = None
+    actual: float | None = None
+    abs_diff: float | None = None
+    rel_diff: float | None = None
+    rel_tol: float = _DEFAULT_REL_TOL
+    abs_tol: float = _DEFAULT_ABS_TOL
+    reason: str | None = None
+    label: str = ""
+
+
+@dataclass
+class ExampleAnswerReport:
+    results: list[ExampleAnswerResult]
+
+    @property
+    def matches(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "match"]
+
+    @property
+    def mismatches(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "mismatch"]
+
+    @property
+    def unassertable(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "unassertable"]
+
+    @property
+    def errors(self) -> list[ExampleAnswerResult]:
+        return [r for r in self.results if r.status == "error"]
+
+    @property
+    def ok(self) -> bool:
+        """True only when there is ≥1 checked assertion and every one is ``match``.
+
+        Scope worth being precise about: this covers the assertions that were
+        *executed*, not every assertion in the corpus. A row carrying an
+        ``expected`` that failed contract validation is filtered out before
+        this pass and produces no result at all, so it cannot be seen here —
+        ``report.ok`` is what catches it. That is why every documented gate
+        composes the two (``report.ok and answers.ok``) rather than trusting
+        this one alone.
+
+        An **empty** report is NOT ok, mirroring ``ExampleValidationReport.ok``:
+        calling the checker on a corpus where nothing declared an ``expected``
+        means a filter, a schema change, or an emptied file dropped every
+        assertion, and that must surface rather than pass a no-op gate. It
+        does mean the second gate can only be wired into CI once at least one
+        row carries an ``expected`` — add the first assertion, then the gate. A
+        consumer wanting the laxer view meanwhile tests ``mismatches`` directly.
+        """
+        return bool(self.results) and all(r.status == "match" for r in self.results)
+
+    def summary(self) -> str:
+        """A compact markdown report, suitable for an MR comment.
+
+        Uses each result's own ``label`` (computed once by the caller against
+        the full validation report) rather than recomputing ``_label`` against
+        ``self.results`` here — ``self.results`` is already filtered down to
+        the asserted rows, so a positional index into it does not match the
+        index a row had when its label was first computed. Recomputing here
+        would give an unnamed row two different ``#N`` labels.
+        """
+        if not self.results:
+            # `ok` is False here by design, so this text is what a first-time
+            # user sees when CI goes red. Four zeroes do not explain that.
+            return (
+                "**Answer checks:** no assertions found — no example declared "
+                "an `expected` value, so nothing was checked. Add one to a "
+                "corpus row, or drop `answers.ok` from the gate until you do."
+            )
+        counts = Counter(r.status for r in self.results)
+        lines = [
+            f"**Answer checks:** {counts['match']} match, "
+            f"{counts['mismatch']} mismatch(es), "
+            f"{counts['unassertable']} unassertable, "
+            f"{counts['error']} error(s).",
+        ]
+        for r in self.results:
+            if r.status == "mismatch":
+                lines.append(
+                    f"- mismatch `{r.label}`: expected {r.expected}, "
+                    f"actual {r.actual} (rel diff {_fmt(r.rel_diff)}, "
+                    f"rel_tol {_fmt(r.rel_tol)}, abs_tol {_fmt(r.abs_tol)})"
+                )
+            elif r.status in ("unassertable", "error"):
+                lines.append(f"- {r.status} `{r.label}`: {r.reason}")
         return "\n".join(lines)
 
 
@@ -297,4 +563,225 @@ def _to_result(
         ],
         contract_checked=False,
         engine_checked=True,
+    )
+
+
+# Arm one: the spellings sqlglot gives a dedicated node. Only bare CURRENT_DATE
+# and CURRENT_TIMESTAMP land here in EVERY dialect.
+_TIME_FUNCS = (
+    exp.CurrentDate,
+    exp.CurrentTimestamp,
+    exp.CurrentTime,
+    exp.CurrentDatetime,
+    exp.Localtime,
+    exp.Localtimestamp,
+    exp.Systimestamp,
+    exp.UtcTimestamp,
+)
+
+# Arm two: the same idea spelled as a function call sqlglot did not model for
+# this dialect. NOW() is CurrentTimestamp under postgres but Anonymous under
+# duckdb, mysql, snowflake, bigquery, tsql and oracle; GETDATE() is typed only
+# under tsql and snowflake; TODAY() only under duckdb. Without this arm the
+# checker would miss the most common relative spelling under the dialect most
+# likely to be running it.
+#
+# ``localtime`` / ``localtimestamp`` are also typed nodes now (see
+# ``_TIME_FUNCS`` above), which makes their entries here currently
+# unreachable. KEEP them anyway: sqlglot's typing is dialect-dependent and has
+# changed before — that is the whole reason this second arm exists — so a
+# redundant name today is a cheap backstop against a future dialect that
+# stops typing it.
+_TIME_FUNC_NAMES = frozenset(
+    {
+        "now",
+        "getdate",
+        "sysdate",
+        "sysdatetime",
+        "today",
+        "curdate",
+        "curtime",
+        "localtime",
+        "localtimestamp",
+        "current_date",
+        "current_timestamp",
+        "current_time",
+        "unix_timestamp",
+        "getutcdate",
+        "statement_timestamp",
+        "transaction_timestamp",
+        "timeofday",
+        # get_current_timestamp is DuckDB's own spelling and clock_timestamp is
+        # statement_timestamp's Postgres sibling — both are real clock reads
+        # that stayed Anonymous and slipped through. current_localtimestamp is
+        # already caught by the typed arm; it is listed for the same backstop
+        # reason as localtime/localtimestamp above.
+        "clock_timestamp",
+        "get_current_timestamp",
+        "current_localtimestamp",
+    }
+)
+
+
+def _relative_time_node(statement: exp.Expression) -> str | None:
+    """Name the first non-deterministic time function in *statement*, if any.
+
+    An expected value attached to a relative window decays: correct today,
+    wrong in a month, for no reason the corpus author did anything about. Such
+    a row is refused rather than executed.
+
+    Matching ``exp.Anonymous`` — a function *call* — rather than any identifier
+    is deliberate: a column named ``now_flag`` or ``sysdate`` is not a call and
+    must not be flagged, or the checker would refuse valid assertions.
+    """
+    node = statement.find(*_TIME_FUNCS)
+    if node is not None:
+        return type(node).__name__
+    for call in statement.find_all(exp.Anonymous):
+        name = str(call.this)
+        if name.lower() in _TIME_FUNC_NAMES and _is_clock_read(call):
+            return f"{name.upper()}()"
+    return None
+
+
+def _is_clock_read(call: exp.Anonymous) -> bool:
+    """True when a named time call reads the clock rather than converting a value.
+
+    The name alone is not enough, because one spelling can be both. Three cases:
+
+    * **No arguments** — ``NOW()``, ``GETDATE()``. The common form, always a
+      clock read.
+    * **One integer literal** — ``NOW(3)``, ``SYSDATE(6)``, ``CURTIME(3)``. A
+      fractional-seconds precision spec, still a clock read. Note this cannot
+      be assumed away by saying the precision spellings are typed nodes: it is
+      true of ``CURRENT_TIMESTAMP(6)`` and ``LOCALTIMESTAMP(3)``, but ``NOW``
+      and ``SYSDATE`` are exactly the names that only ever reach *this* arm.
+    * **Anything else** — ``UNIX_TIMESTAMP(created_at)`` converts the column it
+      is handed and is perfectly deterministic. Refusing it would make the
+      checker reject a pinnable assertion, whose only escape would be
+      ``time_scoped: true`` asserting something untrue.
+    """
+    args = call.expressions
+    if not args:
+        return True
+    return len(args) == 1 and isinstance(args[0], exp.Literal) and args[0].is_int
+
+
+def check_example_answers(
+    report: ExampleValidationReport,
+    *,
+    adapter: DatabaseAdapter,
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
+    rel_tol: float = _DEFAULT_REL_TOL,
+    abs_tol: float = _DEFAULT_ABS_TOL,
+) -> ExampleAnswerReport:
+    """Execute each *asserted*, contract-compliant example and check its answer.
+
+    Takes the report from ``validate_examples`` rather than raw examples, and
+    that is the load-bearing choice: an example that failed contract validation
+    must never be executed, and consuming the report makes that ordering a
+    property of the signature rather than a rule in a docstring. A row is
+    executed only when it is ``status == "valid"`` AND declares an ``expected``;
+    everything else produces no result at all (it is already accounted for by
+    ``ExampleValidationReport``).
+
+    ``validate_examples`` keeps its own property of never executing a query —
+    it plans, via ``ExplainAdapter``, and nothing more. The execute-capable
+    ``DatabaseAdapter`` enters only here.
+
+    ``sql_normalizer`` must be the same value passed to ``validate_examples``:
+    a corpus whose SQL only parses after normalization reached ``valid``
+    through the normalizer. ``dialect`` defaults to ``adapter.dialect``, since
+    ``DatabaseAdapter`` exposes one (unlike the bare ``ExplainAdapter`` that
+    forces ``validate_examples`` to be told); pass it explicitly only when the
+    corpus is authored in a different dialect than the adapter speaks.
+    """
+    effective_dialect = dialect if dialect is not None else adapter.dialect
+    results: list[ExampleAnswerResult] = []
+    for index, row in enumerate(report.results):
+        example = row.example
+        if row.status != "valid" or example.expected is None:
+            continue
+        row_rel_tol = example.rel_tol if example.rel_tol is not None else rel_tol
+        row_abs_tol = example.abs_tol if example.abs_tol is not None else abs_tol
+        try:
+            results.append(
+                _check_one(
+                    example,
+                    _label(example, index),
+                    adapter=adapter,
+                    dialect=effective_dialect,
+                    sql_normalizer=sql_normalizer,
+                    rel_tol=row_rel_tol,
+                    abs_tol=row_abs_tol,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — batch resilience
+            # A non-scalar result (_scalar raises), an unparseable statement, a
+            # driver error, a timeout: this row gets no verdict, and the rest of
+            # the corpus still gets one. Mirrors validate_examples' own guard.
+            results.append(
+                ExampleAnswerResult(
+                    example=example,
+                    status="error",
+                    expected=example.expected,
+                    rel_tol=row_rel_tol,
+                    abs_tol=row_abs_tol,
+                    reason=f"answer check error: {exc}",
+                    label=_label(example, index),
+                )
+            )
+    return ExampleAnswerReport(results=results)
+
+
+def _check_one(
+    example: VerifiedExample,
+    label: str,
+    *,
+    adapter: DatabaseAdapter,
+    rel_tol: float,
+    abs_tol: float,
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
+) -> ExampleAnswerResult:
+    expected = example.expected
+    assert expected is not None  # guarded by the caller's filter
+
+    def _make(status: str, **kw: Any) -> ExampleAnswerResult:
+        return ExampleAnswerResult(
+            example=example,
+            status=status,
+            expected=expected,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+            label=label,
+            **kw,
+        )
+
+    if not example.time_scoped:
+        normalized = (
+            sql_normalizer.normalize_sql(example.sql) if sql_normalizer else example.sql
+        )
+        statement = sqlglot.parse_one(normalized, dialect=dialect)
+        found = _relative_time_node(statement)
+        if found is not None:
+            return _make(
+                "unassertable",
+                reason=(
+                    f"relative time window ({found}) — the expected value "
+                    "decays; pin the window or set time_scoped: true"
+                ),
+            )
+
+    actual, reason = _scalar(adapter, example.sql, label)
+    if actual is None:
+        return _make("error", reason=reason)
+    diff, rel_diff, matched = _compare(actual, expected, rel_tol, abs_tol)
+    return _make(
+        "match" if matched else "mismatch",
+        actual=actual,
+        abs_diff=diff,
+        rel_diff=rel_diff,
+        reason=None if matched else "answer differs from the certified value",
     )

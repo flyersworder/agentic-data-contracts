@@ -811,3 +811,103 @@ def test_a_row_may_override_one_tolerance_without_the_other(
     assert r.status == "match"
     assert r.abs_tol == 1.0  # from the row
     assert r.rel_tol == 1e-3  # from the call
+
+
+_ROLLING_SQL = (
+    "SELECT SUM(amount) FROM analytics.orders "
+    "WHERE tenant_id = 'acme' AND created_at >= CURRENT_DATE - 30"
+)
+
+
+def test_relative_time_window_is_unassertable_and_never_executed(
+    contract: DataContract,
+) -> None:
+    adapter = SpyAdapter()
+    report = validate_examples([_asserted(_ROLLING_SQL, 88120.0)], contract)
+    assert report.results[0].status == "valid"  # it is a fine query, just not pinnable
+    answers = check_example_answers(report, adapter=adapter)
+    r = answers.results[0]
+    assert r.status == "unassertable"
+    assert r.reason is not None and "CurrentDate" in r.reason
+    assert adapter.calls == []  # the guarantee, asserted directly
+    assert not answers.ok
+
+
+def test_time_scoped_flag_permits_a_relative_window(contract: DataContract) -> None:
+    adapter = SpyAdapter({_ROLLING_SQL: 88120.0})
+    ex = _asserted(_ROLLING_SQL, 88120.0, time_scoped=True)
+    answers = check_example_answers(validate_examples([ex], contract), adapter=adapter)
+    assert answers.results[0].status == "match"
+    assert adapter.calls == [_ROLLING_SQL]
+
+
+@pytest.mark.parametrize(
+    ("fragment", "marker"),
+    [
+        # Typed arm — the only two spellings sqlglot types in every dialect.
+        ("CURRENT_DATE", "CurrentDate"),
+        ("CURRENT_TIMESTAMP", "CurrentTimestamp"),
+        # Anonymous arm — under duckdb (what SpyAdapter reports) these stay
+        # exp.Anonymous, so a typed-node-only scan would miss them. NOW() is
+        # the common case and the reason the second arm exists.
+        ("NOW()", "NOW()"),
+        ("GETDATE()", "GETDATE()"),
+    ],
+)
+def test_each_relative_time_spelling_is_detected(
+    contract: DataContract, fragment: str, marker: str
+) -> None:
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND created_at >= {fragment}"
+    )
+    adapter = SpyAdapter()
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "unassertable"
+    assert marker in (answers.results[0].reason or "")
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        "now_flag = 1",  # a COLUMN whose name looks like a time function
+        "created_at >= DATE '2026-01-01'",  # a pinned literal
+        "created_at >= make_date(2026, 1, 1)",  # an unrelated function call
+    ],
+)
+def test_pinned_and_lookalike_predicates_are_not_flagged(
+    contract: DataContract, predicate: str
+) -> None:
+    # The anonymous arm matches function CALLS by name; it must not fire on a
+    # column that merely reads like one, or the checker refuses valid work.
+    sql = (
+        "SELECT SUM(amount) FROM analytics.orders "
+        f"WHERE tenant_id = 'acme' AND {predicate}"
+    )
+    adapter = SpyAdapter({sql: 1.0})
+    answers = check_example_answers(
+        validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "match"
+    assert adapter.calls == [sql]
+
+
+def test_dialect_defaults_to_the_adapters(contract: DataContract) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 1.0})
+    answers = check_example_answers(
+        validate_examples([_asserted(_SUM_SQL, 1.0)], contract), adapter=adapter
+    )
+    assert answers.results[0].status == "match"  # parsed under duckdb, no crash
+
+
+def test_explicit_dialect_wins_over_the_adapters(contract: DataContract) -> None:
+    adapter = SpyAdapter({_SUM_SQL: 1.0})
+    answers = check_example_answers(
+        validate_examples([_asserted(_SUM_SQL, 1.0)], contract),
+        adapter=adapter,
+        dialect="postgres",
+    )
+    assert answers.results[0].status == "match"

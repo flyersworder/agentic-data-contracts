@@ -15,6 +15,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import sqlglot
+from sqlglot import exp
+
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation._scalar import _scalar
@@ -493,10 +496,67 @@ def _to_result(
     )
 
 
+# Arm one: the spellings sqlglot gives a dedicated node. Only bare CURRENT_DATE
+# and CURRENT_TIMESTAMP land here in EVERY dialect.
+_TIME_FUNCS = (
+    exp.CurrentDate,
+    exp.CurrentTimestamp,
+    exp.CurrentTime,
+    exp.CurrentDatetime,
+)
+
+# Arm two: the same idea spelled as a function call sqlglot did not model for
+# this dialect. NOW() is CurrentTimestamp under postgres but Anonymous under
+# duckdb, mysql, snowflake, bigquery, tsql and oracle; GETDATE() is typed only
+# under tsql and snowflake; TODAY() only under duckdb. Without this arm the
+# checker would miss the most common relative spelling under the dialect most
+# likely to be running it.
+_TIME_FUNC_NAMES = frozenset(
+    {
+        "now",
+        "getdate",
+        "sysdate",
+        "sysdatetime",
+        "today",
+        "curdate",
+        "curtime",
+        "localtime",
+        "localtimestamp",
+        "current_date",
+        "current_timestamp",
+        "current_time",
+        "unix_timestamp",
+    }
+)
+
+
+def _relative_time_node(statement: exp.Expression) -> str | None:
+    """Name the first non-deterministic time function in *statement*, if any.
+
+    An expected value attached to a relative window decays: correct today,
+    wrong in a month, for no reason the corpus author did anything about. Such
+    a row is refused rather than executed.
+
+    Matching ``exp.Anonymous`` — a function *call* — rather than any identifier
+    is deliberate: a column named ``now_flag`` or ``sysdate`` is not a call and
+    must not be flagged, or the checker would refuse valid assertions.
+    """
+    node = statement.find(*_TIME_FUNCS)
+    if node is not None:
+        return type(node).__name__
+    for call in statement.find_all(exp.Anonymous):
+        name = str(call.this)
+        if name.lower() in _TIME_FUNC_NAMES:
+            return f"{name.upper()}()"
+    return None
+
+
 def check_example_answers(
     report: ExampleValidationReport,
     *,
     adapter: DatabaseAdapter,
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
     rel_tol: float = _DEFAULT_REL_TOL,
     abs_tol: float = _DEFAULT_ABS_TOL,
 ) -> ExampleAnswerReport:
@@ -514,7 +574,14 @@ def check_example_answers(
     it plans, via ``ExplainAdapter``, and nothing more. The execute-capable
     ``DatabaseAdapter`` enters only here.
 
+    ``sql_normalizer`` must be the same value passed to ``validate_examples``:
+    a corpus whose SQL only parses after normalization reached ``valid``
+    through the normalizer. ``dialect`` defaults to ``adapter.dialect``, since
+    ``DatabaseAdapter`` exposes one (unlike the bare ``ExplainAdapter`` that
+    forces ``validate_examples`` to be told); pass it explicitly only when the
+    corpus is authored in a different dialect than the adapter speaks.
     """
+    effective_dialect = dialect if dialect is not None else adapter.dialect
     results: list[ExampleAnswerResult] = []
     for index, row in enumerate(report.results):
         example = row.example
@@ -527,6 +594,8 @@ def check_example_answers(
                 adapter=adapter,
                 rel_tol=example.rel_tol if example.rel_tol is not None else rel_tol,
                 abs_tol=example.abs_tol if example.abs_tol is not None else abs_tol,
+                dialect=effective_dialect,
+                sql_normalizer=sql_normalizer,
             )
         )
     return ExampleAnswerReport(results=results)
@@ -539,6 +608,8 @@ def _check_one(
     adapter: DatabaseAdapter,
     rel_tol: float,
     abs_tol: float,
+    dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
 ) -> ExampleAnswerResult:
     expected = example.expected
     assert expected is not None  # guarded by the caller's filter
@@ -552,6 +623,21 @@ def _check_one(
             abs_tol=abs_tol,
             **kw,
         )
+
+    if not example.time_scoped:
+        normalized = (
+            sql_normalizer.normalize_sql(example.sql) if sql_normalizer else example.sql
+        )
+        statement = sqlglot.parse_one(normalized, dialect=dialect)
+        found = _relative_time_node(statement)
+        if found is not None:
+            return _make(
+                "unassertable",
+                reason=(
+                    f"relative time window ({found}) — the expected value "
+                    "decays; pin the window or set time_scoped: true"
+                ),
+            )
 
     actual, reason = _scalar(adapter, example.sql, label)
     if actual is None:

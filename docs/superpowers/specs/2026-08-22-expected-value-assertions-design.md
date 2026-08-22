@@ -51,19 +51,28 @@ keeps parsing unchanged:
 | Field | Type | Meaning |
 |---|---|---|
 | `expected` | `float \| None` | The certified answer. `None` means the row is not an assertion. |
-| `tolerance` | `Tolerance \| None` | Per-example `rel_tol` / `abs_tol` override. |
+| `rel_tol` | `float \| None` | Per-example relative tolerance. `None` falls back to the call-level default. |
+| `abs_tol` | `float \| None` | Per-example absolute tolerance. `None` falls back to the call-level default. |
 | `time_scoped` | `bool` | The author asserts the query's time window is pinned by other means. |
 
-`Tolerance` is a small frozen dataclass with `rel_tol: float` and
-`abs_tol: float`, both optional in YAML; an absent field falls back to the
-call-level default. `_KNOWN_KEYS` gains all three, so they stop being swept into
-`metadata`.
+The two tolerances are flat fields rather than a nested `tolerance` mapping.
+Flat keeps the YAML shallow for corpus authors and adds no new public type; a
+`Tolerance` dataclass would buy grouping and nothing else. `_KNOWN_KEYS` gains
+all four, so they stop being swept into `metadata`.
 
-`from_dict` validates the new fields the way it already validates `metadata`:
-a non-numeric `expected`, a non-mapping `tolerance`, or a non-boolean
-`time_scoped` raises `ValueError` with an actionable message. External YAML is
-untrusted; a malformed assertion must fail loudly at parse time rather than
-silently degrade to "not an assertion".
+`from_dict` validates the new fields the way it already validates `metadata`,
+raising `ValueError` with an actionable message. External YAML is untrusted; a
+malformed assertion must fail loudly at parse time rather than silently degrade
+to "not an assertion". Specifically:
+
+- `expected`, `rel_tol`, and `abs_tol` must each be an `int` or `float` and are
+  coerced to `float`. **`bool` is rejected explicitly** — it is an `int`
+  subclass in Python, so `expected: true` would otherwise slip through a naive
+  `isinstance` check and assert against `1.0`.
+- `expected` must be finite. A YAML `.nan` or `.inf` is a malformed answer, not
+  an assertion that can ever match.
+- `rel_tol` and `abs_tol` must be finite and non-negative.
+- `time_scoped` must be a `bool`.
 
 ### Result types
 
@@ -113,10 +122,16 @@ def check_example_answers(
 ```
 
 `dialect` and `sql_normalizer` serve the time-scope scan, which re-parses the
-SQL. They must be passed the same values given to `validate_examples`: a corpus
-whose SQL only parses after normalisation (Denodo/VDP) reached `valid` through
-the normalizer, and re-parsing the raw string without it would fail. Passing
-them keeps the two passes looking at the same statement.
+SQL. `sql_normalizer` must be the same value given to `validate_examples`: a
+corpus whose SQL only parses after normalisation (Denodo/VDP) reached `valid`
+through the normalizer, and re-parsing the raw string without it would fail.
+
+`dialect` **defaults to `adapter.dialect`** when not given. Unlike
+`ExplainAdapter` — which is a bare `explain()` and is why `validate_examples`
+must be told the dialect — `DatabaseAdapter` exposes a `dialect` property, so
+requiring the caller to restate it would only create an opportunity for the two
+passes to disagree. An explicit argument still wins, for the case where the
+corpus is authored in a different dialect than the adapter speaks.
 
 It consumes an `ExampleValidationReport`, not raw examples. This is the load-
 bearing choice in the design: **an example that failed contract validation must
@@ -158,11 +173,52 @@ For each row of `report.results`, in input order:
    dialect mismatch between the two passes — the row degrades to `error`. It is
    never executed on an unscanned statement: an unparseable statement cannot be
    cleared of a relative time window, so it does not get to run.
-3. **Execute.** `_scalar(adapter, example.sql, label)` measures the result.
-4. **Compare.** `math.isclose(actual, expected, rel_tol=..., abs_tol=...)`
-   decides `match` or `mismatch`; both diffs are recorded either way.
+3. **Execute.** `_scalar(adapter, example.sql, label)` measures the result,
+   where `label` is the row's display name — `id → question → #index`, the same
+   fallback chain `summary()` already uses. That helper is extracted from
+   `ExampleValidationReport.summary()` into a module-level `_label` so an
+   execution error names the offending row rather than saying "query".
+4. **Compare.** Per the Comparison section below, yielding `match` or
+   `mismatch`; both diffs are recorded either way.
 
-Effective tolerance is per-example if given, else the call-level argument.
+Effective tolerance is resolved per field: `rel_tol` and `abs_tol` each come
+from the example when set, else from the call-level argument. An example may
+override one without the other.
+
+### Comparison
+
+```python
+abs_diff = abs(actual - expected)
+if abs_diff == 0:
+    rel_diff = 0.0
+elif expected != 0:
+    rel_diff = abs_diff / abs(expected)
+else:
+    rel_diff = math.inf
+matched = abs_diff <= max(abs_tol, rel_tol * abs(expected))
+```
+
+Two decisions here, both deliberate:
+
+**`rel_diff` is guarded against a zero reference.** A certified answer of zero
+is legitimate — "how many failed orders in Q1 2026? None" — and dividing by it
+would raise or yield a meaningless `inf` for an exact match. The three-branch
+form is lifted verbatim from `reconcile_decomposition`, which solved the same
+problem for `actual_parent == 0`.
+
+**The relative term is anchored on `expected`, not on `actual` or on the larger
+magnitude.** This is the one place the two integrity checks deliberately differ.
+`reconcile_decomposition` compares two *measurements* and has no privileged
+side, so it anchors on the parent it measured. An assertion has a reference: the
+certified answer is the fixed point and the query result is what varies against
+it. Anchoring on `expected` also keeps the tolerance meaning stable — "within
+0.1% of the certified number" — regardless of how far the query has drifted,
+which `math.isclose`'s `max(|a|, |b|)` would not.
+
+Note the consequence at `expected == 0`: the relative term vanishes, so a
+zero-valued assertion matches only exactly unless the author sets an `abs_tol`.
+That is correct behaviour and is documented in the README rather than worked
+around.
 
 ### Tolerance default
 
@@ -190,8 +246,14 @@ example and every one is `match`. `unassertable` and `error` both fail it.
 An **empty** report is not ok, mirroring `ExampleValidationReport.ok`. Calling
 the checker on a corpus where nothing declared an `expected` means a filter, a
 schema change, or an emptied file silently dropped every assertion; that must
-surface as a failure rather than pass a no-op gate. A consumer wanting a laxer
-view tests `report.mismatches` directly.
+surface as a failure rather than pass a no-op gate.
+
+This does put a small edge on adoption: a team with an existing 200-row corpus
+and no assertions yet cannot wire the second gate into CI until at least one row
+carries an `expected`. That is the intended order — add the first assertion,
+then add the gate — and it is preferable to a gate that reads green while
+checking nothing. A consumer wanting the laxer view meanwhile tests
+`answers.mismatches` directly rather than `answers.ok`.
 
 CI composes the two gates rather than merging them, keeping a policy violation
 and a wrong number distinguishable:
@@ -231,7 +293,7 @@ This is a pure move: no behaviour change, no signature change, and
 |---|---|
 | `src/agentic_data_contracts/validation/_scalar.py` | New. `_scalar` moved here verbatim. |
 | `src/agentic_data_contracts/validation/reconciliation.py` | Import `_scalar` from its new home; delete the local copy. |
-| `src/agentic_data_contracts/validation/examples.py` | `Tolerance`; three fields on `VerifiedExample` plus `from_dict` validation; `ExampleAnswerResult`; `ExampleAnswerReport`; `check_example_answers`. |
+| `src/agentic_data_contracts/validation/examples.py` | Four fields on `VerifiedExample` plus `from_dict` validation; `_label` extracted from `summary()`; `ExampleAnswerResult`; `ExampleAnswerReport`; `check_example_answers`. |
 | `src/agentic_data_contracts/validation/__init__.py` | Export the new public names. |
 | `src/agentic_data_contracts/__init__.py` | Export the new public names. |
 | `tests/test_validation/test_examples.py` | New cases (below). |
@@ -239,7 +301,7 @@ This is a pure move: no behaviour change, no signature change, and
 | `tests/test_public_api.py` | New exports. |
 | `README.md` | "Validating a verified-examples corpus" section gains the assertion subsection. |
 | `examples/revenue_agent/verified_examples.yml` | An asserted row, a deliberate mismatch, and a relative-window row. |
-| `examples/revenue_agent/verify_examples.py` | Run the second pass and print its summary. |
+| `examples/revenue_agent/verify_examples.py` | Run the second pass and print its summary. Like the existing violation demo, it **reports** every status and exits zero — the deliberate mismatch is the point of the demo and must not fail CI. |
 | `CHANGELOG.md` | 0.44.0 entry. |
 | `pyproject.toml` | Version 0.44.0. |
 
@@ -251,9 +313,16 @@ Tests are written first, from this spec.
 - An assertion matching its expected value → `match`.
 - An assertion outside tolerance → `mismatch`, with `expected`, `actual`,
   `abs_diff`, and `rel_diff` all populated.
-- A per-example `tolerance` widening the default rescues an answer certified at
+- A per-example `rel_tol` widening the default rescues an answer certified at
   lower precision.
-- A per-example `tolerance` is used in preference to the call-level default.
+- A per-example `rel_tol` / `abs_tol` is used in preference to the call-level
+  default.
+- `expected: 0.0` with an exactly-zero result → `match`, `rel_diff == 0.0`, no
+  ZeroDivisionError.
+- `expected: 0.0` with a near-zero result → `mismatch`, `rel_diff == inf`.
+- `expected: 0.0` with a near-zero result and an `abs_tol` → `match`.
+- The relative term is anchored on `expected`: a case where anchoring on
+  `actual` instead would flip the verdict.
 
 **Time scoping**
 - SQL containing `CURRENT_DATE` → `unassertable`, **and the adapter is never
@@ -263,12 +332,15 @@ Tests are written first, from this spec.
 - `NOW()` and `CURRENT_TIMESTAMP` are detected alongside `CURRENT_DATE`.
 - A row whose SQL fails to re-parse degrades to `error` and is never executed
   (spy adapter).
+- `dialect` is taken from `adapter.dialect` when the argument is omitted, and
+  the explicit argument wins when both are present.
 
 **Filtering**
 - A `violation` row carrying an `expected` is never executed (spy adapter) and
   produces no result.
 - An `unverified` row carrying an `expected` is never executed.
 - A `valid` row with no `expected` produces no result.
+- An `unchecked` row carrying an `expected` is never executed.
 
 **Errors**
 - Non-scalar SQL (two columns) with an `expected` → `error`, batch continues.
@@ -285,8 +357,12 @@ Tests are written first, from this spec.
   `id → question → #index`, matching the existing renderer.
 
 **Parsing**
-- Round-trip of the three new YAML fields through `from_dict`.
-- A non-numeric `expected`, a non-mapping `tolerance`, and a non-boolean
-  `time_scoped` each raise `ValueError`.
+- Round-trip of the four new YAML fields through `from_dict`.
+- An integer `expected` is coerced to `float`.
+- A non-numeric `expected`, a non-boolean `time_scoped`, and a negative or
+  non-numeric `rel_tol` / `abs_tol` each raise `ValueError`.
+- `expected: true` raises `ValueError` rather than asserting against `1.0`
+  (bool is an int subclass).
+- A non-finite `expected` (`.nan`, `.inf`) raises `ValueError`.
 - The new keys do not land in `metadata`.
 - An existing corpus with none of the new fields parses and behaves unchanged.

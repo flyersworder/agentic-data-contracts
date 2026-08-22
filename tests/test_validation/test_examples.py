@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from agentic_data_contracts.validation.examples import (
     ExampleResult,
     ExampleValidationReport,
     VerifiedExample,
+    _compare,
     _label,
     validate_examples,
 )
@@ -579,3 +581,48 @@ def test_summary_tolerates_a_mismatch_with_unset_diffs() -> None:
     text = report.summary()
     assert "mismatch" in text
     assert "?" in text
+
+
+class TestCompare:
+    def test_exact_match(self) -> None:
+        abs_diff, rel_diff, matched = _compare(100.0, 100.0, 1e-9, 0.0)
+        assert (abs_diff, rel_diff, matched) == (0.0, 0.0, True)
+
+    def test_outside_tolerance_is_mismatch(self) -> None:
+        abs_diff, rel_diff, matched = _compare(98.0, 100.0, 1e-9, 0.0)
+        assert abs_diff == 2.0
+        assert rel_diff == pytest.approx(0.02)
+        assert not matched
+
+    def test_within_relative_tolerance(self) -> None:
+        _, _, matched = _compare(100.05, 100.0, 1e-3, 0.0)
+        assert matched
+
+    def test_within_absolute_tolerance(self) -> None:
+        _, _, matched = _compare(100.5, 100.0, 0.0, 1.0)
+        assert matched
+
+    def test_zero_expected_exact_match_does_not_divide_by_zero(self) -> None:
+        # A certified answer of zero is legitimate ("how many failed orders in
+        # Q1? None") and must not raise or report a meaningless inf.
+        abs_diff, rel_diff, matched = _compare(0.0, 0.0, 1e-9, 0.0)
+        assert (abs_diff, rel_diff, matched) == (0.0, 0.0, True)
+
+    def test_zero_expected_near_miss_reports_infinite_rel_diff(self) -> None:
+        abs_diff, rel_diff, matched = _compare(0.5, 0.0, 1e-9, 0.0)
+        assert abs_diff == 0.5
+        assert rel_diff == math.inf
+        assert not matched
+
+    def test_zero_expected_rescued_by_abs_tol(self) -> None:
+        # The relative term vanishes at expected == 0, so abs_tol is the only
+        # way to allow any slack there.
+        _, _, matched = _compare(0.5, 0.0, 1e-9, 1.0)
+        assert matched
+
+    def test_relative_term_is_anchored_on_expected_not_actual(self) -> None:
+        # expected=100, actual=200, rel_tol=0.75. Anchored on expected the
+        # threshold is 75 and the diff of 100 is a mismatch; anchored on actual
+        # (or on max(|a|,|b|), as math.isclose does) it would be 150 and pass.
+        _, _, matched = _compare(200.0, 100.0, 0.75, 0.0)
+        assert not matched

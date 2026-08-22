@@ -886,27 +886,33 @@ def test_time_scoped_flag_permits_a_relative_window(contract: DataContract) -> N
     assert adapter.calls == [_ROLLING_SQL]
 
 
+# Each case is a fragment plus the marker(s) its refusal reason may carry.
+# Several entries accept more than one: *which* arm catches a spelling is
+# sqlglot's choice, not ours, and it moves within the supported floor range —
+# `TODAY()` is exp.Anonymous on the 28.6 floor and exp.CurrentDate on current
+# releases. Pinning one name would assert upstream's taxonomy rather than the
+# property that matters here, which is that the row is refused unexecuted.
 @pytest.mark.parametrize(
-    ("fragment", "marker"),
+    ("fragment", "markers"),
     [
         # Typed arm — the only two spellings sqlglot types in every dialect.
-        ("CURRENT_DATE", "CurrentDate"),
-        ("CURRENT_TIMESTAMP", "CurrentTimestamp"),
+        ("CURRENT_DATE", ("CurrentDate",)),
+        ("CURRENT_TIMESTAMP", ("CurrentTimestamp",)),
         # Anonymous arm — under duckdb (what SpyAdapter reports) these stay
         # exp.Anonymous, so a typed-node-only scan would miss them. NOW() is
         # the common case and the reason the second arm exists.
-        ("NOW()", "NOW()"),
-        ("GETDATE()", "GETDATE()"),
-        ("TODAY()", "CurrentDate"),  # typed under duckdb, per the spec
+        ("NOW()", ("NOW()",)),
+        ("GETDATE()", ("GETDATE()",)),
+        ("TODAY()", ("CurrentDate", "TODAY()")),  # arm depends on the version
         # Important-1 regression: LOCALTIMESTAMP / LOCALTIME parse to typed
         # nodes (exp.Localtimestamp / exp.Localtime) that used to be missing
         # from _TIME_FUNCS entirely, so they slipped past both arms.
-        ("LOCALTIMESTAMP", "Localtimestamp"),
-        ("LOCALTIME", "Localtime"),
+        ("LOCALTIMESTAMP", ("Localtimestamp",)),
+        ("LOCALTIME", ("Localtime",)),
     ],
 )
 def test_each_relative_time_spelling_is_detected(
-    contract: DataContract, fragment: str, marker: str
+    contract: DataContract, fragment: str, markers: tuple[str, ...]
 ) -> None:
     sql = (
         "SELECT SUM(amount) FROM analytics.orders "
@@ -917,14 +923,16 @@ def test_each_relative_time_spelling_is_detected(
         validate_examples([_asserted(sql, 1.0)], contract), adapter=adapter
     )
     assert answers.results[0].status == "unassertable"
-    assert marker in (answers.results[0].reason or "")
+    assert any(m in (answers.results[0].reason or "") for m in markers)
     assert adapter.calls == []
 
 
 def test_current_time_is_detected_under_snowflake(contract: DataContract) -> None:
     # Important-1 regression: CURRENT_TIME parses to exp.CurrentTime under
-    # duckdb (and most dialects) but to exp.Localtime under snowflake — the
-    # exp.CurrentTime entry alone misses Snowflake.
+    # duckdb (and most dialects) but to exp.Localtime under snowflake on
+    # current sqlglot — the exp.CurrentTime entry alone misses Snowflake.
+    # Both names are accepted because snowflake typed it CurrentTime on the
+    # 28.6 floor; the refusal is the invariant, the node name is not.
     sql = (
         "SELECT SUM(amount) FROM analytics.orders "
         "WHERE tenant_id = 'acme' AND created_at >= CURRENT_TIME"
@@ -936,7 +944,8 @@ def test_current_time_is_detected_under_snowflake(contract: DataContract) -> Non
         dialect="snowflake",
     )
     assert answers.results[0].status == "unassertable"
-    assert "Localtime" in (answers.results[0].reason or "")
+    reason = answers.results[0].reason or ""
+    assert "Localtime" in reason or "CurrentTime" in reason
     assert adapter.calls == []
 
 

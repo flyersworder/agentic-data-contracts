@@ -335,7 +335,15 @@ class ExampleAnswerReport:
 
     @property
     def ok(self) -> bool:
-        """True only when there is ≥1 assertion and every one is ``match``.
+        """True only when there is ≥1 checked assertion and every one is ``match``.
+
+        Scope worth being precise about: this covers the assertions that were
+        *executed*, not every assertion in the corpus. A row carrying an
+        ``expected`` that failed contract validation is filtered out before
+        this pass and produces no result at all, so it cannot be seen here —
+        ``report.ok`` is what catches it. That is why every documented gate
+        composes the two (``report.ok and answers.ok``) rather than trusting
+        this one alone.
 
         An **empty** report is NOT ok, mirroring ``ExampleValidationReport.ok``:
         calling the checker on a corpus where nothing declared an ``expected``
@@ -357,6 +365,14 @@ class ExampleAnswerReport:
         index a row had when its label was first computed. Recomputing here
         would give an unnamed row two different ``#N`` labels.
         """
+        if not self.results:
+            # `ok` is False here by design, so this text is what a first-time
+            # user sees when CI goes red. Four zeroes do not explain that.
+            return (
+                "**Answer checks:** no assertions found — no example declared "
+                "an `expected` value, so nothing was checked. Add one to a "
+                "corpus row, or drop `answers.ok` from the gate until you do."
+            )
         counts = Counter(r.status for r in self.results)
         lines = [
             f"**Answer checks:** {counts['match']} match, "
@@ -556,6 +572,14 @@ _TIME_FUNC_NAMES = frozenset(
         "statement_timestamp",
         "transaction_timestamp",
         "timeofday",
+        # get_current_timestamp is DuckDB's own spelling and clock_timestamp is
+        # statement_timestamp's Postgres sibling — both are real clock reads
+        # that stayed Anonymous and slipped through. current_localtimestamp is
+        # already caught by the typed arm; it is listed for the same backstop
+        # reason as localtime/localtimestamp above.
+        "clock_timestamp",
+        "get_current_timestamp",
+        "current_localtimestamp",
     }
 )
 

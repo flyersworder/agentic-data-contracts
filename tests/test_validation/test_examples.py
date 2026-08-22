@@ -569,6 +569,15 @@ def test_empty_answer_report_is_not_ok() -> None:
     assert not ExampleAnswerReport(results=[]).ok
 
 
+def test_empty_answer_summary_explains_why_nothing_was_checked() -> None:
+    # `ok` is False for an empty report by design, so this text is what a
+    # first-time user sees when CI goes red. Four zeroes do not explain it.
+    text = ExampleAnswerReport(results=[]).summary()
+    assert "no assertions found" in text
+    assert "expected" in text
+    assert "0 match" not in text  # the bare-counts line must not be used here
+
+
 def test_answer_summary_mentions_counts_and_offenders() -> None:
     report = ExampleAnswerReport(
         results=[

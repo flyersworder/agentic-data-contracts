@@ -60,3 +60,42 @@
   sql: "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme' AND customer_id = 101"
   principal: partner-b@external.com
   type: sql
+
+# 7. Asserted and correct — the certified answer matches what the query
+#    returns, so the second pass reports `match`. Note the answer comes back
+#    as a DECIMAL from DuckDB; the checker coerces it to a float.
+- id: acme-completed-revenue
+  question: "total completed revenue for acme"
+  sql: >
+    SELECT SUM(amount) FROM analytics.orders
+    WHERE tenant_id = 'acme' AND status = 'completed'
+  expected: 10700.00
+  type: sql
+  verified_by: data-eng-finance
+  last_verified: 2026-08-22
+
+# 8. Asserted and WRONG — contract-compliant SQL that returns the wrong
+#    number. `validate_examples` calls this `valid`; only the answer check
+#    catches it. This is the whole point of the second pass.
+- id: acme-completed-revenue-stale
+  question: "total completed revenue for acme (stale certified answer)"
+  sql: >
+    SELECT SUM(amount) FROM analytics.orders
+    WHERE tenant_id = 'acme' AND status = 'completed'
+  expected: 9800.00
+  type: sql
+  verified_by: data-eng-finance
+  last_verified: 2026-01-15
+
+# 9. Asserted over a ROLLING window — the expected value decays, so the
+#    checker refuses it as `unassertable` and never runs it. Pin the window
+#    (or set time_scoped: true) to make it a real assertion.
+- id: acme-revenue-last-30-days
+  question: "acme revenue over the last 30 days"
+  sql: >
+    SELECT SUM(amount) FROM analytics.orders
+    WHERE tenant_id = 'acme' AND created_at >= CURRENT_DATE - 30
+  expected: 4200.00
+  type: sql
+  verified_by: data-eng-finance
+  last_verified: 2026-08-22

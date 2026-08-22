@@ -14,7 +14,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 
 - **Governed, not guessed** — the agent uses *your* metric definitions (`SUM(amount) FILTER (WHERE status = 'completed')`), not an ad-hoc query it invented.
 - **Bad SQL blocked before execution** — forbidden operations, disallowed tables, missing tenant filters, `SELECT *`, unbounded scans — caught by static analysis plus an optional EXPLAIN dry-run.
-- **Validate a whole corpus, not just live queries** — re-check a verified-examples database (or a metric's arithmetic identity) against the contract in CI, and catch drift when the contract or the warehouse schema changes.
+- **Validate a whole corpus, not just live queries** — re-check a verified-examples database against the contract *and* its certified answers in CI (or a metric's arithmetic identity), catching drift when the contract or warehouse schema changes and a compliant query that quietly returns the wrong number.
 - **Business context first** — domain descriptions, metric ownership, freshness, and a metric graph (causal *and* arithmetic) guide the agent before it writes a line of SQL.
 - **Resource governance built in** — per-session cost, retry, row, and token budgets, and wall-clock limits.
 - **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
@@ -980,6 +980,40 @@ Each example lands in exactly one `status` — `valid` (statically contract-chec
 - **Drift sweep** — re-run against a *changed* contract; `report.violations` are the examples the change just broke. With an `explain_adapter`, the live EXPLAIN also catches a dropped or renamed column that static checks can't see.
 
 It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL (result correctness stays with your review). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
+
+### Asserting the certified answer, not just compliance
+
+`validate_examples` proves an example is *allowed* — it never proves the SQL is *right*. A query with every table permitted, the tenant filter present, and explicit columns can still sum the wrong rows and pass with `status: "valid"`. To close that gap, an example can carry the certified answer alongside its SQL, and a second pass, `check_example_answers`, executes just the compliant, asserted rows and compares:
+
+```yaml
+- id: acme-completed-revenue
+  question: "total completed revenue for acme"
+  sql: SELECT SUM(amount) FROM analytics.orders WHERE tenant_id = 'acme' AND status = 'completed'
+  expected: 10700.00     # the certified answer
+  rel_tol: 0.001          # optional, overrides the call-level default for this row
+  abs_tol: 0.0            # optional, likewise
+  time_scoped: false       # optional; see "relative time windows" below
+```
+
+```python
+from agentic_data_contracts.validation import check_example_answers
+
+report = validate_examples(examples, contract, explain_adapter=adapter)
+answers = check_example_answers(report, adapter=adapter)  # a DIFFERENT adapter type — see below
+
+if not (report.ok and answers.ok):
+    print(report.summary())
+    print(answers.summary())
+    # in CI: sys.exit(1)
+```
+
+`check_example_answers` takes `report` — the output of `validate_examples` — not the raw examples. That is deliberate, not incidental: it means there is no way to hand the checker SQL that failed contract validation. A row that violates the tenant-filter rule is precisely the query that must not be sent to the warehouse to see what it returns, so a row is executed only when it is `status == "valid"` **and** declares an `expected`; everything else (a violation, an unverified or unchecked row, or a valid row with no `expected`) produces no result at all. Note the two functions also take different adapter *kinds*: `validate_examples` takes an `ExplainAdapter` (plans only, never runs a query), while `check_example_answers` takes a `DatabaseAdapter` (executes) — the execute-capable adapter enters the pipeline only at this second, already-filtered stage.
+
+Each result lands in exactly one `status` — `match`, `mismatch` (both `expected` and `actual` populated, plus `abs_diff` / `rel_diff`), `unassertable`, or `error`. **A SQL statement using a relative time window is refused, not executed**: `WHERE created_at >= CURRENT_DATE - 30` degrades correctly as fixture data ages, so the certified answer would too, for a reason the corpus author never touched. The checker scans for that before running anything — `CURRENT_DATE` / `CURRENT_TIMESTAMP` and friends, plus function-call spellings like `NOW()`, `GETDATE()`, and `TODAY()` — and marks the row `unassertable` when it finds one. Set `time_scoped: true` once you've confirmed the window is pinned some other way (e.g. the SQL binds explicit dates from application code) to run it anyway.
+
+The default tolerance is deliberately tight — `rel_tol=1e-9`, `abs_tol=0.0` — because a certified answer is meant to be *the* number, not an approximation; the default absorbs only floating-point representation noise. Widen `rel_tol` / `abs_tol` per example when the certified answer itself has limited precision — e.g. it was read off a dashboard that rounds to whole dollars — rather than loosening the call-level default for the whole corpus.
+
+One more consequence worth knowing before you write `expected: 0`: the tolerance's relative term is `rel_tol * abs(expected)`, so at `expected == 0` it's always zero and only the absolute term can pass a near-miss. A row asserting "zero failed orders in Q1" matches only an *exact* zero unless you also set an `abs_tol`.
 
 Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance. Its default `rel_tol=1e-4` assumes the operands are exact — see [operand units and precision](#metric-decomposition-and-drill-dimensions) when one of them is a rounded percentage or carries limited decimals.
 

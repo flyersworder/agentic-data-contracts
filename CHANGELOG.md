@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.44.0] - 2026-08-22
+
+### Added
+
+- **Expected-value assertions for the verified-examples corpus.** `validate_examples` re-checks each example's SQL against the same `Validator` that gates live agent queries — allowed tables, tenant filter, no `SELECT *`, and (with an `ExplainAdapter`) a live schema dry-run — and reports whether the SQL *complies*. It cannot report whether the SQL is *right*. A query that satisfies every one of those rules and still sums the wrong rows passes today with `status: "valid"`; nothing downstream can tell it apart from a correct one. That is the gap this closes: `VerifiedExample` gains four optional fields (`expected`, `rel_tol`, `abs_tol`, `time_scoped`), and a new second pass, `check_example_answers(report, *, adapter, ...)`, executes the compliant, asserted rows and compares the live result against the certified answer within tolerance, yielding `match` / `mismatch` / `unassertable` / `error` per row.
+
+  ```python
+  report = validate_examples(examples, contract, explain_adapter=adapter)
+  answers = check_example_answers(report, adapter=adapter)
+  if not (report.ok and answers.ok):
+      sys.exit(1)
+  ```
+
+- **The checker consumes the validation *report*, not raw examples — the load-bearing choice in the design.** An example that failed contract validation must never be executed: a row that violates the tenant-filter rule is precisely the query that must not be run against a warehouse to see what it returns. Taking `ExampleValidationReport` as the input makes that ordering a property of the function signature rather than a rule stated in a docstring — there is no call shape that hands the checker unvalidated SQL. A row is executed only when it is `status == "valid"` **and** declares an `expected`; everything else produces no result. This also keeps `validate_examples`'s own invariant intact: it still only plans (via `ExplainAdapter`) and never executes. The execute-capable `DatabaseAdapter` enters the pipeline only at this second, already-filtered stage.
+
+- **A relative time window refuses the row rather than running it.** `WHERE created_at >= CURRENT_DATE - 30` is correct today and wrong in a month, for no reason the corpus author did anything about — an expected value pinned against that SQL decays on its own. The checker scans the parsed SQL before executing anything and marks a hit `unassertable`, never running the query. The scan needs two arms: sqlglot only normalises a spelling to a typed AST node (`exp.CurrentDate`, `exp.CurrentTimestamp`, ...) in the dialects that own it. `NOW()` becomes `CurrentTimestamp` under postgres but stays an untyped `exp.Anonymous` call under duckdb, mysql, snowflake, bigquery, tsql, and oracle; `GETDATE()` is typed only under tsql and snowflake; `TODAY()` only under duckdb. A typed-node-only scan would therefore miss `NOW()` — the single most common relative spelling — under the dialects most likely to be running it. The second arm matches named `exp.Anonymous` calls (`now`, `getdate`, `sysdate`, `today`, `curdate`, `unix_timestamp`, and others) by name, so a *column* called `now_flag` or `sysdate` is never flagged — only a function call is. Setting `time_scoped: true` on the example tells the checker the window is pinned some other way and clears the refusal.
+
+- **The comparison tolerance is anchored on `expected`, not on the larger magnitude the way `math.isclose` anchors on `max(|a|, |b|)`.** An assertion has a privileged side: the certified answer is the fixed point and the query result is what varies against it, unlike `reconcile_decomposition`'s two-measurements case which has no privileged side and anchors on the parent it measured instead. Anchoring on `expected` keeps "within 0.1% of the certified number" meaning the same thing regardless of how far the query result has drifted. The default (`rel_tol=1e-9`, `abs_tol=0.0`) is deliberately far tighter than `reconcile_decomposition`'s `1e-4`: a decomposition identity is approximate by construction (operands carried at limited precision leave a real residual), but a certified answer is meant to be *the* number — the default tolerates floating-point representation noise and nothing else. An answer certified off a dashboard that rounds to whole dollars will not match a full-precision `SUM` at this default; the author sets an explicit per-example `rel_tol` / `abs_tol` matching the answer's actual precision. `rel_diff` is guarded against a zero `expected` the same three-branch way `reconcile_decomposition` guards a zero parent, so `expected: 0.0` never raises — but the guard has a visible consequence: the relative term vanishes at zero, so a zero-valued assertion matches only an exact zero unless the author also sets an `abs_tol`.
+
 ## [0.43.1] - 2026-08-18
 
 ### Fixed

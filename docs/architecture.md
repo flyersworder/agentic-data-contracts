@@ -690,14 +690,26 @@ signal. Revisit only with a deliberate decision to widen what the wrappers raise
 
 ### MCP Tool Annotations (SDK path only)
 
-`create_sdk_mcp_server` passes `ToolAnnotations(readOnlyHint=True)` for the eight
-tools that only read, via `_annotations_for(name)`. `run_query` is left
+`create_sdk_mcp_server` passes a `readOnlyHint` annotation for the eight tools
+that only read, via `_annotations_for(name)`. `run_query` is left
 **unannotated** rather than `False`: whether it can write depends on the
 contract's `forbidden_operations`, and while the blocklist now covers every
 operation in `ENFORCEABLE_OPERATIONS`, `CALL` and vendor-specific DDL still
 parse as a bare `exp.Command` and pass unseen. An omitted hint means "unknown"
 in MCP; claiming read-only would invite a client to skip a confirmation prompt
 it should have shown.
+
+The annotation is built from its **wire representation** —
+`ToolAnnotations.model_validate({"readOnlyHint": True})` — not from a
+`ToolAnnotations(readOnlyHint=True)` kwarg. The declared floor `mcp>=1.23.0` is
+unbounded above, and mcp 2.0 renamed the model attributes to snake_case
+(`readOnlyHint` -> `read_only_hint`) while keeping the camelCase alias the
+protocol sends. `model_validate` resolves to the field name on 1.x and to the
+validation alias on 2.0; the camelCase kwarg happens to work on both too, but
+only via alias validation, so it reads as an argument silently discarded and ty
+reports it as one. Extend annotations in the same form (add keys to that dict),
+and assert on them through `model_dump(by_alias=True)` rather than attribute
+access, or the tests pass on one side of the range and fail on the other.
 
 Annotations are an `mcp.types` concept, so they live in `tools/sdk.py` rather
 than on the framework-agnostic `ToolDef`, and `mcp.types` is imported lazily so

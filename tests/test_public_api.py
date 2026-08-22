@@ -127,3 +127,28 @@ def test_tools_imports() -> None:
     assert ToolDef is not None
     assert create_tools is not None
     assert contract_middleware is not None
+
+
+def test_answer_checking_exports() -> None:
+    """v0.44.0 promises these three names at the top level and in .validation."""
+    from agentic_data_contracts import (
+        ExampleAnswerReport,
+        ExampleAnswerResult,
+        check_example_answers,
+    )
+    from agentic_data_contracts.validation import (
+        ExampleAnswerReport as VExampleAnswerReport,
+    )
+    from agentic_data_contracts.validation import (
+        ExampleAnswerResult as VExampleAnswerResult,
+    )
+    from agentic_data_contracts.validation import (
+        check_example_answers as v_check_example_answers,
+    )
+
+    assert ExampleAnswerReport is VExampleAnswerReport
+    assert ExampleAnswerResult is VExampleAnswerResult
+    assert check_example_answers is v_check_example_answers
+    assert callable(check_example_answers)
+    # The empty-is-not-ok rule is part of the published contract.
+    assert ExampleAnswerReport(results=[]).ok is False

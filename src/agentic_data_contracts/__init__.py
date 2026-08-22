@@ -24,6 +24,11 @@ from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS
 from agentic_data_contracts.tools.factory import RowFormat, create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
+from agentic_data_contracts.validation import (
+    ExampleAnswerReport,
+    ExampleAnswerResult,
+    check_example_answers,
+)
 
 # Optional [langchain] extra — module top-level imports langchain_core and
 # langchain.agents, so this fails fast when the extra isn't installed. We
@@ -66,6 +71,8 @@ __all__ = [
     "ContractDeps",
     "ContractMiddleware",
     "DataContract",
+    "ExampleAnswerReport",
+    "ExampleAnswerResult",
     "ExtensibleSemanticSource",
     "MetricDefinition",
     "MetricImpact",
@@ -79,6 +86,7 @@ __all__ = [
     "XmlPromptRenderer",
     "build_ai_catalog",
     "build_catalog_entry",
+    "check_example_answers",
     "contract_canonical_bytes",
     "contract_digest",
     "contract_middleware",

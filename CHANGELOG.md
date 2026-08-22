@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.44.1] - 2026-08-22
+
+### Changed
+
+- **The `[agent-sdk]` extra now resolves `mcp` 2.0, and the MCP annotation is built in the one form valid across the 1.x/2.0 rename.** claude-agent-sdk 0.2.144 widened its own constraint from `mcp<2.0.0,>=1.23.0` to `mcp<3.0.0,>=1.23.0`, and this extra's `mcp>=1.23.0` is unbounded above, so a fresh install picks 2.0 up with no edit here — which is exactly what declining to duplicate someone else's ceiling was for. mcp 2.0 moves `mcp.types` into a separate `mcp-types` distribution and renames the model attributes to snake_case (`readOnlyHint` -> `read_only_hint`) while keeping the camelCase alias the protocol actually sends. `_annotations_for` therefore stops passing a camelCase *kwarg*: that spelling still works on both versions, but only by way of alias validation, so it reads — and to a type checker *is* — an argument silently discarded. It now builds from the wire representation instead, `ToolAnnotations.model_validate({"readOnlyHint": True})`, which resolves to the field name on 1.x and to the validation alias on 2.0. The emitted annotation is byte-identical either way; the point is that both ends of the declared range stay honest, since `test-lowest-floors` resolves 1.23 while the lockfile now carries 2.0. No floor moves: mcp 2.0 requires `pydantic>=2.12`, but the `pydantic>=2.11` floor stays true because the lowest-direct resolve takes mcp 1.23 with it.
+
+### Internal
+
+- **Dependency refresh across both tracked lockfiles.** The root lock takes 24 updates, the notable majors being `anthropic` 0.122.0 -> 1.0.0 and `mcp` 1.29.0 -> 2.0.0, alongside `pydantic-ai-slim` 2.33.0, `langchain-core` 1.6.0, `claude-agent-sdk` 0.2.144 and `websockets` 16.1.1. `experiments/mermaid-joinpath-eval` keeps its own lockfile and is upgraded separately: `openai` 2.41.0 -> 3.3.1, whose v3 surface still carries everything `ModelClient` uses (`chat.completions.create` with `max_tokens`, `.choices[0].message.content`, `.usage.prompt_tokens` / `.completion_tokens`).
+
+  Worth recording because the name invites the opposite conclusion: `anthropic` 1.0 and `openai` 3.0 both moved to **`httpx2`, which is a separate distribution and top-level module, not httpx 2.x**. It installs alongside the `httpx<1.0.0` that `langchain-core` still requires rather than competing with it, so the migration is additive at the resolver and invisible here — `src/` imports neither `httpx` nor any vendor client, and `mcp.types` is its only third-party runtime surface outside sqlglot, pydantic and pyyaml. The experiments env is the clean case: with `openai` 3.x, `httpx`, `httpcore`, `distro` and `tqdm` leave that lock entirely.
+
+- **Pre-commit hooks bumped**: ruff `v0.16.3` -> `v0.16.4`, ty `v0.0.72` -> `v0.0.73`. The ty bump is what surfaced the discarded-kwarg diagnostic above.
+
 ## [0.44.0] - 2026-08-22
 
 ### Added

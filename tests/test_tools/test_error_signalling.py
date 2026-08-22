@@ -341,6 +341,20 @@ async def test_run_query_session_limit_carries_is_error(
 # ── MCP tool annotations (SDK path only) ─────────────────────────────────────
 
 
+def _read_only_hint(annotations: Any) -> Any:
+    """Read the ``readOnlyHint`` value off an ``mcp.types.ToolAnnotations``.
+
+    Goes through the *wire* alias rather than the Python attribute because mcp
+    renamed the attributes to snake_case in 2.0 (`readOnlyHint` ->
+    `read_only_hint`) while keeping the camelCase alias the protocol actually
+    sends. `mcp>=1.23.0` is the declared floor and is unbounded above, so both
+    spellings are in support range and `test-lowest-floors` resolves the 1.x
+    one. `model_dump(by_alias=True)` is the single form valid on both, and it
+    asserts on what goes over the wire — which is what the annotation is for.
+    """
+    return annotations.model_dump(by_alias=True)["readOnlyHint"]
+
+
 def test_read_only_annotation_covers_every_non_executing_tool(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
@@ -360,7 +374,7 @@ def test_read_only_annotation_covers_every_non_executing_tool(
             assert annotations is None
         else:
             assert annotations is not None, tool.name
-            assert annotations.readOnlyHint is True, tool.name
+            assert _read_only_hint(annotations) is True, tool.name
 
 
 def test_read_only_set_matches_the_shipped_tools(
@@ -413,4 +427,4 @@ def test_sdk_forwards_description_and_annotations(
 
     _, describe_annotations = seen["describe_table"]
     assert describe_annotations is not None
-    assert describe_annotations.readOnlyHint is True
+    assert _read_only_hint(describe_annotations) is True

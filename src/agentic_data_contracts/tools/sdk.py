@@ -83,7 +83,15 @@ def _annotations_for(name: str) -> ToolAnnotations | None:
         return None
     from mcp.types import ToolAnnotations
 
-    return ToolAnnotations(readOnlyHint=True)
+    # Built from the wire representation rather than `ToolAnnotations(...)`
+    # kwargs because mcp 2.0 renamed the Python attributes to snake_case
+    # (`readOnlyHint` -> `read_only_hint`) while keeping the camelCase alias the
+    # protocol sends. `mcp>=1.23.0` is unbounded above, so both spellings are in
+    # support range: `model_validate` hits the field name on 1.x and the
+    # validation alias on 2.0. The camelCase kwarg happens to work on both too,
+    # but only via alias validation -- which ty cannot see through, so it reads
+    # (and reports) as an argument silently discarded.
+    return ToolAnnotations.model_validate({"readOnlyHint": True})
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:

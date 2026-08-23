@@ -113,15 +113,26 @@ async def test_fuzzy_metric_lookup_records_miss(contract, semantic):
 
 @pytest.mark.asyncio
 async def test_no_recorder_records_nothing_and_still_works(contract, semantic):
+    """Observability must not change behaviour: the same call, with and
+    without a recorder attached, must return byte-identical responses --
+    not merely "some truthy content" in both cases.
+    """
     session = ContractSession(contract)
     tools = {
         t.name: t.callable
         for t in create_tools(contract, semantic_source=semantic, session=session)
     }
-    result = await tools["lookup_metric"]({"metric_name": "total_revenue"})
+    args = {"metric_name": "total_revenue"}
+    result = await tools["lookup_metric"](args)
 
     assert session.recorder is None
-    assert result["content"]
+
+    rec = ToolRecorder()
+    recorded_tools = _tools(contract, rec, semantic=semantic)
+    recorded_result = await recorded_tools["lookup_metric"](args)
+
+    assert rec.calls  # the recorder-attached call did get logged
+    assert result == recorded_result
 
 
 @pytest.mark.asyncio
@@ -506,6 +517,39 @@ async def test_query_execution_error_records_error(contract, adapter, semantic):
     call = rec.calls[-1]
     assert call.outcome == "error"
     assert call.detail
+
+
+@pytest.mark.asyncio
+async def test_run_query_unexpected_error_still_records_and_reraises(
+    contract, adapter, semantic, monkeypatch
+):
+    """A raise from anywhere in run_query other than the two narrow excepts
+    (adapter.execute, the scalar coercion) must still be recorded as an
+    error before propagating.
+
+    Without an outer catch-all, a crash here would leave the recorder empty,
+    which the protocol-conformance verdict reads as contamination -- a false
+    accusation against an agent whose governed tool call actually crashed.
+    """
+    from agentic_data_contracts.validation.validator import Validator
+
+    def _boom(self, sql, columns, rows):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Validator, "validate_results", _boom)
+
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await tools["run_query"](
+            {"sql": "SELECT amount FROM analytics.orders WHERE tenant_id = 'acme'"}
+        )
+
+    assert len(rec.calls) == 1
+    assert rec.calls[0].tool == "run_query"
+    assert rec.calls[0].outcome == "error"
+    assert rec.calls[0].detail == "boom"
 
 
 @pytest.mark.asyncio

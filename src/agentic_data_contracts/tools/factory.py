@@ -1102,127 +1102,133 @@ def create_tools(
         def _with_remaining(msg: str) -> str:
             return f"{msg}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
-        # Check session limits first
         try:
-            session.check_limits()
-        except LimitExceededError as e:
-            response = _error_response(
-                _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
-                kind="blocked",
-            )
-            _record(response["_kind"], detail=str(e))
-            return response
+            # Check session limits first
+            try:
+                session.check_limits()
+            except LimitExceededError as e:
+                response = _error_response(
+                    _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
+                    kind="blocked",
+                )
+                _record(response["_kind"], detail=str(e))
+                return response
 
-        # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
-        # EXPLAIN/dry-run DB round-trip (Validator.validate ->
-        # explain_adapter.explain), so offload it to a worker thread to avoid
-        # blocking the event loop.
-        vresult = await asyncio.to_thread(validator.validate, sql)
-        if vresult.blocked:
-            session.record_retry()
-            msg = "BLOCKED — Violations:\n" + "\n".join(
-                f"- {r}" for r in vresult.reasons
+            # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
+            # EXPLAIN/dry-run DB round-trip (Validator.validate ->
+            # explain_adapter.explain), so offload it to a worker thread to avoid
+            # blocking the event loop.
+            vresult = await asyncio.to_thread(validator.validate, sql)
+            if vresult.blocked:
+                session.record_retry()
+                msg = "BLOCKED — Violations:\n" + "\n".join(
+                    f"- {r}" for r in vresult.reasons
+                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
+                _record(
+                    response["_kind"],
+                    detail="; ".join(vresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
+
+            # Record estimated cost from EXPLAIN — charged before execution because
+            # the cost budget tracks database resource consumption, not successful
+            # operations. Even if result checks later block the output, the database
+            # work was performed.
+            if vresult.estimated_cost_usd is not None:
+                session.record_cost(vresult.estimated_cost_usd)
+
+            if adapter is None:
+                response = _error_response(
+                    "No database adapter configured — cannot execute query."
+                )
+                _record(response["_kind"], detail="no database adapter configured")
+                return response
+
+            try:
+                # Offload the query execution — the dominant blocking call — off
+                # the event loop. Concurrent DB work stays bounded by the adapter's
+                # own connection pool, not the thread pool.
+                qresult = await asyncio.to_thread(adapter.execute, sql)
+            except Exception as e:  # noqa: BLE001
+                session.record_retry()
+                response = _error_response(
+                    _with_remaining(f"BLOCKED — Query execution failed: {e}")
+                )
+                _record(
+                    response["_kind"],
+                    detail=str(e),
+                    relative_time=vresult.relative_time,
+                )
+                return response
+
+            # Phase 3: result checks
+            rresult = validator.validate_results(
+                sql, qresult.columns, [tuple(r) for r in qresult.rows]
             )
-            response = _error_response(_with_remaining(msg), kind="blocked")
+            if rresult.blocked:
+                session.record_retry()
+                msg = "BLOCKED — Result check violations:\n" + "\n".join(
+                    f"- {r}" for r in rresult.reasons
+                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
+                _record(
+                    response["_kind"],
+                    detail="; ".join(rresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
+
+            data = {
+                "columns": qresult.columns,
+                "rows": _render_rows(qresult.columns, qresult.rows, row_format),
+                "row_count": qresult.row_count,
+                "session": {"remaining": session.remaining()},
+            }
+            response_text = json.dumps(data, default=str)
+
+            # Prepend warnings and log-enforcement messages from both query checks
+            # and result checks. log_messages surface rules with enforcement=log
+            # that triggered during validation — symmetric with inspect_query.
+            all_warnings = vresult.warnings + rresult.warnings
+            all_logs = vresult.log_messages + rresult.log_messages
+            preamble_parts: list[str] = []
+            if all_warnings:
+                preamble_parts.append(
+                    "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
+                )
+            if all_logs:
+                preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in all_logs))
+            if preamble_parts:
+                response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
+
+            # scalar is computed from the result already in hand -- never
+            # re-executes the query. Unlike _scalar_value's other two callers,
+            # which only ever run it on SQL a corpus author designated as a
+            # numeric metric, this call runs on every successful run_query result
+            # that happens to be one-column-by-one-row -- arbitrary agent SQL, so
+            # a DATE/TIMESTAMP/bytes value is entirely routine here. ValueError is
+            # the shape check (wrong column/row count); TypeError is float()
+            # rejecting a non-numeric value (e.g. a date). Both mean "not
+            # scalar-shaped for our purposes," not a failure -- catch exactly
+            # those two documented cases and nothing broader, so a genuinely
+            # unexpected exception from an exotic adapter type still surfaces
+            # loudly instead of being swallowed here.
+            try:
+                scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
+            except (ValueError, TypeError):
+                scalar = None
             _record(
-                response["_kind"],
-                detail="; ".join(vresult.reasons),
+                "ok",
+                scalar=scalar,
+                row_count=qresult.row_count,
                 relative_time=vresult.relative_time,
             )
-            return response
-
-        # Record estimated cost from EXPLAIN — charged before execution because
-        # the cost budget tracks database resource consumption, not successful
-        # operations. Even if result checks later block the output, the database
-        # work was performed.
-        if vresult.estimated_cost_usd is not None:
-            session.record_cost(vresult.estimated_cost_usd)
-
-        if adapter is None:
-            response = _error_response(
-                "No database adapter configured — cannot execute query."
-            )
-            _record(response["_kind"], detail="no database adapter configured")
-            return response
-
-        try:
-            # Offload the query execution — the dominant blocking call — off
-            # the event loop. Concurrent DB work stays bounded by the adapter's
-            # own connection pool, not the thread pool.
-            qresult = await asyncio.to_thread(adapter.execute, sql)
-        except Exception as e:  # noqa: BLE001
-            session.record_retry()
-            response = _error_response(
-                _with_remaining(f"BLOCKED — Query execution failed: {e}")
-            )
-            _record(
-                response["_kind"], detail=str(e), relative_time=vresult.relative_time
-            )
-            return response
-
-        # Phase 3: result checks
-        rresult = validator.validate_results(
-            sql, qresult.columns, [tuple(r) for r in qresult.rows]
-        )
-        if rresult.blocked:
-            session.record_retry()
-            msg = "BLOCKED — Result check violations:\n" + "\n".join(
-                f"- {r}" for r in rresult.reasons
-            )
-            response = _error_response(_with_remaining(msg), kind="blocked")
-            _record(
-                response["_kind"],
-                detail="; ".join(rresult.reasons),
-                relative_time=vresult.relative_time,
-            )
-            return response
-
-        data = {
-            "columns": qresult.columns,
-            "rows": _render_rows(qresult.columns, qresult.rows, row_format),
-            "row_count": qresult.row_count,
-            "session": {"remaining": session.remaining()},
-        }
-        response_text = json.dumps(data, default=str)
-
-        # Prepend warnings and log-enforcement messages from both query checks
-        # and result checks. log_messages surface rules with enforcement=log
-        # that triggered during validation — symmetric with inspect_query.
-        all_warnings = vresult.warnings + rresult.warnings
-        all_logs = vresult.log_messages + rresult.log_messages
-        preamble_parts: list[str] = []
-        if all_warnings:
-            preamble_parts.append(
-                "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
-            )
-        if all_logs:
-            preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in all_logs))
-        if preamble_parts:
-            response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
-
-        # scalar is computed from the result already in hand -- never
-        # re-executes the query. Unlike _scalar_value's other two callers,
-        # which only ever run it on SQL a corpus author designated as a
-        # numeric metric, this call runs on every successful run_query result
-        # that happens to be one-column-by-one-row -- arbitrary agent SQL, so
-        # a DATE/TIMESTAMP/bytes value is entirely routine here. ValueError is
-        # the shape check (wrong column/row count); TypeError is float()
-        # rejecting a non-numeric value (e.g. a date). Both mean "not
-        # scalar-shaped for our purposes," not a failure -- catch exactly
-        # those two documented cases and nothing broader, so a genuinely
-        # unexpected exception from an exotic adapter type still surfaces
-        # loudly instead of being swallowed here.
-        try:
-            scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
-        except (ValueError, TypeError):
-            scalar = None
-        _record(
-            "ok",
-            scalar=scalar,
-            row_count=qresult.row_count,
-            relative_time=vresult.relative_time,
-        )
-        return _text_response(response_text)
+            return _text_response(response_text)
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Assemble ToolDef list ─────────────────────────────────────────────────
     return [

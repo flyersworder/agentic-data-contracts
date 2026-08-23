@@ -183,22 +183,26 @@ def _protocol_verdict(
     """
     reasons: list[str] = []
 
-    # P3 -- friction. Recorded on every path, never fails on its own.
-    blocked = [c for c in attempt.calls if c.outcome == "blocked"]
+    successful = [
+        c for c in attempt.calls if c.tool == "run_query" and c.outcome == "ok"
+    ]
+
+    # P3 -- friction. Recorded on every path, never fails on its own. Scoped to
+    # run_query: a describe_table block restricted for the principal is not a
+    # query attempt, and the wording only claims "before an accepted one" when
+    # a run_query actually succeeded -- otherwise it says so.
+    blocked = [
+        c for c in attempt.calls if c.tool == "run_query" and c.outcome == "blocked"
+    ]
     if blocked:
-        reasons.append(
-            f"{len(blocked)} blocked query attempt(s) before an accepted one"
-        )
+        tail = "before an accepted one" if successful else "with none accepted"
+        reasons.append(f"{len(blocked)} blocked run_query attempt(s) {tail}")
     misses = [c for c in attempt.calls if c.outcome == "miss"]
     for call in misses:
         reasons.append(f"lookup miss on {call.tool}({call.args})")
 
     if attempt.error is not None:
         return "unchecked", reasons
-
-    successful = [
-        c for c in attempt.calls if c.tool == "run_query" and c.outcome == "ok"
-    ]
 
     # P1 -- contamination.
     if attempt.foreign_tool_calls:

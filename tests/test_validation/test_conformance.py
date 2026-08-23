@@ -243,6 +243,30 @@ def test_friction_is_recorded_without_failing():
     assert any("miss" in r for r in reasons)
 
 
+def test_friction_ignores_blocks_from_other_tools():
+    """A describe_table block restricted for the principal is not a query
+    attempt -- only run_query blocks belong in the friction count."""
+    calls = [
+        ToolCall(sequence=0, tool="describe_table", outcome="blocked"),
+        _q(42.0, seq=1),
+    ]
+    attempt = Attempt(example=_example(), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    _, reasons = _protocol_verdict(attempt, anchor)
+    assert not any("blocked" in r for r in reasons)
+
+
+def test_friction_wording_is_honest_when_nothing_was_accepted():
+    """A row where every run_query attempt was blocked must not claim an
+    accepted query came after -- none did."""
+    calls = [_q(None, outcome="blocked", seq=0)]
+    attempt = Attempt(example=_example(), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    _, reasons = _protocol_verdict(attempt, anchor)
+    assert any("none accepted" in r for r in reasons)
+    assert not any("before an accepted one" in r for r in reasons)
+
+
 def _attempt(example, calls=(), **kw):
     return Attempt(example=example, calls=list(calls), **kw)
 

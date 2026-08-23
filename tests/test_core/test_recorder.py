@@ -5,12 +5,12 @@ from agentic_data_contracts.core.recorder import ToolCall, ToolRecorder
 
 def test_log_appends_a_call_with_an_incrementing_sequence():
     rec = ToolRecorder()
-    rec.log("lookup_metric", {"name": "CAC"}, "ok")
+    rec.log("lookup_metric", {"metric_name": "CAC"}, "ok")
     rec.log("run_query", {"sql": "SELECT 1"}, "ok", scalar=1.0, row_count=1)
 
     assert [c.sequence for c in rec.calls] == [0, 1]
     assert rec.calls[0] == ToolCall(
-        sequence=0, tool="lookup_metric", args={"name": "CAC"}, outcome="ok"
+        sequence=0, tool="lookup_metric", args={"metric_name": "CAC"}, outcome="ok"
     )
     assert rec.calls[1].scalar == 1.0
     assert rec.calls[1].row_count == 1

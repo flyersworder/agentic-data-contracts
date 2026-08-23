@@ -52,7 +52,7 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
-def _error_response(text: str) -> dict[str, Any]:
+def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
     ``claude_agent_sdk`` reads ``is_error`` off this dict and maps it onto MCP's
@@ -70,8 +70,19 @@ def _error_response(text: str) -> dict[str, Any]:
     Consumers that never see MCP ignore the extra key -- the LangChain and
     Pydantic AI wrappers read only ``content`` -- so this is additive on every
     path.
+
+    ``kind`` is a second, finer-grained axis alongside ``is_error``: it says
+    *why* the call didn't perform its advertised action, not just that it
+    didn't. ``"blocked"`` means the contract actively refused the action --
+    a governance decision, not a failure -- and is reserved for call sites
+    where that is genuinely what happened; a message that merely *says*
+    "BLOCKED" in its text (e.g. an adapter raising during execution) is still
+    an execution failure and keeps the default ``"error"``. Consumed by the
+    conformance recorder (a later feature), which reads ``_kind`` off the
+    envelope to classify a tool call as blocked vs. error instead of treating
+    every non-raising return as a successful call.
     """
-    return {**_text_response(text), "is_error": True}
+    return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
 def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
@@ -416,13 +427,15 @@ def create_tools(
         qualified = f"{schema_name}.{table_name}"
         if qualified not in contract.allowed_table_names():
             return _error_response(
-                f"Table {qualified} is not in the allowed tables list."
+                f"Table {qualified} is not in the allowed tables list.",
+                kind="blocked",
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
             return _error_response(
                 f"Table {qualified} is restricted"
-                f" (caller: {_caller_label(principal)!r})."
+                f" (caller: {_caller_label(principal)!r}).",
+                kind="blocked",
             )
         if adapter is None:
             return _error_response(
@@ -472,13 +485,15 @@ def create_tools(
         qualified = f"{schema}.{table}"
         if qualified not in contract.allowed_table_names():
             return _error_response(
-                f"Table {qualified} is not in the allowed tables list."
+                f"Table {qualified} is not in the allowed tables list.",
+                kind="blocked",
             )
         principal = resolve_principal(caller_principal)
         if qualified not in contract.allowed_table_names_for(principal):
             return _error_response(
                 f"Table {qualified} is restricted"
-                f" (caller: {_caller_label(principal)!r})."
+                f" (caller: {_caller_label(principal)!r}).",
+                kind="blocked",
             )
         if adapter is None:
             return _error_response(
@@ -539,7 +554,8 @@ def create_tools(
                 f"BLOCKED — preview_table SELECT * gated for caller"
                 f" {_caller_label(principal)!r}:\n"
                 + "\n".join(f"- {m}" for m in block_msgs)
-                + "\nUse run_query with explicit columns instead."
+                + "\nUse run_query with explicit columns instead.",
+                kind="blocked",
             )
 
         # Offload the blocking DB round-trip — see describe_table above.
@@ -910,7 +926,8 @@ def create_tools(
             session.check_limits()
         except LimitExceededError as e:
             return _error_response(
-                _with_remaining(f"BLOCKED — Session limit exceeded: {e}")
+                _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
+                kind="blocked",
             )
 
         # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
@@ -923,7 +940,7 @@ def create_tools(
             msg = "BLOCKED — Violations:\n" + "\n".join(
                 f"- {r}" for r in vresult.reasons
             )
-            return _error_response(_with_remaining(msg))
+            return _error_response(_with_remaining(msg), kind="blocked")
 
         # Record estimated cost from EXPLAIN — charged before execution because
         # the cost budget tracks database resource consumption, not successful
@@ -957,7 +974,7 @@ def create_tools(
             msg = "BLOCKED — Result check violations:\n" + "\n".join(
                 f"- {r}" for r in rresult.reasons
             )
-            return _error_response(_with_remaining(msg))
+            return _error_response(_with_remaining(msg), kind="blocked")
 
         data = {
             "columns": qresult.columns,

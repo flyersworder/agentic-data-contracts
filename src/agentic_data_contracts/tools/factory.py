@@ -1201,12 +1201,20 @@ def create_tools(
             response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
 
         # scalar is computed from the result already in hand -- never
-        # re-executes the query. A ValueError here just means the answer is
-        # table-shaped (more than one column, or more than one row), which is
-        # an entirely ordinary outcome for run_query, not a failure.
+        # re-executes the query. Unlike _scalar_value's other two callers,
+        # which only ever run it on SQL a corpus author designated as a
+        # numeric metric, this call runs on every successful run_query result
+        # that happens to be one-column-by-one-row -- arbitrary agent SQL, so
+        # a DATE/TIMESTAMP/bytes value is entirely routine here. ValueError is
+        # the shape check (wrong column/row count); TypeError is float()
+        # rejecting a non-numeric value (e.g. a date). Both mean "not
+        # scalar-shaped for our purposes," not a failure -- catch exactly
+        # those two documented cases and nothing broader, so a genuinely
+        # unexpected exception from an exotic adapter type still surfaces
+        # loudly instead of being swallowed here.
         try:
             scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
-        except ValueError:
+        except (ValueError, TypeError):
             scalar = None
         _record(
             "ok",

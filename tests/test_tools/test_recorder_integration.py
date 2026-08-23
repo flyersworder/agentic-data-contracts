@@ -385,6 +385,32 @@ async def test_successful_query_records_scalar_and_row_count(
 
 
 @pytest.mark.asyncio
+async def test_non_numeric_scalar_result_succeeds_with_no_scalar(
+    contract, adapter, semantic
+):
+    """A single-row, single-column, non-numeric result must not crash the tool.
+
+    _scalar_value's float() coercion raises TypeError (not ValueError) for a
+    date/timestamp/bytes value. Before recorder instrumentation, _scalar_value
+    only ever ran on SQL a corpus author had designated as a numeric metric.
+    Now it runs on every successful run_query result that happens to be
+    one-column-by-one-row -- ordinary agent SQL like MAX(created_at) -- so the
+    call must survive an unconvertible value the same way it survives a
+    table-shaped one.
+    """
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"](
+        {"sql": "SELECT MAX(created_at) FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+
+    call = rec.calls[-1]
+    assert call.outcome == "ok"
+    assert call.scalar is None
+    assert call.row_count == 1
+
+
+@pytest.mark.asyncio
 async def test_multi_row_result_records_no_scalar_but_is_still_ok(
     contract, adapter, semantic
 ):

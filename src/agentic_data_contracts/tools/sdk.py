@@ -121,7 +121,8 @@ def _wrap_with_session_check(
             return _error_response(
                 _with_remaining(
                     f"{_BLOCKED_PREFIX} Session limit exceeded: {e}", session
-                )
+                ),
+                kind="blocked",
             )
         return await inner(args)
 

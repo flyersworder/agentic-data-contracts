@@ -10,6 +10,7 @@ from agentic_data_contracts.validation.conformance import (
     _answer_verdict,
     _protocol_verdict,
     _select_answer,
+    evaluate_conformance,
 )
 from agentic_data_contracts.validation.examples import VerifiedExample
 
@@ -114,8 +115,8 @@ def test_blocked_queries_are_never_candidates():
 
 def _verdict(example, calls=(), **kw):
     attempt = Attempt(example=example, calls=list(calls), **kw)
-    source, actual, _, anchor = _select_answer(attempt)
-    return _answer_verdict(attempt, source, actual, anchor)[0]
+    _, actual, _, anchor = _select_answer(attempt)
+    return _answer_verdict(attempt, actual, anchor)[0]
 
 
 def test_a_crashed_attempt_is_an_error():
@@ -136,8 +137,8 @@ def test_matching_within_tolerance():
 
 def test_a_mismatch_records_the_diffs_it_missed_by():
     attempt = Attempt(example=_example(expected=40.0), calls=[_q(42.0)])
-    source, actual, _, anchor = _select_answer(attempt)
-    status, _, abs_diff, rel_diff = _answer_verdict(attempt, source, actual, anchor)
+    _, actual, _, anchor = _select_answer(attempt)
+    status, _, abs_diff, rel_diff = _answer_verdict(attempt, actual, anchor)
     assert status == "mismatch"
     assert abs_diff == pytest.approx(2.0)
     assert rel_diff == pytest.approx(0.05)
@@ -240,3 +241,73 @@ def test_friction_is_recorded_without_failing():
     assert status == "followed"
     assert any("blocked" in r for r in reasons)
     assert any("miss" in r for r in reasons)
+
+
+def _attempt(example, calls=(), **kw):
+    return Attempt(example=example, calls=list(calls), **kw)
+
+
+def test_a_clean_run_passes_the_gate():
+    report = evaluate_conformance([_attempt(_example(expected=42.0), [_q(42.0)])])
+    assert report.ok is True
+    assert report.pass_rate() == 1.0
+
+
+def test_an_empty_report_is_not_ok():
+    """An emptied or fully-filtered corpus must surface, not pass a no-op gate."""
+    assert evaluate_conformance([]).ok is False
+
+
+def test_a_protocol_only_row_passes_without_an_expected():
+    assert evaluate_conformance([_attempt(_example(), [_q(42.0)])]).ok is True
+
+
+def test_an_ambiguous_answer_selection_fails_the_gate():
+    attempts = [_attempt(_example(expected=42.0), [_q(42.0, seq=0), _q(4182.0, seq=1)])]
+    report = evaluate_conformance(attempts)
+    assert report.ok is False
+    assert len(report.ambiguous) == 1
+
+
+def test_ambiguity_on_a_protocol_only_row_does_not_fail_the_gate():
+    """Nobody asserted an answer, so its ambiguity is irrelevant."""
+    attempts = [_attempt(_example(), [_q(42.0, seq=0), _q(4182.0, seq=1)])]
+    assert evaluate_conformance(attempts).ok is True
+
+
+def test_declaring_the_answer_resolves_ambiguity():
+    attempts = [
+        _attempt(
+            _example(expected=42.0),
+            [_q(42.0, seq=0), _q(4182.0, seq=1)],
+            final_answer=42.0,
+        )
+    ]
+    assert evaluate_conformance(attempts).ok is True
+
+
+def test_repeats_group_by_example_id():
+    ex = _example(id="q1", expected=42.0)
+    report = evaluate_conformance([_attempt(ex, [_q(42.0)]) for _ in range(3)])
+    assert list(report.by_example()) == ["q1"]
+    assert len(report.by_example()["q1"]) == 3
+
+
+def test_one_flake_in_three_repeats_fails_the_strict_gate():
+    ex = _example(id="q1", expected=42.0)
+    attempts = [
+        _attempt(ex, [_q(42.0)]),
+        _attempt(ex, [_q(42.0)]),
+        _attempt(ex, [_q(0.0)]),
+    ]
+    report = evaluate_conformance(attempts)
+    assert report.ok is False
+    assert report.pass_rate() == pytest.approx(2 / 3)
+
+
+def test_summary_is_markdown_and_never_prints_raw_sql():
+    sql = "SELECT secret_column FROM analytics.orders"
+    attempts = [_attempt(_example(expected=42.0), [_q(42.0, args={"sql": sql})])]
+    text = evaluate_conformance(attempts).summary()
+    assert "|" in text
+    assert sql not in text

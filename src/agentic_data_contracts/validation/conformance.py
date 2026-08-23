@@ -24,6 +24,7 @@ from agentic_data_contracts.validation.examples import (
     _DEFAULT_REL_TOL,
     VerifiedExample,
     _compare,
+    _label,
 )
 
 if TYPE_CHECKING:
@@ -129,7 +130,6 @@ def _select_answer(
 
 def _answer_verdict(
     attempt: Attempt,
-    source: str,
     actual: float | None,
     anchor: ToolCall | None,
 ) -> tuple[str, list[str], float | None, float | None]:
@@ -236,3 +236,158 @@ def _protocol_verdict(
         )
         return "violated", reasons
     return "followed", reasons
+
+
+@dataclass
+class ConformanceResult:
+    """The verdict for one attempt, on two orthogonal axes.
+
+    ``answer_source`` stays separate from ``answer`` rather than fusing into it:
+    a ``last_scalar`` row that numerically matched still reports
+    ``answer="match"`` and is still excluded from ``ok``. The verdict and the
+    evidence for it are different fields, so nothing hides how it was derived.
+    """
+
+    attempt: Attempt
+    answer: str
+    protocol: str
+    answer_source: str
+    scalar_candidates: int
+    expected: float | None = None
+    actual: float | None = None
+    abs_diff: float | None = None
+    rel_diff: float | None = None
+    rel_tol: float = _DEFAULT_REL_TOL
+    abs_tol: float = _DEFAULT_ABS_TOL
+    reasons: list[str] = field(default_factory=list)
+    label: str = ""
+
+
+@dataclass
+class ConformanceReport:
+    results: list[ConformanceResult]
+
+    @property
+    def passed(self) -> list[ConformanceResult]:
+        return [r for r in self.results if _result_ok(r)]
+
+    @property
+    def answer_failures(self) -> list[ConformanceResult]:
+        return [
+            r for r in self.results if r.answer in {"mismatch", "error", "unassertable"}
+        ]
+
+    @property
+    def protocol_failures(self) -> list[ConformanceResult]:
+        return [r for r in self.results if r.protocol == "violated"]
+
+    @property
+    def contaminated(self) -> list[ConformanceResult]:
+        return [r for r in self.results if r.protocol == "contaminated"]
+
+    @property
+    def ambiguous(self) -> list[ConformanceResult]:
+        """Rows whose answer axis was actually judged but whose selected
+        scalar was ambiguous.
+
+        Scoped to ``answer != "skipped"`` rather than ``answer == "match"``:
+        an ambiguous row can just as easily resolve to a ``mismatch`` (the
+        wrong candidate was picked) as to a ``match`` (it was picked and
+        happened to be right). Either way the row asserted an expected value
+        and the selection among several distinct scalars was uncertain. A
+        ``skipped`` row never asserted anything, so its ambiguity is
+        irrelevant and must not appear here.
+        """
+        return [
+            r
+            for r in self.results
+            if r.answer != "skipped" and r.answer_source == "last_scalar"
+        ]
+
+    @property
+    def skipped(self) -> list[ConformanceResult]:
+        return [r for r in self.results if r.answer == "skipped"]
+
+    def by_example(self) -> dict[str, list[ConformanceResult]]:
+        """Group repeats of the same question.
+
+        Keys on ``id``, falling back to ``question`` -- never on ``label``,
+        which embeds a positional index and would split repeats apart.
+        """
+        grouped: dict[str, list[ConformanceResult]] = {}
+        for result in self.results:
+            example = result.attempt.example
+            key = example.id or example.question or result.label
+            grouped.setdefault(key, []).append(result)
+        return grouped
+
+    def pass_rate(self) -> float:
+        if not self.results:
+            return 0.0
+        return len(self.passed) / len(self.results)
+
+    @property
+    def ok(self) -> bool:
+        """The strict safe gate. An empty report is not ok."""
+        return bool(self.results) and all(_result_ok(r) for r in self.results)
+
+    def summary(self) -> str:
+        lines = [
+            f"**Conformance:** {len(self.passed)}/{len(self.results)} attempts passed "
+            f"({self.pass_rate():.0%})",
+            "",
+            "| Example | Answer | Protocol | Source | Notes |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for r in self.results:
+            notes = "; ".join(r.reasons) if r.reasons else ""
+            lines.append(
+                f"| {r.label} | {r.answer} | {r.protocol} | "
+                f"{r.answer_source} | {notes} |"
+            )
+        return "\n".join(lines)
+
+
+def _result_ok(result: ConformanceResult) -> bool:
+    """Nothing-to-judge passes; couldn't-judge fails.
+
+    The ``last_scalar`` exclusion is scoped to rows whose answer axis was
+    actually judged: ``answer_source`` is derived for every attempt, so a
+    protocol-only row where the agent ran several exploratory queries would
+    otherwise fail the gate over an answer nobody was asserting.
+    """
+    if result.protocol not in {"followed", "not_applicable"}:
+        return False
+    if result.answer == "skipped":
+        return True
+    return result.answer == "match" and result.answer_source != "last_scalar"
+
+
+def evaluate_conformance(attempts: list[Attempt]) -> ConformanceReport:
+    """Score recorded attempts. Pure: no network, no database, no model."""
+    results = []
+    for index, attempt in enumerate(attempts):
+        source, actual, candidates, anchor = _select_answer(attempt)
+        answer, answer_reasons, abs_diff, rel_diff = _answer_verdict(
+            attempt, actual, anchor
+        )
+        protocol, protocol_reasons = _protocol_verdict(attempt, anchor)
+        rel_tol, abs_tol = _tolerances(attempt.example)
+        results.append(
+            ConformanceResult(
+                attempt=attempt,
+                answer=answer,
+                protocol=protocol,
+                answer_source=source,
+                scalar_candidates=candidates,
+                expected=attempt.example.expected,
+                actual=actual,
+                abs_diff=abs_diff,
+                rel_diff=rel_diff,
+                rel_tol=rel_tol,
+                abs_tol=abs_tol,
+                reasons=answer_reasons + protocol_reasons,
+                label=_label(attempt.example, index),
+            )
+        )
+    return ConformanceReport(results=results)

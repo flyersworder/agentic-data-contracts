@@ -215,6 +215,18 @@ def test_a_fuzzy_miss_does_not_satisfy_the_rule():
     assert _protocol(_example(expects_metrics=["CAC"]), calls=calls) == "violated"
 
 
+def test_expects_metrics_with_no_anchor_cannot_be_judged():
+    """A row with a consultation requirement but no successful run_query has
+    nothing to order the lookup against -- unchecked, not not_applicable.
+    Conflating these would silently turn "could not judge" into "nothing to
+    judge", greenlighting exactly the rows a corpus author asked to check."""
+    calls = [_lookup("total_revenue", 0)]
+    assert (
+        _protocol(_example(expects_metrics=["total_revenue"]), calls=calls)
+        == "unchecked"
+    )
+
+
 def test_friction_is_recorded_without_failing():
     calls = [
         _lookup("CAC", 0, outcome="miss"),

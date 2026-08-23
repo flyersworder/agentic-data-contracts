@@ -20,6 +20,42 @@
 - **Never reference `file.py:NNN` in committed code or docs** — a pre-commit hook rejects it. Name the symbol instead.
 - **Commit after every task.** Small commits, conventional-commit prefixes (`feat:`, `refactor:`, `test:`, `docs:`).
 - **The library never calls a model.** No task may import an LLM client or make a network call.
+- **Test fixtures are module-local, not shared.** The suite has exactly one shared fixture (`fixtures_dir` in `tests/conftest.py`). Any task whose tests need a contract, adapter, or semantic source defines them at the top of its own test file, following `tests/test_tools/test_factory.py`:
+
+  ```python
+  @pytest.fixture
+  def contract(fixtures_dir: Path) -> DataContract:
+      return DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+
+  @pytest.fixture
+  def adapter() -> DuckDBAdapter:
+      db = DuckDBAdapter(":memory:")
+      db.connection.execute(
+          """
+          CREATE SCHEMA IF NOT EXISTS analytics;
+          CREATE TABLE analytics.orders (
+              id INTEGER, amount DECIMAL(10,2), tenant_id VARCHAR, created_at DATE
+          );
+          INSERT INTO analytics.orders VALUES
+              (1, 100.00, 'acme', DATE '2026-01-05'),
+              (2, 200.00, 'acme', DATE '2026-01-06');
+          """
+      )
+      return db
+
+  @pytest.fixture
+  def semantic(fixtures_dir: Path) -> YamlSource:
+      return YamlSource(fixtures_dir / "semantic_source.yml")
+  ```
+
+  Facts that follow from these fixtures and must not be re-guessed:
+  - `create_tools(contract, adapter=adapter, semantic_source=semantic)` — the semantic source is passed **explicitly**. `valid_contract.yml` points its source at a dbt manifest path that does not resolve, so auto-loading yields "No semantic source configured."
+  - `SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'` returns **2**.
+  - `valid_contract.yml` blocks `SELECT *` and requires a `tenant_id` filter. Every query meant to succeed must name explicit columns and filter on `tenant_id`.
+  - The metrics available are `total_revenue` and `active_customers`.
+  - `created_at` is added above specifically so the relative-time path can be exercised; the repo's other test files omit it.
+- **`lookup_metric` reads its argument as `metric_name`, not `name`.** Every call and every `args.get(...)` uses `metric_name`. With `name`, the consulted-metrics set is always empty and the protocol rule reports a violation for every compliant agent.
+- **`lookup_metric`'s two non-exact paths return `_text_response`, not `_error_response`** — fuzzy candidates return JSON with `exact_match: false`, and no-match returns the plain string `Metric '<x>' not found.` Both must be recorded as `outcome="miss"` at their own return sites; neither carries a `_kind` to read.
 
 ---
 
@@ -216,13 +252,13 @@ git commit -m "feat: ToolCall and ToolRecorder for conformance evaluation"
 from agentic_data_contracts.core.recorder import ToolRecorder
 
 
-def test_session_defaults_to_no_recorder(simple_contract):
-    assert ContractSession(simple_contract).recorder is None
+def test_session_defaults_to_no_recorder(contract):
+    assert ContractSession(contract).recorder is None
 
 
-def test_session_accepts_a_recorder(simple_contract):
+def test_session_accepts_a_recorder(contract):
     rec = ToolRecorder()
-    assert ContractSession(simple_contract, recorder=rec).recorder is rec
+    assert ContractSession(contract, recorder=rec).recorder is rec
 ```
 
 Use whatever contract fixture `tests/test_core/test_session.py` already uses; if it constructs a contract inline, do the same rather than adding a fixture.
@@ -458,22 +494,22 @@ git commit -m "refactor: relative-time helpers move to a shared private module"
 from agentic_data_contracts.validation.validator import Validator
 
 
-def test_validate_names_a_relative_time_node(simple_contract):
-    result = Validator(simple_contract).validate(
+def test_validate_names_a_relative_time_node(contract):
+    result = Validator(contract).validate(
         "SELECT amount FROM analytics.orders WHERE created_at > CURRENT_DATE - 7"
     )
     assert result.relative_time is not None
 
 
-def test_validate_reports_none_for_a_pinned_window(simple_contract):
-    result = Validator(simple_contract).validate(
+def test_validate_reports_none_for_a_pinned_window(contract):
+    result = Validator(contract).validate(
         "SELECT amount FROM analytics.orders WHERE created_at > '2026-01-01'"
     )
     assert result.relative_time is None
 
 
-def test_unparseable_sql_leaves_relative_time_none(simple_contract):
-    result = Validator(simple_contract).validate("NOT SQL AT ALL ((")
+def test_unparseable_sql_leaves_relative_time_none(contract):
+    result = Validator(contract).validate("NOT SQL AT ALL ((")
     assert result.parse_error is True
     assert result.relative_time is None
 ```
@@ -608,35 +644,35 @@ def _tools(contract, recorder, adapter=None):
 
 
 @pytest.mark.asyncio
-async def test_exact_metric_lookup_records_ok(contract_with_metrics):
+async def test_exact_metric_lookup_records_ok(contract):
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec)
-    await tools["lookup_metric"]({"name": "total_revenue"})
+    tools = _tools(contract, rec)
+    await tools["lookup_metric"]({"metric_name": "total_revenue"})
 
     assert [(c.tool, c.outcome) for c in rec.calls] == [("lookup_metric", "ok")]
 
 
 @pytest.mark.asyncio
-async def test_fuzzy_metric_lookup_records_miss(contract_with_metrics):
+async def test_fuzzy_metric_lookup_records_miss(contract):
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec)
-    await tools["lookup_metric"]({"name": "revenu"})
+    tools = _tools(contract, rec)
+    await tools["lookup_metric"]({"metric_name": "revenu"})
 
     assert rec.calls[0].outcome == "miss"
 
 
 @pytest.mark.asyncio
-async def test_no_recorder_records_nothing_and_still_works(contract_with_metrics):
-    session = ContractSession(contract_with_metrics)
-    tools = {t.name: t.callable for t in create_tools(contract_with_metrics, session=session)}
-    result = await tools["lookup_metric"]({"name": "total_revenue"})
+async def test_no_recorder_records_nothing_and_still_works(contract):
+    session = ContractSession(contract)
+    tools = {t.name: t.callable for t in create_tools(contract, session=session)}
+    result = await tools["lookup_metric"]({"metric_name": "total_revenue"})
 
     assert session.recorder is None
     assert result["content"]
 
 
 @pytest.mark.asyncio
-async def test_every_tool_records_at_least_one_call(contract_with_metrics, duckdb_adapter):
+async def test_every_tool_records_at_least_one_call(contract, adapter):
     """A wholly uninstrumented new tool must fail CI."""
     for name in [
         "describe_table", "preview_table", "list_metrics", "lookup_metric",
@@ -644,7 +680,7 @@ async def test_every_tool_records_at_least_one_call(contract_with_metrics, duckd
         "inspect_query", "run_query",
     ]:
         rec = ToolRecorder()
-        tools = _tools(contract_with_metrics, rec, adapter=duckdb_adapter)
+        tools = _tools(contract, rec, adapter=adapter)
         await tools[name](_MINIMAL_ARGS[name])
         assert rec.calls, f"{name} recorded nothing"
         assert rec.calls[0].tool == name
@@ -705,9 +741,9 @@ git commit -m "feat: record lookup and inspection tool calls"
 ```python
 # append to tests/test_tools/test_recorder_integration.py
 @pytest.mark.asyncio
-async def test_successful_query_records_scalar_and_row_count(contract_with_metrics, duckdb_adapter):
+async def test_successful_query_records_scalar_and_row_count(contract, adapter):
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec, adapter=duckdb_adapter)
+    tools = _tools(contract, rec, adapter=adapter)
     await tools["run_query"]({"sql": "SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'"})
 
     call = rec.calls[-1]
@@ -717,10 +753,10 @@ async def test_successful_query_records_scalar_and_row_count(contract_with_metri
 
 
 @pytest.mark.asyncio
-async def test_multi_row_result_records_no_scalar_but_is_still_ok(contract_with_metrics, duckdb_adapter):
+async def test_multi_row_result_records_no_scalar_but_is_still_ok(contract, adapter):
     """A table-shaped answer is ordinary for run_query, not a failure."""
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec, adapter=duckdb_adapter)
+    tools = _tools(contract, rec, adapter=adapter)
     await tools["run_query"]({"sql": "SELECT order_id, amount FROM analytics.orders WHERE tenant_id = 'acme'"})
 
     call = rec.calls[-1]
@@ -729,9 +765,9 @@ async def test_multi_row_result_records_no_scalar_but_is_still_ok(contract_with_
 
 
 @pytest.mark.asyncio
-async def test_blocked_query_records_blocked(contract_with_metrics, duckdb_adapter):
+async def test_blocked_query_records_blocked(contract, adapter):
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec, adapter=duckdb_adapter)
+    tools = _tools(contract, rec, adapter=adapter)
     await tools["run_query"]({"sql": "SELECT * FROM analytics.orders"})
 
     assert rec.calls[-1].outcome == "blocked"
@@ -739,19 +775,19 @@ async def test_blocked_query_records_blocked(contract_with_metrics, duckdb_adapt
 
 
 @pytest.mark.asyncio
-async def test_missing_adapter_records_error_not_ok(contract_with_metrics):
+async def test_missing_adapter_records_error_not_ok(contract):
     """The regression that would certify a governed path that never ran."""
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec, adapter=None)
+    tools = _tools(contract, rec, adapter=None)
     await tools["run_query"]({"sql": "SELECT amount FROM analytics.orders WHERE tenant_id = 'acme'"})
 
     assert rec.calls[-1].outcome == "error"
 
 
 @pytest.mark.asyncio
-async def test_relative_time_window_is_recorded(contract_with_metrics, duckdb_adapter):
+async def test_relative_time_window_is_recorded(contract, adapter):
     rec = ToolRecorder()
-    tools = _tools(contract_with_metrics, rec, adapter=duckdb_adapter)
+    tools = _tools(contract, rec, adapter=adapter)
     await tools["run_query"]({
         "sql": "SELECT amount FROM analytics.orders WHERE tenant_id = 'acme' AND created_at > CURRENT_DATE - 7"
     })
@@ -943,9 +979,9 @@ def _example(**kw):
     return VerifiedExample(sql=kw.pop("sql", "SELECT 1"), **kw)
 
 
-def test_from_session_captures_the_call_log_and_cost(simple_contract):
+def test_from_session_captures_the_call_log_and_cost(contract):
     rec = ToolRecorder()
-    session = ContractSession(simple_contract, recorder=rec)
+    session = ContractSession(contract, recorder=rec)
     rec.log("run_query", {"sql": "SELECT 1"}, "ok", scalar=5.0)
     session.record_cost(0.02)
 
@@ -957,8 +993,8 @@ def test_from_session_captures_the_call_log_and_cost(simple_contract):
     assert attempt.final_text == "five"
 
 
-def test_from_session_coerces_foreign_tool_calls_to_a_list(simple_contract):
-    session = ContractSession(simple_contract, recorder=ToolRecorder())
+def test_from_session_coerces_foreign_tool_calls_to_a_list(contract):
+    session = ContractSession(contract, recorder=ToolRecorder())
     attempt = Attempt.from_session(
         _example(), session, foreign_tool_calls=("mcp__bigquery__execute_sql",)
     )
@@ -967,17 +1003,17 @@ def test_from_session_coerces_foreign_tool_calls_to_a_list(simple_contract):
     attempt.foreign_tool_calls.append("another")  # must not raise
 
 
-def test_from_session_refuses_a_reused_recorder(simple_contract):
-    session = ContractSession(simple_contract, recorder=ToolRecorder())
+def test_from_session_refuses_a_reused_recorder(contract):
+    session = ContractSession(contract, recorder=ToolRecorder())
     Attempt.from_session(_example(), session)
 
     with pytest.raises(ValueError, match="already consumed"):
         Attempt.from_session(_example(), session)
 
 
-def test_from_session_requires_a_recorder(simple_contract):
+def test_from_session_requires_a_recorder(contract):
     with pytest.raises(ValueError, match="recorder"):
-        Attempt.from_session(_example(), ContractSession(simple_contract))
+        Attempt.from_session(_example(), ContractSession(contract))
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1359,7 +1395,7 @@ from agentic_data_contracts.validation.conformance import _protocol_verdict
 
 
 def _lookup(name, seq, outcome="ok"):
-    return ToolCall(sequence=seq, tool="lookup_metric", args={"name": name}, outcome=outcome)
+    return ToolCall(sequence=seq, tool="lookup_metric", args={"metric_name": name}, outcome=outcome)
 
 
 def _protocol(example, calls=(), **kw):
@@ -1473,7 +1509,7 @@ def _protocol_verdict(attempt: Attempt, anchor: ToolCall | None) -> tuple[str, l
         return "unchecked", reasons
 
     consulted = {
-        str(c.args.get("name", ""))
+        str(c.args.get("metric_name", ""))
         for c in attempt.calls
         if c.tool == "lookup_metric" and c.outcome == "ok" and c.sequence < anchor.sequence
     }
@@ -1852,18 +1888,18 @@ def _run(contract, adapter, recorder):
 
 
 @pytest.mark.asyncio
-async def test_a_compliant_scripted_agent_passes(contract_with_metrics, duckdb_adapter):
+async def test_a_compliant_scripted_agent_passes(contract, adapter):
     example = VerifiedExample(
         sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="How many orders does acme have?",
         id="orders-count",
-        expected=3.0,
+        expected=2.0,
         expects_metrics=["total_revenue"],
     )
     rec = ToolRecorder()
-    session, tools = _run(contract_with_metrics, duckdb_adapter, rec)
+    session, tools = _run(contract, adapter, rec)
 
-    await tools["lookup_metric"]({"name": "total_revenue"})
+    await tools["lookup_metric"]({"metric_name": "total_revenue"})
     await tools["run_query"]({"sql": example.sql})
 
     report = evaluate_conformance([Attempt.from_session(example, session)])
@@ -1871,15 +1907,15 @@ async def test_a_compliant_scripted_agent_passes(contract_with_metrics, duckdb_a
 
 
 @pytest.mark.asyncio
-async def test_skipping_the_declared_lookup_is_violated(contract_with_metrics, duckdb_adapter):
+async def test_skipping_the_declared_lookup_is_violated(contract, adapter):
     example = VerifiedExample(
         sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="How many orders does acme have?",
-        expected=3.0,
+        expected=2.0,
         expects_metrics=["total_revenue"],
     )
     rec = ToolRecorder()
-    session, tools = _run(contract_with_metrics, duckdb_adapter, rec)
+    session, tools = _run(contract, adapter, rec)
 
     await tools["run_query"]({"sql": example.sql})
 
@@ -1889,10 +1925,10 @@ async def test_skipping_the_declared_lookup_is_violated(contract_with_metrics, d
 
 
 @pytest.mark.asyncio
-async def test_an_out_of_band_answer_is_contaminated(contract_with_metrics, duckdb_adapter):
-    example = VerifiedExample(sql="SELECT 1", question="q", expected=3.0)
+async def test_an_out_of_band_answer_is_contaminated(contract, adapter):
+    example = VerifiedExample(sql="SELECT 1", question="q", expected=2.0)
     rec = ToolRecorder()
-    session, _ = _run(contract_with_metrics, duckdb_adapter, rec)
+    session, _ = _run(contract, adapter, rec)
 
     report = evaluate_conformance(
         [Attempt.from_session(example, session, final_answer=3.0)]
@@ -1902,15 +1938,15 @@ async def test_an_out_of_band_answer_is_contaminated(contract_with_metrics, duck
 
 
 @pytest.mark.asyncio
-async def test_a_rerun_after_a_blocked_attempt_still_passes(contract_with_metrics, duckdb_adapter):
+async def test_a_rerun_after_a_blocked_attempt_still_passes(contract, adapter):
     """Friction is recorded; it must not fail the gate on its own."""
     example = VerifiedExample(
         sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="q",
-        expected=3.0,
+        expected=2.0,
     )
     rec = ToolRecorder()
-    session, tools = _run(contract_with_metrics, duckdb_adapter, rec)
+    session, tools = _run(contract, adapter, rec)
 
     await tools["run_query"]({"sql": "SELECT * FROM analytics.orders"})  # blocked
     await tools["run_query"]({"sql": example.sql})
@@ -1922,7 +1958,7 @@ async def test_a_rerun_after_a_blocked_attempt_still_passes(contract_with_metric
     assert any("blocked" in r for r in report.results[0].reasons)
 ```
 
-Adjust `expected=3.0` and every SQL string to the actual fixture data and contract rules. Run the query by hand against the fixture first if the row count is not obvious.
+Adjust `expected=2.0` and every SQL string to the actual fixture data and contract rules. Run the query by hand against the fixture first if the row count is not obvious.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1991,7 +2027,7 @@ HERE = Path(__file__).parent
 async def _scripted_agent(example: VerifiedExample, tools: dict) -> str:
     """Stand-in for a model: consult declared metrics, then run the query."""
     for metric in example.expects_metrics:
-        await tools["lookup_metric"]({"name": metric})
+        await tools["lookup_metric"]({"metric_name": metric})
     await tools["run_query"]({"sql": example.sql})
     return "answered"
 

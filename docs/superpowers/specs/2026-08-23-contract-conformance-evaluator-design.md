@@ -84,7 +84,10 @@ parameter, and one implementation instruments all four frameworks.** No
 contextvars, no framework choice, no signature churn.
 
 Because the harness creates a fresh session per question, per-attempt budget
-isolation, `cost_usd`, and `elapsed_seconds` come for free.
+isolation and `cost_usd` come for free. Wall-clock does **not**: the session
+timer starts in `_ensure_timer()`, reached only via `check_limits()`, which only
+`run_query` calls — so it reads `0.0` for any attempt that never ran a query.
+`ToolRecorder` therefore times itself from construction.
 
 ### The library never runs an agent
 
@@ -126,8 +129,18 @@ three. `examples.py` does not import `conformance.py`, so there is no cycle.
 The helpers are **not** extracted to a new shared module beyond the
 `_scalar_value` split described below.
 
+`ToolCall` and `ToolRecorder` live in a **new `core/recorder.py`**, not in
+`conformance.py`. `ContractSession` must reference `ToolRecorder`, and
+`conformance.py` must reference `ContractSession` for `Attempt.from_session`;
+putting the recorder in `validation/` would therefore create a hard cycle
+(`core.session` → `validation.conformance` → `validation/__init__` →
+`examples.py` → `adapters` → `core.session`). `core/recorder.py` depends on
+nothing but the standard library, which removes the cycle rather than papering
+over it with a `TYPE_CHECKING` import. Both names are re-exported from
+`validation/__init__.py` so consumers still have a single import site.
+
 `tools/factory.py` already imports from `validation/` (it uses `Validator`), so
-the recorder introduces no new dependency direction.
+the recorder introduces no new dependency direction there either.
 
 ## The closed-world requirement
 
@@ -160,7 +173,8 @@ world actually was.
 
 ## Data model
 
-Four types in `conformance.py`.
+`ToolCall` and `ToolRecorder` in `core/recorder.py`; `Attempt`,
+`ConformanceResult`, and `ConformanceReport` in `validation/conformance.py`.
 
 ### `ToolCall`
 
@@ -168,12 +182,13 @@ Four types in `conformance.py`.
 @dataclass(frozen=True)
 class ToolCall:
     sequence: int
-    tool: str                      # "lookup_metric" | "run_query" | ...
+    tool: str                        # "lookup_metric" | "run_query" | ...
     args: dict[str, Any]
-    outcome: str                   # "ok" | "miss" | "blocked" | "error"
-    detail: str | None = None      # block reason, or the fuzzy candidates returned
-    scalar: float | None = None    # run_query only, when scalar-shaped
+    outcome: str                     # "ok" | "miss" | "blocked" | "error"
+    detail: str | None = None        # block reason, or fuzzy candidates returned
+    scalar: float | None = None      # run_query only, when scalar-shaped
     row_count: int | None = None
+    relative_time: str | None = None # run_query only; see below
 ```
 
 `outcome` is the load-bearing field:
@@ -183,7 +198,47 @@ class ToolCall:
 - `miss` — a lookup did not resolve exactly: the fuzzy fallback fired, or
   nothing matched. The most direct evidence of a naming or prose gap.
 - `blocked` — validation rejected the SQL.
-- `error` — the adapter or tool raised.
+- `error` — the tool raised, **or returned an error payload without raising**.
+
+That last clause is load-bearing and is why `_error_response` gains a machine-
+readable `kind` (see [Changes to existing code](#changes-to-existing-code)).
+The tools return errors far more often than they raise them — `lookup_metric`
+returns `_error_response("No semantic source configured.")`, `run_query`
+returns `_error_response("No database adapter configured…")`, and there are
+eighteen such sites. Classifying outcome by "did it raise" would record every
+one of those as `ok`: an eval wired without a semantic source would log every
+`lookup_metric` as a successful consultation, P2 would pass, and the report
+would certify `followed` for an agent that never saw a metric definition. The
+outcome must be derived from the returned payload, not from the absence of an
+exception.
+
+`relative_time` is captured **at record time, inside `run_query`**, where the
+already-parsed statement, the contract dialect, and the `SqlNormalizer` are all
+in scope — it stores the result of `_relative_time_node` on that statement.
+This is why `evaluate_conformance` needs no `dialect` or `sql_normalizer`
+parameter and can stay pure: it reads a field rather than re-parsing agent SQL.
+Where sqlglot cannot parse the SQL at all (the Denodo/VQL path), `relative_time`
+stays `None` and the relative-time check is skipped, degrading exactly as
+`unverified` does in pass 1.
+
+### `ToolRecorder`
+
+```python
+class ToolRecorder:
+    calls: list[ToolCall]
+
+    def __init__(self) -> None: ...          # stamps a monotonic start time
+    def log(self, tool, args, outcome, **fields) -> None: ...
+    @property
+    def elapsed_seconds(self) -> float: ...
+```
+
+The recorder times itself from construction rather than reading
+`ContractSession.elapsed_seconds`. The session's timer is started by
+`_ensure_timer()`, which is reached only from `check_limits()`, which only
+`run_query` calls — so a session-derived duration reads `0.0` for precisely the
+attempts worth timing: the `contaminated` and `error` rows where the agent
+burned minutes and never reached a successful query.
 
 **The recorder never retains result rows** — only `scalar` and `row_count`. A
 conformance report is the kind of artifact that gets committed or posted as a
@@ -213,6 +268,11 @@ class Attempt:
                      final_answer=None, foreign_tool_calls=(),
                      error=None) -> Attempt: ...
 ```
+
+`from_session` coerces `foreign_tool_calls` with `list(...)`: the parameter
+accepts any iterable (its default is `()`), while the field is declared
+`list[str]`, and storing the tuple as-is would break the declared type for any
+consumer that appends to it.
 
 `from_session` snapshots `list(session.recorder.calls)`, copies `cost_usd` and
 `elapsed_seconds` off the session, and marks the recorder consumed. A second
@@ -286,7 +346,7 @@ else:
     candidates = [c.scalar for c in calls
                   if c.tool == "run_query" and c.outcome == "ok"
                   and c.scalar is not None]
-    distinct = dedupe(candidates)          # exact float equality
+    distinct = cluster(candidates)         # tolerance-based; see below
     len(distinct) == 0                     -> "none",        actual = None
     len(distinct) == 1                     -> "sole_scalar", actual = distinct[0]
     len(distinct) >  1                     -> "last_scalar", actual = candidates[-1]
@@ -294,14 +354,35 @@ else:
 scalar_candidates = len(distinct)
 ```
 
-Two details do real work:
+Three details do real work:
 
 - Non-scalar results carry `scalar = None` and never become candidates. This
   removes the "agent's last query returned a table" outlier, which would
   otherwise score a correct attempt as `error`.
-- Candidates are **deduped by value before counting**, so an agent that reruns
-  the same query after a transient failure still reports `sole_scalar`. Retries
-  are ordinary; ambiguity should mean genuinely different numbers.
+- Candidates are **clustered before counting**, so an agent that reruns the same
+  query after a transient failure still reports `sole_scalar`. Retries are
+  ordinary; ambiguity should mean genuinely different numbers.
+- Clustering is **tolerance-based**, not exact float equality: two candidates
+  are the same when `math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)` using
+  the row's own tolerances. Exact equality would let `100.0` and
+  `100.00000000000001` count as two answers and demote the row to
+  `last_scalar`, failing the `ok` gate over the precise case clustering exists
+  to absorb. `math.isclose` rather than `_compare` is deliberate: these are two
+  measurements with no privileged reference, which is the one situation
+  `_compare`'s docstring says it is *not* for.
+
+**The anchor call.** Several rules below need "the call that produced the
+answer". It is defined once, here:
+
+- `sole_scalar` / `last_scalar` → the `run_query` call whose scalar was
+  selected.
+- `declared` → the **last successful `run_query`**, if any; otherwise `None`.
+- `none` → `None`.
+
+Defining it for the `declared` case matters because that is the path this spec
+steers consumers toward for ambiguous rows (see the `ok` gate). Without it, P2's
+ordering rule and the relative-time check would be undefined on exactly those
+rows. When the anchor is `None`, both are skipped.
 
 Selecting "the last `run_query`" unconditionally was rejected: verification
 queries after the answer, drill-downs, and non-scalar tails all break it. The
@@ -316,14 +397,22 @@ Evaluated in order; first match wins.
 2. `example.expected is None` → `skipped` (a legitimate protocol-only row, not
    a failure).
 3. `actual is None` → `error`, reason `"no scalar result produced"`.
-4. The **agent's** answering SQL uses a relative time window and the row is not
-   `time_scoped` → `unassertable`. This applies `_relative_time_node` to the
-   SQL in the selected answering call's `args`. Pass 2 applies the same helper
-   to the *certified* SQL; here the SQL that matters is the agent's, because
-   that is what the certified number is being compared against. This is a case
-   pass 2 structurally cannot see.
-5. Otherwise `_compare(expected, actual, rel_tol, abs_tol)` → `match` or
+4. The anchor call's `relative_time` is set and the row is not `time_scoped`
+   → `unassertable`. Pass 2 applies `_relative_time_node` to the *certified*
+   SQL; here the SQL that matters is the agent's, because that is what the
+   certified number is being compared against — a case pass 2 structurally
+   cannot see. Skipped when there is no anchor, or when the SQL did not parse.
+5. Otherwise `_compare(actual, expected, rel_tol, abs_tol)` → `match` or
    `mismatch`.
+
+   **Argument order is load-bearing.** The signature is
+   `_compare(actual, expected, rel_tol, abs_tol)`, and it deliberately anchors
+   both `rel_diff` and the tolerance on `expected` — "within 0.1% of the
+   certified number", stable however far the query has drifted. Passing the
+   operands in the other order silently anchors on the agent's measured value:
+   with `expected=1`, `actual=100`, `rel_tol=1.0`, the correct call reports a
+   mismatch and the swapped call reports a **match**. The zero-reference guard
+   flips to the wrong operand too.
 
 ### Protocol verdict
 
@@ -336,13 +425,22 @@ This matters because in sub-project 2 these findings will drive prose edits. A
 false positive there writes wrong documentation into the contract.
 
 - **P1 — contamination.** `foreign_tool_calls` non-empty → `contaminated`. Or:
-  an answer exists (declared, or a scalar was produced) with zero successful
-  `run_query` → `contaminated`.
+  `final_answer` was declared and there is **no successful `run_query`** in the
+  attempt → `contaminated`, since that number provably came from outside the
+  governed path.
+
+  The declared branch is the only reachable one. A *derived* scalar cannot
+  coexist with zero successful `run_query` calls, because candidates are drawn
+  exclusively from `run_query` calls with `outcome == "ok"` — an earlier draft
+  of this rule included that case and it was dead by construction. An agent
+  that states a number only in prose, with no query and no declared answer, is
+  not detectable here and lands on `not_applicable` / `error` instead.
 - **P2 — metric consultation.** Applies **only** when the row sets
   `expects_metrics`. Each named metric must have a successful `lookup_metric`
-  (outcome `ok`) at a `sequence` lower than the answering `run_query`'s.
-  Missing → `violated`, with the metric named in `reasons`. When
-  `expects_metrics` is empty this rule does not run.
+  (outcome `ok`) at a `sequence` lower than the **anchor call's**. Missing →
+  `violated`, with the metric named in `reasons`. When `expects_metrics` is
+  empty this rule does not run; when it is set but there is no anchor call, the
+  ordering cannot be judged and the row is `unchecked`.
 
   Inferring whether a metric was "required" from the SQL was rejected: "how
   many rows in `orders`?" legitimately needs no metric, and any inference rule
@@ -412,7 +510,17 @@ default silently.
 1. **`core/session.py`** — `ContractSession.__init__` gains
    `recorder: ToolRecorder | None = None` and stores it. Default `None` means
    zero overhead and byte-identical behavior for every existing user.
-2. **`validation/_scalar.py`** — split the existing `_scalar` into a pure
+2. **New `core/recorder.py`** — `ToolCall` and `ToolRecorder`. Standard library
+   only, so `core/session.py` can import it at runtime without creating the
+   `core.session` ↔ `validation.conformance` cycle described in
+   [Module placement](#architecture).
+3. **`tools/factory.py` — `_error_response` gains a `kind`** (`"error"` |
+   `"blocked"`), threaded through all eighteen call sites and used by the
+   recorder to classify outcome. Mechanical, but not optional: without it the
+   recorder cannot distinguish a successful call from one that returned an
+   error payload, and every "no semantic source configured" response would be
+   logged as a successful metric consultation.
+4. **`validation/_scalar.py`** — split the existing `_scalar` into a pure
    shape-and-value rule and a thin executing wrapper:
 
    ```python
@@ -432,27 +540,34 @@ default silently.
    half honours the module’s own stated rule that these semantics have exactly
    one implementation. Existing callers (`reconcile_decomposition`,
    `check_example_answers`) keep the same signature and behavior.
-3. **`tools/factory.py`** — each of the nine tool closures gains a guarded log
+5. **`tools/factory.py`** — each of the nine tool closures gains a guarded log
    line (`if session.recorder is not None: session.recorder.log(...)`).
-   `run_query` additionally captures `row_count` and, for `scalar`, calls
+   `run_query` additionally captures `row_count`; `relative_time` from the
+   statement it already parsed for validation; and, for `scalar`, calls
    `_scalar_value` on the result it *already holds*, treating `ValueError`
    (not scalar-shaped) as `scalar = None` rather than an error — a multi-row
    answer is ordinary for `run_query` and must not be recorded as a failure.
    Lookup tools map exact hit → `ok` and fuzzy fallback / no match → `miss`;
-   validation rejection → `blocked`; adapter exceptions → `error`.
-4. **`validation/examples.py`** — `VerifiedExample` gains
+   every `_error_response` return maps by its `kind` to `blocked` or `error`;
+   raised exceptions map to `error`.
+6. **`validation/examples.py`** — `VerifiedExample` gains
    `expects_metrics: list[str] = field(default_factory=list)`, supported in
    `from_dict` and validated in `__post_init__` (must be a list of non-empty
    strings). It is independent of `expected`, so it does not participate in
    the existing orphaned-key check: a protocol-only row may set it.
-5. **New `validation/conformance.py`** — the four types plus
-   `evaluate_conformance` and `ToolRecorder`.
-6. **`validation/__init__.py`** — export `Attempt`, `ConformanceReport`,
-   `ConformanceResult`, `ToolCall`, `ToolRecorder`, `evaluate_conformance`;
-   add to `__all__` and to `tests/test_public_api.py`.
-7. **New `examples/revenue_agent/evaluate_conformance.py`** — demo alongside
+   **`_KNOWN_KEYS` must gain `"expects_metrics"`** — `from_dict` copies every
+   key not in that frozenset into `metadata`, so omitting it would leave the
+   value both set on the record and duplicated into
+   `metadata["expects_metrics"]`.
+7. **New `validation/conformance.py`** — `Attempt`, `ConformanceResult`,
+   `ConformanceReport`, and `evaluate_conformance`.
+8. **`validation/__init__.py`** — export `Attempt`, `ConformanceReport`,
+   `ConformanceResult`, `ToolCall`, `ToolRecorder`, `evaluate_conformance`
+   (the first two recorder types re-exported from `core/recorder.py`); add to
+   `__all__` and to `tests/test_public_api.py`.
+9. **New `examples/revenue_agent/evaluate_conformance.py`** — demo alongside
    the existing `verify_examples.py`.
-8. **`README.md`** — a section following "Validating a verified-examples
+10. **`README.md`** — a section following "Validating a verified-examples
    corpus", presenting the three passes as a progression.
 
 No new dependency, so no dependency-floor work.
@@ -462,7 +577,7 @@ No new dependency, so no dependency-floor work.
 | Condition | Handling |
 |---|---|
 | Agent raises or times out | Consumer catches, builds `Attempt(error=...)` → `answer="error"`, `protocol="unchecked"` → fails `ok` |
-| `ContractSessionLimitError` | Same path; `from_session` detects an exhausted budget from `session.remaining()` and appends a reason |
+| `ContractSessionLimitError` | Same path — the consumer catches it and passes `error=str(e)`. `from_session` does **not** auto-detect an exhausted budget: `Attempt` has no `reasons` field to record it on, and a budget breach after a correct answer is not necessarily a failed attempt |
 | Empty `attempts` list | `ok is False` |
 | Recorder reused across questions | `from_session` marks the recorder consumed; a second call raises `ValueError` |
 | `example.question` empty | The row cannot be evaluated. The consumer skips it; `summary()` reports the skipped count so an unevaluatable corpus is visible |
@@ -481,10 +596,21 @@ after the answer, relative-time agent SQL, and `declared` overriding
 `sole_scalar`. Pure functions; no fixtures.
 
 **Tier 2 — recorder completeness.** `tests/test_tools/`. The real failure mode
-is a *missing* log line: someone adds a tenth tool, it silently never records,
-and protocol verdicts quietly degrade. A parametrized test over the tool
-registry asserts **every** tool emits at least one `ToolCall` when a recorder
-is attached, so adding an uninstrumented tool fails CI.
+is a *missing* log line: someone adds a tenth tool or a tenth early return, it
+silently never records, and protocol verdicts quietly degrade.
+
+Two tests, because one does not cover the other:
+
+- **Per tool.** A parametrized test over the tool registry asserts every tool
+  emits at least one `ToolCall` when a recorder is attached. Catches a wholly
+  uninstrumented new tool.
+- **Per outcome path.** A parametrized test over each multi-outcome tool's
+  return paths asserts the *right* `outcome` on each. `run_query` alone has six
+  (limit exceeded, validation blocked, no adapter, execute failure, result-check
+  blocked, success), and the per-tool test above passes on the success path
+  alone — so without this second test a dropped `blocked` log line ships green,
+  which is the exact regression that silently turns `violated` rows into
+  `followed` ones.
 
 This mirrors the reasoning already recorded against `getattr(exp, ..., None)`
 in `pyproject.toml`: what the library can enforce — or here, observe — must not

@@ -214,7 +214,13 @@ exception.
 
 `relative_time` is captured **at record time, inside `run_query`**, where the
 already-parsed statement, the contract dialect, and the `SqlNormalizer` are all
-in scope — it stores the result of `_relative_time_node` on that statement.
+in scope. Concretely — worked out while planning — `Validator.validate` reports
+it as a new `ValidationResult.relative_time` field, computed from the statement
+it already parses, and `run_query` reads `vresult.relative_time`. That in turn
+requires `_relative_time_node` and `_is_clock_read` to move from `examples.py`
+to a shared private `validation/_timewindow.py`: `examples.py` imports
+`Validator`, so importing the helper back into `validator.py` would be circular.
+Same extraction pattern as `_scalar.py`.
 This is why `evaluate_conformance` needs no `dialect` or `sql_normalizer`
 parameter and can stay pure: it reads a field rather than re-parsing agent SQL.
 Where sqlglot cannot parse the SQL at all (the Denodo/VQL path), `relative_time`

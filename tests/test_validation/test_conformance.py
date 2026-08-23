@@ -8,6 +8,7 @@ from agentic_data_contracts.core.session import ContractSession
 from agentic_data_contracts.validation.conformance import (
     Attempt,
     _answer_verdict,
+    _protocol_verdict,
     _select_answer,
 )
 from agentic_data_contracts.validation.examples import VerifiedExample
@@ -158,3 +159,72 @@ def test_a_relative_window_makes_the_certified_number_unassertable():
 def test_time_scoped_rows_suppress_the_relative_window_refusal():
     calls = [_q(42.0, relative_time="CURRENT_DATE")]
     assert _verdict(_example(expected=42.0, time_scoped=True), calls=calls) == "match"
+
+
+def _lookup(name, seq, outcome="ok"):
+    return ToolCall(
+        sequence=seq, tool="lookup_metric", args={"metric_name": name}, outcome=outcome
+    )
+
+
+def _protocol(example, calls=(), **kw):
+    attempt = Attempt(example=example, calls=list(calls), **kw)
+    _, _, _, anchor = _select_answer(attempt)
+    return _protocol_verdict(attempt, anchor)[0]
+
+
+def test_a_row_activating_no_rule_is_not_applicable():
+    assert _protocol(_example(), calls=[_q(42.0)]) == "not_applicable"
+
+
+def test_a_crashed_attempt_could_not_be_judged():
+    assert _protocol(_example(), error="boom") == "unchecked"
+
+
+def test_declaring_an_answer_with_no_query_is_contaminated():
+    assert _protocol(_example(), final_answer=42.0) == "contaminated"
+
+
+def test_a_foreign_tool_call_is_contaminated():
+    assert (
+        _protocol(
+            _example(),
+            calls=[_q(42.0)],
+            foreign_tool_calls=["mcp__bigquery__execute_sql"],
+        )
+        == "contaminated"
+    )
+
+
+def test_consulting_the_declared_metric_first_is_followed():
+    calls = [_lookup("CAC", 0), _q(42.0, seq=1)]
+    assert _protocol(_example(expects_metrics=["CAC"]), calls=calls) == "followed"
+
+
+def test_querying_without_the_declared_lookup_is_violated():
+    assert _protocol(_example(expects_metrics=["CAC"]), calls=[_q(42.0)]) == "violated"
+
+
+def test_a_lookup_after_the_answer_does_not_count():
+    calls = [_q(42.0, seq=0), _lookup("CAC", 1)]
+    assert _protocol(_example(expects_metrics=["CAC"]), calls=calls) == "violated"
+
+
+def test_a_fuzzy_miss_does_not_satisfy_the_rule():
+    calls = [_lookup("CAC", 0, outcome="miss"), _q(42.0, seq=1)]
+    assert _protocol(_example(expects_metrics=["CAC"]), calls=calls) == "violated"
+
+
+def test_friction_is_recorded_without_failing():
+    calls = [
+        _lookup("CAC", 0, outcome="miss"),
+        _lookup("CAC", 1),
+        _q(None, outcome="blocked", seq=2),
+        _q(42.0, seq=3),
+    ]
+    attempt = Attempt(example=_example(expects_metrics=["CAC"]), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    status, reasons = _protocol_verdict(attempt, anchor)
+    assert status == "followed"
+    assert any("blocked" in r for r in reasons)
+    assert any("miss" in r for r in reasons)

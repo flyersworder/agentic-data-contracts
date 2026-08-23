@@ -170,3 +170,69 @@ def _answer_verdict(
         actual, attempt.example.expected, rel_tol, abs_tol
     )
     return ("match" if matched else "mismatch"), [], abs_diff, rel_diff
+
+
+def _protocol_verdict(
+    attempt: Attempt, anchor: ToolCall | None
+) -> tuple[str, list[str]]:
+    """Judge whether the agent used the governed path.
+
+    Only rules the corpus row *activated* can fail it. A row that declares
+    nothing lands on ``not_applicable``, which passes -- a guessed violation
+    here would become wrongly-rewritten contract prose downstream.
+    """
+    reasons: list[str] = []
+
+    # P3 -- friction. Recorded on every path, never fails on its own.
+    blocked = [c for c in attempt.calls if c.outcome == "blocked"]
+    if blocked:
+        reasons.append(
+            f"{len(blocked)} blocked query attempt(s) before an accepted one"
+        )
+    misses = [c for c in attempt.calls if c.outcome == "miss"]
+    for call in misses:
+        reasons.append(f"lookup miss on {call.tool}({call.args})")
+
+    if attempt.error is not None:
+        return "unchecked", reasons
+
+    successful = [
+        c for c in attempt.calls if c.tool == "run_query" and c.outcome == "ok"
+    ]
+
+    # P1 -- contamination.
+    if attempt.foreign_tool_calls:
+        reasons.append(
+            "non-contract tools were available: "
+            f"{', '.join(attempt.foreign_tool_calls)}"
+        )
+        return "contaminated", reasons
+    if attempt.final_answer is not None and not successful:
+        reasons.append(
+            "an answer was declared with no successful run_query — it came from "
+            "outside the governed path"
+        )
+        return "contaminated", reasons
+
+    # P2 -- metric consultation. Activated only by expects_metrics.
+    if not attempt.example.expects_metrics:
+        return "not_applicable", reasons
+    if anchor is None:
+        reasons.append("no answering query to order the metric lookups against")
+        return "unchecked", reasons
+
+    consulted = {
+        str(c.args.get("metric_name", ""))
+        for c in attempt.calls
+        if c.tool == "lookup_metric"
+        and c.outcome == "ok"
+        and c.sequence < anchor.sequence
+    }
+    missing = [m for m in attempt.example.expects_metrics if m not in consulted]
+    if missing:
+        reasons.append(
+            f"answered without consulting {', '.join(missing)} — "
+            "lookup_metric was never called for it before the answering query"
+        )
+        return "violated", reasons
+    return "followed", reasons

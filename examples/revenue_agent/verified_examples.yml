@@ -63,13 +63,17 @@
 
 # 7. Asserted and correct — the certified answer matches what the query
 #    returns, so the second pass reports `match`. Note the answer comes back
-#    as a DECIMAL from DuckDB; the checker coerces it to a float.
+#    as a DECIMAL from DuckDB; the checker coerces it to a float. Also the one
+#    row whose SQL is exactly the governed total_revenue definition
+#    (SUM(amount) FILTER (WHERE status = 'completed')) plus the tenant scope,
+#    so it is the row that declares `expects_metrics` for the conformance demo.
 - id: acme-completed-revenue
   question: "total completed revenue for acme"
   sql: >
     SELECT SUM(amount) FROM analytics.orders
     WHERE tenant_id = 'acme' AND status = 'completed'
   expected: 10700.00
+  expects_metrics: [total_revenue]
   type: sql
   verified_by: data-eng-finance
   last_verified: 2026-08-22

@@ -39,6 +39,7 @@ _KNOWN_KEYS = frozenset(
         "rel_tol",
         "abs_tol",
         "time_scoped",
+        "expects_metrics",
     }
 )
 
@@ -74,6 +75,9 @@ class VerifiedExample:
     ``rel_tol`` / ``abs_tol`` override the call-level tolerances for this row
     alone; ``time_scoped`` is the author's assertion that the query's time
     window is pinned, which suppresses the relative-time-window refusal.
+    ``expects_metrics`` declares which metrics an agent should have consulted
+    before querying; it is independent of ``expected``, so a protocol-only row
+    may set it.
     """
 
     sql: str
@@ -85,6 +89,7 @@ class VerifiedExample:
     rel_tol: float | None = None
     abs_tol: float | None = None
     time_scoped: bool = False
+    expects_metrics: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate the four assertion fields, however the record was built.
@@ -97,6 +102,13 @@ class VerifiedExample:
         naming the bad row. Validating here makes the invariant belong to the
         record rather than to one constructor.
         """
+        if not isinstance(self.expects_metrics, list) or any(
+            not isinstance(m, str) or not m.strip() for m in self.expects_metrics
+        ):
+            raise ValueError(
+                "'expects_metrics' must be a list of non-empty metric names, "
+                f"got {self.expects_metrics!r}"
+            )
         if not isinstance(self.time_scoped, bool):
             raise ValueError(
                 f"'time_scoped' must be a boolean, "
@@ -165,6 +177,7 @@ class VerifiedExample:
             rel_tol=raw.get("rel_tol"),
             abs_tol=raw.get("abs_tol"),
             time_scoped=raw.get("time_scoped", False),
+            expects_metrics=raw.get("expects_metrics", []),
         )
 
 

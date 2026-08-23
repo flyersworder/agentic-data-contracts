@@ -1236,3 +1236,31 @@ def test_results_preserve_report_order(contract: DataContract) -> None:
     )
     answers = check_example_answers(report, adapter=adapter)
     assert [r.example.id for r in answers.results] == ["a", "c"]
+
+
+def test_expects_metrics_defaults_to_empty() -> None:
+    assert VerifiedExample(sql="SELECT 1").expects_metrics == []
+
+
+def test_expects_metrics_round_trips_through_from_dict() -> None:
+    ex = VerifiedExample.from_dict({"sql": "SELECT 1", "expects_metrics": ["CAC"]})
+    assert ex.expects_metrics == ["CAC"]
+
+
+def test_expects_metrics_is_not_duplicated_into_metadata() -> None:
+    """_KNOWN_KEYS must list it, or from_dict copies it into metadata too."""
+    ex = VerifiedExample.from_dict({"sql": "SELECT 1", "expects_metrics": ["CAC"]})
+    assert "expects_metrics" not in ex.metadata
+
+
+def test_expects_metrics_needs_no_expected() -> None:
+    """A protocol-only row may declare it; it is not an orphaned assertion key."""
+    ex = VerifiedExample(sql="SELECT 1", expects_metrics=["CAC"])
+    assert ex.expected is None
+
+
+def test_malformed_expects_metrics_is_rejected() -> None:
+    with pytest.raises(ValueError, match="expects_metrics"):
+        VerifiedExample(sql="SELECT 1", expects_metrics="CAC")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="expects_metrics"):
+        VerifiedExample(sql="SELECT 1", expects_metrics=[""])

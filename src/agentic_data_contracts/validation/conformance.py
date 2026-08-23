@@ -13,12 +13,18 @@ agent and hands back ``Attempt`` records; every function below is pure.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentic_data_contracts.core.recorder import ToolCall
-from agentic_data_contracts.validation.examples import VerifiedExample
+from agentic_data_contracts.validation.examples import (
+    _DEFAULT_ABS_TOL,
+    _DEFAULT_REL_TOL,
+    VerifiedExample,
+    _compare,
+)
 
 if TYPE_CHECKING:
     from agentic_data_contracts.core.session import ContractSession
@@ -68,3 +74,99 @@ class Attempt:
             elapsed_seconds=session.recorder.elapsed_seconds,
             error=error,
         )
+
+
+def _tolerances(example: VerifiedExample) -> tuple[float, float]:
+    rel = _DEFAULT_REL_TOL if example.rel_tol is None else example.rel_tol
+    abs_ = _DEFAULT_ABS_TOL if example.abs_tol is None else example.abs_tol
+    return rel, abs_
+
+
+def _select_answer(
+    attempt: Attempt,
+) -> tuple[str, float | None, int, ToolCall | None]:
+    """Decide which number the agent answered with, and say how sure that is.
+
+    Returns ``(answer_source, actual, scalar_candidates, anchor)``. The *anchor*
+    is the call the ordering and relative-time rules measure against; it is
+    defined for the ``declared`` case too, because that is the path ambiguous
+    rows are steered toward.
+
+    Candidates are clustered by tolerance, not exact float equality: two
+    scalars within the row's own ``rel_tol``/``abs_tol`` of each other count
+    as the same answer, so a retried query after a transient failure does not
+    demote an otherwise-unambiguous row.
+    """
+    successful = [
+        c for c in attempt.calls if c.tool == "run_query" and c.outcome == "ok"
+    ]
+    # (call, scalar) pairs, narrowed once here so `scalar` is `float`, not
+    # `float | None`, everywhere below.
+    scalar_calls: list[tuple[ToolCall, float]] = [
+        (c, c.scalar) for c in successful if c.scalar is not None
+    ]
+
+    rel_tol, abs_tol = _tolerances(attempt.example)
+    clusters: list[tuple[ToolCall, float]] = []
+    for call, scalar in scalar_calls:
+        if not any(
+            math.isclose(scalar, seen_scalar, rel_tol=rel_tol, abs_tol=abs_tol)
+            for _, seen_scalar in clusters
+        ):
+            clusters.append((call, scalar))
+
+    if attempt.final_answer is not None:
+        anchor = successful[-1] if successful else None
+        return "declared", attempt.final_answer, len(clusters), anchor
+    if not clusters:
+        return "none", None, 0, None
+    if len(clusters) == 1:
+        call, scalar = clusters[0]
+        return "sole_scalar", scalar, 1, call
+    call, scalar = scalar_calls[-1]
+    return "last_scalar", scalar, len(clusters), call
+
+
+def _answer_verdict(
+    attempt: Attempt,
+    source: str,
+    actual: float | None,
+    anchor: ToolCall | None,
+) -> tuple[str, list[str], float | None, float | None]:
+    """Score the number ``_select_answer`` chose, in order; the first
+    condition that applies wins.
+
+    Returns ``(status, reasons, abs_diff, rel_diff)``. The diffs populate
+    ``ConformanceResult`` so a mismatch can name the threshold it missed;
+    they are ``None`` on every path that did not reach a comparison.
+    """
+    if attempt.error is not None:
+        return "error", [attempt.error], None, None
+    if attempt.example.expected is None:
+        return "skipped", [], None, None
+    if actual is None:
+        return "error", ["no scalar result produced"], None, None
+    if (
+        anchor is not None
+        and anchor.relative_time is not None
+        and not attempt.example.time_scoped
+    ):
+        return (
+            "unassertable",
+            [
+                f"agent's answering query uses a relative time window "
+                f"({anchor.relative_time}); the certified answer decays against it"
+            ],
+            None,
+            None,
+        )
+
+    rel_tol, abs_tol = _tolerances(attempt.example)
+    # Argument order is load-bearing: _compare(actual, expected, ...) anchors
+    # both rel_diff and the tolerance on `expected`, so "within X% of the
+    # CERTIFIED number" stays stable however far the query drifted. Reversed,
+    # it would anchor on whatever the agent measured instead.
+    abs_diff, rel_diff, matched = _compare(
+        actual, attempt.example.expected, rel_tol, abs_tol
+    )
+    return ("match" if matched else "mismatch"), [], abs_diff, rel_diff

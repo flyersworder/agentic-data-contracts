@@ -50,7 +50,7 @@
 
   Facts that follow from these fixtures and must not be re-guessed:
   - `create_tools(contract, adapter=adapter, semantic_source=semantic)` — the semantic source is passed **explicitly**. `valid_contract.yml` points its source at a dbt manifest path that does not resolve, so auto-loading yields "No semantic source configured."
-  - `SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'` returns **2**.
+  - `SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'` returns **2**.
   - `valid_contract.yml` blocks `SELECT *` and requires a `tenant_id` filter. Every query meant to succeed must name explicit columns and filter on `tenant_id`.
   - The metrics available are `total_revenue` and `active_customers`.
   - `created_at` is added above specifically so the relative-time path can be exercised; the repo's other test files omit it.
@@ -744,7 +744,7 @@ git commit -m "feat: record lookup and inspection tool calls"
 async def test_successful_query_records_scalar_and_row_count(contract, adapter):
     rec = ToolRecorder()
     tools = _tools(contract, rec, adapter=adapter)
-    await tools["run_query"]({"sql": "SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'"})
+    await tools["run_query"]({"sql": "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"})
 
     call = rec.calls[-1]
     assert call.outcome == "ok"
@@ -1890,7 +1890,7 @@ def _run(contract, adapter, recorder):
 @pytest.mark.asyncio
 async def test_a_compliant_scripted_agent_passes(contract, adapter):
     example = VerifiedExample(
-        sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
+        sql="SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="How many orders does acme have?",
         id="orders-count",
         expected=2.0,
@@ -1909,7 +1909,7 @@ async def test_a_compliant_scripted_agent_passes(contract, adapter):
 @pytest.mark.asyncio
 async def test_skipping_the_declared_lookup_is_violated(contract, adapter):
     example = VerifiedExample(
-        sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
+        sql="SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="How many orders does acme have?",
         expected=2.0,
         expects_metrics=["total_revenue"],
@@ -1941,7 +1941,7 @@ async def test_an_out_of_band_answer_is_contaminated(contract, adapter):
 async def test_a_rerun_after_a_blocked_attempt_still_passes(contract, adapter):
     """Friction is recorded; it must not fail the gate on its own."""
     example = VerifiedExample(
-        sql="SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme'",
+        sql="SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'",
         question="q",
         expected=2.0,
     )

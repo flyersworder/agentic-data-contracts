@@ -979,7 +979,7 @@ Each example lands in exactly one `status` — `valid` (statically contract-chec
 - **MR gate** — validate the corpus in CI *before* a human reviews it; fail on `not report.ok`, so the human is no longer the only check.
 - **Drift sweep** — re-run against a *changed* contract; `report.violations` are the examples the change just broke. With an `explain_adapter`, the live EXPLAIN also catches a dropped or renamed column that static checks can't see.
 
-It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL. Result correctness is the second pass's job, [below](#asserting-the-certified-answer-not-just-compliance). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
+It confirms an example is still *allowed, well-formed, and plannable against the current schema* — never that it still returns the right answer, because it **never executes** the SQL. Result correctness is the second pass's job, [below](#asserting-the-certified-answer-not-just-compliance); whether an agent can reach that SQL from the contract at all is the [third's](#evaluating-agent-conformance). For SQL an engine parses but sqlglot cannot (e.g. Denodo/VDP), a parse failure falls back to the engine's own planner; those pass as plannable but policy-unverified, flagged in `report.unverified_compliance`. See [`examples/revenue_agent/verify_examples.py`](examples/revenue_agent/verify_examples.py) for a runnable, DuckDB-backed demo.
 
 ### Asserting the certified answer, not just compliance
 
@@ -1039,6 +1039,95 @@ Its sibling `check_attribution(...)` scores a *reported* breakdown against the
 declared convention. Its intended caller is an **eval harness** measuring
 whether an agent follows the contract — not CI and not production, since a
 reported breakdown exists only inside a written answer.
+
+### Evaluating agent conformance
+
+Both passes above check SQL a human already got right. `validate_examples` asks whether the certified query is still *allowed and plannable*; `check_example_answers` whether it still *returns the right number*. Neither involves an agent, so neither can see the third way a contract decays. Rename a metric, trim a domain description, delete the sentence that explained which order status counts as revenue — enforcement is untouched and the certified SQL still returns `10700.00`, so both passes stay green, while an agent reading that contract can no longer find its way to the query. The contract stopped *teaching*, and nothing said so.
+
+`evaluate_conformance` is the third pass over the same corpus: can an agent reproduce the certified answer from the contract alone, through the governed path? The progression is *enforceable* → *accurate* → *teachable*, and only the last of the three degrades silently today.
+
+The library never runs your agent. You wire the agent the way you already do, give it one `ContractSession` per question with a `ToolRecorder` attached, and hand back what the session recorded:
+
+```python
+from agentic_data_contracts import DataContract
+from agentic_data_contracts.core.session import ContractSession
+from agentic_data_contracts.tools.factory import create_tools
+from agentic_data_contracts.validation import (
+    Attempt,
+    ToolRecorder,
+    VerifiedExample,
+    evaluate_conformance,
+)
+
+examples = [VerifiedExample.from_dict(row) for row in load_your_yaml()]  # you own the load step
+corpus = [ex for ex in examples if ex.question]  # a row with no question cannot be evaluated
+
+attempts = []
+for example in corpus:
+    # One recorder per row: a ToolRecorder serves exactly one attempt and
+    # refuses a second read, so two questions can never merge their call logs.
+    session = ContractSession(contract, recorder=ToolRecorder())
+    tools = {
+        t.name: t.callable
+        for t in create_tools(
+            contract, adapter=adapter, semantic_source=semantic, session=session
+        )
+    }
+
+    final_text = await your_agent_loop(example.question, tools)   # your agent, your framework
+
+    attempts.append(Attempt.from_session(example, session, final_text=final_text))
+
+report = evaluate_conformance(attempts)   # pure: no network, no database, no model
+print(report.summary())                   # markdown, ready to post as a PR comment
+```
+
+`evaluate_conformance` itself is pure and synchronous — it scores recorded `Attempt`s and nothing else. Everything expensive and nondeterministic happens in *your* loop, above the call, which is what makes the verdict logic testable without a model and reproducible from a saved run. `Attempt.from_session` also carries off `session.cost_usd` and the recorder's own elapsed time, so a run can be costed. A runnable end-to-end demo with a scripted stand-in agent (no API key, no network) is [`examples/revenue_agent/evaluate_conformance.py`](examples/revenue_agent/evaluate_conformance.py).
+
+**Two orthogonal axes, five states each.** The `answer` axis scores the number: `match`, `mismatch`, `unassertable` (the agent's answering query used a relative time window, so the certified answer decays against it), `skipped` (the row certified no `expected`), `error`. The `protocol` axis scores the path: `followed`, `violated`, `contaminated`, `not_applicable` (the row activated no protocol rule), `unchecked`. A third field, `answer_source` (`declared` / `sole_scalar` / `last_scalar` / `none`), records *how* the answered number was picked and stays separate from the verdict, so a row that matched on an ambiguously-selected `last_scalar` still reports `answer="match"` and is still excluded from `ok` — the verdict and the evidence for it are different fields.
+
+The distinction that makes the gate mean anything is between **nothing to judge** and **couldn't judge**. `skipped` and `not_applicable` *pass*: no assertion was made, no rule was activated, and there is nothing to hold against the contract. `error` and `unchecked` *fail*: something was supposed to be judged and the evaluation could not do it. Conflating those two is the classic evaluation bug — a suite reporting a serene green because every single case was quietly skipped. For the same reason `report.ok` is False on an **empty** report: a harness that stopped producing attempts fails rather than passes.
+
+**`expects_metrics` activates the protocol rule.** The metric-consultation check only judges rows that declare which metric definitions should have been consulted before answering:
+
+```yaml
+- id: acme-completed-revenue
+  question: "total completed revenue for acme"
+  sql: SELECT SUM(amount) FROM analytics.orders WHERE tenant_id = 'acme' AND status = 'completed'
+  expected: 10700.00
+  expects_metrics: [total_revenue]   # lookup_metric must precede the answering query
+```
+
+A row that names nothing lands on `not_applicable` and passes. That is deliberate, not laziness: the output of this pass is meant to be read as *evidence about the contract's prose* — a `violated` row is an argument for rewriting a definition or a domain description. A guessed violation would therefore become wrongly-rewritten contract text, which is worse than the finding never existing. The rule fires only where a human said in the corpus what the right path was.
+
+**The closed world, and the `contaminated` status.** An agent in production may hold tools this library never created — a generic SQL tool, a warehouse MCP server, a shell, a retriever. The recorder cannot see any of them, which makes "never called `lookup_metric`" ambiguous between a real prose gap and the agent simply going around the contract. The evaluator therefore assumes a **closed world**: the eval runs the agent with the contract toolset and nothing else. That is legitimate precisely because it is an eval and not production — "can an agent answer this from the contract alone?" is not a question you can ask in an open world.
+
+The requirement is enforced by **derived evidence, never by assertion**. You are not asked to promise a closed world. An answer declared with zero successful `run_query` calls proves by construction that the number came from somewhere else, and the row is marked `contaminated`. If you *do* have full framework logs, `Attempt.foreign_tool_calls` accepts the names of non-contract tools that were available; it is used only to mark a row `contaminated` and is never input to any other verdict, keeping arbitrary trace formats out of the reasoning path. The **documented limit**: an agent that used `run_query` but drew its business context from a foreign retriever leaves no detectable trace at all. These findings are trustworthy in proportion to how closed the eval world actually was.
+
+**A blocked query is not a conformance failure.** Run the demo and you will see rows whose SQL the contract rejected counted among the *passes*. That is correct, and it is the point of keeping the axes orthogonal. A row certifying no `expected` and activating no protocol rule gives pass 3 nothing to judge, whatever happened to its SQL — legality is pass 1's job, and it already failed that row there. Blocked attempts are still recorded and surface in `reasons` as friction ("1 blocked query attempt(s) before an accepted one"), which is diagnostic signal about how hard the contract was to obey, not a verdict. Each pass gates on what it can actually see, and the gate is composed:
+
+```python
+report = validate_examples(examples, contract, explain_adapter=explain_adapter)
+answers = check_example_answers(report, adapter=adapter)
+conformance = evaluate_conformance(attempts)
+
+if not (report.ok and answers.ok and conformance.ok):
+    sys.exit(1)
+```
+
+**One known limitation on the SDK and middleware paths.** `create_sdk_mcp_server` and the `contract_middleware` decorator both check the session budget *before* calling the inner tool closure, and the recorder lives inside that closure. So when a session budget is exhausted on one of those two paths, the blocked envelope is returned with **no tool call recorded at all**. The attempt's call log is then short for a reason nothing in it explains, and if you also declare a `final_answer`, the row is attributed `contaminated` — implying the agent went around the contract, when in fact it was cut off by its own budget. On those paths, pass `error=` to `Attempt.from_session` when you observe a budget block; an `error` attempt is scored `error` / `unchecked` and fails honestly instead of being mis-diagnosed.
+
+**Wiring it into CI.** Pass 3 differs in *kind* from the first two. It runs an agent: it costs money per invocation, needs a credential, takes minutes, and is **nondeterministic** — the same contract can pass and fail on consecutive runs from sampling alone. Wired as a hard all-must-match gate on every PR it will flake, and a flaky gate gets disabled, which costs you the signal entirely.
+
+| Pass | Trigger | Gate |
+|---|---|---|
+| 1 `validate_examples` | every PR | hard, all-must-pass |
+| 2 `check_example_answers` | every PR | hard, all-must-pass |
+| 3 `evaluate_conformance` | path-filtered on contract / semantic YAML changes, plus nightly | threshold over repeats via `pass_rate()`, or advisory with `summary()` posted as a PR comment |
+
+Run each question several times and `by_example()` groups the repeats — keyed on the example's `id`, falling back to its `question`, never on the positional label — so a verdict can be a *measurement* ("7 of 10 runs found the metric") rather than a single sample of a stochastic process.
+
+**Corpus readiness.** `VerifiedExample.question` has always been optional and non-load-bearing, so most existing corpora do not populate it. Adopting this pass therefore starts there: fill in `question` on the rows you want evaluated, and `expects_metrics` on the rows where the path matters. Rows without a question are skipped and counted, never treated as errors — an unevaluatable corpus stays visible instead of silently shrinking the run.
 
 ## Custom Prompt Rendering
 

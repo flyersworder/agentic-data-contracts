@@ -7,9 +7,8 @@ from sqlglot import exp
 
 from agentic_data_contracts.adapters.base import QueryResult, TableSchema
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation._timewindow import _TIME_FUNC_NAMES, _TIME_FUNCS
 from agentic_data_contracts.validation.examples import (
-    _TIME_FUNC_NAMES,
-    _TIME_FUNCS,
     ExampleAnswerReport,
     ExampleAnswerResult,
     ExampleResult,

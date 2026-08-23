@@ -20,10 +20,6 @@ import sqlglot
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation._scalar import _scalar
-from agentic_data_contracts.validation._timewindow import (
-    _TIME_FUNC_NAMES as _TIME_FUNC_NAMES,
-)
-from agentic_data_contracts.validation._timewindow import _TIME_FUNCS as _TIME_FUNCS
 from agentic_data_contracts.validation._timewindow import _relative_time_node
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.validator import ValidationResult, Validator

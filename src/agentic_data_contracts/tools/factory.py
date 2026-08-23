@@ -33,6 +33,7 @@ from agentic_data_contracts.semantic.base import (
     metrics_in_domain,
     walk_metric_impacts,
 )
+from agentic_data_contracts.validation._scalar import _scalar_value
 from agentic_data_contracts.validation.validator import Validator
 
 logger = logging.getLogger(__name__)
@@ -1079,6 +1080,25 @@ def create_tools(
     async def run_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
 
+        def _record(
+            outcome: str,
+            *,
+            detail: str | None = None,
+            scalar: float | None = None,
+            row_count: int | None = None,
+            relative_time: str | None = None,
+        ) -> None:
+            if session.recorder is not None:
+                session.recorder.log(
+                    "run_query",
+                    args,
+                    outcome,
+                    detail=detail,
+                    scalar=scalar,
+                    row_count=row_count,
+                    relative_time=relative_time,
+                )
+
         def _with_remaining(msg: str) -> str:
             return f"{msg}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
@@ -1086,10 +1106,12 @@ def create_tools(
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return _error_response(
+            response = _error_response(
                 _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
                 kind="blocked",
             )
+            _record(response["_kind"], detail=str(e))
+            return response
 
         # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
         # EXPLAIN/dry-run DB round-trip (Validator.validate ->
@@ -1101,7 +1123,13 @@ def create_tools(
             msg = "BLOCKED — Violations:\n" + "\n".join(
                 f"- {r}" for r in vresult.reasons
             )
-            return _error_response(_with_remaining(msg), kind="blocked")
+            response = _error_response(_with_remaining(msg), kind="blocked")
+            _record(
+                response["_kind"],
+                detail="; ".join(vresult.reasons),
+                relative_time=vresult.relative_time,
+            )
+            return response
 
         # Record estimated cost from EXPLAIN — charged before execution because
         # the cost budget tracks database resource consumption, not successful
@@ -1111,9 +1139,11 @@ def create_tools(
             session.record_cost(vresult.estimated_cost_usd)
 
         if adapter is None:
-            return _error_response(
+            response = _error_response(
                 "No database adapter configured — cannot execute query."
             )
+            _record(response["_kind"], detail="no database adapter configured")
+            return response
 
         try:
             # Offload the query execution — the dominant blocking call — off
@@ -1122,9 +1152,13 @@ def create_tools(
             qresult = await asyncio.to_thread(adapter.execute, sql)
         except Exception as e:  # noqa: BLE001
             session.record_retry()
-            return _error_response(
+            response = _error_response(
                 _with_remaining(f"BLOCKED — Query execution failed: {e}")
             )
+            _record(
+                response["_kind"], detail=str(e), relative_time=vresult.relative_time
+            )
+            return response
 
         # Phase 3: result checks
         rresult = validator.validate_results(
@@ -1135,7 +1169,13 @@ def create_tools(
             msg = "BLOCKED — Result check violations:\n" + "\n".join(
                 f"- {r}" for r in rresult.reasons
             )
-            return _error_response(_with_remaining(msg), kind="blocked")
+            response = _error_response(_with_remaining(msg), kind="blocked")
+            _record(
+                response["_kind"],
+                detail="; ".join(rresult.reasons),
+                relative_time=vresult.relative_time,
+            )
+            return response
 
         data = {
             "columns": qresult.columns,
@@ -1160,6 +1200,20 @@ def create_tools(
         if preamble_parts:
             response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
 
+        # scalar is computed from the result already in hand -- never
+        # re-executes the query. A ValueError here just means the answer is
+        # table-shaped (more than one column, or more than one row), which is
+        # an entirely ordinary outcome for run_query, not a failure.
+        try:
+            scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
+        except ValueError:
+            scalar = None
+        _record(
+            "ok",
+            scalar=scalar,
+            row_count=qresult.row_count,
+            relative_time=vresult.relative_time,
+        )
         return _text_response(response_text)
 
     # ── Assemble ToolDef list ─────────────────────────────────────────────────

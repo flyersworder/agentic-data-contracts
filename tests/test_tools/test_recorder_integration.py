@@ -33,9 +33,11 @@ def adapter() -> DuckDBAdapter:
         """
         CREATE SCHEMA IF NOT EXISTS analytics;
         CREATE TABLE analytics.orders (
-            id INTEGER, amount DECIMAL(10,2), tenant_id VARCHAR
+            id INTEGER, amount DECIMAL(10,2), tenant_id VARCHAR, created_at DATE
         );
-        INSERT INTO analytics.orders VALUES (1, 100.00, 'acme'), (2, 200.00, 'acme');
+        INSERT INTO analytics.orders VALUES
+            (1, 100.00, 'acme', '2026-08-01'),
+            (2, 200.00, 'acme', '2026-08-15');
         CREATE TABLE analytics.customers (id INTEGER, name VARCHAR, tenant_id VARCHAR);
         CREATE TABLE analytics.subscriptions (
             id INTEGER, plan VARCHAR, tenant_id VARCHAR
@@ -122,7 +124,6 @@ async def test_no_recorder_records_nothing_and_still_works(contract, semantic):
     assert result["content"]
 
 
-@pytest.mark.xfail(strict=True, reason="run_query is instrumented in the next task")
 @pytest.mark.asyncio
 async def test_every_tool_records_at_least_one_call(contract, adapter, semantic):
     """A wholly uninstrumented new tool must fail CI."""
@@ -360,3 +361,173 @@ async def test_inspect_query_records_ok(contract, semantic):
         {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
     )
     assert rec.calls[0].outcome == "ok"
+
+
+# ── run_query's six return paths ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_successful_query_records_scalar_and_row_count(
+    contract, adapter, semantic
+):
+    # COUNT(id), not COUNT(*): the fixture's no_select_star rule blocks any
+    # exp.Star node, and sqlglot represents COUNT(*) with one.
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"](
+        {"sql": "SELECT COUNT(id) FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+
+    call = rec.calls[-1]
+    assert call.outcome == "ok"
+    assert call.scalar is not None
+    assert call.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_row_result_records_no_scalar_but_is_still_ok(
+    contract, adapter, semantic
+):
+    """A table-shaped answer is ordinary for run_query, not a failure."""
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"](
+        {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+
+    call = rec.calls[-1]
+    assert call.outcome == "ok"
+    assert call.scalar is None
+
+
+@pytest.mark.asyncio
+async def test_blocked_query_records_blocked(contract, adapter, semantic):
+    """Query-check validation blocked (SELECT * is forbidden by the fixture)."""
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"]({"sql": "SELECT * FROM analytics.orders"})
+
+    assert rec.calls[-1].outcome == "blocked"
+    assert rec.calls[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_missing_adapter_records_error_not_ok(contract, semantic):
+    """The regression that would certify a governed path that never ran."""
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=None, semantic=semantic)
+    await tools["run_query"](
+        {"sql": "SELECT amount FROM analytics.orders WHERE tenant_id = 'acme'"}
+    )
+
+    assert rec.calls[-1].outcome == "error"
+
+
+@pytest.mark.asyncio
+async def test_relative_time_window_is_recorded(contract, adapter, semantic):
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"](
+        {
+            "sql": (
+                "SELECT amount FROM analytics.orders"
+                " WHERE tenant_id = 'acme' AND created_at > CURRENT_DATE - 7"
+            )
+        }
+    )
+
+    assert rec.calls[-1].relative_time is not None
+
+
+@pytest.mark.asyncio
+async def test_session_limit_exceeded_records_blocked(contract, adapter, semantic):
+    """Fourth call trips max_retries=3 before validation even runs."""
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    blocked_sql = "SELECT * FROM analytics.orders"
+    for _ in range(3):
+        await tools["run_query"]({"sql": blocked_sql})
+
+    await tools["run_query"]({"sql": blocked_sql})
+
+    call = rec.calls[-1]
+    assert call.outcome == "blocked"
+    assert call.detail is not None
+    assert "retries" in call.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_query_execution_error_records_error(contract, adapter, semantic):
+    """Passes the EXPLAIN dry-run (Layer 2) but fails on real execution.
+
+    An unknown column is caught by DuckDB's EXPLAIN plan already -- that
+    lands on the query-check-blocked path, not this one. A bad CAST is
+    schema-valid (the column exists and the type is legal) but only fails
+    once DuckDB tries to convert the actual runtime value, so it is a
+    genuine execution-time failure the dry-run cannot see coming.
+    """
+    rec = ToolRecorder()
+    tools = _tools(contract, rec, adapter=adapter, semantic=semantic)
+    await tools["run_query"](
+        {
+            "sql": (
+                "SELECT CAST(tenant_id AS INTEGER) FROM analytics.orders"
+                " WHERE tenant_id = 'acme'"
+            )
+        }
+    )
+
+    call = rec.calls[-1]
+    assert call.outcome == "error"
+    assert call.detail
+
+
+@pytest.mark.asyncio
+async def test_result_check_blocked_records_blocked():
+    """Result-check enforcement=block discards data and records blocked."""
+    from agentic_data_contracts.core.schema import (
+        AllowedTable,
+        DataContractSchema,
+        Enforcement,
+        ResultCheck,
+        SemanticConfig,
+        SemanticRule,
+    )
+
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["orders"]}
+                )
+            ],
+            rules=[
+                SemanticRule(
+                    name="no_negative",
+                    description="No negative amounts",
+                    enforcement=Enforcement.BLOCK,
+                    result_check=ResultCheck(column="amount", min_value=0),
+                ),
+            ],
+        ),
+    )
+    dc = DataContract(schema)
+
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        """
+        CREATE SCHEMA IF NOT EXISTS analytics;
+        CREATE TABLE analytics.orders (id INTEGER, amount DECIMAL(10,2));
+        INSERT INTO analytics.orders VALUES (1, 100.00), (2, -50.00);
+        """
+    )
+
+    rec = ToolRecorder()
+    session = ContractSession(dc, recorder=rec)
+    tools = {t.name: t.callable for t in create_tools(dc, adapter=db, session=session)}
+    await tools["run_query"]({"sql": "SELECT amount FROM analytics.orders"})
+
+    call = rec.calls[-1]
+    assert call.outcome == "blocked"
+    assert call.detail

@@ -389,3 +389,62 @@ def test_friction_wording_splits_blocks_on_both_sides():
     _, _, _, anchor = _select_answer(attempt)
     _, reasons = _protocol_verdict(attempt, anchor)
     assert any("1 before an accepted one, 1 after" in r for r in reasons)
+
+
+def test_several_successful_queries_and_no_scalar_cannot_be_anchored():
+    """With no scalar and no declared answer, *which* query answered is a
+    guess. Anchoring the last one silently lets a lookup that landed after the
+    real answering query -- but before a trailing drill-down -- read as
+    compliant, which is the one direction that must never happen: a violation
+    turning into a pass. Several candidates is `unchecked`, the same verdict
+    the sibling `sole_scalar` / `last_scalar` split already draws for scalars."""
+    calls = [
+        _q(None, seq=0, row_count=12),
+        _lookup("CAC", 1),
+        _q(None, seq=2, row_count=3),
+    ]
+    attempt = Attempt(example=_example(expects_metrics=["CAC"]), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    assert anchor is None
+    assert _protocol_verdict(attempt, anchor)[0] == "unchecked"
+
+
+def test_a_lone_successful_query_still_anchors_after_the_answer():
+    """The conservative rule must not cost the ordering rule its teeth: one
+    successful query is unambiguous, so a lookup after it is still violated."""
+    calls = [_q(None, seq=0, row_count=12), _lookup("CAC", 1)]
+    attempt = Attempt(example=_example(expects_metrics=["CAC"]), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    assert _protocol_verdict(attempt, anchor)[0] == "violated"
+
+
+def test_a_relative_drill_down_is_not_called_the_answering_query():
+    """The window that decays has to be the one that answered. A trailing
+    drill-down using a relative window, after an absolute answering query,
+    must not be reported as the reason the certified value decayed."""
+    calls = [
+        _q(None, seq=0, row_count=5),
+        _q(None, seq=1, row_count=2, relative_time="CURRENT_DATE - 7"),
+    ]
+    attempt = Attempt(example=_example(expected=4200.0), calls=calls)
+    _, actual, _, anchor = _select_answer(attempt)
+    status, reasons, _, _ = _answer_verdict(attempt, actual, anchor)
+    assert status == "error"
+    assert not any("relative time window" in r for r in reasons)
+
+
+def test_friction_measures_against_the_answering_query_not_the_last_one():
+    """P2 orders against the anchor; P3 must use the same reference or the two
+    rules disagree about which query was the answer -- and the backdating this
+    wording exists to prevent comes straight back on any attempt whose
+    answering query is followed by a later successful one."""
+    calls = [
+        _q(42.0, seq=0),
+        _q(None, outcome="blocked", seq=1),
+        _q(None, seq=2, row_count=7),
+    ]
+    attempt = Attempt(example=_example(expected=42.0), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    _, reasons = _protocol_verdict(attempt, anchor)
+    assert any("after an accepted one" in r for r in reasons)
+    assert not any("before an accepted one" in r for r in reasons)

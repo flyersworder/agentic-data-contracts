@@ -383,20 +383,36 @@ answer". It is defined once, here:
 - `sole_scalar` / `last_scalar` → the `run_query` call whose scalar was
   selected.
 - `declared` → the **last successful `run_query`**, if any; otherwise `None`.
-- `none` → the **last successful `run_query`**, if any; otherwise `None`.
+- `none` → the **sole successful `run_query`** when there is exactly one;
+  otherwise `None`.
 
 Defining it for the `declared` case matters because that is the path this spec
 steers consumers toward for ambiguous rows (see the `ok` gate). Without it, P2's
 ordering rule and the relative-time check would be undefined on exactly those
-rows. The `none` case takes the same fallback for the same reason: both rules
+rows. The `none` case takes a *narrower* fallback, for a related reason: both rules
 need a *query*, not a scalar. A protocol-only row answers "revenue by region"
 with many rows and no scalar, and a relative window that returned NULL is still
 a relative window — anchoring those on `None` reports "no answering query"
-while an answering query sits in the call log. Only an attempt with no
-successful `run_query` at all has nothing to anchor; there, both are skipped.
+while an answering query sits in the call log.
+
+But the fallback stops at **one** successful query. With several and no scalar
+and no declared answer, nothing in the record says which one answered, and
+taking the last is exactly the guess `last_scalar` exists to mark. Here there
+is no answer to grade, so the guess is refused instead: the anchor is `None`
+and both rules report `unchecked`. Grading was rejected because the unmarked
+guess fails in the one direction that must never fail — a `lookup_metric`
+landing after the real answering query but before a trailing drill-down would
+satisfy P2's ordering and turn a violation into a **pass**, and a relative
+window on a drill-down would be named as the reason a certified value decayed.
+`unchecked` fails the gate, so refusing costs a false negative, never a false
+green.
 
 Selecting "the last `run_query`" unconditionally was rejected: verification
-queries after the answer, drill-downs, and non-scalar tails all break it. The
+queries after the answer, drill-downs, and non-scalar tails all break it. That
+rejection is why `none` requires a lone candidate above. It does not bind
+`declared`, where the agent stated its answer *after* every recorded call — so
+ordering runs against the end of the attempt, and the last successful query is
+a faithful stand-in for it rather than a guess about which query answered. The
 harness cannot know which query was the answer unless someone says so, so the
 guess is graded rather than hidden.
 
@@ -471,7 +487,12 @@ false positive there writes wrong documentation into the contract.
   is derived from `sequence` order rather than from the existence of a passing
   query: blocks before the accepted query, after it, and on both sides read
   differently, because a block the agent fought through on the way in and a
-  block on a later drill-down call for different prose fixes.
+  block on a later drill-down call for different prose fixes. The reference
+  point is the **anchor**, the same call P2 orders against — not
+  `successful[-1]`, which would let the two rules disagree about which query
+  answered and reintroduce the backdating on any attempt whose answering query
+  is followed by a later successful one. With no anchor, every successful query
+  is equally a candidate and the last one is the safest reference.
 
 Resolution order: `attempt.error` set → `unchecked`. Else P1 → `contaminated`.
 Else P2 activated and failing → `violated`. Else P2 activated and passing →

@@ -2046,7 +2046,12 @@ async def main() -> int:
         session = ContractSession(contract, recorder=ToolRecorder())
         tools = {
             t.name: t.callable
-            for t in create_tools(contract, adapter=adapter, session=session)
+            for t in create_tools(
+                contract,
+                adapter=adapter,
+                session=session,
+                caller_principal=example.principal,
+            )
         }
         text = await _scripted_agent(example, tools)
         attempts.append(Attempt.from_session(example, session, final_text=text))

@@ -120,11 +120,19 @@ def _select_answer(
         anchor = successful[-1] if successful else None
         return "declared", attempt.final_answer, len(clusters), anchor
     if not clusters:
-        # No scalar, but a successful query still anchors ordering and the
-        # relative-time check: "revenue by region" answers with many rows and
-        # no scalar, and a window that returned NULL is still a window. Only
-        # an attempt with no successful run_query at all has nothing to anchor.
-        return "none", None, 0, (successful[-1] if successful else None)
+        # No scalar, but a *lone* successful query still anchors ordering and
+        # the relative-time check: "revenue by region" answers with many rows
+        # and no scalar, and a window that returned NULL is still a window.
+        #
+        # Several successful queries and no scalar is a different situation:
+        # nothing here says which one answered, and picking the last silently
+        # is the same guess `last_scalar` exists to mark. Unmarked it fails in
+        # the one direction that must never fail -- a lookup landing after the
+        # real answering query but before a trailing drill-down would read as
+        # compliant, turning a violation into a pass. So the guess is refused
+        # rather than graded (there is no answer here to grade), and both
+        # rules downstream report `unchecked`: couldn't judge, which fails.
+        return "none", None, 0, (successful[0] if len(successful) == 1 else None)
     if len(clusters) == 1:
         call, scalar = clusters[0]
         return "sole_scalar", scalar, 1, call
@@ -208,7 +216,13 @@ def _protocol_verdict(
         if not successful:
             tail = "with none accepted"
         else:
-            cut = successful[-1].sequence
+            # Measured against the anchor, not against the last successful
+            # call: P2 orders lookups against the anchor, and two rules
+            # disagreeing about which query was the answer is how the
+            # backdating this wording exists to prevent comes back. The
+            # fallback covers the anchor-less case, where every successful
+            # query is equally a candidate and the last is the safest tail.
+            cut = (anchor or successful[-1]).sequence
             before = sum(1 for c in blocked if c.sequence < cut)
             after = len(blocked) - before
             if not after:

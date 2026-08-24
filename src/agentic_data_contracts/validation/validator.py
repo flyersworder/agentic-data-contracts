@@ -16,6 +16,7 @@ from agentic_data_contracts.core.principal import (
     principal_in_scope,
     resolve_principal,
 )
+from agentic_data_contracts.validation._timewindow import _relative_time_node
 from agentic_data_contracts.validation.checkers import (
     ENFORCEABLE_OPERATIONS,
     BlockedColumnsChecker,
@@ -98,6 +99,7 @@ class ValidationResult:
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
     parse_error: bool = False
+    relative_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -311,6 +313,8 @@ class Validator:
                 parse_error=True,
             )
 
+        relative_time = _relative_time_node(ast)
+
         referenced_tables = extract_tables(ast)
 
         # Resolve once per validate() — matches TableAllowlistChecker's
@@ -394,6 +398,7 @@ class Validator:
             estimated_rows=estimated_rows,
             schema_valid=schema_valid,
             explain_errors=explain_errors,
+            relative_time=relative_time,
         )
 
     def validate_results(

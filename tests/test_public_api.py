@@ -158,3 +158,19 @@ def test_answer_checking_exports_live_in_the_validation_submodule() -> None:
         assert name not in pkg.__all__
     for sibling in ("validate_examples", "VerifiedExample", "reconcile_decomposition"):
         assert not hasattr(pkg, sibling), f"convention changed: {sibling} now at root"
+
+
+def test_conformance_names_are_exported() -> None:
+    """Conformance evaluator exports live in the validation submodule."""
+    from agentic_data_contracts import validation
+
+    for name in [
+        "Attempt",
+        "ConformanceReport",
+        "ConformanceResult",
+        "ToolCall",
+        "ToolRecorder",
+        "evaluate_conformance",
+    ]:
+        assert hasattr(validation, name), name
+        assert name in validation.__all__, name

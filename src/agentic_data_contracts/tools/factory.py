@@ -33,6 +33,7 @@ from agentic_data_contracts.semantic.base import (
     metrics_in_domain,
     walk_metric_impacts,
 )
+from agentic_data_contracts.validation._scalar import _scalar_value
 from agentic_data_contracts.validation.validator import Validator
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
-def _error_response(text: str) -> dict[str, Any]:
+def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
     ``claude_agent_sdk`` reads ``is_error`` off this dict and maps it onto MCP's
@@ -70,8 +71,19 @@ def _error_response(text: str) -> dict[str, Any]:
     Consumers that never see MCP ignore the extra key -- the LangChain and
     Pydantic AI wrappers read only ``content`` -- so this is additive on every
     path.
+
+    ``kind`` is a second, finer-grained axis alongside ``is_error``: it says
+    *why* the call didn't perform its advertised action, not just that it
+    didn't. ``"blocked"`` means the contract actively refused the action --
+    a governance decision, not a failure -- and is reserved for call sites
+    where that is genuinely what happened; a message that merely *says*
+    "BLOCKED" in its text (e.g. an adapter raising during execution) is still
+    an execution failure and keeps the default ``"error"``. Consumed by the
+    conformance recorder (a later feature), which reads ``_kind`` off the
+    envelope to classify a tool call as blocked vs. error instead of treating
+    every non-raising return as a successful call.
     """
-    return {**_text_response(text), "is_error": True}
+    return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
 def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
@@ -411,357 +423,509 @@ def create_tools(
 
     # ── Tool 1: describe_table ────────────────────────────────────────────────
     async def describe_table(args: dict[str, Any]) -> dict[str, Any]:
-        schema_name = args.get("schema", "")
-        table_name = args.get("table", "")
-        qualified = f"{schema_name}.{table_name}"
-        if qualified not in contract.allowed_table_names():
-            return _error_response(
-                f"Table {qualified} is not in the allowed tables list."
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("describe_table", args, outcome, detail=detail)
+
+        try:
+            schema_name = args.get("schema", "")
+            table_name = args.get("table", "")
+            qualified = f"{schema_name}.{table_name}"
+            if qualified not in contract.allowed_table_names():
+                response = _error_response(
+                    f"Table {qualified} is not in the allowed tables list.",
+                    kind="blocked",
+                )
+                _record(response["_kind"])
+                return response
+            principal = resolve_principal(caller_principal)
+            if qualified not in contract.allowed_table_names_for(principal):
+                response = _error_response(
+                    f"Table {qualified} is restricted"
+                    f" (caller: {_caller_label(principal)!r}).",
+                    kind="blocked",
+                )
+                _record(response["_kind"])
+                return response
+            if adapter is None:
+                response = _error_response(
+                    f"No database adapter configured — table description unavailable"
+                    f" for {qualified}."
+                )
+                _record(response["_kind"])
+                return response
+            # Offload the synchronous DB round-trip to a worker thread so a slow
+            # warehouse call cannot stall the host's asyncio event loop (and every
+            # other coroutine sharing it). The sync DatabaseAdapter contract is
+            # unchanged. See tests/test_tools/test_event_loop.py.
+            ts = await asyncio.to_thread(
+                adapter.describe_table, schema_name, table_name
             )
-        principal = resolve_principal(caller_principal)
-        if qualified not in contract.allowed_table_names_for(principal):
-            return _error_response(
-                f"Table {qualified} is restricted"
-                f" (caller: {_caller_label(principal)!r})."
-            )
-        if adapter is None:
-            return _error_response(
-                f"No database adapter configured — table description unavailable"
-                f" for {qualified}."
-            )
-        # Offload the synchronous DB round-trip to a worker thread so a slow
-        # warehouse call cannot stall the host's asyncio event loop (and every
-        # other coroutine sharing it). The sync DatabaseAdapter contract is
-        # unchanged. See tests/test_tools/test_event_loop.py.
-        ts = await asyncio.to_thread(adapter.describe_table, schema_name, table_name)
-        # Overlay authored descriptions from the semantic source onto adapter
-        # output. Semantic source wins because it is the canonical agent-facing
-        # documentation; adapter-supplied descriptions (e.g. warehouse column
-        # comments) fill in where the semantic source has no entry. Columns
-        # with no description anywhere omit the field to keep responses tight.
-        sem_descs: dict[str, str] = {}
-        if semantic_source is not None:
-            sem_ts = semantic_source.get_table_schema(schema_name, table_name)
-            if sem_ts is not None:
-                sem_descs = {
-                    c.name: c.description for c in sem_ts.columns if c.description
+            # Overlay authored descriptions from the semantic source onto adapter
+            # output. Semantic source wins because it is the canonical agent-facing
+            # documentation; adapter-supplied descriptions (e.g. warehouse column
+            # comments) fill in where the semantic source has no entry. Columns
+            # with no description anywhere omit the field to keep responses tight.
+            sem_descs: dict[str, str] = {}
+            if semantic_source is not None:
+                sem_ts = semantic_source.get_table_schema(schema_name, table_name)
+                if sem_ts is not None:
+                    sem_descs = {
+                        c.name: c.description for c in sem_ts.columns if c.description
+                    }
+            cols: list[dict[str, Any]] = []
+            for c in ts.columns:
+                col: dict[str, Any] = {
+                    "name": c.name,
+                    "type": c.type,
+                    "nullable": c.nullable,
                 }
-        cols: list[dict[str, Any]] = []
-        for c in ts.columns:
-            col: dict[str, Any] = {
-                "name": c.name,
-                "type": c.type,
-                "nullable": c.nullable,
-            }
-            desc = sem_descs.get(c.name) or c.description
-            if desc:
-                col["description"] = desc
-            cols.append(col)
-        return _text_response(
-            json.dumps({"schema": schema_name, "table": table_name, "columns": cols})
-        )
+                desc = sem_descs.get(c.name) or c.description
+                if desc:
+                    col["description"] = desc
+                cols.append(col)
+            response = _text_response(
+                json.dumps(
+                    {"schema": schema_name, "table": table_name, "columns": cols}
+                )
+            )
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 2: preview_table ─────────────────────────────────────────────────
     async def preview_table(args: dict[str, Any]) -> dict[str, Any]:
-        schema = args.get("schema", "")
-        table = args.get("table", "")
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("preview_table", args, outcome, detail=detail)
+
         try:
-            limit = max(1, min(int(args.get("limit", 5)), 100))
-        except (ValueError, TypeError):
-            limit = 5
-        qualified = f"{schema}.{table}"
-        if qualified not in contract.allowed_table_names():
-            return _error_response(
-                f"Table {qualified} is not in the allowed tables list."
-            )
-        principal = resolve_principal(caller_principal)
-        if qualified not in contract.allowed_table_names_for(principal):
-            return _error_response(
-                f"Table {qualified} is restricted"
-                f" (caller: {_caller_label(principal)!r})."
-            )
-        if adapter is None:
-            return _error_response(
-                "No database adapter configured — preview unavailable."
-            )
-
-        # preview_table honours rules that gate which DATA an in-scope caller
-        # may see — `blocked_columns` (the column itself is sensitive) and
-        # `required_filter_values` (the caller may only see a subset of rows
-        # filtered on a column). It deliberately bypasses rules that gate
-        # QUERY SHAPE the caller writes — `required_filter`, `no_select_star`,
-        # `require_limit`, `max_joins` — because preview synthesises its own
-        # SELECT *  LIMIT N and those rules guard run_query's user-supplied SQL.
-        # Mirrors Validator._is_table_in_scope + _rule_applies_to_principal;
-        # keep the table/principal predicates in sync.
-        block_msgs: list[str] = []
-        warn_msgs: list[str] = []
-        log_msgs: list[str] = []
-        for rule in contract.schema.semantic.rules:
-            qc = rule.query_check
-            if qc is None:
-                continue
-            if rule.table is not None and rule.table != "*" and rule.table != qualified:
-                continue
-            if not principal_in_scope(
-                principal, rule.allowed_principals, rule.blocked_principals
-            ):
-                continue
-
-            violations: list[str] = []
-            if qc.blocked_columns is not None:
-                violations.append(
-                    f"SELECT * exposes blocked columns {sorted(qc.blocked_columns)}"
+            schema = args.get("schema", "")
+            table = args.get("table", "")
+            try:
+                limit = max(1, min(int(args.get("limit", 5)), 100))
+            except (ValueError, TypeError):
+                limit = 5
+            qualified = f"{schema}.{table}"
+            if qualified not in contract.allowed_table_names():
+                response = _error_response(
+                    f"Table {qualified} is not in the allowed tables list.",
+                    kind="blocked",
                 )
-            rfv = qc.required_filter_values
-            if (
-                rfv is not None
-                and principal is not None
-                and (principal in rfv.values_by_principal)
-            ):
-                violations.append(
-                    f"missing required filter on '{rfv.column}'"
-                    f" (per-principal value allowlist applies)"
+                _record(response["_kind"])
+                return response
+            principal = resolve_principal(caller_principal)
+            if qualified not in contract.allowed_table_names_for(principal):
+                response = _error_response(
+                    f"Table {qualified} is restricted"
+                    f" (caller: {_caller_label(principal)!r}).",
+                    kind="blocked",
                 )
-            if not violations:
-                continue
+                _record(response["_kind"])
+                return response
+            if adapter is None:
+                response = _error_response(
+                    "No database adapter configured — preview unavailable."
+                )
+                _record(response["_kind"])
+                return response
 
-            message = f"{rule.name}: " + "; ".join(violations)
-            if rule.enforcement == "block":
-                block_msgs.append(message)
-            elif rule.enforcement == "warn":
-                warn_msgs.append(message)
-            else:
-                log_msgs.append(message)
+            # preview_table honours rules that gate which DATA an in-scope caller
+            # may see — `blocked_columns` (the column itself is sensitive) and
+            # `required_filter_values` (the caller may only see a subset of rows
+            # filtered on a column). It deliberately bypasses rules that gate
+            # QUERY SHAPE the caller writes — `required_filter`, `no_select_star`,
+            # `require_limit`, `max_joins` — because preview synthesises its own
+            # SELECT *  LIMIT N and those rules guard run_query's user-supplied SQL.
+            # Mirrors Validator._is_table_in_scope + _rule_applies_to_principal;
+            # keep the table/principal predicates in sync.
+            block_msgs: list[str] = []
+            warn_msgs: list[str] = []
+            log_msgs: list[str] = []
+            for rule in contract.schema.semantic.rules:
+                qc = rule.query_check
+                if qc is None:
+                    continue
+                if (
+                    rule.table is not None
+                    and rule.table != "*"
+                    and rule.table != qualified
+                ):
+                    continue
+                if not principal_in_scope(
+                    principal, rule.allowed_principals, rule.blocked_principals
+                ):
+                    continue
 
-        if block_msgs:
-            return _error_response(
-                f"BLOCKED — preview_table SELECT * gated for caller"
-                f" {_caller_label(principal)!r}:\n"
-                + "\n".join(f"- {m}" for m in block_msgs)
-                + "\nUse run_query with explicit columns instead."
+                violations: list[str] = []
+                if qc.blocked_columns is not None:
+                    violations.append(
+                        f"SELECT * exposes blocked columns {sorted(qc.blocked_columns)}"
+                    )
+                rfv = qc.required_filter_values
+                if (
+                    rfv is not None
+                    and principal is not None
+                    and (principal in rfv.values_by_principal)
+                ):
+                    violations.append(
+                        f"missing required filter on '{rfv.column}'"
+                        f" (per-principal value allowlist applies)"
+                    )
+                if not violations:
+                    continue
+
+                message = f"{rule.name}: " + "; ".join(violations)
+                if rule.enforcement == "block":
+                    block_msgs.append(message)
+                elif rule.enforcement == "warn":
+                    warn_msgs.append(message)
+                else:
+                    log_msgs.append(message)
+
+            if block_msgs:
+                response = _error_response(
+                    f"BLOCKED — preview_table SELECT * gated for caller"
+                    f" {_caller_label(principal)!r}:\n"
+                    + "\n".join(f"- {m}" for m in block_msgs)
+                    + "\nUse run_query with explicit columns instead.",
+                    kind="blocked",
+                )
+                _record(response["_kind"])
+                return response
+
+            # Offload the blocking DB round-trip — see describe_table above.
+            result = await asyncio.to_thread(
+                adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
             )
-
-        # Offload the blocking DB round-trip — see describe_table above.
-        result = await asyncio.to_thread(
-            adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
-        )
-        # `columns` precedes `rows`: json.dumps preserves insertion order, so
-        # the model reads the header before the values it must align to.
-        body = json.dumps(
-            {
-                "schema": schema,
-                "table": table,
-                "columns": result.columns,
-                "rows": _render_rows(result.columns, result.rows, row_format),
-            },
-            default=str,
-        )
-        # Symmetric with run_query: surface warn/log enforcement so audit
-        # trails fire on discovery previews too, not just on direct queries.
-        preamble_parts: list[str] = []
-        if warn_msgs:
-            preamble_parts.append(
-                "WARNINGS:\n" + "\n".join(f"- {m}" for m in warn_msgs)
+            # `columns` precedes `rows`: json.dumps preserves insertion order, so
+            # the model reads the header before the values it must align to.
+            body = json.dumps(
+                {
+                    "schema": schema,
+                    "table": table,
+                    "columns": result.columns,
+                    "rows": _render_rows(result.columns, result.rows, row_format),
+                },
+                default=str,
             )
-        if log_msgs:
-            preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in log_msgs))
-        if preamble_parts:
-            body = "\n\n".join(preamble_parts) + "\n\n" + body
-        return _text_response(body)
+            # Symmetric with run_query: surface warn/log enforcement so audit
+            # trails fire on discovery previews too, not just on direct queries.
+            preamble_parts: list[str] = []
+            if warn_msgs:
+                preamble_parts.append(
+                    "WARNINGS:\n" + "\n".join(f"- {m}" for m in warn_msgs)
+                )
+            if log_msgs:
+                preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in log_msgs))
+            if preamble_parts:
+                body = "\n\n".join(preamble_parts) + "\n\n" + body
+            response = _text_response(body)
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 3: list_metrics ──────────────────────────────────────────────────
     async def list_metrics(args: dict[str, Any]) -> dict[str, Any]:
-        if semantic_source is None:
-            return _error_response("No semantic source configured.")
-        metrics = semantic_source.get_metrics()
-        domain_filter = args.get("domain")
-        if domain_filter:
-            # The catalog is authoritative for which domains exist (consistent
-            # with lookup_domain and the prompt index); members are the metrics
-            # that declare the domain. An unknown domain → not found; a known
-            # domain with no declaring metric → an empty list, which is honest.
-            if contract.get_domain(domain_filter) is None:
-                available = sorted(d.name for d in contract.schema.semantic.domains)
-                return _text_response(
-                    f"Domain '{domain_filter}' not found."
-                    f" Available domains: {available}"
-                )
-            metrics = metrics_in_domain(metrics, domain_filter)
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("list_metrics", args, outcome, detail=detail)
 
-        tier_filter = args.get("tier")
-        if tier_filter:
-            metrics = [m for m in metrics if tier_filter in m.tier]
+        try:
+            if semantic_source is None:
+                response = _error_response("No semantic source configured.")
+                _record(response["_kind"])
+                return response
+            metrics = semantic_source.get_metrics()
+            domain_filter = args.get("domain")
+            if domain_filter:
+                # The catalog is authoritative for which domains exist (consistent
+                # with lookup_domain and the prompt index); members are the metrics
+                # that declare the domain. An unknown domain → not found; a known
+                # domain with no declaring metric → an empty list, which is honest.
+                if contract.get_domain(domain_filter) is None:
+                    available = sorted(d.name for d in contract.schema.semantic.domains)
+                    response = _text_response(
+                        f"Domain '{domain_filter}' not found."
+                        f" Available domains: {available}"
+                    )
+                    _record("miss", detail=domain_filter)
+                    return response
+                metrics = metrics_in_domain(metrics, domain_filter)
 
-        indicator_filter = args.get("indicator_kind")
-        if indicator_filter:
-            metrics = [m for m in metrics if m.indicator_kind == indicator_filter]
+            tier_filter = args.get("tier")
+            if tier_filter:
+                metrics = [m for m in metrics if tier_filter in m.tier]
 
-        today = date.today()
-        data: list[dict[str, Any]] = []
-        for m in metrics:
-            entry: dict[str, Any] = {
-                "name": m.name,
-                "description": m.description,
-                "source_model": m.source_model,
-            }
-            if m.tier:
-                entry["tier"] = m.tier
-            if m.indicator_kind:
-                entry["indicator_kind"] = m.indicator_kind
-            # Lean flag only — list entries are for scanning; full freshness +
-            # owners live in lookup_metric. Surface `stale` only when actually
-            # stale to avoid noise on fresh / unreviewed metrics.
-            age_days = review_age_days(m.last_reviewed, today)
-            if age_days is not None and age_days > staleness_threshold_days:
-                entry["stale"] = True
-            data.append(entry)
-        return _text_response(json.dumps({"metrics": data}))
+            indicator_filter = args.get("indicator_kind")
+            if indicator_filter:
+                metrics = [m for m in metrics if m.indicator_kind == indicator_filter]
+
+            today = date.today()
+            data: list[dict[str, Any]] = []
+            for m in metrics:
+                entry: dict[str, Any] = {
+                    "name": m.name,
+                    "description": m.description,
+                    "source_model": m.source_model,
+                }
+                if m.tier:
+                    entry["tier"] = m.tier
+                if m.indicator_kind:
+                    entry["indicator_kind"] = m.indicator_kind
+                # Lean flag only — list entries are for scanning; full freshness +
+                # owners live in lookup_metric. Surface `stale` only when actually
+                # stale to avoid noise on fresh / unreviewed metrics.
+                age_days = review_age_days(m.last_reviewed, today)
+                if age_days is not None and age_days > staleness_threshold_days:
+                    entry["stale"] = True
+                data.append(entry)
+            response = _text_response(json.dumps({"metrics": data}))
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 4: lookup_metric ─────────────────────────────────────────────────
     async def lookup_metric(args: dict[str, Any]) -> dict[str, Any]:
-        metric_name = args.get("metric_name", "")
-        if semantic_source is None:
-            return _error_response("No semantic source configured.")
-        today = date.today()
-        # Try exact match first
-        metric = semantic_source.get_metric(metric_name)
-        if metric is not None:
-            return _text_response(
-                json.dumps(
-                    _metric_details(
-                        metric,
-                        _impact_index,
-                        today=today,
-                        threshold_days=staleness_threshold_days,
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("lookup_metric", args, outcome, detail=detail)
+
+        try:
+            metric_name = args.get("metric_name", "")
+            if semantic_source is None:
+                response = _error_response("No semantic source configured.")
+                _record(response["_kind"])
+                return response
+            today = date.today()
+            # Try exact match first
+            metric = semantic_source.get_metric(metric_name)
+            if metric is not None:
+                response = _text_response(
+                    json.dumps(
+                        _metric_details(
+                            metric,
+                            _impact_index,
+                            today=today,
+                            threshold_days=staleness_threshold_days,
+                        )
                     )
                 )
+                _record("ok")
+                return response
+            # Fuzzy fallback
+            candidates = semantic_source.search_metrics(metric_name)
+            if not candidates:
+                response = _text_response(f"Metric '{metric_name}' not found.")
+                _record("miss", detail=metric_name)
+                return response
+            data = [
+                _metric_details(
+                    m,
+                    _impact_index,
+                    today=today,
+                    threshold_days=staleness_threshold_days,
+                )
+                for m in candidates
+            ]
+            response = _text_response(
+                json.dumps(
+                    {
+                        "query": metric_name,
+                        "exact_match": False,
+                        "candidates": data,
+                    }
+                )
             )
-        # Fuzzy fallback
-        candidates = semantic_source.search_metrics(metric_name)
-        if not candidates:
-            return _text_response(f"Metric '{metric_name}' not found.")
-        data = [
-            _metric_details(
-                m,
-                _impact_index,
-                today=today,
-                threshold_days=staleness_threshold_days,
-            )
-            for m in candidates
-        ]
-        return _text_response(
-            json.dumps(
-                {
-                    "query": metric_name,
-                    "exact_match": False,
-                    "candidates": data,
-                }
-            )
-        )
+            _record("miss", detail=", ".join(m.name for m in candidates))
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 5: lookup_domain ───────────────────────────────────────────
     async def lookup_domain(args: dict[str, Any]) -> dict[str, Any]:
-        name = args.get("name", "")
-        today = date.today()
-        domain = contract.get_domain(name)
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("lookup_domain", args, outcome, detail=detail)
 
-        if domain is not None:
-            # Members are reverse-looked-up from metric.domains (metric-first).
-            # Without a semantic source there are no metrics to look up, so the
-            # member list is empty — membership lives on the metric, not here.
-            if semantic_source is not None:
-                metric_data: list[Any] = [
-                    {"name": m.name, "description": m.description}
-                    for m in metrics_in_domain(
-                        semantic_source.get_metrics(), domain.name
+        try:
+            name = args.get("name", "")
+            today = date.today()
+            domain = contract.get_domain(name)
+
+            if domain is not None:
+                # Members are reverse-looked-up from metric.domains (metric-first).
+                # Without a semantic source there are no metrics to look up, so the
+                # member list is empty — membership lives on the metric, not here.
+                if semantic_source is not None:
+                    metric_data: list[Any] = [
+                        {"name": m.name, "description": m.description}
+                        for m in metrics_in_domain(
+                            semantic_source.get_metrics(), domain.name
+                        )
+                    ]
+                else:
+                    metric_data = []
+
+                data: dict[str, Any] = {
+                    "name": domain.name,
+                    "summary": domain.summary,
+                    "description": domain.description,
+                    "metrics": metric_data,
+                }
+                if domain.tables:
+                    data["tables"] = domain.tables
+                data.update(
+                    owner_context(domain.business_owner, domain.operational_owner)
+                )
+                data.update(
+                    _freshness_fields(
+                        domain.last_reviewed, today, staleness_threshold_days
                     )
-                ]
-            else:
-                metric_data = []
+                )
+                response = _text_response(json.dumps(data))
+                _record("ok")
+                return response
 
-            data: dict[str, Any] = {
-                "name": domain.name,
-                "summary": domain.summary,
-                "description": domain.description,
-                "metrics": metric_data,
-            }
-            if domain.tables:
-                data["tables"] = domain.tables
-            data.update(owner_context(domain.business_owner, domain.operational_owner))
-            data.update(
-                _freshness_fields(domain.last_reviewed, today, staleness_threshold_days)
+            # Fuzzy fallback over domain names
+            all_domains = contract.schema.semantic.domains
+            if not all_domains:
+                response = _text_response(
+                    f"Domain '{name}' not found. No domains defined."
+                )
+                _record("miss", detail=name)
+                return response
+
+            from thefuzz import fuzz, process
+
+            choices = {d.name: d.name for d in all_domains}
+            results = process.extractBests(
+                name,
+                choices,
+                scorer=fuzz.token_set_ratio,
+                score_cutoff=50,
+                limit=3,
             )
-            return _text_response(json.dumps(data))
+            if not results:
+                # Stays a success, unlike trace_metric_impacts' `direction must be
+                # ...` which is an _error_response. The boundary: a domain name is
+                # *data* the caller was searching for, so "not found" is the answer
+                # to the question asked (and this branch is reached only after fuzzy
+                # search, so the reply carries suggestions). An invalid enum is
+                # *schema* — the argument was never callable.
+                available = sorted(d.name for d in all_domains)
+                response = _text_response(
+                    f"Domain '{name}' not found. Available domains: {available}"
+                )
+                _record("miss", detail=name)
+                return response
 
-        # Fuzzy fallback over domain names
-        all_domains = contract.schema.semantic.domains
-        if not all_domains:
-            return _text_response(f"Domain '{name}' not found. No domains defined.")
-
-        from thefuzz import fuzz, process
-
-        choices = {d.name: d.name for d in all_domains}
-        results = process.extractBests(
-            name,
-            choices,
-            scorer=fuzz.token_set_ratio,
-            score_cutoff=50,
-            limit=3,
-        )
-        if not results:
-            # Stays a success, unlike trace_metric_impacts' `direction must be
-            # ...` which is an _error_response. The boundary: a domain name is
-            # *data* the caller was searching for, so "not found" is the answer
-            # to the question asked (and this branch is reached only after fuzzy
-            # search, so the reply carries suggestions). An invalid enum is
-            # *schema* — the argument was never callable.
-            available = sorted(d.name for d in all_domains)
-            return _text_response(
-                f"Domain '{name}' not found. Available domains: {available}"
+            # Count members per domain in one pass, rather than re-scanning per
+            # fuzzy candidate.
+            domain_counts = domain_metric_counts(
+                semantic_source.get_metrics() if semantic_source is not None else []
             )
-
-        # Count members per domain in one pass, rather than re-scanning per
-        # fuzzy candidate.
-        domain_counts = domain_metric_counts(
-            semantic_source.get_metrics() if semantic_source is not None else []
-        )
-        candidates = []
-        for _, _, key in results:
-            d = contract.get_domain(key)
-            if d is not None:
-                candidates.append(
+            candidates = []
+            candidate_names: list[str] = []
+            for _, _, key in results:
+                d = contract.get_domain(key)
+                if d is not None:
+                    candidates.append(
+                        {
+                            "name": d.name,
+                            "summary": d.summary,
+                            "metric_count": domain_counts[d.name],
+                        }
+                    )
+                    candidate_names.append(d.name)
+            response = _text_response(
+                json.dumps(
                     {
-                        "name": d.name,
-                        "summary": d.summary,
-                        "metric_count": domain_counts[d.name],
+                        "query": name,
+                        "exact_match": False,
+                        "candidates": candidates,
                     }
                 )
-        return _text_response(
-            json.dumps(
-                {
-                    "query": name,
-                    "exact_match": False,
-                    "candidates": candidates,
-                }
             )
-        )
+            _record("miss", detail=", ".join(candidate_names))
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 6: lookup_relationships ────────────────────────────────────────
     async def lookup_relationships(args: dict[str, Any]) -> dict[str, Any]:
-        table = args.get("table", "")
-        target_table = args.get("target_table")
-        if semantic_source is None:
-            return _error_response("No semantic source configured.")
-
-        if target_table:
-            # Graph walk: find join path between two tables
-            path = find_join_path(_rel_index, table, target_table)
-            if path is None:
-                return _text_response(
-                    f"No join path found between '{table}' and '{target_table}'"
-                    " within 3 hops."
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log(
+                    "lookup_relationships", args, outcome, detail=detail
                 )
+
+        try:
+            table = args.get("table", "")
+            target_table = args.get("target_table")
+            if semantic_source is None:
+                response = _error_response("No semantic source configured.")
+                _record(response["_kind"])
+                return response
+
+            if target_table:
+                # Graph walk: find join path between two tables
+                path = find_join_path(_rel_index, table, target_table)
+                if path is None:
+                    # Not a name-resolution miss (see list_metrics/lookup_metric/
+                    # lookup_domain/trace_metric_impacts) — the tables named are
+                    # real, there is simply no path between them within 3 hops.
+                    # The call answered the question asked, so this is "ok".
+                    response = _text_response(
+                        f"No join path found between '{table}' and '{target_table}'"
+                        " within 3 hops."
+                    )
+                    _record("ok")
+                    return response
+                data = [
+                    {
+                        "from": r.from_,
+                        "to": r.to,
+                        "type": r.type,
+                        "description": r.description,
+                        **(
+                            {"required_filter": r.required_filter}
+                            if r.required_filter
+                            else {}
+                        ),
+                        **({"preferred": True} if r.preferred else {}),
+                    }
+                    for r in path
+                ]
+                response = _text_response(
+                    json.dumps(
+                        {
+                            "table": table,
+                            "target_table": target_table,
+                            "join_path": data,
+                            "hops": len(data),
+                        }
+                    )
+                )
+                _record("ok")
+                return response
+
+            # Direct lookup: all relationships involving this table
+            rels = semantic_source.get_relationships_for_table(table)
+            if not rels:
+                response = _text_response(
+                    f"No relationships found for table '{table}'."
+                )
+                _record("ok")
+                return response
             data = [
                 {
                     "from": r.from_,
@@ -775,214 +939,296 @@ def create_tools(
                     ),
                     **({"preferred": True} if r.preferred else {}),
                 }
-                for r in path
+                for r in rels
             ]
-            return _text_response(
-                json.dumps(
-                    {
-                        "table": table,
-                        "target_table": target_table,
-                        "join_path": data,
-                        "hops": len(data),
-                    }
-                )
+            response = _text_response(
+                json.dumps({"table": table, "relationships": data})
             )
-
-        # Direct lookup: all relationships involving this table
-        rels = semantic_source.get_relationships_for_table(table)
-        if not rels:
-            return _text_response(f"No relationships found for table '{table}'.")
-        data = [
-            {
-                "from": r.from_,
-                "to": r.to,
-                "type": r.type,
-                "description": r.description,
-                **({"required_filter": r.required_filter} if r.required_filter else {}),
-                **({"preferred": True} if r.preferred else {}),
-            }
-            for r in rels
-        ]
-        return _text_response(json.dumps({"table": table, "relationships": data}))
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 7: trace_metric_impacts ──────────────────────────────────────────
     async def trace_metric_impacts(args: dict[str, Any]) -> dict[str, Any]:
-        metric_name = args.get("metric_name", "")
-        direction = args.get("direction", "upstream")
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log(
+                    "trace_metric_impacts", args, outcome, detail=detail
+                )
+
         try:
-            max_depth = max(1, min(int(args.get("max_depth", 2)), 10))
-        except (ValueError, TypeError):
-            max_depth = 2
+            metric_name = args.get("metric_name", "")
+            direction = args.get("direction", "upstream")
+            try:
+                max_depth = max(1, min(int(args.get("max_depth", 2)), 10))
+            except (ValueError, TypeError):
+                max_depth = 2
 
-        if direction not in ("upstream", "downstream"):
-            return _error_response(
-                f"direction must be 'upstream' or 'downstream', got {direction!r}."
+            if direction not in ("upstream", "downstream"):
+                response = _error_response(
+                    f"direction must be 'upstream' or 'downstream', got {direction!r}."
+                )
+                _record(response["_kind"])
+                return response
+            if semantic_source is None:
+                response = _error_response("No semantic source configured.")
+                _record(response["_kind"])
+                return response
+            if semantic_source.get_metric(metric_name) is None:
+                response = _text_response(f"Metric '{metric_name}' not found.")
+                _record("miss", detail=metric_name)
+                return response
+
+            kinds = args.get("kinds", "all")
+            if kinds not in ("all", "identity", "influence"):
+                response = _error_response(
+                    f"kinds must be 'all', 'identity', or 'influence', got {kinds!r}."
+                )
+                _record(response["_kind"])
+                return response
+            graph_edges: list[MetricEdge] = []
+            if kinds in ("all", "influence"):
+                graph_edges.extend(_metric_impacts)
+            if kinds in ("all", "identity"):
+                graph_edges.extend(_identity_edges)
+            graph_index = build_metric_impact_index(graph_edges)
+
+            walk = walk_metric_impacts(
+                graph_index, metric_name, direction=direction, max_depth=max_depth
             )
-        if semantic_source is None:
-            return _error_response("No semantic source configured.")
-        if semantic_source.get_metric(metric_name) is None:
-            return _text_response(f"Metric '{metric_name}' not found.")
-
-        kinds = args.get("kinds", "all")
-        if kinds not in ("all", "identity", "influence"):
-            return _error_response(
-                f"kinds must be 'all', 'identity', or 'influence', got {kinds!r}."
-            )
-        graph_edges: list[MetricEdge] = []
-        if kinds in ("all", "influence"):
-            graph_edges.extend(_metric_impacts)
-        if kinds in ("all", "identity"):
-            graph_edges.extend(_identity_edges)
-        graph_index = build_metric_impact_index(graph_edges)
-
-        walk = walk_metric_impacts(
-            graph_index, metric_name, direction=direction, max_depth=max_depth
-        )
-        edges: list[dict[str, Any]] = []
-        for depth, edge in walk:
-            entry: dict[str, Any] = {
-                "depth": depth,
-                "from": edge.from_metric,
-                "to": edge.to_metric,
-                "kind": edge.kind,
-            }
-            if isinstance(edge, IdentityEdge):
-                entry["operator"] = edge.operator
-                # The convention rides here too: an agent following this tool's
-                # own root-cause guidance ("walk 'identity' first") may never
-                # call lookup_metric, and the operator alone does not say where
-                # the cross term goes.
-                if edge.convention is not None:
-                    entry["convention"] = edge.convention
-                if edge.convention_operand is not None:
-                    entry["convention_operand"] = edge.convention_operand
-            else:
-                entry["direction"] = edge.direction
-                entry["confidence"] = edge.confidence
-                if edge.evidence:
-                    entry["evidence"] = edge.evidence
-                if edge.description:
-                    entry["description"] = edge.description
-            edges.append(entry)
-        return _text_response(
-            json.dumps(
-                {
-                    "metric_name": metric_name,
-                    "direction": direction,
-                    "max_depth": max_depth,
-                    "edges": edges,
+            edges: list[dict[str, Any]] = []
+            for depth, edge in walk:
+                entry: dict[str, Any] = {
+                    "depth": depth,
+                    "from": edge.from_metric,
+                    "to": edge.to_metric,
+                    "kind": edge.kind,
                 }
+                if isinstance(edge, IdentityEdge):
+                    entry["operator"] = edge.operator
+                    # The convention rides here too: an agent following this tool's
+                    # own root-cause guidance ("walk 'identity' first") may never
+                    # call lookup_metric, and the operator alone does not say where
+                    # the cross term goes.
+                    if edge.convention is not None:
+                        entry["convention"] = edge.convention
+                    if edge.convention_operand is not None:
+                        entry["convention_operand"] = edge.convention_operand
+                else:
+                    entry["direction"] = edge.direction
+                    entry["confidence"] = edge.confidence
+                    if edge.evidence:
+                        entry["evidence"] = edge.evidence
+                    if edge.description:
+                        entry["description"] = edge.description
+                edges.append(entry)
+            response = _text_response(
+                json.dumps(
+                    {
+                        "metric_name": metric_name,
+                        "direction": direction,
+                        "max_depth": max_depth,
+                        "edges": edges,
+                    }
+                )
             )
-        )
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 8: inspect_query ─────────────────────────────────────────────────
     async def inspect_query(args: dict[str, Any]) -> dict[str, Any]:
-        sql = args.get("sql", "")
-        # validate() runs a synchronous EXPLAIN/dry-run round-trip to the DB
-        # (Validator.validate -> explain_adapter.explain) when an explain
-        # adapter is configured, so offload it to a worker thread to keep the
-        # event loop responsive.
-        result = await asyncio.to_thread(validator.validate, sql)
-        data: dict[str, Any] = {
-            "valid": not result.blocked,
-            "violations": list(result.reasons),
-            "warnings": list(result.warnings),
-            "log_messages": list(result.log_messages),
-            "schema_valid": result.schema_valid,
-            "explain_errors": list(result.explain_errors),
-            "pending_result_checks": list(validator.pending_result_check_names()),
-        }
-        if result.estimated_cost_usd is not None:
-            data["estimated_cost_usd"] = result.estimated_cost_usd
-        if result.estimated_rows is not None:
-            data["estimated_rows"] = result.estimated_rows
-        return _text_response(json.dumps(data, default=str))
+        def _record(outcome: str, *, detail: str | None = None) -> None:
+            if session.recorder is not None:
+                session.recorder.log("inspect_query", args, outcome, detail=detail)
+
+        try:
+            sql = args.get("sql", "")
+            # validate() runs a synchronous EXPLAIN/dry-run round-trip to the DB
+            # (Validator.validate -> explain_adapter.explain) when an explain
+            # adapter is configured, so offload it to a worker thread to keep the
+            # event loop responsive.
+            result = await asyncio.to_thread(validator.validate, sql)
+            data: dict[str, Any] = {
+                "valid": not result.blocked,
+                "violations": list(result.reasons),
+                "warnings": list(result.warnings),
+                "log_messages": list(result.log_messages),
+                "schema_valid": result.schema_valid,
+                "explain_errors": list(result.explain_errors),
+                "pending_result_checks": list(validator.pending_result_check_names()),
+            }
+            if result.estimated_cost_usd is not None:
+                data["estimated_cost_usd"] = result.estimated_cost_usd
+            if result.estimated_rows is not None:
+                data["estimated_rows"] = result.estimated_rows
+            # inspect_query executes nothing — reporting that a query WOULD be
+            # blocked is still a completed inspection, not a governance block
+            # of this call, so this is "ok" even when result.blocked is True.
+            response = _text_response(json.dumps(data, default=str))
+            _record("ok")
+            return response
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Tool 9: run_query ─────────────────────────────────────────────────────
     async def run_query(args: dict[str, Any]) -> dict[str, Any]:
         sql = args.get("sql", "")
 
+        def _record(
+            outcome: str,
+            *,
+            detail: str | None = None,
+            scalar: float | None = None,
+            row_count: int | None = None,
+            relative_time: str | None = None,
+        ) -> None:
+            if session.recorder is not None:
+                session.recorder.log(
+                    "run_query",
+                    args,
+                    outcome,
+                    detail=detail,
+                    scalar=scalar,
+                    row_count=row_count,
+                    relative_time=relative_time,
+                )
+
         def _with_remaining(msg: str) -> str:
             return f"{msg}\nRemaining: {json.dumps(session.remaining(), default=str)}"
 
-        # Check session limits first
         try:
-            session.check_limits()
-        except LimitExceededError as e:
-            return _error_response(
-                _with_remaining(f"BLOCKED — Session limit exceeded: {e}")
+            # Check session limits first
+            try:
+                session.check_limits()
+            except LimitExceededError as e:
+                response = _error_response(
+                    _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
+                    kind="blocked",
+                )
+                _record(response["_kind"], detail=str(e))
+                return response
+
+            # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
+            # EXPLAIN/dry-run DB round-trip (Validator.validate ->
+            # explain_adapter.explain), so offload it to a worker thread to avoid
+            # blocking the event loop.
+            vresult = await asyncio.to_thread(validator.validate, sql)
+            if vresult.blocked:
+                session.record_retry()
+                msg = "BLOCKED — Violations:\n" + "\n".join(
+                    f"- {r}" for r in vresult.reasons
+                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
+                _record(
+                    response["_kind"],
+                    detail="; ".join(vresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
+
+            # Record estimated cost from EXPLAIN — charged before execution because
+            # the cost budget tracks database resource consumption, not successful
+            # operations. Even if result checks later block the output, the database
+            # work was performed.
+            if vresult.estimated_cost_usd is not None:
+                session.record_cost(vresult.estimated_cost_usd)
+
+            if adapter is None:
+                response = _error_response(
+                    "No database adapter configured — cannot execute query."
+                )
+                _record(response["_kind"], detail="no database adapter configured")
+                return response
+
+            try:
+                # Offload the query execution — the dominant blocking call — off
+                # the event loop. Concurrent DB work stays bounded by the adapter's
+                # own connection pool, not the thread pool.
+                qresult = await asyncio.to_thread(adapter.execute, sql)
+            except Exception as e:  # noqa: BLE001
+                session.record_retry()
+                response = _error_response(
+                    _with_remaining(f"BLOCKED — Query execution failed: {e}")
+                )
+                _record(
+                    response["_kind"],
+                    detail=str(e),
+                    relative_time=vresult.relative_time,
+                )
+                return response
+
+            # Phase 3: result checks
+            rresult = validator.validate_results(
+                sql, qresult.columns, [tuple(r) for r in qresult.rows]
             )
+            if rresult.blocked:
+                session.record_retry()
+                msg = "BLOCKED — Result check violations:\n" + "\n".join(
+                    f"- {r}" for r in rresult.reasons
+                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
+                _record(
+                    response["_kind"],
+                    detail="; ".join(rresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
 
-        # Phase 1 + 2: query checks + EXPLAIN. validate() makes a synchronous
-        # EXPLAIN/dry-run DB round-trip (Validator.validate ->
-        # explain_adapter.explain), so offload it to a worker thread to avoid
-        # blocking the event loop.
-        vresult = await asyncio.to_thread(validator.validate, sql)
-        if vresult.blocked:
-            session.record_retry()
-            msg = "BLOCKED — Violations:\n" + "\n".join(
-                f"- {r}" for r in vresult.reasons
+            data = {
+                "columns": qresult.columns,
+                "rows": _render_rows(qresult.columns, qresult.rows, row_format),
+                "row_count": qresult.row_count,
+                "session": {"remaining": session.remaining()},
+            }
+            response_text = json.dumps(data, default=str)
+
+            # Prepend warnings and log-enforcement messages from both query checks
+            # and result checks. log_messages surface rules with enforcement=log
+            # that triggered during validation — symmetric with inspect_query.
+            all_warnings = vresult.warnings + rresult.warnings
+            all_logs = vresult.log_messages + rresult.log_messages
+            preamble_parts: list[str] = []
+            if all_warnings:
+                preamble_parts.append(
+                    "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
+                )
+            if all_logs:
+                preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in all_logs))
+            if preamble_parts:
+                response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
+
+            # scalar is computed from the result already in hand -- never
+            # re-executes the query. Unlike _scalar_value's other two callers,
+            # which only ever run it on SQL a corpus author designated as a
+            # numeric metric, this call runs on every successful run_query result
+            # that happens to be one-column-by-one-row -- arbitrary agent SQL, so
+            # a DATE/TIMESTAMP/bytes value is entirely routine here. ValueError is
+            # the shape check (wrong column/row count); TypeError is float()
+            # rejecting a non-numeric value (e.g. a date). Both mean "not
+            # scalar-shaped for our purposes," not a failure -- catch exactly
+            # those two documented cases and nothing broader, so a genuinely
+            # unexpected exception from an exotic adapter type still surfaces
+            # loudly instead of being swallowed here.
+            try:
+                scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
+            except (ValueError, TypeError):
+                scalar = None
+            _record(
+                "ok",
+                scalar=scalar,
+                row_count=qresult.row_count,
+                relative_time=vresult.relative_time,
             )
-            return _error_response(_with_remaining(msg))
-
-        # Record estimated cost from EXPLAIN — charged before execution because
-        # the cost budget tracks database resource consumption, not successful
-        # operations. Even if result checks later block the output, the database
-        # work was performed.
-        if vresult.estimated_cost_usd is not None:
-            session.record_cost(vresult.estimated_cost_usd)
-
-        if adapter is None:
-            return _error_response(
-                "No database adapter configured — cannot execute query."
-            )
-
-        try:
-            # Offload the query execution — the dominant blocking call — off
-            # the event loop. Concurrent DB work stays bounded by the adapter's
-            # own connection pool, not the thread pool.
-            qresult = await asyncio.to_thread(adapter.execute, sql)
-        except Exception as e:  # noqa: BLE001
-            session.record_retry()
-            return _error_response(
-                _with_remaining(f"BLOCKED — Query execution failed: {e}")
-            )
-
-        # Phase 3: result checks
-        rresult = validator.validate_results(
-            sql, qresult.columns, [tuple(r) for r in qresult.rows]
-        )
-        if rresult.blocked:
-            session.record_retry()
-            msg = "BLOCKED — Result check violations:\n" + "\n".join(
-                f"- {r}" for r in rresult.reasons
-            )
-            return _error_response(_with_remaining(msg))
-
-        data = {
-            "columns": qresult.columns,
-            "rows": _render_rows(qresult.columns, qresult.rows, row_format),
-            "row_count": qresult.row_count,
-            "session": {"remaining": session.remaining()},
-        }
-        response_text = json.dumps(data, default=str)
-
-        # Prepend warnings and log-enforcement messages from both query checks
-        # and result checks. log_messages surface rules with enforcement=log
-        # that triggered during validation — symmetric with inspect_query.
-        all_warnings = vresult.warnings + rresult.warnings
-        all_logs = vresult.log_messages + rresult.log_messages
-        preamble_parts: list[str] = []
-        if all_warnings:
-            preamble_parts.append(
-                "WARNINGS:\n" + "\n".join(f"- {w}" for w in all_warnings)
-            )
-        if all_logs:
-            preamble_parts.append("LOG:\n" + "\n".join(f"- {m}" for m in all_logs))
-        if preamble_parts:
-            response_text = "\n\n".join(preamble_parts) + "\n\n" + response_text
-
-        return _text_response(response_text)
+            return _text_response(response_text)
+        except Exception as e:
+            _record("error", detail=str(e))
+            raise
 
     # ── Assemble ToolDef list ─────────────────────────────────────────────────
     return [

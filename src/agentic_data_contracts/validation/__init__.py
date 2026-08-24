@@ -1,3 +1,4 @@
+from agentic_data_contracts.core.recorder import ToolCall, ToolRecorder
 from agentic_data_contracts.validation.attribution import (
     INTERACTION_KEY,
     AttributionResult,
@@ -17,6 +18,12 @@ from agentic_data_contracts.validation.checkers import (
     ResultCheckRunner,
     TableAllowlistChecker,
     extract_tables,
+)
+from agentic_data_contracts.validation.conformance import (
+    Attempt,
+    ConformanceReport,
+    ConformanceResult,
+    evaluate_conformance,
 )
 from agentic_data_contracts.validation.examples import (
     ExampleAnswerReport,
@@ -39,10 +46,13 @@ from agentic_data_contracts.validation.validator import (
 )
 
 __all__ = [
+    "Attempt",
     "AttributionResult",
     "BlockedColumnsChecker",
     "CheckResult",
     "Checker",
+    "ConformanceReport",
+    "ConformanceResult",
     "ExampleAnswerReport",
     "ExampleAnswerResult",
     "ExampleResult",
@@ -60,12 +70,15 @@ __all__ = [
     "RequireLimitChecker",
     "ResultCheckRunner",
     "TableAllowlistChecker",
+    "ToolCall",
+    "ToolRecorder",
     "ValidationResult",
     "Validator",
     "VerifiedExample",
     "attribute_change",
     "check_attribution",
     "check_example_answers",
+    "evaluate_conformance",
     "extract_tables",
     "reconcile_decomposition",
     "validate_examples",

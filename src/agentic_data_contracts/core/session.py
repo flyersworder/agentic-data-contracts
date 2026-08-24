@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.recorder import ToolRecorder
 
 
 class LimitExceededError(Exception):
@@ -29,8 +30,11 @@ class ContractSessionLimitError(RuntimeError):
 class ContractSession:
     """Tracks enforcement state for a single agent run."""
 
-    def __init__(self, contract: DataContract) -> None:
+    def __init__(
+        self, contract: DataContract, *, recorder: ToolRecorder | None = None
+    ) -> None:
         self.contract = contract
+        self.recorder = recorder
         self.retries: int = 0
         self.tokens_used: int = 0
         self.cost_usd: float = 0.0

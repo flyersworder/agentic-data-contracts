@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.recorder import ToolRecorder
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 
 
@@ -221,3 +222,14 @@ class TestObserveTokens:
         session = self._session(fixtures_dir)
         session.observe_tokens(20_000, scope="run-1")
         assert session.remaining()["tokens_remaining"] == 30_000
+
+
+def test_session_defaults_to_no_recorder(fixtures_dir: Path) -> None:
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    assert ContractSession(dc).recorder is None
+
+
+def test_session_accepts_a_recorder(fixtures_dir: Path) -> None:
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    rec = ToolRecorder()
+    assert ContractSession(dc, recorder=rec).recorder is rec

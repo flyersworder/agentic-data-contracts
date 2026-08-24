@@ -1,6 +1,6 @@
 [project]
 name = "agentic-data-contracts"
-version = "0.44.1"
+version = "0.45.0"
 description = "YAML-first, domain-driven data governance for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -38,7 +38,7 @@ dependencies = [
     # depend on it, so 27.10 would declare support for a version failing our own
     # governance tests. 28.6 raises that again: `exp.Localtime`, `Localtimestamp`
     # and `Systimestamp` first exist there, and the relative-time scan in
-    # validation/examples.py names them in a module-level tuple -- so on 28.0
+    # validation/_timewindow.py names them in a module-level tuple -- so on 28.0
     # through 28.5 the package does not import at all.
     #
     # Deliberately not `getattr(exp, ..., None)` with filtering, in either

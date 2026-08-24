@@ -335,3 +335,57 @@ def test_summary_is_markdown_and_never_prints_raw_sql():
     text = evaluate_conformance(attempts).summary()
     assert "|" in text
     assert sql not in text
+
+
+def test_a_successful_non_scalar_query_still_anchors_the_ordering():
+    """A row can ask for metric consultation without asserting a number --
+    "revenue by region" returns many rows and no scalar. The ordering rule
+    needs a *query*, not a scalar, so a successful run_query anchors it. Left
+    unanchored the row reports `unchecked` with the reason "no answering query"
+    while an answering query is sitting in the log, and a compliant agent fails
+    the gate over a claim that is not true."""
+    calls = [_lookup("total_revenue", 0), _q(None, seq=1, row_count=4)]
+    attempt = Attempt(
+        example=_example(expected=None, expects_metrics=["total_revenue"]), calls=calls
+    )
+    _, _, _, anchor = _select_answer(attempt)
+    assert anchor is not None
+    assert _protocol_verdict(attempt, anchor)[0] == "followed"
+
+
+def test_a_relative_window_that_returned_nothing_is_still_unassertable():
+    """Pass 2 diagnoses a decaying window before it ever runs the SQL. Pass 3
+    must reach the same diagnosis when the agent's window happens to return
+    NULL or no rows -- `SUM(amount)` over an empty trailing 30 days is exactly
+    that -- rather than blaming the missing scalar, which is a symptom of the
+    window, not an independent fault."""
+    calls = [_q(None, seq=0, relative_time="CURRENT_DATE - 30")]
+    attempt = Attempt(example=_example(expected=4200.0), calls=calls)
+    _, actual, _, anchor = _select_answer(attempt)
+    status, reasons, _, _ = _answer_verdict(attempt, actual, anchor)
+    assert status == "unassertable"
+    assert any("CURRENT_DATE - 30" in r for r in reasons)
+
+
+def test_friction_wording_does_not_backdate_a_later_block():
+    """A block that happened *after* the accepted query must not be described
+    as preceding it. These reasons are the input to rewriting contract prose,
+    so a false ordering claim sends the fix to the wrong place."""
+    calls = [_q(42.0, seq=0), _q(None, outcome="blocked", seq=1)]
+    attempt = Attempt(example=_example(), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    _, reasons = _protocol_verdict(attempt, anchor)
+    assert any("after an accepted one" in r for r in reasons)
+    assert not any("before an accepted one" in r for r in reasons)
+
+
+def test_friction_wording_splits_blocks_on_both_sides():
+    calls = [
+        _q(None, outcome="blocked", seq=0),
+        _q(42.0, seq=1),
+        _q(None, outcome="blocked", seq=2),
+    ]
+    attempt = Attempt(example=_example(), calls=calls)
+    _, _, _, anchor = _select_answer(attempt)
+    _, reasons = _protocol_verdict(attempt, anchor)
+    assert any("1 before an accepted one, 1 after" in r for r in reasons)

@@ -103,6 +103,11 @@ async def main() -> None:
                 adapter=adapter,
                 semantic_source=semantic,
                 session=session,
+                # The corpus carries a principal per row, and pass 1 builds one
+                # Validator per distinct principal for exactly this reason.
+                # Omitted, every attempt runs as the anonymous caller and the
+                # rows that exist to prove per-principal denial pass unblocked.
+                caller_principal=example.principal,
             )
         }
         final_text = await _scripted_agent(example, tools)

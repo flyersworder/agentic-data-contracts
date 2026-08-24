@@ -383,12 +383,17 @@ answer". It is defined once, here:
 - `sole_scalar` / `last_scalar` → the `run_query` call whose scalar was
   selected.
 - `declared` → the **last successful `run_query`**, if any; otherwise `None`.
-- `none` → `None`.
+- `none` → the **last successful `run_query`**, if any; otherwise `None`.
 
 Defining it for the `declared` case matters because that is the path this spec
 steers consumers toward for ambiguous rows (see the `ok` gate). Without it, P2's
 ordering rule and the relative-time check would be undefined on exactly those
-rows. When the anchor is `None`, both are skipped.
+rows. The `none` case takes the same fallback for the same reason: both rules
+need a *query*, not a scalar. A protocol-only row answers "revenue by region"
+with many rows and no scalar, and a relative window that returned NULL is still
+a relative window — anchoring those on `None` reports "no answering query"
+while an answering query sits in the call log. Only an attempt with no
+successful `run_query` at all has nothing to anchor; there, both are skipped.
 
 Selecting "the last `run_query`" unconditionally was rejected: verification
 queries after the answer, drill-downs, and non-scalar tails all break it. The
@@ -402,12 +407,19 @@ Evaluated in order; first match wins.
 1. `attempt.error` is set → `error`.
 2. `example.expected is None` → `skipped` (a legitimate protocol-only row, not
    a failure).
-3. `actual is None` → `error`, reason `"no scalar result produced"`.
-4. The anchor call's `relative_time` is set and the row is not `time_scoped`
+3. The anchor call's `relative_time` is set and the row is not `time_scoped`
    → `unassertable`. Pass 2 applies `_relative_time_node` to the *certified*
    SQL; here the SQL that matters is the agent's, because that is what the
    certified number is being compared against — a case pass 2 structurally
    cannot see. Skipped when there is no anchor, or when the SQL did not parse.
+
+   This is ordered ahead of the missing-scalar rule deliberately. Pass 2
+   reaches its `unassertable` verdict *before* executing anything, so a
+   decaying window whose `SUM` came back NULL must land here too — reporting
+   the absent scalar instead would name a symptom of the window as an
+   independent fault, and the two passes would disagree on exactly the row
+   that exists to demonstrate the rule.
+4. `actual is None` → `error`, reason `"no scalar result produced"`.
 5. Otherwise `_compare(actual, expected, rel_tol, abs_tol)` → `match` or
    `mismatch`.
 
@@ -455,7 +467,11 @@ false positive there writes wrong documentation into the contract.
   preceding a passing one, and `miss` outcomes on lookups, are appended to
   `reasons` and shown in `summary()`. A miss followed by successful recovery is
   a prose smell, not a breach — and it is the highest-value signal for the
-  refiner later, so it must be captured without being punitive now.
+  refiner later, so it must be captured without being punitive now. The wording
+  is derived from `sequence` order rather than from the existence of a passing
+  query: blocks before the accepted query, after it, and on both sides read
+  differently, because a block the agent fought through on the way in and a
+  block on a later drill-down call for different prose fixes.
 
 Resolution order: `attempt.error` set → `unchecked`. Else P1 → `contaminated`.
 Else P2 activated and failing → `violated`. Else P2 activated and passing →

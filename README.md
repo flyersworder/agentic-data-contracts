@@ -1070,7 +1070,11 @@ for example in corpus:
     tools = {
         t.name: t.callable
         for t in create_tools(
-            contract, adapter=adapter, semantic_source=semantic, session=session
+            contract,
+            adapter=adapter,
+            semantic_source=semantic,
+            session=session,
+            caller_principal=example.principal,  # a row's principal, or None
         )
     }
 

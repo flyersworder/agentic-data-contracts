@@ -120,7 +120,11 @@ def _select_answer(
         anchor = successful[-1] if successful else None
         return "declared", attempt.final_answer, len(clusters), anchor
     if not clusters:
-        return "none", None, 0, None
+        # No scalar, but a successful query still anchors ordering and the
+        # relative-time check: "revenue by region" answers with many rows and
+        # no scalar, and a window that returned NULL is still a window. Only
+        # an attempt with no successful run_query at all has nothing to anchor.
+        return "none", None, 0, (successful[-1] if successful else None)
     if len(clusters) == 1:
         call, scalar = clusters[0]
         return "sole_scalar", scalar, 1, call
@@ -144,8 +148,10 @@ def _answer_verdict(
         return "error", [attempt.error], None, None
     if attempt.example.expected is None:
         return "skipped", [], None, None
-    if actual is None:
-        return "error", ["no scalar result produced"], None, None
+    # Ordered ahead of the missing-scalar check on purpose: pass 2 diagnoses a
+    # decaying window before it executes anything, and a window that returned
+    # NULL or no rows must reach the same diagnosis here. Blaming the absent
+    # scalar would report a symptom of the window as an independent fault.
     if (
         anchor is not None
         and anchor.relative_time is not None
@@ -160,6 +166,8 @@ def _answer_verdict(
             None,
             None,
         )
+    if actual is None:
+        return "error", ["no scalar result produced"], None, None
 
     rel_tol, abs_tol = _tolerances(attempt.example)
     # Argument order is load-bearing: _compare(actual, expected, ...) anchors
@@ -189,13 +197,26 @@ def _protocol_verdict(
 
     # P3 -- friction. Recorded on every path, never fails on its own. Scoped to
     # run_query: a describe_table block restricted for the principal is not a
-    # query attempt, and the wording only claims "before an accepted one" when
-    # a run_query actually succeeded -- otherwise it says so.
+    # query attempt. The wording is derived from sequence order, not from the
+    # mere existence of an accepted query: a block that happened *after* the
+    # accepted one is drill-down friction, and calling it a block the agent
+    # fought through on the way in would send a prose fix to the wrong place.
     blocked = [
         c for c in attempt.calls if c.tool == "run_query" and c.outcome == "blocked"
     ]
     if blocked:
-        tail = "before an accepted one" if successful else "with none accepted"
+        if not successful:
+            tail = "with none accepted"
+        else:
+            cut = successful[-1].sequence
+            before = sum(1 for c in blocked if c.sequence < cut)
+            after = len(blocked) - before
+            if not after:
+                tail = "before an accepted one"
+            elif not before:
+                tail = "after an accepted one"
+            else:
+                tail = f"— {before} before an accepted one, {after} after"
         reasons.append(f"{len(blocked)} blocked run_query attempt(s) {tail}")
     misses = [c for c in attempt.calls if c.outcome == "miss"]
     for call in misses:

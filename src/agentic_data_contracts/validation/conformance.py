@@ -24,6 +24,7 @@ from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.examples import (
     _DEFAULT_ABS_TOL,
     _DEFAULT_REL_TOL,
+    _MAX_NAMED_DIFFERENCES,
     VerifiedExample,
     _label,
 )
@@ -40,24 +41,41 @@ class Attempt:
     calls: list[ToolCall] = field(default_factory=list)
     final_text: str = ""
     final_answer: float | None = None
-    final_rows: list[list[Any]] | None = None
-    final_columns: list[str] | None = None
     foreign_tool_calls: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
     elapsed_seconds: float = 0.0
     error: str | None = None
+    # Appended rather than placed beside `final_answer`, so every pre-existing
+    # positional constructor call keeps binding to the same field it always
+    # did — this dataclass is public API and not `kw_only`. Same rule as
+    # `VerifiedExample.expected_rows`.
+    final_rows: list[list[Any]] | None = None
+    final_columns: list[str] | None = None
 
     def __post_init__(self) -> None:
-        # `final_rows` without `final_columns` is incomplete, not inert:
-        # `compare_rows` needs the column names to check the result's width
-        # and to name the column a difference is in. Refusing here beats
-        # grading a breakdown against columns nobody supplied.
-        if self.final_rows is not None and self.final_columns is None:
+        """Reject a declared breakdown that cannot be compared.
+
+        Both rules fail at construction naming the fault, rather than at
+        grading: ``compare_rows`` checks ``final_columns`` against the
+        certified width but nothing constrains an individual row, so a short
+        row would index past its end and raise out of an
+        ``evaluate_conformance`` that is otherwise total over its attempts.
+        """
+        if self.final_rows is None:
+            return
+        if self.final_columns is None:
             raise ValueError(
                 "final_rows needs final_columns — the column names the "
                 "breakdown was returned with, used to check the result's "
                 "width and to name the column a difference is in"
             )
+        width = len(self.final_columns)
+        for index, row in enumerate(self.final_rows):
+            if len(row) != width:
+                raise ValueError(
+                    f"final_rows[{index}] has {len(row)} cell(s) but "
+                    f"final_columns names {width} column(s)"
+                )
 
     @classmethod
     def from_session(
@@ -94,6 +112,18 @@ class Attempt:
             elapsed_seconds=session.recorder.elapsed_seconds,
             error=error,
         )
+
+
+def _declared_breakdown(attempt: Attempt) -> bool:
+    """A host-declared breakdown answer, on a row that certifies one.
+
+    Scoped to ``expected_rows`` deliberately. A host may wire ``final_rows``
+    uniformly -- an agent's result is a table for every question, not only for
+    a breakdown -- and on a scalar-certified row that must not divert the
+    attempt into the declared branch, which would bypass scalar selection and
+    report `error: no scalar result produced` for a perfectly good answer.
+    """
+    return attempt.final_rows is not None and attempt.example.expected_rows is not None
 
 
 def _tolerances(example: VerifiedExample) -> tuple[float, float]:
@@ -135,10 +165,10 @@ def _select_answer(
         ):
             clusters.append((call, scalar))
 
-    if attempt.final_answer is not None or attempt.final_rows is not None:
-        # `final_rows` takes the same branch as `final_answer`: the host has
-        # declared what the agent answered, so no selection is needed. The
-        # scalar it returns stays `final_answer` (None for a breakdown) --
+    if attempt.final_answer is not None or _declared_breakdown(attempt):
+        # A declared breakdown takes the same branch as `final_answer`: the
+        # host has said what the agent answered, so no selection is needed.
+        # The scalar it returns stays `final_answer` (None for a breakdown) --
         # the rows are read off the attempt by `_breakdown_verdict`.
         anchor = successful[-1] if successful else None
         return "declared", attempt.final_answer, len(clusters), anchor
@@ -246,12 +276,18 @@ def _breakdown_verdict(
             None,
         )
     rel_tol, abs_tol = _tolerances(attempt.example)
-    assert attempt.example.expected_rows is not None  # dispatched on this
-    assert attempt.final_columns is not None  # Attempt.__post_init__ enforces
+    expected_rows = attempt.example.expected_rows
+    columns = attempt.final_columns
+    # Real checks, not asserts: `Attempt` is not frozen, so `__post_init__`'s
+    # guarantee does not hold at use time, and an assert would be stripped
+    # under `python -O` -- turning a clear message into an opaque TypeError
+    # from inside the comparison.
+    if expected_rows is None or columns is None:
+        return "error", ["a declared breakdown needs final_columns"], [], None
     try:
         comparison = compare_rows(
-            attempt.example.expected_rows,
-            attempt.final_columns,
+            expected_rows,
+            columns,
             attempt.final_rows,
             ordered=attempt.example.ordered,
             rel_tol=rel_tol,
@@ -263,9 +299,23 @@ def _breakdown_verdict(
         # no such guard, so it converts here rather than propagating out of an
         # `evaluate_conformance` documented as total over its attempts.
         return "error", [str(e)], [], None
+    if comparison.matched:
+        return "match", [], [], comparison.actual_row_count
+    # `summary()` renders `reasons`, not `row_differences`, so a mismatch that
+    # spoke only through the new field would post a bare "mismatch" with an
+    # empty note. Named differences are capped the same way pass 2 caps them,
+    # against the same constant, while `row_differences` stays uncapped.
+    shown = "; ".join(comparison.differences[:_MAX_NAMED_DIFFERENCES])
+    extra = len(comparison.differences) - _MAX_NAMED_DIFFERENCES
+    more = f" (and {extra} more)" if extra > 0 else ""
     return (
-        ("match" if comparison.matched else "mismatch"),
-        [],
+        "mismatch",
+        [
+            f"breakdown differs from the certified answer: "
+            f"{comparison.expected_group_count} expected group(s), "
+            f"{comparison.actual_row_count} row(s) returned, "
+            f"{len(comparison.differences)} difference(s): {shown}{more}"
+        ],
         comparison.differences,
         comparison.actual_row_count,
     )
@@ -329,7 +379,9 @@ def _protocol_verdict(
             f"{', '.join(attempt.foreign_tool_calls)}"
         )
         return "contaminated", reasons
-    if attempt.final_answer is not None and not successful:
+    if (attempt.final_answer is not None or _declared_breakdown(attempt)) and (
+        not successful
+    ):
         reasons.append(
             "an answer was declared with no successful run_query — it came from "
             "outside the governed path"

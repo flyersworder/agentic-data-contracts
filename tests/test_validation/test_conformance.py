@@ -546,3 +546,61 @@ class TestDeclaredBreakdown:
             final_columns=_BD_COLUMNS,
         )
         assert evaluate_conformance([attempt]).results[0].answer == "match"
+
+
+class TestDeclaredBreakdownReviewFindings:
+    """Review findings against the first cut of the declared-breakdown path."""
+
+    def test_a_declared_breakdown_with_no_query_is_contaminated(self) -> None:
+        # Pass 3 asks whether the agent reached the answer *through the
+        # governed path*. A declared breakdown with no successful run_query
+        # did not, and must not grade as a pass.
+        attempt = Attempt(
+            example=_breakdown_example(),
+            calls=[],
+            final_rows=_BREAKDOWN,
+            final_columns=_BD_COLUMNS,
+        )
+        report = evaluate_conformance([attempt])
+        assert report.results[0].protocol == "contaminated"
+        assert not report.ok
+
+    def test_a_ragged_declared_row_is_an_error_not_a_crash(self) -> None:
+        # `final_columns` and `final_rows` are declared independently, so a
+        # short row would index past its end. `evaluate_conformance` is total
+        # over its attempts: one malformed attempt must not void the batch.
+        with pytest.raises(ValueError, match="final_rows"):
+            Attempt(
+                example=_breakdown_example(),
+                final_rows=[["EMEA", 5000.0], ["APAC"]],
+                final_columns=_BD_COLUMNS,
+            )
+
+    def test_final_rows_on_a_scalar_row_does_not_hijack_selection(self) -> None:
+        # A host wiring `final_rows` uniformly (an agent's result is a table
+        # for every question) must not break scalar-certified rows.
+        attempt = Attempt(
+            example=_example(id="sc", expected=5.0),
+            calls=[ToolCall(0, "run_query", outcome="ok", scalar=5.0)],
+            final_rows=[[5.0]],
+            final_columns=["v"],
+        )
+        result = evaluate_conformance([attempt]).results[0]
+        assert result.answer == "match"
+        assert result.answer_source == "sole_scalar"
+
+    def test_positional_construction_still_binds_the_same_fields(self) -> None:
+        # `Attempt` is public and not kw_only; new fields append, so a
+        # pre-existing positional call keeps its meaning.
+        attempt = Attempt(_breakdown_example(), [], "text", 42.0, ["Bash"])
+        assert attempt.final_answer == 42.0
+        assert attempt.foreign_tool_calls == ["Bash"]
+
+    def test_a_breakdown_mismatch_explains_itself_in_reasons(self) -> None:
+        # `summary()` renders `reasons`, not `row_differences`; a bare
+        # "mismatch" with an empty Notes cell diagnoses nothing.
+        result = evaluate_conformance(
+            [_breakdown_attempt([["EMEA", 9999.0], ["APAC", 3000.0]])]
+        ).results[0]
+        assert result.reasons
+        assert any("EMEA" in r for r in result.reasons)

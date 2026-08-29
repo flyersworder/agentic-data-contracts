@@ -14,7 +14,9 @@ All notable changes to this project will be documented in this file.
 
   **Not breaking.** A host that has not wired `final_rows` sees exactly the verdict it saw before: an undeclared breakdown still reports `skipped` and still passes. The guard order differs from the scalar path's for that reason — there, the relative-time check precedes the missing-scalar check, because a window that returned NULL is still a decaying window; here the undeclared case wins first, because with no declared answer there is nothing for a window to decay.
 
-  `final_rows` without `final_columns` is refused at construction: the column names are what `compare_rows` uses to check the result's width and to name the column a difference is in, so rows alone are incomplete rather than merely inert.
+  A declared breakdown that reached no successful `run_query` reports `protocol="contaminated"`, the same verdict a declared scalar already earned: pass 3 asks whether the answer came *through the governed path*, and one that never queried did not. Declaring `final_rows` on a row certified with a scalar `expected` is ignored rather than honoured — a host may reasonably wire it uniformly, since an agent's result is a table for every question, and diverting a scalar row into the declared branch would bypass selection and report `error` for a good answer.
+
+  `final_rows` without `final_columns` is refused at construction, and so is a row whose width disagrees with `final_columns`: the column names are what `compare_rows` uses to check the result's width and to name the column a difference is in, so rows alone are incomplete rather than merely inert. `compare_rows` checks `final_columns` against the certified width but nothing constrains an individual row, so a short row would index past its end and raise out of an `evaluate_conformance` documented as total over its attempts — one malformed attempt would void every other verdict in the batch.
 
 ## [0.47.0] - 2026-08-29
 

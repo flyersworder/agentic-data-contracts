@@ -69,10 +69,31 @@ jobs:
     # examples/revenue_agent/agent.py and no test would have caught a miss.
     # They run offline in demo mode — no API key, no network, ~30s total.
     #
-    # Each step greps for a marker as well as exiting zero, because a broken
-    # example can still exit zero while printing nothing. Output is redirected
-    # to a file rather than piped: a pipeline would mask the interpreter's exit
-    # status behind grep's.
+    # Exiting zero proves nothing: a broken example can exit zero while
+    # printing nothing. Marker greps were the first answer and they under-fit —
+    # the three examples print 27 sections and the greps asserted 5, so the
+    # v0.46.0 walk re-orientation left growth_agent's identity section printing
+    # `{"edges": []}` under a heading promising a decomposition, and this job
+    # stayed green. Per-section markers do not scale: 27 strings to choose and
+    # maintain, one forgotten marker per new section.
+    #
+    # So the whole stdout is diffed against a committed golden file instead.
+    # That is O(1) to maintain — a new section is covered the moment the file
+    # is regenerated — and the diff lands in the PR, where a section that
+    # stopped printing is visible to a reviewer rather than only to CI.
+    # Regenerate with scripts/regen_examples.sh and commit the result.
+    #
+    # The bargain is that examples must print deterministically. A demo query
+    # that returns rows needs an ORDER BY — GROUP BY alone guarantees no row
+    # order, and all three examples were relying on it before this job started
+    # diffing them. Two lines are scrubbed because they move on their own: the
+    # sample-database creation notice (printed only when the gitignored .duckdb
+    # is absent, as on a fresh checkout, and carrying a machine path) and
+    # `age_days` (measured against today's date). Scrub nothing else — anything
+    # else that moves is a real diff.
+    #
+    # Output is redirected to a file rather than piped: a pipeline would mask
+    # the interpreter's exit status behind the next command's.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -84,20 +105,14 @@ jobs:
           cache-dependency-glob: "pyproject.toml"
       - run: uv python install 3.13
       - run: uv sync --all-extras --dev --frozen
-      - name: revenue_agent (governed tools + extras in the prompt)
+      - name: examples print their documented output
         run: |
-          uv run python examples/revenue_agent/agent.py > out.txt
-          grep -q '<column_hints>' out.txt
-          grep -q '<join_paths>' out.txt
-          grep -q 'refused at load' out.txt
-      - name: growth_agent (metric impacts + stale review detection)
-        run: |
-          uv run python examples/growth_agent/agent.py > out.txt
-          grep -q 'Stale-review findings' out.txt
-      - name: ops_agent (blocked columns + per-table principal denial)
-        run: |
-          uv run python examples/ops_agent/agent.py > out.txt
-          grep -q 'Blocked columns in SELECT' out.txt
+          for d in revenue_agent growth_agent ops_agent; do
+            uv run python "examples/$d/agent.py" > out.txt
+            sed -E -e '/^Sample database created at /d' \
+                   -e 's/age_days=[0-9]+/age_days=N/' out.txt > got.txt
+            diff -u "examples/$d/expected_output.txt" got.txt
+          done
       - name: verified-examples corpus validation + answer checks
         run: |
           uv run python examples/revenue_agent/verify_examples.py > out.txt

@@ -1,0 +1,85 @@
+claude-agent-sdk not available or incompatible. Running demo mode.
+
+Query: What was total revenue by region in Q1 2025?
+
+=== Discovery ===
+Allowed schemas/tables are injected into the system prompt by XmlPromptRenderer. Agents see them without a discovery tool call.
+Column-level discovery is still available via describe_table:
+{"schema": "analytics", "table": "orders", "columns": [{"name": "id", "type": "INTEGER", "nullable": true}, {"name": "customer_id", "type": "INTEGER", "nullable": true}, {"name": "amount", "type": "DECIMAL(10,2)", "nullable": true}, {"name": "status", "type": "VARCHAR", "nullable": true}, {"name": "tenant_id", "type": "VARCHAR", "nullable": true}, {"name": "created_at", "type": "DATE", "nullable": true}]}
+
+=== Lookup Domain (revenue) ===
+{"name": "revenue", "summary": "Financial metrics from completed orders", "description": "Revenue metrics track recognized revenue from completed orders. Revenue is recognized at fulfillment, not at booking. Excludes refunds, chargebacks, and pending orders unless stated.\n", "metrics": [{"name": "total_revenue", "description": "Total revenue from completed orders"}, {"name": "revenue_by_region", "description": "Revenue broken down by customer region"}, {"name": "active_customers", "description": "Distinct customers with at least one order in the period"}, {"name": "revenue_per_customer", "description": "Average completed-order revenue per active customer (ARPC)"}], "tables": ["analytics.orders", "analytics.customers"]}
+
+=== Lookup Metric (total_revenue) ===
+{"name": "total_revenue", "description": "Total revenue from completed orders", "sql_expression": "SUM(amount) FILTER (WHERE status = 'completed')", "source_model": "analytics.orders", "filters": ["status = 'completed'"], "domains": ["revenue"], "tier": ["north_star", "department_kpi"], "indicator_kind": "lagging", "decompositions": [{"operator": "product", "operands": ["active_customers", "revenue_per_customer"], "convention": "split_evenly"}], "drill_by": [{"dimension": "region", "column": "analytics.customers.region"}], "business_owner": "revenue-analytics", "operational_owner": "data-eng-finance", "last_reviewed": "2026-05-15", "stale": true, "impacted_by": ["positive impact from active_customers (hypothesized): Directional hypothesis \u2014 not yet backed by an A/B test"]}
+
+=== Trace Metric Impacts (upstream drivers of total_revenue) ===
+{"metric_name": "total_revenue", "direction": "upstream", "max_depth": 2, "edges": [{"depth": 1, "from": "active_customers", "to": "total_revenue", "kind": "influence", "direction": "positive", "confidence": "hypothesized", "evidence": "Directional hypothesis \u2014 not yet backed by an A/B test", "description": "More distinct active customers in a period typically lifts total revenue."}, {"depth": 1, "from": "active_customers", "to": "total_revenue", "kind": "identity", "operator": "product", "convention": "split_evenly"}, {"depth": 1, "from": "revenue_per_customer", "to": "total_revenue", "kind": "identity", "operator": "product", "convention": "split_evenly"}]}
+
+=== Inspect Query (valid revenue-by-region SQL) ===
+  valid: True, violations: []
+  cost: $n/a, rows: 0
+
+=== Query Results ===
+{"columns": ["region", "revenue"], "rows": [["Asia Pacific", "800.00"], ["Europe", "7200.00"], ["North America", "2700.00"]], "row_count": 3, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 3, "tokens_remaining": 50000, "cost_remaining_usd": 5.0, "seconds_remaining": 300.0}}}
+
+=== Lookup Relationships (orders) ===
+{"table": "analytics.orders", "relationships": [{"from": "analytics.orders.customer_id", "to": "analytics.customers.id", "type": "many_to_one", "description": "Join orders to customers for region-level breakdowns. Every order has exactly one customer.\n", "required_filter": "status != 'cancelled'"}]}
+
+=== Find Join Path (orders → subscriptions, 2 hops) ===
+{"table": "analytics.orders", "target_table": "analytics.subscriptions", "join_path": [{"from": "analytics.orders.customer_id", "to": "analytics.customers.id", "type": "many_to_one", "description": "Join orders to customers for region-level breakdowns. Every order has exactly one customer.\n", "required_filter": "status != 'cancelled'"}, {"from": "analytics.subscriptions.customer_id", "to": "analytics.customers.id", "type": "many_to_one", "description": "Join subscriptions to customers. Each subscription belongs to one customer.\n"}], "hops": 2}
+
+=== Relationship Warning (missing required filter) ===
+  valid: True, violations: []
+  warnings: ["Join `orders` -> `customers` has required filter `status != 'cancelled'` but query does not filter on: status"]
+
+=== Blocked Query ===
+  valid: False, violations: ['Missing required filter: tenant_id', 'SELECT * is not allowed — specify explicit columns']
+
+=== Session Budget (from run_query response) ===
+  session remaining: {'elapsed_seconds': 0.0, 'retries_remaining': 3, 'tokens_remaining': 50000, 'cost_remaining_usd': 5.0, 'seconds_remaining': 300.0}
+
+=== Extras resident in the system prompt ===
+<column_hints>
+- table: analytics.orders
+  prefer: amount
+  over: revenue
+  blocked:
+  - total
+  - order_total
+  reason: The money column is `amount`. Models reach for `revenue` because the metrics
+    are named that way, but no such column exists. Verified against the warehouse
+    on 2026-05-15.
+- table: analytics.orders
+  prefer: created_at
+  over: order_date
+  reason: Order timestamps are `created_at`. Verified 2026-05-15.
+- table: analytics.subscriptions
+  prefer: analytics.customers.region
+  over: region
+  reason: Subscriptions carry no geography of their own — region lives on the customer.
+    Use the orders_to_subscriptions path below rather than inventing a column.
+</column_hints>
+<join_paths>
+- name: orders_to_subscriptions
+  description: Attribute an order to the customer's subscription plan. There is no
+    direct edge; both hops route through `customers`.
+  path:
+  - from: analytics.orders
+    to: analytics.customers
+    'on': customer_id
+  - from: analytics.subscriptions
+    to: analytics.customers
+    'on': customer_id
+  notes: 'The orders→customers hop carries `required_filter: status != ''cancelled''`.
+    Traversing without it counts cancelled orders against a plan and inflates per-plan
+    revenue — the query still validates, so nothing tells you. Only 3 of 5 customers
+    have a subscription, so use a LEFT JOIN unless you deliberately want to drop unsubscribed
+    customers.'
+</join_paths>
+
+=== get_extras() ===
+  carried sections: ['column_hints', 'join_paths']
+
+=== Typo protection (expected_extras) ===
+  refused at load: YamlSource: unexpected top-level keys ['relationship']; declared expected_extras=['column_hints', 'join_paths'], interpreted keys=['decomposition_convention', 'metric_impacts', 'metrics', 'relationships', 'tables']

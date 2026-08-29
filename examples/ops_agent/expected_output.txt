@@ -1,0 +1,69 @@
+Caller: sre_lead@co.com
+
+claude-agent-sdk not available. Running demo mode.
+
+Query: What's our MTTR by severity for incidents this week?
+
+=== Lookup Domain (reliability) ===
+{"name": "reliability", "summary": "Service health, incident response, and post-mortem metrics", "description": "Reliability tracks incident lifecycle (MTTR, severity, SLA compliance) and deploy hygiene (frequency, rollback rate). Severity tiers: SEV1 is customer-facing outage; SEV2 is degraded; SEV3 is internal-only. SLA clock starts at `opened_at`, stops at `resolved_at`.\n", "metrics": [{"name": "mttr_minutes", "description": "Mean Time To Resolve in minutes, across all severities. For per-severity breakdown, GROUP BY severity. Excludes incidents still open (resolved_at IS NULL).\n"}, {"name": "incident_count_24h", "description": "Incidents opened in the last 24 hours (rolling)"}, {"name": "sla_compliance_rate", "description": "Percentage of incidents resolved within SLA target by severity. SLA targets: SEV1=60min, SEV2=240min, SEV3=1440min (24h).\n"}, {"name": "deploy_frequency_per_day", "description": "Successful deploys per day across all services"}], "tables": ["sre.incidents", "sre.services", "sre.deploys"], "last_reviewed": "2026-03-20", "stale": true}
+
+=== Lookup Metric (mttr_minutes) ===
+{"name": "mttr_minutes", "description": "Mean Time To Resolve in minutes, across all severities. For per-severity breakdown, GROUP BY severity. Excludes incidents still open (resolved_at IS NULL).\n", "sql_expression": "AVG(EXTRACT(EPOCH FROM (resolved_at - opened_at)) / 60.0)\n", "source_model": "sre.incidents", "filters": ["resolved_at IS NOT NULL"], "domains": ["reliability"], "tier": ["north_star"], "indicator_kind": "lagging", "business_owner": "sre-analytics", "operational_owner": "data-platform", "last_reviewed": "2026-05-15", "stale": true, "impacted_by": ["positive impact from incident_count_24h (hypothesized): Operator hypothesis: high-load days spread responder attention thin, delaying resolution. Not formally tested. Confounded with severity mix.\n"]}
+
+=== Trace Metric Impacts (upstream drivers of incident_count_24h) ===
+{"metric_name": "incident_count_24h", "direction": "upstream", "max_depth": 2, "edges": [{"depth": 1, "from": "deploy_frequency_per_day", "to": "incident_count_24h", "kind": "influence", "direction": "negative", "confidence": "correlated", "evidence": "Internal analysis Q4 2025 (n=180 days, 14 services): services in the top-quartile deploy frequency had 0.43\u00d7 the incident rate of bottom-quartile services. Not randomized \u2014 top-quartile services also had more senior teams. Consistent with DORA 2024 findings.\n", "description": "More frequent small deploys appear to reduce incident rate."}]}
+
+=== Blocked: incidents query without LIMIT ===
+  valid: False, violations: ['Query must include a LIMIT clause']
+
+=== Log-level PII audit fires (compliance caller; governance notified) ===
+LOG:
+- Blocked columns in SELECT: user_email
+
+{"columns": ["id", "severity", "user_email"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+
+=== Second log-level audit (deploy metadata) ===
+LOG:
+- Blocked columns in SELECT: commit_sha
+
+{"columns": ["id", "service_id", "commit_sha", "success"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+
+=== MTTR by severity (last 7 days) ===
+{"columns": ["severity", "mttr_min", "n"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+
+=== Stale-review findings (threshold=90 days) ===
+  [domain] reliability — age_days=N
+  [metric] mttr_minutes — age_days=N
+  [metric] incident_count_24h — age_days=N
+  [metric] sla_compliance_rate — age_days=N
+  [metric] deploy_frequency_per_day — age_days=N
+  [metric_impact] deploy_frequency_per_day -> incident_count_24h — age_days=N
+  [metric_impact] incident_count_24h -> mttr_minutes — age_days=N
+
+=== Principal gate: sre.deploys blocks intern@co.com ===
+
+As sre_lead@co.com on sre.deploys:
+  allowed — 3 rows returned
+
+As intern@co.com on sre.deploys (blocklisted):
+  BLOCKED — Violations:
+- Tables restricted to other principals (caller: 'intern@co.com'): sre.deploys
+Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+
+As intern@co.com on sre.incidents (no principal gate — per-table scope):
+  allowed — 3 rows returned
+
+=== Per-rule principal gate: PII columns on sre.incidents ===
+
+As sre_lead@co.com on customer_id (not exempted from rule):
+  BLOCKED — Violations:
+- Blocked columns in SELECT: customer_id
+Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+
+As intern@co.com on customer_id (also not exempted):
+  BLOCKED — Violations:
+- Blocked columns in SELECT: customer_id
+Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 0, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+
+As compliance@co.com on customer_id (exempted via blocked_principals):
+  allowed — 3 rows returned

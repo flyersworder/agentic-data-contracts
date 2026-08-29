@@ -20,6 +20,27 @@ metrics:
   - name: new_revenue
     description: "Revenue from new customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_new)"
+    # Nested one level deeper than revenue's own operands, so a driver walk
+    # has somewhere to go at depth 2.
+    # Two decompositions sharing `trial_conversions`: two identity edges
+    # leading to one metric.
+    decompositions:
+      - operator: product
+        operands: [trial_conversions, new_customer_arpu]
+      - operator: sum
+        operands: [trial_conversions, referral_revenue]
+  - name: trial_conversions
+    description: "Trials that converted"
+    sql_expression: "COUNT(*) FILTER (WHERE converted)"
+  - name: new_customer_arpu
+    description: "Revenue per newly converted customer"
+    sql_expression: "SUM(amount) / NULLIF(COUNT(*), 0)"
+  - name: referral_revenue
+    description: "Revenue from referrals"
+    sql_expression: "SUM(amount) FILTER (WHERE is_referral)"
+  - name: support_tickets
+    description: "Support tickets raised"
+    sql_expression: "COUNT(*)"
   - name: expansion_revenue
     description: "Revenue expansion from existing customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_expansion)"
@@ -36,3 +57,10 @@ metric_impacts:
     direction: positive
     confidence: verified
     evidence: "trivially true"
+  # Points INTO an operand, so an `all` walk upstream from arpu returns
+  # influence edges while arpu's identity edge sits downstream.
+  - from: support_tickets
+    to: arpu
+    direction: negative
+    confidence: hypothesized
+    evidence: "unhappy customers spend less"

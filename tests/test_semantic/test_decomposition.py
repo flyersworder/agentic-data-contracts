@@ -92,6 +92,45 @@ class TestIdentityEdges:
         assert identity_edges_from_metrics([_metric("signups")]) == []
 
 
+class TestDriverOrientation:
+    """`as_driver_edge` is how an identity edge joins a driver graph.
+
+    Canonically an ``IdentityEdge`` is ``parent -> operand``; an influence
+    edge is ``driver -> affected``. Those are opposite orientations for the
+    same real relationship, so a graph holding both cannot answer "what
+    drives X" by edge topology alone. The driver-oriented view reconciles
+    them without disturbing the canonical record.
+    """
+
+    def test_swaps_the_endpoints(self) -> None:
+        edge = IdentityEdge(
+            from_metric="revenue", to_metric="arpu", operator="product"
+        ).as_driver_edge()
+        assert (edge.from_metric, edge.to_metric) == ("arpu", "revenue")
+
+    def test_carries_the_decomposition_facts_across(self) -> None:
+        edge = IdentityEdge(
+            from_metric="revenue",
+            to_metric="arpu",
+            operator="product",
+            convention="fold_into",
+            convention_operand="arpu",
+        ).as_driver_edge()
+        assert edge.operator == "product"
+        assert edge.convention == "fold_into"
+        assert edge.convention_operand == "arpu"
+        assert edge.kind == "identity"
+
+    def test_leaves_the_canonical_edge_untouched(self) -> None:
+        # lookup_metric and the reconciliation checker read the canonical
+        # orientation; re-orienting for a walk must not mutate it.
+        canonical = IdentityEdge(
+            from_metric="revenue", to_metric="arpu", operator="product"
+        )
+        canonical.as_driver_edge()
+        assert (canonical.from_metric, canonical.to_metric) == ("revenue", "arpu")
+
+
 import pytest  # noqa: E402
 
 from agentic_data_contracts.semantic.base import validate_decompositions  # noqa: E402

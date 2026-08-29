@@ -262,7 +262,9 @@ async def _run_demo(
         "JOIN analytics.customers c ON o.customer_id = c.id "
         "WHERE o.tenant_id = 'acme' AND o.status = 'completed' "
         "AND o.created_at BETWEEN '2025-01-01' AND '2025-03-31' "
-        "GROUP BY c.region"
+        # ORDER BY so the demo prints the same rows every run: the CI job
+        # diffs this output, and GROUP BY alone guarantees no row order.
+        "GROUP BY c.region ORDER BY c.region"
     )
     result = await inspect.callable({"sql": sql})
     data = json.loads(result["content"][0]["text"])

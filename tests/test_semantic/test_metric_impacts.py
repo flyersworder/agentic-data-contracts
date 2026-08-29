@@ -123,6 +123,53 @@ class TestWalkMetricImpacts:
         assert len(visited_targets) == len(set(visited_targets))
         assert "a" not in visited_targets  # start is not revisited
 
+    def test_parallel_edges_to_one_neighbor_are_all_reported(self) -> None:
+        """A pair declared twice must arrive twice.
+
+        `paying_users -> revenue` can be declared both as an influence edge and
+        as an operand of revenue's decomposition. Visited tracking exists to
+        stop cycles, so it must gate which nodes get *expanded*, not which
+        edges get *reported* -- otherwise the second declaration is dropped and
+        whichever facts it carried (an operator, an attribution convention)
+        never reach the caller.
+        """
+        impacts = [
+            MetricImpact(from_metric="conv", to_metric="rev", evidence="first"),
+            MetricImpact(from_metric="conv", to_metric="rev", evidence="second"),
+        ]
+        index = build_metric_impact_index(impacts)
+        walk = walk_metric_impacts(index, "rev", direction="upstream")
+        # The walk is typed over the MetricEdge union; only impacts carry
+        # evidence, and here every edge is one.
+        found = {e.evidence for _, e in walk if isinstance(e, MetricImpact)}
+        assert found == {"first", "second"}
+
+    def test_byte_identical_edges_are_reported_once(self) -> None:
+        # Reporting parallel edges exists to preserve the DISTINCT facts each
+        # declaration carries. Two edges that are equal in every field carry
+        # one fact, so handing it over twice is noise, not information.
+        impacts = [
+            MetricImpact(from_metric="conv", to_metric="rev"),
+            MetricImpact(from_metric="conv", to_metric="rev"),
+        ]
+        index = build_metric_impact_index(impacts)
+        walk = walk_metric_impacts(index, "rev", direction="upstream")
+        assert len(walk) == 1
+
+    def test_a_repeated_neighbor_is_still_expanded_once(self) -> None:
+        # Both edges reach `conv`, but the walk must not queue it twice and
+        # report `traffic` twice at depth 2.
+        impacts = [
+            MetricImpact(from_metric="conv", to_metric="rev", evidence="first"),
+            MetricImpact(from_metric="conv", to_metric="rev", evidence="second"),
+            MetricImpact(from_metric="traffic", to_metric="conv"),
+        ]
+        index = build_metric_impact_index(impacts)
+        walk = walk_metric_impacts(index, "rev", direction="upstream", max_depth=2)
+        deep = [e for d, e in walk if d == 2]
+        assert len(deep) == 1
+        assert deep[0].from_metric == "traffic"
+
     def test_invalid_direction(self) -> None:
         with pytest.raises(ValueError, match="upstream.*downstream"):
             walk_metric_impacts({}, "x", direction="sideways")

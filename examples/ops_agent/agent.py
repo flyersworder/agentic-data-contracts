@@ -311,7 +311,8 @@ async def _run_demo(
         "WHERE tenant_id = 'acme' "
         "  AND resolved_at IS NOT NULL "
         "  AND opened_at >= CURRENT_DATE - INTERVAL 7 DAY "
-        "GROUP BY severity "
+        # Ordered for a reproducible demo — see revenue_agent.
+        "GROUP BY severity ORDER BY severity "
         "LIMIT 10"
     )
     result = await run.callable({"sql": mttr_sql})

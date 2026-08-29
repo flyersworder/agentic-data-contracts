@@ -259,3 +259,17 @@ class TestEmptyIdentityWalkDisclosesTheOtherDirection:
         )
         assert data["edges"] == []
         assert "note" not in data
+
+    @pytest.mark.asyncio
+    async def test_counts_metrics_rather_than_edges(self) -> None:
+        # trial_conversions is an operand of new_revenue in two separate
+        # decompositions, so two edges lead to one metric. The sentence says
+        # "metrics", so the number has to be a metric count.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="trial_conversions",
+            direction="upstream",
+            kinds="identity",
+        )
+        assert data["edges"] == []
+        assert "1 downstream" in data["note"]

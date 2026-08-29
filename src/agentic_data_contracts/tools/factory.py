@@ -234,13 +234,16 @@ def _identity_direction_note(
     """
     # Count what the OTHER direction holds: an edge leaving `metric_name`
     # makes it somebody's operand (downstream), one arriving makes it a parent
-    # built from operands (upstream).
+    # built from operands (upstream). Counted as distinct metrics, not edges —
+    # one parent can name the same operand in two decompositions, and the
+    # sentence below promises metrics.
     if direction == "upstream":
-        count = sum(1 for e in oriented if e.from_metric == metric_name)
+        found = {e.to_metric for e in oriented if e.from_metric == metric_name}
         other, gloss = "downstream", "the metrics it is an operand of"
     else:
-        count = sum(1 for e in oriented if e.to_metric == metric_name)
+        found = {e.from_metric for e in oriented if e.to_metric == metric_name}
         other, gloss = "upstream", "the operands it is built from"
+    count = len(found)
     if count == 0:
         return None
     return (

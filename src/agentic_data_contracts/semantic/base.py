@@ -740,14 +740,23 @@ def walk_metric_impacts(
 
     Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
-    prevents cycles, so each reachable metric is *expanded* at most once —
-    but every edge that reaches it at that depth is reported. The distinction
-    matters on a mixed influence + identity index, where one real
-    relationship can be declared twice (as an impact edge and as a
-    decomposition operand): marking a neighbor visited mid-adjacency would
-    keep whichever edge was indexed first and silently drop the other, along
-    with the operator and attribution convention only the identity edge
+    prevents cycles: each reachable metric is expanded at most once, and an
+    edge is reported only when it reaches a metric no earlier edge has
+    reached.
+
+    The one exception is *parallel* edges — several edges found while
+    expanding a single node that land on the same neighbor. All of them are
+    reported. This matters on a mixed influence + identity index, where one
+    real relationship can be declared twice (as an impact edge and as a
+    decomposition operand): keeping whichever was indexed first would drop
+    the operator and attribution convention that only the identity edge
     carries.
+
+    A shared operand deeper in the graph is still lost — if ``a`` drives both
+    ``b`` and ``c``, and ``b`` is reached first, the edge ``a -> c`` is not
+    reported. That is the node-visited BFS this function has always been;
+    widening it would report cycle-closing edges too, which is a different
+    contract.
     """
     if direction not in ("upstream", "downstream"):
         msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"

@@ -1335,3 +1335,32 @@ class TestExpectedRowsLoading:
             sql="SELECT 1", expected_rows=[["EMEA", 1.0]], abs_tol=0.5
         )
         assert example.abs_tol == 0.5
+
+
+class TestBreakdownRendering:
+    def _result(self, differences: list[str]) -> ExampleAnswerResult:
+        return ExampleAnswerResult(
+            example=VerifiedExample(sql="SELECT 1", expected_rows=[["EMEA", 1.0]]),
+            status="mismatch",
+            expected_rows=[["EMEA", 1.0]],
+            actual_row_count=3,
+            row_differences=differences,
+            label="revenue-by-region",
+        )
+
+    def test_a_breakdown_mismatch_names_its_differences(self) -> None:
+        report = ExampleAnswerReport(results=[self._result(["missing group APAC"])])
+        assert "missing group APAC" in report.summary()
+        assert "revenue-by-region" in report.summary()
+
+    def test_only_the_first_three_differences_are_named(self) -> None:
+        report = ExampleAnswerReport(
+            results=[self._result([f"missing group G{i}" for i in range(6)])]
+        )
+        summary = report.summary()
+        assert "G0" in summary and "G2" in summary
+        assert "G3" not in summary
+        assert "and 3 more" in summary
+
+    def test_the_empty_report_message_mentions_both_assertion_fields(self) -> None:
+        assert "expected_rows" in ExampleAnswerReport(results=[]).summary()

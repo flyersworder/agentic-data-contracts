@@ -49,6 +49,9 @@ _KNOWN_KEYS = frozenset(
 
 _DEFAULT_REL_TOL = 1e-9
 _DEFAULT_ABS_TOL = 0.0
+# The counts above stay complete; only the naming is capped, so a reader is
+# never misled about how much differed. `row_differences` carries them all.
+_MAX_NAMED_DIFFERENCES = 3
 
 
 def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
@@ -390,7 +393,8 @@ class ExampleAnswerResult:
     ``status`` (each result has exactly one):
       - ``"match"``        — executed and equal within tolerance.
       - ``"mismatch"``     — executed and outside tolerance. Both numbers and
-                             both diffs are populated.
+                             both diffs are populated for a scalar assertion;
+                             for a breakdown, only row_differences is populated.
       - ``"unassertable"`` — the SQL uses a relative time window, so the
                              expected value decays. NOT executed.
       - ``"error"``        — no verdict was possible: not scalar-shaped, no
@@ -405,6 +409,10 @@ class ExampleAnswerResult:
     ``ExampleAnswerReport.summary()`` can reuse it verbatim instead of
     recomputing it against a different, filtered index — see the module's
     ``check_example_answers`` for why those two indices differ.
+
+    For a breakdown mismatch, ``abs_diff`` and ``rel_diff`` stay ``None``
+    because there is no single numeric diff — ``row_differences`` carries
+    the differences instead.
     """
 
     example: VerifiedExample
@@ -417,6 +425,9 @@ class ExampleAnswerResult:
     abs_tol: float = _DEFAULT_ABS_TOL
     reason: str | None = None
     label: str = ""
+    expected_rows: list[list[Any]] | None = None
+    actual_row_count: int | None = None
+    row_differences: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -476,8 +487,9 @@ class ExampleAnswerReport:
             # user sees when CI goes red. Four zeroes do not explain that.
             return (
                 "**Answer checks:** no assertions found — no example declared "
-                "an `expected` value, so nothing was checked. Add one to a "
-                "corpus row, or drop `answers.ok` from the gate until you do."
+                "an `expected` or `expected_rows` value, so nothing was "
+                "checked. Add one to a corpus row, or drop `answers.ok` from "
+                "the gate until you do."
             )
         counts = Counter(r.status for r in self.results)
         lines = [
@@ -487,7 +499,16 @@ class ExampleAnswerReport:
             f"{counts['error']} error(s).",
         ]
         for r in self.results:
-            if r.status == "mismatch":
+            if r.status == "mismatch" and r.expected_rows is not None:
+                shown = "; ".join(r.row_differences[:_MAX_NAMED_DIFFERENCES])
+                extra = len(r.row_differences) - _MAX_NAMED_DIFFERENCES
+                more = f" (and {extra} more)" if extra > 0 else ""
+                lines.append(
+                    f"- mismatch `{r.label}`: {len(r.expected_rows)} expected "
+                    f"group(s), {r.actual_row_count} row(s) returned, "
+                    f"{len(r.row_differences)} difference(s): {shown}{more}"
+                )
+            elif r.status == "mismatch":
                 lines.append(
                     f"- mismatch `{r.label}`: expected {r.expected}, "
                     f"actual {r.actual} (rel diff {_fmt(r.rel_diff)}, "

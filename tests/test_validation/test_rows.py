@@ -136,3 +136,42 @@ class TestRefusals:
     def test_a_non_numeric_measure_names_the_column_and_the_value(self) -> None:
         with pytest.raises(ValueError, match="'revenue'.*'N/A'"):
             _run([["EMEA", 5000.0]], [("EMEA", "N/A")])
+
+
+class TestOrderedComparison:
+    def test_the_declared_order_is_the_answer(self) -> None:
+        result = _run(
+            _EXPECTED,
+            [("EMEA", 5000.0), ("APAC", 3000.0), ("AMER", 2700.0)],
+            ordered=True,
+        )
+        assert result.matched
+
+    def test_a_reordering_fails_under_ordered(self) -> None:
+        result = _run(
+            _EXPECTED,
+            [("APAC", 3000.0), ("EMEA", 5000.0), ("AMER", 2700.0)],
+            ordered=True,
+        )
+        assert not result.matched
+
+    def test_a_row_count_difference_is_reported_as_a_count(self) -> None:
+        # Position is identity under `ordered`, so "APAC is missing" is a claim
+        # the comparison cannot support -- only "a row is missing".
+        result = _run(_EXPECTED, [("EMEA", 5000.0), ("APAC", 3000.0)], ordered=True)
+        assert not result.matched
+        assert any("expected 3 row" in d for d in result.differences)
+        assert not any("missing group" in d for d in result.differences)
+
+    def test_a_repeated_key_is_legitimate_under_ordered(self) -> None:
+        expected = [["EMEA", 5000.0], ["EMEA", 3000.0]]
+        result = _run(expected, [("EMEA", 5000.0), ("EMEA", 3000.0)], ordered=True)
+        assert result.matched
+
+    def test_a_wrong_number_names_its_row(self) -> None:
+        result = _run(
+            _EXPECTED,
+            [("EMEA", 9999.0), ("APAC", 3000.0), ("AMER", 2700.0)],
+            ordered=True,
+        )
+        assert any("row 1" in d for d in result.differences)

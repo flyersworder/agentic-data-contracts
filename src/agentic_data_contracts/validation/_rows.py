@@ -100,6 +100,48 @@ def _compare_cell(
     ]
 
 
+def _compare_ordered(
+    expected_rows: list[list[Any]],
+    columns: Sequence[str],
+    actual: list[list[Any]],
+    *,
+    rel_tol: float,
+    abs_tol: float,
+) -> RowComparison:
+    """Pair rows by position, for an answer whose order is the answer.
+
+    A row-count difference is reported as a count rather than as N missing
+    groups: position is identity here, so naming *which* group is absent is a
+    claim this pairing cannot support.
+    """
+    differences: list[str] = []
+    if len(actual) != len(expected_rows):
+        differences.append(
+            f"expected {len(expected_rows)} row(s), query returned {len(actual)}"
+        )
+    for index, (expected_row, actual_row) in enumerate(zip(expected_rows, actual), 1):
+        where = f"row {index}"
+        for i, expected_cell in enumerate(expected_row):
+            actual_cell = actual_row[i]
+            if _is_number(expected_cell) or expected_cell is None:
+                differences.extend(
+                    _compare_cell(
+                        where, columns[i], expected_cell, actual_cell, rel_tol, abs_tol
+                    )
+                )
+            elif str(expected_cell).strip() != str(actual_cell).strip():
+                differences.append(
+                    f"{where}: expected {expected_cell!r}, "
+                    f"actual {actual_cell!r} (column {columns[i]})"
+                )
+    return RowComparison(
+        matched=not differences,
+        differences=differences,
+        expected_group_count=len(expected_rows),
+        actual_row_count=len(actual),
+    )
+
+
 def compare_rows(
     expected_rows: list[list[Any]],
     columns: Sequence[str],
@@ -123,6 +165,10 @@ def compare_rows(
             f"certified answer has {width} column(s), query returned {len(columns)}"
         )
     actual = [list(row) for row in rows]
+    if ordered:
+        return _compare_ordered(
+            expected_rows, columns, actual, rel_tol=rel_tol, abs_tol=abs_tol
+        )
     positions = key_positions(expected_rows)
     differences: list[str] = []
 

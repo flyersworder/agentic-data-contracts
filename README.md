@@ -1123,7 +1123,19 @@ print(report.summary())                   # markdown, ready to post as a PR comm
 
 **Two orthogonal axes, five states each.** The `answer` axis scores the number: `match`, `mismatch`, `unassertable` (the agent's answering query used a relative time window, so the certified answer decays against it), `skipped` (the row certified no `expected`, **or** certified a breakdown via `expected_rows` — see below), `error`. The `protocol` axis scores the path: `followed`, `violated`, `contaminated`, `not_applicable` (the row activated no protocol rule), `unchecked`. A third field, `answer_source` (`declared` / `sole_scalar` / `last_scalar` / `none`), records *how* the answered number was picked and stays separate from the verdict, so a row that matched on an ambiguously-selected `last_scalar` still reports `answer="match"` and is still excluded from `ok` — the verdict and the evidence for it are different fields.
 
-**`evaluate_conformance` does not yet grade a certified breakdown.** Unlike pass 2 (`check_example_answers`, which grades `expected_rows` fully — see above), pass 3 has no recorder shape for a breakdown answer yet, so a row certified with `expected_rows` always reports `answer="skipped"` there, same as a row with no `expected` at all — it passes, but nothing about the breakdown was checked. Tracked as [#85](https://github.com/flyersworder/agentic-data-contracts/issues/85).
+**`evaluate_conformance` grades a certified breakdown only when the host declares it.** Set `final_rows` and `final_columns` on the `Attempt` — the breakdown counterpart to `final_answer` — and pass 3 scores it through the same `compare_rows` pass 2 uses, with tolerance and naming which group differed:
+
+```python
+attempt = Attempt.from_session(
+    example, session,
+    final_rows=[["Europe", 7200.00], ["North America", 2700.00]],
+    final_columns=["region", "revenue"],
+)
+```
+
+The host declares rather than the library inferring, for the same reason `final_answer` exists: `_select_answer` picks a scalar by clustering candidates and *marks the guess* when it is ambiguous, and there is no equally honest inference for a breakdown — choosing whichever query happened to match would let a lucky drill-down pass. Leave them unset and the row reports `answer="skipped"` and passes, exactly as before; note that this means the protocol axis is graded but the numbers are not.
+
+Wiring `final_rows` uniformly is safe: on a row certified with a scalar `expected` it is ignored, and scalar selection runs as usual. A declared breakdown that reached no successful `run_query` reports `protocol="contaminated"` — pass 3 asks whether the answer came *through the governed path*, and one that never queried did not.
 
 **Tolerances are not symmetric with pass 2.** `check_example_answers` accepts corpus-wide `rel_tol`/`abs_tol` overrides that apply to any row setting none of its own, but `evaluate_conformance(attempts)` takes no such override and falls back straight to the library default for an unset row — so the same corpus can `match` in pass 2 and `mismatch` in pass 3 unless the tolerance is set per-row: a row's own `rel_tol`/`abs_tol` apply identically to both passes.
 

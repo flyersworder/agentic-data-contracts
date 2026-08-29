@@ -9,6 +9,7 @@ import pytest
 from agentic_data_contracts.validation._rows import (
     compare_rows,
     key_positions,
+    named_differences,
 )
 
 _EXPECTED = [["EMEA", 5000.0], ["APAC", 3000.0], ["AMER", 2700.0]]
@@ -215,3 +216,19 @@ class TestDifferenceOrdering:
         assert not result.matched
         assert "EMEA" in result.differences[0]
         assert "9999" in result.differences[0]
+
+
+class TestNamedDifferences:
+    """The capped rendering both report summaries share."""
+
+    def test_under_the_cap_names_every_difference(self) -> None:
+        assert named_differences(["a", "b", "c"]) == "a; b; c"
+
+    def test_over_the_cap_counts_the_rest(self) -> None:
+        assert named_differences(["a", "b", "c", "d"]) == "a; b; c (and 1 more)"
+
+    def test_the_remainder_counts_all_of_them(self) -> None:
+        assert named_differences([str(i) for i in range(10)]).endswith("(and 7 more)")
+
+    def test_no_differences_renders_empty(self) -> None:
+        assert named_differences([]) == ""

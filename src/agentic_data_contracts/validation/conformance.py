@@ -16,9 +16,13 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.core.recorder import ToolCall
+from agentic_data_contracts.validation._rows import (
+    compare_rows,
+    named_differences,
+)
 from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.examples import (
     _DEFAULT_ABS_TOL,
@@ -43,6 +47,33 @@ class Attempt:
     cost_usd: float = 0.0
     elapsed_seconds: float = 0.0
     error: str | None = None
+    # Appended rather than placed beside `final_answer`, so every pre-existing
+    # positional constructor call keeps binding to the same field it always
+    # did — this dataclass is public API and not `kw_only`. Same rule as
+    # `VerifiedExample.expected_rows`.
+    final_rows: list[list[Any]] | None = None
+    final_columns: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse an incomplete declared breakdown, and materialise its rows.
+
+        The rows are copied eagerly because a one-shot iterable would be read
+        twice -- once to check its shape, once to compare -- and the second
+        read would see nothing, reporting every certified group as missing on
+        data that was correct. Shape itself is *not* checked here:
+        ``Attempt`` is not frozen, so a constructor guard does not hold at
+        grading time. ``compare_rows`` owns that rule, and both passes already
+        convert its ``ValueError`` into a per-row verdict.
+        """
+        if self.final_rows is None:
+            return
+        if self.final_columns is None:
+            raise ValueError(
+                "final_rows needs final_columns — the column names the "
+                "breakdown was returned with, used to check the result's "
+                "width and to name the column a difference is in"
+            )
+        self.final_rows = [list(row) for row in self.final_rows]
 
     @classmethod
     def from_session(
@@ -52,6 +83,8 @@ class Attempt:
         *,
         final_text: str = "",
         final_answer: float | None = None,
+        final_rows: list[list[Any]] | None = None,
+        final_columns: list[str] | None = None,
         foreign_tool_calls: Iterable[str] = (),
         error: str | None = None,
     ) -> Attempt:
@@ -70,11 +103,25 @@ class Attempt:
             calls=session.recorder.consume(),
             final_text=final_text,
             final_answer=final_answer,
+            final_rows=final_rows,
+            final_columns=final_columns,
             foreign_tool_calls=list(foreign_tool_calls),
             cost_usd=session.cost_usd,
             elapsed_seconds=session.recorder.elapsed_seconds,
             error=error,
         )
+
+
+def _declared_breakdown(attempt: Attempt) -> bool:
+    """A host-declared breakdown answer, on a row that certifies one.
+
+    Scoped to ``expected_rows`` deliberately. A host may wire ``final_rows``
+    uniformly -- an agent's result is a table for every question, not only for
+    a breakdown -- and on a scalar-certified row that must not divert the
+    attempt into the declared branch, which would bypass scalar selection and
+    report `error: no scalar result produced` for a perfectly good answer.
+    """
+    return attempt.final_rows is not None and attempt.example.expected_rows is not None
 
 
 def _tolerances(example: VerifiedExample) -> tuple[float, float]:
@@ -116,7 +163,11 @@ def _select_answer(
         ):
             clusters.append((call, scalar))
 
-    if attempt.final_answer is not None:
+    if attempt.final_answer is not None or _declared_breakdown(attempt):
+        # A declared breakdown takes the same branch as `final_answer`: the
+        # host has said what the agent answered, so no selection is needed.
+        # The scalar it returns stays `final_answer` (None for a breakdown) --
+        # the rows are read off the attempt by `_breakdown_verdict`.
         anchor = successful[-1] if successful else None
         return "declared", attempt.final_answer, len(clusters), anchor
     if not clusters:
@@ -188,6 +239,84 @@ def _answer_verdict(
     return ("match" if matched else "mismatch"), [], abs_diff, rel_diff
 
 
+def _breakdown_verdict(
+    attempt: Attempt,
+    anchor: ToolCall | None,
+) -> tuple[str, list[str], list[str], int | None]:
+    """Score a certified breakdown the host declared via ``final_rows``.
+
+    Returns ``(status, reasons, row_differences, actual_row_count)``.
+
+    The guard order differs from ``_answer_verdict``'s on purpose. There, the
+    relative-time check precedes the missing-scalar check, because a window
+    that returned NULL is still a decaying window and blaming the absent
+    scalar would report a symptom as the fault. Here the undeclared case wins
+    first: with no ``final_rows`` there is no answer to decay, so the row is
+    ``skipped`` exactly as it was before this existed -- which is what keeps a
+    host that never wired ``final_rows`` on its old verdict.
+    """
+    if attempt.error is not None:
+        return "error", [attempt.error], [], None
+    if attempt.final_rows is None:
+        return "skipped", [], [], None
+    if (
+        anchor is not None
+        and anchor.relative_time is not None
+        and not attempt.example.time_scoped
+    ):
+        return (
+            "unassertable",
+            [
+                f"agent's answering query uses a relative time window "
+                f"({anchor.relative_time}); the certified answer decays against it"
+            ],
+            [],
+            None,
+        )
+    rel_tol, abs_tol = _tolerances(attempt.example)
+    expected_rows = attempt.example.expected_rows
+    columns = attempt.final_columns
+    # Real checks, not asserts: `Attempt` is not frozen, so `__post_init__`'s
+    # guarantee does not hold at use time, and an assert would be stripped
+    # under `python -O` -- turning a clear message into an opaque TypeError
+    # from inside the comparison.
+    if expected_rows is None or columns is None:
+        return "error", ["a declared breakdown needs final_columns"], [], None
+    try:
+        comparison = compare_rows(
+            expected_rows,
+            columns,
+            attempt.final_rows,
+            ordered=attempt.example.ordered,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+        )
+    except ValueError as e:
+        # `compare_rows` raises for a fault no pairing can resolve. Pass 2's
+        # batch guard turns that into `status="error"`; pass 3 is pure and has
+        # no such guard, so it converts here rather than propagating out of an
+        # `evaluate_conformance` documented as total over its attempts.
+        return "error", [str(e)], [], None
+    if comparison.matched:
+        return "match", [], [], comparison.actual_row_count
+    # `summary()` renders `reasons`, not `row_differences`, so a mismatch that
+    # spoke only through the new field would post a bare "mismatch" with an
+    # empty note. Named differences are capped the same way pass 2 caps them,
+    # against the same constant, while `row_differences` stays uncapped.
+    return (
+        "mismatch",
+        [
+            f"breakdown differs from the certified answer: "
+            f"{comparison.expected_group_count} expected group(s), "
+            f"{comparison.actual_row_count} row(s) returned, "
+            f"{len(comparison.differences)} difference(s): "
+            f"{named_differences(comparison.differences)}"
+        ],
+        comparison.differences,
+        comparison.actual_row_count,
+    )
+
+
 def _protocol_verdict(
     attempt: Attempt, anchor: ToolCall | None
 ) -> tuple[str, list[str]]:
@@ -246,7 +375,12 @@ def _protocol_verdict(
             f"{', '.join(attempt.foreign_tool_calls)}"
         )
         return "contaminated", reasons
-    if attempt.final_answer is not None and not successful:
+    # Bare `final_rows`, not `_declared_breakdown`: P1 asks whether the answer
+    # came through the governed path, which does not depend on what the corpus
+    # row certifies. Scoping is `_select_answer`'s concern alone.
+    if (attempt.final_answer is not None or attempt.final_rows is not None) and (
+        not successful
+    ):
         reasons.append(
             "an answer was declared with no successful run_query — it came from "
             "outside the governed path"
@@ -300,6 +434,8 @@ class ConformanceResult:
     abs_tol: float = _DEFAULT_ABS_TOL
     reasons: list[str] = field(default_factory=list)
     label: str = ""
+    row_differences: list[str] = field(default_factory=list)
+    actual_row_count: int | None = None
 
 
 @dataclass
@@ -407,9 +543,17 @@ def evaluate_conformance(attempts: list[Attempt]) -> ConformanceReport:
     results = []
     for index, attempt in enumerate(attempts):
         source, actual, candidates, anchor = _select_answer(attempt)
-        answer, answer_reasons, abs_diff, rel_diff = _answer_verdict(
-            attempt, actual, anchor
-        )
+        row_differences: list[str] = []
+        actual_row_count: int | None = None
+        if attempt.example.expected_rows is not None:
+            answer, answer_reasons, row_differences, actual_row_count = (
+                _breakdown_verdict(attempt, anchor)
+            )
+            abs_diff = rel_diff = None
+        else:
+            answer, answer_reasons, abs_diff, rel_diff = _answer_verdict(
+                attempt, actual, anchor
+            )
         protocol, protocol_reasons = _protocol_verdict(attempt, anchor)
         rel_tol, abs_tol = _tolerances(attempt.example)
         results.append(
@@ -427,6 +571,8 @@ def evaluate_conformance(attempts: list[Attempt]) -> ConformanceReport:
                 abs_tol=abs_tol,
                 reasons=answer_reasons + protocol_reasons,
                 label=_label(attempt.example, index),
+                row_differences=row_differences,
+                actual_row_count=actual_row_count,
             )
         )
     return ConformanceReport(results=results)

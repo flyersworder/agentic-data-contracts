@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.46.0] - 2026-08-29
+
+### Fixed
+
+- **`trace_metric_impacts` sent a root-cause walk to the empty side of the graph** (#81). Identity edges are canonically `parent -> operand`; influence edges are `driver -> affected`. Those are opposite orientations for the same real relationship, so the one graph holding both could not answer "what drives this metric" by topology — and the tool's own `kinds` description ("walk 'identity' first to localize the change") composed with its `upstream` default into a call that returned `{"edges": []}`. No error, no warning, and the `convention` an attribution needs never arrived. Identity edges now enter the walk re-pointed operand -> parent via the new `IdentityEdge.as_driver_edge()`, so `direction` means the same thing for both kinds: `upstream` is drivers, `downstream` is what the metric feeds, and every returned edge points from a driver to what it affects. The canonical orientation is unchanged — `lookup_metric` and `reconcile_decomposition` read it as before.
+
+  **Breaking, for callers of this tool only.** A walk that asked `direction="downstream", kinds="identity"` for a metric's operands must now ask `"upstream"`. An identity walk that comes back empty while edges exist on the other side now carries a `note` naming that direction, so the migration reports itself instead of returning a bare `[]`.
+
+- **A pair declared twice reached the agent once.** `walk_metric_impacts` marked a neighbour visited on the first edge that reached it, so with both kinds now pointing the same way, a metric declared as both an impact edge and a decomposition operand (as `examples/revenue_agent/` declares `active_customers`) surfaced only whichever edge was indexed first — dropping the `operator` and `convention` that only the identity edge carries. Visited tracking now gates which nodes are *expanded*, not which edges are *reported*: each node is still walked once, cycles are still safe, and every edge reaching it is returned.
+
 ## [0.45.0] - 2026-08-24
 
 ### Added

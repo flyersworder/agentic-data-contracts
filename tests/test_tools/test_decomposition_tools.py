@@ -65,33 +65,33 @@ class TestLookupMetricSurfacesDecomposition:
 
 class TestTraceWalksIdentity:
     @pytest.mark.asyncio
-    async def test_downstream_all_includes_identity_and_influence(self) -> None:
+    async def test_upstream_all_includes_identity_and_influence(self) -> None:
         data = await _call(
             _tools()["trace_metric_impacts"],
             metric_name="revenue",
-            direction="downstream",
+            direction="upstream",
         )
         kinds = {e["kind"] for e in data["edges"]}
         assert "identity" in kinds
         identity_edges = [e for e in data["edges"] if e["kind"] == "identity"]
         assert any(
-            e["to"] == "arpu" and e["operator"] == "product" for e in identity_edges
+            e["from"] == "arpu" and e["operator"] == "product" for e in identity_edges
         )
 
     @pytest.mark.asyncio
     async def test_kinds_identity_excludes_influence(self) -> None:
-        # Walk upstream from arpu: identity edge revenue->arpu exists; arpu has
-        # no influence edges, so kinds="identity" must return a non-empty,
-        # all-identity set.
+        # Walk downstream from arpu: arpu is an operand of revenue, so it
+        # feeds revenue; arpu has no influence edges, so kinds="identity"
+        # must return a non-empty, all-identity set.
         data = await _call(
             _tools()["trace_metric_impacts"],
             metric_name="arpu",
-            direction="upstream",
+            direction="downstream",
             kinds="identity",
         )
         assert data["edges"]  # non-empty
         assert all(e["kind"] == "identity" for e in data["edges"])
-        assert any(e["from"] == "revenue" for e in data["edges"])
+        assert any(e["to"] == "revenue" for e in data["edges"])
 
     @pytest.mark.asyncio
     async def test_kinds_influence_excludes_identity(self) -> None:
@@ -131,7 +131,7 @@ class TestConventionDelivery:
         data = await _call(
             _tools()["trace_metric_impacts"],
             metric_name="arpu",
-            direction="upstream",
+            direction="downstream",
             kinds="identity",
         )
         product_edges = [e for e in data["edges"] if e["operator"] == "product"]
@@ -145,10 +145,117 @@ class TestConventionDelivery:
         data = await _call(
             _tools()["trace_metric_impacts"],
             metric_name="new_revenue",
-            direction="upstream",
+            direction="downstream",
             kinds="identity",
         )
         sum_edges = [e for e in data["edges"] if e["operator"] == "sum"]
         assert sum_edges
         assert all("convention" not in e for e in sum_edges)
         assert all("convention_operand" not in e for e in sum_edges)
+
+
+class TestDirectionMeansDriversForBothKinds:
+    """`direction` asks a question about metrics, not about edge tuples.
+
+    The fixture declares `paying_users -> revenue` twice: as a `metric_impacts`
+    influence edge, and as an operand of revenue's `product` decomposition. It
+    is one real relationship, so one direction must return both.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_same_pair_arrives_under_one_direction(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="upstream",
+        )
+        pairs = {(e["kind"], e["from"], e["to"]) for e in data["edges"]}
+        assert ("influence", "paying_users", "revenue") in pairs
+        assert ("identity", "paying_users", "revenue") in pairs
+
+    @pytest.mark.asyncio
+    async def test_upstream_identity_returns_the_operands_that_drive_it(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="upstream",
+            kinds="identity",
+            max_depth=1,
+        )
+        assert {e["from"] for e in data["edges"]} == {
+            "paying_users",
+            "arpu",
+            "new_revenue",
+            "expansion_revenue",
+        }
+        assert all(e["to"] == "revenue" for e in data["edges"])
+
+    @pytest.mark.asyncio
+    async def test_downstream_identity_returns_the_parent_it_feeds(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="arpu",
+            direction="downstream",
+            kinds="identity",
+        )
+        assert [(e["from"], e["to"]) for e in data["edges"]] == [("arpu", "revenue")]
+
+    @pytest.mark.asyncio
+    async def test_a_multi_hop_driver_walk_keeps_pointing_the_same_way(self) -> None:
+        # new_revenue drives revenue and is itself driven by trial_conversions,
+        # so depth 2 must arrive still oriented driver -> affected.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="upstream",
+            kinds="identity",
+            max_depth=2,
+        )
+        deep = [(e["from"], e["to"]) for e in data["edges"] if e["depth"] == 2]
+        assert ("trial_conversions", "new_revenue") in deep
+
+
+class TestEmptyIdentityWalkDisclosesTheOtherDirection:
+    """An empty payload must not read as "this metric declares nothing".
+
+    That silence is what #81 was about, and this release re-points identity
+    edges, so a caller who copied the old README example asks the direction
+    that is now empty. Say where the edges are instead of returning bare `[]`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_names_the_direction_that_has_edges(self) -> None:
+        # revenue is nothing's operand, so it drives no metric identically --
+        # but four operands drive it.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="downstream",
+            kinds="identity",
+        )
+        assert data["edges"] == []
+        assert "upstream" in data["note"]
+
+    @pytest.mark.asyncio
+    async def test_stays_quiet_when_the_walk_found_something(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="upstream",
+            kinds="identity",
+        )
+        assert data["edges"]
+        assert "note" not in data
+
+    @pytest.mark.asyncio
+    async def test_stays_quiet_on_an_influence_only_walk(self) -> None:
+        # The caller excluded identity edges, so their whereabouts are not an
+        # answer to the question asked.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="downstream",
+            kinds="influence",
+        )
+        assert data["edges"] == []
+        assert "note" not in data

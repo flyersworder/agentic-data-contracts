@@ -20,6 +20,17 @@ metrics:
   - name: new_revenue
     description: "Revenue from new customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_new)"
+    # Nested one level deeper than revenue's own operands, so a driver walk
+    # has somewhere to go at depth 2.
+    decompositions:
+      - operator: product
+        operands: [trial_conversions, new_customer_arpu]
+  - name: trial_conversions
+    description: "Trials that converted"
+    sql_expression: "COUNT(*) FILTER (WHERE converted)"
+  - name: new_customer_arpu
+    description: "Revenue per newly converted customer"
+    sql_expression: "SUM(amount) / NULLIF(COUNT(*), 0)"
   - name: expansion_revenue
     description: "Revenue expansion from existing customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_expansion)"

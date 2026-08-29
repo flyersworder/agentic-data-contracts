@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, deque
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Protocol, runtime_checkable
 
@@ -93,7 +93,14 @@ class MetricImpact:
 
 @dataclass
 class IdentityEdge:
-    """A directed identity edge parent -> operand in the metric graph."""
+    """A directed identity edge parent -> operand in the metric graph.
+
+    This is the *canonical* orientation, and it is the opposite of a
+    ``MetricImpact``'s: an influence edge points driver -> affected, while an
+    operand that drives its parent points parent -> operand. Any graph holding
+    both kinds must reconcile them before it can answer "what drives X" by
+    topology; :meth:`as_driver_edge` is that reconciliation.
+    """
 
     from_metric: str  # parent metric
     to_metric: str  # operand metric
@@ -107,6 +114,17 @@ class IdentityEdge:
     @property
     def kind(self) -> str:
         return "identity"
+
+    def as_driver_edge(self) -> IdentityEdge:
+        """This edge re-pointed operand -> parent, for a driver-graph walk.
+
+        Returns a new edge; the canonical record is left alone, because
+        ``lookup_metric`` and ``reconcile_decomposition`` read the parent off
+        ``from_metric``. Only the traversal in ``trace_metric_impacts`` wants
+        the other orientation, and only so that ``direction="upstream"`` means
+        "drivers" for identity and influence edges alike.
+        """
+        return replace(self, from_metric=self.to_metric, to_metric=self.from_metric)
 
 
 MetricEdge = MetricImpact | IdentityEdge
@@ -722,8 +740,14 @@ def walk_metric_impacts(
 
     Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
-    prevents cycles, so each reachable metric appears at most once. Works
-    over a mixed influence + identity edge index.
+    prevents cycles, so each reachable metric is *expanded* at most once —
+    but every edge that reaches it at that depth is reported. The distinction
+    matters on a mixed influence + identity index, where one real
+    relationship can be declared twice (as an impact edge and as a
+    decomposition operand): marking a neighbor visited mid-adjacency would
+    keep whichever edge was indexed first and silently drop the other, along
+    with the operator and attribution convention only the identity edge
+    carries.
     """
     if direction not in ("upstream", "downstream"):
         msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"
@@ -736,6 +760,11 @@ def walk_metric_impacts(
         current, depth = queue.popleft()
         if depth >= max_depth:
             continue
+        # Neighbors reached while expanding `current`, in first-seen order.
+        # They join `visited` only after the whole adjacency is scanned, so
+        # parallel edges to the same neighbor all report; the dict keeps each
+        # neighbor queued once.
+        reached: dict[str, None] = {}
         for edge in index.get(current, []):
             if direction == "downstream":
                 # Only follow edges leaving `current`.
@@ -750,6 +779,8 @@ def walk_metric_impacts(
             if neighbor in visited:
                 continue
             result.append((depth + 1, edge))
+            reached[neighbor] = None
+        for neighbor in reached:
             visited.add(neighbor)
             queue.append((neighbor, depth + 1))
     return result

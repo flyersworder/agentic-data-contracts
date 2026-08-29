@@ -433,7 +433,7 @@ asyncio.run(demo())
 | `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, decompositions, drill_by, owners, freshness); fuzzy search fallback when no exact match |
 | `lookup_domain` | Get full domain context (description, metrics, tables, owners, freshness); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
-| `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges, filtered by `kinds` |
+| `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges (a metric's operands are drivers of it), filtered by `kinds` |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
 | `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, session}` |
 
@@ -947,13 +947,19 @@ Decomposition operands become identity edges in the same graph as impacts, so `t
 ```python
 await trace.callable({
     "metric_name": "total_revenue",
-    "direction": "downstream",
+    "direction": "upstream",       # operands drive their parent
     "kinds": "identity",           # walk the arithmetic skeleton first
 })
-# Returns edges like: {"depth": 1, "from": "total_revenue", "to": "arpu",
+# Returns edges like: {"depth": 1, "from": "arpu", "to": "total_revenue",
 #                      "kind": "identity", "operator": "product",
 #                      "convention": "split_evenly"}
 ```
+
+Both kinds answer `direction` the same way — every edge points from a driver to
+what it affects — so one pair declared as both an impact edge and a
+decomposition operand comes back under one direction, as two edges. An identity
+walk that finds nothing where edges exist on the other side says so in a `note`
+rather than returning a bare `[]`.
 
 Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction and a variance-diagnosis tool are deferred.
 

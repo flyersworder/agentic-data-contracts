@@ -219,6 +219,36 @@ def _format_impact_edge(edge: MetricImpact, *, perspective: str) -> str:
     return summary
 
 
+def _identity_direction_note(
+    metric_name: str, direction: str, oriented: list[IdentityEdge]
+) -> str | None:
+    """Explain an identity walk that came back empty, when it need not have.
+
+    ``[]`` reads to an agent as "this metric declares no decomposition", which
+    is false whenever the edges are simply on the other side. Returning the
+    count and the direction that holds them turns a silent miss into a
+    self-correcting one -- the same move ``expected_extras`` made in #60, and
+    the thing that keeps this release's re-orientation from stranding a caller
+    who copied the old example. ``oriented`` is driver-oriented, so an edge
+    leaving ``metric_name`` is one the metric feeds.
+    """
+    # Count what the OTHER direction holds: an edge leaving `metric_name`
+    # makes it somebody's operand (downstream), one arriving makes it a parent
+    # built from operands (upstream).
+    if direction == "upstream":
+        count = sum(1 for e in oriented if e.from_metric == metric_name)
+        other, gloss = "downstream", "the metrics it is an operand of"
+    else:
+        count = sum(1 for e in oriented if e.to_metric == metric_name)
+        other, gloss = "upstream", "the operands it is built from"
+    if count == 0:
+        return None
+    return (
+        f"No identity edges {direction} of {metric_name!r}, but {count} "
+        f"{other} ({gloss}). Re-run with direction={other!r} to see them."
+    )
+
+
 def _freshness_fields(
     last_reviewed: date | None, today: date, threshold_days: int
 ) -> dict[str, Any]:
@@ -991,8 +1021,14 @@ def create_tools(
             graph_edges: list[MetricEdge] = []
             if kinds in ("all", "influence"):
                 graph_edges.extend(_metric_impacts)
+            # Re-oriented operand -> parent so the graph speaks one language:
+            # every edge in it, whatever its kind, points from a driver to what
+            # it affects. Without this an identity edge and an influence edge
+            # declared for the SAME pair answer opposite directions, and
+            # `direction` stops meaning what its own description promises.
+            oriented_identity = [e.as_driver_edge() for e in _identity_edges]
             if kinds in ("all", "identity"):
-                graph_edges.extend(_identity_edges)
+                graph_edges.extend(oriented_identity)
             graph_index = build_metric_impact_index(graph_edges)
 
             walk = walk_metric_impacts(
@@ -1024,16 +1060,21 @@ def create_tools(
                     if edge.description:
                         entry["description"] = edge.description
                 edges.append(entry)
-            response = _text_response(
-                json.dumps(
-                    {
-                        "metric_name": metric_name,
-                        "direction": direction,
-                        "max_depth": max_depth,
-                        "edges": edges,
-                    }
+            payload: dict[str, Any] = {
+                "metric_name": metric_name,
+                "direction": direction,
+                "max_depth": max_depth,
+                "edges": edges,
+            }
+            if kinds in ("all", "identity") and not any(
+                e["kind"] == "identity" for e in edges
+            ):
+                note = _identity_direction_note(
+                    metric_name, direction, oriented_identity
                 )
-            )
+                if note is not None:
+                    payload["note"] = note
+            response = _text_response(json.dumps(payload))
             _record("ok")
             return response
         except Exception as e:
@@ -1418,6 +1459,9 @@ def create_tools(
                 " (useful for root-cause analyses like 'why did revenue"
                 " drop?'); direction='downstream' returns metrics the target"
                 " affects (useful for 'what does this KPI move?')."
+                " Both edge kinds answer the same direction the same way:"
+                " every edge points from a driver to what it affects, so"
+                " 'from' is the driver and 'to' is the metric it moves."
                 " Each edge is tagged with 'kind': identity edges carry an"
                 " 'operator' (sum/product/ratio/difference) and are exact"
                 " arithmetic; influence edges carry direction, confidence, and"
@@ -1436,7 +1480,11 @@ def create_tools(
                         "enum": ["upstream", "downstream"],
                         "description": (
                             "'upstream' for drivers, 'downstream' for"
-                            " affected metrics. Default 'upstream'."
+                            " affected metrics. Default 'upstream'. Applies"
+                            " to both edge kinds: a metric's decomposition"
+                            " operands are drivers of it, so they come back"
+                            " 'upstream' — 'downstream' from an operand"
+                            " returns the metrics it is a factor of."
                         ),
                     },
                     "max_depth": {
@@ -1451,8 +1499,10 @@ def create_tools(
                             " decomposition (exhaustive, deterministic);"
                             " 'influence' = causal driver edges (with evidence);"
                             " 'all' (default) = both. For root-cause, walk"
-                            " 'identity' first to localize the change, then"
-                            " 'influence' for candidate explanations."
+                            " 'identity' upstream first to localize the change,"
+                            " then 'influence' for candidate explanations. One"
+                            " pair may be declared as both kinds; both are"
+                            " returned."
                         ),
                     },
                 },

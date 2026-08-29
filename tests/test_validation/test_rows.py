@@ -175,3 +175,43 @@ class TestOrderedComparison:
             ordered=True,
         )
         assert any("row 1" in d for d in result.differences)
+
+
+class TestNullMeasurements:
+    """A group whose measurement is NULL -- an ordinary LEFT JOIN breakdown."""
+
+    def test_a_null_measurement_is_a_value_not_a_key(self) -> None:
+        # `None` is not a label: a row cannot identify itself by a cell that
+        # holds nothing, and treating it as a key silently makes the group
+        # named `(EMEA, None)` rather than `EMEA`.
+        assert key_positions([["EMEA", None]]) == (0,)
+
+    def test_a_null_measurement_in_one_group_only_is_comparable(self) -> None:
+        expected = [["EMEA", 5000.0], ["LATAM", None]]
+        result = _run(expected, [("EMEA", 5000.0), ("LATAM", None)])
+        assert result.matched
+
+    def test_a_certified_null_does_not_match_the_string_none(self) -> None:
+        result = _run([["EMEA", None]], [("EMEA", "None")])
+        assert not result.matched
+
+    def test_a_certified_null_is_a_value_difference_against_a_number(self) -> None:
+        result = _run([["EMEA", None]], [("EMEA", 0)])
+        assert not result.matched
+        assert not any("missing group" in d for d in result.differences)
+        assert any("EMEA" in d and "0" in d for d in result.differences)
+
+
+class TestDifferenceOrdering:
+    def test_value_mismatches_are_reported_before_group_differences(self) -> None:
+        # `summary()` names only the first few differences, and the line it
+        # renders already carries the group and row counts -- so a group-set
+        # difference is signalled even when unnamed, while a wrong number has
+        # no other signal and must not be crowded out of the named slice.
+        result = _run(
+            [["EMEA", 5000.0], ["APAC", 3000.0]],
+            [("EMEA", 9999.0), ("LATAM", 1.0)],
+        )
+        assert not result.matched
+        assert "EMEA" in result.differences[0]
+        assert "9999" in result.differences[0]

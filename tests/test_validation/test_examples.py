@@ -1269,6 +1269,32 @@ def test_malformed_expects_metrics_is_rejected() -> None:
         VerifiedExample(sql="SELECT 1", expects_metrics=[""])
 
 
+class TestExpectedRowsResiduals:
+    """Load-path gaps found by review of the shipped `expected_rows` branch."""
+
+    def test_a_null_measurement_in_one_group_only_loads(self) -> None:
+        # An ordinary LEFT JOIN breakdown: one region has no revenue yet.
+        example = VerifiedExample(
+            sql="SELECT 1", expected_rows=[["EMEA", 5000.0], ["LATAM", None]]
+        )
+        assert example.expected_rows == [["EMEA", 5000.0], ["LATAM", None]]
+
+    def test_a_decimal_measurement_loads_as_a_number(self) -> None:
+        # `_rows._is_number` counts Decimal deliberately, so the load rule
+        # must not reject what the comparison is built to accept.
+        example = VerifiedExample(
+            sql="SELECT 1", expected_rows=[["EMEA", Decimal("5000.00")]]
+        )
+        assert example.expected_rows == [["EMEA", 5000.0]]
+
+    def test_ordered_beside_a_scalar_expected_is_refused(self) -> None:
+        # `ordered` only ever affects `expected_rows` comparison, so beside a
+        # scalar `expected` it is inert -- the same dead configuration the
+        # orphan guard exists to catch.
+        with pytest.raises(ValueError, match="'ordered' set without"):
+            VerifiedExample(sql="SELECT 1", expected=5.0, ordered=True)
+
+
 class TestExpectedRowsLoading:
     def test_a_breakdown_row_loads(self) -> None:
         example = VerifiedExample(

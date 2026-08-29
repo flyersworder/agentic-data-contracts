@@ -13,6 +13,7 @@ import math
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import sqlglot
@@ -20,7 +21,7 @@ import sqlglot
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.validation._rows import (
-    _is_number,
+    _is_value,
     compare_rows,
     key_positions,
 )
@@ -110,7 +111,7 @@ def _validate_expected_rows(raw: Any, *, ordered: bool) -> list[list[Any]] | Non
         )
     positions = key_positions(rows)
     for row in rows:
-        if tuple(i for i, cell in enumerate(row) if not _is_number(cell)) != positions:
+        if tuple(i for i, cell in enumerate(row) if not _is_value(cell)) != positions:
             raise ValueError(
                 "every row in 'expected_rows' must identify itself by the same "
                 "columns — one row's text cells are in different positions"
@@ -120,10 +121,16 @@ def _validate_expected_rows(raw: Any, *, ordered: bool) -> list[list[Any]] | Non
     # report MATCH against any actual value at all. Reuses `_numeric`'s own
     # finiteness rule rather than a second copy of it, so scalar `expected`
     # and every measurement cell in `expected_rows` are held to one rule.
+    # `Decimal` is normalised rather than refused: `_rows._is_number` counts it
+    # deliberately (a warehouse driver hands back `Decimal` for NUMERIC), so a
+    # load rule that rejected it would reject exactly what the comparison is
+    # built to accept. `_numeric` still owns the finite/bool/type rules.
     for row_index, row in enumerate(rows):
         for i, cell in enumerate(row):
             if i in positions:
                 continue
+            if isinstance(cell, Decimal):
+                cell = float(cell)
             row[i] = _numeric(cell, f"expected_rows[{row_index}][{i}]")
     if not ordered:
         if not positions:
@@ -242,6 +249,17 @@ class VerifiedExample:
                     "asserts nothing. Add 'expected' or 'expected_rows', or "
                     "remove them."
                 )
+        elif self.ordered and self.expected_rows is None:
+            # Same defect one step further in: `ordered` modifies only
+            # `expected_rows` pairing, so beside a scalar `expected` it is
+            # dead configuration — and the likeliest cause is a breakdown row
+            # converted to a `COUNT(*)` scalar with the flag left behind,
+            # whose author still believes order is being asserted.
+            raise ValueError(
+                "'ordered' set without 'expected_rows' — it only affects how a "
+                "certified breakdown is paired, so beside a scalar 'expected' "
+                "it asserts nothing. Remove it, or use 'expected_rows'."
+            )
 
     @classmethod
     def from_dict(cls, raw: Any) -> VerifiedExample:

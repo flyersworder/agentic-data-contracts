@@ -48,13 +48,25 @@ def _is_number(cell: Any) -> bool:
     return isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool)
 
 
+def _is_value(cell: Any) -> bool:
+    """True when a cell is something the certified answer *measures*.
+
+    ``None`` counts as a measurement, not a label: a row cannot identify
+    itself by a cell that holds nothing, so a group whose measurement is NULL
+    -- an ordinary ``LEFT JOIN`` breakdown where one group has no rows yet --
+    would otherwise be keyed as ``(EMEA, None)`` rather than ``EMEA``, and a
+    query returning the literal string ``'None'`` would match it.
+    """
+    return cell is None or _is_number(cell)
+
+
 def key_positions(expected_rows: list[list[Any]]) -> tuple[int, ...]:
     """Cell positions that identify a row, read off the first expected row.
 
     ``VerifiedExample`` validates at load that every expected row agrees on this
     partition, so the first row is representative by then.
     """
-    return tuple(i for i, cell in enumerate(expected_rows[0]) if not _is_number(cell))
+    return tuple(i for i, cell in enumerate(expected_rows[0]) if not _is_value(cell))
 
 
 def _key_of(row: Sequence[Any], positions: tuple[int, ...]) -> Key:
@@ -121,18 +133,15 @@ def _compare_ordered(
         )
     for index, (expected_row, actual_row) in enumerate(zip(expected_rows, actual), 1):
         where = f"row {index}"
-        # Re-derives the key-vs-value classification per cell rather than
-        # calling `key_positions` once, as the unordered path below does. Do
-        # NOT factor this out to share with `key_positions`: the two paths
-        # classify `None` differently on purpose. Unordered treats a `None`
-        # cell as a KEY (`_is_number(None)` is False, so `key_positions` puts
-        # its position in `positions`); here a `None` cell is routed to
-        # `_compare_cell` as a VALUE (`or expected_cell is None` below).
-        # Sharing one derivation would force one rule onto both and silently
-        # break whichever path didn't get it.
+        # Applies `_is_value` per cell rather than calling `key_positions`
+        # once, as the unordered path below does. The rule is the same; what
+        # differs is that position is identity here, so this path never needs
+        # the partition to agree across rows -- deriving it per cell is what
+        # lets an ordered answer hold a column that is a label in one row and
+        # a measurement in another.
         for i, expected_cell in enumerate(expected_row):
             actual_cell = actual_row[i]
-            if _is_number(expected_cell) or expected_cell is None:
+            if _is_value(expected_cell):
                 differences.extend(
                     _compare_cell(
                         where, columns[i], expected_cell, actual_cell, rel_tol, abs_tol
@@ -192,13 +201,11 @@ def compare_rows(
             )
         actual_by_key[key] = row
 
-    for key in expected_by_key:
-        if key not in actual_by_key:
-            differences.append(f"missing group {_render(key)}")
-    for key in actual_by_key:
-        if key not in expected_by_key:
-            differences.append(f"unexpected group {_render(key)}")
-
+    # Value mismatches lead. A caller rendering only the first few
+    # differences still reports `expected_group_count` and `actual_row_count`
+    # alongside them, so a group-set difference is signalled even when it goes
+    # unnamed -- while a wrong number has no other signal at all and must not
+    # be crowded out of the named slice by a bulk renaming.
     value_positions = [i for i in range(width) if i not in positions]
     for key, expected_row in expected_by_key.items():
         actual_row = actual_by_key.get(key)
@@ -215,6 +222,12 @@ def compare_rows(
                     abs_tol,
                 )
             )
+    for key in expected_by_key:
+        if key not in actual_by_key:
+            differences.append(f"missing group {_render(key)}")
+    for key in actual_by_key:
+        if key not in expected_by_key:
+            differences.append(f"unexpected group {_render(key)}")
 
     return RowComparison(
         matched=not differences,

@@ -36,12 +36,31 @@ Three forks were settled with the maintainer up front, because each changes the
 surface materially.
 
 **Scope: `check_example_answers` only.** `evaluate_conformance` keeps returning
-`skipped` for breakdown rows. Grading a breakdown there requires `ToolCall` to
-retain the agent's result *rows*, and the recorder today holds only shapes and
-outcomes (`scalar`, `row_count`, `relative_time`). Putting warehouse data inside
-a governance log is a privacy decision, not merely more work, and it should be
-taken on its own terms rather than as a side effect of closing the corpus gap.
-The field is designed so conformance can grade later with no schema change.
+`skipped` for breakdown rows. Grading a breakdown there means the recorder must
+carry something about the agent's *result*, where today a `ToolCall` holds only
+`scalar`, `row_count` and `relative_time`.
+
+This was first framed as a privacy question — whether a governance log may hold
+warehouse rows — and that framing was wrong on the facts. Nothing in the library
+serializes an `Attempt` or a `ToolCall`: there is no `asdict`, no dump, no file
+write, and `evaluate_conformance` is a pure function over an in-memory structure
+built in the consumer's own process. The attempt already carries result data
+besides — `final_text` is the agent's answer, which for a breakdown *is* the
+numbers, and `ToolCall.args` holds the SQL verbatim including literal filter
+predicates. `run_query` returns every row uncapped, so the rows have already
+reached the model's context. Retaining them alongside adds no exposure.
+
+What is real is **size**: every row of every successful query, across a whole
+corpus run, in a structure that today holds a handful of scalars. The likely
+answer is not to retain rows at all but the **keyed digest** — the `{key: value}`
+map that this design's comparison already consumes — which is bounded by group
+count and drops the raw result. A breakdown answer is low-cardinality by nature;
+that is what separates a certified answer from a data dump, so a cap on group
+count is both a memory guard and a sanity check.
+
+That is a separate piece of work with its own design, not a side effect of
+closing the corpus gap. The field below is shaped so it can land later with no
+schema change.
 
 **Unordered comparison by default, `ordered: true` opt-in.** `GROUP BY` without
 `ORDER BY` has no guaranteed row order — demonstrated in this very repo, where
@@ -250,7 +269,9 @@ under its own suite, per CLAUDE.md.
 ## Out of scope
 
 - **`evaluate_conformance` grading breakdowns**, and any change to what
-  `ToolCall` retains. Tracked separately; see the scope decision above.
+  `ToolCall` retains. Tracked separately; see the scope decision above for why
+  the constraint is size rather than privacy, and for the keyed-digest approach
+  that work should start from.
 - **`key_columns`.** The declared-key escape hatch for an unordered comparison
   over a numeric dimension. `ordered: true` already answers that case, and
   adding an optional field later is additive for every row that does not use it.

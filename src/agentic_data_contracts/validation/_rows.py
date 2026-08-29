@@ -121,6 +121,15 @@ def _compare_ordered(
         )
     for index, (expected_row, actual_row) in enumerate(zip(expected_rows, actual), 1):
         where = f"row {index}"
+        # Re-derives the key-vs-value classification per cell rather than
+        # calling `key_positions` once, as the unordered path below does. Do
+        # NOT factor this out to share with `key_positions`: the two paths
+        # classify `None` differently on purpose. Unordered treats a `None`
+        # cell as a KEY (`_is_number(None)` is False, so `key_positions` puts
+        # its position in `positions`); here a `None` cell is routed to
+        # `_compare_cell` as a VALUE (`or expected_cell is None` below).
+        # Sharing one derivation would force one rule onto both and silently
+        # break whichever path didn't get it.
         for i, expected_cell in enumerate(expected_row):
             actual_cell = actual_row[i]
             if _is_number(expected_cell) or expected_cell is None:

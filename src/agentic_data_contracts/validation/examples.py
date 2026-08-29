@@ -115,6 +115,16 @@ def _validate_expected_rows(raw: Any, *, ordered: bool) -> list[list[Any]] | Non
                 "every row in 'expected_rows' must identify itself by the same "
                 "columns — one row's text cells are in different positions"
             )
+    # A non-finite measurement cell asserts nothing: `1e-9 * inf == inf` makes
+    # `_tolerance._compare`'s tolerance term infinite too, so the row would
+    # report MATCH against any actual value at all. Reuses `_numeric`'s own
+    # finiteness rule rather than a second copy of it, so scalar `expected`
+    # and every measurement cell in `expected_rows` are held to one rule.
+    for row_index, row in enumerate(rows):
+        for i, cell in enumerate(row):
+            if i in positions:
+                continue
+            row[i] = _numeric(cell, f"expected_rows[{row_index}][{i}]")
     if not ordered:
         if not positions:
             raise ValueError(
@@ -159,12 +169,16 @@ class VerifiedExample:
     principal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     expected: float | None = None
-    expected_rows: list[list[Any]] | None = None
-    ordered: bool = False
     rel_tol: float | None = None
     abs_tol: float | None = None
     time_scoped: bool = False
     expects_metrics: list[str] = field(default_factory=list)
+    # Appended after `expects_metrics` rather than inserted beside `expected`,
+    # so every pre-existing positional constructor call keeps binding to the
+    # same field it always did — this dataclass is public API and not
+    # `kw_only`. `ExampleAnswerResult` follows the same append-only rule.
+    expected_rows: list[list[Any]] | None = None
+    ordered: bool = False
 
     def __post_init__(self) -> None:
         """Validate the four assertion fields, however the record was built.

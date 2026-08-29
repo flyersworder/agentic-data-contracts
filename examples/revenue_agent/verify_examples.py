@@ -127,7 +127,18 @@ def main() -> None:
         # about what to call an unnamed row.
         print(f"[{r.status.upper():12}] {r.label}")
         if r.status in ("match", "mismatch"):
-            print(f"             expected={r.expected}  actual={r.actual}")
+            if r.expected_rows is not None:
+                # A breakdown row: `expected`/`actual` are both None (the
+                # assertion is `expected_rows`, not a scalar), so printing
+                # them here would read as "nothing was checked". Print the
+                # shape of what was actually compared instead.
+                print(
+                    f"             {len(r.expected_rows)} expected group(s), "
+                    f"{r.actual_row_count} row(s) returned, "
+                    f"{len(r.row_differences)} difference(s)"
+                )
+            else:
+                print(f"             expected={r.expected}  actual={r.actual}")
         if r.reason:
             print(f"             reason:  {r.reason}")
 

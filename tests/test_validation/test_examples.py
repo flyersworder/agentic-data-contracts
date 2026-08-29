@@ -1339,6 +1339,23 @@ class TestExpectedRowsLoading:
         )
         assert example.abs_tol == 0.5
 
+    def test_an_infinite_cell_raises(self) -> None:
+        # Without this guard, `1e-9 * inf == inf` makes the tolerance term
+        # infinite too, so `abs_diff <= inf` is True for ANY actual value —
+        # the row reports MATCH while asserting nothing.
+        with pytest.raises(ValueError, match="finite"):
+            VerifiedExample(
+                sql="SELECT 1",
+                expected_rows=[["EMEA", float("inf")], ["APAC", 3000.0]],
+            )
+
+    def test_a_nan_cell_raises(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            VerifiedExample(
+                sql="SELECT 1",
+                expected_rows=[["EMEA", float("nan")], ["APAC", 3000.0]],
+            )
+
 
 class TestBreakdownRendering:
     def _result(self, differences: list[str]) -> ExampleAnswerResult:

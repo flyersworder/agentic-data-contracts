@@ -740,9 +740,26 @@ def walk_metric_impacts(
 
     Returns ``(depth, edge)`` pairs in BFS order, where depth is the number
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
-    prevents cycles: each reachable metric is expanded at most once, and an
-    edge is reported only when it reaches a metric no earlier edge has
+    prevents cycles by gating *expansion* only: each reachable metric is
+    expanded at most once, while **every declared edge between reached
+    metrics within the depth horizon is reported**, including one onto a
+    metric another branch already reached. That is what lets a shared driver
+    -- one metric that is an operand of two parents -- arrive on both
+    branches, carrying the ``operator`` and ``convention`` that only its
+    second edge holds.
+
+    "Within the depth horizon" is load-bearing: a node reached at exactly
+    ``max_depth`` is dequeued but never expanded, so its outgoing edges are
+    not discovered even when the far endpoint was independently reached by
+    another path. ``a->b, a->c, b->d, c->e, d->e`` walked from ``a`` at
+    ``max_depth=2`` never reports ``d->e``, though both ``d`` and ``e`` are
     reached.
+
+    A consequence worth knowing: cycle-closing edges are reported. In
+    ``a -> b -> c -> a`` walked downstream, ``c -> a`` appears. The edge is
+    declared and an agent tracing root cause should be told the graph closes.
+    Termination is unaffected -- it was never the reporting gate that
+    guaranteed it.
 
     The one exception is *parallel* edges — several edges found while
     expanding a single node that land on the same neighbor. All of them are
@@ -753,12 +770,6 @@ def walk_metric_impacts(
     decomposition operand): keeping whichever was indexed first would drop
     the operator and attribution convention that only the identity edge
     carries.
-
-    A shared operand deeper in the graph is still lost — if ``a`` drives both
-    ``b`` and ``c``, and ``b`` is reached first, the edge ``a -> c`` is not
-    reported. That is the node-visited BFS this function has always been;
-    widening it would report cycle-closing edges too, which is a different
-    contract.
     """
     if direction not in ("upstream", "downstream"):
         msg = f"direction must be 'upstream' or 'downstream', got {direction!r}"
@@ -793,11 +804,12 @@ def walk_metric_impacts(
                 if edge.to_metric != current:
                     continue
                 neighbor = edge.from_metric
-            if neighbor in visited or any(edge == prior for prior in seen):
+            if any(edge == prior for prior in seen):
                 continue
             result.append((depth + 1, edge))
             seen.append(edge)
-            reached[neighbor] = None
+            if neighbor not in visited:
+                reached[neighbor] = None
         for neighbor in reached:
             visited.add(neighbor)
             queue.append((neighbor, depth + 1))

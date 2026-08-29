@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 from agentic_data_contracts.semantic.base import (
+    Decomposition,
+    IdentityEdge,
+    MetricDefinition,
     MetricImpact,
     build_metric_impact_index,
+    identity_edges_from_metrics,
     walk_metric_impacts,
 )
 from agentic_data_contracts.semantic.cube import CubeSource
@@ -83,6 +87,50 @@ class TestWalkMetricImpacts:
             MetricImpact(from_metric="conv", to_metric="rev"),
         ]
 
+    def _shared_driver_metrics(self) -> list[MetricDefinition]:
+        """`paying_users` is an operand of BOTH `revenue` and `new_revenue`.
+
+        `paying_users` itself decomposes into `trials` and `signups` to test
+        that a shared driver is expanded at most once, not once per incoming edge.
+        """
+
+        def m(name: str, decs: list[Decomposition] | None = None) -> MetricDefinition:
+            return MetricDefinition(
+                name=name,
+                description="",
+                sql_expression="x",
+                decompositions=decs or [],
+            )
+
+        return [
+            m(
+                "revenue",
+                [
+                    Decomposition(
+                        operator="sum", operands=["paying_users", "new_revenue"]
+                    )
+                ],
+            ),
+            m(
+                "new_revenue",
+                [
+                    Decomposition(
+                        operator="product",
+                        operands=["paying_users", "conv"],
+                        convention="fold_into",
+                        convention_operand="conv",
+                    )
+                ],
+            ),
+            m(
+                "paying_users",
+                [Decomposition(operator="sum", operands=["trials", "signups"])],
+            ),
+            m("conv"),
+            m("trials"),
+            m("signups"),
+        ]
+
     def test_downstream_direct(self) -> None:
         index = build_metric_impact_index(self._chain())
         walk = walk_metric_impacts(index, "traffic", direction="downstream")
@@ -109,8 +157,83 @@ class TestWalkMetricImpacts:
         assert by_from["conv"] == 1
         assert by_from["traffic"] == 2
 
-    def test_cycle_visited_tracking(self) -> None:
-        # a -> b -> c -> a (cycle)
+    def test_a_shared_driver_reports_both_of_its_edges(self) -> None:
+        """One metric driving two others must arrive on both branches.
+
+        `paying_users` drives `revenue` directly and `new_revenue` as a
+        `product` operand. Reporting only the first branch drops the
+        `operator` and `convention` that only the second edge carries -- the
+        facts a root-cause walk exists to deliver.
+        """
+        index = build_metric_impact_index(
+            [
+                e.as_driver_edge()
+                for e in identity_edges_from_metrics(self._shared_driver_metrics())
+            ]
+        )
+        walk = walk_metric_impacts(index, "revenue", direction="upstream", max_depth=3)
+        pairs = {(e.from_metric, e.to_metric) for _, e in walk}
+        assert ("paying_users", "new_revenue") in pairs
+
+    def test_a_shared_driver_carries_its_own_operator_and_convention(self) -> None:
+        index = build_metric_impact_index(
+            [
+                e.as_driver_edge()
+                for e in identity_edges_from_metrics(self._shared_driver_metrics())
+            ]
+        )
+        walk = walk_metric_impacts(index, "revenue", direction="upstream", max_depth=3)
+        edge = next(
+            e
+            for _, e in walk
+            if (e.from_metric, e.to_metric) == ("paying_users", "new_revenue")
+        )
+        assert isinstance(edge, IdentityEdge)
+        assert edge.operator == "product"
+        assert edge.convention == "fold_into"
+
+    def test_a_shared_driver_is_expanded_once(self) -> None:
+        """Reporting both edges must not expand the node twice.
+
+        `paying_users` is reached from both `revenue` and `new_revenue`.
+        Its children `trials` and `signups` must appear exactly once each,
+        not twice (once per incoming branch). If `paying_users` were expanded
+        twice, we would see its child edges duplicated in the walk.
+        """
+        index = build_metric_impact_index(
+            [
+                e.as_driver_edge()
+                for e in identity_edges_from_metrics(self._shared_driver_metrics())
+            ]
+        )
+        walk = walk_metric_impacts(index, "revenue", direction="upstream", max_depth=4)
+        # Count how many times each child of paying_users appears
+        trials_count = sum(
+            1
+            for _, e in walk
+            if (e.from_metric, e.to_metric) == ("trials", "paying_users")
+        )
+        signups_count = sum(
+            1
+            for _, e in walk
+            if (e.from_metric, e.to_metric) == ("signups", "paying_users")
+        )
+        assert trials_count == 1, (
+            f"trials->paying_users appeared {trials_count} times, expected 1"
+        )
+        assert signups_count == 1, (
+            f"signups->paying_users appeared {signups_count} times, expected 1"
+        )
+
+    def test_a_cycle_terminates_and_reports_its_closing_edge(self) -> None:
+        """`visited` exists to stop cycles, and still does.
+
+        Replaces the former `test_cycle_visited_tracking`, whose assertions
+        ("each target at most once", "start is never a target") encoded the
+        node-visited guarantee rather than this test's actual intent, which is
+        termination. A cycle-closing edge is declared, and an agent tracing
+        root cause should be told the graph closes.
+        """
         impacts = [
             MetricImpact(from_metric="a", to_metric="b"),
             MetricImpact(from_metric="b", to_metric="c"),
@@ -118,10 +241,18 @@ class TestWalkMetricImpacts:
         ]
         index = build_metric_impact_index(impacts)
         walk = walk_metric_impacts(index, "a", direction="downstream", max_depth=10)
-        visited_targets = [e.to_metric for _, e in walk]
-        # Each target appears at most once — no infinite loop.
-        assert len(visited_targets) == len(set(visited_targets))
-        assert "a" not in visited_targets  # start is not revisited
+        assert [(e.from_metric, e.to_metric) for _, e in walk] == [
+            ("a", "b"),
+            ("b", "c"),
+            ("c", "a"),
+        ]
+
+    def test_a_self_loop_terminates_and_reports_once(self) -> None:
+        index = build_metric_impact_index(
+            [MetricImpact(from_metric="a", to_metric="a")]
+        )
+        walk = walk_metric_impacts(index, "a", direction="downstream", max_depth=5)
+        assert [(e.from_metric, e.to_metric) for _, e in walk] == [("a", "a")]
 
     def test_parallel_edges_to_one_neighbor_are_all_reported(self) -> None:
         """A pair declared twice must arrive twice.
@@ -190,13 +321,23 @@ class TestWalkMetricImpacts:
         assert targets == {"b"}  # does not follow c->a incoming edge
 
     def test_self_loop_end_to_end(self) -> None:
-        """Index builder dedups self-loops; walker then yields no neighbors
-        because the sole edge's neighbor is `start`, already visited."""
+        """A self-loop is now reported, but not expanded (termination guaranteed).
+
+        The sole edge's neighbor is `start`, already visited, so it joins no
+        queue. The edge itself is reported because visited gating applies to
+        *expansion*, not reporting.
+        """
         index = build_metric_impact_index(
             [MetricImpact(from_metric="a", to_metric="a")]
         )
-        assert walk_metric_impacts(index, "a", direction="downstream") == []
-        assert walk_metric_impacts(index, "a", direction="upstream") == []
+        assert [
+            (e.from_metric, e.to_metric)
+            for _, e in walk_metric_impacts(index, "a", direction="downstream")
+        ] == [("a", "a")]
+        assert [
+            (e.from_metric, e.to_metric)
+            for _, e in walk_metric_impacts(index, "a", direction="upstream")
+        ] == [("a", "a")]
 
 
 class TestYamlSourceImpacts:

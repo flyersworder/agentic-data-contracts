@@ -448,3 +448,101 @@ def test_friction_measures_against_the_answering_query_not_the_last_one():
     _, reasons = _protocol_verdict(attempt, anchor)
     assert any("after an accepted one" in r for r in reasons)
     assert not any("before an accepted one" in r for r in reasons)
+
+
+# ── Declared breakdown answers (#85) ──────────────────────────────────────────
+
+_BREAKDOWN = [["EMEA", 5000.0], ["APAC", 3000.0]]
+_BD_COLUMNS = ["region", "revenue"]
+
+
+def _breakdown_example(**kw):
+    return _example(
+        id="by-region",
+        question="revenue by region",
+        expected_rows=[list(r) for r in _BREAKDOWN],
+        **kw,
+    )
+
+
+def _breakdown_attempt(rows, *, columns=None, calls=None, **kw):
+    return Attempt(
+        example=_breakdown_example(**kw),
+        calls=calls if calls is not None else [ToolCall(0, "run_query", outcome="ok")],
+        final_rows=rows,
+        final_columns=_BD_COLUMNS if columns is None else columns,
+    )
+
+
+class TestDeclaredBreakdown:
+    def test_a_matching_breakdown_reports_match(self) -> None:
+        result = evaluate_conformance([_breakdown_attempt(_BREAKDOWN)]).results[0]
+        assert result.answer == "match"
+        assert result.answer_source == "declared"
+        assert result.row_differences == []
+        assert result.actual_row_count == 2
+
+    def test_a_wrong_number_reports_mismatch_and_names_its_group(self) -> None:
+        result = evaluate_conformance(
+            [_breakdown_attempt([["EMEA", 9999.0], ["APAC", 3000.0]])]
+        ).results[0]
+        assert result.answer == "mismatch"
+        assert any("EMEA" in d for d in result.row_differences)
+
+    def test_a_missing_group_reports_mismatch(self) -> None:
+        result = evaluate_conformance([_breakdown_attempt([["EMEA", 5000.0]])]).results[
+            0
+        ]
+        assert result.answer == "mismatch"
+        assert any("missing group APAC" in d for d in result.row_differences)
+
+    def test_an_undeclared_breakdown_still_skips(self) -> None:
+        # The non-breaking half: a host that has not wired `final_rows` sees
+        # exactly what it saw before, so this ships as a minor.
+        attempt = Attempt(
+            example=_breakdown_example(),
+            calls=[ToolCall(0, "run_query", outcome="ok")],
+        )
+        report = evaluate_conformance([attempt])
+        assert report.results[0].answer == "skipped"
+        assert report.ok
+
+    def test_a_column_count_mismatch_is_an_error_not_a_mismatch(self) -> None:
+        # `compare_rows` raises for a fault no pairing can resolve; pass 3
+        # converts it the way pass 2's batch guard does.
+        result = evaluate_conformance(
+            [_breakdown_attempt([["EMEA", 5000.0, 1.0]], columns=["a", "b", "c"])]
+        ).results[0]
+        assert result.answer == "error"
+        assert any("column" in r for r in result.reasons)
+
+    def test_a_relative_window_is_unassertable_before_it_is_compared(self) -> None:
+        result = evaluate_conformance(
+            [
+                _breakdown_attempt(
+                    _BREAKDOWN,
+                    calls=[
+                        ToolCall(
+                            0, "run_query", outcome="ok", relative_time="CURRENT_DATE"
+                        )
+                    ],
+                )
+            ]
+        ).results[0]
+        assert result.answer == "unassertable"
+
+    def test_rows_without_columns_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="final_columns"):
+            Attempt(example=_breakdown_example(), final_rows=_BREAKDOWN)
+
+    def test_from_session_carries_a_declared_breakdown(self, contract) -> None:
+        rec = ToolRecorder()
+        session = ContractSession(contract, recorder=rec)
+        rec.log("run_query", {"sql": "SELECT 1"}, "ok")
+        attempt = Attempt.from_session(
+            _breakdown_example(),
+            session,
+            final_rows=_BREAKDOWN,
+            final_columns=_BD_COLUMNS,
+        )
+        assert evaluate_conformance([attempt]).results[0].answer == "match"

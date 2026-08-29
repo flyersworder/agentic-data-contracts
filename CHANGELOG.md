@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.0] - 2026-08-29
+
+### Added
+
+- **`evaluate_conformance` can grade a certified breakdown** (#85). Pass 3 scores two orthogonal axes, and for a row certified with `expected_rows` only the protocol axis was ever checked: whether the agent followed the governed path was graded in full, while whether it got the right *numbers* reported `answer="skipped"`. The failure that slipped through is a contract that drifts without breaking — a metric description trimmed so it no longer says which column identifies a region — leaving an agent that followed every rule to return a right-shaped, wrong-grouped answer against a green gate.
+
+  `Attempt` gains `final_rows` / `final_columns`, the breakdown counterpart to the existing `final_answer`. As with `final_answer`, the host declares what the agent answered rather than the library inferring it: `_select_answer` picks a scalar by clustering candidates and marks the guess when it is ambiguous, and there is no equally honest inference for a breakdown — choosing whichever query happened to match would let a lucky drill-down pass. Both fields are also accepted by `Attempt.from_session`.
+
+  Grading delegates to the same `compare_rows` that pass 2 uses, so a breakdown is scored identically in both passes — with tolerance, and naming which group differed. `ConformanceResult` gains `row_differences` and `actual_row_count`, mirroring the pair `ExampleAnswerResult` gained in 0.47.0. A fault no pairing can resolve becomes `answer="error"` rather than propagating, since `evaluate_conformance` is pure and has no batch guard to convert it.
+
+  **Not breaking.** A host that has not wired `final_rows` sees exactly the verdict it saw before: an undeclared breakdown still reports `skipped` and still passes. The guard order differs from the scalar path's for that reason — there, the relative-time check precedes the missing-scalar check, because a window that returned NULL is still a decaying window; here the undeclared case wins first, because with no declared answer there is nothing for a window to decay.
+
+  `final_rows` without `final_columns` is refused at construction: the column names are what `compare_rows` uses to check the result's width and to name the column a difference is in, so rows alone are incomplete rather than merely inert.
+
 ## [0.47.0] - 2026-08-29
 
 ### Added

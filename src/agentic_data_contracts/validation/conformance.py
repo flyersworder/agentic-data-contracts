@@ -16,9 +16,10 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.core.recorder import ToolCall
+from agentic_data_contracts.validation._rows import compare_rows
 from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.examples import (
     _DEFAULT_ABS_TOL,
@@ -39,10 +40,24 @@ class Attempt:
     calls: list[ToolCall] = field(default_factory=list)
     final_text: str = ""
     final_answer: float | None = None
+    final_rows: list[list[Any]] | None = None
+    final_columns: list[str] | None = None
     foreign_tool_calls: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
     elapsed_seconds: float = 0.0
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        # `final_rows` without `final_columns` is incomplete, not inert:
+        # `compare_rows` needs the column names to check the result's width
+        # and to name the column a difference is in. Refusing here beats
+        # grading a breakdown against columns nobody supplied.
+        if self.final_rows is not None and self.final_columns is None:
+            raise ValueError(
+                "final_rows needs final_columns — the column names the "
+                "breakdown was returned with, used to check the result's "
+                "width and to name the column a difference is in"
+            )
 
     @classmethod
     def from_session(
@@ -52,6 +67,8 @@ class Attempt:
         *,
         final_text: str = "",
         final_answer: float | None = None,
+        final_rows: list[list[Any]] | None = None,
+        final_columns: list[str] | None = None,
         foreign_tool_calls: Iterable[str] = (),
         error: str | None = None,
     ) -> Attempt:
@@ -70,6 +87,8 @@ class Attempt:
             calls=session.recorder.consume(),
             final_text=final_text,
             final_answer=final_answer,
+            final_rows=final_rows,
+            final_columns=final_columns,
             foreign_tool_calls=list(foreign_tool_calls),
             cost_usd=session.cost_usd,
             elapsed_seconds=session.recorder.elapsed_seconds,
@@ -116,7 +135,11 @@ def _select_answer(
         ):
             clusters.append((call, scalar))
 
-    if attempt.final_answer is not None:
+    if attempt.final_answer is not None or attempt.final_rows is not None:
+        # `final_rows` takes the same branch as `final_answer`: the host has
+        # declared what the agent answered, so no selection is needed. The
+        # scalar it returns stays `final_answer` (None for a breakdown) --
+        # the rows are read off the attempt by `_breakdown_verdict`.
         anchor = successful[-1] if successful else None
         return "declared", attempt.final_answer, len(clusters), anchor
     if not clusters:
@@ -186,6 +209,66 @@ def _answer_verdict(
         actual, attempt.example.expected, rel_tol, abs_tol
     )
     return ("match" if matched else "mismatch"), [], abs_diff, rel_diff
+
+
+def _breakdown_verdict(
+    attempt: Attempt,
+    anchor: ToolCall | None,
+) -> tuple[str, list[str], list[str], int | None]:
+    """Score a certified breakdown the host declared via ``final_rows``.
+
+    Returns ``(status, reasons, row_differences, actual_row_count)``.
+
+    The guard order differs from ``_answer_verdict``'s on purpose. There, the
+    relative-time check precedes the missing-scalar check, because a window
+    that returned NULL is still a decaying window and blaming the absent
+    scalar would report a symptom as the fault. Here the undeclared case wins
+    first: with no ``final_rows`` there is no answer to decay, so the row is
+    ``skipped`` exactly as it was before this existed -- which is what keeps a
+    host that never wired ``final_rows`` on its old verdict.
+    """
+    if attempt.error is not None:
+        return "error", [attempt.error], [], None
+    if attempt.final_rows is None:
+        return "skipped", [], [], None
+    if (
+        anchor is not None
+        and anchor.relative_time is not None
+        and not attempt.example.time_scoped
+    ):
+        return (
+            "unassertable",
+            [
+                f"agent's answering query uses a relative time window "
+                f"({anchor.relative_time}); the certified answer decays against it"
+            ],
+            [],
+            None,
+        )
+    rel_tol, abs_tol = _tolerances(attempt.example)
+    assert attempt.example.expected_rows is not None  # dispatched on this
+    assert attempt.final_columns is not None  # Attempt.__post_init__ enforces
+    try:
+        comparison = compare_rows(
+            attempt.example.expected_rows,
+            attempt.final_columns,
+            attempt.final_rows,
+            ordered=attempt.example.ordered,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+        )
+    except ValueError as e:
+        # `compare_rows` raises for a fault no pairing can resolve. Pass 2's
+        # batch guard turns that into `status="error"`; pass 3 is pure and has
+        # no such guard, so it converts here rather than propagating out of an
+        # `evaluate_conformance` documented as total over its attempts.
+        return "error", [str(e)], [], None
+    return (
+        ("match" if comparison.matched else "mismatch"),
+        [],
+        comparison.differences,
+        comparison.actual_row_count,
+    )
 
 
 def _protocol_verdict(
@@ -300,6 +383,8 @@ class ConformanceResult:
     abs_tol: float = _DEFAULT_ABS_TOL
     reasons: list[str] = field(default_factory=list)
     label: str = ""
+    row_differences: list[str] = field(default_factory=list)
+    actual_row_count: int | None = None
 
 
 @dataclass
@@ -407,9 +492,17 @@ def evaluate_conformance(attempts: list[Attempt]) -> ConformanceReport:
     results = []
     for index, attempt in enumerate(attempts):
         source, actual, candidates, anchor = _select_answer(attempt)
-        answer, answer_reasons, abs_diff, rel_diff = _answer_verdict(
-            attempt, actual, anchor
-        )
+        row_differences: list[str] = []
+        actual_row_count: int | None = None
+        if attempt.example.expected_rows is not None:
+            answer, answer_reasons, row_differences, actual_row_count = (
+                _breakdown_verdict(attempt, anchor)
+            )
+            abs_diff = rel_diff = None
+        else:
+            answer, answer_reasons, abs_diff, rel_diff = _answer_verdict(
+                attempt, actual, anchor
+            )
         protocol, protocol_reasons = _protocol_verdict(attempt, anchor)
         rel_tol, abs_tol = _tolerances(attempt.example)
         results.append(
@@ -427,6 +520,8 @@ def evaluate_conformance(attempts: list[Attempt]) -> ConformanceReport:
                 abs_tol=abs_tol,
                 reasons=answer_reasons + protocol_reasons,
                 label=_label(attempt.example, index),
+                row_differences=row_differences,
+                actual_row_count=actual_row_count,
             )
         )
     return ConformanceReport(results=results)

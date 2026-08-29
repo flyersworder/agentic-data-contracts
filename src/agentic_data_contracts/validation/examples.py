@@ -19,7 +19,11 @@ import sqlglot
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.validation._rows import _is_number, key_positions
+from agentic_data_contracts.validation._rows import (
+    _is_number,
+    compare_rows,
+    key_positions,
+)
 from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation._timewindow import _relative_time_node
 from agentic_data_contracts.validation._tolerance import _compare
@@ -688,7 +692,9 @@ def check_example_answers(
     results: list[ExampleAnswerResult] = []
     for index, row in enumerate(report.results):
         example = row.example
-        if row.status != "valid" or example.expected is None:
+        if row.status != "valid" or (
+            example.expected is None and example.expected_rows is None
+        ):
             continue
         row_rel_tol = example.rel_tol if example.rel_tol is not None else rel_tol
         row_abs_tol = example.abs_tol if example.abs_tol is not None else abs_tol
@@ -713,6 +719,7 @@ def check_example_answers(
                     example=example,
                     status="error",
                     expected=example.expected,
+                    expected_rows=example.expected_rows,
                     rel_tol=row_rel_tol,
                     abs_tol=row_abs_tol,
                     reason=f"answer check error: {exc}",
@@ -733,13 +740,15 @@ def _check_one(
     sql_normalizer: SqlNormalizer | None = None,
 ) -> ExampleAnswerResult:
     expected = example.expected
-    assert expected is not None  # guarded by the caller's filter
+    expected_rows = example.expected_rows
+    assert expected is not None or expected_rows is not None  # caller's filter
 
     def _make(status: str, **kw: Any) -> ExampleAnswerResult:
         return ExampleAnswerResult(
             example=example,
             status=status,
             expected=expected,
+            expected_rows=expected_rows,
             rel_tol=rel_tol,
             abs_tol=abs_tol,
             label=label,
@@ -760,6 +769,27 @@ def _check_one(
                     "decays; pin the window or set time_scoped: true"
                 ),
             )
+
+    if expected_rows is not None:
+        result = adapter.execute(example.sql)
+        comparison = compare_rows(
+            expected_rows,
+            result.columns,
+            result.rows,
+            ordered=example.ordered,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+        )
+        return _make(
+            "match" if comparison.matched else "mismatch",
+            actual_row_count=comparison.actual_row_count,
+            row_differences=comparison.differences,
+            reason=None
+            if comparison.matched
+            else "breakdown differs from the certified answer",
+        )
+
+    assert expected is not None  # expected_rows handled above; only expected remains
 
     actual, reason = _scalar(adapter, example.sql, label)
     if actual is None:

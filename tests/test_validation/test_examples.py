@@ -1,6 +1,7 @@
 import math
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlglot import exp
@@ -697,6 +698,8 @@ class SpyAdapter:
             return QueryResult(columns=["v"], rows=[])
         if value is _TWO_COLS:
             return QueryResult(columns=["a", "b"], rows=[(1, 2)])
+        if isinstance(value, QueryResult):
+            return value
         return QueryResult(columns=["v"], rows=[(value,)])
 
     def explain(self, sql: str) -> ExplainResult:
@@ -1364,3 +1367,81 @@ class TestBreakdownRendering:
 
     def test_the_empty_report_message_mentions_both_assertion_fields(self) -> None:
         assert "expected_rows" in ExampleAnswerReport(results=[]).summary()
+
+
+_BREAKDOWN_SQL = (
+    "SELECT region, SUM(amount) FROM analytics.orders "
+    "WHERE tenant_id = 'acme' GROUP BY region"
+)
+
+
+def _breakdown(rows: list[tuple]) -> QueryResult:
+    return QueryResult(columns=["region", "revenue"], rows=rows)
+
+
+def _asserted_rows(sql: str, expected_rows: list[list], **kw: Any) -> VerifiedExample:
+    return VerifiedExample(sql=sql, expected_rows=expected_rows, **kw)
+
+
+_CERTIFIED = [["EMEA", 5000.0], ["APAC", 3000.0]]
+
+
+class TestBreakdownAnswerChecks:
+    def test_a_correct_breakdown_is_a_match(self, contract: DataContract) -> None:
+        adapter = SpyAdapter(
+            {_BREAKDOWN_SQL: _breakdown([("APAC", 3000.0), ("EMEA", 5000.0)])}
+        )
+        report = validate_examples(
+            [_asserted_rows(_BREAKDOWN_SQL, _CERTIFIED)], contract
+        )
+        answers = check_example_answers(report, adapter=adapter)
+        assert [r.status for r in answers.results] == ["match"]
+        assert answers.ok
+
+    def test_the_right_total_with_the_wrong_split_is_a_mismatch(
+        self, contract: DataContract
+    ) -> None:
+        adapter = SpyAdapter(
+            {_BREAKDOWN_SQL: _breakdown([("EMEA", 5200.0), ("APAC", 2800.0)])}
+        )
+        report = validate_examples(
+            [_asserted_rows(_BREAKDOWN_SQL, _CERTIFIED)], contract
+        )
+        answers = check_example_answers(report, adapter=adapter)
+        assert [r.status for r in answers.results] == ["mismatch"]
+        assert answers.results[0].row_differences
+
+    def test_a_dropped_group_is_a_mismatch(self, contract: DataContract) -> None:
+        adapter = SpyAdapter({_BREAKDOWN_SQL: _breakdown([("EMEA", 5000.0)])})
+        report = validate_examples(
+            [_asserted_rows(_BREAKDOWN_SQL, _CERTIFIED)], contract
+        )
+        answers = check_example_answers(report, adapter=adapter)
+        assert answers.results[0].status == "mismatch"
+        assert any("APAC" in d for d in answers.results[0].row_differences)
+
+    def test_a_structural_fault_is_an_error_not_a_mismatch(
+        self, contract: DataContract
+    ) -> None:
+        adapter = SpyAdapter(
+            {_BREAKDOWN_SQL: QueryResult(columns=["region"], rows=[("EMEA",)])}
+        )
+        report = validate_examples(
+            [_asserted_rows(_BREAKDOWN_SQL, _CERTIFIED)], contract
+        )
+        answers = check_example_answers(report, adapter=adapter)
+        assert answers.results[0].status == "error"
+
+    def test_a_rolling_window_is_unassertable_and_never_executed(
+        self, contract: DataContract
+    ) -> None:
+        sql = (
+            "SELECT region, SUM(amount) FROM analytics.orders "
+            "WHERE tenant_id = 'acme' AND created_at >= CURRENT_DATE - 30 "
+            "GROUP BY region"
+        )
+        adapter = SpyAdapter({})
+        report = validate_examples([_asserted_rows(sql, _CERTIFIED)], contract)
+        answers = check_example_answers(report, adapter=adapter)
+        assert answers.results[0].status == "unassertable"
+        assert adapter.calls == []

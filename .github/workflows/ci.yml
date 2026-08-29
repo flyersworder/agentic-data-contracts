@@ -86,8 +86,11 @@ jobs:
     # The bargain is that examples must print deterministically. A demo query
     # that returns rows needs an ORDER BY — GROUP BY alone guarantees no row
     # order, and all three examples were relying on it before this job started
-    # diffing them. `age_days` is scrubbed because it moves against today's
-    # date; scrub only values that move on their own.
+    # diffing them. Two lines are scrubbed because they move on their own: the
+    # sample-database creation notice (printed only when the gitignored .duckdb
+    # is absent, as on a fresh checkout, and carrying a machine path) and
+    # `age_days` (measured against today's date). Scrub nothing else — anything
+    # else that moves is a real diff.
     #
     # Output is redirected to a file rather than piped: a pipeline would mask
     # the interpreter's exit status behind the next command's.
@@ -106,9 +109,8 @@ jobs:
         run: |
           for d in revenue_agent growth_agent ops_agent; do
             uv run python "examples/$d/agent.py" > out.txt
-            # `age_days` is measured against today's date, so it moves without
-            # anyone touching code. Nothing else in this output does.
-            sed -E 's/age_days=[0-9]+/age_days=N/' out.txt > got.txt
+            sed -E -e '/^Sample database created at /d' \
+                   -e 's/age_days=[0-9]+/age_days=N/' out.txt > got.txt
             diff -u "examples/$d/expected_output.txt" got.txt
           done
       - name: verified-examples corpus validation + answer checks

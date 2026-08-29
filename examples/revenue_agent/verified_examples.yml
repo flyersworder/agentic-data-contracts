@@ -5,7 +5,9 @@
 # last_verified) are preserved untouched in each example's `.metadata`.
 
 # 1. Valid — has tenant_id, explicit columns, and the real columns exist, so it
-#    passes static checks AND the live DuckDB EXPLAIN.
+#    passes static checks AND the live DuckDB EXPLAIN. It also carries a
+#    certified breakdown: `expected_rows` asserts the per-region revenue a
+#    human verified against the warehouse, unordered (region is the key).
 - id: revenue-by-region
   question: "total revenue by region"
   sql: >
@@ -14,6 +16,10 @@
     JOIN analytics.customers c ON o.customer_id = c.id
     WHERE o.tenant_id = 'acme' AND o.status = 'completed'
     GROUP BY c.region
+  expected_rows:
+    - [Europe, 7200.00]
+    - [North America, 2700.00]
+    - [Asia Pacific, 800.00]
   type: sql
   verified_by: data-eng-finance
   last_verified: 2026-06-01

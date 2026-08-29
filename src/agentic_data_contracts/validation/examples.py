@@ -673,9 +673,9 @@ def check_example_answers(
     that is the load-bearing choice: an example that failed contract validation
     must never be executed, and consuming the report makes that ordering a
     property of the signature rather than a rule in a docstring. A row is
-    executed only when it is ``status == "valid"`` AND declares an ``expected``;
-    everything else produces no result at all (it is already accounted for by
-    ``ExampleValidationReport``).
+    executed only when it is ``status == "valid"`` AND declares an ``expected``
+    or ``expected_rows``; everything else produces no result at all (it is
+    already accounted for by ``ExampleValidationReport``).
 
     ``validate_examples`` keeps its own property of never executing a query —
     it plans, via ``ExplainAdapter``, and nothing more. The execute-capable

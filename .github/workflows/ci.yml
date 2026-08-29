@@ -129,6 +129,10 @@ jobs:
           grep -q '\[MATCH ' out.txt
           grep -q 'MISMATCH' out.txt
           grep -q 'UNASSERTABLE' out.txt
+          # The corpus's first entry is a breakdown, the shape v0.47.0 made
+          # assertable. Naming it here means the gate states that it is
+          # asserted rather than merely tolerating whatever it does.
+          grep -q 'revenue-by-region' out.txt
 
   test-pydantic-ai-latest:
     # Early-warning job. pyproject allows pydantic-ai-slim >=2.0 (unbounded), and

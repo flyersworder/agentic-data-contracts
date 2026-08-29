@@ -200,9 +200,30 @@ there rather than in `from_dict`.
 - `expected` and `expected_rows` both set → raise.
 - `expected_rows` must be a non-empty list of equal-length lists with at least
   one cell per row.
-- **An empty `expected_rows: []` is rejected in v1.** "This query returns
-  nothing" is a real certified answer, but it is indistinguishable from a typo
-  or a truncated file, and relaxing this later is easier than tightening it.
+- **An empty `expected_rows: []` is rejected**, and this costs nothing.
+  "This query returns no rows" is a real certified answer — it is the shape of
+  every data-quality invariant worth pinning (no orders without a tenant, no
+  negative amounts, no orphaned customer IDs) — but it is already expressible in
+  the field built for it:
+
+  ```yaml
+  sql: "SELECT COUNT(*) FROM analytics.orders WHERE tenant_id = 'acme' AND amount < 0"
+  expected: 0
+  ```
+
+  Not a workaround: `_compare` was deliberately written for a zero reference,
+  with the three-branch `rel_diff` guard whose comment says a certified answer
+  of zero is legitimate. The count form is also strictly better on failure —
+  `expected_rows: []` failing says only that rows came back, while `expected: 0`
+  failing says *how many*, and for an invariant the difference between 1 bad row
+  and 40,000 is the difference between two incidents.
+
+  So the empty list carries no capability, and rejecting it keeps it as
+  unambiguous evidence of a mistake: a truncated file, a templating bug, or a
+  key someone meant to fill in later all produce exactly these bytes. Left
+  legal, an unfilled row sitting against a sparse fixture — where the query
+  genuinely returns nothing — would pass. Two independent mistakes cancelling
+  into a green gate is the failure class this whole feature exists to close.
 - Duplicate keys *within* `expected_rows` → raise **when `ordered` is unset**.
   Unordered comparison pairs by key, so a corpus stating one group twice has
   stated something the comparison cannot resolve. Under `ordered: true` position

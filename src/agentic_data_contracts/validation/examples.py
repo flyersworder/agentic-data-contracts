@@ -19,6 +19,7 @@ import sqlglot
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation._rows import _is_number, key_positions
 from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation._timewindow import _relative_time_node
 from agentic_data_contracts.validation._tolerance import _compare
@@ -41,6 +42,8 @@ _KNOWN_KEYS = frozenset(
         "abs_tol",
         "time_scoped",
         "expects_metrics",
+        "expected_rows",
+        "ordered",
     }
 )
 
@@ -67,18 +70,80 @@ def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float
     return value
 
 
+def _validate_expected_rows(raw: Any, *, ordered: bool) -> list[list[Any]] | None:
+    """Validate a certified breakdown from an untrusted corpus row.
+
+    Everything that can be decided from the rows alone is decided here, so a
+    malformed corpus fails at load naming the row rather than at execution
+    naming a column.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"'expected_rows' must be a list of rows, got {type(raw).__name__}"
+        )
+    if not raw:
+        raise ValueError(
+            "'expected_rows' must be a non-empty list of rows. A query whose "
+            "certified answer is no rows is asserted as a count instead: "
+            "SELECT COUNT(*) ... with expected: 0."
+        )
+    rows: list[list[Any]] = []
+    for row in raw:
+        if not isinstance(row, list) or not row:
+            raise ValueError(
+                f"each row in 'expected_rows' must be a non-empty list, got {row!r}"
+            )
+        rows.append(list(row))
+    width = len(rows[0])
+    if any(len(row) != width for row in rows):
+        raise ValueError(
+            "every row in 'expected_rows' must have the same number of cells"
+        )
+    positions = key_positions(rows)
+    for row in rows:
+        if tuple(i for i, cell in enumerate(row) if not _is_number(cell)) != positions:
+            raise ValueError(
+                "every row in 'expected_rows' must identify itself by the same "
+                "columns — one row's text cells are in different positions"
+            )
+    if not ordered:
+        if not positions:
+            raise ValueError(
+                "'expected_rows' has no text column to identify a row by, so "
+                "rows cannot be matched. Set 'ordered: true' (and ORDER BY in "
+                "the SQL), or group by something nameable."
+            )
+        seen: set[tuple[str, ...]] = set()
+        for row in rows:
+            key = tuple(str(row[i]).strip() for i in positions)
+            if key in seen:
+                raise ValueError(
+                    f"'expected_rows' names the group {key} twice; an unordered "
+                    "answer matches by group, so it cannot state one group twice"
+                )
+            seen.add(key)
+    return rows
+
+
 @dataclass
 class VerifiedExample:
     """One example to validate. Only ``sql`` is load-bearing.
 
-    An example that sets ``expected`` is additionally an *assertion*: the
-    certified answer its SQL must return, checked by ``check_example_answers``.
-    ``rel_tol`` / ``abs_tol`` override the call-level tolerances for this row
-    alone; ``time_scoped`` is the author's assertion that the query's time
-    window is pinned, which suppresses the relative-time-window refusal.
+    An example that sets ``expected`` or ``expected_rows`` is additionally an
+    *assertion*: the certified answer its SQL must return, checked by
+    ``check_example_answers``. ``expected`` asserts a single number;
+    ``expected_rows`` is its sibling for a certified breakdown (a group-by
+    result) and cannot be set alongside ``expected``. ``ordered`` declares
+    that ``expected_rows`` is matched by position (the SQL's ``ORDER BY`` is
+    the answer) rather than by the row's own text-cell key. ``rel_tol`` /
+    ``abs_tol`` override the call-level tolerances for this row alone;
+    ``time_scoped`` is the author's assertion that the query's time window is
+    pinned, which suppresses the relative-time-window refusal.
     ``expects_metrics`` declares which metrics an agent should have consulted
-    before querying; it is independent of ``expected``, so a protocol-only row
-    may set it.
+    before querying; it is independent of ``expected``/``expected_rows``, so a
+    protocol-only row may set it.
     """
 
     sql: str
@@ -87,6 +152,8 @@ class VerifiedExample:
     principal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     expected: float | None = None
+    expected_rows: list[list[Any]] | None = None
+    ordered: bool = False
     rel_tol: float | None = None
     abs_tol: float | None = None
     time_scoped: bool = False
@@ -118,18 +185,32 @@ class VerifiedExample:
         self.expected = _numeric(self.expected, "expected")
         self.rel_tol = _numeric(self.rel_tol, "rel_tol", allow_negative=False)
         self.abs_tol = _numeric(self.abs_tol, "abs_tol", allow_negative=False)
-        if self.expected is None:
-            # These three only ever modify how an `expected` is compared, so
-            # setting one without it is dead configuration — and the likeliest
-            # cause is a typo'd or dropped `expected` key, which would
-            # otherwise land inertly in metadata and quietly cost the corpus an
-            # assertion that no gate can miss. Fail loudly instead.
+        if not isinstance(self.ordered, bool):
+            raise ValueError(
+                f"'ordered' must be a boolean, got {type(self.ordered).__name__}"
+            )
+        if self.expected is not None and self.expected_rows is not None:
+            raise ValueError(
+                "declare 'expected' or 'expected_rows', not both — one asserts a "
+                "single number, the other a breakdown"
+            )
+        self.expected_rows = _validate_expected_rows(
+            self.expected_rows, ordered=self.ordered
+        )
+        if self.expected is None and self.expected_rows is None:
+            # rel_tol/abs_tol/time_scoped/ordered only ever modify how an
+            # assertion is compared, so setting one without either assertion
+            # field is dead configuration — and the likeliest cause is a
+            # typo'd or dropped `expected`/`expected_rows` key, which would
+            # otherwise land inertly in metadata and quietly cost the corpus
+            # an assertion that no gate can miss. Fail loudly instead.
             orphaned = [
                 key
                 for key, value in (
                     ("rel_tol", self.rel_tol),
                     ("abs_tol", self.abs_tol),
                     ("time_scoped", self.time_scoped or None),
+                    ("ordered", self.ordered or None),
                 )
                 if value is not None
             ]
@@ -137,7 +218,8 @@ class VerifiedExample:
                 raise ValueError(
                     f"{', '.join(orphaned)} set without 'expected' — these only "
                     "affect how a certified answer is compared, so the row "
-                    "asserts nothing. Add 'expected', or remove them."
+                    "asserts nothing. Add 'expected' or 'expected_rows', or "
+                    "remove them."
                 )
 
     @classmethod
@@ -175,6 +257,8 @@ class VerifiedExample:
             principal=raw.get("principal"),
             metadata=metadata,
             expected=raw.get("expected"),
+            expected_rows=raw.get("expected_rows"),
+            ordered=raw.get("ordered", False),
             rel_tol=raw.get("rel_tol"),
             abs_tol=raw.get("abs_tol"),
             time_scoped=raw.get("time_scoped", False),

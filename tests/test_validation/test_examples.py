@@ -1264,3 +1264,74 @@ def test_malformed_expects_metrics_is_rejected() -> None:
         VerifiedExample(sql="SELECT 1", expects_metrics="CAC")  # ty: ignore[invalid-argument-type]
     with pytest.raises(ValueError, match="expects_metrics"):
         VerifiedExample(sql="SELECT 1", expects_metrics=[""])
+
+
+class TestExpectedRowsLoading:
+    def test_a_breakdown_row_loads(self) -> None:
+        example = VerifiedExample(
+            sql="SELECT region, SUM(amount) FROM analytics.orders GROUP BY region",
+            expected_rows=[["EMEA", 5000.0], ["APAC", 3000.0]],
+        )
+        assert example.expected_rows == [["EMEA", 5000.0], ["APAC", 3000.0]]
+        assert example.ordered is False
+
+    def test_from_dict_reads_both_new_keys(self) -> None:
+        example = VerifiedExample.from_dict(
+            {"sql": "SELECT 1", "expected_rows": [["EMEA", 1.0]], "ordered": True}
+        )
+        assert example.ordered is True
+        assert "expected_rows" not in example.metadata  # not swallowed as metadata
+
+    def test_declaring_both_assertions_raises(self) -> None:
+        with pytest.raises(ValueError, match="expected.*expected_rows"):
+            VerifiedExample(sql="SELECT 1", expected=1.0, expected_rows=[["EMEA", 1.0]])
+
+    def test_an_empty_list_raises(self) -> None:
+        # "Returns nothing" is certifiable as `SELECT COUNT(*) ... expected: 0`,
+        # so the empty list carries no capability and stays evidence of a typo.
+        with pytest.raises(ValueError, match="non-empty"):
+            VerifiedExample(sql="SELECT 1", expected_rows=[])
+
+    def test_ragged_rows_raise(self) -> None:
+        with pytest.raises(ValueError, match="same number of cells"):
+            VerifiedExample(sql="SELECT 1", expected_rows=[["EMEA", 1.0], ["APAC"]])
+
+    def test_rows_disagreeing_on_the_key_partition_raise(self) -> None:
+        with pytest.raises(ValueError, match="same columns"):
+            VerifiedExample(sql="SELECT 1", expected_rows=[["EMEA", 1.0], [2.0, 3.0]])
+
+    def test_an_all_numeric_row_raises_and_names_ordered(self) -> None:
+        with pytest.raises(ValueError, match="ordered: true"):
+            VerifiedExample(sql="SELECT 1", expected_rows=[[2025, 5000.0]])
+
+    def test_an_all_numeric_row_is_fine_when_ordered(self) -> None:
+        example = VerifiedExample(
+            sql="SELECT 1", expected_rows=[[2025, 5000.0]], ordered=True
+        )
+        assert example.ordered is True
+
+    def test_duplicate_keys_raise_when_unordered(self) -> None:
+        with pytest.raises(ValueError, match="twice"):
+            VerifiedExample(
+                sql="SELECT 1", expected_rows=[["EMEA", 1.0], ["EMEA", 2.0]]
+            )
+
+    def test_duplicate_keys_are_legitimate_when_ordered(self) -> None:
+        # Position is identity under `ordered`; a ranking may name one
+        # category twice.
+        example = VerifiedExample(
+            sql="SELECT 1", expected_rows=[["EMEA", 1.0], ["EMEA", 2.0]], ordered=True
+        )
+        assert len(example.expected_rows or []) == 2
+
+    def test_ordered_without_an_assertion_is_an_orphan(self) -> None:
+        with pytest.raises(ValueError, match="ordered"):
+            VerifiedExample(sql="SELECT 1", ordered=True)
+
+    def test_a_tolerance_beside_expected_rows_is_not_an_orphan(self) -> None:
+        # The orphan guard keyed on `expected is None`; with a second
+        # assertion field that would fire on every valid breakdown row.
+        example = VerifiedExample(
+            sql="SELECT 1", expected_rows=[["EMEA", 1.0]], abs_tol=0.5
+        )
+        assert example.abs_tol == 0.5

@@ -129,10 +129,16 @@ jobs:
           grep -q '\[MATCH ' out.txt
           grep -q 'MISMATCH' out.txt
           grep -q 'UNASSERTABLE' out.txt
-          # The corpus's first entry is a breakdown, the shape v0.47.0 made
-          # assertable. Naming it here means the gate states that it is
-          # asserted rather than merely tolerating whatever it does.
-          grep -q 'revenue-by-region' out.txt
+          # The corpus's first entry, revenue-by-region, is a breakdown — the
+          # shape v0.47.0 made assertable. Its label is printed unconditionally
+          # in pass 1 (the validation listing), so a plain grep for the label
+          # would pass whether or not the breakdown was ever certified or
+          # still matches. Anchor on the ANSWER-CHECK line instead — '[MATCH'
+          # with the trailing padding, same 'MATCH is a substring of MISMATCH'
+          # discipline as above — so the gate actually states that this row's
+          # certified breakdown still matches, not just that its label exists
+          # somewhere in the output.
+          grep -qE '\[MATCH +\] revenue-by-region' out.txt
 
   test-pydantic-ai-latest:
     # Early-warning job. pyproject allows pydantic-ai-slim >=2.0 (unbounded), and

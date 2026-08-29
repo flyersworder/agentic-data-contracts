@@ -16,6 +16,7 @@ from agentic_data_contracts.core.schema import (
     SemanticConfig,
 )
 from agentic_data_contracts.semantic.base import (
+    Decomposition,
     MetricDefinition,
     MetricImpact,
     Relationship,
@@ -314,7 +315,8 @@ async def test_trace_metric_impacts_clamps_max_depth_lower_bound(
 
 
 class _ImpactsOnly:
-    """A minimal `SemanticSource` carrying nothing but influence edges.
+    """A minimal `SemanticSource` carrying influence edges and, optionally,
+    identity edges declared via each metric's `decompositions`.
 
     `create_tools` has no `metric_impacts` parameter -- impacts reach the tool
     through `semantic_source.get_metric_impacts()`. A dense graph of hundreds
@@ -323,15 +325,29 @@ class _ImpactsOnly:
     `trace_metric_impacts` needs.
     """
 
-    def __init__(self, impacts: list[MetricImpact]) -> None:
+    def __init__(
+        self,
+        impacts: list[MetricImpact],
+        decompositions: dict[str, list[Decomposition]] | None = None,
+    ) -> None:
         self._impacts = impacts
+        self._decompositions = decompositions or {}
         # `create_tools` validates every impact against `get_metrics()` and
         # raises on an unknown endpoint, so the stub must declare the metrics
         # its edges name. Derived rather than passed in, so a test only ever
         # states its edges.
-        names = sorted({n for i in impacts for n in (i.from_metric, i.to_metric)})
+        names = sorted(
+            {n for i in impacts for n in (i.from_metric, i.to_metric)}
+            | set(self._decompositions)
+        )
         self._metrics = [
-            MetricDefinition(name=n, description="", sql_expression="x") for n in names
+            MetricDefinition(
+                name=n,
+                description="",
+                sql_expression="x",
+                decompositions=self._decompositions.get(n, []),
+            )
+            for n in names
         ]
 
     def get_metrics(self) -> list[MetricDefinition]:
@@ -416,3 +432,142 @@ async def test_trace_metric_impacts_cap_boundary_is_exact(
         )
         assert len(data["edges"]) == min(total, 200)
         assert ("showing" in data.get("note", "")) is expect_note
+
+
+@pytest.mark.asyncio
+async def test_truncation_keeps_identity_edges_over_influence(
+    contract_no_domains: DataContract,
+) -> None:
+    """An identity edge is exact arithmetic; an influence edge is a
+    hypothesis. When the 200-edge cap forces something to be dropped, it
+    must drop the hypothesis, not the arithmetic.
+
+    `hub` declares one `product` decomposition (2 identity edges) plus 250
+    influence drivers -- 252 edges total, all one hop upstream of `hub`.
+    Before the fix, influence edges were indexed first and both identity
+    edges landed past the 200-edge cap and were dropped; after the fix,
+    both identity edges are indexed first and survive.
+    """
+    decomp = Decomposition(
+        operator="product",
+        operands=["price", "volume"],
+        convention="fold_into",
+        convention_operand="price",
+    )
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions={"hub": [decomp]}),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 1}
+    )
+    data = json.loads(result["content"][0]["text"])
+    assert len(data["edges"]) == 200
+    identity_kinds = [e for e in data["edges"] if e["kind"] == "identity"]
+    assert len(identity_kinds) == 2
+    assert {e["from"] for e in identity_kinds} == {"price", "volume"}
+
+
+@pytest.mark.asyncio
+async def test_kinds_identity_only_and_influence_only_survive_reordering(
+    contract_no_domains: DataContract,
+) -> None:
+    """Indexing identity edges first must not leak them into an
+    influence-only walk, nor vice versa."""
+    decomp = Decomposition(operator="product", operands=["price", "volume"])
+    impacts = [MetricImpact(from_metric="promo", to_metric="hub")]
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions={"hub": [decomp]}),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+
+    identity_only = json.loads(
+        (
+            await tool.callable(
+                {"metric_name": "hub", "direction": "upstream", "kinds": "identity"}
+            )
+        )["content"][0]["text"]
+    )
+    assert {e["kind"] for e in identity_only["edges"]} == {"identity"}
+
+    influence_only = json.loads(
+        (
+            await tool.callable(
+                {"metric_name": "hub", "direction": "upstream", "kinds": "influence"}
+            )
+        )["content"][0]["text"]
+    )
+    assert {e["kind"] for e in influence_only["edges"]} == {"influence"}
+
+
+@pytest.mark.asyncio
+async def test_truncation_advice_at_the_max_depth_floor_narrows_by_kind(
+    contract_no_domains: DataContract,
+) -> None:
+    """At max_depth=1 -- the clamp floor -- 'lower max_depth' is not
+    actionable, so the note must advise narrowing by kind instead."""
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    data = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=1,
+    )
+    assert "Lower max_depth" not in data["note"]
+    assert "kinds='identity'" in data["note"]
+    assert "kinds='influence'" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_advice_above_the_floor_still_says_lower_max_depth(
+    contract_no_domains: DataContract,
+) -> None:
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    data = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=2,
+    )
+    assert "Lower max_depth" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_and_identity_direction_notes_join(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 6: truncation and identity-direction notes both
+    present when both apply, joined into one `note` rather than one
+    silently overwriting the other.
+
+    `hub` has 250 influence drivers (triggers truncation) and no identity
+    edges upstream of it, but is itself an operand of `parent` (triggers
+    the identity-direction note, since identity edges exist downstream).
+    """
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    decomp = Decomposition(operator="sum", operands=["hub", "other"])
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions={"parent": [decomp]}),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 1}
+    )
+    data = json.loads(result["content"][0]["text"])
+    note = data["note"]
+    assert "showing the 200 nearest" in note
+    assert "No identity edges upstream of 'hub'" in note

@@ -888,6 +888,8 @@ await trace.callable({
 
 Impacts declared in contract YAML reference metric names regardless of where the metric itself is defined, so this works even for dbt and Cube-sourced metrics — neither semantic layer has a native causal-graph concept. Unknown metric references in `metric_impacts` emit a warning at tool-creation time (same pattern as domain validation).
 
+`trace_metric_impacts` serializes at most 200 edges per call, nearest (BFS) first; a graph holding more than that adds a `note` naming the true total and how many are shown. A cycle-closing edge (`c -> a` when the graph has `a -> b -> c -> a`) is reported once rather than treated as an error — the graph genuinely closes.
+
 ### Metric decomposition and drill dimensions
 
 Impact edges are *causal* — evidential and non-exhaustive. A metric can also declare its *arithmetic identity*: how its value is exactly reconstructed from other metrics. Declare `decompositions` on the metric itself:

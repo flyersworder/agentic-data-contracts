@@ -1052,11 +1052,20 @@ def create_tools(
                 )
                 _record(response["_kind"])
                 return response
+            # Identity edges go in BEFORE influence edges. `build_metric_impact_index`
+            # preserves declaration order per node, so this is the order the
+            # per-node adjacency list holds them in, and it is what
+            # `walk[:_MAX_TRACE_EDGES]` below truncates against. An identity
+            # edge is exact arithmetic -- it carries an operator and an
+            # attribution convention -- while an influence edge is a
+            # hypothesis. When a dense graph forces something to be dropped,
+            # drop the hypothesis, not the arithmetic. This reorders `edges`
+            # in the response payload for mixed-kind graphs; that is intended.
             graph_edges: list[MetricEdge] = []
-            if kinds in ("all", "influence"):
-                graph_edges.extend(_metric_impacts)
             if kinds in ("all", "identity"):
                 graph_edges.extend(_oriented_identity)
+            if kinds in ("all", "influence"):
+                graph_edges.extend(_metric_impacts)
             graph_index = build_metric_impact_index(graph_edges)
 
             walk = walk_metric_impacts(
@@ -1106,10 +1115,24 @@ def create_tools(
             # silently overwriting the other.
             notes: list[str] = []
             if total_edges > _MAX_TRACE_EDGES:
+                # "Lower max_depth" is only actionable above the floor of 1
+                # (clamped above). At max_depth=1 there is nothing lower to
+                # try, and an agent following that advice would re-run at the
+                # same floor and get the identical truncated payload -- so
+                # advise narrowing by kind instead.
+                advice = (
+                    "Lower max_depth to see a complete result."
+                    if max_depth > 1
+                    else (
+                        "Narrow by kind instead: kinds='identity' for the"
+                        " exact arithmetic, kinds='influence' for the"
+                        " hypotheses."
+                    )
+                )
                 notes.append(
                     f"The graph holds {total_edges} edges within depth "
                     f"{max_depth}; showing the {_MAX_TRACE_EDGES} nearest. "
-                    f"Lower max_depth to see a complete result."
+                    f"{advice}"
                 )
             if kinds in ("all", "identity") and not walk_has_identity:
                 note = _identity_direction_note(
@@ -1516,7 +1539,10 @@ def create_tools(
                 " 'operator' (sum/product/ratio/difference) and are exact"
                 " arithmetic; influence edges carry direction, confidence, and"
                 " evidence and are hypotheses. Cycles are handled via visited"
-                " tracking."
+                " tracking, but a cycle-closing edge (e.g. c -> a when a -> b"
+                " -> c -> a) is still reported once -- that is not an error."
+                " At most 200 edges are serialized per call, nearest first;"
+                " a 'note' in the response says so when the graph holds more."
             ),
             input_schema={
                 "type": "object",

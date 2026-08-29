@@ -742,10 +742,18 @@ def walk_metric_impacts(
     of hops from ``start`` (direct neighbors at depth 1).  Visited tracking
     prevents cycles by gating *expansion* only: each reachable metric is
     expanded at most once, while **every declared edge between reached
-    metrics is reported**, including one onto a metric another branch already
-    reached. That is what lets a shared driver -- one metric that is an
-    operand of two parents -- arrive on both branches, carrying the
-    ``operator`` and ``convention`` that only its second edge holds.
+    metrics within the depth horizon is reported**, including one onto a
+    metric another branch already reached. That is what lets a shared driver
+    -- one metric that is an operand of two parents -- arrive on both
+    branches, carrying the ``operator`` and ``convention`` that only its
+    second edge holds.
+
+    "Within the depth horizon" is load-bearing: a node reached at exactly
+    ``max_depth`` is dequeued but never expanded, so its outgoing edges are
+    not discovered even when the far endpoint was independently reached by
+    another path. ``a->b, a->c, b->d, c->e, d->e`` walked from ``a`` at
+    ``max_depth=2`` never reports ``d->e``, though both ``d`` and ``e`` are
+    reached.
 
     A consequence worth knowing: cycle-closing edges are reported. In
     ``a -> b -> c -> a`` walked downstream, ``c -> a`` appears. The edge is

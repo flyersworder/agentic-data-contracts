@@ -273,3 +273,29 @@ class TestEmptyIdentityWalkDisclosesTheOtherDirection:
         )
         assert data["edges"] == []
         assert "1 downstream" in data["note"]
+
+    @pytest.mark.asyncio
+    async def test_does_not_tell_a_mixed_walk_to_throw_away_its_edges(self) -> None:
+        # kinds="all" upstream from arpu returns influence edges but no
+        # identity ones. Telling the agent to re-run downstream would trade
+        # the edges it just got for the ones it did not -- and this whole PR
+        # exists because two tool sentences composed into a bad call.
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="arpu",
+            direction="upstream",
+        )
+        assert data["edges"]  # influence edges came back
+        assert "downstream" in data["note"]
+        assert "Re-run" not in data["note"]
+
+    @pytest.mark.asyncio
+    async def test_still_suggests_the_rerun_when_nothing_would_be_lost(self) -> None:
+        data = await _call(
+            _tools()["trace_metric_impacts"],
+            metric_name="revenue",
+            direction="downstream",
+            kinds="identity",
+        )
+        assert data["edges"] == []
+        assert "Re-run with direction='upstream'" in data["note"]

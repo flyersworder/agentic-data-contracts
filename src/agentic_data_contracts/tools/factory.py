@@ -220,7 +220,11 @@ def _format_impact_edge(edge: MetricImpact, *, perspective: str) -> str:
 
 
 def _identity_direction_note(
-    metric_name: str, direction: str, oriented: list[IdentityEdge]
+    metric_name: str,
+    direction: str,
+    oriented: list[IdentityEdge],
+    *,
+    suggest_rerun: bool,
 ) -> str | None:
     """Explain an identity walk that came back empty, when it need not have.
 
@@ -231,6 +235,12 @@ def _identity_direction_note(
     the thing that keeps this release's re-orientation from stranding a caller
     who copied the old example. ``oriented`` is driver-oriented, so an edge
     leaving ``metric_name`` is one the metric feeds.
+
+    ``suggest_rerun`` gates the closing instruction, and the caller sets it
+    from whether the walk returned anything at all. A ``kinds="all"`` walk can
+    find influence edges and no identity ones; telling *that* caller to re-run
+    the other way would trade the edges it has for the ones it does not, which
+    is the same species of bad advice this note exists to undo.
     """
     # Count what the OTHER direction holds: an edge leaving `metric_name`
     # makes it somebody's operand (downstream), one arriving makes it a parent
@@ -246,10 +256,13 @@ def _identity_direction_note(
     count = len(found)
     if count == 0:
         return None
-    return (
+    note = (
         f"No identity edges {direction} of {metric_name!r}, but {count} "
-        f"{other} ({gloss}). Re-run with direction={other!r} to see them."
+        f"{other} ({gloss})."
     )
+    if suggest_rerun:
+        note += f" Re-run with direction={other!r} to see them."
+    return note
 
 
 def _freshness_fields(
@@ -397,6 +410,16 @@ def create_tools(
         if semantic_source is not None
         else []
     )
+    # Re-oriented operand -> parent so the trace graph speaks one language:
+    # every edge in it, whatever its kind, points from a driver to what it
+    # affects. Without this an identity edge and an influence edge declared for
+    # the SAME pair answer opposite directions, and `direction` stops meaning
+    # what its own description promises. Built once here, like the edges it
+    # derives from -- the canonical list is untouched, so `lookup_metric` and
+    # `reconcile_decomposition` still read parent -> operand.
+    _oriented_identity: list[IdentityEdge] = [
+        e.as_driver_edge() for e in _identity_edges
+    ]
 
     metric_names_set = (
         {m.name for m in semantic_source.get_metrics()}
@@ -1024,14 +1047,8 @@ def create_tools(
             graph_edges: list[MetricEdge] = []
             if kinds in ("all", "influence"):
                 graph_edges.extend(_metric_impacts)
-            # Re-oriented operand -> parent so the graph speaks one language:
-            # every edge in it, whatever its kind, points from a driver to what
-            # it affects. Without this an identity edge and an influence edge
-            # declared for the SAME pair answer opposite directions, and
-            # `direction` stops meaning what its own description promises.
-            oriented_identity = [e.as_driver_edge() for e in _identity_edges]
             if kinds in ("all", "identity"):
-                graph_edges.extend(oriented_identity)
+                graph_edges.extend(_oriented_identity)
             graph_index = build_metric_impact_index(graph_edges)
 
             walk = walk_metric_impacts(
@@ -1073,7 +1090,12 @@ def create_tools(
                 e["kind"] == "identity" for e in edges
             ):
                 note = _identity_direction_note(
-                    metric_name, direction, oriented_identity
+                    metric_name,
+                    direction,
+                    _oriented_identity,
+                    # Nothing came back, so re-running the other way discards
+                    # nothing.
+                    suggest_rerun=not edges,
                 )
                 if note is not None:
                     payload["note"] = note

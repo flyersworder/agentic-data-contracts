@@ -233,7 +233,8 @@ async def _run_demo(
     result = await trace.callable(
         {
             "metric_name": "conversion_rate",
-            "direction": "downstream",
+            # Operands drive their parent, so the decomposition is upstream.
+            "direction": "upstream",
             "kinds": "identity",
         }
     )

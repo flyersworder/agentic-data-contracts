@@ -38,6 +38,9 @@ metrics:
   - name: referral_revenue
     description: "Revenue from referrals"
     sql_expression: "SUM(amount) FILTER (WHERE is_referral)"
+  - name: support_tickets
+    description: "Support tickets raised"
+    sql_expression: "COUNT(*)"
   - name: expansion_revenue
     description: "Revenue expansion from existing customers"
     sql_expression: "SUM(amount) FILTER (WHERE is_expansion)"
@@ -54,3 +57,10 @@ metric_impacts:
     direction: positive
     confidence: verified
     evidence: "trivially true"
+  # Points INTO an operand, so an `all` walk upstream from arpu returns
+  # influence edges while arpu's identity edge sits downstream.
+  - from: support_tickets
+    to: arpu
+    direction: negative
+    confidence: hypothesized
+    evidence: "unhappy customers spend less"

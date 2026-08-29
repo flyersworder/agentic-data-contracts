@@ -144,6 +144,18 @@ class TestWalkMetricImpacts:
         found = {e.evidence for _, e in walk if isinstance(e, MetricImpact)}
         assert found == {"first", "second"}
 
+    def test_byte_identical_edges_are_reported_once(self) -> None:
+        # Reporting parallel edges exists to preserve the DISTINCT facts each
+        # declaration carries. Two edges that are equal in every field carry
+        # one fact, so handing it over twice is noise, not information.
+        impacts = [
+            MetricImpact(from_metric="conv", to_metric="rev"),
+            MetricImpact(from_metric="conv", to_metric="rev"),
+        ]
+        index = build_metric_impact_index(impacts)
+        walk = walk_metric_impacts(index, "rev", direction="upstream")
+        assert len(walk) == 1
+
     def test_a_repeated_neighbor_is_still_expanded_once(self) -> None:
         # Both edges reach `conv`, but the walk must not queue it twice and
         # report `traffic` twice at depth 2.

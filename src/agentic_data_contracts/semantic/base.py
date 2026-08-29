@@ -746,7 +746,9 @@ def walk_metric_impacts(
 
     The one exception is *parallel* edges — several edges found while
     expanding a single node that land on the same neighbor. All of them are
-    reported. This matters on a mixed influence + identity index, where one
+    reported, less any that are equal in every field to one already reported
+    (identical declarations carry one fact). This matters on a mixed
+    influence + identity index, where one
     real relationship can be declared twice (as an impact edge and as a
     decomposition operand): keeping whichever was indexed first would drop
     the operator and attribution convention that only the identity edge
@@ -774,6 +776,12 @@ def walk_metric_impacts(
         # parallel edges to the same neighbor all report; the dict keeps each
         # neighbor queued once.
         reached: dict[str, None] = {}
+        # Edges already reported while expanding `current`, compared by value.
+        # Parallel edges are reported for the distinct facts each carries, so
+        # two edges equal in every field carry one fact and report once.
+        # A list, not a set: MetricEdge dataclasses are unhashable, and one
+        # node's adjacency is short.
+        seen: list[MetricEdge] = []
         for edge in index.get(current, []):
             if direction == "downstream":
                 # Only follow edges leaving `current`.
@@ -785,9 +793,10 @@ def walk_metric_impacts(
                 if edge.to_metric != current:
                     continue
                 neighbor = edge.from_metric
-            if neighbor in visited:
+            if neighbor in visited or any(edge == prior for prior in seen):
                 continue
             result.append((depth + 1, edge))
+            seen.append(edge)
             reached[neighbor] = None
         for neighbor in reached:
             visited.add(neighbor)

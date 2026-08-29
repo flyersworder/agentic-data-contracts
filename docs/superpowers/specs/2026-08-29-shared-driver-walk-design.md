@@ -167,6 +167,48 @@ example is affected.
 This is where the boundary already sits: `max_depth` is clamped in the tool
 (`max(1, min(int(args.get("max_depth", 2)), 10))`), not in the walk.
 
+### Cost, and why the algorithm does not change
+
+BFS is already the bound. The problem is single-source bounded-depth traversal
+that reports edges, and no edge can be reported without being touched, so
+O(V+E) is optimal. Measured, complete graphs at `max_depth=10`:
+
+| Metrics | Edges | Reported before | after | before | after |
+|---|---|---|---|---|---|
+| 10 | 90 | 9 | 90 | 0.02ms | 0.04ms |
+| 20 | 380 | 19 | 380 | 0.03ms | 0.27ms |
+| 40 | 1560 | 39 | 1560 | 0.11ms | 1.88ms |
+
+The growth is superlinear, and the cause is worth recording because it is a
+second-order effect of this change rather than of the graph. Today's guard
+reads `if neighbor in visited or any(edge == prior for prior in seen)`, and
+Python short-circuits `or`: when a neighbour is already visited, the
+value-dedupe scan never runs. Removing the `visited` term makes that scan
+unconditional, so a node whose neighbours are mostly already visited goes from
+O(k) to O(k²) dataclass comparisons across its adjacency.
+
+**Not worth fixing.** The obvious remedy — replacing the list scan with a set
+of hashable field tuples — was measured and is *slower* below roughly 40
+metrics, because `astuple` costs more than scanning a short list. It only wins
+at 80 metrics / 6320 edges, where it halves 14.8ms to 7.4ms. The crossover is
+far past any realistic metric graph, the worst case constructible is
+milliseconds, and the change would trade a rule that reads simply for a faster
+one nobody needs.
+
+A graph library does not help either. `networkx.bfs_edges` yields *tree edges
+only*, which is precisely the defect this spec fixes; obtaining non-tree edges
+means iterating `G.edges(nbunch)` and writing this same loop by hand, with a
+heavy dependency added to a project that keeps its floors deliberately small.
+`MultiDiGraph` also does not carry #81's parallel-edge semantics, where two
+identical declarations are one fact and two differing ones are two.
+
+A cleaner formulation does exist — compute reachability within the depth
+horizon, then report every declared edge induced on that node set, which makes
+"expand once, report all" structural instead of a subtlety inside one loop. It
+is the same complexity, a substantially larger diff, and it changes edge
+ordering, which the truncation cap depends on being BFS-nearest-first. Not
+taken.
+
 ### Two notes can fire at once
 
 `payload["note"]` is a single string, already used by the identity-direction

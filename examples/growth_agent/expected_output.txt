@@ -1,0 +1,40 @@
+claude-agent-sdk not available. Running demo mode.
+
+Query: Which onboarding variant lifted activation in Q3 2025?
+
+=== Lookup Domain (experimentation) ===
+{"name": "experimentation", "summary": "A/B tests and feature flags \u2014 experiment tracking and result analysis", "description": "Experiments are defined in `analytics.experiments` with start/end dates. Events tagged with `experiment_id` and `variant` are the unit of analysis. Do not compute lift on running experiments \u2014 wait for `status=concluded`.\n", "metrics": [{"name": "activation_rate", "description": "Signed-up users who performed an activation event within 7 days of signup. Activation event is event_name='activation'. Excludes users who churned before day 7.\n"}, {"name": "conversion_rate", "description": "Signed-up users who made a first_purchase within 30 days. Computed per-cohort; compare cohorts on equal lookback, not calendar window.\n"}, {"name": "first_purchase_users", "description": "Distinct users whose first_purchase occurred within 30 days of signup"}], "tables": ["analytics.experiments", "analytics.events"], "last_reviewed": "2026-03-15", "stale": true}
+
+=== Lookup Metric (activation_rate) ===
+{"name": "activation_rate", "description": "Signed-up users who performed an activation event within 7 days of signup. Activation event is event_name='activation'. Excludes users who churned before day 7.\n", "sql_expression": "COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'activation') / COUNT(DISTINCT u.id)::FLOAT\n", "source_model": "analytics.events", "filters": ["e.created_at BETWEEN u.signup_at AND u.signup_at + INTERVAL 7 DAY"], "domains": ["experimentation"], "tier": ["department_kpi"], "indicator_kind": "leading", "business_owner": "growth-analytics", "operational_owner": "data-eng-growth", "last_reviewed": "2026-05-15", "stale": true, "impacts": ["positive impact on conversion_rate (correlated): Cohort analysis Q2 2025 (n=45,000 users across 12 monthly cohorts): Pearson r=0.68 between day-7 activation rate and day-30 conversion rate. Not controlled for cohort acquisition channel \u2014 activated users may simply have been higher-intent at signup.\n"], "impacted_by": ["positive impact from signup_rate_7d (verified): A/B test onboarding-042 (2025-Q3, n=12,400, variant=new_flow): +14.2% activation vs control, p<0.01 (95% CI: +9.1% to +19.3%). Effect replicated in onboarding-051 (2025-Q4, same direction, smaller magnitude).\n"]}
+
+=== Trace Metric Impacts (upstream drivers of conversion_rate) ===
+{"metric_name": "conversion_rate", "direction": "upstream", "max_depth": 2, "edges": [{"depth": 1, "from": "activation_rate", "to": "conversion_rate", "kind": "influence", "direction": "positive", "confidence": "correlated", "evidence": "Cohort analysis Q2 2025 (n=45,000 users across 12 monthly cohorts): Pearson r=0.68 between day-7 activation rate and day-30 conversion rate. Not controlled for cohort acquisition channel \u2014 activated users may simply have been higher-intent at signup.\n", "description": "Activated users convert more; causal direction unproven."}, {"depth": 1, "from": "first_purchase_users", "to": "conversion_rate", "kind": "identity", "operator": "ratio", "convention": "explicit"}, {"depth": 1, "from": "cohort_signups", "to": "conversion_rate", "kind": "identity", "operator": "ratio", "convention": "explicit"}, {"depth": 2, "from": "signup_rate_7d", "to": "activation_rate", "kind": "influence", "direction": "positive", "confidence": "verified", "evidence": "A/B test onboarding-042 (2025-Q3, n=12,400, variant=new_flow): +14.2% activation vs control, p<0.01 (95% CI: +9.1% to +19.3%). Effect replicated in onboarding-051 (2025-Q4, same direction, smaller magnitude).\n", "description": "The streamlined onboarding flow lifts day-7 activation \u2014 verified."}]}
+
+=== Trace Metric Impacts (identity: what arithmetically moved) ===
+{"metric_name": "conversion_rate", "direction": "upstream", "max_depth": 2, "edges": [{"depth": 1, "from": "first_purchase_users", "to": "conversion_rate", "kind": "identity", "operator": "ratio", "convention": "explicit"}, {"depth": 1, "from": "cohort_signups", "to": "conversion_rate", "kind": "identity", "operator": "ratio", "convention": "explicit"}]}
+
+=== Blocked: events scan without time bound ===
+  valid: False, violations: ['Missing required filter: created_at']
+
+=== Log-level audit fires (query DOES run, governance is notified) ===
+LOG:
+- Blocked columns in SELECT: email
+
+{"columns": ["email", "acquisition_source"], "rows": [["alice@ex.com", "paid_search"], ["bob@ex.com", "organic"], ["charlie@ex.com", "referral"], ["diana@ex.com", "paid_search"], ["eve@ex.com", "social"], ["frank@ex.com", "organic"], ["grace@ex.com", "paid_search"], ["henry@ex.com", "referral"], ["iris@ex.com", "social"], ["jane@ex.com", "paid_search"]], "r
+
+=== Experiment lift query (onboarding-042) ===
+{"columns": ["variant", "users", "activations"], "rows": [["control", 1, 1], ["new_flow", 3, 3]], "row_count": 2, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 3, "tokens_remaining": 30000, "cost_remaining_usd": 2.0, "seconds_remaining": 120.0}}}
+
+=== Stale-review findings ===
+  [domain] acquisition — age_days=N, context={}
+  [domain] experimentation — age_days=N, context={}
+  [metric] signup_rate_7d — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric] activation_rate — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric] conversion_rate — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric] acquisition_spend — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric] first_purchase_users — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric] cohort_signups — age_days=N, context={'business_owner': 'growth-analytics', 'operational_owner': 'data-eng-growth'}
+  [metric_impact] signup_rate_7d -> activation_rate — age_days=N, context={'from_metric': 'signup_rate_7d', 'to_metric': 'activation_rate', 'confidence': 'verified', 'direction': 'positive'}
+  [metric_impact] activation_rate -> conversion_rate — age_days=N, context={'from_metric': 'activation_rate', 'to_metric': 'conversion_rate', 'confidence': 'correlated', 'direction': 'positive'}
+  [metric_impact] acquisition_spend -> signup_rate_7d — age_days=None, context={'from_metric': 'acquisition_spend', 'to_metric': 'signup_rate_7d', 'confidence': 'hypothesized', 'direction': 'positive'}

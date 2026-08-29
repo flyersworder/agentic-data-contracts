@@ -273,7 +273,8 @@ async def _run_demo(
         "WHERE tenant_id = 'acme' "
         "  AND experiment_id = 'onboarding-042' "
         "  AND created_at BETWEEN '2025-07-01' AND '2025-09-30' "
-        "GROUP BY variant"
+        # Ordered for a reproducible demo — see revenue_agent.
+        "GROUP BY variant ORDER BY variant"
     )
     result = await run.callable({"sql": lift_sql})
     print("\n=== Experiment lift query (onboarding-042) ===")

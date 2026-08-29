@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from agentic_data_contracts.validation._rows import (
     compare_rows,
     key_positions,
@@ -113,3 +115,24 @@ class TestNullCells:
         result = _run([["EMEA", 5000.0]], [("EMEA", None)])
         assert not result.matched
         assert any("EMEA" in d for d in result.differences)
+
+
+class TestRefusals:
+    def test_a_column_count_mismatch_names_both_counts(self) -> None:
+        with pytest.raises(ValueError, match="2 column.*returned 3"):
+            compare_rows(
+                _EXPECTED,
+                ["region", "revenue", "orders"],
+                [("EMEA", 5000.0, 12)],
+                ordered=False,
+                rel_tol=1e-9,
+                abs_tol=0.0,
+            )
+
+    def test_a_duplicated_group_in_the_result_refuses(self) -> None:
+        with pytest.raises(ValueError, match="two rows for group EMEA"):
+            _run(_EXPECTED, [("EMEA", 5000.0), ("EMEA", 1.0)])
+
+    def test_a_non_numeric_measure_names_the_column_and_the_value(self) -> None:
+        with pytest.raises(ValueError, match="'revenue'.*'N/A'"):
+            _run([["EMEA", 5000.0]], [("EMEA", "N/A")])

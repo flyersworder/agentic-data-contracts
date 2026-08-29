@@ -24,6 +24,7 @@ from agentic_data_contracts.validation._rows import (
     _is_value,
     compare_rows,
     key_positions,
+    named_differences,
 )
 from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation._timewindow import _relative_time_node
@@ -54,9 +55,6 @@ _KNOWN_KEYS = frozenset(
 
 _DEFAULT_REL_TOL = 1e-9
 _DEFAULT_ABS_TOL = 0.0
-# The counts above stay complete; only the naming is capped, so a reader is
-# never misled about how much differed. `row_differences` carries them all.
-_MAX_NAMED_DIFFERENCES = 3
 
 
 def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
@@ -536,13 +534,11 @@ class ExampleAnswerReport:
         ]
         for r in self.results:
             if r.status == "mismatch" and r.expected_rows is not None:
-                shown = "; ".join(r.row_differences[:_MAX_NAMED_DIFFERENCES])
-                extra = len(r.row_differences) - _MAX_NAMED_DIFFERENCES
-                more = f" (and {extra} more)" if extra > 0 else ""
                 lines.append(
                     f"- mismatch `{r.label}`: {len(r.expected_rows)} expected "
                     f"group(s), {r.actual_row_count} row(s) returned, "
-                    f"{len(r.row_differences)} difference(s): {shown}{more}"
+                    f"{len(r.row_differences)} difference(s): "
+                    f"{named_differences(r.row_differences)}"
                 )
             elif r.status == "mismatch":
                 lines.append(

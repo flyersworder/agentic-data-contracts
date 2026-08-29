@@ -568,13 +568,38 @@ class TestDeclaredBreakdownReviewFindings:
     def test_a_ragged_declared_row_is_an_error_not_a_crash(self) -> None:
         # `final_columns` and `final_rows` are declared independently, so a
         # short row would index past its end. `evaluate_conformance` is total
-        # over its attempts: one malformed attempt must not void the batch.
-        with pytest.raises(ValueError, match="final_rows"):
-            Attempt(
-                example=_breakdown_example(),
-                final_rows=[["EMEA", 5000.0], ["APAC"]],
-                final_columns=_BD_COLUMNS,
-            )
+        # over its attempts: one malformed attempt must not void the batch,
+        # so this asserts on the batch rather than on a constructor raise.
+        good = _breakdown_attempt(_BREAKDOWN)
+        ragged = _breakdown_attempt([["EMEA", 5000.0], ["APAC"]])
+        report = evaluate_conformance([good, ragged, good])
+        assert [r.answer for r in report.results] == ["match", "error", "match"]
+        assert any("cell" in r for r in report.results[1].reasons)
+
+    def test_a_ragged_row_still_fails_after_mutation(self) -> None:
+        # The guard must sit where the comparison is, not only at
+        # construction: `Attempt` is not frozen.
+        attempt = _breakdown_attempt(_BREAKDOWN)
+        attempt.final_rows = [["EMEA", 5000.0], ["APAC"]]
+        assert evaluate_conformance([attempt]).results[0].answer == "error"
+
+    def test_declared_rows_given_as_an_iterator_are_not_consumed(self) -> None:
+        # A one-shot iterable read twice yields a silently WRONG verdict --
+        # a mismatch naming every group as missing, on correct data.
+        attempt = _breakdown_attempt(row for row in _BREAKDOWN)
+        assert evaluate_conformance([attempt]).results[0].answer == "match"
+
+    def test_a_protocol_only_row_declaring_an_answer_is_contaminated(self) -> None:
+        # P1 asks whether the answer came through the governed path. That does
+        # not depend on what the corpus row certifies -- the `final_answer`
+        # half of the same condition fires here, and the rows half must too.
+        attempt = Attempt(
+            example=_example(id="po"),
+            calls=[],
+            final_rows=_BREAKDOWN,
+            final_columns=_BD_COLUMNS,
+        )
+        assert evaluate_conformance([attempt]).results[0].protocol == "contaminated"
 
     def test_final_rows_on_a_scalar_row_does_not_hijack_selection(self) -> None:
         # A host wiring `final_rows` uniformly (an agent's result is a table

@@ -23,6 +23,22 @@ from agentic_data_contracts.validation._tolerance import _compare
 
 Key = tuple[str, ...]
 
+# The counts a caller renders alongside these stay complete; only the naming is
+# capped, so a reader is never misled about how much differed.
+_MAX_NAMED_DIFFERENCES = 3
+
+
+def named_differences(differences: list[str]) -> str:
+    """Render differences for a report summary, capped and counted.
+
+    Lives here rather than in either report: pass 2 and pass 3 both cap a
+    breakdown's differences for a summary line, and two copies of the arithmetic
+    are two chances to disagree about what "and N more" counts.
+    """
+    shown = "; ".join(differences[:_MAX_NAMED_DIFFERENCES])
+    extra = len(differences) - _MAX_NAMED_DIFFERENCES
+    return f"{shown} (and {extra} more)" if extra > 0 else shown
+
 
 @dataclass
 class RowComparison:
@@ -183,6 +199,16 @@ def compare_rows(
             f"certified answer has {width} column(s), query returned {len(columns)}"
         )
     actual = [list(row) for row in rows]
+    # Checked here rather than by either caller: `columns` constrains the
+    # result's declared width, but nothing constrains an individual row, and a
+    # short one would index past its end deep inside a pairing loop. Both
+    # callers already convert `ValueError` into a per-row verdict.
+    for index, row in enumerate(actual):
+        if len(row) != width:
+            raise ValueError(
+                f"row {index + 1} of the query result has {len(row)} cell(s), "
+                f"but the certified answer has {width}"
+            )
     if ordered:
         return _compare_ordered(
             expected_rows, columns, actual, rel_tol=rel_tol, abs_tol=abs_tol

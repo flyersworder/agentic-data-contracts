@@ -19,12 +19,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from agentic_data_contracts.core.recorder import ToolCall
-from agentic_data_contracts.validation._rows import compare_rows
+from agentic_data_contracts.validation._rows import (
+    compare_rows,
+    named_differences,
+)
 from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.examples import (
     _DEFAULT_ABS_TOL,
     _DEFAULT_REL_TOL,
-    _MAX_NAMED_DIFFERENCES,
     VerifiedExample,
     _label,
 )
@@ -53,13 +55,15 @@ class Attempt:
     final_columns: list[str] | None = None
 
     def __post_init__(self) -> None:
-        """Reject a declared breakdown that cannot be compared.
+        """Refuse an incomplete declared breakdown, and materialise its rows.
 
-        Both rules fail at construction naming the fault, rather than at
-        grading: ``compare_rows`` checks ``final_columns`` against the
-        certified width but nothing constrains an individual row, so a short
-        row would index past its end and raise out of an
-        ``evaluate_conformance`` that is otherwise total over its attempts.
+        The rows are copied eagerly because a one-shot iterable would be read
+        twice -- once to check its shape, once to compare -- and the second
+        read would see nothing, reporting every certified group as missing on
+        data that was correct. Shape itself is *not* checked here:
+        ``Attempt`` is not frozen, so a constructor guard does not hold at
+        grading time. ``compare_rows`` owns that rule, and both passes already
+        convert its ``ValueError`` into a per-row verdict.
         """
         if self.final_rows is None:
             return
@@ -69,13 +73,7 @@ class Attempt:
                 "breakdown was returned with, used to check the result's "
                 "width and to name the column a difference is in"
             )
-        width = len(self.final_columns)
-        for index, row in enumerate(self.final_rows):
-            if len(row) != width:
-                raise ValueError(
-                    f"final_rows[{index}] has {len(row)} cell(s) but "
-                    f"final_columns names {width} column(s)"
-                )
+        self.final_rows = [list(row) for row in self.final_rows]
 
     @classmethod
     def from_session(
@@ -305,16 +303,14 @@ def _breakdown_verdict(
     # spoke only through the new field would post a bare "mismatch" with an
     # empty note. Named differences are capped the same way pass 2 caps them,
     # against the same constant, while `row_differences` stays uncapped.
-    shown = "; ".join(comparison.differences[:_MAX_NAMED_DIFFERENCES])
-    extra = len(comparison.differences) - _MAX_NAMED_DIFFERENCES
-    more = f" (and {extra} more)" if extra > 0 else ""
     return (
         "mismatch",
         [
             f"breakdown differs from the certified answer: "
             f"{comparison.expected_group_count} expected group(s), "
             f"{comparison.actual_row_count} row(s) returned, "
-            f"{len(comparison.differences)} difference(s): {shown}{more}"
+            f"{len(comparison.differences)} difference(s): "
+            f"{named_differences(comparison.differences)}"
         ],
         comparison.differences,
         comparison.actual_row_count,
@@ -379,7 +375,10 @@ def _protocol_verdict(
             f"{', '.join(attempt.foreign_tool_calls)}"
         )
         return "contaminated", reasons
-    if (attempt.final_answer is not None or _declared_breakdown(attempt)) and (
+    # Bare `final_rows`, not `_declared_breakdown`: P1 asks whether the answer
+    # came through the governed path, which does not depend on what the corpus
+    # row certifies. Scoping is `_select_answer`'s concern alone.
+    if (attempt.final_answer is not None or attempt.final_rows is not None) and (
         not successful
     ):
         reasons.append(

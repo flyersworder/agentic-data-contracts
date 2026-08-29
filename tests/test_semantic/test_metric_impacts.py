@@ -88,7 +88,11 @@ class TestWalkMetricImpacts:
         ]
 
     def _shared_driver_metrics(self) -> list[MetricDefinition]:
-        """`paying_users` is an operand of BOTH `revenue` and `new_revenue`."""
+        """`paying_users` is an operand of BOTH `revenue` and `new_revenue`.
+
+        `paying_users` itself decomposes into `trials` and `signups` to test
+        that a shared driver is expanded at most once, not once per incoming edge.
+        """
 
         def m(name: str, decs: list[Decomposition] | None = None) -> MetricDefinition:
             return MetricDefinition(
@@ -118,8 +122,13 @@ class TestWalkMetricImpacts:
                     )
                 ],
             ),
-            m("paying_users"),
+            m(
+                "paying_users",
+                [Decomposition(operator="sum", operands=["trials", "signups"])],
+            ),
             m("conv"),
+            m("trials"),
+            m("signups"),
         ]
 
     def test_downstream_direct(self) -> None:
@@ -184,16 +193,37 @@ class TestWalkMetricImpacts:
         assert edge.convention == "fold_into"
 
     def test_a_shared_driver_is_expanded_once(self) -> None:
-        """Reporting both edges must not expand the node twice."""
+        """Reporting both edges must not expand the node twice.
+
+        `paying_users` is reached from both `revenue` and `new_revenue`.
+        Its children `trials` and `signups` must appear exactly once each,
+        not twice (once per incoming branch). If `paying_users` were expanded
+        twice, we would see its child edges duplicated in the walk.
+        """
         index = build_metric_impact_index(
             [
                 e.as_driver_edge()
                 for e in identity_edges_from_metrics(self._shared_driver_metrics())
             ]
         )
-        walk = walk_metric_impacts(index, "revenue", direction="upstream", max_depth=3)
-        depths = [d for d, e in walk if e.from_metric == "conv"]
-        assert depths == [2]  # reached once, via new_revenue, not re-expanded
+        walk = walk_metric_impacts(index, "revenue", direction="upstream", max_depth=4)
+        # Count how many times each child of paying_users appears
+        trials_count = sum(
+            1
+            for _, e in walk
+            if (e.from_metric, e.to_metric) == ("trials", "paying_users")
+        )
+        signups_count = sum(
+            1
+            for _, e in walk
+            if (e.from_metric, e.to_metric) == ("signups", "paying_users")
+        )
+        assert trials_count == 1, (
+            f"trials->paying_users appeared {trials_count} times, expected 1"
+        )
+        assert signups_count == 1, (
+            f"signups->paying_users appeared {signups_count} times, expected 1"
+        )
 
     def test_a_cycle_terminates_and_reports_its_closing_edge(self) -> None:
         """`visited` exists to stop cycles, and still does.

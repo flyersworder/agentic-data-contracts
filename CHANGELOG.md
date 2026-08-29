@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.0] - 2026-08-29
+
+### Fixed
+
+- **`walk_metric_impacts` reports a shared driver's second edge** (#83). The walk marked a metric visited the first time any edge reached it and dropped every later edge onto it, so a metric driving two others was reported on whichever branch happened to be walked first — and the `operator` and `convention` carried only by its other edge never arrived. The loss was silent: no error, no warning, no `note`, and the result read as a complete walk.
+
+  `visited` now gates *expansion* only, which is the sole thing it was ever needed for: each reachable metric is expanded at most once, while every declared edge between reached metrics is reported. This is not a new principle — `test_parallel_edges_to_one_neighbor_are_all_reported` already stated it in its own docstring; it had been applied within a single node's adjacency and is now applied across the walk.
+
+  **Cycle-closing edges are now reported.** In `a -> b -> c -> a` walked downstream, `c -> a` appears. The edge is declared, and an agent tracing root cause should be told the graph closes; termination was never guaranteed by the reporting gate. The former `test_cycle_visited_tracking` asserted the old guarantee rather than its own intent and was rewritten to state the new one.
+
+  The #81 value-equality rule is unchanged: two edges equal in every field carry one fact and report once; two edges differing in any field are two declarations and both report.
+
+### Changed
+
+- **`trace_metric_impacts` serializes at most 200 edges**, announced in `note`. Reporting grew from O(V) to O(E) within the depth horizon, and that output lands in an agent's context. The walk itself stays complete and uncapped — a graph primitive that silently truncates is the same class of loss this release fixes — so the cap sits in the tool, where the `max_depth` clamp already lives. This can truncate a response that was complete before: a star graph of one metric driving 100 others already returned 100 edges. No shipped semantic layer comes close; they report at most 5.
+
 ## [0.48.0] - 2026-08-29
 
 ### Added

@@ -19,11 +19,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentic_data_contracts.core.recorder import ToolCall
+from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.examples import (
     _DEFAULT_ABS_TOL,
     _DEFAULT_REL_TOL,
     VerifiedExample,
-    _compare,
     _label,
 )
 

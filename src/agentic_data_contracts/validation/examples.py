@@ -13,14 +13,21 @@ import math
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import sqlglot
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.validation._rows import (
+    _is_value,
+    compare_rows,
+    key_positions,
+)
 from agentic_data_contracts.validation._scalar import _scalar
 from agentic_data_contracts.validation._timewindow import _relative_time_node
+from agentic_data_contracts.validation._tolerance import _compare
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.validator import ValidationResult, Validator
 
@@ -40,11 +47,16 @@ _KNOWN_KEYS = frozenset(
         "abs_tol",
         "time_scoped",
         "expects_metrics",
+        "expected_rows",
+        "ordered",
     }
 )
 
 _DEFAULT_REL_TOL = 1e-9
 _DEFAULT_ABS_TOL = 0.0
+# The counts above stay complete; only the naming is capped, so a reader is
+# never misled about how much differed. `row_differences` carries them all.
+_MAX_NAMED_DIFFERENCES = 3
 
 
 def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
@@ -66,18 +78,96 @@ def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float
     return value
 
 
+def _validate_expected_rows(raw: Any, *, ordered: bool) -> list[list[Any]] | None:
+    """Validate a certified breakdown from an untrusted corpus row.
+
+    Everything that can be decided from the rows alone is decided here, so a
+    malformed corpus fails at load naming the row rather than at execution
+    naming a column.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"'expected_rows' must be a list of rows, got {type(raw).__name__}"
+        )
+    if not raw:
+        raise ValueError(
+            "'expected_rows' must be a non-empty list of rows. A query whose "
+            "certified answer is no rows is asserted as a count instead: "
+            "SELECT COUNT(*) ... with expected: 0."
+        )
+    rows: list[list[Any]] = []
+    for row in raw:
+        if not isinstance(row, list) or not row:
+            raise ValueError(
+                f"each row in 'expected_rows' must be a non-empty list, got {row!r}"
+            )
+        rows.append(list(row))
+    width = len(rows[0])
+    if any(len(row) != width for row in rows):
+        raise ValueError(
+            "every row in 'expected_rows' must have the same number of cells"
+        )
+    positions = key_positions(rows)
+    for row in rows:
+        if tuple(i for i, cell in enumerate(row) if not _is_value(cell)) != positions:
+            raise ValueError(
+                "every row in 'expected_rows' must identify itself by the same "
+                "columns — one row's text cells are in different positions"
+            )
+    # A non-finite measurement cell asserts nothing: `1e-9 * inf == inf` makes
+    # `_tolerance._compare`'s tolerance term infinite too, so the row would
+    # report MATCH against any actual value at all. Reuses `_numeric`'s own
+    # finiteness rule rather than a second copy of it, so scalar `expected`
+    # and every measurement cell in `expected_rows` are held to one rule.
+    # `Decimal` is normalised rather than refused: `_rows._is_number` counts it
+    # deliberately (a warehouse driver hands back `Decimal` for NUMERIC), so a
+    # load rule that rejected it would reject exactly what the comparison is
+    # built to accept. `_numeric` still owns the finite/bool/type rules.
+    for row_index, row in enumerate(rows):
+        for i, cell in enumerate(row):
+            if i in positions:
+                continue
+            if isinstance(cell, Decimal):
+                cell = float(cell)
+            row[i] = _numeric(cell, f"expected_rows[{row_index}][{i}]")
+    if not ordered:
+        if not positions:
+            raise ValueError(
+                "'expected_rows' has no text column to identify a row by, so "
+                "rows cannot be matched. Set 'ordered: true' (and ORDER BY in "
+                "the SQL), or group by something nameable."
+            )
+        seen: set[tuple[str, ...]] = set()
+        for row in rows:
+            key = tuple(str(row[i]).strip() for i in positions)
+            if key in seen:
+                raise ValueError(
+                    f"'expected_rows' names the group {key} twice; an unordered "
+                    "answer matches by group, so it cannot state one group twice"
+                )
+            seen.add(key)
+    return rows
+
+
 @dataclass
 class VerifiedExample:
     """One example to validate. Only ``sql`` is load-bearing.
 
-    An example that sets ``expected`` is additionally an *assertion*: the
-    certified answer its SQL must return, checked by ``check_example_answers``.
-    ``rel_tol`` / ``abs_tol`` override the call-level tolerances for this row
-    alone; ``time_scoped`` is the author's assertion that the query's time
-    window is pinned, which suppresses the relative-time-window refusal.
+    An example that sets ``expected`` or ``expected_rows`` is additionally an
+    *assertion*: the certified answer its SQL must return, checked by
+    ``check_example_answers``. ``expected`` asserts a single number;
+    ``expected_rows`` is its sibling for a certified breakdown (a group-by
+    result) and cannot be set alongside ``expected``. ``ordered`` declares
+    that ``expected_rows`` is matched by position (the SQL's ``ORDER BY`` is
+    the answer) rather than by the row's own text-cell key. ``rel_tol`` /
+    ``abs_tol`` override the call-level tolerances for this row alone;
+    ``time_scoped`` is the author's assertion that the query's time window is
+    pinned, which suppresses the relative-time-window refusal.
     ``expects_metrics`` declares which metrics an agent should have consulted
-    before querying; it is independent of ``expected``, so a protocol-only row
-    may set it.
+    before querying; it is independent of ``expected``/``expected_rows``, so a
+    protocol-only row may set it.
     """
 
     sql: str
@@ -90,6 +180,12 @@ class VerifiedExample:
     abs_tol: float | None = None
     time_scoped: bool = False
     expects_metrics: list[str] = field(default_factory=list)
+    # Appended after `expects_metrics` rather than inserted beside `expected`,
+    # so every pre-existing positional constructor call keeps binding to the
+    # same field it always did — this dataclass is public API and not
+    # `kw_only`. `ExampleAnswerResult` follows the same append-only rule.
+    expected_rows: list[list[Any]] | None = None
+    ordered: bool = False
 
     def __post_init__(self) -> None:
         """Validate the four assertion fields, however the record was built.
@@ -117,18 +213,32 @@ class VerifiedExample:
         self.expected = _numeric(self.expected, "expected")
         self.rel_tol = _numeric(self.rel_tol, "rel_tol", allow_negative=False)
         self.abs_tol = _numeric(self.abs_tol, "abs_tol", allow_negative=False)
-        if self.expected is None:
-            # These three only ever modify how an `expected` is compared, so
-            # setting one without it is dead configuration — and the likeliest
-            # cause is a typo'd or dropped `expected` key, which would
-            # otherwise land inertly in metadata and quietly cost the corpus an
-            # assertion that no gate can miss. Fail loudly instead.
+        if not isinstance(self.ordered, bool):
+            raise ValueError(
+                f"'ordered' must be a boolean, got {type(self.ordered).__name__}"
+            )
+        if self.expected is not None and self.expected_rows is not None:
+            raise ValueError(
+                "declare 'expected' or 'expected_rows', not both — one asserts a "
+                "single number, the other a breakdown"
+            )
+        self.expected_rows = _validate_expected_rows(
+            self.expected_rows, ordered=self.ordered
+        )
+        if self.expected is None and self.expected_rows is None:
+            # rel_tol/abs_tol/time_scoped/ordered only ever modify how an
+            # assertion is compared, so setting one without either assertion
+            # field is dead configuration — and the likeliest cause is a
+            # typo'd or dropped `expected`/`expected_rows` key, which would
+            # otherwise land inertly in metadata and quietly cost the corpus
+            # an assertion that no gate can miss. Fail loudly instead.
             orphaned = [
                 key
                 for key, value in (
                     ("rel_tol", self.rel_tol),
                     ("abs_tol", self.abs_tol),
                     ("time_scoped", self.time_scoped or None),
+                    ("ordered", self.ordered or None),
                 )
                 if value is not None
             ]
@@ -136,8 +246,20 @@ class VerifiedExample:
                 raise ValueError(
                     f"{', '.join(orphaned)} set without 'expected' — these only "
                     "affect how a certified answer is compared, so the row "
-                    "asserts nothing. Add 'expected', or remove them."
+                    "asserts nothing. Add 'expected' or 'expected_rows', or "
+                    "remove them."
                 )
+        elif self.ordered and self.expected_rows is None:
+            # Same defect one step further in: `ordered` modifies only
+            # `expected_rows` pairing, so beside a scalar `expected` it is
+            # dead configuration — and the likeliest cause is a breakdown row
+            # converted to a `COUNT(*)` scalar with the flag left behind,
+            # whose author still believes order is being asserted.
+            raise ValueError(
+                "'ordered' set without 'expected_rows' — it only affects how a "
+                "certified breakdown is paired, so beside a scalar 'expected' "
+                "it asserts nothing. Remove it, or use 'expected_rows'."
+            )
 
     @classmethod
     def from_dict(cls, raw: Any) -> VerifiedExample:
@@ -174,6 +296,8 @@ class VerifiedExample:
             principal=raw.get("principal"),
             metadata=metadata,
             expected=raw.get("expected"),
+            expected_rows=raw.get("expected_rows"),
+            ordered=raw.get("ordered", False),
             rel_tol=raw.get("rel_tol"),
             abs_tol=raw.get("abs_tol"),
             time_scoped=raw.get("time_scoped", False),
@@ -198,37 +322,6 @@ def _fmt(value: float | None) -> str:
     crashing the whole report.
     """
     return "?" if value is None else f"{value:.3g}"
-
-
-def _compare(
-    actual: float, expected: float, rel_tol: float, abs_tol: float
-) -> tuple[float, float, bool]:
-    """Compare a measured value against a certified answer.
-
-    Returns ``(abs_diff, rel_diff, matched)``.
-
-    ``rel_diff`` is guarded against a zero reference — a certified answer of
-    zero is legitimate, and dividing by it would raise or report a meaningless
-    ``inf`` for an exact match. The three-branch form is the same one
-    ``reconcile_decomposition`` uses for a zero parent.
-
-    The relative term is anchored on ``expected``, deliberately unlike
-    ``reconcile_decomposition`` (which compares two measurements and has no
-    privileged side) and unlike ``math.isclose`` (which anchors on the larger
-    magnitude). An assertion *has* a reference: the certified answer is the
-    fixed point and the query result is what varies against it. Anchoring on
-    ``expected`` keeps the tolerance's meaning stable — "within 0.1% of the
-    certified number" — however far the query has drifted.
-    """
-    abs_diff = abs(actual - expected)
-    if abs_diff == 0:
-        rel_diff = 0.0
-    elif expected != 0:
-        rel_diff = abs_diff / abs(expected)
-    else:
-        rel_diff = math.inf
-    matched = abs_diff <= max(abs_tol, rel_tol * abs(expected))
-    return abs_diff, rel_diff, matched
 
 
 @dataclass
@@ -336,7 +429,8 @@ class ExampleAnswerResult:
     ``status`` (each result has exactly one):
       - ``"match"``        — executed and equal within tolerance.
       - ``"mismatch"``     — executed and outside tolerance. Both numbers and
-                             both diffs are populated.
+                             both diffs are populated for a scalar assertion;
+                             for a breakdown, only row_differences is populated.
       - ``"unassertable"`` — the SQL uses a relative time window, so the
                              expected value decays. NOT executed.
       - ``"error"``        — no verdict was possible: not scalar-shaped, no
@@ -351,6 +445,10 @@ class ExampleAnswerResult:
     ``ExampleAnswerReport.summary()`` can reuse it verbatim instead of
     recomputing it against a different, filtered index — see the module's
     ``check_example_answers`` for why those two indices differ.
+
+    For a breakdown mismatch, ``abs_diff`` and ``rel_diff`` stay ``None``
+    because there is no single numeric diff — ``row_differences`` carries
+    the differences instead.
     """
 
     example: VerifiedExample
@@ -363,6 +461,9 @@ class ExampleAnswerResult:
     abs_tol: float = _DEFAULT_ABS_TOL
     reason: str | None = None
     label: str = ""
+    expected_rows: list[list[Any]] | None = None
+    actual_row_count: int | None = None
+    row_differences: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -422,8 +523,9 @@ class ExampleAnswerReport:
             # user sees when CI goes red. Four zeroes do not explain that.
             return (
                 "**Answer checks:** no assertions found — no example declared "
-                "an `expected` value, so nothing was checked. Add one to a "
-                "corpus row, or drop `answers.ok` from the gate until you do."
+                "an `expected` or `expected_rows` value, so nothing was "
+                "checked. Add one to a corpus row, or drop `answers.ok` from "
+                "the gate until you do."
             )
         counts = Counter(r.status for r in self.results)
         lines = [
@@ -433,7 +535,16 @@ class ExampleAnswerReport:
             f"{counts['error']} error(s).",
         ]
         for r in self.results:
-            if r.status == "mismatch":
+            if r.status == "mismatch" and r.expected_rows is not None:
+                shown = "; ".join(r.row_differences[:_MAX_NAMED_DIFFERENCES])
+                extra = len(r.row_differences) - _MAX_NAMED_DIFFERENCES
+                more = f" (and {extra} more)" if extra > 0 else ""
+                lines.append(
+                    f"- mismatch `{r.label}`: {len(r.expected_rows)} expected "
+                    f"group(s), {r.actual_row_count} row(s) returned, "
+                    f"{len(r.row_differences)} difference(s): {shown}{more}"
+                )
+            elif r.status == "mismatch":
                 lines.append(
                     f"- mismatch `{r.label}`: expected {r.expected}, "
                     f"actual {r.actual} (rel diff {_fmt(r.rel_diff)}, "
@@ -594,9 +705,9 @@ def check_example_answers(
     that is the load-bearing choice: an example that failed contract validation
     must never be executed, and consuming the report makes that ordering a
     property of the signature rather than a rule in a docstring. A row is
-    executed only when it is ``status == "valid"`` AND declares an ``expected``;
-    everything else produces no result at all (it is already accounted for by
-    ``ExampleValidationReport``).
+    executed only when it is ``status == "valid"`` AND declares an ``expected``
+    or ``expected_rows``; everything else produces no result at all (it is
+    already accounted for by ``ExampleValidationReport``).
 
     ``validate_examples`` keeps its own property of never executing a query —
     it plans, via ``ExplainAdapter``, and nothing more. The execute-capable
@@ -613,7 +724,9 @@ def check_example_answers(
     results: list[ExampleAnswerResult] = []
     for index, row in enumerate(report.results):
         example = row.example
-        if row.status != "valid" or example.expected is None:
+        if row.status != "valid" or (
+            example.expected is None and example.expected_rows is None
+        ):
             continue
         row_rel_tol = example.rel_tol if example.rel_tol is not None else rel_tol
         row_abs_tol = example.abs_tol if example.abs_tol is not None else abs_tol
@@ -638,6 +751,7 @@ def check_example_answers(
                     example=example,
                     status="error",
                     expected=example.expected,
+                    expected_rows=example.expected_rows,
                     rel_tol=row_rel_tol,
                     abs_tol=row_abs_tol,
                     reason=f"answer check error: {exc}",
@@ -658,13 +772,15 @@ def _check_one(
     sql_normalizer: SqlNormalizer | None = None,
 ) -> ExampleAnswerResult:
     expected = example.expected
-    assert expected is not None  # guarded by the caller's filter
+    expected_rows = example.expected_rows
+    assert expected is not None or expected_rows is not None  # caller's filter
 
     def _make(status: str, **kw: Any) -> ExampleAnswerResult:
         return ExampleAnswerResult(
             example=example,
             status=status,
             expected=expected,
+            expected_rows=expected_rows,
             rel_tol=rel_tol,
             abs_tol=abs_tol,
             label=label,
@@ -685,6 +801,27 @@ def _check_one(
                     "decays; pin the window or set time_scoped: true"
                 ),
             )
+
+    if expected_rows is not None:
+        result = adapter.execute(example.sql)
+        comparison = compare_rows(
+            expected_rows,
+            result.columns,
+            result.rows,
+            ordered=example.ordered,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+        )
+        return _make(
+            "match" if comparison.matched else "mismatch",
+            actual_row_count=comparison.actual_row_count,
+            row_differences=comparison.differences,
+            reason=None
+            if comparison.matched
+            else "breakdown differs from the certified answer",
+        )
+
+    assert expected is not None  # expected_rows handled above; only expected remains
 
     actual, reason = _scalar(adapter, example.sql, label)
     if actual is None:

@@ -1015,13 +1015,40 @@ if not (report.ok and answers.ok):
 
 Note what `answers.ok` means before you paste that gate in: it is True only when at least one assertion was actually *checked* **and** every checked one matched. An **empty** answer report is therefore False, not True — a gate that quietly stopped asserting anything fails rather than passing. The consequence to expect: adopt the recipe before any row carries an `expected` and the build goes red on a corpus with nothing wrong with it. Add the first assertion, or leave `answers.ok` out of the gate until you do.
 
-`check_example_answers` takes `report` — the output of `validate_examples` — not the raw examples. That is deliberate, not incidental: it means the pipeline cannot hand it unvalidated SQL. A row that violates the tenant-filter rule is precisely the query that must not be sent to the warehouse to see what it returns, so a row is executed only when it is `status == "valid"` **and** declares an `expected`; everything else (a violation, an unverified or unchecked row, or a valid row with no `expected`) produces no result at all. Note the two functions also take different adapter *kinds*: `validate_examples` takes an `ExplainAdapter` (plans only, never runs a query), while `check_example_answers` takes a `DatabaseAdapter` (executes) — the execute-capable adapter enters the pipeline only at this second, already-filtered stage.
+`check_example_answers` takes `report` — the output of `validate_examples` — not the raw examples. That is deliberate, not incidental: it means the pipeline cannot hand it unvalidated SQL. A row that violates the tenant-filter rule is precisely the query that must not be sent to the warehouse to see what it returns, so a row is executed only when it is `status == "valid"` **and** declares an `expected` or `expected_rows`; everything else (a violation, an unverified or unchecked row, or a valid row with no assertion) produces no result at all. Note the two functions also take different adapter *kinds*: `validate_examples` takes an `ExplainAdapter` (plans only, never runs a query), while `check_example_answers` takes a `DatabaseAdapter` (executes) — the execute-capable adapter enters the pipeline only at this second, already-filtered stage.
 
-Each result lands in exactly one `status` — `match`, `mismatch` (both `expected` and `actual` populated, plus `abs_diff` / `rel_diff`), `unassertable`, or `error`. **A SQL statement using a relative time window is refused, not executed**: `WHERE created_at >= CURRENT_DATE - 30` degrades correctly as fixture data ages, so the certified answer would too, for a reason the corpus author never touched. The checker scans for that before running anything — `CURRENT_DATE` / `CURRENT_TIMESTAMP` and friends, plus function-call spellings like `NOW()`, `GETDATE()`, and `TODAY()` — and marks the row `unassertable` when it finds one. Set `time_scoped: true` once you've confirmed the window is pinned some other way (e.g. the SQL binds explicit dates from application code) to run it anyway.
+Each result lands in exactly one `status` — `match`, `mismatch`, `unassertable`, or `error`. What a `mismatch` carries depends on which assertion it came from: a scalar `expected` populates `expected` / `actual` / `abs_diff` / `rel_diff`, while a breakdown leaves all four `None` and reports through `expected_rows`, `actual_row_count`, and `row_differences` instead. **A SQL statement using a relative time window is refused, not executed**: `WHERE created_at >= CURRENT_DATE - 30` degrades correctly as fixture data ages, so the certified answer would too, for a reason the corpus author never touched. The checker scans for that before running anything — `CURRENT_DATE` / `CURRENT_TIMESTAMP` and friends, plus function-call spellings like `NOW()`, `GETDATE()`, and `TODAY()` — and marks the row `unassertable` when it finds one. Set `time_scoped: true` once you've confirmed the window is pinned some other way (e.g. the SQL binds explicit dates from application code) to run it anyway.
 
 The default tolerance is deliberately tight — `rel_tol=1e-9`, `abs_tol=0.0` — because a certified answer is meant to be *the* number, not an approximation; the default absorbs only floating-point representation noise. Widen `rel_tol` / `abs_tol` per example when the certified answer itself has limited precision — e.g. it was read off a dashboard that rounds to whole dollars — rather than loosening the call-level default for the whole corpus.
 
 One more consequence worth knowing before you write `expected: 0`: the tolerance's relative term is `rel_tol * abs(expected)`, so at `expected == 0` it's always zero and only the absolute term can pass a near-miss. A row asserting "zero failed orders in Q1" matches only an *exact* zero unless you also set an `abs_tol`.
+
+**`expected_rows`: certifying a breakdown, not just a scalar.** A certified answer isn't always a single number — revenue by region, a top-N list, any `GROUP BY` has nowhere to put its answer in `expected`. `expected_rows` is `expected`'s sibling for exactly that shape, and a row declares one or the other, never both:
+
+```yaml
+- id: revenue-by-region
+  question: "total revenue by region"
+  sql: >
+    SELECT c.region, SUM(o.amount) AS revenue
+    FROM analytics.orders o JOIN analytics.customers c ON o.customer_id = c.id
+    WHERE o.tenant_id = 'acme' AND o.status = 'completed'
+    GROUP BY c.region
+  expected_rows:
+    - [EMEA, 5000.00]
+    - [APAC, 3000.00]
+    - [AMER, 2700.00]
+
+- id: top-3-regions
+  ordered: true                # order IS the answer
+  expected_rows:
+    - [EMEA, 5000.00]
+    - [APAC, 3000.00]
+    - [AMER, 2700.00]
+```
+
+Row identity is inferred from the cells themselves, not declared: a non-numeric cell is a key (the group), a numeric cell is a value (the measurement). Comparison pairs rows by key and is **unordered by default** — a `GROUP BY` without an `ORDER BY` has no guaranteed row order, so a correct query should never fail on the order it happens to come back in. Set `ordered: true` when order *is* the answer (a top-N list); comparison then pairs rows by position instead of by key.
+
+A certified answer of "no rows" — the shape of every data-quality invariant ("no orders without a tenant", "no negative amounts") — is written with `expected`, not `expected_rows: []` (which is rejected as almost certainly a mistake, not a valid assertion): `SELECT COUNT(*) FROM ... WHERE ...` with `expected: 0`.
 
 Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance. Its default `rel_tol=1e-4` assumes the operands are exact — see [operand units and precision](#metric-decomposition-and-drill-dimensions) when one of them is a rounded percentage or carries limited decimals.
 
@@ -1094,7 +1121,9 @@ print(report.summary())                   # markdown, ready to post as a PR comm
 
 `evaluate_conformance` itself is pure and synchronous — it scores recorded `Attempt`s and nothing else. Everything expensive and nondeterministic happens in *your* loop, above the call, which is what makes the verdict logic testable without a model and reproducible from a saved run. `Attempt.from_session` also carries off `session.cost_usd` and the recorder's own elapsed time, so a run can be costed. A runnable end-to-end demo with a scripted stand-in agent (no API key, no network) is [`examples/revenue_agent/evaluate_conformance.py`](examples/revenue_agent/evaluate_conformance.py).
 
-**Two orthogonal axes, five states each.** The `answer` axis scores the number: `match`, `mismatch`, `unassertable` (the agent's answering query used a relative time window, so the certified answer decays against it), `skipped` (the row certified no `expected`), `error`. The `protocol` axis scores the path: `followed`, `violated`, `contaminated`, `not_applicable` (the row activated no protocol rule), `unchecked`. A third field, `answer_source` (`declared` / `sole_scalar` / `last_scalar` / `none`), records *how* the answered number was picked and stays separate from the verdict, so a row that matched on an ambiguously-selected `last_scalar` still reports `answer="match"` and is still excluded from `ok` — the verdict and the evidence for it are different fields.
+**Two orthogonal axes, five states each.** The `answer` axis scores the number: `match`, `mismatch`, `unassertable` (the agent's answering query used a relative time window, so the certified answer decays against it), `skipped` (the row certified no `expected`, **or** certified a breakdown via `expected_rows` — see below), `error`. The `protocol` axis scores the path: `followed`, `violated`, `contaminated`, `not_applicable` (the row activated no protocol rule), `unchecked`. A third field, `answer_source` (`declared` / `sole_scalar` / `last_scalar` / `none`), records *how* the answered number was picked and stays separate from the verdict, so a row that matched on an ambiguously-selected `last_scalar` still reports `answer="match"` and is still excluded from `ok` — the verdict and the evidence for it are different fields.
+
+**`evaluate_conformance` does not yet grade a certified breakdown.** Unlike pass 2 (`check_example_answers`, which grades `expected_rows` fully — see above), pass 3 has no recorder shape for a breakdown answer yet, so a row certified with `expected_rows` always reports `answer="skipped"` there, same as a row with no `expected` at all — it passes, but nothing about the breakdown was checked. Tracked as [#85](https://github.com/flyersworder/agentic-data-contracts/issues/85).
 
 **Tolerances are not symmetric with pass 2.** `check_example_answers` accepts corpus-wide `rel_tol`/`abs_tol` overrides that apply to any row setting none of its own, but `evaluate_conformance(attempts)` takes no such override and falls back straight to the library default for an unset row — so the same corpus can `match` in pass 2 and `mismatch` in pass 3 unless the tolerance is set per-row: a row's own `rel_tol`/`abs_tol` apply identically to both passes.
 

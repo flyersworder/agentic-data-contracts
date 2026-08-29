@@ -156,6 +156,14 @@ _PROTOCOL_METRIC_ORDERING = (
 # exists.
 _PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path."
 
+# What `trace_metric_impacts` will serialize into an agent's context. The walk
+# itself is complete and uncapped: a graph primitive that silently truncates is
+# the same class of loss the walk was fixed to stop. Truncation happens here,
+# announced in `note`, and drops the deepest edges because the walk is in BFS
+# order. 200 clears any realistic metric graph -- the shipped semantic layers
+# report at most 5 edges -- while bounding a dense one.
+_MAX_TRACE_EDGES = 200
+
 
 def _render_rows(
     columns: Sequence[str],
@@ -1054,6 +1062,13 @@ def create_tools(
             walk = walk_metric_impacts(
                 graph_index, metric_name, direction=direction, max_depth=max_depth
             )
+            total_edges = len(walk)
+            # Read off the full walk, before truncation: a graph can hold
+            # identity edges past the cap, and deciding "no identity edges came
+            # back" from the truncated list would emit a direction note that is
+            # simply wrong.
+            walk_has_identity = any(e.kind == "identity" for _, e in walk)
+            walk = walk[:_MAX_TRACE_EDGES]
             edges: list[dict[str, Any]] = []
             for depth, edge in walk:
                 entry: dict[str, Any] = {
@@ -1086,9 +1101,17 @@ def create_tools(
                 "max_depth": max_depth,
                 "edges": edges,
             }
-            if kinds in ("all", "identity") and not any(
-                e["kind"] == "identity" for e in edges
-            ):
+            # Both notes can apply at once -- a walk can return 200 edges none
+            # of which are identity edges -- so they join rather than one
+            # silently overwriting the other.
+            notes: list[str] = []
+            if total_edges > _MAX_TRACE_EDGES:
+                notes.append(
+                    f"The graph holds {total_edges} edges within depth "
+                    f"{max_depth}; showing the {_MAX_TRACE_EDGES} nearest. "
+                    f"Lower max_depth to see a complete result."
+                )
+            if kinds in ("all", "identity") and not walk_has_identity:
                 note = _identity_direction_note(
                     metric_name,
                     direction,
@@ -1098,7 +1121,9 @@ def create_tools(
                     suggest_rerun=not edges,
                 )
                 if note is not None:
-                    payload["note"] = note
+                    notes.append(note)
+            if notes:
+                payload["note"] = " ".join(notes)
             response = _text_response(json.dumps(payload))
             _record("ok")
             return response

@@ -15,6 +15,12 @@ from agentic_data_contracts.core.schema import (
     DataContractSchema,
     SemanticConfig,
 )
+from agentic_data_contracts.semantic.base import (
+    MetricDefinition,
+    MetricImpact,
+    Relationship,
+    TableSchema,
+)
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 from agentic_data_contracts.tools.factory import create_tools
 
@@ -300,3 +306,113 @@ async def test_trace_metric_impacts_clamps_max_depth_lower_bound(
     )
     data = json.loads(result["content"][0]["text"])
     assert data["max_depth"] == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# trace_metric_impacts: capping what gets serialized
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _ImpactsOnly:
+    """A minimal `SemanticSource` carrying nothing but influence edges.
+
+    `create_tools` has no `metric_impacts` parameter -- impacts reach the tool
+    through `semantic_source.get_metric_impacts()`. A dense graph of hundreds
+    of edges is impractical as a YAML fixture, so this stub supplies them
+    directly. Every other protocol method returns empty, which is all
+    `trace_metric_impacts` needs.
+    """
+
+    def __init__(self, impacts: list[MetricImpact]) -> None:
+        self._impacts = impacts
+        # `create_tools` validates every impact against `get_metrics()` and
+        # raises on an unknown endpoint, so the stub must declare the metrics
+        # its edges name. Derived rather than passed in, so a test only ever
+        # states its edges.
+        names = sorted({n for i in impacts for n in (i.from_metric, i.to_metric)})
+        self._metrics = [
+            MetricDefinition(name=n, description="", sql_expression="x") for n in names
+        ]
+
+    def get_metrics(self) -> list[MetricDefinition]:
+        return self._metrics
+
+    def get_metric(self, name: str) -> MetricDefinition | None:
+        return next((m for m in self._metrics if m.name == name), None)
+
+    def get_table_schema(self, schema: str, table: str) -> TableSchema | None:
+        return None
+
+    def get_table_schemas(self) -> dict[str, TableSchema]:
+        return {}
+
+    def search_metrics(self, query: str) -> list[MetricDefinition]:
+        return []
+
+    def get_relationships(self) -> list[Relationship]:
+        return []
+
+    def get_relationships_for_table(self, table: str) -> list[Relationship]:
+        return []
+
+    def get_metric_impacts(self) -> list[MetricImpact]:
+        return self._impacts
+
+
+async def _trace(contract: DataContract, impacts: list[MetricImpact], **args) -> dict:
+    tools = create_tools(contract, semantic_source=_ImpactsOnly(impacts))
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(args)
+    return json.loads(result["content"][0]["text"])
+
+
+@pytest.mark.asyncio
+async def test_trace_metric_impacts_caps_the_edges_it_serializes(
+    contract_no_domains: DataContract,
+) -> None:
+    """A dense graph must not flood the agent's context.
+
+    The walk itself stays complete; only what this tool serializes is capped.
+    """
+    names = [f"m{i}" for i in range(30)]
+    impacts = [
+        MetricImpact(from_metric=a, to_metric=b) for a in names for b in names if a != b
+    ]
+    data = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="m0",
+        direction="downstream",
+        max_depth=10,
+    )
+    assert len(data["edges"]) == 200
+    assert "870" in data["note"]  # 30 * 29 edges exist within the horizon
+    assert "max_depth" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_trace_metric_impacts_under_the_cap_has_no_truncation_note(
+    contract_no_domains: DataContract,
+) -> None:
+    impacts = [MetricImpact(from_metric="a", to_metric=f"b{i}") for i in range(10)]
+    data = await _trace(
+        contract_no_domains, impacts, metric_name="a", direction="downstream"
+    )
+    assert len(data["edges"]) == 10
+    assert "showing" not in data.get("note", "")
+
+
+@pytest.mark.asyncio
+async def test_trace_metric_impacts_cap_boundary_is_exact(
+    contract_no_domains: DataContract,
+) -> None:
+    """Pinned at 200 and 201 so an off-by-one cannot pass."""
+    for total, expect_note in ((200, False), (201, True)):
+        impacts = [
+            MetricImpact(from_metric="hub", to_metric=f"leaf{i}") for i in range(total)
+        ]
+        data = await _trace(
+            contract_no_domains, impacts, metric_name="hub", direction="downstream"
+        )
+        assert len(data["edges"]) == min(total, 200)
+        assert ("showing" in data.get("note", "")) is expect_note

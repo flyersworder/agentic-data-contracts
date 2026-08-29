@@ -159,11 +159,18 @@ _PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path
 # What `trace_metric_impacts` will serialize into an agent's context. The walk
 # itself is complete and uncapped: a graph primitive that silently truncates is
 # the same class of loss the walk was fixed to stop. Truncation happens here,
-# announced in `note`, and drops hypotheses (influence edges) before arithmetic
-# (identity edges), and the deepest edges within each kind, because the walk is
-# sorted identity-first and is otherwise in BFS order. 200 clears any realistic
-# metric graph -- the shipped semantic layers report at most 5 edges -- while
-# bounding a dense one.
+# announced in `note`, and is a straight BFS prefix -- the nearest edges to the
+# queried metric, not a kind-first repartition of the whole walk. A prefix by
+# BFS order is always connected back to the queried metric; sorting the whole
+# walk identity-first is not, and can return a payload of exact arithmetic
+# about metrics the agent never asked about, with no edge connecting any of it
+# to the metric it queried. Within one node's adjacency, identity edges are
+# still ordered ahead of influence edges (see `graph_edges` below), so
+# arithmetic discovered alongside a hypothesis at the same node is more likely
+# to survive the cut -- but that is a local tie-break, not a global guarantee,
+# and a dropped identity edge is surfaced in `note` rather than silently lost.
+# 200 clears any realistic metric graph -- the shipped semantic layers report
+# at most 5 edges -- while bounding a dense one.
 _MAX_TRACE_EDGES = 200
 
 
@@ -1055,14 +1062,15 @@ def create_tools(
                 _record(response["_kind"])
                 return response
             # Identity edges go in BEFORE influence edges. `build_metric_impact_index`
-            # preserves declaration order per node, so this is the order the
-            # per-node adjacency list holds them in, and it is what
-            # `walk[:_MAX_TRACE_EDGES]` below truncates against. An identity
-            # edge is exact arithmetic -- it carries an operator and an
-            # attribution convention -- while an influence edge is a
-            # hypothesis. When a dense graph forces something to be dropped,
-            # drop the hypothesis, not the arithmetic. This reorders `edges`
-            # in the response payload for mixed-kind graphs; that is intended.
+            # preserves declaration order per node, so this is the order each
+            # node's own adjacency list holds them in: when BFS expands a node
+            # that has both kinds, its identity edges are discovered (and
+            # reported) before its influence edges. This is scoped to one
+            # node's adjacency, not a global ordering across the whole walk --
+            # a shallower node's hypotheses can still precede a deeper node's
+            # arithmetic in the final BFS-ordered `walk` below. This reorders
+            # `edges` in the response payload for mixed-kind graphs; that is
+            # intended.
             graph_edges: list[MetricEdge] = []
             if kinds in ("all", "identity"):
                 graph_edges.extend(_oriented_identity)
@@ -1079,22 +1087,42 @@ def create_tools(
             # back" from the truncated list would emit a direction note that is
             # simply wrong.
             walk_has_identity = any(e.kind == "identity" for _, e in walk)
+            # Symmetric read, same reason: "narrow by kind" is only useful
+            # advice when the full walk actually holds both kinds -- if it's
+            # all identity or all influence, narrowing to the kind already
+            # present returns a byte-identical payload, and narrowing to the
+            # other kind returns nothing.
+            walk_has_influence = any(e.kind == "influence" for _, e in walk)
             # Also read off the full walk: how many edges sit at depth 1.
             # "Lower max_depth" is only useful advice when depth 1 alone
             # doesn't already exceed the cap -- otherwise re-running at the
             # floor returns the identical truncated payload.
             depth_one_edges = sum(1 for depth, _ in walk if depth == 1)
-            # `graph_edges` above is identity-first, but that only orders each
-            # node's own adjacency list -- `walk_metric_impacts` still returns
-            # a single BFS-ordered sequence *across* nodes, so a deeper node's
-            # identity edges can sort after a shallower node's hypotheses.
-            # Truncation must drop hypotheses before arithmetic regardless of
-            # depth, and a per-node ordering cannot deliver that across a BFS,
-            # so re-partition the full walk identity-first here. `sort` is
-            # stable, so BFS order is preserved within each kind: the result is
-            # identity-first globally, then BFS order within each kind.
-            walk.sort(key=lambda pair: 0 if pair[1].kind == "identity" else 1)
+            # And how many identity edges the full walk holds, so truncation
+            # below can report how many of them it drops.
+            identity_edges_in_full_walk = sum(
+                1 for _, e in walk if e.kind == "identity"
+            )
+            # Truncation is a straight BFS prefix -- NOT a sort. A prefix of
+            # BFS order is always connected back to `start`: every edge in it
+            # was discovered while expanding a node that is itself in the
+            # prefix. Globally re-partitioning identity-first (as a previous
+            # version of this tool did) breaks that guarantee -- a hub of
+            # hypotheses at depth 1 can fill the whole cap with edges naming
+            # metrics `start` never connects to in the payload, while the
+            # identity edges that actually reach `start` get dropped. A
+            # partial-but-connected answer beats a complete-but-unusable one.
+            # `graph_edges`'s identity-first ordering above still matters here:
+            # it decides ties *within* one node's adjacency, so arithmetic
+            # discovered at the same node as a hypothesis is still reported
+            # first and is more likely to survive the prefix cut.
             walk = walk[:_MAX_TRACE_EDGES]
+            # A dropped identity edge must not be silent -- that is the
+            # failure class this ordering exists to avoid. Surfaced in the
+            # note below, alongside the remedy (`kinds="identity"`).
+            identity_edges_dropped = identity_edges_in_full_walk - sum(
+                1 for _, e in walk if e.kind == "identity"
+            )
             edges: list[dict[str, Any]] = []
             for depth, edge in walk:
                 entry: dict[str, Any] = {
@@ -1139,9 +1167,14 @@ def create_tools(
                 # at the floor) returns the identical truncated payload.
                 can_lower_depth = max_depth > 1 and depth_one_edges <= _MAX_TRACE_EDGES
                 # "Narrow by kind" is only actionable when kinds hasn't
-                # already been narrowed -- otherwise an agent re-running with
-                # the kinds it already passed gets a byte-identical payload.
-                can_narrow_kind = kinds == "all"
+                # already been narrowed AND the full walk actually holds both
+                # kinds -- otherwise narrowing to the kind already present
+                # returns a byte-identical payload, and narrowing to the
+                # other kind returns nothing, neither of which is useful
+                # advice.
+                can_narrow_kind = (
+                    kinds == "all" and walk_has_identity and walk_has_influence
+                )
                 if can_lower_depth:
                     advice = "Lower max_depth to see a complete result."
                 elif can_narrow_kind:
@@ -1157,6 +1190,16 @@ def create_tools(
                     f"{max_depth}; showing the {_MAX_TRACE_EDGES} nearest. "
                     f"{advice}"
                 )
+                # A dropped identity edge must not be silent, regardless of
+                # what other advice applies above -- this is stated
+                # unconditionally whenever truncation cost the walk any
+                # arithmetic.
+                if identity_edges_dropped > 0:
+                    notes.append(
+                        f"Truncation dropped {identity_edges_dropped} identity"
+                        " edge(s) that were within depth"
+                        f" {max_depth}; rerun with kinds='identity' to see them."
+                    )
             if kinds in ("all", "identity") and not walk_has_identity:
                 note = _identity_direction_note(
                     metric_name,

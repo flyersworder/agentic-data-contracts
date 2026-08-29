@@ -473,21 +473,24 @@ async def test_truncation_keeps_identity_edges_over_influence(
 
 
 @pytest.mark.asyncio
-async def test_truncation_keeps_identity_edges_from_deeper_nodes_too(
+async def test_truncation_may_drop_deeper_identity_edges_and_says_so(
     contract_no_domains: DataContract,
 ) -> None:
-    """Spec Testing item 1 (the important one): identity-first ordering must
-    hold across the whole BFS walk, not just within one node's adjacency.
+    """Superseded contract for the old
+    `test_truncation_keeps_identity_edges_from_deeper_nodes_too`.
 
-    `hub = sum(A, B)`; `A` has 250 influence drivers (all one hop upstream of
-    `A`, i.e. depth 2 from `hub`); `B = product(p, q)`. Walked upstream from
-    `hub` at max_depth=2: `graph_edges` is assembled identity-first, which
-    only orders each node's own adjacency list -- `hub`'s 2 identity edges
-    (to A and B) come out ahead of `A`'s 250 influence edges *within `hub`'s
-    adjacency*, but the walk as a whole is still BFS order across nodes, so
-    without a global identity-first sort, `A`'s depth-1 hypotheses fill the
-    200-edge cap before `B`'s depth-2 identity edges (`p -> B`, `q -> B`) are
-    even considered -- and those two identity edges are silently dropped.
+    A global identity-first sort would keep `B`'s depth-2 identity edges
+    ahead of `A`'s depth-1 hypotheses, but that sort was reverted (Spec
+    Testing item 1): it let arithmetic connected to nothing in the payload
+    outrank hypotheses that connect the payload to `start`, producing a
+    disconnected result. Truncation is a straight BFS prefix now, so a
+    depth-1 hub of hypotheses genuinely can fill the cap before a deeper
+    node's identity edges are ever reached -- `B`'s two identity edges
+    (`p -> B`, `q -> B`) are dropped here. That loss must not be silent: the
+    note must name the count and point at `kinds='identity'` as the remedy.
+
+    `hub = sum(A, B)`; `A` has 250 influence drivers (depth 2 from `hub`);
+    `B = product(p, q)` (2 more identity edges, also depth 2).
     """
     hub_decomp = Decomposition(operator="sum", operands=["A", "B"])
     b_decomp = Decomposition(operator="product", operands=["p", "q"])
@@ -509,7 +512,100 @@ async def test_truncation_keeps_identity_edges_from_deeper_nodes_too(
     identity_pairs = {
         (e["from"], e["to"]) for e in data["edges"] if e["kind"] == "identity"
     }
-    assert identity_pairs == {("A", "hub"), ("B", "hub"), ("p", "B"), ("q", "B")}
+    # `hub`'s own 2 identity edges are depth 1, so they survive the BFS
+    # prefix; `B`'s 2 identity edges are depth 2, behind 250 depth-1
+    # hypotheses, so they do not.
+    assert identity_pairs == {("A", "hub"), ("B", "hub")}
+    assert "2 identity edge(s)" in data["note"]
+    assert "kinds='identity'" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_never_returns_edges_disconnected_from_the_root(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 1 (the important one, CRITICAL finding): a global
+    identity-first sort could return a payload entirely disconnected from
+    the queried metric.
+
+    `hub` has 250 influence drivers (depth 1); each `driver_i` declares
+    `sum(a_i, b_i)`, contributing 2 identity edges (depth 2) -- 500 identity
+    edges total. Under the reverted global sort, all 500 depth-2 identity
+    edges would outrank the 250 depth-1 influence edges that connect `hub`
+    to the rest of the graph, so the 200-edge cap would be filled entirely
+    with identity edges naming `driver_i`/`a_i`/`b_i` metrics with no edge
+    connecting any of them back to `hub` -- 200 edges, none reachable from
+    `hub`. Truncation must be a BFS prefix so every edge returned is
+    reachable from `hub` within the payload itself.
+    """
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    decompositions = {
+        f"driver{i}": [Decomposition(operator="sum", operands=[f"a{i}", f"b{i}"])]
+        for i in range(250)
+    }
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions=decompositions),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 2}
+    )
+    data = json.loads(result["content"][0]["text"])
+    edges = data["edges"]
+    assert len(edges) == 200
+
+    # Walk the returned edges themselves -- not the "hub" string, not the
+    # depth labels -- to find what is actually reachable from `hub`. Each
+    # edge points driver -> affected ("from" -> "to"), so `hub` is reached
+    # from a driver by following an edge backward: `to` already reached
+    # implies `from` is now reached too. Fixpoint over the payload's own
+    # edges, since a bug that mislabels depth must not be able to hide a
+    # disconnected edge from this check.
+    reachable = {"hub"}
+    changed = True
+    while changed:
+        changed = False
+        for edge in edges:
+            if edge["to"] in reachable and edge["from"] not in reachable:
+                reachable.add(edge["from"])
+                changed = True
+    unreachable = [
+        e for e in edges if e["to"] not in reachable or e["from"] not in reachable
+    ]
+    assert unreachable == []
+
+
+@pytest.mark.asyncio
+async def test_truncation_returned_edges_are_genuinely_the_nearest(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 2: the note's 'showing the N nearest' and the tool
+    description's 'nearest first' claims were false under the global sort --
+    a graph could return depth-2 identity edges while depth-1 influence
+    edges were dropped entirely. `hub` has 250 shallow (depth-1) influence
+    drivers, exceeding the 200-edge cap on their own, plus deeper (depth-2)
+    identity edges declared on `driver0`. With the sort reverted, the
+    payload must hold only the shallowest edges the cap allows -- no depth-2
+    edge may appear while a depth-1 edge existed and was left out."""
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    decomp = Decomposition(operator="sum", operands=["x", "y"])
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions={"driver0": [decomp]}),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 2}
+    )
+    data = json.loads(result["content"][0]["text"])
+    assert len(data["edges"]) == 200
+    assert {e["depth"] for e in data["edges"]} == {1}
+    assert "showing the 200 nearest" in data["note"]
 
 
 @pytest.mark.asyncio
@@ -550,7 +646,39 @@ async def test_truncation_advice_at_the_max_depth_floor_narrows_by_kind(
     contract_no_domains: DataContract,
 ) -> None:
     """At max_depth=1 -- the clamp floor -- 'lower max_depth' is not
-    actionable, so the note must advise narrowing by kind instead."""
+    actionable, so the note must advise narrowing by kind instead -- but only
+    because this walk genuinely holds both kinds. `hub = sum(A, B)` supplies 2
+    identity edges at depth 1, alongside 250 influence drivers, also at depth
+    1, so narrowing to either kind actually changes the result."""
+    decomp = Decomposition(operator="sum", operands=["A", "B"])
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(impacts, decompositions={"hub": [decomp]}),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 1}
+    )
+    data = json.loads(result["content"][0]["text"])
+    assert "Lower max_depth" not in data["note"]
+    assert "kinds='identity'" in data["note"]
+    assert "kinds='influence'" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_advice_no_kind_narrowing_when_walk_holds_one_kind(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 3 (single-kind case): when the full walk holds only
+    influence edges, narrowing to 'influence' returns a byte-identical
+    payload and narrowing to 'identity' returns nothing -- neither is useful
+    advice, so the note must not suggest either, even though `kinds` was
+    never narrowed by the caller. Lowering max_depth is also not actionable
+    at the floor, so the note must plainly say the result is truncated with
+    no narrowing available."""
     impacts = [
         MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
     ]
@@ -561,9 +689,9 @@ async def test_truncation_advice_at_the_max_depth_floor_narrows_by_kind(
         direction="upstream",
         max_depth=1,
     )
+    assert "kinds=" not in data["note"]
     assert "Lower max_depth" not in data["note"]
-    assert "kinds='identity'" in data["note"]
-    assert "kinds='influence'" in data["note"]
+    assert "no narrowing is available" in data["note"]
 
 
 @pytest.mark.asyncio

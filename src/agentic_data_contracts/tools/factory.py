@@ -159,9 +159,11 @@ _PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path
 # What `trace_metric_impacts` will serialize into an agent's context. The walk
 # itself is complete and uncapped: a graph primitive that silently truncates is
 # the same class of loss the walk was fixed to stop. Truncation happens here,
-# announced in `note`, and drops the deepest edges because the walk is in BFS
-# order. 200 clears any realistic metric graph -- the shipped semantic layers
-# report at most 5 edges -- while bounding a dense one.
+# announced in `note`, and drops hypotheses (influence edges) before arithmetic
+# (identity edges), and the deepest edges within each kind, because the walk is
+# sorted identity-first and is otherwise in BFS order. 200 clears any realistic
+# metric graph -- the shipped semantic layers report at most 5 edges -- while
+# bounding a dense one.
 _MAX_TRACE_EDGES = 200
 
 
@@ -1077,6 +1079,21 @@ def create_tools(
             # back" from the truncated list would emit a direction note that is
             # simply wrong.
             walk_has_identity = any(e.kind == "identity" for _, e in walk)
+            # Also read off the full walk: how many edges sit at depth 1.
+            # "Lower max_depth" is only useful advice when depth 1 alone
+            # doesn't already exceed the cap -- otherwise re-running at the
+            # floor returns the identical truncated payload.
+            depth_one_edges = sum(1 for depth, _ in walk if depth == 1)
+            # `graph_edges` above is identity-first, but that only orders each
+            # node's own adjacency list -- `walk_metric_impacts` still returns
+            # a single BFS-ordered sequence *across* nodes, so a deeper node's
+            # identity edges can sort after a shallower node's hypotheses.
+            # Truncation must drop hypotheses before arithmetic regardless of
+            # depth, and a per-node ordering cannot deliver that across a BFS,
+            # so re-partition the full walk identity-first here. `sort` is
+            # stable, so BFS order is preserved within each kind: the result is
+            # identity-first globally, then BFS order within each kind.
+            walk.sort(key=lambda pair: 0 if pair[1].kind == "identity" else 1)
             walk = walk[:_MAX_TRACE_EDGES]
             edges: list[dict[str, Any]] = []
             for depth, edge in walk:
@@ -1115,20 +1132,26 @@ def create_tools(
             # silently overwriting the other.
             notes: list[str] = []
             if total_edges > _MAX_TRACE_EDGES:
-                # "Lower max_depth" is only actionable above the floor of 1
-                # (clamped above). At max_depth=1 there is nothing lower to
-                # try, and an agent following that advice would re-run at the
-                # same floor and get the identical truncated payload -- so
-                # advise narrowing by kind instead.
-                advice = (
-                    "Lower max_depth to see a complete result."
-                    if max_depth > 1
-                    else (
+                # "Lower max_depth" is only actionable when it would actually
+                # shrink the result below the cap: above the floor of 1
+                # (clamped above), AND only when depth-1 edges alone don't
+                # already exceed the cap -- otherwise re-running lower (even
+                # at the floor) returns the identical truncated payload.
+                can_lower_depth = max_depth > 1 and depth_one_edges <= _MAX_TRACE_EDGES
+                # "Narrow by kind" is only actionable when kinds hasn't
+                # already been narrowed -- otherwise an agent re-running with
+                # the kinds it already passed gets a byte-identical payload.
+                can_narrow_kind = kinds == "all"
+                if can_lower_depth:
+                    advice = "Lower max_depth to see a complete result."
+                elif can_narrow_kind:
+                    advice = (
                         "Narrow by kind instead: kinds='identity' for the"
                         " exact arithmetic, kinds='influence' for the"
                         " hypotheses."
                     )
-                )
+                else:
+                    advice = "The result is truncated and no narrowing is available."
                 notes.append(
                     f"The graph holds {total_edges} edges within depth "
                     f"{max_depth}; showing the {_MAX_TRACE_EDGES} nearest. "
@@ -1541,8 +1564,9 @@ def create_tools(
                 " evidence and are hypotheses. Cycles are handled via visited"
                 " tracking, but a cycle-closing edge (e.g. c -> a when a -> b"
                 " -> c -> a) is still reported once -- that is not an error."
-                " At most 200 edges are serialized per call, nearest first;"
-                " a 'note' in the response says so when the graph holds more."
+                f" At most {_MAX_TRACE_EDGES} edges are serialized per call,"
+                " nearest first; a 'note' in the response says so when the"
+                " graph holds more."
             ),
             input_schema={
                 "type": "object",

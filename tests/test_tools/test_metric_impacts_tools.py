@@ -473,6 +473,46 @@ async def test_truncation_keeps_identity_edges_over_influence(
 
 
 @pytest.mark.asyncio
+async def test_truncation_keeps_identity_edges_from_deeper_nodes_too(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 1 (the important one): identity-first ordering must
+    hold across the whole BFS walk, not just within one node's adjacency.
+
+    `hub = sum(A, B)`; `A` has 250 influence drivers (all one hop upstream of
+    `A`, i.e. depth 2 from `hub`); `B = product(p, q)`. Walked upstream from
+    `hub` at max_depth=2: `graph_edges` is assembled identity-first, which
+    only orders each node's own adjacency list -- `hub`'s 2 identity edges
+    (to A and B) come out ahead of `A`'s 250 influence edges *within `hub`'s
+    adjacency*, but the walk as a whole is still BFS order across nodes, so
+    without a global identity-first sort, `A`'s depth-1 hypotheses fill the
+    200-edge cap before `B`'s depth-2 identity edges (`p -> B`, `q -> B`) are
+    even considered -- and those two identity edges are silently dropped.
+    """
+    hub_decomp = Decomposition(operator="sum", operands=["A", "B"])
+    b_decomp = Decomposition(operator="product", operands=["p", "q"])
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="A") for i in range(250)
+    ]
+    tools = create_tools(
+        contract_no_domains,
+        semantic_source=_ImpactsOnly(
+            impacts, decompositions={"hub": [hub_decomp], "B": [b_decomp]}
+        ),
+    )
+    tool = next(t for t in tools if t.name == "trace_metric_impacts")
+    result = await tool.callable(
+        {"metric_name": "hub", "direction": "upstream", "max_depth": 2}
+    )
+    data = json.loads(result["content"][0]["text"])
+    assert len(data["edges"]) == 200
+    identity_pairs = {
+        (e["from"], e["to"]) for e in data["edges"] if e["kind"] == "identity"
+    }
+    assert identity_pairs == {("A", "hub"), ("B", "hub"), ("p", "B"), ("q", "B")}
+
+
+@pytest.mark.asyncio
 async def test_kinds_identity_only_and_influence_only_survive_reordering(
     contract_no_domains: DataContract,
 ) -> None:
@@ -530,6 +570,46 @@ async def test_truncation_advice_at_the_max_depth_floor_narrows_by_kind(
 async def test_truncation_advice_above_the_floor_still_says_lower_max_depth(
     contract_no_domains: DataContract,
 ) -> None:
+    """Lowering max_depth is only actionable when depth-1 edges alone don't
+    already exceed the cap. Here `hub` has 5 direct drivers (depth 1) and
+    each of those has 60 further drivers (depth 2) -- 305 edges total, but
+    only 5 at depth 1 -- so re-running at max_depth=1 genuinely returns a
+    complete, untruncated result."""
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(5)
+    ] + [
+        MetricImpact(from_metric=f"subdriver{i}_{j}", to_metric=f"driver{i}")
+        for i in range(5)
+        for j in range(60)
+    ]
+    data = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=2,
+    )
+    assert "Lower max_depth" in data["note"]
+
+    lowered = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=1,
+    )
+    assert "showing" not in lowered.get("note", "")
+    assert len(lowered["edges"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_truncation_advice_does_not_recommend_lowering_when_it_would_not_help(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 2: 250 direct (depth-1) drivers of `hub` already
+    exceed the cap on their own, so re-running at max_depth=1 returns the
+    identical 200-edge truncated payload -- 'Lower max_depth' must not be
+    advised."""
     impacts = [
         MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
     ]
@@ -540,7 +620,43 @@ async def test_truncation_advice_above_the_floor_still_says_lower_max_depth(
         direction="upstream",
         max_depth=2,
     )
-    assert "Lower max_depth" in data["note"]
+    assert "Lower max_depth" not in data["note"]
+
+    lowered = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=1,
+    )
+    assert lowered["edges"] == data["edges"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_advice_does_not_recommend_kind_already_narrowed(
+    contract_no_domains: DataContract,
+) -> None:
+    """Spec Testing item 3: when `kinds` is already narrowed, re-running with
+    the kind the agent already passed returns a byte-identical payload, so
+    the note must not tell it to do that. It should plainly say the result is
+    truncated with no narrowing available, while still keeping the true
+    total and the shown count."""
+    impacts = [
+        MetricImpact(from_metric=f"driver{i}", to_metric="hub") for i in range(250)
+    ]
+    data = await _trace(
+        contract_no_domains,
+        impacts,
+        metric_name="hub",
+        direction="upstream",
+        max_depth=1,
+        kinds="influence",
+    )
+    assert "kinds=" not in data["note"]
+    assert "Lower max_depth" not in data["note"]
+    assert "250" in data["note"]
+    assert "200" in data["note"]
+    assert len(data["edges"]) == 200
 
 
 @pytest.mark.asyncio

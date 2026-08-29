@@ -178,6 +178,18 @@ support.
   the duplicated key.
 - **Column-count mismatch** between `expected_rows` and the result: an `error`,
   naming both counts.
+- **A non-numeric cell at a value position in the result**: the certified answer
+  says column 2 is a measurement and the query returned `"N/A"` there. Caught
+  explicitly as an `error` naming the column and the offending value, rather
+  than left to `float()` raising inside `_compare` — the batch guard would turn
+  that into a result whose `reason` is a bare coercion message that names
+  neither the column nor the row.
+
+A row whose cells are **all** key positions — `[[EMEA], [APAC]]`, no measure —
+is legal and asserts that the query returns exactly these groups, with nothing
+checked about their values. It falls out of the rules above rather than needing
+its own, and it is a useful assertion in its own right: a `GROUP BY` that
+silently drops a group fails it.
 
 ## Load-time validation
 
@@ -191,8 +203,11 @@ there rather than in `from_dict`.
 - **An empty `expected_rows: []` is rejected in v1.** "This query returns
   nothing" is a real certified answer, but it is indistinguishable from a typo
   or a truncated file, and relaxing this later is easier than tightening it.
-- Duplicate keys *within* `expected_rows` → raise. A corpus cannot state one
-  group twice.
+- Duplicate keys *within* `expected_rows` → raise **when `ordered` is unset**.
+  Unordered comparison pairs by key, so a corpus stating one group twice has
+  stated something the comparison cannot resolve. Under `ordered: true` position
+  is identity and keys are not, so a repeated key is legitimate there and must
+  not raise — a ranking may name the same category twice.
 - A row with no non-numeric cell while `ordered` is unset → raise, per above.
 - `ordered: true` without `expected_rows` → orphan error, the same family as a
   `rel_tol` set without an assertion to apply it to.
@@ -263,8 +278,17 @@ under its own suite, per CLAUDE.md.
 5. **The corpus itself.** `examples/revenue_agent/verified_examples.yml` #1
    `revenue-by-region` gains a real `expected_rows` and becomes an asserted row.
    That example is both the motivating case and the proof: the file that
-   demonstrated the gap should demonstrate the fix. Note this changes the
-   `examples` CI job's golden output, which is regenerated in the same change.
+   demonstrated the gap should demonstrate the fix.
+
+   This does **not** touch the golden output files. Those are generated from
+   each `agent.py`, and no `agent.py` reads the corpus — `verify_examples.py`
+   and `evaluate_conformance.py` are its only readers, and the CI step that runs
+   `verify_examples.py` is still gated by its own status greps rather than by a
+   snapshot. Those greps assert that `[MATCH `, `MISMATCH` and `UNASSERTABLE`
+   each still appear, and a matching breakdown row keeps all three present, so
+   the step passes unchanged. Worth adding a grep for the new breakdown row's
+   own status line, so the corpus's first entry becoming asserted is something
+   CI states rather than something it merely tolerates.
 
 ## Out of scope
 

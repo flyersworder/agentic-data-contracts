@@ -37,6 +37,33 @@ def _is_thousands_grouped(value: str) -> bool:
     return bool(_THOUSANDS.match(value))
 
 
+def _is_scalar_looking(value: str) -> bool:
+    """True when a comma-containing gold should be read as one number, not a list.
+
+    `"709,741,454"` is genuinely ambiguous: it matches `_THOUSANDS` perfectly,
+    but it is equally plausible as a 3-element merchant-id list. There is no
+    syntactic rule that resolves this — preferring the list reading brings
+    back `score("500,10", "10,500") -> True`. See `golds.py::_norm`'s
+    docstring: it hit the identical ambiguity and reverted a
+    thousands-separator guard there for the same reason.
+
+    The stored gold is the *modal raw submission string*
+    (`Counter(plurality).most_common(1)[0][0]` in `golds.py`), not `_norm`'s
+    canonical ", "-joined form — so nothing structurally guarantees a numeric
+    list gold keeps its spaces. It is only true *empirically*, today: task
+    59's gold is the no-space `"IT,ES,FR"`, proof the plurality vote can drop
+    the space on a genuine list (that one is safe only because it's
+    non-numeric — `_THOUSANDS` never matches letters). This function draws
+    the line at what's true today: a value reads as a plain number only when
+    it matches `_THOUSANDS` *and* contains no `", "`.
+    `test_every_numeric_comma_gold_uses_the_reconstruction_separator` in
+    `test_grade.py` checks that boundary against the real corpus on every
+    run, so the day a *numeric* list gold's modal rendering drops its
+    spaces too, it fails loudly here instead of silently misgrading.
+    """
+    return _is_thousands_grouped(value) and ", " not in value
+
+
 def _scalar_match(predicted: str, gold: str) -> bool:
     p, g = _clean(predicted), _clean(gold)
     if p.lower() in _NA and g.lower() in _NA:
@@ -55,7 +82,7 @@ def score(predicted: str, gold: str) -> bool:
         return official
 
     p, g = _clean(predicted), _clean(gold)
-    if "," in g and not _is_thousands_grouped(g):
+    if "," in g and not _is_scalar_looking(g):
         pl = sorted(_clean(x).lower() for x in p.split(",") if _clean(x))
         gl = sorted(_clean(x).lower() for x in g.split(",") if _clean(x))
         return pl == gl

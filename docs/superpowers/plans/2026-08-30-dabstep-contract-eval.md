@@ -6,7 +6,7 @@
 
 **Architecture:** A standalone `uv` project under `experiments/dabstep-contract-eval/`, mirroring the layout of `experiments/mermaid-joinpath-eval`. It depends on `agentic-data-contracts` as a path dependency and drives it through `create_pydantic_ai_tools`. Arms differ only in what context reaches the agent; the model, loop, caps, and scorer are shared code. All model calls go through OpenRouter via Pydantic AI. Results append to JSONL, one row per `(task, arm, model)`, and statistics are computed offline from those files.
 
-**Tech Stack:** Python 3.12+, `uv`, `pydantic-ai-slim[openai]` 2.33+, `duckdb`, `huggingface-hub`, `scipy` (McNemar/Wilson), `pytest`.
+**Tech Stack:** Python 3.12+, `uv`, `pydantic-ai-slim[openai]` >=2.36, `duckdb`, `huggingface-hub`, `scipy` (McNemar/Wilson), `pytest`.
 
 **Spec:** `docs/superpowers/specs/2026-08-30-dabstep-contract-eval-design.md` — read it before starting. The plan implements it; where they disagree, the spec wins and the plan is wrong.
 
@@ -22,6 +22,8 @@
 - **No network in tests.** Every test in `tests/` runs offline and deterministically.
 - **The contract is frozen before any scored run.** Once Task 5 commits it, editing `contract/` invalidates all downstream results.
 - **Tests precede implementation** (repo TDD convention). Steps below are ordered accordingly; do not reorder them.
+- **`uv.lock` is committed** for this experiment, as it is for `mermaid-joinpath-eval`. The lock is what makes a re-run months later reproducible; the `>=` constraints only set the floor.
+- **This experiment's `pydantic-ai-slim>=2.36` floor is local to `experiments/dabstep-contract-eval/pyproject.toml`.** Do **not** raise the library's own `pydantic-ai-slim[anthropic]>=2.0.0` floor in the root `pyproject.toml` to match — the library supports that floor deliberately, and the experiment is a separate `uv` project with its own resolution, so nothing forces them to agree. The API surface used here (`UsageLimits(cost_limit=, tool_calls_limit=)`, `RunUsage.cache_read_tokens`, `OpenRouterProvider`, `ModelSettings(temperature/seed/timeout)`) was verified present in 2.36.0 on 2026-08-30.
 
 ---
 
@@ -50,7 +52,7 @@ description = "DABStep contract-context evaluation: schema-only vs manual-in-pro
 requires-python = ">=3.12"
 dependencies = [
     "agentic-data-contracts",
-    "pydantic-ai-slim[openai]>=2.33",
+    "pydantic-ai-slim[openai]>=2.36",
     "duckdb>=1.0",
     "huggingface-hub>=0.25",
     "scipy>=1.11",
@@ -163,7 +165,22 @@ def cost(model: str, in_tok: int, out_tok: int) -> float:
 Run: `cd experiments/dabstep-contract-eval && uv sync && uv run pytest -v`
 Expected: 3 passed
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Confirm the resolved pydantic-ai version and commit the lock**
+
+```bash
+cd experiments/dabstep-contract-eval
+uv run python -c "
+import importlib.metadata as md
+print('pydantic-ai-slim', md.version('pydantic-ai-slim'))
+"
+```
+
+Expected: 2.36.0 or newer. If `uv` resolved something older, the root package's
+`pydantic-ai-slim[anthropic]>=2.0.0` extra is not the cause (a floor cannot cap a
+resolution) — check for an unexpected upper bound before proceeding, because the
+plan's `UsageLimits(cost_limit=...)` budget guard does not exist below 2.33.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add experiments/dabstep-contract-eval/

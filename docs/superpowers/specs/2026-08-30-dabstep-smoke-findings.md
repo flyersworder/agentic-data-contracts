@@ -309,6 +309,38 @@ loosening:
 Gold reconstruction is unaffected: it consumes the leaderboard's own published
 `score` field, and the dev gate uses a separate normaliser.
 
+## F13 — the fallback scorer should never have existed
+
+F12 fixed the symptom. The cause was a design error in the spec itself, which
+said the experiment would use
+`dabstep_benchmark.evaluation.scorer.question_scorer` **"when installable"**
+and otherwise a local normalizer that "mirrors its documented behaviour".
+
+Two things were wrong with that:
+
+1. **"Not on PyPI" was treated as "unavailable."** The scorer is 146 lines of
+   public code in a public Space, reachable with one `curl` at a pinned
+   revision. Writing an approximation of a readable algorithm we could simply
+   copy was never justified.
+2. **"Mirrors its documented behaviour" was an unverified claim, and false.**
+   No test ever compared the two. They differed on trailing punctuation,
+   numeric tolerance, `Not Applicable` synonyms, and fuzzy string matching.
+
+The fallback has therefore been **deleted**, not merely demoted. `score` is a
+thin delegation to the vendored official scorer, and an exception from it
+propagates so `run_task` records a visible `scoring_error` row.
+
+Keeping a fallback "just for errors" was itself a bug, introduced in the F12
+fix and removed here: `active_scorer()` decides its answer once at import by
+probing with `("x", "x")`, so a row could record `official-vendored` while a
+per-call exception had actually graded it with the stricter local rules. That
+is the same "one results file, two grading algorithms, nothing per row to say
+which" hazard the field exists to prevent — reintroduced, invisibly, by the
+patch meant to fix it.
+
+Only `_clean` survives, and it does not score: it fills `answer_normalized`
+so a dispute can be re-adjudicated from a stored row.
+
 ## Status
 
 - **Done:** F1, F2, F5, F6 (caps + forcing turn); F3, F4, F9, F10, F11

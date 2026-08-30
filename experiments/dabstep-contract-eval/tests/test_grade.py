@@ -87,22 +87,25 @@ def test_genuine_lists_still_compare_order_insensitively():
 def test_the_no_space_triple_is_graded_as_a_number_not_a_list():
     """`"709,741,454"` is genuinely ambiguous: three reordered merchant ids,
     or the single number 709741454. No syntactic rule resolves it (see
-    `_is_scalar_looking`'s docstring in grade.py, and `golds.py::_norm`'s
-    docstring, which hit and reverted the opposite guard for the same
-    reason). It reads as a number here because it matches the thousands
-    pattern *and* has no ", " -- today's boundary, checked against the real
-    corpus by `test_every_numeric_comma_gold_uses_the_reconstruction_separator`
-    below. This is a deliberate, documented choice, not an oversight: it is
-    pinned here so a future "fix" doesn't reopen
+    `golds.py::_norm`'s docstring, which hit and reverted the opposite guard
+    for the same reason).
+
+    Upstream resolves it BEFORE the list branch: `question_scorer` tries
+    `is_numeric_with_commas` first, and that pattern matches comma-grouped
+    digits, so this reads as one number and the reordering is wrong. That is
+    now the benchmark's call rather than ours -- this test pins that we
+    inherit it, and that a future local "fix" cannot reopen
     `score("500,10", "10,500") -> True`.
     """
     assert not score("741,454,709", "709,741,454")
 
 
-# Mirrors dce.grade._THOUSANDS. Duplicated rather than imported so this test
-# reaches only the public `score` API; kept in lockstep by the assertion
-# below, which would start failing the moment the two patterns diverge in a
-# way that matters (any gold `_THOUSANDS` would now treat differently).
+# Approximates the comma-grouped-number branch of upstream's
+# `is_numeric_with_commas`, to FIND the golds at risk of the number/list
+# ambiguity. Deliberately a local copy rather than an import: this test must
+# reach `score` only through its public API, and upstream's pattern is a
+# vendored file we do not edit. It need not match upstream exactly -- it is a
+# net for candidates, and the assertion below is what checks them.
 _THOUSANDS_PATTERN = r"^-?\d{1,3}(,\d{3})+(\.\d+)?$"
 
 
@@ -110,9 +113,9 @@ _THOUSANDS_PATTERN = r"^-?\d{1,3}(,\d{3})+(\.\d+)?$"
     not _GOLDS_PATH.exists(), reason="data/golds.json not present locally"
 )
 def test_every_numeric_comma_gold_uses_the_reconstruction_separator():
-    """`_is_scalar_looking` in grade.py reads a comma-joined gold as one
-    number, not a list, only when it matches the thousands pattern *and* has
-    no ", ". That boundary is not structurally guaranteed by `golds.py` --
+    """Upstream reads a comma-joined gold as one number, not a list, when it
+    matches `is_numeric_with_commas`. That boundary is not structurally
+    guaranteed by `golds.py` --
     the stored gold is whichever raw submission string won the plurality
     vote, and task 59 proves a vote can drop the space (its gold is the
     no-space "IT,ES,FR"; harmless there only because letters never match the
@@ -137,13 +140,13 @@ def test_every_numeric_comma_gold_uses_the_reconstruction_separator():
 
 
 def test_active_scorer_names_the_scorer_actually_in_use():
-    """The fallback is no longer the normal path.
+    """There is no fallback left to name.
 
     `vendor/dabstep_scorer.py` is a pinned copy of DABStep's own scorer and
-    grades every row; the fallback runs only if upstream's scorer raises. The
-    field is still recorded per row because the choice is made at import time
-    — an environment with a real `dabstep_benchmark` installed would report
-    `"official"` instead, and one results file must never silently mix the
-    two."""
-    assert active_scorer() in {"official", "official-vendored", "fallback"}
+    grades every row; an exception from it becomes a visible `scoring_error`
+    row rather than a silent regrade under different rules. The field is still
+    recorded per row because the choice is made at import time — an
+    environment with a real `dabstep_benchmark` installed reports `"official"`
+    instead, and one results file must never silently mix provenances."""
+    assert active_scorer() in {"official", "official-vendored"}
     assert active_scorer() == "official-vendored"

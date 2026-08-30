@@ -499,3 +499,24 @@ def test_report_does_not_warn_when_every_arm_saw_every_task(tmp_path):
     _write(path, rows)
 
     assert "did NOT see the same task set" not in report(path)
+
+
+def test_report_does_not_raise_on_a_row_with_an_explicit_null_arm(tmp_path):
+    """`_unequal_task_set_warning` used to build its arm set with
+    `sorted({row.get("arm", "unknown") ...})` -- `.get(key, default)` only
+    substitutes the default when the KEY is absent, not when its value is
+    explicitly `None`, so a row reading `"arm": null` (a hand-edited or
+    malformed row, not merely an old shape missing the field) put `None`
+    into a set of strings and `sorted()` raised `TypeError` comparing
+    `None` to `str`, killing `report()` entirely. A row's arm may be
+    explicitly `None`; `report()` must tolerate it, same as it tolerates
+    any other malformed field elsewhere in this file."""
+    path = tmp_path / "results.jsonl"
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct"),
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        {**_row("t2", PRIMARY_LEFT_ARM, "correct"), "arm": None},
+    ]
+    _write(path, rows)
+
+    report(path)  # must not raise TypeError

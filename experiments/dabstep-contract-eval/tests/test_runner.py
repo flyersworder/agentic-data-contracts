@@ -975,6 +975,105 @@ def test_a_torn_final_line_does_not_break_any_reader(tmp_path: Path):
     stats_module.report(path)  # must not raise
 
 
+def test_write_side_repairs_a_torn_tail_before_two_resumes_append(
+    tmp_path: Path,
+):
+    """The WRITE-side counterpart to the read-side forgiveness above.
+    `sweep` used to open `out` with `out.open("a")` and append straight
+    onto a torn tail, which merges the next paid row onto the torn bytes
+    instead of starting a fresh line. Reproduced, before the fix, in
+    exactly this three-step sequence:
+
+      1. Torn tail present -> read forgives it, rows ['1', '2'].
+      2. Resume 1 appends a real, paid row -> rows STILL ['1', '2'],
+         `spent` unchanged at 0.02: the new row merged onto the torn line
+         and reads back as torn again, so it is silently swallowed and its
+         unit (task '3') would be re-attempted, and re-paid, forever.
+      3. Resume 2 appends another row -> the still-corrupt merged line is
+         no longer the file's LAST line, so every reader now raises
+         `JSONDecodeError` -- `spent_so_far` and `dce.stats.report` both
+         dead, the whole paid sweep bricked, not just one row.
+
+    `_repair_torn_tail` truncates the torn tail before `sweep`'s first
+    append, so the paid row survives and the file stays fully readable
+    across both resumes.
+
+    Each `sweep()` call below is deliberately given only as much of the
+    task list as would be "pending" at that point of a real two-resume
+    session (task '3' first, then task '4' newly added) -- `sweep` itself
+    does not stop after one task once it has started; it keeps going
+    through every pending unit until the budget or a circuit breaker says
+    stop. Widening the task list between calls is what turns two `sweep()`
+    calls into two genuinely separate resumes, each appending exactly one
+    row, instead of one call quietly finishing all of the pending work."""
+    out = tmp_path / "r.jsonl"
+    out.write_text(_row("1") + "\n" + _row("2") + "\n" + '{"task_id": "3", "usd')
+
+    def _tasks(*ids: str) -> list[dict]:
+        return [
+            {"task_id": tid, "question": "q", "guidelines": "g", "level": "hard"}
+            for tid in ids
+        ]
+
+    db_path = _make_pristine(tmp_path)
+    calls: list[str] = []
+
+    def fake_run(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.02,
+            "usd_guard": 0.02,
+            "verdict": "correct",
+        }
+
+    # Resume 1: task "3" was never actually completed (its only row was
+    # torn), so it is the next -- and only -- pending unit, and it must be
+    # PAID and LAND, not silently eaten by the torn line.
+    tasks = _tasks("1", "2", "3")
+    golds = {t["task_id"]: "g" for t in tasks}
+    sweep(
+        tasks,
+        ("contract",),
+        (GLM,),
+        golds,
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=10.0,
+        golds_hash="h",
+        run_task_fn=fake_run,
+    )
+    assert calls == ["3"]
+    assert {r["task_id"] for r in latest_rows(out)} == {"1", "2", "3"}
+    assert spent_so_far(out) == pytest.approx(0.04)  # 0.01 + 0.01 + 0.02
+    stats_module.report(out)  # must not raise
+
+    # Resume 2: task "4" is the next pending unit. This call must not
+    # re-brick the file the way the original bug did by pushing the
+    # still-corrupt merged line off the tail.
+    tasks = _tasks("1", "2", "3", "4")
+    golds = {t["task_id"]: "g" for t in tasks}
+    sweep(
+        tasks,
+        ("contract",),
+        (GLM,),
+        golds,
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=10.0,
+        golds_hash="h",
+        run_task_fn=fake_run,
+    )
+    assert calls == ["3", "4"]
+    assert {r["task_id"] for r in latest_rows(out)} == {"1", "2", "3", "4"}
+    assert spent_so_far(out) == pytest.approx(0.06)
+    stats_module.report(out)  # must not raise
+
+
 def test_a_corrupt_line_mid_file_still_raises_loudly(tmp_path: Path):
     """Only the TAIL can be torn by an interrupted append. A bad line in
     the middle means something rewrote the file, which is not a truncation

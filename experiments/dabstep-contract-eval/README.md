@@ -80,6 +80,20 @@ stamps `commit_sha`, and with an editable path dependency the library under
 test *is* the working tree — an uncommitted change makes that stamp a lie and
 nothing in the results would show it. The output file itself is exempt.
 
+**Commit `results/smoke12.jsonl` after the smoke run, before launching the
+full sweep.** `assert_clean_tree` exempts only the exact `--out` file passed
+to *that* invocation — `results/` itself is deliberately not gitignored (the
+tamper-evidence claim depends on results being readable in git history), so
+an uncommitted `results/smoke12.jsonl` left over from the smoke run is just
+another dirty file as far as the *next* invocation (writing to a different
+`--out`) is concerned, and it will refuse to start. This fires on the very
+first paid session:
+
+```bash
+git add results/smoke12.jsonl
+git commit -m "smoke run"
+```
+
 ## Arms
 
 | Arm | Context reaching the model | Tools |
@@ -136,9 +150,23 @@ Concretely, and reproduced:
 * `--n 12 --max-spend 2.00` on **deepseek-pro** writes **zero rows and exits
   2**, because $2.00 < $4.35. Nothing is wrong; the cap simply cannot admit a
   single task group.
-* The spec's ~$10 budget for the Sol ceiling check is **below** the $14.64
-  that one Sol task group demands. Sol needs `--max-spend 15.00` or more to
-  run at all.
+* **`--arms` defaults to all THREE arms**, not two. The $14.64 figure above
+  is for 2 arms only (`manual_prompt` + `contract`, the design's own Sol
+  comparison) — the default 3-arm invocation reserves 3 x $7.32 =
+  **$21.96/task-group**, so `--max-spend 15.00` with the default arms writes
+  **zero rows and exits 2**. To actually get the $14.64 ceiling, name the
+  arms explicitly:
+
+  ```bash
+  uv run python -m dce.runner --arms manual_prompt contract \
+    --models openai/gpt-5.6-sol --max-spend 15.00 --out results/sol.jsonl
+  ```
+
+  Even then, **$15.00 admits only one task group** before the next one's
+  reservation would exceed it (`admits up to 1`) — the design calls for
+  ~60 Sol tasks x 2 arms, so budget accordingly (roughly `60 * $14.64` =
+  **$878.40** worst case, tightening as real observations come in) rather
+  than treating $15.00 as sufficient for the whole Sol run.
 
 Budget a sweep as `--max-spend` **plus one group's overshoot**: the cap is
 checked before a group starts, not while it runs.

@@ -509,8 +509,12 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     Nothing else in this module would say a word about it.
     """
     by_arm = {
-        arm: {row.get("task_id") for row in rows if row.get("arm") == arm}
-        for arm in sorted({row.get("arm", "unknown") for row in rows})
+        arm: {
+            row.get("task_id")
+            for row in rows
+            if str(row.get("arm") or "unknown") == arm
+        }
+        for arm in sorted({str(row.get("arm") or "unknown") for row in rows})
     }
     distinct = {frozenset(ids) for ids in by_arm.values()}
     if len(by_arm) < 2 or len(distinct) == 1:
@@ -585,9 +589,13 @@ def report(path: Path) -> str:
         subset = [row for row in rows if row.get("model") == model]
         raw_subset = [row for row in raw_rows if row.get("model") == model]
 
-        for arm in sorted({row.get("arm", "unknown") for row in subset}):
-            arm_rows = [row for row in subset if row.get("arm") == arm]
-            raw_arm_rows = [row for row in raw_subset if row.get("arm") == arm]
+        for arm in sorted({str(row.get("arm") or "unknown") for row in subset}):
+            arm_rows = [
+                row for row in subset if str(row.get("arm") or "unknown") == arm
+            ]
+            raw_arm_rows = [
+                row for row in raw_subset if str(row.get("arm") or "unknown") == arm
+            ]
             lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
 
             scored_by_level = accuracy_by(_scored(arm_rows), "level")

@@ -55,7 +55,17 @@ forgives an unparseable FINAL line — a torn tail is what a killed or
 out-of-space append leaves behind, and raising on it used to make the
 entire accumulated results file unreadable to every reader at once,
 turning a one-row loss into a dead paid sweep. A corrupt line anywhere
-but the last still raises.
+but the last still raises. The READ side's forgiveness has a WRITE side
+counterpart, `_repair_torn_tail`, called once before `sweep`'s append loop
+opens `out`: `out.open("a")` appends onto whatever bytes are already
+there, torn tail included, which MERGES the next row onto it instead of
+starting a fresh line — silently swallowing that row (it reads back as
+torn again, so the unit is re-attempted and re-paid forever) and then, on
+the very next resume, pushing the still-corrupt merged line off the tail
+entirely, which bricks every reader for the whole file instead of just
+one row. `_repair_torn_tail` truncates a genuinely torn tail before the
+first append (matching what the read side already forgives) rather than
+appending onto it.
 
 ONE EDGE OF "REACHES DISK" THAT IS DOCUMENTED, NOT CLOSED: `flush()` is
 not `fsync()`: it hands the bytes to the OS's page cache, which
@@ -363,6 +373,78 @@ def _read_rows(path: Path) -> list[dict]:
                 file=sys.stderr,
             )
     return rows
+
+
+def _repair_torn_tail(path: Path) -> None:
+    """The write-side counterpart to `_read_rows`'s forgiveness: make `path`
+    safe to append to.
+
+    `_read_rows` already forgives an unparseable FINAL line (a torn tail
+    left by a killed or out-of-space write). But `sweep` used to open `out`
+    with `out.open("a")` and append straight onto that torn line, which
+    MERGES the next row's bytes onto the torn ones instead of starting a
+    fresh line. Two failures follow from that one merge, both reproduced:
+
+      * The merged line is now the file's new last line, and it is STILL
+        unparseable (torn prefix + a whole new JSON row, no separator) —
+        so it reads right back as torn again. The row `sweep` just wrote,
+        and paid for, is swallowed: `_read_rows` forgives the merged line
+        exactly as it forgave the original one, `completed_keys` sees no
+        progress, and the unit is silently re-attempted (and re-paid) on
+        every future resume.
+      * The SECOND resume appends again, pushing that still-corrupt merged
+        line off the tail — it is no longer the LAST line, so `_read_rows`
+        now RAISES on it ("a corrupt line anywhere but the last still
+        raises"), bricking every reader (`spent_so_far`, `completed_keys`,
+        `dce.stats.report`, ...) for the whole file, not just the one row.
+
+    This function runs once, before `sweep`'s append loop opens `out`, and
+    repairs the file to match what `_read_rows` already treats it as:
+
+      * If the file's last line, read in isolation, parses as valid JSON,
+        it is simply missing a trailing newline (e.g. a hand-edited file,
+        or one written before this repair existed) — nothing is torn or
+        lost, so only a newline is appended.
+      * If it does not parse, it IS the torn tail. It is truncated off
+        entirely (not left in place) — matching `_read_rows` forgiving it
+        on the read side, so the next row `sweep` appends starts the file's
+        new last line instead of merging onto a dead one, and the file
+        stays fully parseable across any number of resumes.
+
+    Truncating (rather than only inserting a separating newline) is the
+    right call here specifically because a torn line, once anything is
+    appended after it, permanently stops being "the last line" — the one
+    exemption `_read_rows` grants. Leaving the torn bytes in place while
+    still appending would just move today's data loss (one swallowed row)
+    into tomorrow's brick (every reader raising) one resume later; removing
+    them is what makes the exemption's premise ("only the tail is ever
+    torn") stay true after this repair.
+    """
+    if not path.exists():
+        return
+    data = path.read_bytes()
+    if not data or data.endswith(b"\n"):
+        return
+    last_newline = data.rfind(b"\n")
+    last_line = data[last_newline + 1 :]
+    try:
+        json.loads(last_line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        print(
+            f"WARNING: {path} ends in an unparseable line with no trailing "
+            f"newline ({len(last_line)} bytes) — a torn tail from a killed "
+            "or out-of-space write. Truncating it before appending, so the "
+            "row this resume is about to write lands on its own line "
+            "instead of merging onto the torn one; the torn line's own "
+            "unit is simply re-attempted, exactly as the read side already "
+            "treats it.",
+            file=sys.stderr,
+        )
+        path.write_bytes(data[: last_newline + 1])
+    else:
+        # The last line is valid JSON; it is just missing its trailing
+        # newline. Nothing was lost — restore only the separator.
+        path.write_bytes(data + b"\n")
 
 
 def _construction_error_state(
@@ -844,6 +926,13 @@ def sweep(
     if not todo:
         # Nothing to do: don't even pay for a working-copy file write.
         return SweepResult(spent=spent, real_spent=real_spent, truncated=False)
+
+    # Write-side counterpart to `_read_rows`'s forgiveness — see
+    # `_repair_torn_tail`'s docstring: appending directly onto a torn tail
+    # merges the next row onto it instead of starting a fresh line, which
+    # first swallows that row silently and then bricks the whole file on
+    # the very next resume.
+    _repair_torn_tail(out)
 
     working = make_working_copy(db_path, _working_db_path(db_path))
     truncated = False

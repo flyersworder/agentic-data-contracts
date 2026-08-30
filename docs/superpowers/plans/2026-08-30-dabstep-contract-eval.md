@@ -1659,7 +1659,40 @@ if __name__ == "__main__":
 Run: `cd experiments/dabstep-contract-eval && uv run pytest -v`
 Expected: 41 passed
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Add the clean-tree guard**
+
+The experiment depends on the library as an editable path dep, so the library
+under test is the working tree. Every result row already stamps the experiment's
+git `commit_sha`, and because the library lives in this same repo that sha *is* a
+complete pin on the library source — strictly better than a released-version pin,
+which could not express "0.49.0 plus unreleased branch state".
+
+That pin is only truthful if the tree is clean. Refuse to start a scored sweep
+otherwise:
+
+```python
+def assert_clean_tree() -> None:
+    """A scored sweep must be reconstructible from its recorded commit sha.
+
+    With an editable path dependency the library under test IS the working tree,
+    so an uncommitted change makes every row's commit_sha a lie — and nothing in
+    the results would show it.
+    """
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain"], text=True
+    ).strip()
+    if dirty:
+        raise SystemExit(
+            "refusing to run a scored sweep with a dirty working tree; "
+            f"commit or stash first:\n{dirty}"
+        )
+```
+
+Call it from `main()` before any model call. Add a test that a non-empty
+`git status --porcelain` raises and an empty one does not (inject the subprocess
+call so the test stays offline and deterministic).
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add experiments/dabstep-contract-eval/dce/runner.py experiments/dabstep-contract-eval/tests/test_runner.py
@@ -2022,6 +2055,10 @@ Required contents, per the spec:
 - `inspect_query` rejection counts, presented as descriptive instrumentation of arm C's behaviour, **not** as a governance claim.
 - Cap-trip and error rates per arm.
 - The contract digest, the commit sha, and the pinned model ids.
+- The library version stated as **"measured against `agentic-data-contracts` at
+  commit `<sha>`"**, not as a released version number. The experiment runs against
+  an editable path dependency, so the commit sha is the real pin; quoting a PyPI
+  version alone would imply a reproducibility the run does not have.
 - If the arms tie: report the tie as a tie. If discordant pairs are scarce: report "this design could not tell", not "the arms are equal".
 
 - [ ] **Step 6: Link from the main README and commit**

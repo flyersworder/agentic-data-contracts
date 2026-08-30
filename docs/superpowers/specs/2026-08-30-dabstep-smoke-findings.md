@@ -201,12 +201,91 @@ reasonably assume works the other way.
    tool-call limit instead of answering. `_tool_less_twin` builds a fresh
    `Agent` on the same model and settings with no tools at all.
 
+## F9 — `temperature=0.0` was inert for every model, on every run so far
+
+pydantic-ai strips `ModelSettings(temperature=...)` for any model whose profile
+has reasoning enabled, warning:
+
+> `Sampling parameters ['temperature'] are not supported when reasoning is enabled. These settings will be ignored.`
+
+Its `SAMPLING_PARAMS` set — temperature, top_p, presence/frequency penalty,
+logit_bias, logprobs, top_logprobs — is borrowed from OpenAI's reasoning
+models. It is wrong for these OpenRouter models, whose cards list `temperature`
+and `reasoning` as simultaneously supported. Reasoning cannot be turned off to
+dodge the rule either: `{"enabled": false}` returns HTTP 400, *"Reasoning is
+mandatory for this endpoint and cannot be disabled."*
+
+So every run in the smoke sweep sampled at the provider's default temperature,
+not 0. `seed` was unaffected — it is not in `SAMPLING_PARAMS`.
+
+**Fix:** send temperature in `extra_body`, which bypasses the strip. Verified
+against the live API: a deliberately out-of-range value returned *"Expected
+temperature to be at most 2, received 99"* rather than being dropped. Applied
+only to the three models whose OpenRouter card lists `temperature`;
+`openai/gpt-5.6-sol` does not, so it is omitted there and Sol genuinely runs at
+its own default sampling. FINDINGS must say that rather than imply a uniform
+temperature=0 across the board.
+
+## F10 — reasoning effort was an unset, per-endpoint default
+
+All four pinned models support `reasoning_effort`, all four reason by default,
+and the default differs by endpoint — while the endpoint was, until F3, chosen
+per request. Measured on `z-ai/glm-5.3-flash` for one trivial question: **133
+reasoning tokens with no parameter set, against 45–55 at any explicit effort.**
+Reasoning tokens bill at the OUTPUT rate, the pricier one, so this is a cost
+knob as well as a quality knob.
+
+**Fix:** `REASONING_EFFORT = "medium"`, sent explicitly on every call and
+stamped on every row. Uniform across arms — it is a model setting, not an arm
+setting.
+
+## F11 — the account data policy silently removes endpoints
+
+`provider: {"only": ["deepseek"]}` on `deepseek-v4-pro-0813` returns *"No
+endpoints available matching your guardrail restrictions and data policy"*. The
+first-party DeepSeek endpoint is unreachable under this account's settings, for
+both DeepSeek models. Routing was therefore already constrained by an
+account-level setting that nothing in the experiment recorded, and that a
+different operator re-running this would not share.
+
+Recorded, not worked around: the pins chosen below are all reachable ones.
+
+### The endpoint pins
+
+Chosen on quantization, price, context, and reachability. Prices are the
+**pinned endpoint's**, not the model card's headline rate — the distinction
+that makes F4 correct rather than merely closer.
+
+| model | pin | quant | in / out / cache ($/1M) |
+|---|---|---|---|
+| deepseek-v4-flash-0731 | `deepinfra/fp8` | fp8 | 0.08 / 0.18 / 0.016 |
+| deepseek-v4-pro-0813 | `alibaba` | unknown | 0.5808 / 1.7424 / 0.0581 |
+| glm-5.3-flash | `z-ai` | fp8 | 0.075 / 0.25 / 0.015 |
+| gpt-5.6-sol | `openai` | unknown | 2.00 / 10.00 / 0.20 |
+
+Note the old table priced `deepseek-v4-flash-0731` at 0.065/0.18 — the **fp4**
+Sail Research/Relace rate. Endpoint prices for that model span $0.03–$0.44 per
+1M input, a **14.7x** spread across 30 endpoints.
+
+**The pin is self-verifying.** `allow_fallbacks: false` returns HTTP 404 rather
+than re-routing when it cannot be honoured — verified through pydantic-ai, not
+just curl. So a row that exists at all is a row the pin held for, which is why
+the observed provider is not recorded: OpenRouter returns it only in the
+response body, which pydantic-ai discards (`ModelResponse.provider_name` is the
+literal string `"openrouter"`, and no response header carries it).
+
 ## Status
 
-- **Done:** F1, F2, F5, F6 — the caps, plus the forcing turn.
-- **Next:** F3 (provider pin + per-row provider) and F4 (cache-aware pricing).
+- **Done:** F1, F2, F5, F6 (caps + forcing turn); F3, F4, F9, F10, F11
+  (endpoint pin, cache-aware pricing, temperature, reasoning effort).
 - **Open:** F7 (scope, parallelism, VPS) and F8's Sol budget await a decision.
 
-No result produced before F3 and F4 land may be used in FINDINGS: `usd` is
-still inflated and the serving provider is still unrecorded.
+Every result produced before these fixes is void for FINDINGS purposes: the
+recorded `usd` was inflated, the serving endpoint was unpinned and unrecorded,
+temperature was inert, and reasoning effort was a per-endpoint default. The
+frozen contract and the gold set are unaffected.
+
+All four pinned models were verified end-to-end through
+`_default_agent_factory` — pin honoured, tool call executed, correct answer,
+and no `UserWarning` under `-W error::UserWarning`.
 

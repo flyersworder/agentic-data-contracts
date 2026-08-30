@@ -241,9 +241,11 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dce.agent import (
+    REASONING_EFFORT,
     WORST_CASE_TOKEN_BUDGET_USD,
     AgentConstructionError,
     _commit_sha,
+    _spec_field,
     _token_budget_usd,
     run_task,
 )
@@ -870,6 +872,9 @@ def _construction_error_row(
         # nothing for the forcing turn to force. Present so every row in a
         # results file has the same keys.
         "forced_answer": False,
+        "provider_tag": _spec_field(model, "provider_tag"),
+        "quantization": _spec_field(model, "quantization"),
+        "reasoning_effort": REASONING_EFFORT,
         "input_tokens": 0,
         "output_tokens": 0,
         "cached_tokens": 0,

@@ -233,7 +233,7 @@ def test_result_row_prices_from_the_pinned_table():
         "inspect_rejections": 0,
     }
     row = build_result_row(**kwargs)
-    assert row["usd"] == pytest.approx(0.66)
+    assert row["usd"] == pytest.approx(MODELS["deepseek/deepseek-v4-pro-0813"].price_in)
 
 
 # ── run_task, fake-agent unit tests ─────────────────────────────────────
@@ -1377,3 +1377,134 @@ def test_forcing_turn_survives_a_real_cap_trip_end_to_end(contract_db: Path):
     assert row["verdict"] == "correct"
     # The forcing turn's own tokens are billed onto the row, not lost.
     assert row["input_tokens"] > 0 and row["usd"] > 0
+
+
+# ── F3: the endpoint pin and the reasoning effort ───────────────────────────
+
+
+def test_default_agent_factory_pins_the_endpoint_and_the_reasoning_effort():
+    """Both travel in `extra_body`, which is how OpenRouter-specific fields
+    reach the API through pydantic-ai's OpenAI-shaped client."""
+    import os
+
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model="z-ai/glm-5.3-flash", system_prompt="s", tools=[], retries=3
+    )
+    body = (built.model_settings or {})["extra_body"]
+    assert body["provider"]["order"] == [MODELS["z-ai/glm-5.3-flash"].provider_tag]
+    # The load-bearing half. Without it OpenRouter silently re-routes to
+    # another endpoint — a different quantization at a different price — and
+    # nothing in the results file would show it.
+    assert body["provider"]["allow_fallbacks"] is False
+    assert body["reasoning"]["effort"] == agent.REASONING_EFFORT
+
+
+@pytest.mark.parametrize("model_id", list(MODELS))
+def test_every_model_gets_its_own_pin_not_a_shared_one(model_id):
+    import os
+
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model=model_id, system_prompt="s", tools=[], retries=1
+    )
+    body = (built.model_settings or {})["extra_body"]
+    assert body["provider"]["order"] == [MODELS[model_id].provider_tag]
+
+
+def test_spec_field_returns_unknown_rather_than_raising_for_an_unpinned_model():
+    """`_priced_fallback_row` is the last line of defense inside `run_task`'s
+    own exception handler; a bare `MODELS[model]` there would raise on exactly
+    the unknown-model case the fallback exists to survive."""
+    assert agent._spec_field("z-ai/glm-5.3-flash", "provider_tag") == "z-ai"
+    assert agent._spec_field("no/such-model", "provider_tag") == "unknown"
+    assert agent._spec_field("no/such-model", "quantization") == "unknown"
+
+
+def test_every_row_shape_records_the_endpoint_actually_pinned():
+    """A results file must say which model was SERVED, not only which id was
+    requested. Every row shape carries it, including the two error shapes — a
+    key present on some rows and absent on others is a silent `None` in the
+    middle of an analysis.
+    """
+    from dce.runner import _construction_error_row
+
+    rows = [
+        build_result_row(**ROW_KWARGS),
+        _priced_fallback_row(
+            task=TASK,
+            arm="contract",
+            model="z-ai/glm-5.3-flash",
+            gold="g",
+            golds_hash="h",
+            usage=None,
+            verdict="post_run_error",
+            note="x",
+        ),
+        _construction_error_row(
+            TASK, "contract", "z-ai/glm-5.3-flash", "g", "h", RuntimeError("boom")
+        ),
+    ]
+    for row in rows:
+        assert row["reasoning_effort"] == agent.REASONING_EFFORT
+        assert row["provider_tag"] in {s.provider_tag for s in MODELS.values()}
+        assert row["quantization"] in {"fp4", "fp8", "unknown"}
+
+
+def test_result_row_prices_cache_reads_at_the_discounted_rate():
+    """F4 at the row level: `build_result_row` must pass `cached_tok` through
+    to `cost`, not price every input token fresh."""
+    spec = MODELS["deepseek/deepseek-v4-pro-0813"]
+    kwargs: dict[str, Any] = {
+        **ROW_KWARGS,
+        "in_tok": 1_000_000,
+        "out_tok": 0,
+        "cached_tok": 1_000_000,
+    }
+    row = build_result_row(**kwargs)
+    assert row["usd"] == pytest.approx(spec.price_cached)
+    # `usd_guard` feeds the sweep's spend cap and must agree with `usd` when a
+    # real priced call happened — otherwise the cap counts a different number
+    # from the one the report totals.
+    assert row["usd_guard"] == row["usd"]
+
+
+def test_temperature_is_sent_via_extra_body_because_model_settings_strips_it():
+    """Regression for a silent inertness that affected EVERY run so far.
+
+    pydantic-ai strips `ModelSettings(temperature=...)` for any model whose
+    profile has reasoning enabled — its `SAMPLING_PARAMS` rule, borrowed from
+    OpenAI's reasoning models. These OpenRouter models list `temperature` and
+    `reasoning` as simultaneously supported, and reasoning cannot be disabled
+    to dodge the rule (HTTP 400, "Reasoning is mandatory for this endpoint").
+    So temperature has to travel in `extra_body`, which bypasses the strip.
+    """
+    import os
+
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model="z-ai/glm-5.3-flash", system_prompt="s", tools=[], retries=1
+    )
+    settings = built.model_settings or {}
+    # If this ever moves back to ModelSettings it becomes inert again, and
+    # nothing at run time would say so beyond one warning.
+    assert "temperature" not in settings
+    assert settings["extra_body"]["temperature"] == 0.0
+    # `seed` is NOT in pydantic-ai's SAMPLING_PARAMS, so it survives there.
+    assert settings["seed"] == 0
+
+
+def test_temperature_is_omitted_for_the_model_that_does_not_support_it():
+    """`openai/gpt-5.6-sol` does not list `temperature` among its OpenRouter
+    supported parameters. Sending it anyway would be sending a knob we know is
+    ignored, and would imply a uniform temperature=0 across the board that
+    FINDINGS cannot claim."""
+    import os
+
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model="openai/gpt-5.6-sol", system_prompt="s", tools=[], retries=1
+    )
+    body = (built.model_settings or {})["extra_body"]
+    assert "temperature" not in body
+    assert MODELS["openai/gpt-5.6-sol"].supports_temperature is False

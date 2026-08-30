@@ -43,6 +43,26 @@ from dce.pricing import MODELS, cost
 # A harness cap, not a contract limit — applied identically to every arm so
 # no arm gets more iterations than another (see the retries note below, and
 # `dce/arms.py`'s module docstring on why that symmetry matters).
+#: OpenRouter's `reasoning.effort`, sent explicitly rather than inherited.
+#:
+#: F3's real lesson applied to a second knob: an unset parameter is not a
+#: fixed parameter. Every pinned model supports `reasoning_effort`, every one
+#: of them reasons by default, and the default differs by endpoint — while the
+#: serving endpoint was, until the pin below, chosen per request. Measured on
+#: `z-ai/glm-5.3-flash` for one trivial question: 133 reasoning tokens with no
+#: parameter set, against 45-55 at any explicit effort. Reasoning tokens bill
+#: at the OUTPUT rate (the pricier one), so this is a cost knob as well as a
+#: quality knob.
+#:
+#: "medium" is the neutral middle of OpenRouter's scale, chosen so the guard
+#: is an explicit recorded value rather than a provider default. Uniform
+#: across every arm — it is a model setting, not an arm setting — and stamped
+#: on every row as `reasoning_effort`.
+#:
+#: Reasoning cannot be switched off: `{"enabled": false}` returns HTTP 400
+#: "Reasoning is mandatory for this endpoint and cannot be disabled."
+REASONING_EFFORT: str = "medium"
+
 MAX_TOOL_CALLS: int = 40
 
 # RAISED FROM 25 AFTER THE FIRST SMOKE RUN (F2, see
@@ -586,16 +606,28 @@ def build_result_row(
         # from a volunteered one, and an analysis that pooled the two silently
         # would be comparing two things under one name.
         "forced_answer": forced_answer,
+        # F3 — the pinned endpoint and the reasoning effort in force, so a
+        # results file says which model was actually served rather than only
+        # which id was requested. THE OBSERVED PROVIDER IS DELIBERATELY NOT
+        # RECORDED: OpenRouter returns it only in the response body, which
+        # pydantic-ai discards (`ModelResponse.provider_name` is the string
+        # "openrouter", and no response header carries it). It is not needed,
+        # because `allow_fallbacks: False` makes the pin self-verifying —
+        # verified live, an unhonourable pin returns HTTP 404 through
+        # pydantic-ai rather than silently re-routing, so a row that exists at
+        # all is a row the pin held for.
+        "provider_tag": MODELS[model].provider_tag,
+        "quantization": MODELS[model].quantization,
+        "reasoning_effort": REASONING_EFFORT,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached_tok,
         "turns": turns,
-        # `dce.pricing`'s table has no discounted rate for cache-read
-        # tokens, so this prices every `cached_tok` at the full `price_in`
-        # rate — this OVER-estimates real spend whenever `cached_tokens > 0`
-        # (a real provider typically bills a cache read well below the
-        # fresh-input rate).
-        "usd": cost(model, in_tok, out_tok),
+        # Cache-aware since F4: `cached_tok` is priced at the pinned
+        # endpoint's cache-read rate, the rest at the fresh-input rate. See
+        # `dce.pricing.cost` for why charging everything fresh was not a
+        # harmless over-estimate but a bias against the longest-context arm.
+        "usd": cost(model, in_tok, out_tok, cached_tok),
         # Mirrors `usd` here — a real, priceable call happened, so there is
         # no gap between what was really spent and what the sweep's spend
         # cap should count against. `usd_guard` only diverges from `usd`
@@ -603,7 +635,7 @@ def build_result_row(
         # happened at all but the cap still charges a pessimistic ceiling
         # (see that function's docstring). `spent_so_far` sums THIS field;
         # `real_spent_so_far` sums `usd`.
-        "usd_guard": cost(model, in_tok, out_tok),
+        "usd_guard": cost(model, in_tok, out_tok, cached_tok),
         "tool_calls": tool_calls,
         "inspect_rejections": inspect_rejections,
         "enforcement_blocks": enforcement_blocks,
@@ -648,6 +680,18 @@ class AgentConstructionError(RuntimeError):
     """
 
 
+def _spec_field(model: str, field: str) -> str:
+    """A `ModelSpec` field, or "unknown" for an unpinned id.
+
+    Used only from `_priced_fallback_row`, which is the last line of defense
+    inside `run_task`'s own exception handler and must not be able to raise —
+    a bare `MODELS[model]` lookup would defeat that for exactly the exotic
+    unknown-model case the fallback exists to survive.
+    """
+    spec = MODELS.get(model)
+    return getattr(spec, field, "unknown") if spec is not None else "unknown"
+
+
 def _priced_fallback_row(
     *,
     task: dict,
@@ -676,7 +720,7 @@ def _priced_fallback_row(
     in_tok = getattr(usage, "input_tokens", 0) or 0
     out_tok = getattr(usage, "output_tokens", 0) or 0
     try:
-        usd = cost(model, in_tok, out_tok)
+        usd = cost(model, in_tok, out_tok, getattr(usage, "cache_read_tokens", 0) or 0)
     except Exception:
         # Can't even price it off real counts: charge the pessimistic
         # ceiling rather than $0.00, so an unknown-cost failure consumes
@@ -707,6 +751,9 @@ def _priced_fallback_row(
         # no answer here for the forcing turn to have produced. Present so
         # every row in a results file has the same keys.
         "forced_answer": False,
+        "provider_tag": _spec_field(model, "provider_tag"),
+        "quantization": _spec_field(model, "quantization"),
+        "reasoning_effort": REASONING_EFFORT,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": getattr(usage, "cache_read_tokens", 0) or 0,
@@ -743,6 +790,7 @@ def _default_agent_factory(
     from pydantic_ai.providers.openrouter import OpenRouterProvider
     from pydantic_ai.settings import ModelSettings
 
+    spec = MODELS[model]
     return Agent(
         OpenAIChatModel(
             model, provider=OpenRouterProvider(api_key=os.environ["OPENROUTER_API_KEY"])
@@ -769,10 +817,46 @@ def _default_agent_factory(
         # the between-request `total_tokens_limit` checks. See
         # `MAX_OUTPUT_TOKENS_PER_REQUEST`'s module-level comment.
         model_settings=ModelSettings(
-            temperature=0.0,
+            # `temperature` is DELIBERATELY NOT SET HERE — see `extra_body`
+            # below. `seed` is safe: pydantic-ai's `SAMPLING_PARAMS` strip
+            # covers temperature/top_p/penalties/logit_bias/logprobs, not seed.
             seed=0,
             timeout=300,
             max_tokens=MAX_OUTPUT_TOKENS_PER_REQUEST,
+            # F3: pin the serving ENDPOINT, not merely the model id, and pin
+            # the reasoning effort. `allow_fallbacks: False` is the load-
+            # bearing half — verified against the live API to return HTTP 404
+            # rather than silently re-routing when the pin cannot be honoured,
+            # so a pin that stops being available fails loudly instead of
+            # quietly changing the model mid-sweep.
+            # `extra_body` carries the fields pydantic-ai will not send for
+            # us: OpenRouter-specific routing, the reasoning effort, and —
+            # unavoidably — temperature.
+            #
+            # WHY TEMPERATURE IS HERE AND NOT ABOVE. pydantic-ai silently
+            # STRIPS `ModelSettings(temperature=...)` for any model whose
+            # profile has reasoning enabled, warning "Sampling parameters
+            # ['temperature'] are not supported when reasoning is enabled".
+            # That rule comes from OpenAI's own reasoning models; it is wrong
+            # for these OpenRouter models, whose cards list `temperature` and
+            # `reasoning` as simultaneously supported. Reasoning cannot be
+            # turned off to dodge it either (HTTP 400, "Reasoning is mandatory
+            # for this endpoint"). So `temperature=0.0` in `ModelSettings` was
+            # inert for EVERY model in this experiment — every run so far was
+            # at the provider's default sampling temperature.
+            #
+            # `extra_body` bypasses the strip; verified against the live API,
+            # where a deliberately out-of-range value came back as
+            # "Expected temperature to be at most 2, received 99" rather than
+            # being dropped.
+            extra_body={
+                "provider": {
+                    "order": [spec.provider_tag],
+                    "allow_fallbacks": False,
+                },
+                "reasoning": {"effort": REASONING_EFFORT},
+                **({"temperature": 0.0} if spec.supports_temperature else {}),
+            },
         ),
     )
 

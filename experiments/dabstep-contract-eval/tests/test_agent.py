@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,22 @@ TASK = {
     "guidelines": "Answer with a number.",
     "level": "hard",
 }
+
+
+def test_agent_run_result_usage_is_a_property_not_a_method():
+    """Guards `dce.agent.run_task`'s `usage = result.usage` against a version
+    change. On the installed pydantic-ai, `AgentRunResult.usage` is a
+    property. An earlier draft of `run_task` called it as `result.usage()`,
+    and the fakes below originally matched that mistake with a `usage()`
+    method instead of the real API — every test passed while the real call
+    would have raised `TypeError: 'RunUsage' object is not callable` on the
+    first live model call. This checks the actual installed library, not the
+    plan, so a future pydantic-ai release that changes this shape fails
+    loudly here instead of silently reintroducing that bug.
+    """
+    from pydantic_ai.agent import AgentRunResult
+
+    assert isinstance(inspect.getattr_static(AgentRunResult, "usage"), property)
 
 
 def test_result_row_carries_full_provenance():
@@ -94,17 +111,19 @@ def _fake_result(output: str, tool_names: list[str] | None = None):
         def __init__(self, names):
             self.parts = [Part(n) for n in names]
 
+    class U:
+        input_tokens = 100
+        output_tokens = 10
+        cache_read_tokens = 0
+
     class R:
         def __init__(self):
             self.output = output
-
-        def usage(self):
-            class U:
-                input_tokens = 100
-                output_tokens = 10
-                cache_read_tokens = 0
-
-            return U()
+            # `usage` is a property on the real `AgentRunResult` (see
+            # `test_agent_run_result_usage_is_a_property_not_a_method`), not
+            # a method — this fake must match that shape, not the plan's
+            # original (wrong) `usage()` method, or it validates nothing.
+            self.usage = U()
 
         def all_messages(self):
             return [Msg(tool_names or [])]

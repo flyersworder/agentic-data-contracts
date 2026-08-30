@@ -29,13 +29,10 @@ def _tool_call_names(result: Any) -> list[str]:
     never calls `lookup_metric` is not testing what we think it is.
     """
     names: list[str] = []
-    try:
-        for message in result.all_messages():
-            for part in getattr(message, "parts", []):
-                if getattr(part, "part_kind", "") == "tool-call":
-                    names.append(part.tool_name)
-    except Exception:
-        pass
+    for message in result.all_messages():
+        for part in getattr(message, "parts", []):
+            if getattr(part, "part_kind", "") == "tool-call":
+                names.append(part.tool_name)
     return names
 
 
@@ -62,24 +59,29 @@ def _inspect_rejections(result: Any) -> int:
     them without special-casing the arm.
     """
     count = 0
-    try:
-        for message in result.all_messages():
-            for part in getattr(message, "parts", []):
-                if getattr(part, "part_kind", "") != "tool-return":
-                    continue
-                if getattr(part, "tool_name", "") != "inspect_query":
-                    continue
-                content = getattr(part, "content", None)
-                if not isinstance(content, str):
-                    continue
-                try:
-                    data = json.loads(content)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(data, dict) and data.get("valid") is False:
-                    count += 1
-    except Exception:
-        pass
+    for message in result.all_messages():
+        for part in getattr(message, "parts", []):
+            if getattr(part, "part_kind", "") != "tool-return":
+                continue
+            if getattr(part, "tool_name", "") != "inspect_query":
+                continue
+            content = getattr(part, "content", None)
+            if not isinstance(content, str):
+                continue
+            # A malformed inspect_query payload is not a shape this counter
+            # understands, and the whole point of this function is to be the
+            # one place that number comes from — silently coding it as "not
+            # rejected" here would delete the library's own headline metric
+            # without a trace, so only a genuine parse failure is tolerated
+            # (an inspect_query response is not always bare JSON in general,
+            # see `_truncate_run_query` in `dce/arms.py` for the sibling case
+            # on `run_query`), and everything else propagates.
+            try:
+                data = json.loads(content)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict) and data.get("valid") is False:
+                count += 1
     return count
 
 
@@ -185,7 +187,13 @@ def run_task(
         rejections = 0
         try:
             result = agent.run_sync(prompt, usage_limits=limits)
-            usage = result.usage()
+            # `AgentRunResult.usage` is a property, not a method, on
+            # pydantic-ai 2.36.0's `AgentRunResult` — see
+            # `test_agent_run_result_usage_is_a_property_not_a_method` in
+            # `tests/test_agent.py`, which asserts this against the installed
+            # library so a future version that changes this shape fails
+            # loudly here instead of via a `TypeError` mid-sweep.
+            usage = result.usage
             in_tok = usage.input_tokens
             out_tok = usage.output_tokens
             cached = getattr(usage, "cache_read_tokens", 0) or 0

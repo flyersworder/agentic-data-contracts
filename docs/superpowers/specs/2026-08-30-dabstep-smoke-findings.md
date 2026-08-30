@@ -1,0 +1,165 @@
+# DABStep eval — smoke-run findings and cap re-plan
+
+**Date:** 2026-08-30
+**Amends:** `docs/superpowers/specs/2026-08-30-dabstep-contract-eval-design.md`
+**Evidence:** `experiments/dabstep-contract-eval/results/smoke12.jsonl` (3 rows, task 1712, `z-ai/glm-5.3-flash`, commit 23c4576)
+
+The smoke run was stopped after the first task. All three arms failed on it,
+each for a *different* reason — which makes one task a complete diagnostic of
+the harness rather than a data point about the arms.
+
+| Arm | verdict | input | cached | ctx/req | tools | turns | answer |
+|---|---|---:|---:|---:|---:|---:|---|
+| schema_only | hit_limit | 58,076 | 80% | 5,807 | 28 | 10 | *empty* |
+| manual_prompt | error | 153,981 | 83% | 11,844 | 21 | 13 | `max_tokens (4000) exceeded` |
+| contract | hit_limit | 781,609 | 87% | 45,977 | 22 | 17 | *empty* |
+
+Gold was `12.91`. No arm produced any answer at all.
+
+## F1 — `MAX_OUTPUT_TOKENS_PER_REQUEST = 4_000` is fatal to reasoning models
+
+`z-ai/glm-5.3-flash` is a reasoning model. Measured directly against the
+OpenRouter API: a trivial 50-token completion reported
+`completion_tokens_details.reasoning_tokens: 49`. Reasoning tokens count
+against `max_tokens`, so the cap can fire *before any answer text exists* —
+which is exactly the error arm B returned:
+
+> `UnexpectedModelBehavior: Model token limit (4000) exceeded before any response was generated.`
+
+**This is a confound, not merely a bug.** The cap is nominally uniform across
+arms, but it killed only arm B, because arm B's larger prompt induced longer
+reasoning. A cap that preferentially kills the arm carrying the most context
+biases the very comparison the experiment exists to make.
+
+**Fix:** `MAX_OUTPUT_TOKENS_PER_REQUEST: 4_000 -> 16_000`.
+
+## F2 — `hit_limit` rows are paid for and carry no signal
+
+Two of three arms exhausted their budget and returned `""`. `verdict=hit_limit`
+is unscoreable: it contributes nothing to accuracy while costing full price.
+Across a 1,800-run sweep this is a large, silent waste channel.
+
+**Fix — the forcing turn.** On `UsageLimitExceeded`, re-ask once using the
+captured message history with **an empty toolset** and a prompt demanding the
+final answer now. `capture_run_messages` is already wired into `run_task`, so
+the transcript is in hand at the moment the exception fires. This converts an
+unscoreable waste row into a scoreable right-or-wrong one.
+
+The forcing turn is applied identically to every arm, and its extra request is
+recorded on the row (`forced_answer: bool`) so no analysis can mistake a forced
+answer for an unforced one.
+
+## F3 — OpenRouter provider routing is per-request and unpinned
+
+`z-ai/glm-5.3-flash` exposes **20 endpoints** spanning fp4 / fp8 / unknown
+quantization, $0.05–$0.15 per 1M input, and 262K–1.31M context.
+
+Measured: two *identical, back-to-back* calls were served by **Z.AI**, then
+**DeepInfra**. Routing is per-request, not per-session — so a single task's
+turns can hop providers, and therefore quantizations.
+
+Three consequences:
+
+1. **Quality confound.** fp4 and fp8 are different models in effect. Nothing in
+   the results file records which served each call.
+2. **Pricing error.** `dce/pricing.py` hardcodes the $0.075/$0.25 fp8 tier. Of
+   20 endpoints, one is cheaper and eleven are 2x more expensive.
+3. **Cache destruction.** Unpinned, the repeat call reported
+   `cached_tokens: 0`. Pinned to Z.AI, the same repeat cached 4,224 of 4,228.
+
+**Fix:** pin `provider: {order: [...], allow_fallbacks: false}` per model, and
+record the serving `provider` on every result row so the pin is *verified from
+the data*, not assumed.
+
+## F4 — Cached input is billed at ~20% of standard, and our accounting ignores it
+
+Measured against the live API, pinned to one provider:
+
+| call | prompt | cached | actual | our formula | ratio |
+|---|---:|---:|---:|---:|---:|
+| 1 | 4,228 | 0 | $0.00031467 | $0.00031785 | 0.99 |
+| 2 | 4,228 | 4,224 | $0.00006599 | $0.00032010 | 0.21 |
+| 3 | 4,228 | 4,224 | $0.00007292 | $0.00032710 | 0.22 |
+
+Cache reads bill at roughly **$0.015/1M against a $0.075/1M standard rate**.
+`cost()` charges the full rate on every input token.
+
+**This error is differential, which is what makes it serious.** The inflation
+factor scales with cache-hit rate, which scales with conversation length:
+
+| Arm | recorded | corrected | inflation |
+|---|---:|---:|---:|
+| schema_only | $0.00575 | $0.00296 | 1.94x |
+| manual_prompt | $0.01425 | $0.00655 | 2.17x |
+| contract | $0.06325 | $0.02255 | 2.81x |
+
+The recorded cost ratio contract:schema_only is **11.0x**; the true ratio is
+**7.6x**. Publishing the recorded figure would have overstated our own
+library's cost penalty by 45%.
+
+**Fix:** add `price_cached` to `ModelSpec`; bill `cached_tokens` at that rate
+and `input_tokens - cached_tokens` at the standard rate.
+
+## F5 — `MAX_ROWS = 1_000` poisons the context, arm-asymmetrically
+
+Arm C averaged 45,977 input tokens per request against arm A's 5,807 — 8x. A
+single 1,000-row `run_query` return stays in the conversation and is resent as
+input on every subsequent turn. DABStep answers are aggregates; the agent
+almost never needs 1,000 raw rows.
+
+**Fix:** `MAX_ROWS: 1_000 -> 50`.
+
+## F6 — `TOKEN_BUDGET` re-introduces the confound N1 was meant to remove
+
+The plan's `GROWTH: int = 4` is a "deliberately blunt safety multiplier."
+Measured growth (mean ctx/req over `MAX_ARM_FLOOR`) is arm-dependent:
+
+| Arm | ctx/req | growth vs 6,100 floor |
+|---|---:|---:|
+| schema_only | 5,807 | 0.95x |
+| manual_prompt | 11,844 | 1.94x |
+| contract | 45,977 | **7.54x** |
+
+So `TOKEN_BUDGET = 732,000` bound arm C at **22** tool calls while arm A ran to
+**28** — the token guard, not `tool_calls_limit`, became the binding iteration
+control, and it bound *earlier for the arm carrying more context*. That is
+precisely the failure N1 recorded and claimed to have fixed by moving the guard
+out of dollars and into tokens: the guard is uniform in tokens but not in
+iterations, because growth is a property of the arm.
+
+**Fix:** `tool_calls_limit` must be the single uniform iteration control, and
+`TOKEN_BUDGET` must be sized never to bind first. F5 collapses arm C's growth
+at the root; `GROWTH` is then raised to **12** (worst observed 7.54x with
+margin) so the token guard is a genuine runaway stop rather than a de facto
+iteration cap. Both are re-measured in the next smoke run before the sweep.
+
+## F7 — Scope: the sweep fits neither the budget nor the calendar
+
+- The dataset is **378 hard / 72 easy** (84% hard). A flash-tier model floors
+  near zero on hard tasks in all three arms — 250+ tasks of 0-vs-0.
+- The OpenRouter balance is **$129.60 remaining** ($120.40 of $250 used).
+  Corrected full-sweep estimate: **~$208**. It does not fit. Under the *current*
+  inflated accounting the `--max-spend` guard would have halted mid-sweep.
+- Wall-clock: 4,050 runs x 4.5 min/run (measured: 13m47s for 3 runs including
+  dataset load and DB build) = **~14 days serial**.
+
+**Proposed (not yet approved):** stratify to all 72 easy + 128 random hard =
+**200 tasks**; 200 x 3 arms x 3 models = 1,800 runs (~$66), plus a 60-task
+`gpt-5.6-sol` hard subset x 2 arms (~$36) => **~$102**. Parallelise to 10
+concurrent workers — runs are already isolated per-run via `make_working_copy`
+and the work is pure network I/O — turning ~6 days into ~14 hours. The serial
+spend ledger and single write site need a lock to stay correct under
+concurrency; that is the only real work.
+
+Whether to run on a VPS is open. With resume already working, a sleeping laptop
+merely resumes, so a VPS is a reliability convenience rather than a
+requirement.
+
+## Status
+
+F1, F2, F5, F6 (the caps) are being fixed now. F3 and F4 (provider pin and
+cache-aware pricing) follow. F7 (scope, parallelism, VPS) awaits a decision.
+
+No result produced before these fixes may be used in FINDINGS: the frozen
+contract and gold set are unaffected, but every `usd` recorded so far is
+inflated, and every `hit_limit` row is an artifact of a cap that has changed.

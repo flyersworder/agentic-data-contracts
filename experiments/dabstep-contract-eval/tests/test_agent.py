@@ -7,8 +7,10 @@ import duckdb
 import pytest
 from dce.agent import (
     MAX_TOOL_CALLS,
+    AgentConstructionError,
     _commit_sha,
     _inspect_rejections,
+    _priced_fallback_row,
     _retry_prompt_count,
     _token_budget_usd,
     _tool_call_names,
@@ -342,6 +344,166 @@ def test_run_task_gives_a_scoring_failure_its_own_verdict_without_touching_the_a
     )
     assert row["verdict"] == "scoring_error"
     assert row["answer"] == "0.12"
+
+
+# ── A1: the only exception run_task still lets propagate is construction ──
+
+
+def test_run_task_raises_agent_construction_error_when_the_factory_fails(
+    tmp_path: Path,
+):
+    """Nothing billable has happened yet when the agent factory itself
+    fails (e.g. a missing OPENROUTER_API_KEY) — this is the ONE exception
+    `run_task` still lets escape, and it must be `AgentConstructionError`
+    specifically so `dce.runner.sweep` can narrow its `except` to exactly
+    this and let any other bug propagate and stop the sweep loudly."""
+
+    def exploding_factory(**_):
+        raise KeyError("OPENROUTER_API_KEY")
+
+    with pytest.raises(AgentConstructionError):
+        run_task(
+            TASK,
+            "schema_only",
+            "z-ai/glm-5.3-flash",
+            tmp_path / "x.duckdb",
+            {"manual": "m", "payments_readme": "r"},
+            gold="0.12",
+            golds_hash="deadbeef",
+            agent_factory=exploding_factory,
+        )
+
+
+def test_run_task_recovers_a_priced_row_when_the_post_call_tail_raises(
+    tmp_path: Path, monkeypatch
+):
+    """The billable call has already completed by the time anything in the
+    post-run tail runs — `usage` already holds real counts. A bug there
+    (this module's own history, commit a2c5d1d, was exactly this class of
+    bug) must return a priced fallback row instead of raising and losing
+    that spend to an untraceable failure.
+
+    `build_result_row` itself is the thing made to explode here: it is
+    explicitly the LAST link in the guarded tail (the review's own
+    enumeration includes "the whole build_result_row call"), so this
+    exercises the outermost, hardest-to-reach case, not just an earlier
+    step.
+    """
+    import dce.agent as agent_module
+
+    def _boom(**_):
+        raise AttributeError("simulated pydantic-ai rename")
+
+    monkeypatch.setattr(agent_module, "build_result_row", _boom)
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] == "post_run_error"
+    # CR1's principle, extended to this tail: usage was already mutated in
+    # place by run_sync, so the fallback must be priced from real counts,
+    # not report $0.00 / 0 tokens for spend that already happened.
+    assert row["input_tokens"] == 100
+    assert row["output_tokens"] == 10
+    assert row["usd"] > 0
+    assert row["level"] == "hard"
+    assert "AttributeError" in row["note"]
+
+
+def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
+    """`setup.close()` runs in a `finally` on every path. A close failure
+    (e.g. a DB error while releasing the connection) must not replace the
+    row the guarded tail already built — the money is already priced by
+    that point regardless of whether cleanup itself succeeds."""
+    import dce.agent as agent_module
+
+    class _ExplodingCloseSetup:
+        system_prompt = "p"
+        tools: list = []
+        session = None
+
+        def close(self):
+            raise RuntimeError("close exploded")
+
+    monkeypatch.setattr(
+        agent_module, "build_arm", lambda *a, **k: _ExplodingCloseSetup()
+    )
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] == "correct"
+    assert row["answer"] == "0.12"
+
+
+def test_priced_fallback_row_prices_normally_when_possible():
+    from dce.pricing import cost
+    from pydantic_ai.usage import RunUsage
+
+    usage = RunUsage()
+    usage.input_tokens = 100
+    usage.output_tokens = 10
+    row = _priced_fallback_row(
+        task=TASK,
+        arm="contract",
+        model="z-ai/glm-5.3-flash",
+        gold="g",
+        golds_hash="h",
+        usage=usage,
+        verdict="post_run_error",
+        note="x",
+    )
+    assert row["usd"] == cost("z-ai/glm-5.3-flash", 100, 10)
+    assert row["input_tokens"] == 100
+    assert row["output_tokens"] == 10
+
+
+def test_priced_fallback_row_never_raises_even_for_an_unknown_model():
+    """`_priced_fallback_row` is itself the last line of defense in the
+    guarded tail (called from inside `run_task`'s own exception handler),
+    so it must not be able to raise even in the exotic case where `model`
+    can't be priced at all — both `cost()` and `_token_budget_usd()` do a
+    bare `MODELS[model]` lookup, so an unknown id fails both, and this
+    still returns a row rather than propagating."""
+    from pydantic_ai.usage import RunUsage
+
+    usage = RunUsage()
+    usage.input_tokens = 100
+    usage.output_tokens = 10
+    row = _priced_fallback_row(
+        task=TASK,
+        arm="contract",
+        model="not-a-pinned-model",
+        gold="g",
+        golds_hash="h",
+        usage=usage,
+        verdict="post_run_error",
+        note="x",
+    )
+    assert row["usd"] == 0.0
+    assert row["input_tokens"] == 100
 
 
 def test_run_task_threads_the_effective_cap_into_the_agent_factory(tmp_path: Path):

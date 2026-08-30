@@ -18,30 +18,55 @@ as its logic:
     continues — an ungoverned arm mutating the warehouse is exactly the kind
     of governance gap this experiment exists to surface, so losing the rest
     of a paid sweep over it would be the wrong failure mode.
-  * A CONSTRUCTION FAILURE IS A FINDING, NOT A CRASH, BUT IT MUST NOT HIDE A
-    BUG FOREVER. `run_task` can raise before it ever gets a chance to write
-    a row (e.g. its agent factory reading a missing `OPENROUTER_API_KEY`).
-    `sweep` catches that, writes a row with `verdict: "construction_error"`,
-    and moves on — but `completed_keys` never treats a
-    `construction_error` row as done, so a resumed sweep always retries it.
-    That is a deliberate trade-off: `except Exception` here also catches an
-    ordinary bug (a signature mismatch, say), and always-retry means such a
-    bug surfaces on every resume instead of silently completing the sweep
-    with a wall of skip-forever rows.
+  * A CONSTRUCTION FAILURE IS A FINDING, NOT A CRASH — AND IT IS THE *ONLY*
+    THING THAT CAN STILL ESCAPE `run_task` UNPRICED. `run_task` raises
+    `dce.agent.AgentConstructionError` when its agent factory fails (e.g. a
+    missing `OPENROUTER_API_KEY`), before any billable call was made; `sweep`
+    catches exactly that type and nothing else, writing a row with
+    `verdict: "construction_error"`. Anything else `run_task_fn` raises is a
+    real bug and is left to propagate and stop the sweep loudly — `run_task`
+    itself guards its whole post-call tail so a bug there returns a priced
+    row instead of raising (see `dce/agent.py`'s `_priced_fallback_row`);
+    only agent construction is still allowed to raise, and only because
+    nothing billable has happened yet when it does. Retries are bounded, not
+    infinite: `completed_keys` stops retrying a unit after
+    `MAX_CONSTRUCTION_ATTEMPTS` `construction_error` rows and treats it as
+    terminal — "cheap twice, then loud" — and `gave_up_keys` lets `main()`
+    warn about exactly which units that happened to. As a backstop against
+    all of the above regressing at once, `_construction_error_row` prices
+    itself at `_token_budget_usd(model)`, not `$0.00`: an unknown-cost
+    failure consumes budget instead of reading as free, deliberately, even
+    though a genuine construction failure never actually spent anything.
   * THE SPEND CAP BOUNDS THE EXPERIMENT, NOT ONE PROCESS. `sweep` seeds its
     running total from `spent_so_far(out)` — the `usd` already banked by
     every prior invocation against the same `out` file — because resume is
     the headline feature and a cap that resets to $0 on every restart is no
-    cap at all under a crash loop or a naive retry wrapper.
+    cap at all under a crash loop or a naive retry wrapper. A row's `usd` is
+    read and validated BEFORE it is written to `out`: an un-priced row must
+    never land on disk looking like a free, permanently-done unit.
   * THE RESERVATION IS A REAL CEILING, NOT A GUESS, AND IT COVERS A WHOLE
     TASK. Before any observation for a given model, `sweep` reserves
     `dce.agent._token_budget_usd(model)` — the true worst case the runaway
-    token guard allows, not a hand-picked dollar figure — and once a model
-    has been observed, the max (not mean) of what it has actually cost, so
-    the reservation is never optimistic. The reservation covers an entire
-    task's (arm, model) group at once and is checked before the first call
-    in that group, so a truncation always lands on a task boundary: a
+    token guard allows, not a hand-picked dollar figure. Once a model HAS
+    been observed, the reservation is the larger of that ceiling and the max
+    (not mean) of what it has actually cost so far — never just the
+    observed max alone, which would let one cheap early call collapse the
+    reservation for every later, possibly-worst-case call (measured: an 82%
+    budget overrun this way). The reservation covers an entire task's (arm,
+    model) group at once and is checked before the first call in that
+    group, so a truncation always lands on a task boundary: a
     resumed/paired analysis never has to discard a half-finished task.
+  * A RETRIED UNIT ACCUMULATES ROWS; SCORING MUST DEDUPE. Every attempt at a
+    (task_id, arm, model) key appends a new row to `out` rather than
+    replacing the old one — `spent_so_far`/`completed_keys`/the reserve
+    estimator all deliberately want every row (cumulative real spend,
+    accurate retry counts), but a *scorer* wants each unit counted exactly
+    once, by its most recent outcome. `latest_rows(out)` returns exactly
+    that (last row per key wins); every downstream reader that scores this
+    file — Task 9's accuracy/McNemar calculations included — MUST use it
+    rather than iterating `out` directly, or a stale `construction_error`
+    row sitting earlier in the file gets silently counted as a wrong answer
+    on top of the real, later outcome.
 """
 
 from __future__ import annotations
@@ -55,17 +80,24 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 
-from dce.agent import _commit_sha, _token_budget_usd, run_task
+from dce.agent import AgentConstructionError, _commit_sha, _token_budget_usd, run_task
 from dce.arms import ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
 from dce.frozen import digest
 from dce.pricing import MODELS
 
 #: A reservation must never be read as "this call is free." Observed `usd`
-#: can legitimately be 0.0 (a `hit_limit`/`error`/`construction_error` row
-#: that made no billable call), and neither the seed floor nor the observed
-#: max may collapse to that value.
+#: can legitimately be 0.0 (a `hit_limit`/`error` row that made no billable
+#: call), and neither the seed floor nor the observed max may collapse to
+#: that value.
 MIN_RESERVE_USD: float = 0.01
+
+#: "Cheap twice, then loud": a unit that fails agent construction this many
+#: times in a row is treated as terminal rather than retried forever —
+#: `dce.agent.AgentConstructionError` is usually a persistent problem (a
+#: missing env var, say), not a transient one, so hammering it every resume
+#: would never succeed and would only ever hide the same bug.
+MAX_CONSTRUCTION_ATTEMPTS: int = 2
 
 
 @dataclass
@@ -86,35 +118,106 @@ def _read_rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def _construction_error_state(
+    path: Path,
+) -> tuple[dict[tuple[str, str, str], str | None], dict[tuple[str, str, str], int]]:
+    """For every (task_id, arm, model) key seen in `path`: its most recently
+    written verdict, and how many `construction_error` rows it has
+    accumulated in total. Shared by `completed_keys` (resume/skip
+    decisions) and `gave_up_keys` (visibility into units that exhausted
+    their retry budget) so the two can never disagree about what "the
+    state of this key" means.
+    """
+    last_verdict: dict[tuple[str, str, str], str | None] = {}
+    error_counts: dict[tuple[str, str, str], int] = {}
+    for row in _read_rows(path):
+        key = (row["task_id"], row["arm"], row["model"])
+        verdict = row.get("verdict")
+        last_verdict[key] = verdict
+        if verdict == "construction_error":
+            error_counts[key] = error_counts.get(key, 0) + 1
+    return last_verdict, error_counts
+
+
 def completed_keys(
     path: Path, *, retry_error: bool = False
 ) -> set[tuple[str, str, str]]:
     """(task_id, arm, model) triples a resumed sweep should skip.
 
-    Verdict-aware, not a blanket "every row already written is done":
-    `construction_error` rows are never counted as done (see the module
-    docstring) — they cost nothing and made no call, so always retrying
-    them is free. `error` rows are counted as done unless `retry_error` is
-    set, since an `error` row already cost money and a resume should not
-    silently re-pay for it without being asked. `hit_limit` and
-    `scoring_error` rows need no special case at all: both are terminal by
-    design (a `hit_limit` needs a deliberate higher-budget re-run, not an
-    automatic retry at the same budget; a `scoring_error` is fixed by
-    re-scoring the stored `answer` offline, never by re-paying for the
-    model call), so they simply fall through to "done" like any completed
-    row. A row with no `verdict` at all (an older/foreign row shape) is
-    also treated as done, matching this function's pre-verdict-aware
-    behaviour.
+    Verdict-aware, not a blanket "every row already written is done", and
+    keyed off each unit's MOST RECENT row (a retried unit accumulates
+    several; see `latest_rows`), not merely "any row exists":
+
+      * `construction_error` — retried (not done) until
+        `MAX_CONSTRUCTION_ATTEMPTS` such rows have piled up for the same
+        key, at which point it is terminal: "cheap twice, then loud" rather
+        than free-forever (see `gave_up_keys`). Bounding this matters
+        because `run_task`'s `except Exception` around agent construction
+        also catches an ordinary bug (a signature mismatch, say); unbounded
+        free retries would hide such a bug behind a wall of skip-forever
+        rows forever, instead of surfacing it loudly after two tries.
+      * `error` — done unless `retry_error` is set, since an `error` row
+        already cost money and a resume should not silently re-pay for it
+        without being asked.
+      * `hit_limit` / `scoring_error` — need no special case: both are
+        terminal by design (a `hit_limit` needs a deliberate higher-budget
+        re-run, not an automatic retry at the same budget; a
+        `scoring_error` is fixed by re-scoring the stored `answer` offline,
+        never by re-paying for the model call), so they simply fall through
+        to "done" like any completed row.
+      * No verdict at all (an older/foreign row shape) — also treated as
+        done, matching this function's pre-verdict-aware behaviour.
     """
-    keys = set()
-    for row in _read_rows(path):
-        verdict = row.get("verdict")
+    last_verdict, error_counts = _construction_error_state(path)
+    done: set[tuple[str, str, str]] = set()
+    for key, verdict in last_verdict.items():
         if verdict == "construction_error":
+            if error_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS:
+                done.add(key)  # retries exhausted: terminal, stop retrying
             continue
         if verdict == "error" and retry_error:
             continue
-        keys.add((row["task_id"], row["arm"], row["model"]))
-    return keys
+        done.add(key)
+    return done
+
+
+def gave_up_keys(path: Path) -> set[tuple[str, str, str]]:
+    """Keys whose unit hit `MAX_CONSTRUCTION_ATTEMPTS` `construction_error`
+    rows and will therefore never be attempted again by `completed_keys`.
+    Exposed so `main()` can print a loud warning about exactly which units
+    that happened to, rather than the sweep quietly going silent on them
+    forever — "cheap twice, then loud" needs the "loud" half to be visible
+    somewhere other than a grep through `out`.
+    """
+    last_verdict, error_counts = _construction_error_state(path)
+    return {
+        key
+        for key, verdict in last_verdict.items()
+        if verdict == "construction_error"
+        and error_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS
+    }
+
+
+def latest_rows(path: Path) -> list[dict]:
+    """One row per (task_id, arm, model) key: the LAST row written for that
+    key wins.
+
+    A retried unit accumulates multiple rows across resumes — a
+    `construction_error` that hasn't yet hit `MAX_CONSTRUCTION_ATTEMPTS`, a
+    `--retry error` re-run, or simply a resumed sweep picking a unit back
+    up — and only the most recent one reflects its true current state.
+    Measured: three failing resumes then a success left four rows for one
+    key; a scorer iterating raw rows counts the three stale
+    `construction_error` rows as wrong answers on top of the real success
+    (that unit would score 1/4 = 25% despite succeeding). EVERY READER OF
+    THIS FILE FOR SCORING — Task 9's accuracy/McNemar calculations
+    included — MUST call this instead of iterating `out` directly; see the
+    module docstring.
+    """
+    last: dict[tuple[str, str, str], dict] = {}
+    for row in _read_rows(path):
+        last[(row["task_id"], row["arm"], row["model"])] = row
+    return list(last.values())
 
 
 def spent_so_far(path: Path) -> float:
@@ -164,18 +267,23 @@ def _next_reserve(observed: list[float], floor: float) -> float:
     Before any observation, `floor` is the real worst case implied by the
     runaway token guard (`dce.agent._token_budget_usd(model)`), not a
     hand-picked figure. Once at least one call against this model has been
-    observed, the estimate is the MAX (not the mean) of what it has
-    actually cost: a mean guarantees roughly half of all calls exceed the
-    reservation by construction, and using the max instead costs nothing
-    extra once the ceiling is already known to be much larger (a mean only
-    ever pays for itself when the floor would otherwise have been an
-    overestimate, which `_token_budget_usd` is not). Either way, never
-    returns a figure at or below `MIN_RESERVE_USD` — a $0 reservation would
-    let the guard treat the next call as free.
+    observed, the estimate is the LARGER of that same `floor` and the MAX
+    (not the mean) of what it has actually cost — `floor` must stay in the
+    comparison even after an observation exists: an early cheap call (a
+    short, easy task) would otherwise collapse the reservation toward
+    whatever it happened to cost, discarding the real per-call ceiling for
+    every later, possibly-worst-case task (measured: an 82% budget overrun
+    doing exactly that with only physically-possible costs). A mean is
+    rejected for the same reason `floor` must not be discarded: it
+    guarantees roughly half of all calls exceed the reservation by
+    construction, and using the max instead costs nothing extra once the
+    ceiling is already known to be much larger. Either way, never returns a
+    figure at or below `MIN_RESERVE_USD` — a $0 reservation would let the
+    guard treat the next call as free.
     """
     if not observed:
         return max(floor, MIN_RESERVE_USD)
-    return max(max(observed), MIN_RESERVE_USD)
+    return max(max(observed), floor, MIN_RESERVE_USD)
 
 
 def _seed_observed_by_model(path: Path) -> dict[str, list[float]]:
@@ -195,15 +303,30 @@ def _seed_observed_by_model(path: Path) -> dict[str, list[float]]:
 
 
 def _construction_error_row(
-    task: dict, arm: str, model: str, gold: str, golds_hash: str, exc: Exception
+    task: dict,
+    arm: str,
+    model: str,
+    gold: str,
+    golds_hash: str,
+    exc: AgentConstructionError,
 ) -> dict:
     """A row with the same shape `dce.agent.build_result_row` produces, for
-    a task that never got far enough to build one — `run_task`'s agent
-    factory raised (e.g. a missing `OPENROUTER_API_KEY`) before any model
-    call was made. Everything `sweep` actually knows is filled in (`level`
-    matters: `accuracy_by(rows, "level")` needs it on every row, not just
-    the ones that ran); only the token/turn fields, which have no
-    meaningful value for a call that never happened, are zeroed.
+    a task that never got far enough to build one — `run_task` raised
+    `dce.agent.AgentConstructionError` (e.g. a missing `OPENROUTER_API_KEY`)
+    before any model call was made. Everything `sweep` actually knows is
+    filled in (`level` matters: `accuracy_by(rows, "level")` needs it on
+    every row, not just the ones that ran); only the token/turn fields,
+    which have no meaningful value for a call that never happened, are
+    zeroed.
+
+    `usd` is priced at `_token_budget_usd(model)` — the pessimistic
+    per-task ceiling — not `$0.00`, even though a genuine
+    `AgentConstructionError` really did cost nothing. This is a deliberate
+    backstop, not an accounting truth: it is the third of three layers
+    against the same failure class (see the module docstring), there so
+    that even if the other two — a non-throwing `run_task` tail, and
+    bounded retries — ever regress together, an unknown-cost failure still
+    consumes budget instead of reading as free and running unbounded.
     """
     return {
         "task_id": task["task_id"],
@@ -218,7 +341,7 @@ def _construction_error_row(
         "output_tokens": 0,
         "cached_tokens": 0,
         "turns": 0,
-        "usd": 0.0,
+        "usd": _token_budget_usd(model),
         "tool_calls": [],
         "inspect_rejections": 0,
         "enforcement_blocks": 0,
@@ -299,7 +422,13 @@ def sweep(
                         gold,
                         golds_hash=golds_hash,
                     )
-                except Exception as exc:
+                except AgentConstructionError as exc:
+                    # The ONLY exception `run_task_fn` is expected to raise
+                    # (see the module docstring and `AgentConstructionError`
+                    # itself) — anything else is a real bug and is left to
+                    # propagate, stopping the sweep loudly rather than
+                    # silently treating a possibly-billable failure as a
+                    # free construction error.
                     row = _construction_error_row(
                         by_id[task_id], arm, model, gold, golds_hash, exc
                     )
@@ -309,17 +438,24 @@ def sweep(
                 # ORDER).
                 integrity = check_and_restore(working, db_path)
                 row["db_corrupted"] = integrity.corrupted
-                fh.write(json.dumps(row) + "\n")
-                fh.flush()
 
-                # Loud on a missing `usd`: a row that forgot to price itself
-                # must stop the sweep, not read as "free and run forever"
-                # (measured: `.get("usd", 0.0)` ran 50 tasks under a $2.00
-                # cap and reported `spent $0.00`). `usd: None` (an explicit,
-                # known "couldn't price this") is handled, not crashed on.
+                # Read and validate the price BEFORE writing: a row must
+                # never land on disk un-priced-but-looking-done — that
+                # would make a resumed sweep treat it as both free and
+                # permanently finished. A row missing `usd` entirely raises
+                # `KeyError` here, before `fh.write`, so nothing partial
+                # ever hits the file (measured without this ordering: an
+                # un-priced row landed on disk as `verdict: "correct"` and
+                # was thereafter free and done forever). `usd: None` (an
+                # explicit, known "couldn't price this") is handled, not
+                # crashed on.
                 usd = row["usd"]
                 if usd is None:
                     usd = 0.0
+
+                fh.write(json.dumps(row) + "\n")
+                fh.flush()
+
                 spent += usd
                 if usd > 0:
                     observed.setdefault(model, []).append(usd)
@@ -421,12 +557,17 @@ def assert_clean_tree(
         --show-toplevel`, not inherited from `os.getcwd()`) so its verdict
         does not depend on which directory the sweep happened to be invoked
         from.
-      * `out` — the sweep's own results file and its parent directory — is
-        excluded from the dirty check. `results/` is deliberately committed
-        (the tamper-evidence claim depends on it being readable in git
-        history), so its being freshly written between commits is expected
-        and would otherwise make every resumed sweep refuse to start.
-        Everything else must still be clean.
+      * `out` itself — the sweep's own results file, exactly, NOT its
+        parent directory — is excluded from the dirty check. `results/` is
+        deliberately committed (the tamper-evidence claim depends on it
+        being readable in git history), so `out` being freshly written
+        between commits is expected and would otherwise make every resumed
+        sweep refuse to start. Exempting the whole directory instead of
+        just `out` would let a change to a DIFFERENT, PREVIOUS run's
+        results file — an edit or deletion — pass silently; only the exact
+        file this invocation writes to is exempt. Everything else,
+        including every other file already sitting in `results/`, must
+        still be clean.
 
     `git_status_fn`, if given, replaces the real `git status --porcelain`
     call; injected by tests so this stays offline and deterministic.
@@ -451,13 +592,7 @@ def assert_clean_tree(
         except ValueError:
             out_rel = None
         if out_rel is not None:
-            out_parent = str(Path(out_rel).parent.as_posix())
-
-            def _is_output_path(line: str) -> bool:
-                path = _porcelain_path(line)
-                return path == out_rel or path.startswith(out_parent + "/")
-
-            lines = [line for line in lines if not _is_output_path(line)]
+            lines = [line for line in lines if _porcelain_path(line) != out_rel]
 
     dirty = "\n".join(lines).strip()
     if dirty:
@@ -469,6 +604,19 @@ def assert_clean_tree(
 
 def _exit_code_for(result: SweepResult) -> int:
     return 2 if result.truncated else 0
+
+
+def _worst_case_task_group_usd(arms, models) -> float:
+    """The true worst-case reservation `sweep` checks before starting one
+    task's group — every arm x every model's `_token_budget_usd` ceiling,
+    summed — not one call's ceiling alone. Printing the per-call figure
+    instead overstates how many tasks a cap admits by a factor of
+    `len(arms)`: measured, printing $0.18/task (one model's ceiling)
+    against a real per-group cost of $0.55 (three arms) claimed 27
+    admissible tasks where the truth was 9; with two models the same
+    mistake printed $7.32 against an actual $22.51.
+    """
+    return len(arms) * sum(_token_budget_usd(m) for m in models)
 
 
 def main() -> None:
@@ -486,8 +634,9 @@ def main() -> None:
         choices=["error"],
         default=None,
         help="also retry rows with this verdict on resume (an 'error' row "
-        "already cost money; 'construction_error' rows are always retried "
-        "for free)",
+        "already cost money; 'construction_error' rows are retried "
+        f"automatically, up to {MAX_CONSTRUCTION_ATTEMPTS} attempts, "
+        "regardless of this flag)",
     )
     args = parser.parse_args()
 
@@ -504,12 +653,13 @@ def main() -> None:
     # `assert_clean_tree`'s docstring.
     assert_clean_tree(out=args.out)
 
-    worst = max(_token_budget_usd(m) for m in args.models)
-    admits = int(args.max_spend // worst) if worst > 0 else 0
+    worst_group = _worst_case_task_group_usd(args.arms, args.models)
+    admits = int(args.max_spend // worst_group) if worst_group > 0 else 0
     print(
-        f"reserve ceiling ${worst:.2f}/task ({args.models}); "
-        f"${args.max_spend:.2f} cap admits up to {admits} worst-case task(s) "
-        "before the first observation tightens it"
+        f"reserve ceiling ${worst_group:.2f}/task-group "
+        f"({len(args.arms)} arms x {args.models}); ${args.max_spend:.2f} cap "
+        f"admits up to {admits} worst-case task-group(s) before the first "
+        "observation tightens it"
     )
 
     golds, golds_hash = _load_golds(args.golds)
@@ -541,6 +691,18 @@ def main() -> None:
             "(resume is automatic)",
             file=sys.stderr,
         )
+
+    gave_up = gave_up_keys(args.out)
+    if gave_up:
+        print(
+            f"WARNING: {len(gave_up)} unit(s) gave up after "
+            f"{MAX_CONSTRUCTION_ATTEMPTS} failed agent-construction attempts "
+            "and will NOT be retried automatically (fix the underlying "
+            "problem, e.g. a missing OPENROUTER_API_KEY, then re-run): "
+            + ", ".join(f"{t}/{a}/{m}" for t, a, m in sorted(gave_up)),
+            file=sys.stderr,
+        )
+
     raise SystemExit(_exit_code_for(result))
 
 

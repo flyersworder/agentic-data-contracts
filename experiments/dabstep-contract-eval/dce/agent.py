@@ -389,6 +389,94 @@ def build_result_row(
     }
 
 
+class AgentConstructionError(RuntimeError):
+    """Raised by `run_task` only when building the agent itself failed (the
+    `agent_factory`/`_default_agent_factory` call — e.g. a missing
+    `OPENROUTER_API_KEY`), before any billable model call was made.
+
+    This is deliberately the ONLY exception `run_task` still lets escape.
+    Everything after the agent exists — the model call, scoring,
+    transcript bookkeeping, `build_result_row` itself — is guarded and
+    returns a priced fallback row instead of raising (see
+    `_priced_fallback_row`), because by that point real, non-refundable
+    spend may already have happened. `dce.runner.sweep` catches exactly
+    this type (and nothing else) to build a genuinely-free
+    `construction_error` row on resume; any other exception is a real bug
+    in this module and must stop the sweep loudly rather than being
+    silently swallowed as if it were as cheap as a missing API key.
+    """
+
+
+def _priced_fallback_row(
+    *,
+    task: dict,
+    arm: str,
+    model: str,
+    gold: str,
+    golds_hash: str,
+    usage,
+    verdict: str,
+    note: str,
+) -> dict:
+    """A `build_result_row`-shaped row for when something AFTER the model
+    call itself failed: transcript/session bookkeeping, scoring's own
+    plumbing (not `score()` itself — that already has its own
+    `scoring_error` verdict, see `run_task`), or `build_result_row`
+    construction. By this point `agent.run_sync` has already run (or
+    tripped a cap) and mutated `usage` in place with real counts — exactly
+    the mechanism CR1 (commit 262e810) relies on for the cap-trip path —
+    so this must not report a $0.00 / 0-token row for spend that already
+    happened. This module's own history is the reason this exists: commit
+    a2c5d1d was exactly this class of bug (`result.usage()` instead of the
+    property) sitting in this same post-call region, and a future
+    pydantic-ai rename (`cache_read_tokens`, say) would reproduce it
+    verbatim without this backstop.
+    """
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    try:
+        usd = cost(model, in_tok, out_tok)
+    except Exception:
+        # Can't even price it off real counts: charge the pessimistic
+        # ceiling rather than $0.00, so an unknown-cost failure consumes
+        # budget instead of reading as free. Caps the blast radius even if
+        # the guards above this one regress later.
+        try:
+            usd = _token_budget_usd(model)
+        except Exception:
+            # This function's entire purpose is to be a fallback that
+            # cannot itself raise (a raise here would propagate out of
+            # run_task despite the whole point of this guarded tail) — an
+            # absolute last resort, not a real accounting outcome.
+            usd = 0.0
+    return {
+        "task_id": task["task_id"],
+        "level": task.get("level", "unknown"),
+        "arm": arm,
+        "model": model,
+        "answer": "",
+        "answer_normalized": "",
+        "gold": gold,
+        "verdict": verdict,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cached_tokens": getattr(usage, "cache_read_tokens", 0) or 0,
+        "turns": getattr(usage, "requests", 0) or 0,
+        "usd": usd,
+        "tool_calls": [],
+        "inspect_rejections": 0,
+        "enforcement_blocks": 0,
+        "retry_prompts": 0,
+        "request_limit": REQUEST_LIMIT,
+        "token_cap": TOKEN_BUDGET,
+        "contract_digest": digest(),
+        "golds_hash": golds_hash,
+        "commit_sha": _commit_sha(),
+        "adc_version": version("agentic-data-contracts"),
+        "note": note,
+    }
+
+
 def _default_agent_factory(
     *, model: str, system_prompt: str, tools: list, retries: int
 ):
@@ -459,12 +547,18 @@ def run_task(
     setup = build_arm(arm, db_path, docs)
     try:
         factory = agent_factory or _default_agent_factory
-        agent = factory(
-            model=model,
-            system_prompt=setup.system_prompt,
-            tools=setup.tools,
-            retries=max_tool_calls,
-        )
+        try:
+            agent = factory(
+                model=model,
+                system_prompt=setup.system_prompt,
+                tools=setup.tools,
+                retries=max_tool_calls,
+            )
+        except Exception as exc:
+            # The ONLY exception `run_task` still lets propagate — see
+            # `AgentConstructionError`'s docstring. Nothing billable has
+            # happened yet, so this is genuinely free to retry.
+            raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
 
         prompt = (
             f"{task['question']}\n\nAnswer guidelines: {task.get('guidelines', '')}"
@@ -542,36 +636,84 @@ def run_task(
                 verdict = "error"
                 answer = f"{type(exc).__name__}: {exc}"
 
-        tool_calls = _tool_call_names(messages)
-        rejections = _inspect_rejections(messages)
-        retry_prompts = _retry_prompt_count(messages)
-        # Read before `setup.close()` (in `finally`, below) even though
-        # `ContractSession.retries` is a plain int attribute unaffected by
-        # the connection's lifecycle — matching `dce/arms.py`'s CALL ORDER
-        # discipline of treating "read everything, then close" as the one
-        # safe sequence rather than relying on which specific reads happen
-        # to be connection-independent today.
-        # `ArmSetup.session` is typed `object | None` (see `dce/arms.py`), so
-        # this reads it dynamically rather than narrowing on `is not None` —
-        # a plain `object` has no `.retries` either way, and `getattr` gives
-        # the same "0 for schema_only/manual_prompt" result without a
-        # type-checker false positive.
-        enforcement_blocks = getattr(setup.session, "retries", 0)
+        # EVERYTHING FROM HERE THROUGH `build_result_row` RUNS AFTER THE
+        # BILLABLE CALL HAS ALREADY HAPPENED (or the cap already tripped):
+        # `usage` already holds real, non-refundable counts by this point.
+        # A bug anywhere in this bookkeeping tail — `_tool_call_names`,
+        # `_inspect_rejections`, `_retry_prompt_count`, the session
+        # `getattr`, `_clean`, `build_result_row` itself — must not let
+        # that already-spent money vanish into an untraceable $0.00 row
+        # that a resumed sweep then retries forever for free. This
+        # module's own history is the reason this is guarded as a whole,
+        # not left to the individual calls: commit a2c5d1d was exactly
+        # this class of bug (`result.usage()` instead of the property)
+        # shipped in this same region once already, and a future
+        # pydantic-ai rename would reproduce it verbatim without this.
+        try:
+            tool_calls = _tool_call_names(messages)
+            rejections = _inspect_rejections(messages)
+            retry_prompts = _retry_prompt_count(messages)
+            # Read before `setup.close()` (in `finally`, below) even though
+            # `ContractSession.retries` is a plain int attribute unaffected
+            # by the connection's lifecycle — matching `dce/arms.py`'s CALL
+            # ORDER discipline of treating "read everything, then close" as
+            # the one safe sequence rather than relying on which specific
+            # reads happen to be connection-independent today.
+            # `ArmSetup.session` is typed `object | None` (see
+            # `dce/arms.py`), so this reads it dynamically rather than
+            # narrowing on `is not None` — a plain `object` has no
+            # `.retries` either way, and `getattr` gives the same "0 for
+            # schema_only/manual_prompt" result without a type-checker
+            # false positive.
+            enforcement_blocks = getattr(setup.session, "retries", 0)
 
-        # Scored only if the model call itself completed — scoring a cap
-        # trip or a mid-run error against `gold` would misrepresent a
-        # harness artifact as a graded attempt. Kept out of the try/except
-        # above (Important 3): `score` raising must not overwrite a good
-        # `answer` with an exception string and relabel it "error" — a
-        # scoring failure gets its own verdict instead, and the real answer
-        # this run produced is preserved either way.
-        if verdict == "unset":
-            try:
-                verdict = "correct" if score(answer, gold) else "incorrect"
-            except Exception:
-                verdict = "scoring_error"
+            # Scored only if the model call itself completed — scoring a
+            # cap trip or a mid-run error against `gold` would
+            # misrepresent a harness artifact as a graded attempt. Kept
+            # out of the try/except above (Important 3): `score` raising
+            # must not overwrite a good `answer` with an exception text
+            # and relabel it `error` — a scoring failure gets its own
+            # verdict instead, and the real answer this run produced is
+            # preserved either way.
+            if verdict == "unset":
+                try:
+                    verdict = "correct" if score(answer, gold) else "incorrect"
+                except Exception:
+                    verdict = "scoring_error"
 
-        answer_normalized = _clean(answer)
+            answer_normalized = _clean(answer)
+
+            return build_result_row(
+                task=task,
+                arm=arm,
+                model=model,
+                answer=answer,
+                answer_normalized=answer_normalized,
+                gold=gold,
+                verdict=verdict,
+                in_tok=usage.input_tokens,
+                out_tok=usage.output_tokens,
+                cached_tok=usage.cache_read_tokens,
+                turns=usage.requests,
+                tool_calls=tool_calls,
+                inspect_rejections=rejections,
+                enforcement_blocks=enforcement_blocks,
+                retry_prompts=retry_prompts,
+                request_limit=REQUEST_LIMIT,
+                token_cap=token_cap,
+                golds_hash=golds_hash,
+            )
+        except Exception as exc:
+            return _priced_fallback_row(
+                task=task,
+                arm=arm,
+                model=model,
+                gold=gold,
+                golds_hash=golds_hash,
+                usage=usage,
+                verdict="post_run_error",
+                note=f"{type(exc).__name__}: {exc}",
+            )
     finally:
         # Arm C's adapter holds a live DuckDB connection open for the arm's
         # whole lifetime. It MUST be closed here — on every path, including
@@ -581,25 +723,10 @@ def run_task(
         # so a check performed against a live connection is not a valid
         # check and its repair is not guaranteed to survive the connection's
         # later close. See `dce/arms.py`'s module docstring, CALL ORDER.
-        setup.close()
-
-    return build_result_row(
-        task=task,
-        arm=arm,
-        model=model,
-        answer=answer,
-        answer_normalized=answer_normalized,
-        gold=gold,
-        verdict=verdict,
-        in_tok=usage.input_tokens,
-        out_tok=usage.output_tokens,
-        cached_tok=usage.cache_read_tokens,
-        turns=usage.requests,
-        tool_calls=tool_calls,
-        inspect_rejections=rejections,
-        enforcement_blocks=enforcement_blocks,
-        retry_prompts=retry_prompts,
-        request_limit=REQUEST_LIMIT,
-        token_cap=token_cap,
-        golds_hash=golds_hash,
-    )
+        # Guarded, not bare: a close failure here must not replace whatever
+        # `row`/exception the `try` above already produced — the money is
+        # already spent and priced either way by this point.
+        try:
+            setup.close()
+        except Exception:
+            pass

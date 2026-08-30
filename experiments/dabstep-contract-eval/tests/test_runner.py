@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 
 import pytest
-from dce.agent import build_result_row
+from dce.agent import AgentConstructionError, _token_budget_usd, build_result_row
 from dce.data import DATASET_REVISION
 from dce.runner import (
+    MAX_CONSTRUCTION_ATTEMPTS,
     SweepResult,
     _construction_error_row,
     _exit_code_for,
@@ -13,8 +14,11 @@ from dce.runner import (
     _seed_observed_by_model,
     _stratified_sample,
     _working_db_path,
+    _worst_case_task_group_usd,
     assert_clean_tree,
     completed_keys,
+    gave_up_keys,
+    latest_rows,
     pending,
     spent_so_far,
     sweep,
@@ -54,7 +58,7 @@ def test_completed_keys_on_missing_file_is_empty(tmp_path: Path):
     assert completed_keys(tmp_path / "absent.jsonl") == set()
 
 
-def test_completed_keys_always_retries_construction_error_rows(tmp_path: Path):
+def test_completed_keys_retries_construction_error_rows_below_the_cap(tmp_path: Path):
     path = tmp_path / "r.jsonl"
     path.write_text(
         json.dumps(
@@ -67,8 +71,34 @@ def test_completed_keys_always_retries_construction_error_rows(tmp_path: Path):
         )
         + "\n"
     )
+    assert MAX_CONSTRUCTION_ATTEMPTS > 1  # a single attempt must be below the cap
     assert completed_keys(path) == set()
     assert completed_keys(path, retry_error=True) == set()  # unaffected by the flag
+
+
+def test_completed_keys_stops_retrying_construction_error_after_the_cap(
+    tmp_path: Path,
+):
+    """'Cheap twice, then loud': once a key has accumulated
+    `MAX_CONSTRUCTION_ATTEMPTS` `construction_error` rows, it must be
+    treated as terminal (done) so a resume stops hammering a persistent
+    problem forever."""
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "task_id": "1",
+                    "arm": "contract",
+                    "model": "m",
+                    "verdict": "construction_error",
+                }
+            )
+            for _ in range(MAX_CONSTRUCTION_ATTEMPTS)
+        )
+        + "\n"
+    )
+    assert completed_keys(path) == {("1", "contract", "m")}
 
 
 def test_completed_keys_retries_error_rows_only_when_requested(tmp_path: Path):
@@ -99,6 +129,81 @@ def test_completed_keys_treats_hit_limit_and_scoring_error_as_terminal(tmp_path:
         ("1", "contract", "m"),
         ("2", "contract", "m"),
     }
+
+
+# ── gave_up_keys ─────────────────────────────────────────────────────────
+
+
+def test_gave_up_keys_is_empty_below_the_cap(tmp_path: Path):
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "task_id": "1",
+                "arm": "contract",
+                "model": "m",
+                "verdict": "construction_error",
+            }
+        )
+        + "\n"
+    )
+    assert gave_up_keys(path) == set()
+
+
+def test_gave_up_keys_reports_units_that_exhausted_the_cap(tmp_path: Path):
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "task_id": "1",
+                    "arm": "contract",
+                    "model": "m",
+                    "verdict": "construction_error",
+                }
+            )
+            for _ in range(MAX_CONSTRUCTION_ATTEMPTS)
+        )
+        + "\n"
+    )
+    assert gave_up_keys(path) == {("1", "contract", "m")}
+
+
+# ── latest_rows ──────────────────────────────────────────────────────────
+
+
+def test_latest_rows_keeps_only_the_last_row_per_key(tmp_path: Path):
+    """Three failing resumes then a success must dedupe to ONE row for that
+    key, not four — a raw iteration would count the stale
+    `construction_error` rows as wrong answers alongside the real success."""
+    path = tmp_path / "r.jsonl"
+    rows = [
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+        {"task_id": "1", "arm": "contract", "model": "m", "verdict": "error"},
+        {"task_id": "1", "arm": "contract", "model": "m", "verdict": "correct"},
+        {"task_id": "2", "arm": "contract", "model": "m", "verdict": "incorrect"},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    deduped = latest_rows(path)
+    assert len(deduped) == 2  # one per key, not five
+    by_key = {(r["task_id"], r["arm"], r["model"]): r for r in deduped}
+    assert by_key[("1", "contract", "m")]["verdict"] == "correct"
+    assert by_key[("2", "contract", "m")]["verdict"] == "incorrect"
+
+
+def test_latest_rows_on_missing_file_is_empty(tmp_path: Path):
+    assert latest_rows(tmp_path / "absent.jsonl") == []
 
 
 # ── spent_so_far ─────────────────────────────────────────────────────────
@@ -169,6 +274,17 @@ def test_next_reserve_never_reads_zero_as_free():
     assert _next_reserve([0.0, 0.0], floor=0.0) > 0.0
 
 
+def test_next_reserve_does_not_let_a_cheap_observation_undercut_the_floor():
+    # I1a: a cheap early call ($0.02) must not collapse the reservation
+    # below the real per-model ceiling ($0.183) for a later, possibly
+    # worst-case call — measured without this: an 82% budget overrun.
+    assert _next_reserve([0.02], floor=0.183) == 0.183
+
+
+def test_next_reserve_still_grows_past_the_floor_if_actually_observed():
+    assert _next_reserve([0.02, 5.00], floor=0.183) == 5.00
+
+
 # ── _seed_observed_by_model ──────────────────────────────────────────────
 
 
@@ -186,6 +302,28 @@ def test_seed_observed_by_model_only_counts_billable_rows(tmp_path: Path):
         + "\n"
     )
     assert _seed_observed_by_model(path) == {"m1": [0.40]}
+
+
+# ── _worst_case_task_group_usd ───────────────────────────────────────────
+
+
+def test_worst_case_task_group_usd_sums_across_arms_and_models():
+    # I1b: the real reservation `sweep` checks is per TASK GROUP, not per
+    # call — every arm x every model's ceiling, summed. Three arms against
+    # one model must be 3x that model's own per-call ceiling, not the
+    # per-call figure alone (measured: printing the per-call figure
+    # overstated admissible tasks by exactly that factor).
+    expected = 3 * _token_budget_usd(GLM)
+    assert _worst_case_task_group_usd(("a", "b", "c"), (GLM,)) == pytest.approx(
+        expected
+    )
+
+
+def test_worst_case_task_group_usd_sums_across_multiple_models_too():
+    expected = 2 * (_token_budget_usd(GLM) + _token_budget_usd(DEEPSEEK_FLASH))
+    assert _worst_case_task_group_usd(
+        ("a", "b"), (GLM, DEEPSEEK_FLASH)
+    ) == pytest.approx(expected)
 
 
 # ── sweep: the spend cap ─────────────────────────────────────────────────
@@ -429,7 +567,7 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     def flaky_run(task, arm, model, *a, **k):
         calls.append(task["task_id"])
         if task["task_id"] == "0":
-            raise KeyError("OPENROUTER_API_KEY")
+            raise AgentConstructionError("missing OPENROUTER_API_KEY")
         return {
             "task_id": task["task_id"],
             "arm": arm,
@@ -444,7 +582,7 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     ]
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
-    sweep(
+    result = sweep(
         tasks,
         ("schema_only",),
         (GLM,),
@@ -463,7 +601,106 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     assert rows[0]["task_id"] == "0"
     assert rows[0]["level"] == "hard"  # schema-compat: Task 9's accuracy_by needs this
     assert "db_corrupted" in rows[0]
+    # A1 layer 3: priced pessimistically, not $0.00 — see
+    # test_construction_error_row_has_build_result_row_shape.
+    assert rows[0]["usd"] == _token_budget_usd(GLM)
     assert rows[1]["verdict"] == "correct"
+    assert result.spent == pytest.approx(_token_budget_usd(GLM) + 0.01)
+
+
+def test_sweep_gives_up_after_max_construction_attempts_across_resumes(
+    tmp_path: Path,
+):
+    """'Cheap twice, then loud': a persistently failing unit (e.g. an
+    API key that is never fixed) must stop being retried after
+    `MAX_CONSTRUCTION_ATTEMPTS` resumes, not hammer the same failure
+    forever."""
+    calls = []
+
+    def always_fails(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        raise AgentConstructionError("missing OPENROUTER_API_KEY")
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+
+    for _ in range(MAX_CONSTRUCTION_ATTEMPTS + 2):  # more resumes than the cap allows
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=always_fails,
+        )
+
+    assert len(calls) == MAX_CONSTRUCTION_ATTEMPTS
+    assert gave_up_keys(out) == {("1", "contract", GLM)}
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == MAX_CONSTRUCTION_ATTEMPTS
+    assert all(r["verdict"] == "construction_error" for r in rows)
+
+
+def test_sweep_lets_a_real_bug_in_run_task_fn_propagate(tmp_path: Path):
+    """Only `AgentConstructionError` is swallowed into a `construction_error`
+    row — anything else (a signature mismatch, an unrelated `TypeError`,
+    ...) is a real bug and must stop the sweep loudly rather than being
+    silently treated as a free, retryable construction failure."""
+
+    def buggy_run(task, arm, model, *a, **k):
+        raise TypeError("run_task_fn() got an unexpected keyword argument")
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    with pytest.raises(TypeError):
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=1.0,
+            golds_hash="h",
+            run_task_fn=buggy_run,
+        )
+    assert out.read_text() == ""  # nothing written; the bug surfaced, not swallowed
+
+
+def test_sweep_stops_loudly_and_writes_nothing_when_usd_is_missing(tmp_path: Path):
+    """I3 residual: a row must be validated BEFORE it is written — an
+    un-priced row must never land on disk looking like a free, permanently
+    -done unit."""
+
+    def unpriced_run(task, arm, model, *a, **k):
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "verdict": "correct",
+        }  # no "usd" key at all
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    with pytest.raises(KeyError):
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=1.0,
+            golds_hash="h",
+            run_task_fn=unpriced_run,
+        )
+    assert out.read_text() == ""
 
 
 def test_sweep_with_no_pending_work_skips_the_working_copy(tmp_path: Path):
@@ -517,10 +754,18 @@ def test_construction_error_row_has_build_result_row_shape():
         golds_hash="h",
     )
     error_row = _construction_error_row(
-        TASKS[0], "contract", GLM, "g", "h", KeyError("OPENROUTER_API_KEY")
+        TASKS[0],
+        "contract",
+        GLM,
+        "g",
+        "h",
+        AgentConstructionError("missing OPENROUTER_API_KEY"),
     )
     assert set(real_row.keys()) <= set(error_row.keys())
     assert error_row["level"] == "hard"
+    # A1 layer 3: priced at the pessimistic ceiling, not $0.00, even though
+    # a genuine construction failure spent nothing — a deliberate backstop.
+    assert error_row["usd"] == _token_budget_usd(GLM)
 
 
 # ── stratified --n sampling ────────────────────────────────────────────
@@ -618,15 +863,31 @@ def test_assert_clean_tree_passes_on_clean_tree():
     assert_clean_tree(git_status_fn=lambda: "")  # must not raise
 
 
-def test_assert_clean_tree_ignores_the_sweep_output_path(tmp_path: Path):
+def test_assert_clean_tree_ignores_only_the_exact_output_file(tmp_path: Path):
     out = tmp_path / "results" / "r.jsonl"
-    porcelain = "?? results/r.jsonl\n?? results/scratch.tmp\n"
+    porcelain = "?? results/r.jsonl\n"
     assert_clean_tree(out=out, repo_root=tmp_path, git_status_fn=lambda: porcelain)
 
 
 def test_assert_clean_tree_still_fails_on_other_dirty_files(tmp_path: Path):
     out = tmp_path / "results" / "r.jsonl"
     porcelain = "?? results/r.jsonl\n M dce/runner.py\n"
+    try:
+        assert_clean_tree(out=out, repo_root=tmp_path, git_status_fn=lambda: porcelain)
+        raise AssertionError("expected SystemExit")
+    except SystemExit:
+        pass
+
+
+def test_assert_clean_tree_does_not_exempt_a_different_file_in_the_same_results_dir(
+    tmp_path: Path,
+):
+    """I5 minor: exempting the whole `results/` directory instead of just
+    `out` would let a change to a DIFFERENT, previous run's results file —
+    an edit or deletion — pass silently. Only the exact `out` path is
+    exempt."""
+    out = tmp_path / "results" / "r.jsonl"
+    porcelain = "?? results/r.jsonl\n?? results/scratch.tmp\n"
     try:
         assert_clean_tree(out=out, repo_root=tmp_path, git_status_fn=lambda: porcelain)
         raise AssertionError("expected SystemExit")

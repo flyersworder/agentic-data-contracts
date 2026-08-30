@@ -29,3 +29,25 @@ def test_comma_lists_compare_order_insensitively():
 def test_a_wrong_answer_is_wrong():
     assert not score("BE", "NL")
     assert not score("fee_1", "fee_1, fee_2")
+
+
+def test_thousands_grouped_gold_is_not_split_into_a_list():
+    assert not score("500,10", "10,500")
+    assert not score("234,1", "1,234")
+
+
+def test_thousands_grouped_number_matches_its_plain_form_either_direction():
+    assert score("1234.56", "1,234.56")
+    assert score("1,234.56", "1234.56")
+
+
+def test_thousands_grouped_gold_matches_itself():
+    assert score("1,234.56", "1,234.56")
+
+
+def test_genuine_lists_still_compare_order_insensitively():
+    assert score("fee_3, fee_1", "fee_1,fee_3")
+    assert score(
+        "Ecommerce: 97.68, POS: 88.49",
+        "[POS: 88.49, Ecommerce: 97.68]",
+    )

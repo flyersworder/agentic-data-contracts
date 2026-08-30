@@ -10,6 +10,7 @@ import re
 
 _NA = {"", "n/a", "na", "none", "null", "not applicable"}
 _BRACKETS = re.compile(r"^[\[\('\"]+|[\]\)'\"]+$")
+_THOUSANDS = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
 
 
 def _official(predicted: str, gold: str) -> bool | None:
@@ -31,6 +32,11 @@ def _as_float(value: str) -> float | None:
         return None
 
 
+def _is_thousands_grouped(value: str) -> bool:
+    """True for a single numeric literal like `1,234.56`, not a list of values."""
+    return bool(_THOUSANDS.match(value))
+
+
 def _scalar_match(predicted: str, gold: str) -> bool:
     p, g = _clean(predicted), _clean(gold)
     if p.lower() in _NA and g.lower() in _NA:
@@ -49,7 +55,7 @@ def score(predicted: str, gold: str) -> bool:
         return official
 
     p, g = _clean(predicted), _clean(gold)
-    if "," in g:
+    if "," in g and not _is_thousands_grouped(g):
         pl = sorted(_clean(x).lower() for x in p.split(",") if _clean(x))
         gl = sorted(_clean(x).lower() for x in g.split(",") if _clean(x))
         return pl == gl

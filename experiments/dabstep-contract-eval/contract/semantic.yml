@@ -78,12 +78,28 @@ metrics:
 
   - name: fee_rule_matches_merchant_month
     description: >
+      NOT RUNNABLE AS WRITTEN: `:volume` and `:fraud_ratio` are placeholders you
+      must textually substitute before executing this SQL — nothing in the
+      contract or the tools binds them, so pasting the expression unchanged into
+      `run_query` raises a prepared-statement error. Substitute `:volume` with
+      the merchant's `merchant_monthly_volume` for the month in question (a
+      number of euros, or that metric's SQL) and `:fraud_ratio` with its
+      `merchant_monthly_fraud_level` (a fraction, not a percentage).
+
       True when fee rule `f` applies to a merchant in a given natural month, on
       the two fields that are properties of the month rather than of a single
-      transaction: `monthly_volume` and `monthly_fraud_level`. `:volume` is the
-      merchant's `merchant_monthly_volume` for that month and `:fraud_ratio` its
-      `merchant_monthly_fraud_level` (a fraction, not a percentage). Null in
-      either field means the rule applies to all values of it.
+      transaction: `monthly_volume` and `monthly_fraud_level`. Null in either
+      field means the rule applies to all values of it.
+
+      This is the authority on band membership. It reads the manual's "between A
+      and B" as inclusive at both ends, so a value sitting exactly on a shared
+      boundary — a volume of exactly 1,000,000, a fraud ratio of exactly 7.7% —
+      satisfies both adjacent bands and both rules match. The manual does not
+      resolve that tie, and this predicate does not have to: a rule either
+      matches or it does not, independently of every other rule. The companion
+      metrics `monthly_volume_band` and `monthly_fraud_level_band` must return a
+      single band and therefore do break the tie; where the two disagree, this
+      one is correct.
     sql_expression: >
       (f.monthly_volume IS NULL OR CASE f.monthly_volume
          WHEN '<100k'   THEN :volume <  100000
@@ -102,14 +118,26 @@ metrics:
 
   - name: monthly_volume_band
     description: >
-      The `fees.monthly_volume` band a merchant's monthly total volume falls in.
-      The manual defines the band format: "'100k-1m' is between 100.000 (100k)
-      and 1.000.000 (1m). All volumes are specified in euros. Normally merchants
-      with higher volume are able to get cheaper fees from payments processors."
+      NOT RUNNABLE AS WRITTEN: `:volume` is a placeholder you must textually
+      substitute with the merchant's monthly volume in euros before executing
+      this SQL; nothing binds it, and running it unchanged raises a
+      prepared-statement error.
+
+      The single `fees.monthly_volume` band a merchant's monthly total volume
+      falls in. The manual defines the band format: "'100k-1m' is between
+      100.000 (100k) and 1.000.000 (1m). All volumes are specified in euros.
+      Normally merchants with higher volume are able to get cheaper fees from
+      payments processors."
       INTERPRETATION: the manual says "between A and B" without saying which
-      band owns a value sitting exactly on a shared boundary, so both adjacent
-      bands are read as inclusive and a boundary value matches both. The band
-      literals below are those the annexed `fees` ruleset uses.
+      band owns a value sitting exactly on a shared boundary. A CASE must return
+      one value, so this expression breaks the tie downward: exactly 100,000
+      yields '100k-1m', exactly 1,000,000 yields '100k-1m', exactly 5,000,000
+      yields '1m-5m'. That tie-break is this metric's, not the manual's. Fee
+      *matching* does not have to choose and does not: in
+      `fee_rule_matches_merchant_month` a boundary value satisfies both adjacent
+      bands, which is what the manual's wording licenses. Use that predicate,
+      not this label, to decide whether a rule applies. The band literals below
+      are those the annexed `fees` ruleset uses.
     sql_expression: >
       CASE
         WHEN :volume <  100000  THEN '<100k'
@@ -122,13 +150,23 @@ metrics:
 
   - name: monthly_fraud_level_band
     description: >
-      The `fees.monthly_fraud_level` band a merchant's monthly fraud ratio falls
-      in. The manual defines the band as a "ratio between monthly total volume
-      and monthly volume notified as fraud. For example '7.7%-8.3%' means that
-      the ratio should be between 7.7 and 8.3 percent. Generally, the payment
-      processors will become more expensive as fraud rate increases."
-      `:fraud_ratio` is a fraction, so it is scaled by 100 to compare against
-      the percentage band. Same boundary ambiguity as `monthly_volume_band`.
+      NOT RUNNABLE AS WRITTEN: `:fraud_ratio` is a placeholder you must
+      textually substitute with the merchant's monthly fraud ratio — a fraction,
+      not a percentage — before executing this SQL; nothing binds it, and
+      running it unchanged raises a prepared-statement error. It is scaled by
+      100 below to compare against the percentage band.
+
+      The single `fees.monthly_fraud_level` band a merchant's monthly fraud
+      ratio falls in. The manual defines the band as a "ratio between monthly
+      total volume and monthly volume notified as fraud. For example '7.7%-8.3%'
+      means that the ratio should be between 7.7 and 8.3 percent. Generally, the
+      payment processors will become more expensive as fraud rate increases."
+      INTERPRETATION: as with `monthly_volume_band`, a CASE must return one
+      value, so this expression breaks the manual's unresolved boundary tie
+      downward — exactly 7.7% yields '7.2%-7.7%', exactly 8.3% yields
+      '7.7%-8.3%'. `fee_rule_matches_merchant_month` does not break the tie and
+      matches both adjacent bands; it is the authority on whether a rule
+      applies.
     sql_expression: >
       CASE
         WHEN 100 * :fraud_ratio <  7.2 THEN '<7.2%'
@@ -256,6 +294,27 @@ metrics:
     source_model: main.payments
     domains: [reporting]
 
+  # ── Fraud prevention adoption (manual 4, 5.1.5, 7.1) ────────────────────────
+  - name: three_d_secure_share
+    description: >
+      The share of card-not-present transactions that were authenticated with
+      3-D Secure. The manual asks merchants to "implement 3D Secure, a payment
+      security protocol that adds an additional layer of authentication for
+      online transactions" (manual 7.1) and warns that "failure to use AVS or 3D
+      Secure for card-not-present transactions" is a common cause of transaction
+      downgrades (manual 5.1.5). Manual 4 makes it measurable: ACI F is "Card
+      Not Present - 3-D Secure" and ACI G is "Card Not Present - Non-3-D
+      Secure", so F over (F + G) is the adoption rate among exactly the traffic
+      the two sections are about. The denominator is deliberately F + G rather
+      than all transactions: ACIs A, B and C are card-present or tokenized flows
+      where 3-D Secure does not apply, and D and E are card-not-present flows
+      the manual's own ACI table does not classify either way.
+    sql_expression: >
+      COUNT(*) FILTER (WHERE p.aci = 'F')
+      / NULLIF(COUNT(*) FILTER (WHERE p.aci IN ('F', 'G')), 0)
+    source_model: main.payments
+    domains: [fraud, transactions, cost_optimization]
+
   # NOT ENCODED — chargeback_rate. Manual 7.2 and 8.2 ask merchants to keep the
   # chargeback rate low and to track it, but the manual never defines it and no
   # column of these five tables records a chargeback. `has_fraudulent_dispute`
@@ -269,14 +328,21 @@ metrics:
   # ruleset is the `monthly_volume` band, which `monthly_volume_band` covers.
   #
   # NOT ENCODED — transaction downgrades (manual 5.1.5), PIN entry attempt
-  # limits (manual 6), fraud-prevention tooling (manual 7.1), staff training
-  # (manual 7.3), PCI DSS compliance and its EUR 5,000-100,000 monthly penalty
-  # (manual 7.4), and the reporting-tool inventory (manual 8). None is
-  # computable over these tables: there is no settlement timestamp, retry
-  # counter, interchange tier, PIN attempt, AVS/CVV/3DS flag, training record
-  # or compliance status anywhere in the schema. Each is carried as governed
-  # prose on the domain that owns it (`cost_optimization`, `compliance`,
-  # `fraud`, `reporting`) and is reachable through `lookup_domain`.
+  # limits (manual 6), the AVS / CVV-check / risk-engine part of the
+  # fraud-prevention tooling (manual 7.1), staff training (manual 7.3), PCI DSS
+  # compliance and its EUR 5,000-100,000 monthly penalty (manual 7.4), and the
+  # reporting-tool inventory (manual 8). None is computable over these tables:
+  # there is no settlement timestamp, retry counter, interchange tier, PIN
+  # attempt, AVS or CVV result, risk-engine verdict, training record or
+  # compliance status anywhere in the schema. Each is carried as governed prose
+  # on the domain that owns it (`cost_optimization`, `compliance`, `fraud`,
+  # `reporting`) and is reachable through `lookup_domain`.
+  #
+  # The 3-D Secure part of manual 7.1 IS encoded, as `three_d_secure_share`
+  # above: manual 4's ACI table splits card-not-present traffic into 3-D Secure
+  # (F) and non-3-D Secure (G), which makes adoption measurable from the two
+  # source documents alone. Listing it as unencodable would have understated
+  # what a contract can carry.
 
 tables:
   # Column documentation. `describe_table` overlays these descriptions onto the
@@ -284,9 +350,14 @@ tables:
   # lands.
   - schema: main
     table: payments
-    # Every description below is quoted or condensed from `payments-readme.md`,
-    # which documents payments.csv as a "synthetic dataset of payment
-    # transactions processed by the Payments Processor".
+    # Every description below is quoted or condensed from `payments-readme.md`.
+    # Its dataset-level sentence — payments.csv is a "synthetic dataset of
+    # payment transactions processed by the Payments Processor" — cannot live
+    # here: `TableSchema` (adapters/base.py) carries only `columns`, and this
+    # file's table parser reads only `schema`, `table` and `columns`, so a
+    # `description:` key on a table entry would be dropped without a word. It is
+    # carried in the `allowed_tables` schema-group description in contract.yml
+    # instead, which is rendered to the agent and inside the digest.
     columns:
       - {name: psp_reference, type: BIGINT, description: "Unique payment identifier (ID)."}
       - {name: merchant, type: VARCHAR, description: "Merchant name (categorical), e.g. Starbucks or Netflix."}

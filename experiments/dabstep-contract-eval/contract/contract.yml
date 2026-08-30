@@ -31,8 +31,17 @@ semantic:
     # XmlPromptRenderer(extra_sections=...).
     expected_extras: []
   allowed_tables:
+    # The description carries the payments readme's one dataset-level sentence.
+    # It belongs on the table, not the schema, but this library's `TableSchema`
+    # has no table-level description field (see the note in semantic.yml), and
+    # the experiment measures the library as shipped rather than patched. With a
+    # single schema holding all five context tables, schema granularity is the
+    # closest home that is rendered to the agent and covered by the digest.
     - schema: main
-      description: "DABStep payments context tables (manual annexes + payments.csv)"
+      description: >-
+        DABStep payments context tables (manual annexes + payments.csv).
+        payments.csv is a synthetic dataset of payment transactions processed by
+        the Payments Processor.
       preferred: true
       tables:
         [payments, fees, merchant_data, acquirer_countries, merchant_category_codes]
@@ -173,7 +182,11 @@ semantic:
         Secure adds an additional layer of authentication for online
         transactions. A risk engine — rules-based, machine-learning, or both —
         analyses transaction data, identifies suspicious patterns and blocks
-        attempts that are likely to be fraudulent.
+        attempts that are likely to be fraudulent. Of these four, only 3-D
+        Secure is observable: manual 4 splits card-not-present traffic into ACI
+        F (3-D Secure) and ACI G (non-3-D Secure), which the metric
+        `three_d_secure_share` measures. No column records an AVS result, a CVV
+        check or a risk-engine verdict.
 
         CHARGEBACKS (manual 7.2). Keep the chargeback rate below the desired
         levels of total transactions to avoid penalties and increased costs;
@@ -279,6 +292,50 @@ semantic:
         prose, reachable through `lookup_domain("compliance")`.
       tables: []
 
+    # A domain of pure document facts. It holds no data semantics at all, and by
+    # the governance reading of "what belongs in a data contract" it does not
+    # belong here. It is carried anyway, because the experiment's foundation is
+    # that arm B and arm C hold the *same documented knowledge in different
+    # form*: the manual states these facts, arm B receives them verbatim, and a
+    # question answerable from the manual alone must be answerable from the
+    # contract alone. An asymmetry that happens to point against arm C is still
+    # an asymmetry.
+    - name: support
+      summary: "Document metadata and the manual's contact directory (manual title block, 10)"
+      description: >
+        DOCUMENT METADATA (manual title block). The source document is the
+        "Merchant Guide to Optimizing Payment Processing and Minimizing Fees",
+        Version 2.1, Last Updated: November 1, 2024. Its table of contents runs:
+        1. Introduction; 2. Account Type; 3. Merchant Category Code;
+        4. Authorization Characteristics Indicator; 5. Understanding Payment
+        Processing Fees; 6. PIN Entry Attempt Limits; 7. Reducing Fraud-Related
+        Fees; 8. Leveraging Data and Reporting; 9. Appendix (Glossary);
+        10. Contact Information.
+
+        CONTACT INFORMATION (manual 10).
+        Merchant Services Support — phone 1-800-555-1234, email
+        support@paymentprocessor.com, website
+        www.paymentprocessor.com/support.
+        Fraud Prevention Team — phone 1-800-555-5678, email
+        fraud@paymentprocessor.com.
+        Technical Support — phone 1-800-555-9876, email
+        tech@paymentprocessor.com.
+
+        GLOSSARY (manual 9). AVS: Address Verification Service. CVV: Card
+        Verification Value. PCI DSS: Payment Card Industry Data Security
+        Standard. ACI: Authorization Characteristics Indicator.
+
+        DISCLAIMER (manual 10). "This document is for informational purposes
+        only and does not constitute legal or financial advice. Please consult
+        with your payment processor or a qualified professional for advice
+        specific to your business." (c) 2024 Payment Processor, Inc. All rights
+        reserved.
+
+        Nothing here is computable over the five tables, and nothing here
+        governs a query. It is documentation of the document, reachable through
+        `lookup_domain("support")`.
+      tables: []
+
   rules:
     - name: no_select_star
       description: "Queries must name their columns; use preview_table to explore"
@@ -297,6 +354,11 @@ semantic:
 # Where each part of manual.md landed, so the encoding can be audited against
 # the source without re-reading both end to end:
 #
+#   Title block .................. `support` domain — the document's name,
+#                                    "Version 2.1", "Last Updated: November 1,
+#                                    2024" and the table of contents. Stated
+#                                    facts arm B holds verbatim, so arm C holds
+#                                    them too.
 #   1  Introduction ................ nowhere. It states the document's own
 #                                    purpose ("this guide provides best
 #                                    practices..."); it asserts no fact about
@@ -305,6 +367,9 @@ semantic:
 #                                    fees.account_type / merchant_data.account_type
 #   3  Merchant Category Code ..... `merchants` domain + column descriptions
 #   4  ACI .......................... `transactions` domain + payments.aci column
+#                                    descriptions; the F/G split (3-D Secure vs
+#                                    non-3-D Secure) also drives the metric
+#                                    three_d_secure_share
 #   5  Payment processing fees ..... `fees` domain, the fees column descriptions,
 #                                    and metrics transaction_fee,
 #                                    total_transaction_fees,
@@ -327,8 +392,15 @@ semantic:
 #                                    attempt or card-block column)
 #   7    Fraud definition .......... `fraud` domain, metrics fraud_rate and
 #                                    merchant_monthly_fraud_level
-#   7.1  Prevention tooling ....... `fraud` domain (NOT ENCODABLE: no AVS/CVV/3DS
-#                                    or risk-engine column)
+#   7.1  Prevention tooling ....... `fraud` domain. The 3-D Secure half IS
+#                                    encodable: manual 4 defines ACI F as
+#                                    card-not-present 3-D Secure and G as
+#                                    card-not-present non-3-D Secure, so
+#                                    three_d_secure_share measures adoption
+#                                    among card-not-present traffic. AVS, CVV
+#                                    checks and the risk engine remain NOT
+#                                    ENCODABLE: no column records whether any
+#                                    of them ran.
 #   7.2  Chargebacks .............. `fraud` domain (NOT ENCODABLE: no chargeback
 #                                    column, and the manual gives no formula)
 #   7.3  Staff training ........... `fraud` domain (NOT ENCODABLE: no data)
@@ -339,18 +411,31 @@ semantic:
 #   9  Appendix / Glossary ........ the four expansions (AVS, CVV, PCI DSS, ACI)
 #                                    are written out where they are used, in the
 #                                    `fraud`, `compliance` and `transactions`
-#                                    domains; the glossary itself has no separate
-#                                    home
-#   10 Contact information ........ nowhere. Phone numbers, e-mail addresses and
-#                                    the legal disclaimer describe the processor,
-#                                    not the data; nothing in the schema relates
-#                                    to them and no query can be governed by
-#                                    them. This is the one block of the manual
-#                                    deliberately left uncarried, and it is
-#                                    recorded here rather than dropped silently.
+#                                    domains, and the glossary is also carried
+#                                    verbatim in the `support` domain
+#   10 Contact information ........ `support` domain, verbatim — three teams,
+#                                    their phone numbers and e-mail addresses,
+#                                    the support website, and the legal
+#                                    disclaimer. None of it is computable over
+#                                    the five tables and none of it governs a
+#                                    query, so by a governance reading it does
+#                                    not belong in a data contract at all. It is
+#                                    carried because the manual states it and
+#                                    arm B holds it: a question answerable from
+#                                    the manual alone must be answerable from
+#                                    the contract alone, or the two arms no
+#                                    longer carry the same knowledge.
 #
-# `payments-readme.md` is carried in full as column descriptions on
-# main.payments in semantic.yml — one entry per documented column, all 21.
+# `payments-readme.md` is carried as column descriptions on main.payments in
+# semantic.yml — one entry per documented column, all 21 — plus its one
+# dataset-level statement ("synthetic dataset of payment transactions processed
+# by the Payments Processor"), which rides in the `allowed_tables` schema-group
+# description above. That is a workaround, not the natural home: this library's
+# `TableSchema` carries columns but no table-level `description`, and a
+# `description:` key written inside a table entry in semantic.yml is silently
+# ignored rather than rejected. The workaround loses table granularity and
+# nothing else; both facts reach the agent and both are inside the digest. See
+# the task report — the missing field is worth raising upstream.
 
 # No `resources` or `temporal` block. The brief's skeleton carried a
 # `semantic.limits.max_rows`, which this library's schema does not define — it

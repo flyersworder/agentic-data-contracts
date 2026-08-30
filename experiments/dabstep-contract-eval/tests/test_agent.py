@@ -202,6 +202,7 @@ def test_result_row_carries_full_provenance():
         "cached_tokens",
         "turns",
         "usd",
+        "usd_guard",
         "tool_calls",
         "inspect_rejections",
         "enforcement_blocks",
@@ -425,7 +426,11 @@ def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
     """`setup.close()` runs in a `finally` on every path. A close failure
     (e.g. a DB error while releasing the connection) must not replace the
     row the guarded tail already built — the money is already priced by
-    that point regardless of whether cleanup itself succeeds."""
+    that point regardless of whether cleanup itself succeeds. But it must
+    not be SILENT either: a close failure means the connection may still
+    be open, which `dce.runner.sweep`'s subsequent `check_and_restore`
+    call cannot validly run against (see `dce/arms.py`'s CALL ORDER) —
+    `close_error` on the row is what lets the runner see that."""
     import dce.agent as agent_module
 
     class _ExplodingCloseSetup:
@@ -456,6 +461,25 @@ def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
     )
     assert row["verdict"] == "correct"
     assert row["answer"] == "0.12"
+    assert row["close_error"] == "RuntimeError: close exploded"
+
+
+def test_run_task_does_not_stamp_close_error_when_close_succeeds(tmp_path: Path):
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert "close_error" not in row
 
 
 def test_priced_fallback_row_prices_normally_when_possible():
@@ -476,6 +500,7 @@ def test_priced_fallback_row_prices_normally_when_possible():
         note="x",
     )
     assert row["usd"] == cost("z-ai/glm-5.3-flash", 100, 10)
+    assert row["usd_guard"] == row["usd"]
     assert row["input_tokens"] == 100
     assert row["output_tokens"] == 10
 
@@ -485,8 +510,11 @@ def test_priced_fallback_row_never_raises_even_for_an_unknown_model():
     guarded tail (called from inside `run_task`'s own exception handler),
     so it must not be able to raise even in the exotic case where `model`
     can't be priced at all — both `cost()` and `_token_budget_usd()` do a
-    bare `MODELS[model]` lookup, so an unknown id fails both, and this
-    still returns a row rather than propagating."""
+    bare `MODELS[model]` lookup, so an unknown id fails both. It must still
+    return a row rather than propagating, and that row must still be
+    priced pessimistically (WORST_CASE_TOKEN_BUDGET_USD), not $0.00 — $0.00
+    here is exactly the value A1 exists to eliminate."""
+    from dce.agent import WORST_CASE_TOKEN_BUDGET_USD
     from pydantic_ai.usage import RunUsage
 
     usage = RunUsage()
@@ -502,7 +530,8 @@ def test_priced_fallback_row_never_raises_even_for_an_unknown_model():
         verdict="post_run_error",
         note="x",
     )
-    assert row["usd"] == 0.0
+    assert row["usd"] == WORST_CASE_TOKEN_BUDGET_USD
+    assert row["usd_guard"] == WORST_CASE_TOKEN_BUDGET_USD
     assert row["input_tokens"] == 100
 
 

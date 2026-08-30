@@ -1,4 +1,30 @@
-"""Run one (task, arm, model) and return a fully provenanced result row."""
+"""Run one (task, arm, model) and return a fully provenanced result row.
+
+`run_task` guarantees that once the billable model call has happened (or a
+cap has tripped), it returns — it does not raise. The only exception it
+still lets propagate is `AgentConstructionError`, and only because nothing
+billable has happened yet when that one fires. Two known, deliberately
+unfixed gaps in that guarantee, recorded here rather than silently
+tolerated:
+
+  * `KeyboardInterrupt` during a live model call escapes everything —
+    `run_sync` itself, the guarded tail, even `setup.close()`'s own
+    `try/except Exception` (which does not catch `BaseException`
+    subclasses). Measured: 5 interrupted calls burned ~$6.00 in real spend
+    and produced 0 rows. This is accepted as-is: an interrupt is
+    user-initiated, and a sweep the operator is actively killing does not
+    need its own resume bookkeeping to survive the kill — but it means an
+    operator who Ctrl-C's a running sweep should not assume `spent_so_far`
+    reflects everything that was actually billed up to that point.
+  * `TOKEN_BUDGET` (the runaway guard) has slack against the TRUE
+    request-level ceiling: `UsageLimits.total_tokens_limit` is checked only
+    BETWEEN requests (see `PER_REQUEST_INPUT_TOKEN_CAP`'s own note on the
+    same gap), so one in-flight request can land up to roughly
+    `PER_REQUEST_INPUT_TOKEN_CAP` (a quarter of `TOKEN_BUDGET`) over the
+    nominal cap before the NEXT request is what actually stops. ~25% slack
+    is accepted as part of `TOKEN_BUDGET`'s deliberately generous sizing
+    (see its own module-level comment), not closed here.
+"""
 
 from __future__ import annotations
 
@@ -324,6 +350,16 @@ def _token_budget_usd(model: str) -> float:
     return TOKEN_BUDGET * rate / 1_000_000
 
 
+#: Absolute last-resort price when even `_token_budget_usd(model)` can't be
+#: computed (an unrecognized model id) — the worst case ACROSS EVERY pinned
+#: model, computed once off `MODELS` rather than hand-picked, so
+#: `_priced_fallback_row`'s innermost fallback can never itself raise
+#: (`MODELS[model]` would be the thing raising) and never has to fall back
+#: further, to `$0.00` — the exact failure mode this whole guarded-tail
+#: mechanism exists to eliminate.
+WORST_CASE_TOKEN_BUDGET_USD: float = max(_token_budget_usd(m) for m in MODELS)
+
+
 def build_result_row(
     *,
     task: dict,
@@ -371,6 +407,14 @@ def build_result_row(
         # (a real provider typically bills a cache read well below the
         # fresh-input rate).
         "usd": cost(model, in_tok, out_tok),
+        # Mirrors `usd` here — a real, priceable call happened, so there is
+        # no gap between what was really spent and what the sweep's spend
+        # cap should count against. `usd_guard` only diverges from `usd`
+        # for `dce.runner._construction_error_row`, where a real call never
+        # happened at all but the cap still charges a pessimistic ceiling
+        # (see that function's docstring). `spent_so_far` sums THIS field;
+        # `real_spent_so_far` sums `usd`.
+        "usd_guard": cost(model, in_tok, out_tok),
         "tool_calls": tool_calls,
         "inspect_rejections": inspect_rejections,
         "enforcement_blocks": enforcement_blocks,
@@ -444,11 +488,14 @@ def _priced_fallback_row(
         try:
             usd = _token_budget_usd(model)
         except Exception:
-            # This function's entire purpose is to be a fallback that
-            # cannot itself raise (a raise here would propagate out of
-            # run_task despite the whole point of this guarded tail) — an
-            # absolute last resort, not a real accounting outcome.
-            usd = 0.0
+            # `model` itself can't be priced at all (an unrecognized id) —
+            # `_token_budget_usd`'s own `MODELS[model]` lookup just failed
+            # the same way `cost`'s did. `WORST_CASE_TOKEN_BUDGET_USD` is
+            # computed off `MODELS` directly rather than off `model`, so
+            # THIS branch cannot itself raise — the exact value A1 exists
+            # to eliminate is `$0.00` here, not an untested fallback that
+            # might still be it.
+            usd = WORST_CASE_TOKEN_BUDGET_USD
     return {
         "task_id": task["task_id"],
         "level": task.get("level", "unknown"),
@@ -462,7 +509,12 @@ def _priced_fallback_row(
         "output_tokens": out_tok,
         "cached_tokens": getattr(usage, "cache_read_tokens", 0) or 0,
         "turns": getattr(usage, "requests", 0) or 0,
+        # A real (partial) call did happen here, unlike a construction
+        # error — `usd_guard` mirrors `usd`, pessimistic fallback and all,
+        # since there is no independently-known "real" figure to diverge
+        # from once `cost()` itself couldn't be trusted.
         "usd": usd,
+        "usd_guard": usd,
         "tool_calls": [],
         "inspect_rejections": 0,
         "enforcement_blocks": 0,
@@ -545,6 +597,15 @@ def run_task(
     from pydantic_ai.usage import RunUsage, UsageLimits
 
     setup = build_arm(arm, db_path, docs)
+    # Set as soon as a priced row exists (in either branch of the guarded
+    # tail below), so the `finally` block can still attach `close_error`
+    # to it — mutating the SAME dict object a `return row` further up has
+    # already committed to returning; Python runs `finally` before the
+    # return actually completes, so the mutation is visible to the caller.
+    # Stays `None` only on the `AgentConstructionError` path, where no row
+    # was ever built — nothing billable happened, so there is nothing here
+    # to attach a close error to.
+    row: dict | None = None
     try:
         factory = agent_factory or _default_agent_factory
         try:
@@ -683,7 +744,7 @@ def run_task(
 
             answer_normalized = _clean(answer)
 
-            return build_result_row(
+            row = build_result_row(
                 task=task,
                 arm=arm,
                 model=model,
@@ -704,7 +765,7 @@ def run_task(
                 golds_hash=golds_hash,
             )
         except Exception as exc:
-            return _priced_fallback_row(
+            row = _priced_fallback_row(
                 task=task,
                 arm=arm,
                 model=model,
@@ -714,6 +775,7 @@ def run_task(
                 verdict="post_run_error",
                 note=f"{type(exc).__name__}: {exc}",
             )
+        return row
     finally:
         # Arm C's adapter holds a live DuckDB connection open for the arm's
         # whole lifetime. It MUST be closed here — on every path, including
@@ -723,10 +785,21 @@ def run_task(
         # so a check performed against a live connection is not a valid
         # check and its repair is not guaranteed to survive the connection's
         # later close. See `dce/arms.py`'s module docstring, CALL ORDER.
+        #
         # Guarded, not bare: a close failure here must not replace whatever
         # `row`/exception the `try` above already produced — the money is
-        # already spent and priced either way by this point.
+        # already spent and priced either way by this point. But a
+        # swallowed close failure is not the same as a HANDLED one: if the
+        # connection did not actually close, `dce.runner.sweep`'s
+        # subsequent `check_and_restore` call runs against what may still
+        # be a live connection — exactly the "not a valid check" case
+        # `dce/arms.py`'s CALL ORDER section warns about. Stamping
+        # `close_error` onto the row (when one exists) is what lets the
+        # runner see that and refuse to trust that task's integrity result,
+        # instead of silently misattributing a leaked connection's own
+        # effects to the arm under test.
         try:
             setup.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            if row is not None:
+                row["close_error"] = f"{type(exc).__name__}: {exc}"

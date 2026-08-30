@@ -1,7 +1,26 @@
 """Sweep driver: resumable, budget-capped, one JSONL row per unit of work.
 
 This is the component that spends real money, so its guards matter as much
-as its logic:
+as its logic. THE CENTRAL INVARIANT, stated once, that every rule below
+exists to uphold:
+
+    ONCE A PRICED ROW EXISTS, IT REACHES DISK BEFORE ANYTHING ELSE MAY
+    THROW.
+
+`run_task_fn` returning (or `_construction_error_row` building a
+substitute) is the moment a row becomes "priced" — real spend, or a
+deliberate pessimistic guard charge, is now a fact that must be recorded.
+Everything between that moment and `fh.write` — `check_and_restore`,
+`json.dumps`, updating `spent` — is now wrapped so that a failure THERE
+still lets the row land on disk (with the failure noted on it) before any
+exception propagates. This was gotten wrong twice already, in the same
+component, at two different frames: first by treating `run_task_fn`'s
+whole outcome as unpriced on ANY exception (see `AgentConstructionError`'s
+narrowing below), and then — after that was fixed — by discovering that
+the loop calling it had exactly the same problem one frame later
+(`check_and_restore` itself raising, or `json.dumps` raising, discarded an
+already-priced row the same way). The invariant above is the fix stated
+once instead of patched frame by frame.
 
   * WORKING COPY, ALWAYS. Arms `schema_only` and `manual_prompt` are
     ungoverned — nothing stops either from issuing `DROP TABLE` against
@@ -13,11 +32,33 @@ as its logic:
     Left on disk once the sweep finishes (deliberately — a corrupted-DB row
     is worth being able to inspect post-mortem); the next invocation just
     overwrites it via `make_working_copy` again, so nothing accumulates.
-  * A CORRUPTED DB IS A FINDING, NOT A CRASH. If `check_and_restore` reports
-    corruption, that row is stamped `db_corrupted: True` and the sweep
-    continues — an ungoverned arm mutating the warehouse is exactly the kind
-    of governance gap this experiment exists to surface, so losing the rest
-    of a paid sweep over it would be the wrong failure mode.
+  * A CORRUPTED DB IS A FINDING, NOT A CRASH — AND A FAILED CHECK IS A
+    DIFFERENT FINDING, NOT A LOST ROW. `check_and_restore` itself can raise
+    (a real `PermissionError` from `_sha256`, a full disk on the repair
+    `copyfile`) — it is not an exotic caller: corruption is the EXPECTED
+    outcome for the ungoverned arms this experiment studies, so its
+    `unlink` + multi-MB `copyfile` path runs often, and its triggers
+    (unreadable pristine file, full disk) are persistent, which is
+    precisely when a resuming wrapper hits it again and again. Per the
+    invariant above, a `check_and_restore` failure still gets the row
+    written — `db_corrupted: None` (unknown, not `False`) plus an
+    `integrity_error` note — with `spent` updated, and ONLY THEN
+    re-raises, so the sweep still stops loudly on a persistent environment
+    problem without losing the accounting for the call that already
+    happened.
+  * A CLOSE FAILURE INVALIDATES THE CHECK THAT FOLLOWS IT, AND MUST SAY SO.
+    `run_task`'s `setup.close()` runs inside its own `try/except`, so a
+    close failure there no longer replaces a good row — but it must not be
+    SILENT either: if the connection did not actually close, this sweep's
+    subsequent `check_and_restore` call is not a valid check (see
+    `dce/arms.py`'s CALL ORDER — a check against a live connection can
+    report a repair that does not survive that connection's later
+    checkpoint-on-close, and a leaked connection's own effects can then be
+    misattributed to the arm under test on a LATER task too). `run_task`
+    stamps `close_error` onto the row when this happens; `sweep` treats
+    such a row's integrity result as untrustworthy (`db_corrupted: None`)
+    regardless of what `check_and_restore` actually reported, rather than
+    trusting a check it cannot vouch for.
   * A CONSTRUCTION FAILURE IS A FINDING, NOT A CRASH — AND IT IS THE *ONLY*
     THING THAT CAN STILL ESCAPE `run_task` UNPRICED. `run_task` raises
     `dce.agent.AgentConstructionError` when its agent factory fails (e.g. a
@@ -28,22 +69,46 @@ as its logic:
     itself guards its whole post-call tail so a bug there returns a priced
     row instead of raising (see `dce/agent.py`'s `_priced_fallback_row`);
     only agent construction is still allowed to raise, and only because
-    nothing billable has happened yet when it does. Retries are bounded, not
-    infinite: `completed_keys` stops retrying a unit after
-    `MAX_CONSTRUCTION_ATTEMPTS` `construction_error` rows and treats it as
-    terminal — "cheap twice, then loud" — and `gave_up_keys` lets `main()`
-    warn about exactly which units that happened to. As a backstop against
-    all of the above regressing at once, `_construction_error_row` prices
-    itself at `_token_budget_usd(model)`, not `$0.00`: an unknown-cost
-    failure consumes budget instead of reading as free, deliberately, even
-    though a genuine construction failure never actually spent anything.
+    nothing billable has happened yet when it does. Retries are bounded on
+    TWO levels, not one:
+      - Per-key: `completed_keys` stops retrying a unit after
+        `MAX_CONSTRUCTION_ATTEMPTS` TRAILING `construction_error` rows
+        (consecutive at the END of that key's history, not a lifetime
+        total — a key that once failed, then succeeded, then failed again
+        must not be given up on after that one fresh failure) and treats
+        it as terminal — "cheap twice, then loud" — and `gave_up_keys` lets
+        `main()` warn about exactly which units that happened to.
+      - Sweep-wide: `CIRCUIT_BREAKER_THRESHOLD` CONSECUTIVE
+        `construction_error` outcomes, across however many DIFFERENT keys,
+        stops the whole sweep immediately. A missing `OPENROUTER_API_KEY`
+        fails every unit identically; without this, per-key bounding alone
+        would still write up to `len(tasks) x len(arms) x len(models) x
+        MAX_CONSTRUCTION_ATTEMPTS` phantom-priced rows before the SPEND cap
+        (not the circuit breaker) finally noticed — 2,436 rows and ~$446 of
+        guard-ledger charges at 406 tasks x 3 arms, all before
+        `gave_up_keys` is what an operator happens to check.
+  * SEPARATE REAL SPEND FROM GUARD SPEND. Pricing a `construction_error`
+    pessimistically is right for the CAP (an unknown-cost failure must not
+    read as free) but wrong for the LEDGER (a genuine construction failure
+    spent nothing real). Every row therefore carries two fields: `usd`
+    (what was actually billed — 0.0 for a genuine `construction_error`) and
+    `usd_guard` (what the spend cap counts — the pessimistic ceiling for a
+    `construction_error`, identical to `usd` for every other verdict, since
+    a real call really did happen). `spent_so_far` sums `usd_guard` — the
+    cap's own ledger; `real_spent_so_far` sums `usd` — what to actually
+    report as spent. `main()` prints the real figure and treats the guard
+    figure as bookkeeping, not an accounting claim.
   * THE SPEND CAP BOUNDS THE EXPERIMENT, NOT ONE PROCESS. `sweep` seeds its
-    running total from `spent_so_far(out)` — the `usd` already banked by
-    every prior invocation against the same `out` file — because resume is
-    the headline feature and a cap that resets to $0 on every restart is no
-    cap at all under a crash loop or a naive retry wrapper. A row's `usd` is
-    read and validated BEFORE it is written to `out`: an un-priced row must
-    never land on disk looking like a free, permanently-done unit.
+    running total from `spent_so_far(out)` — the `usd_guard` already banked
+    by every prior invocation against the same `out` file — because resume
+    is the headline feature and a cap that resets to $0 on every restart is
+    no cap at all under a crash loop or a naive retry wrapper. A row's
+    `usd`/`usd_guard` are read and VALIDATED (a real, finite, non-negative
+    number, or `None` treated as 0.0 — never a string, a bool, a negative
+    figure, or NaN) BEFORE the row is written to `out`: an invalid or
+    un-priced value must never land on disk looking like a free,
+    permanently-done unit that then bricks every future `spent_so_far`
+    read with no recovery but hand-editing JSONL.
   * THE RESERVATION IS A REAL CEILING, NOT A GUESS, AND IT COVERS A WHOLE
     TASK. Before any observation for a given model, `sweep` reserves
     `dce.agent._token_budget_usd(model)` — the true worst case the runaway
@@ -67,6 +132,17 @@ as its logic:
     rather than iterating `out` directly, or a stale `construction_error`
     row sitting earlier in the file gets silently counted as a wrong answer
     on top of the real, later outcome.
+
+Two gaps recorded here as deliberately unfixed, not silently tolerated —
+see `dce/agent.py`'s module docstring for the full detail on both:
+
+  * `KeyboardInterrupt` during a live model call escapes everything in
+    both this module and `run_task` (measured: 5 interrupts, ~$6.00 real
+    spend, 0 rows). Accepted: it is user-initiated, and a sweep the
+    operator is actively killing does not need its own bookkeeping to
+    survive the kill.
+  * `TOKEN_BUDGET` has roughly 25% slack against the true per-request
+    ceiling, because `total_tokens_limit` is only checked BETWEEN requests.
 """
 
 from __future__ import annotations
@@ -74,6 +150,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import math
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -93,23 +170,42 @@ from dce.pricing import MODELS
 MIN_RESERVE_USD: float = 0.01
 
 #: "Cheap twice, then loud": a unit that fails agent construction this many
-#: times in a row is treated as terminal rather than retried forever —
-#: `dce.agent.AgentConstructionError` is usually a persistent problem (a
-#: missing env var, say), not a transient one, so hammering it every resume
-#: would never succeed and would only ever hide the same bug.
+#: TRAILING times (consecutive at the end of its own history, not a
+#: lifetime total — see `_construction_error_state`) is treated as terminal
+#: rather than retried forever. `dce.agent.AgentConstructionError` is
+#: usually a persistent problem (a missing env var, say), not a transient
+#: one, so hammering it every resume would never succeed and would only
+#: ever hide the same bug.
 MAX_CONSTRUCTION_ATTEMPTS: int = 2
+
+#: A sweep-wide safety valve distinct from the per-key cap above: this many
+#: CONSECUTIVE `construction_error` outcomes, across however many different
+#: keys, stops the whole sweep immediately rather than grinding through
+#: every remaining unit at the same guaranteed-to-fail cost. Deliberately
+#: larger than `MAX_CONSTRUCTION_ATTEMPTS` (which bounds retries of ONE
+#: key across resumes) — this bounds a systemic failure WITHIN one
+#: invocation, before it can write thousands of phantom-priced rows.
+CIRCUIT_BREAKER_THRESHOLD: int = 5
 
 
 @dataclass
 class SweepResult:
-    """`spent`: total USD banked in `out` after this call, resumed sweeps
-    included. `truncated`: True iff this call stopped before completing
-    `pending()` because the next task group's reservation would have
-    exceeded `max_spend` — `main()` uses this to exit non-zero so a wrapper
-    can tell a capped-out run from a completed one."""
+    """`spent`: total `usd_guard` banked in `out` after this call — the
+    cap's own ledger, resumed sweeps included. `real_spent`: total `usd`
+    actually billed — what to report as spent. `truncated`: True iff this
+    call stopped before completing `pending()` because the next task
+    group's reservation would have exceeded `max_spend`. `circuit_broken`:
+    True iff this call stopped because `CIRCUIT_BREAKER_THRESHOLD`
+    consecutive construction failures looked like a systemic problem, not
+    per-task bad luck. `main()` uses `truncated`/`circuit_broken` to exit
+    non-zero so a wrapper can tell a capped-out or broken-circuit run from
+    a completed one.
+    """
 
     spent: float
+    real_spent: float
     truncated: bool
+    circuit_broken: bool = False
 
 
 def _read_rows(path: Path) -> list[dict]:
@@ -122,21 +218,31 @@ def _construction_error_state(
     path: Path,
 ) -> tuple[dict[tuple[str, str, str], str | None], dict[tuple[str, str, str], int]]:
     """For every (task_id, arm, model) key seen in `path`: its most recently
-    written verdict, and how many `construction_error` rows it has
-    accumulated in total. Shared by `completed_keys` (resume/skip
-    decisions) and `gave_up_keys` (visibility into units that exhausted
-    their retry budget) so the two can never disagree about what "the
-    state of this key" means.
+    written verdict, and how many TRAILING `construction_error` rows it has
+    accumulated — consecutive at the end of its history, not a lifetime
+    total. A row with any other verdict resets that key's trailing count to
+    0 even though it may later be overwritten by a fresh
+    `construction_error`; a file reading `construction_error, correct,
+    construction_error` for the same key therefore has a trailing count of
+    1, not 2 — the intervening success means this is one fresh failure, not
+    the second half of a persistent one, and must not be given up on after
+    only one recent attempt.
+
+    Shared by `completed_keys` (resume/skip decisions) and `gave_up_keys`
+    (visibility into units that exhausted their retry budget) so the two
+    can never disagree about what "the state of this key" means.
     """
     last_verdict: dict[tuple[str, str, str], str | None] = {}
-    error_counts: dict[tuple[str, str, str], int] = {}
+    trailing_counts: dict[tuple[str, str, str], int] = {}
     for row in _read_rows(path):
         key = (row["task_id"], row["arm"], row["model"])
         verdict = row.get("verdict")
         last_verdict[key] = verdict
         if verdict == "construction_error":
-            error_counts[key] = error_counts.get(key, 0) + 1
-    return last_verdict, error_counts
+            trailing_counts[key] = trailing_counts.get(key, 0) + 1
+        else:
+            trailing_counts[key] = 0
+    return last_verdict, trailing_counts
 
 
 def completed_keys(
@@ -149,13 +255,14 @@ def completed_keys(
     several; see `latest_rows`), not merely "any row exists":
 
       * `construction_error` — retried (not done) until
-        `MAX_CONSTRUCTION_ATTEMPTS` such rows have piled up for the same
-        key, at which point it is terminal: "cheap twice, then loud" rather
-        than free-forever (see `gave_up_keys`). Bounding this matters
-        because `run_task`'s `except Exception` around agent construction
-        also catches an ordinary bug (a signature mismatch, say); unbounded
-        free retries would hide such a bug behind a wall of skip-forever
-        rows forever, instead of surfacing it loudly after two tries.
+        `MAX_CONSTRUCTION_ATTEMPTS` TRAILING such rows have piled up for
+        the same key (see `_construction_error_state`), at which point it
+        is terminal: "cheap twice, then loud" rather than free-forever
+        (see `gave_up_keys`). Bounding this matters because `run_task`'s
+        `except Exception` around agent construction also catches an
+        ordinary bug (a signature mismatch, say); unbounded free retries
+        would hide such a bug behind a wall of skip-forever rows forever,
+        instead of surfacing it loudly after two tries.
       * `error` — done unless `retry_error` is set, since an `error` row
         already cost money and a resume should not silently re-pay for it
         without being asked.
@@ -168,11 +275,11 @@ def completed_keys(
       * No verdict at all (an older/foreign row shape) — also treated as
         done, matching this function's pre-verdict-aware behaviour.
     """
-    last_verdict, error_counts = _construction_error_state(path)
+    last_verdict, trailing_counts = _construction_error_state(path)
     done: set[tuple[str, str, str]] = set()
     for key, verdict in last_verdict.items():
         if verdict == "construction_error":
-            if error_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS:
+            if trailing_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS:
                 done.add(key)  # retries exhausted: terminal, stop retrying
             continue
         if verdict == "error" and retry_error:
@@ -182,19 +289,19 @@ def completed_keys(
 
 
 def gave_up_keys(path: Path) -> set[tuple[str, str, str]]:
-    """Keys whose unit hit `MAX_CONSTRUCTION_ATTEMPTS` `construction_error`
-    rows and will therefore never be attempted again by `completed_keys`.
-    Exposed so `main()` can print a loud warning about exactly which units
-    that happened to, rather than the sweep quietly going silent on them
-    forever — "cheap twice, then loud" needs the "loud" half to be visible
-    somewhere other than a grep through `out`.
+    """Keys whose unit hit `MAX_CONSTRUCTION_ATTEMPTS` TRAILING
+    `construction_error` rows and will therefore never be attempted again
+    by `completed_keys`. Exposed so `main()` can print a loud warning about
+    exactly which units that happened to, rather than the sweep quietly
+    going silent on them forever — "cheap twice, then loud" needs the
+    "loud" half to be visible somewhere other than a grep through `out`.
     """
-    last_verdict, error_counts = _construction_error_state(path)
+    last_verdict, trailing_counts = _construction_error_state(path)
     return {
         key
         for key, verdict in last_verdict.items()
         if verdict == "construction_error"
-        and error_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS
+        and trailing_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS
     }
 
 
@@ -221,14 +328,33 @@ def latest_rows(path: Path) -> list[dict]:
 
 
 def spent_so_far(path: Path) -> float:
-    """Total USD already banked in `path`, across every prior invocation
-    that appended to it. Seeds `sweep`'s running total so `max_spend` bounds
-    the experiment (every resume put together), not one process's lifetime.
+    """Total `usd_guard` already banked in `path`, across every prior
+    invocation that appended to it — the spend CAP's own ledger. Seeds
+    `sweep`'s running total so `max_spend` bounds the experiment (every
+    resume put together), not one process's lifetime.
 
-    Tolerant of a missing/null `usd` on a historical row (an older row shape
-    from before a field existed) — unlike the strict `row["usd"]` `sweep`
-    itself uses for rows it is producing right now; see that function's
+    Falls back to a row's `usd` when `usd_guard` is absent (an older row
+    shape from before the two were split — see the module docstring's
+    SEPARATE REAL SPEND FROM GUARD SPEND section) and is tolerant of a
+    missing/null value entirely — unlike the strict validation `sweep`
+    itself applies to rows it is producing right now; see that function's
     docstring for why the two need different strictness.
+    """
+    total = 0.0
+    for row in _read_rows(path):
+        usd = row.get("usd_guard", row.get("usd"))
+        if usd:
+            total += usd
+    return total
+
+
+def real_spent_so_far(path: Path) -> float:
+    """Total `usd` — real, billed dollars — already banked in `path`. This
+    is what `main()` reports as "spent"; `spent_so_far`'s `usd_guard` total
+    is the cap's bookkeeping figure, not an accounting claim (a unit with
+    two pessimistically-priced construction errors and one real $0.01
+    success has `spent_so_far` well above $0.01 but `real_spent_so_far`
+    exactly $0.01).
     """
     total = 0.0
     for row in _read_rows(path):
@@ -287,19 +413,48 @@ def _next_reserve(observed: list[float], floor: float) -> float:
 
 
 def _seed_observed_by_model(path: Path) -> dict[str, list[float]]:
-    """Per-model billable-cost history from `path`, so a resume's very
-    first reservation for each model is exactly as informed as if the
-    process had never restarted. Only rows with `usd > 0` count — see
-    `sweep`'s docstring on why a `construction_error`/`hit_limit`/`error`
-    row's `usd: 0.0` must not be allowed to decay the reservation toward
-    the floor."""
+    """Per-model GUARD-cost history from `path` (`usd_guard`, falling back
+    to `usd` for an older row shape), so a resume's very first reservation
+    for each model is exactly as informed as if the process had never
+    restarted. Only rows with a positive value count — a `hit_limit`/`error`
+    row's `usd_guard: 0.0` must not be allowed to decay the reservation
+    toward the floor. Reads `usd_guard`, not `usd`, deliberately: a
+    `construction_error` row's pessimistic guard charge IS a valid signal
+    for what this model's worst case looks like, even though its `usd` is
+    genuinely 0.0 — see the module docstring's SEPARATE REAL SPEND FROM
+    GUARD SPEND section.
+    """
     by_model: dict[str, list[float]] = {}
     for row in _read_rows(path):
-        usd = row.get("usd")
+        usd_guard = row.get("usd_guard", row.get("usd"))
         model = row.get("model")
-        if usd and model:
-            by_model.setdefault(model, []).append(usd)
+        if usd_guard and model:
+            by_model.setdefault(model, []).append(usd_guard)
     return by_model
+
+
+def _validated_usd(value, field_name: str) -> float:
+    """`usd`/`usd_guard` must be a real, finite, non-negative number before
+    a row is allowed to reach disk. `None` is the one explicit "couldn't
+    price this" signal and is treated as `0.0`; anything else invalid — a
+    string, a `bool` (a `bool` IS an `int` in Python; explicitly excluded
+    so `True` cannot silently price a row at $1.00), a negative figure, NaN
+    — raises loudly here rather than landing on disk. Measured without
+    this: a stray `"1.20"` string wrote fine, then `spent +=` raised on
+    every subsequent read of the file — bricking `spent_so_far` for that
+    results file permanently, with no recovery but hand-editing JSONL; six
+    negative rows produced `spent = -600.0`.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field_name} must be a number or None, got {value!r}")
+    value = float(value)
+    if math.isnan(value):
+        raise ValueError(f"{field_name} is NaN")
+    if value < 0:
+        raise ValueError(f"{field_name} is negative: {value!r}")
+    return value
 
 
 def _construction_error_row(
@@ -319,14 +474,17 @@ def _construction_error_row(
     which have no meaningful value for a call that never happened, are
     zeroed.
 
-    `usd` is priced at `_token_budget_usd(model)` — the pessimistic
-    per-task ceiling — not `$0.00`, even though a genuine
-    `AgentConstructionError` really did cost nothing. This is a deliberate
-    backstop, not an accounting truth: it is the third of three layers
-    against the same failure class (see the module docstring), there so
-    that even if the other two — a non-throwing `run_task` tail, and
-    bounded retries — ever regress together, an unknown-cost failure still
-    consumes budget instead of reading as free and running unbounded.
+    `usd` — the REAL figure — is `0.0`: a genuine `AgentConstructionError`
+    really did cost nothing. `usd_guard` — what the spend cap counts — is
+    `_token_budget_usd(model)`, the pessimistic per-task ceiling, not
+    `$0.00`. This split is deliberate: pricing the CAP pessimistically is a
+    backstop (the third of three layers against the same failure class, see
+    the module docstring) so that even if a non-throwing `run_task` tail
+    and bounded retries ever regress together, an unknown-cost failure
+    still consumes cap budget instead of reading as free — but pricing the
+    LEDGER (`usd`) the same way would misrepresent a $0 failure as real
+    spend, which is exactly the "spent is no longer an accounting figure"
+    bug this split fixes.
     """
     return {
         "task_id": task["task_id"],
@@ -341,7 +499,8 @@ def _construction_error_row(
         "output_tokens": 0,
         "cached_tokens": 0,
         "turns": 0,
-        "usd": _token_budget_usd(model),
+        "usd": 0.0,
+        "usd_guard": _token_budget_usd(model),
         "tool_calls": [],
         "inspect_rejections": 0,
         "enforcement_blocks": 0,
@@ -372,7 +531,8 @@ def sweep(
 ) -> SweepResult:
     """Run every not-yet-completed (task, arm, model) triple, appending one
     JSON row per unit of work to `out`, until the next task's reservation
-    would push spend past `max_spend`.
+    would push spend past `max_spend`, or `CIRCUIT_BREAKER_THRESHOLD`
+    consecutive construction failures signal a systemic problem.
 
     `db_path` is the pristine database; it is never opened directly here or
     handed to `run_task_fn` — see the module docstring. `golds` is the plain
@@ -385,14 +545,17 @@ def sweep(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     spent = spent_so_far(out)
+    real_spent = real_spent_so_far(out)
     observed = _seed_observed_by_model(out)
 
     if not todo:
         # Nothing to do: don't even pay for a working-copy file write.
-        return SweepResult(spent=spent, truncated=False)
+        return SweepResult(spent=spent, real_spent=real_spent, truncated=False)
 
     working = make_working_copy(db_path, _working_db_path(db_path))
     truncated = False
+    circuit_broken = False
+    consecutive_construction_errors = 0
 
     with out.open("a") as fh:
         for task_id, group_iter in itertools.groupby(todo, key=lambda t: t[0]):
@@ -433,33 +596,100 @@ def sweep(
                         by_id[task_id], arm, model, gold, golds_hash, exc
                     )
 
-                # Valid only now: `run_task_fn` has closed its own arm's
-                # connection (see `dce/arms.py`'s module docstring, CALL
-                # ORDER).
-                integrity = check_and_restore(working, db_path)
-                row["db_corrupted"] = integrity.corrupted
+                # INVARIANT (see module docstring): `row` now exists and is
+                # priced. Everything below must let it reach disk before
+                # anything else may throw.
 
-                # Read and validate the price BEFORE writing: a row must
-                # never land on disk un-priced-but-looking-done — that
-                # would make a resumed sweep treat it as both free and
-                # permanently finished. A row missing `usd` entirely raises
-                # `KeyError` here, before `fh.write`, so nothing partial
-                # ever hits the file (measured without this ordering: an
-                # un-priced row landed on disk as `verdict: "correct"` and
-                # was thereafter free and done forever). `usd: None` (an
-                # explicit, known "couldn't price this") is handled, not
-                # crashed on.
-                usd = row["usd"]
-                if usd is None:
-                    usd = 0.0
+                # `run_task` stamps `close_error` when its OWN `setup.close()`
+                # failed — meaning the connection may still be open, so
+                # `check_and_restore` below is not a valid check regardless
+                # of what it reports (see `dce/arms.py`'s CALL ORDER). Valid
+                # otherwise: `run_task_fn` has closed its own arm's
+                # connection.
+                integrity_untrustworthy = row.get("close_error") is not None
+                integrity_exc: Exception | None = None
+                try:
+                    integrity = check_and_restore(working, db_path)
+                    row["db_corrupted"] = (
+                        None if integrity_untrustworthy else integrity.corrupted
+                    )
+                except Exception as exc:
+                    row["db_corrupted"] = None
+                    integrity_exc = exc
+                if integrity_untrustworthy:
+                    note = (
+                        "setup.close() failed for this task "
+                        f"({row['close_error']}); the connection may still "
+                        "be open, so check_and_restore's result cannot be "
+                        "trusted"
+                    )
+                    row["integrity_error"] = (
+                        f"{note}; check_and_restore also raised "
+                        f"{type(integrity_exc).__name__}: {integrity_exc}"
+                        if integrity_exc is not None
+                        else note
+                    )
+                elif integrity_exc is not None:
+                    row["integrity_error"] = (
+                        f"{type(integrity_exc).__name__}: {integrity_exc}"
+                    )
 
-                fh.write(json.dumps(row) + "\n")
+                # Validate the price BEFORE writing: a row must never land
+                # on disk un-priced-or-invalid-but-looking-done — that
+                # would make a resumed sweep treat it as both free (or
+                # corruptly mispriced) and permanently finished. A row
+                # missing `usd` entirely raises `KeyError` here, before
+                # `fh.write`, so nothing partial ever hits the file.
+                usd = _validated_usd(row["usd"], "usd")
+                usd_guard = _validated_usd(row.get("usd_guard", usd), "usd_guard")
+
+                # A field that turned out not to be JSON-serializable must
+                # not lose the row — `default=repr` guarantees SOMETHING
+                # legible lands on disk instead of the row vanishing.
+                try:
+                    line = json.dumps(row)
+                except Exception:
+                    line = json.dumps(row, default=repr)
+                fh.write(line + "\n")
                 fh.flush()
 
-                spent += usd
-                if usd > 0:
-                    observed.setdefault(model, []).append(usd)
-    return SweepResult(spent=spent, truncated=truncated)
+                spent += usd_guard
+                real_spent += usd
+                if usd_guard > 0:
+                    observed.setdefault(model, []).append(usd_guard)
+
+                if row.get("verdict") == "construction_error":
+                    consecutive_construction_errors += 1
+                else:
+                    consecutive_construction_errors = 0
+                if consecutive_construction_errors >= CIRCUIT_BREAKER_THRESHOLD:
+                    circuit_broken = True
+
+                # Only now, after the row is safely on disk and every
+                # counter above is updated, does a `check_and_restore`
+                # failure get to stop the sweep — loudly, as any other
+                # persistent environment problem should, but without
+                # losing the row or the spend it represents.
+                if integrity_exc is not None:
+                    raise integrity_exc
+
+                if circuit_broken:
+                    print(
+                        f"stopping: {CIRCUIT_BREAKER_THRESHOLD} consecutive "
+                        "construction errors across different units — "
+                        "likely a systemic problem (missing "
+                        "OPENROUTER_API_KEY? a bad model id?), not "
+                        "per-task bad luck"
+                    )
+                    break
+            if circuit_broken:
+                break
+    return SweepResult(
+        spent=spent,
+        real_spent=real_spent,
+        truncated=truncated,
+        circuit_broken=circuit_broken,
+    )
 
 
 def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
@@ -603,7 +833,11 @@ def assert_clean_tree(
 
 
 def _exit_code_for(result: SweepResult) -> int:
-    return 2 if result.truncated else 0
+    if result.circuit_broken:
+        return 3
+    if result.truncated:
+        return 2
+    return 0
 
 
 def _worst_case_task_group_usd(arms, models) -> float:
@@ -635,8 +869,8 @@ def main() -> None:
         default=None,
         help="also retry rows with this verdict on resume (an 'error' row "
         "already cost money; 'construction_error' rows are retried "
-        f"automatically, up to {MAX_CONSTRUCTION_ATTEMPTS} attempts, "
-        "regardless of this flag)",
+        f"automatically, up to {MAX_CONSTRUCTION_ATTEMPTS} trailing "
+        "attempts, regardless of this flag)",
     )
     args = parser.parse_args()
 
@@ -684,8 +918,18 @@ def main() -> None:
         golds_hash=golds_hash,
         retry_error=args.retry == "error",
     )
-    print(f"spent ${result.spent:.2f}")
-    if result.truncated:
+    # Real dollars, not the guard ledger — see the module docstring's
+    # SEPARATE REAL SPEND FROM GUARD SPEND section.
+    print(f"spent ${result.real_spent:.2f} (guard ledger ${result.spent:.2f})")
+    if result.circuit_broken:
+        print(
+            f"stopped: {CIRCUIT_BREAKER_THRESHOLD} consecutive construction "
+            "errors across different units — this looks systemic (a "
+            "missing OPENROUTER_API_KEY, say), not per-task bad luck; fix "
+            "the underlying problem before re-running",
+            file=sys.stderr,
+        )
+    elif result.truncated:
         print(
             f"stopped at the ${args.max_spend:.2f} cap; re-run to continue "
             "(resume is automatic)",

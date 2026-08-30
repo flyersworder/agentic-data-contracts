@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 
+import dce.runner as runner_module
 import pytest
 from dce.agent import AgentConstructionError, _token_budget_usd, build_result_row
 from dce.data import DATASET_REVISION
 from dce.runner import (
+    CIRCUIT_BREAKER_THRESHOLD,
     MAX_CONSTRUCTION_ATTEMPTS,
     SweepResult,
     _construction_error_row,
@@ -13,6 +15,7 @@ from dce.runner import (
     _next_reserve,
     _seed_observed_by_model,
     _stratified_sample,
+    _validated_usd,
     _working_db_path,
     _worst_case_task_group_usd,
     assert_clean_tree,
@@ -20,6 +23,7 @@ from dce.runner import (
     gave_up_keys,
     latest_rows,
     pending,
+    real_spent_so_far,
     spent_so_far,
     sweep,
 )
@@ -601,11 +605,16 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     assert rows[0]["task_id"] == "0"
     assert rows[0]["level"] == "hard"  # schema-compat: Task 9's accuracy_by needs this
     assert "db_corrupted" in rows[0]
-    # A1 layer 3: priced pessimistically, not $0.00 — see
-    # test_construction_error_row_has_build_result_row_shape.
-    assert rows[0]["usd"] == _token_budget_usd(GLM)
+    # Real spend vs guard spend split: a genuine construction failure spent
+    # $0.00 for real, but the CAP still charges the pessimistic ceiling —
+    # see test_construction_error_row_has_build_result_row_shape.
+    assert rows[0]["usd"] == 0.0
+    assert rows[0]["usd_guard"] == _token_budget_usd(GLM)
     assert rows[1]["verdict"] == "correct"
+    # The guard ledger (what the cap counts) includes the pessimistic
+    # charge; the real ledger does not.
     assert result.spent == pytest.approx(_token_budget_usd(GLM) + 0.01)
+    assert result.real_spent == pytest.approx(0.01)
 
 
 def test_sweep_gives_up_after_max_construction_attempts_across_resumes(
@@ -763,9 +772,11 @@ def test_construction_error_row_has_build_result_row_shape():
     )
     assert set(real_row.keys()) <= set(error_row.keys())
     assert error_row["level"] == "hard"
-    # A1 layer 3: priced at the pessimistic ceiling, not $0.00, even though
-    # a genuine construction failure spent nothing — a deliberate backstop.
-    assert error_row["usd"] == _token_budget_usd(GLM)
+    # Real vs guard split: `usd` (real) is $0.00 — a genuine construction
+    # failure spent nothing; `usd_guard` (what the cap counts) is the
+    # pessimistic ceiling — a deliberate backstop, not an accounting truth.
+    assert error_row["usd"] == 0.0
+    assert error_row["usd_guard"] == _token_budget_usd(GLM)
 
 
 # ── stratified --n sampling ────────────────────────────────────────────
@@ -899,8 +910,458 @@ def test_assert_clean_tree_does_not_exempt_a_different_file_in_the_same_results_
 
 
 def test_exit_code_for_truncated_is_nonzero():
-    assert _exit_code_for(SweepResult(spent=1.0, truncated=True)) != 0
+    result = SweepResult(spent=1.0, real_spent=1.0, truncated=True)
+    assert _exit_code_for(result) != 0
 
 
 def test_exit_code_for_complete_is_zero():
-    assert _exit_code_for(SweepResult(spent=1.0, truncated=False)) == 0
+    result = SweepResult(spent=1.0, real_spent=1.0, truncated=False)
+    assert _exit_code_for(result) == 0
+
+
+def test_exit_code_for_circuit_broken_is_distinct_from_truncated():
+    truncated = SweepResult(spent=1.0, real_spent=1.0, truncated=True)
+    broken = SweepResult(
+        spent=1.0, real_spent=1.0, truncated=False, circuit_broken=True
+    )
+    assert _exit_code_for(broken) != 0
+    assert _exit_code_for(broken) != _exit_code_for(truncated)
+
+
+# ── _validated_usd ───────────────────────────────────────────────────────
+
+
+def test_validated_usd_treats_none_as_zero():
+    assert _validated_usd(None, "usd") == 0.0
+
+
+def test_validated_usd_accepts_a_normal_float():
+    assert _validated_usd(0.42, "usd") == 0.42
+
+
+def test_validated_usd_rejects_a_string():
+    with pytest.raises(TypeError):
+        _validated_usd("1.20", "usd")
+
+
+def test_validated_usd_rejects_a_bool():
+    # bool IS an int in Python -- True must not silently price a row at $1.00.
+    with pytest.raises(TypeError):
+        _validated_usd(True, "usd")
+
+
+def test_validated_usd_rejects_a_negative_value():
+    with pytest.raises(ValueError):
+        _validated_usd(-600.0, "usd")
+
+
+def test_validated_usd_rejects_nan():
+    with pytest.raises(ValueError):
+        _validated_usd(float("nan"), "usd")
+
+
+# ── real_spent_so_far ────────────────────────────────────────────────────
+
+
+def test_real_spent_so_far_sums_usd_not_usd_guard(tmp_path: Path):
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        json.dumps({"usd": 0.01, "usd_guard": 0.183, "verdict": "construction_error"})
+        + "\n"
+    )
+    assert real_spent_so_far(path) == pytest.approx(0.01)
+    assert spent_so_far(path) == pytest.approx(0.183)
+
+
+def test_spent_so_far_falls_back_to_usd_for_a_legacy_row_without_usd_guard(
+    tmp_path: Path,
+):
+    path = tmp_path / "r.jsonl"
+    path.write_text(json.dumps({"usd": 0.40}) + "\n")  # pre-split row shape
+    assert spent_so_far(path) == pytest.approx(0.40)
+    assert real_spent_so_far(path) == pytest.approx(0.40)
+
+
+def test_seed_observed_by_model_prefers_usd_guard_over_usd(tmp_path: Path):
+    path = tmp_path / "r.jsonl"
+    path.write_text(json.dumps({"model": "m1", "usd": 0.0, "usd_guard": 0.183}) + "\n")
+    assert _seed_observed_by_model(path) == {"m1": [0.183]}
+
+
+# ── sweep: real spend split from guard ledger ─────────────────────────────
+
+
+def test_sweep_reports_a_ledger_that_separates_real_spend_from_guard_spend(
+    tmp_path: Path,
+):
+    """Pricing a construction error pessimistically is right for the CAP
+    but wrong for the LEDGER: a unit with one construction error and one
+    real $0.01 success must report real_spent close to $0.01, not the
+    guard-inflated figure. (Kept to ONE failure, below
+    MAX_CONSTRUCTION_ATTEMPTS, so this exercises the ledger split rather
+    than the retry cap.)"""
+    attempt = {"n": 0}
+
+    def flaky_then_succeeds(task, arm, model, *a, **k):
+        attempt["n"] += 1
+        if attempt["n"] == 1:
+            raise AgentConstructionError("transient")
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.01,
+            "verdict": "correct",
+        }
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    for _ in range(2):  # two separate invocations: fail, then succeed
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=flaky_then_succeeds,
+        )
+
+    assert real_spent_so_far(out) == pytest.approx(0.01)
+    assert spent_so_far(out) == pytest.approx(_token_budget_usd(GLM) + 0.01)
+
+
+# ── retry policy: trailing, not lifetime, construction-error counts ──────
+
+
+def test_completed_keys_does_not_give_up_on_one_fresh_failure_after_a_success(
+    tmp_path: Path,
+):
+    """A file reading construction_error, correct, construction_error for
+    the same key has a TRAILING count of 1, not a lifetime count of 2 —
+    the intervening success means the most recent failure is fresh, not
+    the second half of a persistent problem, and must still be retryable."""
+    path = tmp_path / "r.jsonl"
+    rows = [
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+        {"task_id": "1", "arm": "contract", "model": "m", "verdict": "correct"},
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    assert MAX_CONSTRUCTION_ATTEMPTS == 2  # this test assumes the current cap
+    assert completed_keys(path) == set()  # still retryable, not given up
+    assert gave_up_keys(path) == set()
+
+
+def test_completed_keys_gives_up_on_truly_consecutive_trailing_failures(
+    tmp_path: Path,
+):
+    path = tmp_path / "r.jsonl"
+    rows = [
+        {"task_id": "1", "arm": "contract", "model": "m", "verdict": "correct"},
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+        {
+            "task_id": "1",
+            "arm": "contract",
+            "model": "m",
+            "verdict": "construction_error",
+        },
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    assert completed_keys(path) == {("1", "contract", "m")}
+    assert gave_up_keys(path) == {("1", "contract", "m")}
+
+
+# ── sweep-wide circuit breaker ────────────────────────────────────────────
+
+
+def test_sweep_circuit_breaker_stops_immediately_on_systemic_failure(
+    tmp_path: Path,
+):
+    """A missing API key fails EVERY unit identically. Without a
+    sweep-wide circuit breaker, per-key retry bounding alone would still
+    let the sweep grind through every remaining unit at
+    MAX_CONSTRUCTION_ATTEMPTS phantom-priced rows apiece before the spend
+    cap finally noticed."""
+    calls = []
+
+    def always_fails(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        raise AgentConstructionError("missing OPENROUTER_API_KEY")
+
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(50)  # far more than the circuit breaker threshold
+    ]
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(50)},
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=1000.0,  # generous: the circuit breaker must fire first
+        golds_hash="h",
+        run_task_fn=always_fails,
+    )
+    assert result.circuit_broken is True
+    assert result.truncated is False
+    assert len(calls) == CIRCUIT_BREAKER_THRESHOLD
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == CIRCUIT_BREAKER_THRESHOLD
+
+
+def test_sweep_circuit_breaker_resets_on_a_non_construction_error_row(
+    tmp_path: Path,
+):
+    """The circuit breaker counts CONSECUTIVE construction errors; a
+    success in between must reset the count rather than accumulate across
+    it."""
+    calls = []
+
+    def mostly_fails_but_not_consecutively(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        # Every third task succeeds, breaking up any run of consecutive
+        # construction errors before it can reach the threshold.
+        if int(task["task_id"]) % 3 == 2:
+            return {
+                "task_id": task["task_id"],
+                "arm": arm,
+                "model": model,
+                "usd": 0.01,
+                "verdict": "correct",
+            }
+        raise AgentConstructionError("missing OPENROUTER_API_KEY")
+
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(12)
+    ]
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(12)},
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=1000.0,
+        golds_hash="h",
+        run_task_fn=mostly_fails_but_not_consecutively,
+    )
+    assert result.circuit_broken is False
+    assert len(calls) == 12  # every task ran; the circuit never tripped
+
+
+# ── check_and_restore failures: the row still reaches disk ────────────────
+
+
+def test_sweep_records_the_row_and_reraises_when_check_and_restore_fails(
+    tmp_path, monkeypatch
+):
+    """The central invariant: once a priced row exists, it reaches disk
+    before anything else may throw. A `check_and_restore` failure (e.g. a
+    real PermissionError from `_sha256`) must not discard the row or the
+    spend it represents -- it writes the row (db_corrupted=None,
+    integrity_error noted), updates spent, and ONLY THEN re-raises."""
+
+    def fake_run(task, arm, model, *a, **k):
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 1.20,
+            "verdict": "correct",
+        }
+
+    def exploding_check_and_restore(working, pristine):
+        raise PermissionError("cannot read pristine file")
+
+    monkeypatch.setattr(runner_module, "check_and_restore", exploding_check_and_restore)
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    with pytest.raises(PermissionError):
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=10.0,
+            golds_hash="h",
+            run_task_fn=fake_run,
+        )
+
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == 1  # the row was NOT lost
+    assert rows[0]["db_corrupted"] is None
+    assert "PermissionError" in rows[0]["integrity_error"]
+    assert real_spent_so_far(out) == pytest.approx(1.20)  # spend was recorded
+
+
+def test_sweep_twenty_resumes_advance_the_cap_when_check_and_restore_fails(
+    tmp_path, monkeypatch
+):
+    """The exact scenario the coordinator asked to see re-run: 20 resumes
+    against a real_run_task_fn that spends real money, with
+    check_and_restore injected to fail every time. The cap must advance
+    (spent_so_far grows, rows land on disk) instead of reading $0.00
+    forever while real dollars are burned."""
+    calls = []
+
+    def fake_run(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 1.20,
+            "verdict": "correct",
+        }
+
+    def exploding_check_and_restore(working, pristine):
+        raise PermissionError("cannot read pristine file")
+
+    monkeypatch.setattr(runner_module, "check_and_restore", exploding_check_and_restore)
+
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(20)
+    ]
+    golds = {str(i): "g" for i in range(20)}
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+
+    for _ in range(20):
+        try:
+            sweep(
+                tasks,
+                ("schema_only",),
+                (GLM,),
+                golds,
+                out=out,
+                db_path=db_path,
+                docs={},
+                max_spend=1.00,
+                golds_hash="h",
+                run_task_fn=fake_run,
+            )
+        except PermissionError:
+            pass  # the sweep is expected to stop loudly each time
+
+    # The cap must have advanced: real dollars were spent AND recorded.
+    assert len(calls) >= 1
+    assert real_spent_so_far(out) > 0.0
+    assert real_spent_so_far(out) == pytest.approx(len(calls) * 1.20)
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == len(calls)
+    # The cap ($1.00) plus per-call reservation must have stopped further
+    # calls once one $1.20 call was already recorded -- not run all 20.
+    assert len(calls) < 20
+
+
+# ── close_error invalidates the integrity check ───────────────────────────
+
+
+def test_sweep_distrusts_the_integrity_check_when_close_error_is_present(
+    tmp_path: Path,
+):
+    """A `close_error` on the row means `run_task`'s own `setup.close()`
+    failed -- the connection may still be open, so `check_and_restore`'s
+    result cannot be trusted regardless of what it actually reports."""
+
+    def fake_run_with_close_error(task, arm, model, *a, **k):
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.01,
+            "verdict": "correct",
+            "close_error": "RuntimeError: close exploded",
+        }
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    sweep(
+        TASKS,
+        ("contract",),
+        (GLM,),
+        {"1": "g"},
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=1.0,
+        golds_hash="h",
+        run_task_fn=fake_run_with_close_error,
+    )
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == 1
+    # Untrustworthy, not corrupted=False -- the check may have run against
+    # a still-live connection and cannot be relied on either way.
+    assert rows[0]["db_corrupted"] is None
+    assert "setup.close()" in rows[0]["integrity_error"]
+
+
+# ── json serialization never loses a row ─────────────────────────────────
+
+
+def test_sweep_falls_back_to_repr_for_a_non_serializable_field(tmp_path: Path):
+    class Unserializable:
+        def __repr__(self):
+            return "<Unserializable sentinel>"
+
+    def fake_run_with_bad_field(task, arm, model, *a, **k):
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.01,
+            "verdict": "correct",
+            "oops": Unserializable(),
+        }
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    sweep(
+        TASKS,
+        ("contract",),
+        (GLM,),
+        {"1": "g"},
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=1.0,
+        golds_hash="h",
+        run_task_fn=fake_run_with_bad_field,
+    )
+    text = out.read_text()
+    assert "<Unserializable sentinel>" in text  # the row was not lost
+    rows = [json.loads(line) for line in text.splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["verdict"] == "correct"

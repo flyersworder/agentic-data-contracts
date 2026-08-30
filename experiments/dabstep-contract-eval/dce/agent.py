@@ -574,6 +574,7 @@ def build_result_row(
     verdict: str,
     forced_answer: bool,
     trace_path: str | None,
+    reasoning_tokens: int,
     in_tok: int,
     out_tok: int,
     cached_tok: int,
@@ -625,6 +626,17 @@ def build_result_row(
         "provider_tag": MODELS[model].provider_tag,
         "quantization": MODELS[model].quantization,
         "reasoning_effort": REASONING_EFFORT,
+        # MEASURED, NOT ASSUMED. `REASONING_EFFORT` is pinned because an
+        # explicit value beats a per-endpoint default, but its measured effect
+        # was taken on a TOOL-FREE call (133 reasoning tokens unset against
+        # 45-55 at any explicit effort) and does not describe this
+        # experiment's actual path. With tools bound, three of the four pinned
+        # models emitted ZERO reasoning tokens on a probe, and a real hard task
+        # (1480, arm C, glm) produced 601 output tokens with 0 reasoning across
+        # all five turns. Recording the count per row is what turns "the effort
+        # knob may be inert here" from a guess into something the sweep
+        # answers. A subset of `output_tokens`, which is what is billed.
+        "reasoning_tokens": reasoning_tokens,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached_tok,
@@ -684,6 +696,19 @@ class AgentConstructionError(RuntimeError):
     in this module and must stop the sweep loudly rather than being
     silently swallowed as if it were as cheap as a missing API key.
     """
+
+
+def _reasoning_tokens(usage) -> int:
+    """Reasoning tokens accumulated over a run, or 0 when unreported.
+
+    pydantic-ai keeps this in `RunUsage.details`, not as a first-class field,
+    so it is read defensively: a provider that omits it, or a future release
+    that renames the key, must yield 0 rather than break a paid row.
+    """
+    try:
+        return int((getattr(usage, "details", None) or {}).get("reasoning_tokens", 0))
+    except Exception:
+        return 0
 
 
 def _spec_field(model: str, field: str) -> str:
@@ -763,6 +788,7 @@ def _priced_fallback_row(
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
         "reasoning_effort": REASONING_EFFORT,
+        "reasoning_tokens": _reasoning_tokens(usage),
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": getattr(usage, "cache_read_tokens", 0) or 0,
@@ -1093,6 +1119,7 @@ def run_task(
                 verdict=verdict,
                 forced_answer=forced_answer,
                 trace_path=trace_path,
+                reasoning_tokens=_reasoning_tokens(usage),
                 in_tok=usage.input_tokens,
                 out_tok=usage.output_tokens,
                 cached_tok=usage.cache_read_tokens,

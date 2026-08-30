@@ -196,3 +196,74 @@ def test_a_row_still_lands_when_tracing_is_impossible(tmp_path: Path):
     assert row["verdict"] == "correct"
     assert row["usd"] > 0
     assert row["trace_path"] is None
+
+
+# ── reasoning ───────────────────────────────────────────────────────────────
+
+
+def test_a_trace_preserves_a_thinking_part(tmp_path: Path):
+    """Reasoning is the most valuable thing in a transcript for diagnosis — it
+    is where the model says WHY it wrote the query it wrote.
+
+    This asserts the trace does not drop it, which matters because the first
+    real traces contained none: that turned out to be the models not emitting
+    reasoning while tools are bound, not the trace losing it. Distinguishing
+    those two required exactly this test.
+    """
+    from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
+
+    messages = [
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="the fee rule has a null aci, so it matches all"),
+                TextPart("5, 9, 20"),
+            ]
+        )
+    ]
+    write_trace(
+        tmp_path / "t", task_id="1480", arm="contract", model="m", messages=messages
+    )
+    parts = read_trace(tmp_path / "t" / trace_name("1480", "contract", "m"))[0]["parts"]
+    kinds = {p["part_kind"] for p in parts}
+    assert "thinking" in kinds
+    thinking = next(p for p in parts if p["part_kind"] == "thinking")
+    assert "null aci" in thinking["content"]
+
+
+def test_reasoning_tokens_are_recorded_on_the_row():
+    """`REASONING_EFFORT` is pinned on faith; this is how the sweep checks it.
+
+    The effort knob's measured effect (133 reasoning tokens unset vs 45-55 set)
+    was taken on a TOOL-FREE call. With tools bound — the experiment's actual
+    path — three of four pinned models emitted zero reasoning on a probe. This
+    field turns that from an anecdote into a column.
+    """
+    from dce.agent import _reasoning_tokens, build_result_row
+
+    from tests.test_agent import ROW_KWARGS
+
+    row = build_result_row(**{**ROW_KWARGS, "reasoning_tokens": 137})
+    assert row["reasoning_tokens"] == 137
+    # A subset of what is billed, never more.
+    assert row["reasoning_tokens"] <= row["output_tokens"] or row["output_tokens"] == 0
+
+    class Usage:
+        details = {"reasoning_tokens": 42}
+
+    assert _reasoning_tokens(Usage()) == 42
+
+
+def test_reasoning_tokens_degrade_to_zero_rather_than_breaking_a_paid_row():
+    """`details` is not a first-class pydantic-ai field, so a provider that
+    omits it — or a rename in a future release — must cost 0, not a row."""
+    from dce.agent import _reasoning_tokens
+
+    class NoDetails:
+        pass
+
+    class Weird:
+        details = {"reasoning_tokens": "not-a-number"}
+
+    assert _reasoning_tokens(NoDetails()) == 0
+    assert _reasoning_tokens(Weird()) == 0
+    assert _reasoning_tokens(None) == 0

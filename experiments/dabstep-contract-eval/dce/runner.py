@@ -877,6 +877,7 @@ def _construction_error_row(
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
         "reasoning_effort": REASONING_EFFORT,
+        "reasoning_tokens": 0,
         "input_tokens": 0,
         "output_tokens": 0,
         "cached_tokens": 0,

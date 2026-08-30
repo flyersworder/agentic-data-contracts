@@ -804,6 +804,7 @@ def test_construction_error_row_has_build_result_row_shape():
         verdict="correct",
         forced_answer=False,
         trace_path=None,
+        reasoning_tokens=0,
         in_tok=1,
         out_tok=1,
         cached_tok=0,

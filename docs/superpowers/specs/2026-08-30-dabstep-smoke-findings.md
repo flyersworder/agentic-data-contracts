@@ -239,6 +239,31 @@ knob as well as a quality knob.
 stamped on every row. Uniform across arms — it is a model setting, not an arm
 setting.
 
+### Correction: that measurement was taken on the wrong path
+
+The 133-vs-45 figure above comes from a **tool-free** call. This experiment
+never makes tool-free calls. With tools bound, reasoning largely disappears:
+
+| model | thinking parts | reasoning tokens |
+|---|:-:|---:|
+| deepseek-v4-flash-0731 | 1 | 8 |
+| deepseek-v4-pro-0813 | 0 | 0 |
+| glm-5.3-flash | 0 | 0 |
+| gpt-5.6-sol | 0 | 0 |
+
+That probe used a trivial prompt, so it is weak on its own — but the real
+task-1480 trace (arm C, glm, a hard task) shows **0 reasoning tokens across all
+five turns at 601 output tokens**, which is not an easy-prompt artifact.
+
+So `REASONING_EFFORT` is probably close to inert on the path that matters, and
+F10's claim that it is "a cost knob as well as a quality knob" is not supported
+for tool-calling. The pin STAYS — an explicit recorded value still beats a
+per-endpoint default that varies with routing — but the justification is
+reproducibility, not cost.
+
+`reasoning_tokens` is now recorded on every row so the full sweep answers this
+empirically instead of inheriting a claim measured on the wrong path.
+
 ## F11 — the account data policy silently removes endpoints
 
 `provider: {"only": ["deepseek"]}` on `deepseek-v4-pro-0813` returns *"No

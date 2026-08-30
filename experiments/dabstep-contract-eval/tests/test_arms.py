@@ -1,20 +1,34 @@
+import asyncio
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import duckdb
 import pytest
 from dce.arms import ARMS, build_arm
+from pydantic_ai import ModelRetry
 
 DOCS = {"manual": "FEE RULE ALPHA: match on card_scheme.", "payments_readme": "cols"}
+
+# A stand-in `RunContext`: the pydantic-ai wrapper around governed tools only
+# reads `ctx.usage.total_tokens` (to observe spend) and `ctx.run_id` (to scope
+# that observation) before dispatching, so a duck-typed object with just those
+# two attributes is enough to call a governed tool's `.function` directly in a
+# test, without an `Agent` run around it.
+_CTX = SimpleNamespace(usage=SimpleNamespace(total_tokens=0), run_id=None)
 
 
 @pytest.fixture
 def db(tmp_path: Path) -> Path:
-    import duckdb
-
     path = tmp_path / "t.duckdb"
     con = duckdb.connect(str(path))
     con.execute("CREATE TABLE payments AS SELECT 1 AS psp_reference")
     con.close()
     return path
+
+
+def _tool(setup, name: str):
+    return next(t for t in setup.tools if t.name == name)
 
 
 def test_three_arms_with_the_spec_names():
@@ -60,3 +74,139 @@ def test_only_the_contract_arm_carries_a_session(db):
 def test_unknown_arm_raises(db):
     with pytest.raises(ValueError):
         build_arm("some_other_arm", db, DOCS)
+
+
+def test_all_three_arms_share_one_process_without_connection_conflict(db):
+    """C1 regression guard.
+
+    Arm `contract`'s `DuckDBAdapter` opens a persistent read-write connection
+    and never closes it until `.close()` is called. Task 7's runner builds
+    the arm map up front, in one process, so arms A and B must still be able
+    to open and use `db` afterward — previously they opened `read_only=True`,
+    which DuckDB refuses once a differently-configured connection to the same
+    file exists, crashing every A/B tool call rather than returning a
+    recoverable error.
+    """
+    setups = [build_arm(arm, db, DOCS) for arm in ARMS]
+    try:
+        out_a = _tool(setups[0], "list_tables").function()
+        assert "payments" in out_a
+
+        out_b = _tool(setups[1], "list_tables").function()
+        assert "payments" in out_b
+
+        out_c = asyncio.run(
+            _tool(setups[2], "describe_table").function(
+                _CTX, schema="main", table="payments"
+            )
+        )
+        assert "psp_reference" in out_c
+    finally:
+        for setup in setups:
+            setup.close()
+
+
+def test_row_cap_parity_between_ungoverned_and_governed_arms(db, monkeypatch):
+    import dce.arms as arms_mod
+
+    monkeypatch.setattr(arms_mod, "MAX_ROWS", 5)
+
+    con = duckdb.connect(str(db))
+    con.execute(
+        "CREATE OR REPLACE TABLE payments AS "
+        "SELECT range AS psp_reference FROM range(20)"
+    )
+    con.close()
+
+    setup_a = build_arm("schema_only", db, DOCS)
+    out_a = _tool(setup_a, "execute_sql").function(
+        "SELECT psp_reference FROM payments ORDER BY psp_reference"
+    )
+    rows_a = [
+        line
+        for line in out_a.splitlines()[1:]  # drop the CSV header row
+        if not line.startswith("-- truncated")
+    ]
+
+    setup_c = build_arm("contract", db, DOCS)
+    out_c = asyncio.run(
+        _tool(setup_c, "run_query").function(
+            _CTX, sql="SELECT psp_reference FROM main.payments ORDER BY psp_reference"
+        )
+    )
+    blob = out_c[out_c.index("{") :].split("\n-- truncated")[0]
+    data = json.loads(blob)
+
+    assert len(rows_a) == 5
+    assert len(data["rows"]) == 5
+
+    setup_a.close()
+    setup_c.close()
+
+
+def test_bad_query_returns_something_the_model_can_act_on_every_arm(db):
+    setup_a = build_arm("schema_only", db, DOCS)
+    out_a = _tool(setup_a, "execute_sql").function("SELECT * FROM nonexistent_table")
+    assert out_a.startswith("ERROR:")
+
+    setup_c = build_arm("contract", db, DOCS)
+    # `SELECT *` is blocked by `no_select_star` before execution — a
+    # recoverable validation block, surfaced as `ModelRetry` (not a bare
+    # exception) so the model can rewrite its query and try again.
+    with pytest.raises(ModelRetry):
+        asyncio.run(
+            _tool(setup_c, "run_query").function(
+                _CTX, sql="SELECT * FROM main.payments"
+            )
+        )
+
+    setup_a.close()
+    setup_c.close()
+
+
+def test_csv_rendering_survives_a_comma_bearing_cell(db):
+    con = duckdb.connect(str(db))
+    con.execute(
+        "CREATE OR REPLACE TABLE payments AS SELECT 'Restaurants, cafes' AS description"
+    )
+    con.close()
+
+    setup = build_arm("schema_only", db, DOCS)
+    out = _tool(setup, "execute_sql").function("SELECT description FROM payments")
+
+    import csv
+    import io
+
+    rows = list(csv.reader(io.StringIO(out)))
+    assert rows[0] == ["description"]
+    assert rows[1] == ["Restaurants, cafes"]
+
+    setup.close()
+
+
+def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
+    import dce.arms as arms_mod
+
+    monkeypatch.setattr(arms_mod, "MAX_ROWS", 3)
+
+    con = duckdb.connect(str(db))
+    con.execute(
+        "CREATE OR REPLACE TABLE payments AS "
+        "SELECT range AS psp_reference FROM range(10)"
+    )
+    con.close()
+
+    setup_a = build_arm("schema_only", db, DOCS)
+    out_a = _tool(setup_a, "execute_sql").function("SELECT psp_reference FROM payments")
+    assert "-- truncated at 3 rows" in out_a
+
+    setup_c = build_arm("contract", db, DOCS)
+    out_c = asyncio.run(
+        _tool(setup_c, "run_query").function(
+            _CTX, sql="SELECT psp_reference FROM main.payments"
+        )
+    )
+    assert "-- truncated at 3 rows" in out_c
+
+    setup_a.close()
+    setup_c.close()

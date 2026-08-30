@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dce.data import CONTEXT_FILES, DATASET, build_duckdb, download_context, load_tasks
+from dce.data import (
+    CONTEXT_FILES,
+    DATASET,
+    DATASET_REVISION,
+    build_duckdb,
+    download_context,
+    load_tasks,
+)
 from dce.golds import PLURALITY_THRESHOLD, check_dev_gate, reconstruct_with_shares
 
 # Discovered by inspecting the live dataset tree (Task 3, Step 5):
@@ -28,6 +35,7 @@ def download_task_scores(dest: Path) -> Path:
     root = snapshot_download(
         DATASET,
         repo_type="dataset",
+        revision=DATASET_REVISION,
         allow_patterns=f"{SCORES_DIR}/*",
         local_dir=str(dest),
         max_workers=16,
@@ -63,6 +71,29 @@ def load_leaderboard_artifacts(dest: Path | None = None) -> tuple[dict, dict]:
     return submissions, scores
 
 
+def write_golds(
+    path: Path,
+    golds: dict[str, str],
+    threshold: float = PLURALITY_THRESHOLD,
+    revision: str = DATASET_REVISION,
+) -> dict:
+    """Write the self-describing gold envelope Task 8's runner reads.
+
+    The golds are an *envelope*, not a bare mapping: a gold set reconstructed
+    from a live leaderboard is only meaningful next to the revision and
+    threshold that produced it. Anything scoring against this file can assert
+    it is reading the same ground truth every arm was scored against.
+    """
+    envelope = {
+        "revision": revision,
+        "threshold": threshold,
+        "count": len(golds),
+        "golds": golds,
+    }
+    path.write_text(json.dumps(envelope, indent=2))
+    return envelope
+
+
 def main() -> None:
     data = Path("data")
     files = download_context(data / "hf")
@@ -79,7 +110,7 @@ def main() -> None:
     golds, exclusions, shares = reconstruct_with_shares(submissions, scores)
     ok, mismatches, absent = check_dev_gate(golds, load_tasks("dev"), corpus_ids)
 
-    (data / "golds.json").write_text(json.dumps(golds, indent=2))
+    write_golds(data / "golds.json", golds)
     (data / "exclusions.json").write_text(json.dumps(exclusions, indent=2))
     (data / "gold_shares.json").write_text(json.dumps(shares, indent=2))
 

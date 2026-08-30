@@ -8,6 +8,15 @@ import duckdb
 
 DATASET = "adyen/DABstep"
 
+# The leaderboard is live: `data/submissions/` and `data/task_scores/` gain files
+# continuously, so an unpinned read reconstructs a different gold set on every run.
+# The corpus grew 2198 -> 2199 submissions *during* the Task 3 gate run alone. Golds
+# that drift between the smoke run and the full sweep would score different arms
+# against different ground truth, and nothing in the results file would show it.
+# Every Hub call in this experiment therefore pins this revision; none resolves to
+# `main`. Bump it deliberately, and re-run the dev gate when you do.
+DATASET_REVISION = "a1a3187c3f52e0846886a62814ed5adfcbbcc48e"
+
 # table name -> path within the HF dataset repo
 CONTEXT_FILES: dict[str, str] = {
     "payments": "data/context/payments.csv",
@@ -36,6 +45,7 @@ def download_context(dest: Path) -> dict[str, Path]:
                 repo_id=DATASET,
                 filename=repo_path,
                 repo_type="dataset",
+                revision=DATASET_REVISION,
                 local_dir=dest,
             )
         )
@@ -60,7 +70,7 @@ def build_duckdb(files: dict[str, Path], db_path: Path) -> None:
 
 # DABStep's public split names ("default"/"dev") don't match the repo's actual
 # task-file names (data/tasks/all.jsonl, data/tasks/dev.jsonl) — verified by hand
-# via huggingface_hub.list_repo_files(DATASET, repo_type="dataset").
+# by listing the pinned revision's repo files.
 _TASK_FILES: dict[str, str] = {"default": "all", "dev": "dev"}
 
 
@@ -75,6 +85,7 @@ def load_tasks(split: str) -> list[dict]:
         repo_id=DATASET,
         filename=f"data/tasks/{filename}.jsonl",
         repo_type="dataset",
+        revision=DATASET_REVISION,
     )
     with open(path) as fh:
         return [json.loads(line) for line in fh if line.strip()]

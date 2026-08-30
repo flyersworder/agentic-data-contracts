@@ -274,6 +274,41 @@ the observed provider is not recorded: OpenRouter returns it only in the
 response body, which pydantic-ai discards (`ModelResponse.provider_name` is the
 literal string `"openrouter"`, and no response header carries it).
 
+## F12 — our fallback scorer was stricter than DABStep's, and it flipped a headline
+
+The 12-task re-run graded `Yes.` as **wrong** against a gold of `yes`: the
+fallback normalises case but not trailing punctuation. DABStep's own
+`compare_strings` strips all non-word characters, so it grades that correct.
+
+Two rows disagreed — both ungoverned arms on task 30 — and they moved the
+result across the significance line:
+
+| comparison | our fallback | official scorer |
+|---|---|---|
+| `schema_only` vs `contract` | **p=0.0156** (significant) | p=0.0703 (not) |
+| `manual_prompt` vs `contract` | p=0.0625 | p=0.2188 |
+| accuracy | A 1/12, B 3/12, C 8/12 | A 2/12, B 4/12, C 8/12 |
+
+**The stricter scorer produced a false positive in this library's own favour.**
+Both corrected rows went against the contract arm; none went for it.
+
+**Fix:** vendor DABStep's scorer verbatim at pinned revision
+`d4431c2e4a695cbe43c33aab2adaa304a37ae64a` (sha256 recorded and asserted in
+`tests/test_vendored_scorer.py`) and make it the grading path. It is not on
+PyPI, so a pinned hashed copy is the only way to have both the official rules
+and determinism.
+
+Adopting it cuts **both ways**, which is why it is a correctness fix and not a
+loosening:
+
+- *More lenient:* `rel_tol=1e-4` numeric comparison, rounding to the lesser
+  decimal precision, single-word subset matching, `SequenceMatcher > 0.95`.
+- *Stricter:* `N/A` and `none` no longer satisfy a `Not Applicable` gold — the
+  task guidelines ask for that exact phrase, and 6 of 406 golds (1.5%) use it.
+
+Gold reconstruction is unaffected: it consumes the leaderboard's own published
+`score` field, and the dev gate uses a separate normaliser.
+
 ## Status
 
 - **Done:** F1, F2, F5, F6 (caps + forcing turn); F3, F4, F9, F10, F11

@@ -13,12 +13,47 @@ _BRACKETS = re.compile(r"^[\[\('\"]+|[\]\)'\"]+$")
 _THOUSANDS = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
 
 
-def _official(predicted: str, gold: str) -> bool | None:
+def _load_official():
+    """DABStep's own `question_scorer`, preferring a real installed package
+    over the vendored copy.
+
+    `dabstep_benchmark` is not on PyPI — it lives only inside the leaderboard
+    Space — so `vendor/dabstep_scorer.py` is a pinned, hashed copy of the same
+    file and is what actually runs here. The installed-package branch is kept
+    ahead of it so that an environment which DOES have the real thing (a future
+    release, or a Space checkout on the path) grades with that instead of a
+    copy that may have gone stale.
+    """
     try:
-        from dabstep_benchmark.evaluation.scorer import question_scorer
+        from dabstep_benchmark.evaluation.scorer import (  # type: ignore[import-not-found]
+            question_scorer,
+        )
+
+        return question_scorer, "official"
     except ImportError:
+        pass
+    from vendor.dabstep_scorer import question_scorer
+
+    return question_scorer, "official-vendored"
+
+
+_OFFICIAL, _OFFICIAL_KIND = _load_official()
+
+
+def _official(predicted: str, gold: str) -> bool | None:
+    """DABStep's verdict, or None if its scorer raises.
+
+    Upstream's `question_scorer` is not written defensively — `compare_lists`
+    recurses, `extract_numeric` regexes arbitrary text — so a pathological
+    model answer could raise where our own fallback would simply return False.
+    Falling through to the fallback on an exception keeps one bad answer from
+    turning into a `scoring_error` row, and is the ONLY case where the fallback
+    still grades anything.
+    """
+    try:
+        return bool(_OFFICIAL(predicted, gold))
+    except Exception:
         return None
-    return bool(question_scorer(predicted, gold))
 
 
 def active_scorer() -> str:
@@ -26,16 +61,20 @@ def active_scorer() -> str:
     when `dabstep_benchmark` is importable, `"fallback"` otherwise.
 
     Recorded on every result row (`dce.agent.build_result_row`) because the
-    choice is made at import time by whatever happens to be installed, and
-    the two scorers are not guaranteed to agree. `dabstep_benchmark` is NOT
-    a dependency of this experiment, so today every row is scored by the
-    fallback and `_official` is dead code — but installing it mid-sweep
-    (directly, or as a transitive dependency of something else) would
-    switch the scorer silently and split one results file across two
-    grading rules with nothing in the file to show it. This makes that
-    visible per row instead of per environment.
+    two scorers are NOT equivalent and the difference changed a headline. On
+    the 12-task smoke run the fallback disagreed with DABStep's own rules on
+    two rows (`Yes.` against gold `yes`: the fallback normalises case but not
+    trailing punctuation; upstream's `compare_strings` strips all non-word
+    characters). Those two rows moved `schema_only vs contract` from p=0.0156
+    to p=0.0703 — a significant result, in this library's favour, that the
+    benchmark's rules do not support.
+
+    So the fallback is no longer the normal path: it grades only if upstream's
+    scorer raises. Returns `"official"` for a real installed
+    `dabstep_benchmark`, `"official-vendored"` for the pinned copy in
+    `vendor/`, `"fallback"` only if neither can be reached at all.
     """
-    return "fallback" if _official("x", "x") is None else "official"
+    return "fallback" if _official("x", "x") is None else _OFFICIAL_KIND
 
 
 def _clean(value: str) -> str:

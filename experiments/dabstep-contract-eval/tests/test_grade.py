@@ -18,15 +18,39 @@ def test_bracket_and_quote_normalization():
     assert score('"C"', "C")
 
 
-def test_float_tolerance_is_relative_and_tight():
+def test_float_tolerance_follows_upstream_not_our_own_taste():
+    """Upstream compares numerics with `rel_tol=1e-4`/`abs_tol=1e-4` and rounds
+    to the lesser decimal precision of the two values — markedly looser than
+    the tight tolerance this file used to assert. We adopt it because the
+    leaderboard does; grading more strictly than the benchmark is how the
+    fallback manufactured a significant result the rules did not support (see
+    `tests/test_vendored_scorer.py`).
+    """
     assert score("0.120132", "0.1201320000001")
-    assert not score("0.120132", "0.120133")
+    # Was `not score(...)` under the old fallback. Upstream calls this equal.
+    assert score("0.120132", "0.120133")
+    # Still discriminating well short of "anything close enough".
+    assert not score("0.12", "0.13")
 
 
-def test_na_equivalence():
-    assert score("", "N/A")
-    assert score("none", "N/A")
-    assert score("null", "N/A")
+def test_not_applicable_must_be_spelled_the_way_the_task_asks():
+    """Adopting the official scorer is not a blanket loosening — here it is
+    STRICTER than the fallback was.
+
+    DABStep's own task guidelines say: "If a question does not have a relevant
+    or applicable answer for the task, please respond with 'Not Applicable'".
+    Upstream honours that literally: `N/A`, `none` and `null` are all wrong
+    against a `Not Applicable` gold, where the old fallback accepted them as
+    synonyms. 6 of 406 reconstructed golds (1.5%) are `Not Applicable` or
+    empty, so this is a real slice of the sweep and it now costs every arm
+    equally.
+    """
+    assert score("Not Applicable", "Not Applicable")
+    assert score("not applicable", "Not Applicable")
+    assert not score("N/A", "Not Applicable")
+    assert not score("none", "Not Applicable")
+    # An empty gold still wants an empty answer, and gets one.
+    assert score("", "")
 
 
 def test_comma_lists_compare_order_insensitively():
@@ -113,10 +137,13 @@ def test_every_numeric_comma_gold_uses_the_reconstruction_separator():
 
 
 def test_active_scorer_names_the_scorer_actually_in_use():
-    """`dabstep_benchmark` is not a dependency of this experiment, so the
-    fallback normalizer grades every row and the official path is dead
-    code. The field exists so that installing it mid-experiment — which
-    would switch scorers silently — is visible per row rather than only in
-    an environment nobody recorded."""
-    assert active_scorer() in {"official", "fallback"}
-    assert active_scorer() == "fallback"
+    """The fallback is no longer the normal path.
+
+    `vendor/dabstep_scorer.py` is a pinned copy of DABStep's own scorer and
+    grades every row; the fallback runs only if upstream's scorer raises. The
+    field is still recorded per row because the choice is made at import time
+    — an environment with a real `dabstep_benchmark` installed would report
+    `"official"` instead, and one results file must never silently mix the
+    two."""
+    assert active_scorer() in {"official", "official-vendored", "fallback"}
+    assert active_scorer() == "official-vendored"

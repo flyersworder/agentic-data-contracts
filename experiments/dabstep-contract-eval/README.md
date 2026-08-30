@@ -249,5 +249,13 @@ Known, deliberate, and disclosed rather than fixed:
 * A torn final line (a full disk, a killed write) is skipped by every reader
   with a warning, costing that one row. A corrupt line anywhere else still
   raises loudly.
-* `dabstep_benchmark` is not installed, so the fallback normalizer scores
-  every answer. Each row records which scorer graded it in its `scorer` field.
+* Answers are graded by **DABStep's own scorer**, vendored verbatim at a
+  pinned revision in `vendor/dabstep_scorer.py` (`dabstep_benchmark` is not on
+  PyPI — it exists only inside the leaderboard Space). The local fallback
+  normalizer now runs only if upstream's scorer raises. Each row records which
+  graded it in its `scorer` field.
+
+  This is load-bearing, not housekeeping. The fallback was *stricter* than the
+  benchmark, and on the 12-task smoke run that manufactured a significant
+  result in this library's favour which the official rules do not support
+  (p=0.0156 against p=0.0703). See `vendor/README.md`.

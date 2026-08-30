@@ -37,3 +37,32 @@ def test_contract_defines_at_least_one_metric():
     source = contract.load_semantic_source()
     assert source is not None
     assert len(source.get_metrics()) >= 1
+
+
+# The digest of the contract as frozen on 2026-08-30, after the third and last
+# authoring pass. Every scored result row carries this value; a result whose
+# digest differs was produced against a different contract and is not comparable
+# with the rest of the sweep.
+#
+# This constant is the enforcement behind the freeze. Without it the suite only
+# asserts that the digest is *stable within one process*, which is true of any
+# contract, including one edited after the fact — detection would depend on
+# somebody reading git history, which nobody does.
+#
+# If this test fails, the contract changed. That is not a formatting problem and
+# updating the constant is not the fix: if any run has been scored, the edit
+# invalidates it, and the honest options are to revert the contract or to re-run
+# every arm. Change this literal only as a deliberate decision, made before any
+# scoring, and say in the commit message what moved and why.
+#
+# Comments and YAML formatting are outside the digest — it is taken over the
+# parsed contract with the semantic source frozen inline — so prose the agent
+# actually reads (domain and metric descriptions, table and column
+# descriptions) does move it, while a comment-only edit does not.
+FROZEN_DIGEST = (
+    "sha256:a08313254de3d91f367fa2ad7f01855084db111c09da62810a177c7c60fec92e"
+)
+
+
+def test_digest_matches_the_frozen_value():
+    assert digest() == FROZEN_DIGEST

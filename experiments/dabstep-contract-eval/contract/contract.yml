@@ -100,10 +100,24 @@ semantic:
         The manual states the *format* of `capture_delay`, `monthly_volume` and
         `monthly_fraud_level` bands but never says whether a value sitting
         exactly on a shared band boundary belongs to the lower or the upper
-        band; it says only "between A and B". The metrics below read "between"
-        as inclusive at both ends, which means a value exactly on a boundary
-        matches both adjacent bands. This is a documented gap in the source
-        material, not a decision the manual makes.
+        band; it says only "between A and B". That gap is in the source
+        material, not a decision the manual makes, and the contract answers it
+        in two different places because the two do different jobs:
+
+        * `fee_rule_matches_merchant_month` — the AUTHORITY on whether a rule
+          applies — reads "between" as inclusive at both ends and does not
+          choose between adjacent bands. A monthly volume of exactly 1,000,000
+          satisfies both a '100k-1m' rule and a '1m-5m' rule, and both rules
+          match. Nothing forces a choice: a rule either matches or it does not,
+          independently of every other rule.
+        * `monthly_volume_band` and `monthly_fraud_level_band` — which label a
+          merchant-month with a single band — must return one value, so they
+          break the tie downward, toward the lower band: exactly 1,000,000
+          yields '100k-1m', exactly 7.7% yields '7.2%-7.7%'. That tie-break is
+          the metric's, not the manual's.
+
+        Where the label and the predicate disagree, the predicate is right. Use
+        the label to describe a merchant, never to decide which fee applies.
       tables: [main.fees, main.payments, main.merchant_data]
 
     - name: merchants
@@ -238,10 +252,18 @@ semantic:
         2 and Level 3 data for B2B transactions; review and update systems
         regularly; train staff.
 
-        NOT ENCODABLE: none of the downgrade causes or remedies is observable in
-        these five tables — there is no settlement timestamp, no retry counter,
-        no interchange tier and no data-completeness flag — so this section
-        survives as governance prose only, with no metric behind it.
+        MOSTLY NOT ENCODABLE, WITH ONE EXCEPTION. There is no settlement
+        timestamp, no retry counter, no interchange tier, no data-completeness
+        flag and no Level 2/Level 3 indicator in these five tables, so almost
+        every downgrade cause and remedy above survives as governance prose with
+        no metric behind it. The exception is 3-D Secure: "failure to use AVS or
+        3D Secure for card-not-present transactions" is one of the listed
+        causes, and manual 4's ACI table splits card-not-present traffic into F
+        (3-D Secure) and G (non-3-D Secure), so the 3DS half of that cause is
+        measurable — see the metric `three_d_secure_share`, which belongs to
+        this domain for exactly that reason. The AVS half is not: no column
+        records an address-verification result. `intracountry_transaction`, the
+        domain's other metric, serves 5.1.1 rather than 5.1.5.
       tables: [main.payments, main.fees]
 
     - name: reporting

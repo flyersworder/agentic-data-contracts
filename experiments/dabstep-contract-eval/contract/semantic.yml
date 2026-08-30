@@ -130,9 +130,10 @@ metrics:
       payments processors."
       INTERPRETATION: the manual says "between A and B" without saying which
       band owns a value sitting exactly on a shared boundary. A CASE must return
-      one value, so this expression breaks the tie downward: exactly 100,000
-      yields '100k-1m', exactly 1,000,000 yields '100k-1m', exactly 5,000,000
-      yields '1m-5m'. That tie-break is this metric's, not the manual's. Fee
+      one value, so this expression breaks the tie downward: exactly 1,000,000
+      yields '100k-1m' and exactly 5,000,000 yields '1m-5m'. (100,000 is not a
+      shared boundary at all — '<100k' is strict, so only '100k-1m' admits it,
+      and both this metric and the match predicate agree there.) That tie-break is this metric's, not the manual's. Fee
       *matching* does not have to choose and does not: in
       `fee_rule_matches_merchant_month` a boundary value satisfies both adjacent
       bands, which is what the manual's wording licenses. Use that predicate,

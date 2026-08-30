@@ -1,5 +1,8 @@
 import asyncio
 import json
+import multiprocessing
+import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -277,4 +280,56 @@ def test_check_and_restore_detects_a_mutation_made_while_a_governed_arm_is_open(
     con = duckdb.connect(str(working))
     tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
     con.close()
+    assert "payments" in tables
+
+
+def _drop_payments_and_die(working_path: str) -> None:
+    """Run in a forked child: mutate the working copy through a live
+    connection, then SIGKILL the process itself before it ever gets a
+    chance to checkpoint or close -- a real hard death (SIGKILL, an OOM
+    kill), not a simulation via a dangling Python reference."""
+    con = duckdb.connect(working_path)
+    con.execute("DROP TABLE payments")
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+def test_make_working_copy_removes_a_stale_wal_left_by_a_real_crash(
+    tmp_path: Path,
+):
+    """A hard death between a mutation and its checkpoint leaves a `.wal`
+    sidecar sitting next to the working file. The next `make_working_copy`
+    call -- a resume, in a fresh process -- must not let that sidecar
+    survive: opening the "fresh" copy would otherwise have DuckDB replay
+    the dead run's own mutation on top of it, silently. Reproduced with a
+    genuinely killed subprocess, not a stand-in file, per the reviewer's
+    own reproduction.
+    """
+    pristine = tmp_path / "pristine.duckdb"
+    con = duckdb.connect(str(pristine))
+    con.execute("CREATE TABLE payments AS SELECT 1 AS psp_reference")
+    con.close()
+
+    working = tmp_path / "working.duckdb"
+    make_working_copy(pristine, working)
+
+    ctx = multiprocessing.get_context("fork")
+    proc = ctx.Process(target=_drop_payments_and_die, args=(str(working),))
+    proc.start()
+    proc.join(timeout=15)
+    assert proc.exitcode == -signal.SIGKILL  # genuinely killed, not a clean exit
+
+    wal_path = working.with_name(working.name + ".wal")
+    assert wal_path.exists()  # the dead run's mutation really is sitting there
+
+    # The resume: a fresh process's make_working_copy call.
+    make_working_copy(pristine, working)
+    assert not wal_path.exists()
+
+    con = duckdb.connect(str(working))
+    tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
+    con.close()
+    # The dead run's DROP TABLE must NOT have been replayed onto the fresh
+    # copy -- this task did nothing, and must not be stamped db_corrupted
+    # for it (a false positive on the experiment's headline metric,
+    # measured without this fix).
     assert "payments" in tables

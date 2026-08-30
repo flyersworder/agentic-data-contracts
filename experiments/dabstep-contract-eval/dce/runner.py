@@ -10,17 +10,71 @@ exists to uphold:
 `run_task_fn` returning (or `_construction_error_row` building a
 substitute) is the moment a row becomes "priced" — real spend, or a
 deliberate pessimistic guard charge, is now a fact that must be recorded.
-Everything between that moment and `fh.write` — `check_and_restore`,
-`json.dumps`, updating `spent` — is now wrapped so that a failure THERE
-still lets the row land on disk (with the failure noted on it) before any
-exception propagates. This was gotten wrong twice already, in the same
-component, at two different frames: first by treating `run_task_fn`'s
-whole outcome as unpriced on ANY exception (see `AgentConstructionError`'s
-narrowing below), and then — after that was fixed — by discovering that
-the loop calling it had exactly the same problem one frame later
-(`check_and_restore` itself raising, or `json.dumps` raising, discarded an
-already-priced row the same way). The invariant above is the fix stated
-once instead of patched frame by frame.
+
+STRUCTURAL, NOT A SERIES OF GUARDED STATEMENTS: there is exactly ONE site
+in `sweep`'s loop body that writes a row (`_safe_json_dumps` + `fh.write`),
+and every step between "`row` exists" and that site — the integrity check,
+pricing validation — COLLECTS its failure onto the row (an `integrity_error`
+or `pricing_error` note, a normalized/pessimistic value swapped in) instead
+of raising through it. A collected exception, if any, is held in
+`pending_exc` and only gets to propagate AFTER the write, the flush, and
+the `spent`/`real_spent` update. This was gotten wrong THREE times already
+in this one component, at three different frames, each reproducing the
+identical signature (a resumed sweep burning real money while
+`spent_so_far`/rows-on-disk stayed at zero) via a different mechanism:
+
+  1. `run_task_fn`'s whole outcome was treated as unpriced on ANY
+     exception (fixed by `AgentConstructionError`'s narrowing, below, plus
+     `run_task`'s own guarded post-call tail in `dce/agent.py`).
+  2. The loop calling it had the identical problem one frame later:
+     `check_and_restore` itself raising, or `json.dumps` raising,
+     discarded an already-priced row the same way (fixed by writing
+     before re-raising, and by `_safe_json_dumps`'s fallback layers).
+  3. The FIX for (2) still left two statements between the two guarded
+     calls unguarded: `_validated_usd(row["usd"], ...)` and
+     `_validated_usd(row["usd_guard"], ...)` raised and lost the row on a
+     `Decimal`, a NaN, an infinite value, or a missing key — the identical
+     bug, one frame further in, dressed as "validate before writing"
+     rather than "guard this specific call". Fixed by making pricing
+     validation collect-and-normalize (see `_priced_or_pessimistic`)
+     instead of raise-and-lose, using the SAME policy `check_and_restore`
+     failures already got, rather than the opposite one.
+
+The regression pin for this is
+`test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write`, a
+parametrized test that injects a failure at every known point in this
+sequence (a bad `usd`, a bad `usd_guard`, a non-`str` dict key, a circular
+reference, `check_and_restore` raising) and asserts the row always lands —
+so a fifth frame introduced later has to explicitly break a test, not slip
+past silently the way the first three did.
+
+TWO EDGES OF "REACHES DISK" THAT ARE DOCUMENTED, NOT CLOSED: `fh.write`/
+`fh.flush` can still fail outright (a full disk, mid-write) with no
+further fallback — there is no stderr last-resort dump if the OS refuses
+the write itself, only for what `json.dumps` cannot serialize. And
+`flush()` is not `fsync()`: it hands the bytes to the OS's page cache, which
+survives THIS PROCESS dying (a crash, a `raise`, `SIGKILL`) but not the
+MACHINE dying before the OS itself flushes that cache to disk. "Reaches
+disk" in this module means "survives process death", not "survives power
+loss".
+
+EXIT CODE TAXONOMY (`main()`, via `_exit_code_for` plus one path it does
+NOT cover):
+
+  * `0` — completed cleanly.
+  * `1` — an UNCAUGHT exception propagated out of `main()` entirely (e.g.
+    a `check_and_restore` failure with no working `except` above it, or
+    genuinely any other bug) — Python's own default for an uncaught
+    exception, not something `_exit_code_for` assigns. No final `spent`
+    line is printed in this case: the traceback is the last thing on
+    stderr, and the row(s) already written are the only record of what
+    happened up to that point.
+  * `2` — `SweepResult.truncated`: the spend cap would have been exceeded.
+  * `3` — `SweepResult.circuit_broken`: too many consecutive construction
+    failures across different units.
+  * `4` — `SweepResult.connection_leaked`: a DuckDB connection failed to
+    close; the working copy's integrity substrate can no longer be
+    trusted for this invocation.
 
   * WORKING COPY, ALWAYS. Arms `schema_only` and `manual_prompt` are
     ungoverned — nothing stops either from issuing `DROP TABLE` against
@@ -112,12 +166,16 @@ once instead of patched frame by frame.
     by every prior invocation against the same `out` file — because resume
     is the headline feature and a cap that resets to $0 on every restart is
     no cap at all under a crash loop or a naive retry wrapper. A row's
-    `usd`/`usd_guard` are read and VALIDATED (a real, finite, non-negative
-    number, or `None` treated as 0.0 — never a string, a bool, a negative
-    figure, or NaN) BEFORE the row is written to `out`: an invalid or
-    un-priced value must never land on disk looking like a free,
-    permanently-done unit that then bricks every future `spent_so_far`
-    read with no recovery but hand-editing JSONL.
+    `usd`/`usd_guard` are VALIDATED (a real, finite, non-negative number,
+    or `None` treated as 0.0 — never a string, a `Decimal`, a bool, a
+    negative figure, NaN, or `float("inf")`) before it contributes to
+    either total — but an invalid value is NORMALIZED to the pessimistic
+    per-model ceiling with a `pricing_error` note (see
+    `_priced_or_pessimistic`), not raised and discarded: the row still
+    reaches disk (the central invariant above) either way, so an invalid
+    or un-priced value can no longer land on disk looking like a free,
+    permanently-done unit, and it no longer costs the row itself to say
+    so.
   * THE RESERVATION IS A REAL CEILING, NOT A GUESS, AND IT COVERS A WHOLE
     TASK. Before any observation for a given model, `sweep` reserves
     `dce.agent._token_budget_usd(model)` — the true worst case the runaway
@@ -166,7 +224,13 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 
-from dce.agent import AgentConstructionError, _commit_sha, _token_budget_usd, run_task
+from dce.agent import (
+    WORST_CASE_TOKEN_BUDGET_USD,
+    AgentConstructionError,
+    _commit_sha,
+    _token_budget_usd,
+    run_task,
+)
 from dce.arms import ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
 from dce.frozen import digest
@@ -463,27 +527,119 @@ def _seed_observed_by_model(path: Path) -> dict[str, list[float]]:
 
 
 def _validated_usd(value, field_name: str) -> float:
-    """`usd`/`usd_guard` must be a real, finite, non-negative number before
+    """`usd`/`usd_guard` must be a real, FINITE, non-negative number before
     a row is allowed to reach disk. `None` is the one explicit "couldn't
     price this" signal and is treated as `0.0`; anything else invalid — a
     string, a `bool` (a `bool` IS an `int` in Python; explicitly excluded
     so `True` cannot silently price a row at $1.00), a negative figure, NaN
-    — raises loudly here rather than landing on disk. Measured without
-    this: a stray `"1.20"` string wrote fine, then `spent +=` raised on
-    every subsequent read of the file — bricking `spent_so_far` for that
-    results file permanently, with no recovery but hand-editing JSONL; six
-    negative rows produced `spent = -600.0`.
+    OR `float("inf")` — raises. `math.isfinite` (not a bare `isnan` check)
+    is what catches infinity: `Infinity` is not valid JSON per RFC 8259 (a
+    non-Python consumer chokes on it), and an accepted `inf` would make
+    `spent_so_far` permanently `inf`, truncating every future resume to
+    zero pending work — precisely the bricking outcome this validator
+    exists to prevent, just via a different value than the ones already
+    covered. Callers of this function COLLECT its exception and normalize
+    rather than propagate it — see `_priced_or_pessimistic` — so raising
+    here is the mechanism for "this needs normalizing", not "lose the
+    row"; the row-losing failure mode this docstring used to describe
+    (six negative rows producing `spent = -600.0`, a stray `"1.20"` string
+    bricking every future read) is what motivated validating in the first
+    place, not what happens now when validation fails.
     """
     if value is None:
         return 0.0
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{field_name} must be a number or None, got {value!r}")
     value = float(value)
-    if math.isnan(value):
-        raise ValueError(f"{field_name} is NaN")
+    if not math.isfinite(value):
+        raise ValueError(f"{field_name} is not finite: {value!r}")
     if value < 0:
         raise ValueError(f"{field_name} is negative: {value!r}")
     return value
+
+
+def _pessimistic_usd(model: str) -> float:
+    """`_token_budget_usd(model)`, falling back to the worst case across
+    every pinned model (`dce.agent.WORST_CASE_TOKEN_BUDGET_USD`) if even
+    that fails — an unrecognized `model` string. This function is the
+    fallback of last resort for a pricing failure and must never itself
+    raise.
+    """
+    try:
+        return _token_budget_usd(model)
+    except Exception:
+        return WORST_CASE_TOKEN_BUDGET_USD
+
+
+def _priced_or_pessimistic(
+    row: dict, field: str, model: str
+) -> tuple[float, str | None]:
+    """Extract and validate `row[field]` (`usd`/`usd_guard`); on ANY
+    failure — a missing key, wrong type, negative, NaN, infinite — this
+    NORMALIZES to the pessimistic ceiling and returns an error note
+    instead of raising. There is no version of "the row already exists
+    and is on its way to the one write site" where discarding it over a
+    pricing bug is the right response — the same policy `check_and_restore`
+    failures already get (collect, write, re-raise after), not the
+    opposite one a bare `row[field]` access used to apply here.
+    """
+    try:
+        raw = row[field]
+    except KeyError:
+        return _pessimistic_usd(model), f"{field} missing"
+    try:
+        return _validated_usd(raw, field), None
+    except Exception as exc:
+        return (
+            _pessimistic_usd(model),
+            f"{field}={raw!r}: {type(exc).__name__}: {exc}",
+        )
+
+
+def _safe_json_dumps(row: dict) -> str:
+    """Serialize `row` for the one write site in `sweep` — this function
+    must never raise, because the row it is given already exists and must
+    reach disk regardless of what it contains.
+
+    Three layers, each covering what the last one cannot:
+
+      1. Plain `json.dumps(row)`.
+      2. `default=repr` — covers a VALUE `json` doesn't natively know how
+         to serialize (an exception object, a custom class instance, ...).
+         Does NOT cover a non-`str`-coercible dict KEY (`json` raises
+         `TypeError` about the key before `default` is ever consulted —
+         `default` only ever runs on values) or a circular reference
+         (`json` detects the cycle and raises `ValueError` internally,
+         again before `default` gets a say).
+      3. A minimal envelope built from `str(row)` — Python's `str`/`repr`
+         on a `dict` has its own built-in cycle guard (renders `{...}` for
+         a self-reference rather than recursing or raising), and places no
+         constraint on key types at all, so this covers both gaps layer 2
+         leaves open. A handful of string-valued identifying fields
+         (`task_id`, `arm`, `model`, `verdict`) are copied out best-effort
+         so the row stays findable by simple tools even in this shape.
+    """
+    try:
+        return json.dumps(row)
+    except Exception:
+        pass
+    try:
+        return json.dumps(row, default=repr)
+    except Exception:
+        pass
+    envelope: dict = {}
+    try:
+        envelope["unserializable_row"] = str(row)
+    except Exception:
+        envelope["unserializable_row"] = "<could not stringify row>"
+    for key in ("task_id", "arm", "model", "verdict"):
+        value = row.get(key)
+        if isinstance(value, str):
+            envelope[key] = value
+    try:
+        return json.dumps(envelope)
+    except Exception:
+        return json.dumps({"unserializable_row": "<could not stringify row>"})
 
 
 def _construction_error_row(
@@ -627,8 +783,13 @@ def sweep(
                     )
 
                 # INVARIANT (see module docstring): `row` now exists and is
-                # priced. Everything below must let it reach disk before
-                # anything else may throw.
+                # priced. THERE IS EXACTLY ONE WRITE SITE, below
+                # (`_safe_json_dumps` + `fh.write`), and every failure
+                # between here and it is COLLECTED onto `row` — never
+                # raised through — so the row always reaches that one
+                # site. `pending_exc`, if set, only gets to propagate
+                # AFTER the write, the flush, and the spend update.
+                pending_exc: Exception | None = None
 
                 # `run_task` stamps `close_error` when its OWN `setup.close()`
                 # failed — meaning the connection may still be open. That
@@ -641,11 +802,9 @@ def sweep(
                 # ungoverned arm mutate the warehouse" — a stream of
                 # unreliable `db_corrupted` values is worse than no sweep
                 # at all, so this task's working copy is retired: the row
-                # still reaches disk (the invariant above), but the sweep
-                # then stops rather than running `check_and_restore` again
-                # against unknown state.
+                # still reaches disk, but the sweep then stops rather than
+                # running `check_and_restore` again against unknown state.
                 row_leaked = row.get("close_error") is not None
-                integrity_exc: Exception | None = None
                 if row_leaked:
                     row["db_corrupted"] = None
                     row["integrity_error"] = (
@@ -661,30 +820,35 @@ def sweep(
                     except Exception as exc:
                         row["db_corrupted"] = None
                         row["integrity_error"] = f"{type(exc).__name__}: {exc}"
-                        integrity_exc = exc
+                        pending_exc = exc
 
-                # Validate the price BEFORE writing: a row must never land
-                # on disk un-priced-or-invalid-but-looking-done — that
-                # would make a resumed sweep treat it as both free (or
-                # corruptly mispriced) and permanently finished. A row
-                # missing `usd`/`usd_guard` entirely raises `KeyError`
-                # here, before `fh.write`, so nothing partial ever hits the
-                # file. `usd_guard` is required, not defaulted from `usd`
-                # (the same keyword-required treatment `golds_hash` gets):
-                # a row-producer that forgot to set it would otherwise
-                # silently behave as guard == real, which is exactly the
-                # "unknown-cost failure reads as free" shape A1 was about.
-                usd = _validated_usd(row["usd"], "usd")
-                usd_guard = _validated_usd(row["usd_guard"], "usd_guard")
+                # Pricing is NORMALIZED, never raised through — the same
+                # collect-then-carry-on policy `integrity_error` gets just
+                # above, not the opposite one a bare `row["usd"]` access
+                # used to apply here (a `Decimal`, a NaN, a missing key, an
+                # infinite value all used to raise and lose the row; same
+                # frame, same already-spent money, and there is no reason
+                # for the two policies to differ). `usd_guard` stays
+                # required in spirit — a row that never sets it gets
+                # `"usd_guard missing"` in `pricing_error`, not a silent
+                # `guard == real` default.
+                usd, usd_error = _priced_or_pessimistic(row, "usd", model)
+                usd_guard, usd_guard_error = _priced_or_pessimistic(
+                    row, "usd_guard", model
+                )
+                row["usd"] = usd
+                row["usd_guard"] = usd_guard
+                pricing_errors = [e for e in (usd_error, usd_guard_error) if e]
+                if pricing_errors:
+                    row["pricing_error"] = "; ".join(pricing_errors)
+                    if pending_exc is None:
+                        pending_exc = ValueError(row["pricing_error"])
 
-                # A field that turned out not to be JSON-serializable must
-                # not lose the row — `default=repr` guarantees SOMETHING
-                # legible lands on disk instead of the row vanishing.
-                try:
-                    line = json.dumps(row)
-                except Exception:
-                    line = json.dumps(row, default=repr)
-                fh.write(line + "\n")
+                # THE ONE WRITE SITE. `_safe_json_dumps` cannot itself
+                # raise, by construction — see its own docstring for why
+                # `default=repr` alone (a non-`str` dict key, a circular
+                # reference) is not enough.
+                fh.write(_safe_json_dumps(row) + "\n")
                 fh.flush()
 
                 spent += usd_guard
@@ -715,8 +879,8 @@ def sweep(
                     )
                     break
 
-                if integrity_exc is not None:
-                    raise integrity_exc
+                if pending_exc is not None:
+                    raise pending_exc
 
                 if circuit_broken:
                     print(

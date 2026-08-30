@@ -1,9 +1,16 @@
+import contextlib
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import dce.runner as runner_module
 import pytest
-from dce.agent import AgentConstructionError, _token_budget_usd, build_result_row
+from dce.agent import (
+    WORST_CASE_TOKEN_BUDGET_USD,
+    AgentConstructionError,
+    _token_budget_usd,
+    build_result_row,
+)
 from dce.data import DATASET_REVISION
 from dce.runner import (
     CIRCUIT_BREAKER_THRESHOLD,
@@ -13,6 +20,9 @@ from dce.runner import (
     _exit_code_for,
     _load_golds,
     _next_reserve,
+    _pessimistic_usd,
+    _priced_or_pessimistic,
+    _safe_json_dumps,
     _seed_observed_by_model,
     _stratified_sample,
     _validated_usd,
@@ -688,10 +698,13 @@ def test_sweep_lets_a_real_bug_in_run_task_fn_propagate(tmp_path: Path):
     assert out.read_text() == ""  # nothing written; the bug surfaced, not swallowed
 
 
-def test_sweep_stops_loudly_and_writes_nothing_when_usd_is_missing(tmp_path: Path):
-    """I3 residual: a row must be validated BEFORE it is written — an
-    un-priced row must never land on disk looking like a free, permanently
-    -done unit."""
+def test_sweep_normalizes_and_writes_the_row_when_usd_is_missing(tmp_path: Path):
+    """A1's fourth frame, fixed structurally: a row missing `usd` must
+    still reach the one write site (normalized to the pessimistic ceiling,
+    with a `pricing_error` note) rather than being lost the way a bare
+    `row["usd"]` access used to lose it. The collected exception still
+    propagates afterward -- a pricing bug is worth surfacing loudly -- but
+    only once the row is safely on disk."""
 
     def unpriced_run(task, arm, model, *a, **k):
         return {
@@ -699,11 +712,11 @@ def test_sweep_stops_loudly_and_writes_nothing_when_usd_is_missing(tmp_path: Pat
             "arm": arm,
             "model": model,
             "verdict": "correct",
-        }  # no "usd" key at all
+        }  # no "usd" or "usd_guard" key at all
 
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError):
         sweep(
             TASKS,
             ("contract",),
@@ -716,7 +729,12 @@ def test_sweep_stops_loudly_and_writes_nothing_when_usd_is_missing(tmp_path: Pat
             golds_hash="h",
             run_task_fn=unpriced_run,
         )
-    assert out.read_text() == ""
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == 1  # the row was NOT lost
+    assert rows[0]["usd"] == _token_budget_usd(GLM)
+    assert rows[0]["usd_guard"] == _token_budget_usd(GLM)
+    assert "usd missing" in rows[0]["pricing_error"]
+    assert "usd_guard missing" in rows[0]["pricing_error"]
 
 
 def test_sweep_with_no_pending_work_skips_the_working_copy(tmp_path: Path):
@@ -965,6 +983,102 @@ def test_validated_usd_rejects_a_negative_value():
 def test_validated_usd_rejects_nan():
     with pytest.raises(ValueError):
         _validated_usd(float("nan"), "usd")
+
+
+def test_validated_usd_rejects_infinity():
+    # `Infinity` is not valid JSON per RFC 8259, and an accepted `inf`
+    # would make spent_so_far permanently `inf`, truncating every future
+    # resume to zero pending work -- the same bricking outcome the NaN
+    # check already exists to prevent, just via a different value.
+    with pytest.raises(ValueError):
+        _validated_usd(float("inf"), "usd")
+
+
+def test_validated_usd_rejects_a_decimal():
+    # Decimal is not registered as a subclass of int/float in Python, so
+    # it must be rejected by the isinstance check even though it looks
+    # numeric.
+    with pytest.raises(TypeError):
+        _validated_usd(Decimal("1.20"), "usd")
+
+
+# ── _pessimistic_usd / _priced_or_pessimistic ─────────────────────────────
+
+
+def test_pessimistic_usd_returns_the_real_ceiling_for_a_known_model():
+    assert _pessimistic_usd("z-ai/glm-5.3-flash") == _token_budget_usd(
+        "z-ai/glm-5.3-flash"
+    )
+
+
+def test_pessimistic_usd_never_raises_for_an_unknown_model():
+    assert _pessimistic_usd("not-a-real-model") == WORST_CASE_TOKEN_BUDGET_USD
+
+
+def test_priced_or_pessimistic_passes_through_a_valid_value():
+    row = {"usd": 0.42}
+    value, error = _priced_or_pessimistic(row, "usd", "z-ai/glm-5.3-flash")
+    assert value == 0.42
+    assert error is None
+
+
+def test_priced_or_pessimistic_normalizes_a_missing_key():
+    row: dict = {}
+    value, error = _priced_or_pessimistic(row, "usd", "z-ai/glm-5.3-flash")
+    assert value == _token_budget_usd("z-ai/glm-5.3-flash")
+    assert error is not None
+    assert "missing" in error
+
+
+def test_priced_or_pessimistic_normalizes_an_invalid_value():
+    row = {"usd": Decimal("1.20")}
+    value, error = _priced_or_pessimistic(row, "usd", "z-ai/glm-5.3-flash")
+    assert value == _token_budget_usd("z-ai/glm-5.3-flash")
+    assert error is not None
+    assert "TypeError" in error
+
+
+def test_priced_or_pessimistic_never_raises_even_for_an_unknown_model():
+    row: dict = {}
+    value, error = _priced_or_pessimistic(row, "usd", "not-a-real-model")
+    assert value == WORST_CASE_TOKEN_BUDGET_USD
+    assert error is not None
+
+
+# ── _safe_json_dumps ──────────────────────────────────────────────────────
+
+
+def test_safe_json_dumps_handles_a_normal_row():
+    row = {"task_id": "1", "verdict": "correct", "usd": 0.01}
+    assert json.loads(_safe_json_dumps(row)) == row
+
+
+def test_safe_json_dumps_falls_back_to_repr_for_an_unserializable_value():
+    class Unserializable:
+        def __repr__(self):
+            return "<sentinel>"
+
+    row = {"task_id": "1", "oops": Unserializable()}
+    parsed = json.loads(_safe_json_dumps(row))
+    assert parsed["oops"] == "<sentinel>"
+
+
+def test_safe_json_dumps_survives_a_non_str_dict_key():
+    # default=repr cannot help here: json.dumps raises on the KEY before
+    # `default` is ever consulted, regardless of what `default` does.
+    row = {"task_id": "1", "arm": "contract", (1, 2): "bad key"}
+    parsed = json.loads(_safe_json_dumps(row))
+    assert "unserializable_row" in parsed
+    assert parsed["task_id"] == "1"  # best-effort identifying fields survive
+    assert parsed["arm"] == "contract"
+
+
+def test_safe_json_dumps_survives_a_circular_reference():
+    row: dict = {"task_id": "1", "verdict": "correct"}
+    row["self"] = row
+    parsed = json.loads(_safe_json_dumps(row))
+    assert "unserializable_row" in parsed
+    assert parsed["task_id"] == "1"
 
 
 # ── real_spent_so_far ────────────────────────────────────────────────────
@@ -1481,3 +1595,140 @@ def test_sweep_falls_back_to_repr_for_a_non_serializable_field(tmp_path: Path):
     rows = [json.loads(line) for line in text.splitlines()]
     assert len(rows) == 1
     assert rows[0]["verdict"] == "correct"
+
+
+# ── regression pin: the row always lands, no matter what fails in between ─
+
+
+def _mutate_missing_usd(row):
+    row = dict(row)
+    del row["usd"]
+    return row
+
+
+def _mutate_missing_usd_guard(row):
+    row = dict(row)
+    del row["usd_guard"]
+    return row
+
+
+def _mutate_usd_decimal(row):
+    row = dict(row)
+    row["usd"] = Decimal("1.20")
+    return row
+
+
+def _mutate_usd_nan(row):
+    row = dict(row)
+    row["usd"] = float("nan")
+    return row
+
+
+def _mutate_usd_infinite(row):
+    row = dict(row)
+    row["usd"] = float("inf")
+    return row
+
+
+def _mutate_usd_negative(row):
+    row = dict(row)
+    row["usd"] = -5.0
+    return row
+
+
+def _mutate_non_str_dict_key(row):
+    row = dict(row)
+    row[(1, 2)] = "bad key"  # a tuple key: json.dumps raises regardless of `default`
+    return row
+
+
+def _mutate_circular_reference(row):
+    row = dict(row)
+    row["self"] = row
+    return row
+
+
+def _mutate_identity(row):
+    return dict(row)
+
+
+# (case name, row mutator, patch check_and_restore to raise?, sweep must raise?)
+_INJECTION_CASES = [
+    ("missing_usd", _mutate_missing_usd, False, True),
+    ("missing_usd_guard", _mutate_missing_usd_guard, False, True),
+    ("usd_decimal", _mutate_usd_decimal, False, True),
+    ("usd_nan", _mutate_usd_nan, False, True),
+    ("usd_infinite", _mutate_usd_infinite, False, True),
+    ("usd_negative", _mutate_usd_negative, False, True),
+    ("non_str_dict_key", _mutate_non_str_dict_key, False, False),
+    ("circular_reference", _mutate_circular_reference, False, False),
+    ("check_and_restore_raises", _mutate_identity, True, True),
+]
+
+
+@pytest.mark.parametrize(
+    "mutate,patch_check_and_restore,expect_exception",
+    [c[1:] for c in _INJECTION_CASES],
+    ids=[c[0] for c in _INJECTION_CASES],
+)
+def test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write(
+    tmp_path: Path,
+    monkeypatch,
+    mutate,
+    patch_check_and_restore,
+    expect_exception,
+):
+    """The regression pin for A1's fourth recurrence: walks every known
+    injection point between `run_task_fn` returning and the row landing
+    on disk (a bad/missing `usd`/`usd_guard`, an unserializable dict key,
+    a circular reference, `check_and_restore` itself raising) and asserts
+    the row is ALWAYS on disk afterward. This is the fourth time this bug
+    class has recurred in this component (see the module docstring); the
+    point of this test is that a FIFTH recurrence has to explicitly break
+    a test to ship, not slip past silently the way the first three did.
+    """
+    base_row = {
+        "task_id": "1",
+        "arm": "contract",
+        "model": GLM,
+        "usd": 0.01,
+        "usd_guard": 0.01,
+        "verdict": "correct",
+    }
+
+    def fake_run(task, arm, model, *a, **k):
+        return mutate(base_row)
+
+    if patch_check_and_restore:
+
+        def exploding_check_and_restore(working, pristine):
+            raise PermissionError("cannot read pristine file")
+
+        monkeypatch.setattr(
+            runner_module, "check_and_restore", exploding_check_and_restore
+        )
+
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+
+    ctx = pytest.raises(Exception) if expect_exception else contextlib.nullcontext()
+    with ctx:
+        sweep(
+            TASKS,
+            ("contract",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=db_path,
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=fake_run,
+        )
+
+    lines = [line for line in out.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1, "the row was lost"
+    row = json.loads(lines[0])
+    # Either the row parsed with its real fields, or it landed via the
+    # unserializable-row envelope -- either way it reached disk, legibly.
+    assert row.get("task_id") == "1" or "unserializable_row" in row

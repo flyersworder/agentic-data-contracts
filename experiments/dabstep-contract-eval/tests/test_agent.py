@@ -350,6 +350,33 @@ def test_run_task_gives_a_scoring_failure_its_own_verdict_without_touching_the_a
 # ── A1: the only exception run_task still lets propagate is construction ──
 
 
+def test_run_task_raises_agent_construction_error_when_build_arm_fails(
+    tmp_path: Path, monkeypatch
+):
+    """`build_arm` sits before the agent-factory call but is the OTHER
+    construction-class failure: nothing billable has happened yet, so it
+    deserves identical free-to-retry treatment, not a raw exception type
+    that `dce.runner.sweep`'s narrowed `except AgentConstructionError`
+    would fail to catch."""
+    import dce.agent as agent_module
+
+    def exploding_build_arm(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(agent_module, "build_arm", exploding_build_arm)
+
+    with pytest.raises(AgentConstructionError):
+        run_task(
+            TASK,
+            "schema_only",
+            "z-ai/glm-5.3-flash",
+            tmp_path / "x.duckdb",
+            {"manual": "m", "payments_readme": "r"},
+            gold="0.12",
+            golds_hash="deadbeef",
+        )
+
+
 def test_run_task_raises_agent_construction_error_when_the_factory_fails(
     tmp_path: Path,
 ):

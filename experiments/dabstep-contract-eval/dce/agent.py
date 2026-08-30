@@ -434,9 +434,10 @@ def build_result_row(
 
 
 class AgentConstructionError(RuntimeError):
-    """Raised by `run_task` only when building the agent itself failed (the
-    `agent_factory`/`_default_agent_factory` call — e.g. a missing
-    `OPENROUTER_API_KEY`), before any billable model call was made.
+    """Raised by `run_task` only when CONSTRUCTION failed — either
+    `build_arm` (`dce/arms.py`) or the `agent_factory`/
+    `_default_agent_factory` call (e.g. a missing `OPENROUTER_API_KEY`) —
+    before any billable model call was made.
 
     This is deliberately the ONLY exception `run_task` still lets escape.
     Everything after the agent exists — the model call, scoring,
@@ -596,7 +597,24 @@ def run_task(
     from pydantic_ai.exceptions import CostNotFoundWarning, UsageLimitExceeded
     from pydantic_ai.usage import RunUsage, UsageLimits
 
-    setup = build_arm(arm, db_path, docs)
+    try:
+        setup = build_arm(arm, db_path, docs)
+    except Exception as exc:
+        # `build_arm` failing is the OTHER construction-class failure,
+        # alongside the agent-factory call below: nothing billable has
+        # happened yet either way, so it deserves the identical
+        # free-to-retry treatment. NOTE (recorded, not fixed here): for
+        # arm "contract", `_governed_tools` opens a `DuckDBAdapter`
+        # connection before it can fail later in the same call (building
+        # tools, loading the contract's system prompt) — if that later
+        # step is what raises, there is no `ArmSetup` yet to call
+        # `.close()` on, and that connection can leak. This is the one
+        # construction-class failure this module cannot currently close
+        # cleanly; fixing it would mean making `dce/arms.py`'s own
+        # construction self-cleaning on partial failure, out of scope
+        # here.
+        raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
+
     # Set as soon as a priced row exists (in either branch of the guarded
     # tail below), so the `finally` block can still attach `close_error`
     # to it — mutating the SAME dict object a `return row` further up has

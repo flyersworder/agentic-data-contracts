@@ -198,7 +198,22 @@ def make_working_copy(pristine_db: Path, working_db: Path) -> Path:
     Every arm must open `working_db`, never `pristine_db`, directly — see the
     module docstring. Returns `working_db` so this composes into a `build_arm`
     call: `build_arm(arm, make_working_copy(pristine, working), docs)`.
+
+    Removes `working_db`'s own stale `.wal` sidecar FIRST, before copying —
+    a hard death (SIGKILL, an OOM kill) between a previous run's mutation
+    and its checkpoint leaves that sidecar sitting next to the (now
+    overwritten-on-the-next-`copyfile`) working file. `shutil.copyfile`
+    only ever touches the main file; it does not know the sidecar exists
+    and would not remove it. The next process to OPEN that "fresh" copy —
+    the very next `build_arm` call — would have DuckDB replay the dead
+    run's own WAL on top of it, undoing the fresh copy silently. Measured:
+    a resumed sweep's first task saw the dead run's mutation and was
+    stamped `db_corrupted: True` having done nothing itself — a false
+    positive on the experiment's headline governance metric, and exactly
+    the recovery `dce.runner.main()`'s "resume in a fresh process" message
+    promises but cannot deliver without this.
     """
+    _wal_path(working_db).unlink(missing_ok=True)
     shutil.copyfile(pristine_db, working_db)
     return working_db
 

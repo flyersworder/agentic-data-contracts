@@ -1180,8 +1180,10 @@ git commit -m "experiment: three arm configurations, only the contract arm gover
 - Test: `experiments/dabstep-contract-eval/tests/test_agent.py`
 
 **Interfaces:**
-- Consumes: `dce.arms.build_arm`, `dce.pricing.cost`, `dce.grade.score`, `dce.frozen.digest`.
-- Produces: `run_task(task: dict, arm: str, model: str, db_path: Path, docs: dict[str, str], gold: str, *, max_tool_calls: int = 25, per_task_usd: float = 0.25, agent_factory=None) -> dict` returning a result row.
+- Consumes: `dce.arms.build_arm`, `dce.arms.ArmSetup.close`, `dce.pricing.cost`, `dce.grade.score`, `dce.frozen.digest`.
+- Produces: `MAX_TOOL_CALLS: int`, `run_task(task: dict, arm: str, model: str, db_path: Path, docs: dict[str, str], gold: str, *, max_tool_calls: int = MAX_TOOL_CALLS, per_task_usd: float = 0.25, agent_factory=None) -> dict` returning a result row.
+
+**Two contracts inherited from `dce/arms.py` — read its module docstring before starting.** Retries are a confound control (see the comment in the factory below), and every `ArmSetup` must be closed before the runner's integrity check.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1395,6 +1397,14 @@ def _default_agent_factory(*, model: str, system_prompt: str, tools: list):
         ),
         system_prompt=system_prompt,
         tools=tools,
+        # RETRIES ARE A CONFOUND CONTROL, NOT A ROBUSTNESS KNOB. The ungoverned
+        # arms return "ERROR: ..." as an ordinary tool result and keep iterating;
+        # arm C's governed tools raise ModelRetry, and pydantic-ai's DEFAULT tool
+        # retry budget is 1 — so arm C dies with UnexpectedModelBehavior after two
+        # bad queries while arm A iterates freely. Measured: arm A finished after
+        # 7 model calls, arm C raised after 2. Set it high enough that arm C is
+        # never budget-limited relative to arms A/B, and identically for all arms.
+        retries=MAX_TOOL_CALLS,
         model_settings=ModelSettings(temperature=0.0, seed=0, timeout=300),
     )
 
@@ -1445,6 +1455,12 @@ def run_task(
     rejections = 0
     if setup.session is not None:
         rejections = getattr(setup.session, "rejected_queries", 0) or 0
+
+    # Arm C's adapter holds a live DuckDB connection. It MUST be closed before the
+    # runner's integrity check: DuckDB keeps mutations in a `.wal` sidecar while a
+    # connection is open, so a check run against a live connection reports clean
+    # and a restore performed then is replayed away when the connection drops.
+    setup.close()
 
     return build_result_row(
         task=task, arm=arm, model=model, answer=answer, gold=gold, verdict=verdict,
@@ -1561,7 +1577,7 @@ import json
 from pathlib import Path
 
 from dce.agent import run_task
-from dce.arms import ARMS
+from dce.arms import ARMS, check_and_restore, make_working_copy
 from dce.pricing import MODELS
 
 
@@ -1591,6 +1607,11 @@ def sweep(
     tasks, arms, models, golds, *, out: Path, db_path: Path, docs,
     max_spend: float, run_task_fn=run_task, per_task_usd: float = 0.25,
 ) -> float:
+    # The ungoverned arms can genuinely write: dropping read_only was required to
+    # avoid a DuckDB connection-config conflict with the governed adapter, so
+    # nothing stops arm A issuing DROP TABLE. Every arm therefore runs against a
+    # disposable copy; the pristine DB is never opened by the harness.
+    working = make_working_copy(db_path)
     by_id = {t["task_id"]: t for t in tasks}
     todo = pending(tasks, arms, models, completed_keys(out))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1610,6 +1631,10 @@ def sweep(
                 by_id[task_id], arm, model, db_path, docs, golds[task_id],
                 per_task_usd=per_task_usd,
             )
+            # run_task closes the arm, so the working copy has no live
+            # connection and its .wal sidecar is settled by this point.
+            integrity = check_and_restore(working, db_path)
+            row["db_corrupted"] = integrity.corrupted
             fh.write(json.dumps(row) + "\n")
             fh.flush()
             spent += row["usd"]
@@ -1658,6 +1683,11 @@ if __name__ == "__main__":
 
 Run: `cd experiments/dabstep-contract-eval && uv run pytest -v`
 Expected: 41 passed
+
+Pass `working` (not `db_path`) to `run_task_fn`. Add tests that the sweep runs
+against the copy and never the pristine file, and that a task whose integrity
+check reports corruption still writes its row with `db_corrupted: true` rather
+than aborting the sweep — a mutation is a finding to record, not a crash.
 
 - [ ] **Step 5: Add the clean-tree guard**
 

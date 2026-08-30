@@ -407,9 +407,21 @@ semantic:
 #   5.1.3 Higher volumes .......... `cost_optimization` domain (qualitative curve;
 #                                    NOT ENCODABLE as a metric)
 #   5.1.4 Fraud-related costs ..... `cost_optimization` + `fraud` domains
-#   5.1.5 Downgrades .............. `cost_optimization` domain (NOT ENCODABLE:
-#                                    no settlement time, retry count, interchange
-#                                    tier or data-completeness signal exists)
+#   5.1.5 Downgrades .............. `cost_optimization` domain. One listed cause
+#                                    is partly encodable: "failure to use AVS or
+#                                    3D Secure for card-not-present
+#                                    transactions" — manual 4 splits
+#                                    card-not-present traffic into ACI F (3-D
+#                                    Secure) and G (non-3-D Secure), which the
+#                                    metric three_d_secure_share measures. The
+#                                    AVS half and every other cause and remedy
+#                                    remain NOT ENCODABLE: no settlement time,
+#                                    retry count, interchange tier,
+#                                    data-completeness flag, AVS result or
+#                                    Level 2/Level 3 indicator exists. Matches
+#                                    the `cost_optimization` domain description
+#                                    and the 7.1 entry below; all three state
+#                                    the same fact and must agree.
 #   6  PIN entry attempt limits ... `compliance` domain (NOT ENCODABLE: no PIN
 #                                    attempt or card-block column)
 #   7    Fraud definition .......... `fraud` domain, metrics fraud_rate and

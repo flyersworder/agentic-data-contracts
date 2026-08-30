@@ -183,11 +183,16 @@ def _assert_cost_limit_is_unenforceable_for_pinned_models() -> None:
         except LookupError:
             continue
         raise AssertionError(
-            f"{model_id!r} is now priceable by genai-prices. pydantic-ai's "
-            "cost_limit would start being enforced for this model while "
-            "staying a silent no-op for the rest of dce.pricing.MODELS — "
-            "re-evaluate _token_cap and this assertion together before "
-            "relying on cost_limit again."
+            f"GOOD NEWS, ACTION NEEDED: genai-prices can now price "
+            f"{model_id!r}. This is not a breakage — it means pydantic-ai's "
+            "cost_limit would start being genuinely enforced for this model "
+            "(it was previously a silent no-op; see this function's "
+            "docstring), while staying a no-op for the rest of "
+            "dce.pricing.MODELS until they are priced too. _token_cap's "
+            "conservative token-based cap may now be redundant for this "
+            "model — re-evaluate whether cost_limit alone is now trustworthy "
+            "for it before continuing to layer _token_cap on top, and update "
+            "this assertion (or MODELS) once you have."
         )
 
 
@@ -199,15 +204,30 @@ def _token_cap(model: str, per_task_usd: float) -> int:
     `cost_limit` that `_assert_cost_limit_is_unenforceable_for_pinned_models`
     proves cannot be trusted for any pinned model.
 
-    Priced off `price_in` — the cheaper of a model's two per-token rates —
-    so this is an approximation, not an exact bound: a task whose usage
-    skews heavily toward output tokens (charged at the pricier `price_out`)
-    can still cost more than `per_task_usd` before this trips. It is a
-    backstop against an unbounded pathological loop, not a replacement for
-    real cost accounting.
+    Priced off `max(price_in, price_out)` — the MORE EXPENSIVE of a model's
+    two per-token rates, deliberately, not the cheaper one. `total_tokens_
+    limit` bounds input and output tokens together, undifferentiated, and
+    output is the pricier side for every pinned model — DABStep's fee
+    questions are exactly the kind that provoke long reasoning, and
+    reasoning tokens bill as output. Pricing off `price_in` instead once
+    looked like a reasonable approximation but is not a bound at all: at
+    $0.25, an all-output run on `deepseek-v4-pro-0813` would have been
+    capped at 378,787 tokens by a `price_in`-derived limit, and 378,787
+    output tokens cost $0.75 — three times the intended limit (`gpt-5.6-sol`
+    would have been five times over). Do not "optimise" this back to
+    `price_in` for a larger, more permissive cap — that reintroduces exactly
+    this hole. Yes, this makes the cap more conservative (`deepseek-v4-pro`
+    drops from 378,787 to ~126,262 tokens): a task that gets truncated early
+    is a visible `hit_limit` row that can be re-run at a higher budget: a
+    task that quietly costs several times `per_task_usd` is money that
+    cannot be recovered. This is still an approximation, not exact cost
+    accounting — it does not know the real input/output split a task will
+    have — but unlike the `price_in`-derived version, it is a true upper
+    bound on spend regardless of that split.
     """
     spec = MODELS[model]
-    return int(per_task_usd / spec.price_in * 1_000_000)
+    rate = max(spec.price_in, spec.price_out)
+    return int(per_task_usd / rate * 1_000_000)
 
 
 def build_result_row(
@@ -228,6 +248,7 @@ def build_result_row(
     enforcement_blocks: int,
     retry_prompts: int,
     request_limit: int,
+    token_cap: int,
     golds_hash: str,
 ) -> dict:
     return {
@@ -261,6 +282,11 @@ def build_result_row(
         "enforcement_blocks": enforcement_blocks,
         "retry_prompts": retry_prompts,
         "request_limit": request_limit,
+        # The `total_tokens_limit` `_token_cap` derived for this task's
+        # (model, per_task_usd) — recorded so a `hit_limit` row shows which
+        # limit actually bound (`tool_calls_limit`, `request_limit`, or this
+        # one) without re-deriving it from `dce.pricing.MODELS` by hand.
+        "token_cap": token_cap,
         "contract_digest": digest(),
         "golds_hash": golds_hash,
         "commit_sha": _commit_sha(),
@@ -331,6 +357,7 @@ def run_task(
         prompt = (
             f"{task['question']}\n\nAnswer guidelines: {task.get('guidelines', '')}"
         )
+        token_cap = _token_cap(model, per_task_usd)
         limits = UsageLimits(
             tool_calls_limit=max_tool_calls,
             request_limit=REQUEST_LIMIT,
@@ -339,7 +366,7 @@ def run_task(
             # — but it is left in place for any pinned model that ever does
             # become priceable, and as documented intent.
             cost_limit=Decimal(str(per_task_usd)),
-            total_tokens_limit=_token_cap(model, per_task_usd),
+            total_tokens_limit=token_cap,
         )
 
         answer, verdict = "", "unset"
@@ -426,5 +453,6 @@ def run_task(
         enforcement_blocks=enforcement_blocks,
         retry_prompts=retry_prompts,
         request_limit=REQUEST_LIMIT,
+        token_cap=token_cap,
         golds_hash=golds_hash,
     )

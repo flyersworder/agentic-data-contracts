@@ -12,6 +12,7 @@ from dce.agent import (
     build_result_row,
     run_task,
 )
+from dce.pricing import MODELS
 
 TASK = {
     "task_id": "7",
@@ -37,6 +38,7 @@ ROW_KWARGS = dict(
     enforcement_blocks=0,
     retry_prompts=0,
     request_limit=50,
+    token_cap=126_262,
     golds_hash="deadbeef",
 )
 
@@ -111,13 +113,33 @@ def test_pinned_models_remain_unpriceable_by_genai_prices():
 # ── _token_cap ───────────────────────────────────────────────────────────
 
 
-def test_token_cap_is_per_task_usd_divided_by_the_input_price():
-    # gpt-5.6-sol: price_in=2.00 USD/1M tokens, so $0.25 buys 125,000 tokens.
-    assert _token_cap("openai/gpt-5.6-sol", 0.25) == 125_000
+def test_token_cap_is_per_task_usd_divided_by_the_pricier_rate():
+    # gpt-5.6-sol: price_in=2.00, price_out=10.00 USD/1M tokens — priced off
+    # the pricier price_out (output, not input, is the expensive side for
+    # every pinned model; see _token_cap's docstring for why price_in would
+    # not actually bound spend), so $0.25 buys 25,000 tokens, not 125,000.
+    assert _token_cap("openai/gpt-5.6-sol", 0.25) == 25_000
 
 
 def test_token_cap_scales_with_per_task_usd():
-    assert _token_cap("openai/gpt-5.6-sol", 0.50) == 250_000
+    assert _token_cap("openai/gpt-5.6-sol", 0.50) == 50_000
+
+
+@pytest.mark.parametrize("model_id", list(MODELS))
+def test_token_cap_is_a_true_upper_bound_on_spend_regardless_of_input_output_mix(
+    model_id,
+):
+    """The property that matters, not a specific number — so this survives a
+    future edit to `dce/pricing.py`'s prices. `total_tokens_limit` bounds
+    input and output tokens together, undifferentiated, so the cap must hold
+    even in the worst case where every one of those tokens turns out to be
+    priced at the model's more expensive rate.
+    """
+    per_task_usd = 0.25
+    spec = MODELS[model_id]
+    cap = _token_cap(model_id, per_task_usd)
+    worst_case_cost = cap * max(spec.price_in, spec.price_out) / 1_000_000
+    assert worst_case_cost <= per_task_usd
 
 
 # ── _commit_sha ──────────────────────────────────────────────────────────
@@ -160,6 +182,7 @@ def test_result_row_carries_full_provenance():
         "enforcement_blocks",
         "retry_prompts",
         "request_limit",
+        "token_cap",
         "contract_digest",
         "golds_hash",
         "commit_sha",

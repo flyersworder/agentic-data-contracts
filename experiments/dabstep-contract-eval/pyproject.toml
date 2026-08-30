@@ -1,0 +1,21 @@
+[project]
+name = "dce"
+version = "0.1.0"
+description = "DABStep contract-context evaluation: schema-only vs manual-in-prompt vs contract"
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-data-contracts",
+    "pydantic-ai-slim[openai]>=2.36",
+    "duckdb>=1.0",
+    "huggingface-hub>=0.25",
+    "scipy>=1.11",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv.sources]
+agentic-data-contracts = { path = "../..", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

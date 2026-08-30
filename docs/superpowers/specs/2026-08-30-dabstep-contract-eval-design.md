@@ -38,9 +38,11 @@ encode.
 > prompt — and both beat a schema-only floor.
 
 **Non-goals.** Reproducing MotherDuck's harness (their number is cited, not
-re-run). Measuring the blocking value of `inspect_query` as a governance
-mechanism in its own right — DABStep is not built to expose that, and it needs
-its own constructed failure cases. Submitting to the DABStep leaderboard.
+re-run). Establishing the blocking value of `inspect_query` as a governance
+mechanism — DABStep is not built to expose that, and a claim there needs its own
+constructed failure cases. The `inspect_query` counts reported under Metrics are
+**descriptive instrumentation of arm C's behaviour, not a claim**, and
+`FINDINGS.md` must present them that way. Submitting to the DABStep leaderboard.
 
 ## Arms
 
@@ -59,6 +61,11 @@ the library's execution path they would inherit contract enforcement, and arm C
 would no longer be the only governed arm. Arms A and B do get the same row cap
 and the same result-formatting as arm C, so no arm is advantaged or penalized by
 result truncation; the cap is a harness property, not a contract property.
+
+**The turn budget is uniform and counts every tool call.** Arm C's
+`inspect_query` validation-and-retry cycles consume its own budget; they are not
+free extra attempts. Without this, arm C would effectively get more shots at each
+question than arms A and B, and any win would be confounded with attempt count.
 
 Arm B is the load-bearing comparison. Arm A only establishes that context
 matters at all, which is not in dispute. Beating or matching B at a smaller
@@ -118,14 +125,37 @@ artifacts:
 Golds freeze to `data/golds.json` with a content hash, recorded in every result
 row alongside the contract digest.
 
+### Selection bias — stated, not mitigated
+
+Reconstructed golds exist only for tasks that **at least two submitted agents
+already answered correctly**. Tasks no agent ever got right yield no gold and are
+excluded — and those are disproportionately the hardest tasks. The scored set is
+therefore easier than the true 450, and **every accuracy number this experiment
+produces is biased upward relative to the full benchmark.**
+
+This cannot be fixed without the official golds, so it is disclosed instead:
+`FINDINGS.md` reports gold coverage broken down by `level` and by template, so a
+reader can see exactly which slice was scorable. Accuracy is never quoted against
+"DABStep" unqualified — always against "the reconstructed-gold subset (n=…)".
+
+Cross-arm comparisons are unaffected: all arms face the identical task set, so
+the paired tests remain valid. Only the absolute number is inflated, which is
+also why comparing it directly to MotherDuck's 99.5% would be unsound.
+
 ### The gate
 
-Reconstruction must reproduce **all 10 published `dev` answers exactly**. If it
-does not, the method is unsound and the run does not proceed.
+Reconstruction must reproduce **all 10 published `dev` answers exactly**.
 
-**Fallback if the gate fails:** report on the 10 `dev` tasks only, and prepare a
-leaderboard submission for the full set. This yields a weaker but honest result,
-and `FINDINGS.md` says so plainly.
+**This gate's feasibility is itself unverified** and is the first thing the
+implementation checks: it requires that the 10 `dev` tasks appear in
+`data/submissions/` and `data/task_scores/` at all. If they do not, the gate
+cannot run as designed, and the substitute is a **hand-verified sample**: write
+SQL by hand for 10 reconstructed golds stratified across templates and confirm
+each matches. That is weaker evidence and is labelled as such.
+
+**Fallback if either form of the gate fails:** report on the 10 `dev` tasks only,
+and prepare a leaderboard submission for the full set. This yields a much weaker
+but honest result, and `FINDINGS.md` says so plainly.
 
 ## Harness
 
@@ -146,7 +176,23 @@ column recording it. Model id is stamped into every row.
 | `z-ai/glm-5.3-flash` | 0.075 / 0.25 | Full, cross-family control | ~$4 |
 | `openai/gpt-5.6-sol` | 2.00 / 10.00 | Hard subset only (~60 tasks x arms B,C) | ~$10 |
 
-**~$49 total.**
+**~$49 total — but see the asymmetry below; treat this as a floor, not a
+forecast.**
+
+**Arm B is structurally the most expensive arm.** `manual.md` sits in its system
+prompt and is therefore re-sent on *every* turn of a multi-turn tool loop. At a
+plausible ~15k-token manual and ~10 turns, arm B alone can approach ~150k input
+tokens per question — roughly 5x the ~30k blended assumption these estimates are
+built on. The per-arm split matters more than the total, so the runner tracks
+spend per `(arm, model)` and the smoke run reports the three arms' costs
+separately before the full sweep is authorized.
+
+Two consequences. First, this asymmetry is not a nuisance — a large part of arm
+C's value proposition *is* that it does not re-send a manual every turn, so the
+cost gap is itself a headline secondary result. Second, prompt caching would
+disproportionately rescue arm B; whether OpenRouter applies it per provider is
+checked during the smoke run and recorded, because a silently cached arm B makes
+the cost comparison meaningless.
 
 The two DeepSeek snapshots are the capability axis: same family, same tokenizer
 and tool-calling conventions, same reasoning-token accounting, so a weak-vs-
@@ -161,10 +207,32 @@ hardest tasks and only on the two arms that discriminate. Easy tasks where every
 arm scores 100% cost flagship rates to learn nothing; `mermaid-joinpath-eval`
 hit exactly this with Spider's shallow joins.
 
+**The subset is selected before any run, by a rule fixed here**: all
+reconstructed-gold tasks with `level == "hard"`, and if that exceeds 60, a
+deterministic seeded sample of 60 stratified across templates. Selecting the
+subset after seeing which tasks the other models missed would turn a ceiling
+check into a search for a favourable slice. The chosen task ids are written to
+`data/sol_subset.json` and committed before the Sol run.
+
 Reasoning mode is set explicitly per model rather than left to default. The
 `-pro` served variants are priced identically to their base variants and differ
 only in reasoning mode, which means unpinned reasoning turns per-question cost
 into a function of how hard the model decides a question is.
+
+### Determinism and repeats
+
+Temperature 0 and a fixed seed wherever the provider honours them. Reasoning
+models remain non-deterministic in practice, so this reduces variance rather than
+eliminating it.
+
+Each `(task, arm, model)` runs **once** in the main sweep. Single-sample runs
+cannot separate a real arm difference from sampling noise on any individual task,
+which is acceptable because the paired tests aggregate over hundreds of tasks —
+but it means **no per-task claim is ever made**, only distributional ones.
+
+If the primary B-vs-C comparison lands near significance, the documented response
+is a **3-sample repeat of that one pair on the weak model** (~$9), not a
+reinterpretation of the single-sample result.
 
 ### Per-task caps
 
@@ -190,18 +258,40 @@ can be re-adjudicated without re-running the model.
 
 Every row records: `task_id`, `level`, `template`, `arm`, `model`, raw answer,
 normalized answer, verdict, turns, prompt tokens, completion tokens, USD,
-tool-call sequence, `contract_digest`, `golds_hash`, and any `inspect_query`
-rejections.
+tool-call sequence, `contract_digest`, `golds_hash`, the experiment's **git
+commit sha**, the resolved `agentic-data-contracts` version, and any
+`inspect_query` rejections.
+
+The commit sha matters as much as the contract digest: it makes a mid-sweep
+harness change — a reworded prompt, a changed cap — visible as a discontinuity in
+the results file rather than an invisible one.
 
 Template labels come from MotherDuck's `data/split.json` (T01–T26), cited as an
 external mapping.
 
 ## Metrics
 
+**The primary comparison is pre-registered here as a single test:** arm B vs
+arm C on `deepseek-v4-pro-0813`, paired McNemar, over the reconstructed-gold
+task set. Every other comparison — arm A, the other two models, all strata — is
+**secondary and exploratory**, and `FINDINGS.md` labels it so.
+
+This matters because the design otherwise runs 3 arms x 3 models x 2 levels x 26
+templates worth of possible tests, and at that count something crosses p<0.05 by
+chance alone. Naming the one confirmatory test in advance is what keeps the
+result from being a search.
+
 **Primary.** Accuracy per arm with Wilson confidence intervals, plus paired
 **McNemar** tests for A-vs-C and B-vs-C. Every task is seen by every arm, so the
 paired test is the correct one — the same treatment `mermaid-joinpath-eval`
 applied across renderings.
+
+**Discordant pairs are reported alongside every McNemar result**, because
+McNemar sees only the tasks where two arms disagree. Near the ceiling — and
+MotherDuck reached 99.5% on this benchmark — discordant pairs become scarce and
+the test loses power fast. A non-significant result at ceiling means "this design
+could not tell", not "the arms are equal", and `FINDINGS.md` must say which of
+the two it is.
 
 **Secondary.** Tokens and USD per question, and always-on prompt size per arm —
 the direct analog of MotherDuck's 3.4x prompt-size reduction claim.
@@ -284,6 +374,16 @@ uses.
 mechanism to investigate first would be MotherDuck's own finding — that
 fetch-gated context gets skipped by weaker models — which the weak/strong
 DeepSeek pairing is positioned to detect.
+
+**Ceiling effect.** If all three arms cluster near 100% on the scorable subset,
+the experiment cannot discriminate them and the honest conclusion is that DABStep
+is saturated for this question — the same outcome Spider's shallow joins produced
+in `mermaid-joinpath-eval`. Detected at the smoke run, where near-identical arm
+accuracy on 12 tasks is an early warning; the response is to re-cut against the
+`hard` stratum only rather than to spend the full sweep.
+
+**Arm B silently benefits from prompt caching.** Would invalidate the cost
+comparison that is arm C's main expected win. Checked and recorded at smoke time.
 
 **Contract authoring quality is a confound.** A badly authored contract measures
 the author, not the library. Mitigated by freezing before any score is seen, and

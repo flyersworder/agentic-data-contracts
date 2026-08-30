@@ -1,0 +1,361 @@
+# DABStep payments contract — the artifact under test in arm C.
+#
+# PROVENANCE / FREEZE DISCIPLINE
+# Every business fact in this file and in semantic.yml was taken from exactly
+# two documents:
+#   * data/hf/data/context/manual.md          — "Merchant Guide to Optimizing
+#                                                Payment Processing and
+#                                                Minimizing Fees", v2.1
+#   * data/hf/data/context/payments-readme.md — column documentation for
+#                                                payments.csv
+# plus the *schema* (table names, column names, column types) of the local
+# DuckDB built from the five context files. No DABStep question, gold answer,
+# leaderboard submission, or score was read while authoring. Arm B receives the
+# same two documents verbatim in its system prompt; if this contract encoded
+# anything they do not contain, the arms would no longer carry identical
+# knowledge in different form and the comparison would be void.
+#
+# Section references below (e.g. "manual 5") point at the manual's numbered
+# sections so every claim can be traced back to its source sentence.
+version: "1.0"
+name: dabstep-payments
+
+semantic:
+  source:
+    type: yaml
+    path: "./semantic.yml"
+    # Strict mode: no uninterpreted top-level sections. Everything the manual
+    # states is carried as *interpreted* vocabulary (metrics, tables,
+    # relationships) or as domain prose in this file — never as an extra, which
+    # would only reach the agent if the runner happened to name it in
+    # XmlPromptRenderer(extra_sections=...).
+    expected_extras: []
+  allowed_tables:
+    - schema: main
+      description: "DABStep payments context tables (manual annexes + payments.csv)"
+      preferred: true
+      tables:
+        [payments, fees, merchant_data, acquirer_countries, merchant_category_codes]
+  forbidden_operations:
+    [DELETE, DROP, TRUNCATE, UPDATE, INSERT, CREATE, ALTER, MERGE, GRANT, REVOKE, COPY]
+  domains:
+    # Membership is metric-first: metrics declare `domains: [...]` in
+    # semantic.yml, and no domain block lists its metrics.
+    - name: fees
+      summary: "Scheme fee rules and how a transaction is matched to a fee (manual 5)"
+      description: >
+        Payment processing fees depend on characteristics of the merchant and of
+        the transaction. Each row of `fees` is one fee rule, with these fields
+        (manual 5): ID, the identifier of the rule within the fee ruleset;
+        card_scheme, the card scheme or network the fee applies to; account_type,
+        a list of merchant account types (manual 2); capture_delay, the number of
+        days allowed between authorization and settlement, one of '3-5' (between
+        3 and 5 days), '>5' (more than 5 days is possible), '<3' (before 3 days),
+        'immediate' or 'manual' — the faster the capture to settlement happens,
+        the more expensive it is; monthly_fraud_level, the merchant's ratio of
+        monthly volume notified as fraud over monthly total volume, expressed as
+        a band such as '7.7%-8.3%' (the ratio should be between 7.7 and 8.3
+        percent) — processors generally become more expensive as the fraud rate
+        increases; monthly_volume, the merchant's monthly total volume in euros
+        as a band such as '100k-1m' (between 100,000 and 1,000,000) — merchants
+        with higher volume are normally able to get cheaper fees;
+        merchant_category_code, a list of the merchant category codes the rule
+        covers (manual 3); is_credit, true if the rule applies to credit
+        transactions, which are typically more expensive; aci, a list of
+        Authorization Characteristics Indicator values the rule covers (manual
+        4); fixed_amount, a fixed fee in euros per transaction; rate, a variable
+        rate to be multiplied by the transaction value and divided by 10000; and
+        intracountry, true if the transaction is domestic — that is, the issuer
+        country and the acquiring country are the same — where false marks
+        international transactions, which are typically more expensive.
+
+        The fee is `fee = fixed_amount + rate * transaction_value / 10000`.
+
+        MATCHING RULE (manual 5, Notes): if a field of a fee rule is set to null
+        it means the rule applies to all possible values of that field — e.g. a
+        null `aci` means the rule applies for every ACI. A fee rule therefore
+        matches a transaction when *every* non-null field of the rule agrees
+        with the transaction (or with its merchant, or with that merchant's
+        month). The metric `fee_rule_matches_transaction` states this predicate
+        as SQL; `fee_rule_matches_merchant_month` states the two fields
+        (monthly_volume, monthly_fraud_level) that depend on the merchant's
+        month rather than on the single transaction.
+
+        Monthly volumes and rates are computed always in natural months (e.g.
+        January, February), starting always on day 1 and ending on the last
+        natural day of the month (28 for February, 30 or 31 otherwise).
+
+        Fixed amount and transaction values are given in the same currency,
+        typically euros.
+
+        The manual states the *format* of `capture_delay`, `monthly_volume` and
+        `monthly_fraud_level` bands but never says whether a value sitting
+        exactly on a shared band boundary belongs to the lower or the upper
+        band; it says only "between A and B". The metrics below read "between"
+        as inclusive at both ends, which means a value exactly on a boundary
+        matches both adjacent bands. This is a documented gap in the source
+        material, not a decision the manual makes.
+      tables: [main.fees, main.payments, main.merchant_data]
+
+    - name: merchants
+      summary: "Merchant account types, category codes and capture delay (manual 2, 3)"
+      description: >
+        ACCOUNT TYPE (manual 2). Merchants are categorized by business model and
+        industry classification: R = Enterprise - Retail, D = Enterprise -
+        Digital, H = Enterprise - Hospitality, F = Platform - Franchise, S =
+        Platform - SaaS, O = Other. The categorization is used to provide more
+        targeted support and services to merchants. Fee rules select on it
+        through their `account_type` list.
+
+        MERCHANT CATEGORY CODE (manual 3). The MCC is a four-digit code assigned
+        to a merchant by the card networks (schemes, e.g. Visa, Mastercard) to
+        categorize their business type, used for risk assessment, fraud
+        detection and accounting. It is typically assigned by the merchant's
+        bank or payment processor and classifies merchants into one of over 400
+        categories, each corresponding to a specific industry or business type
+        such as retail, restaurant, hotel or healthcare. Examples given by the
+        manual: 5451 (Automated Fuel Dispensers), 5812 (Automotive Parts and
+        Accessories Stores), 5521 (Motor Vehicle Dealers - New and Used Cars).
+        The first two digits indicate the category and the last two the
+        subcategory. The complete list is the annexed `merchant_category_codes`
+        table. The MCC can affect a merchant's payment processing rates and
+        fees.
+
+        CAPTURE DELAY. `merchant_data.capture_delay` records a merchant's own
+        capture delay; `fees.capture_delay` states the band a rule covers, using
+        the vocabulary defined in the `fees` domain. See the metric
+        `capture_delay_band` for the mapping from a merchant's delay to a rule
+        band.
+
+        Neither `manual.md` nor `payments-readme.md` documents the
+        `merchant_data` or `acquirer_countries` tables at all — the manual names
+        only `fees.json` and `merchant_category_codes.csv` as annexes. What this
+        contract says about those two tables is therefore schema-level only
+        (column names and types), plus the field semantics the manual defines
+        for the identically-named fee-rule fields.
+      tables: [main.merchant_data, main.merchant_category_codes, main.acquirer_countries]
+
+    - name: transactions
+      summary: "Payment transactions, ACI codes and local vs cross-border acquiring"
+      description: >
+        AUTHORIZATION CHARACTERISTICS INDICATOR (manual 4). The ACI identifies
+        the transaction flow submitted to the acquirer — a standardized way of
+        describing the manner in which the transaction was sent. Values: A =
+        Card present - Non-authenticated; B = Card Present - Authenticated; C =
+        Tokenized card with mobile device; D = Card Not Present - Card On File;
+        E = Card Not Present - Recurring Bill Payment; F = Card Not Present -
+        3-D Secure; G = Card Not Present - Non-3-D Secure.
+
+        LOCAL ACQUIRING (manual 5.1.1). Local acquiring occurs when a
+        transaction is processed through an acquirer located in the same country
+        as the issuer of the card; that is the same condition the fee rules call
+        `intracountry`. Routing through local acquirers reduces transaction
+        friction (higher conversion rates), lowers the fees associated with
+        cross-border transactions, improves the user experience and simplifies
+        transaction processing.
+
+        The `payments` table is documented column by column in
+        `payments-readme.md`; those descriptions are attached to the columns
+        themselves and are returned by `describe_table`.
+      tables: [main.payments]
+
+    - name: fraud
+      summary: "Fraud definition, prevention measures and chargeback management (manual 7)"
+      description: >
+        Fraud is defined as the ratio of fraudulent volume over total volume
+        (manual 7). Costs increase in direct proportion to the level of fraud
+        detected, so fraud levels should be kept at the lowest possible
+        threshold (manual 5.1.4).
+
+        PREVENTION (manual 7.1). Address Verification Service (AVS) verifies
+        that the cardholder's billing address matches the address on file. Card
+        Verification Value (CVV) checks validate the CVV code on the card. 3D
+        Secure adds an additional layer of authentication for online
+        transactions. A risk engine — rules-based, machine-learning, or both —
+        analyses transaction data, identifies suspicious patterns and blocks
+        attempts that are likely to be fraudulent.
+
+        CHARGEBACKS (manual 7.2). Keep the chargeback rate below the desired
+        levels of total transactions to avoid penalties and increased costs;
+        monitor it regularly and take corrective action when it exceeds
+        acceptable levels. Watch fraud rate drifts closely and act promptly when
+        the situation reaches undesired levels.
+
+        TRAINING (manual 7.3). Staff should be trained on best practices for
+        handling transactions, including recognizing fraud red flags.
+
+        NOT ENCODABLE AS A METRIC: the chargeback rate. The manual asks for it to
+        be monitored but never defines it, and no column of `payments` records a
+        chargeback — `has_fraudulent_dispute` is documented as an indicator of a
+        fraudulent dispute from the issuing bank, which is not the same event.
+      tables: [main.payments]
+
+    - name: cost_optimization
+      summary: "Manual best practices for minimizing transaction costs (manual 5.1)"
+      description: >
+        LOCAL ACQUIRING (5.1.1). Route transactions through local acquirers —
+        issuer country equal to acquirer country — to reduce friction, raise
+        conversion and lower cross-border fees.
+
+        CHOOSING THE RIGHT TRANSACTION TYPE (5.1.2). Different ACIs carry
+        different fees, and the cheaper option may add friction (for example
+        prompting the cardholder for a PIN or signature). Consider the type of
+        transaction (POS vs e-commerce), the level of authentication required
+        (authentication vs tokenization) and the fees associated with the ACI,
+        and balance them.
+
+        PROCESSING WITH HIGHER VOLUMES (5.1.3). The cost per unit decreases as
+        volume grows and the pricing curve flattens at higher volumes. There is
+        no minimum volume requirement, so economies of scale accrue as volume
+        increases. (Qualitative: the manual gives no formula for this curve, and
+        the fee rules express volume only as the `monthly_volume` band.)
+
+        MINIMIZING FRAUD-RELATED COSTS (5.1.4). Costs rise in direct proportion
+        to the level of fraud detected; maintain fraud at the lowest possible
+        level.
+
+        AVOIDING TRANSACTION DOWNGRADES (5.1.5). Downgrades push a transaction
+        into a less favourable interchange rate tier and so raise processing
+        cost. Common causes: missing or incomplete data elements; late
+        settlement; non-qualified transaction types; failure to use AVS or 3D
+        Secure for card-not-present transactions; excessive transaction size or
+        volume; excessive retrying. Best practices: submit complete data; settle
+        within 24 hours; use retry strategies that consider cost and penalties;
+        use AVS and 3D Secure for card-not-present transactions; leverage Level
+        2 and Level 3 data for B2B transactions; review and update systems
+        regularly; train staff.
+
+        NOT ENCODABLE: none of the downgrade causes or remedies is observable in
+        these five tables — there is no settlement timestamp, no retry counter,
+        no interchange tier and no data-completeness flag — so this section
+        survives as governance prose only, with no metric behind it.
+      tables: [main.payments, main.fees]
+
+    - name: reporting
+      summary: "KPIs and reporting practice the manual asks merchants to track (manual 8)"
+      description: >
+        Regularly reviewing transaction data identifies patterns and
+        opportunities for cost savings: a deeper understanding of operations,
+        optimization of fee structures, and better fraud prevention (manual 8.1).
+        The provided reporting tools cover transaction history (dates, amounts
+        and types of past transactions), fee structures (assessment rates,
+        transaction fees and other charges) and fraud metrics (authorization
+        rates, fraud rates, chargeback rates) (manual 8.2).
+
+        KEY PERFORMANCE INDICATORS (manual 8.2). Authorization rate: aim for the
+        maximum possible level, to maximize successful transactions and minimize
+        rejected ones. Fraud rate: strive for the lowest possible level. Chargeback
+        rate: aim for the lowest possible level, to minimize the number of
+        chargebacks and associated fees.
+
+        The manual names these three KPIs but defines a formula for none of
+        them. `fraud_rate` is defined because manual 7 does define fraud as
+        fraudulent volume over total volume. `authorization_rate` is defined
+        here as the share of transactions not refused, which follows from the
+        manual's own gloss ("maximize successful transactions and minimize
+        rejected transactions") applied to the readme's `is_refused_by_adyen`
+        column — flagged on the metric itself as an interpretation. The
+        chargeback rate has no metric: see the `fraud` domain.
+      tables: [main.payments]
+
+    - name: compliance
+      summary: "PIN entry limits and PCI DSS obligations (manual 6, 7.4)"
+      description: >
+        PIN ENTRY ATTEMPT LIMITS (manual 6). Three (3) consecutive incorrect PIN
+        entry attempts are allowed before the card is temporarily blocked. While
+        blocked the cardholder cannot transact; to unblock the card or reset the
+        PIN the cardholder must contact the issuing bank directly, which can
+        reactivate the card. The limit exists to prevent unauthorized access and
+        protect against losses from repeated incorrect PIN attempts.
+
+        PCI DSS (manual 7.4). Comply with the latest Payment Card Industry Data
+        Security Standard. Failure to comply can cost EUR 5,000 to EUR 100,000
+        per month depending on the severity of the non-compliance, and can
+        damage the organization's reputation and erode customer trust.
+
+        NOT ENCODABLE AS METRICS: neither statement is computable over these
+        tables. No column records PIN attempts or card blocks, and no column
+        records compliance status or fines. Both are carried here as governed
+        prose, reachable through `lookup_domain("compliance")`.
+      tables: []
+
+  rules:
+    - name: no_select_star
+      description: "Queries must name their columns; use preview_table to explore"
+      enforcement: block
+      query_check:
+        no_select_star: true
+    - name: use_declared_fee_definitions
+      description: >
+        Fee, volume and fraud-rate computations must follow the metric
+        definitions in the semantic source rather than an ad-hoc formula. This
+        is governance over *how* an answer is derived; it adds no fact that
+        `manual.md` does not state.
+      enforcement: warn
+
+# ── Coverage ledger ──────────────────────────────────────────────────────────
+# Where each part of manual.md landed, so the encoding can be audited against
+# the source without re-reading both end to end:
+#
+#   1  Introduction ................ nowhere. It states the document's own
+#                                    purpose ("this guide provides best
+#                                    practices..."); it asserts no fact about
+#                                    the data and governs no query.
+#   2  Account Type ............... `merchants` domain + column descriptions on
+#                                    fees.account_type / merchant_data.account_type
+#   3  Merchant Category Code ..... `merchants` domain + column descriptions
+#   4  ACI .......................... `transactions` domain + payments.aci column
+#   5  Payment processing fees ..... `fees` domain, the fees column descriptions,
+#                                    and metrics transaction_fee,
+#                                    total_transaction_fees,
+#                                    fee_rule_matches_transaction,
+#                                    fee_rule_matches_merchant_month,
+#                                    monthly_volume_band, monthly_fraud_level_band,
+#                                    capture_delay_band, transaction_natural_month,
+#                                    merchant_monthly_volume,
+#                                    merchant_monthly_fraud_level
+#   5.1.1 Local acquiring ......... `cost_optimization` + `transactions` domains,
+#                                    metric intracountry_transaction
+#   5.1.2 Choosing the ACI ........ `cost_optimization` domain (advice, no formula)
+#   5.1.3 Higher volumes .......... `cost_optimization` domain (qualitative curve;
+#                                    NOT ENCODABLE as a metric)
+#   5.1.4 Fraud-related costs ..... `cost_optimization` + `fraud` domains
+#   5.1.5 Downgrades .............. `cost_optimization` domain (NOT ENCODABLE:
+#                                    no settlement time, retry count, interchange
+#                                    tier or data-completeness signal exists)
+#   6  PIN entry attempt limits ... `compliance` domain (NOT ENCODABLE: no PIN
+#                                    attempt or card-block column)
+#   7    Fraud definition .......... `fraud` domain, metrics fraud_rate and
+#                                    merchant_monthly_fraud_level
+#   7.1  Prevention tooling ....... `fraud` domain (NOT ENCODABLE: no AVS/CVV/3DS
+#                                    or risk-engine column)
+#   7.2  Chargebacks .............. `fraud` domain (NOT ENCODABLE: no chargeback
+#                                    column, and the manual gives no formula)
+#   7.3  Staff training ........... `fraud` domain (NOT ENCODABLE: no data)
+#   7.4  PCI DSS .................. `compliance` domain (NOT ENCODABLE: no data)
+#   8    Data and reporting ....... `reporting` domain, metrics authorization_rate
+#                                    and fraud_rate; the chargeback-rate KPI has
+#                                    no metric (see 7.2)
+#   9  Appendix / Glossary ........ the four expansions (AVS, CVV, PCI DSS, ACI)
+#                                    are written out where they are used, in the
+#                                    `fraud`, `compliance` and `transactions`
+#                                    domains; the glossary itself has no separate
+#                                    home
+#   10 Contact information ........ nowhere. Phone numbers, e-mail addresses and
+#                                    the legal disclaimer describe the processor,
+#                                    not the data; nothing in the schema relates
+#                                    to them and no query can be governed by
+#                                    them. This is the one block of the manual
+#                                    deliberately left uncarried, and it is
+#                                    recorded here rather than dropped silently.
+#
+# `payments-readme.md` is carried in full as column descriptions on
+# main.payments in semantic.yml — one entry per documented column, all 21.
+
+# No `resources` or `temporal` block. The brief's skeleton carried a
+# `semantic.limits.max_rows`, which this library's schema does not define — it
+# would have been silently dropped by pydantic rather than enforced. A
+# `result_check.max_rows` would enforce something real but would also block a
+# legitimate large result, changing arm C's answers for a reason that has
+# nothing to do with the knowledge under test, and a `resources.token_budget`
+# would truncate a run mid-answer. Both were left out deliberately.

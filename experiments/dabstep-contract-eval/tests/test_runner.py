@@ -343,6 +343,7 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.40,
+            "usd_guard": 0.40,
             "verdict": "correct",
         }
 
@@ -382,6 +383,7 @@ def test_sweep_appends_rows_that_can_be_resumed(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -416,6 +418,7 @@ def test_sweep_seeds_spent_from_existing_rows_across_resumes(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.40,
+            "usd_guard": 0.40,
             "verdict": "correct",
         }
 
@@ -460,6 +463,7 @@ def test_sweep_reserves_the_whole_task_group_before_starting_it(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -498,6 +502,7 @@ def test_sweep_never_opens_the_pristine_db(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -535,6 +540,7 @@ def test_sweep_records_corruption_and_continues(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -577,6 +583,7 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -1011,6 +1018,7 @@ def test_sweep_reports_a_ledger_that_separates_real_spend_from_guard_spend(
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
         }
 
@@ -1132,6 +1140,51 @@ def test_sweep_circuit_breaker_stops_immediately_on_systemic_failure(
     assert len(rows) == CIRCUIT_BREAKER_THRESHOLD
 
 
+def test_circuit_breaker_fires_before_any_key_is_given_up(tmp_path: Path):
+    """Cross-validates MAX_CONSTRUCTION_ATTEMPTS and
+    CIRCUIT_BREAKER_THRESHOLD directly: within one invocation no key is
+    ever attempted twice, so when a systemic failure trips the circuit
+    breaker, every one of its failing keys has a TRAILING count of exactly
+    1 -- strictly below the per-key cap. The circuit breaker must be the
+    FIRST alarm for a systemic problem, not one that co-occurs with (or
+    is preceded by) `gave_up_keys` reporting the same units -- otherwise a
+    future edit to either constant could silently let per-key give-up mask
+    what is actually a systemic failure behind what looks like N
+    independent per-task failures.
+    """
+    # The relationship this test exercises requires this to hold; if it
+    # ever doesn't, every failing key's first attempt would ALSO exhaust
+    # its retry budget in the same invocation the circuit breaker fires.
+    assert MAX_CONSTRUCTION_ATTEMPTS > 1
+
+    def always_fails(task, arm, model, *a, **k):
+        raise AgentConstructionError("missing OPENROUTER_API_KEY")
+
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(CIRCUIT_BREAKER_THRESHOLD * 3)
+    ]
+    golds = {str(i): "g" for i in range(len(tasks))}
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        golds,
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=1000.0,
+        golds_hash="h",
+        run_task_fn=always_fails,
+    )
+    assert result.circuit_broken is True
+    # The circuit breaker is the sole, first alarm: not one single key has
+    # been given up on yet when it fires.
+    assert gave_up_keys(out) == set()
+
+
 def test_sweep_circuit_breaker_resets_on_a_non_construction_error_row(
     tmp_path: Path,
 ):
@@ -1150,6 +1203,7 @@ def test_sweep_circuit_breaker_resets_on_a_non_construction_error_row(
                 "arm": arm,
                 "model": model,
                 "usd": 0.01,
+                "usd_guard": 0.01,
                 "verdict": "correct",
             }
         raise AgentConstructionError("missing OPENROUTER_API_KEY")
@@ -1194,6 +1248,7 @@ def test_sweep_records_the_row_and_reraises_when_check_and_restore_fails(
             "arm": arm,
             "model": model,
             "usd": 1.20,
+            "usd_guard": 1.20,
             "verdict": "correct",
         }
 
@@ -1242,6 +1297,7 @@ def test_sweep_twenty_resumes_advance_the_cap_when_check_and_restore_fails(
             "arm": arm,
             "model": model,
             "usd": 1.20,
+            "usd_guard": 1.20,
             "verdict": "correct",
         }
 
@@ -1302,6 +1358,7 @@ def test_sweep_distrusts_the_integrity_check_when_close_error_is_present(
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
             "close_error": "RuntimeError: close exploded",
         }
@@ -1325,7 +1382,65 @@ def test_sweep_distrusts_the_integrity_check_when_close_error_is_present(
     # Untrustworthy, not corrupted=False -- the check may have run against
     # a still-live connection and cannot be relied on either way.
     assert rows[0]["db_corrupted"] is None
-    assert "setup.close()" in rows[0]["integrity_error"]
+    assert "leaked" in rows[0]["integrity_error"]
+
+
+def test_sweep_stops_entirely_on_a_leaked_connection_not_just_that_row(
+    tmp_path: Path,
+):
+    """A leaked connection does not just invalidate ONE task's check -- a
+    still-open connection can keep mutating the working copy underneath
+    whatever runs next, so every later check in the SAME sweep would be
+    equally untrustworthy. The sweep must stop immediately: the row for
+    the task that leaked is written (the invariant), but no further task
+    is attempted this invocation."""
+    calls = []
+
+    def fake_run_first_task_leaks(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        row = {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.01,
+            "usd_guard": 0.01,
+            "verdict": "correct",
+        }
+        if task["task_id"] == "0":
+            row["close_error"] = "RuntimeError: close exploded"
+        return row
+
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(5)
+    ]
+    out = tmp_path / "r.jsonl"
+    db_path = _make_pristine(tmp_path)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(5)},
+        out=out,
+        db_path=db_path,
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=fake_run_first_task_leaks,
+    )
+    assert calls == ["0"]  # every later task was never even attempted
+    assert result.connection_leaked is True
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["task_id"] == "0"
+    assert rows[0]["db_corrupted"] is None
+    assert _exit_code_for(result) == 4
+    assert _exit_code_for(result) != _exit_code_for(
+        SweepResult(spent=0, real_spent=0, truncated=True)
+    )
+    assert _exit_code_for(result) != _exit_code_for(
+        SweepResult(spent=0, real_spent=0, truncated=False, circuit_broken=True)
+    )
 
 
 # ── json serialization never loses a row ─────────────────────────────────
@@ -1342,6 +1457,7 @@ def test_sweep_falls_back_to_repr_for_a_non_serializable_field(tmp_path: Path):
             "arm": arm,
             "model": model,
             "usd": 0.01,
+            "usd_guard": 0.01,
             "verdict": "correct",
             "oops": Unserializable(),
         }

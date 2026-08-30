@@ -46,19 +46,28 @@ once instead of patched frame by frame.
     re-raises, so the sweep still stops loudly on a persistent environment
     problem without losing the accounting for the call that already
     happened.
-  * A CLOSE FAILURE INVALIDATES THE CHECK THAT FOLLOWS IT, AND MUST SAY SO.
+  * A LEAKED CONNECTION STOPS THE SWEEP — IT DOES NOT JUST FLAG ONE ROW.
     `run_task`'s `setup.close()` runs inside its own `try/except`, so a
     close failure there no longer replaces a good row — but it must not be
     SILENT either: if the connection did not actually close, this sweep's
-    subsequent `check_and_restore` call is not a valid check (see
-    `dce/arms.py`'s CALL ORDER — a check against a live connection can
-    report a repair that does not survive that connection's later
-    checkpoint-on-close, and a leaked connection's own effects can then be
-    misattributed to the arm under test on a LATER task too). `run_task`
-    stamps `close_error` onto the row when this happens; `sweep` treats
-    such a row's integrity result as untrustworthy (`db_corrupted: None`)
-    regardless of what `check_and_restore` actually reported, rather than
-    trusting a check it cannot vouch for.
+    `check_and_restore` call is not a valid check (see `dce/arms.py`'s CALL
+    ORDER — a check against a live connection can report a repair that
+    does not survive that connection's later checkpoint-on-close). Worse,
+    a live leaked connection can keep mutating the SAME working copy
+    underneath whatever runs next, so EVERY later task's check in this
+    sweep would be equally untrustworthy — and each of those later rows
+    would carry a `db_corrupted` value that looks just as authoritative as
+    a real one. The experiment's headline governance finding is "did an
+    ungoverned arm mutate the warehouse", so a stream of unreliable
+    `db_corrupted` values is worse than no sweep at all. `run_task` stamps
+    `close_error` onto the row when this happens; `sweep` writes that row
+    (`db_corrupted: None`, the invariant above still holds) and then STOPS
+    THE WHOLE SWEEP — a distinct outcome (`SweepResult.connection_leaked`,
+    a distinct exit code) from a budget truncation or a circuit break.
+    Resume already works, so restarting in a fresh process (a fresh
+    working copy) loses nothing but the one task in flight; stopping
+    loudly on a rare failure is far cheaper than silently producing rows
+    nobody can trust.
   * A CONSTRUCTION FAILURE IS A FINDING, NOT A CRASH — AND IT IS THE *ONLY*
     THING THAT CAN STILL ESCAPE `run_task` UNPRICED. `run_task` raises
     `dce.agent.AgentConstructionError` when its agent factory fails (e.g. a
@@ -176,6 +185,18 @@ MIN_RESERVE_USD: float = 0.01
 #: usually a persistent problem (a missing env var, say), not a transient
 #: one, so hammering it every resume would never succeed and would only
 #: ever hide the same bug.
+#:
+#: CROSS-VALIDATED WITH `CIRCUIT_BREAKER_THRESHOLD` BELOW, NOT INDEPENDENT
+#: OF IT: within one `sweep` invocation, no key is ever attempted twice, so
+#: every one of `CIRCUIT_BREAKER_THRESHOLD`'s failing keys has a TRAILING
+#: count of exactly 1 the first time a systemic failure trips the circuit
+#: breaker. This value must stay > 1 for that to matter — at exactly 1, a
+#: key's very first failure would ALSO satisfy this cap, so `gave_up_keys`
+#: would report the same keys the circuit breaker just caught, instead of
+#: the circuit breaker being the sole, first alarm for a systemic problem.
+#: Pinned by `test_circuit_breaker_fires_before_any_key_is_given_up`; a
+#: future edit to either constant that breaks this ordering fails that
+#: test, not silently.
 MAX_CONSTRUCTION_ATTEMPTS: int = 2
 
 #: A sweep-wide safety valve distinct from the per-key cap above: this many
@@ -184,7 +205,9 @@ MAX_CONSTRUCTION_ATTEMPTS: int = 2
 #: every remaining unit at the same guaranteed-to-fail cost. Deliberately
 #: larger than `MAX_CONSTRUCTION_ATTEMPTS` (which bounds retries of ONE
 #: key across resumes) — this bounds a systemic failure WITHIN one
-#: invocation, before it can write thousands of phantom-priced rows.
+#: invocation, before it can write thousands of phantom-priced rows. See
+#: `MAX_CONSTRUCTION_ATTEMPTS`'s own comment for the precise relationship
+#: the two constants are required to keep.
 CIRCUIT_BREAKER_THRESHOLD: int = 5
 
 
@@ -197,15 +220,21 @@ class SweepResult:
     group's reservation would have exceeded `max_spend`. `circuit_broken`:
     True iff this call stopped because `CIRCUIT_BREAKER_THRESHOLD`
     consecutive construction failures looked like a systemic problem, not
-    per-task bad luck. `main()` uses `truncated`/`circuit_broken` to exit
-    non-zero so a wrapper can tell a capped-out or broken-circuit run from
-    a completed one.
+    per-task bad luck. `connection_leaked`: True iff this call stopped
+    because `run_task`'s `setup.close()` failed for some task — the
+    working copy's integrity substrate can no longer be trusted for any
+    later task, so the sweep stops rather than keep producing `db_corrupted`
+    values nobody can rely on; a fresh process (resume) gets a fresh
+    working copy. `main()` uses these three flags to exit non-zero so a
+    wrapper can tell a capped-out, broken-circuit, or leaked-connection run
+    from a completed one.
     """
 
     spent: float
     real_spent: float
     truncated: bool
     circuit_broken: bool = False
+    connection_leaked: bool = False
 
 
 def _read_rows(path: Path) -> list[dict]:
@@ -555,6 +584,7 @@ def sweep(
     working = make_working_copy(db_path, _working_db_path(db_path))
     truncated = False
     circuit_broken = False
+    connection_leaked = False
     consecutive_construction_errors = 0
 
     with out.open("a") as fh:
@@ -601,47 +631,51 @@ def sweep(
                 # anything else may throw.
 
                 # `run_task` stamps `close_error` when its OWN `setup.close()`
-                # failed — meaning the connection may still be open, so
-                # `check_and_restore` below is not a valid check regardless
-                # of what it reports (see `dce/arms.py`'s CALL ORDER). Valid
-                # otherwise: `run_task_fn` has closed its own arm's
-                # connection.
-                integrity_untrustworthy = row.get("close_error") is not None
+                # failed — meaning the connection may still be open. That
+                # does not just invalidate THIS task's `check_and_restore`
+                # call: a still-open connection can keep mutating the
+                # working copy underneath whatever runs next, so EVERY
+                # later check in this sweep would be equally untrustworthy,
+                # each looking just as authoritative as a real one. The
+                # experiment's headline governance finding is "did an
+                # ungoverned arm mutate the warehouse" — a stream of
+                # unreliable `db_corrupted` values is worse than no sweep
+                # at all, so this task's working copy is retired: the row
+                # still reaches disk (the invariant above), but the sweep
+                # then stops rather than running `check_and_restore` again
+                # against unknown state.
+                row_leaked = row.get("close_error") is not None
                 integrity_exc: Exception | None = None
-                try:
-                    integrity = check_and_restore(working, db_path)
-                    row["db_corrupted"] = (
-                        None if integrity_untrustworthy else integrity.corrupted
-                    )
-                except Exception as exc:
+                if row_leaked:
                     row["db_corrupted"] = None
-                    integrity_exc = exc
-                if integrity_untrustworthy:
-                    note = (
-                        "setup.close() failed for this task "
-                        f"({row['close_error']}); the connection may still "
-                        "be open, so check_and_restore's result cannot be "
-                        "trusted"
-                    )
                     row["integrity_error"] = (
-                        f"{note}; check_and_restore also raised "
-                        f"{type(integrity_exc).__name__}: {integrity_exc}"
-                        if integrity_exc is not None
-                        else note
+                        "DuckDB connection leaked while closing this "
+                        f"task's arm ({row['close_error']}); the working "
+                        "copy's integrity substrate can no longer be "
+                        "trusted for this or any later task in this sweep"
                     )
-                elif integrity_exc is not None:
-                    row["integrity_error"] = (
-                        f"{type(integrity_exc).__name__}: {integrity_exc}"
-                    )
+                else:
+                    try:
+                        integrity = check_and_restore(working, db_path)
+                        row["db_corrupted"] = integrity.corrupted
+                    except Exception as exc:
+                        row["db_corrupted"] = None
+                        row["integrity_error"] = f"{type(exc).__name__}: {exc}"
+                        integrity_exc = exc
 
                 # Validate the price BEFORE writing: a row must never land
                 # on disk un-priced-or-invalid-but-looking-done — that
                 # would make a resumed sweep treat it as both free (or
                 # corruptly mispriced) and permanently finished. A row
-                # missing `usd` entirely raises `KeyError` here, before
-                # `fh.write`, so nothing partial ever hits the file.
+                # missing `usd`/`usd_guard` entirely raises `KeyError`
+                # here, before `fh.write`, so nothing partial ever hits the
+                # file. `usd_guard` is required, not defaulted from `usd`
+                # (the same keyword-required treatment `golds_hash` gets):
+                # a row-producer that forgot to set it would otherwise
+                # silently behave as guard == real, which is exactly the
+                # "unknown-cost failure reads as free" shape A1 was about.
                 usd = _validated_usd(row["usd"], "usd")
-                usd_guard = _validated_usd(row.get("usd_guard", usd), "usd_guard")
+                usd_guard = _validated_usd(row["usd_guard"], "usd_guard")
 
                 # A field that turned out not to be JSON-serializable must
                 # not lose the row — `default=repr` guarantees SOMETHING
@@ -666,10 +700,21 @@ def sweep(
                     circuit_broken = True
 
                 # Only now, after the row is safely on disk and every
-                # counter above is updated, does a `check_and_restore`
-                # failure get to stop the sweep — loudly, as any other
-                # persistent environment problem should, but without
-                # losing the row or the spend it represents.
+                # counter above is updated, do the stop conditions below
+                # get to act — loudly, as any of them should, but without
+                # ever losing the row or the spend it represents.
+                if row_leaked:
+                    connection_leaked = True
+                    print(
+                        "stopping: a DuckDB connection leaked while closing "
+                        f"task {task_id!r}'s arm; the working copy's "
+                        "integrity substrate can no longer be trusted for "
+                        "any later task in this sweep. Resume in a fresh "
+                        "process to continue — only this task's own "
+                        "check_and_restore result is affected."
+                    )
+                    break
+
                 if integrity_exc is not None:
                     raise integrity_exc
 
@@ -682,13 +727,14 @@ def sweep(
                         "per-task bad luck"
                     )
                     break
-            if circuit_broken:
+            if circuit_broken or connection_leaked:
                 break
     return SweepResult(
         spent=spent,
         real_spent=real_spent,
         truncated=truncated,
         circuit_broken=circuit_broken,
+        connection_leaked=connection_leaked,
     )
 
 
@@ -833,6 +879,8 @@ def assert_clean_tree(
 
 
 def _exit_code_for(result: SweepResult) -> int:
+    if result.connection_leaked:
+        return 4
     if result.circuit_broken:
         return 3
     if result.truncated:
@@ -921,7 +969,17 @@ def main() -> None:
     # Real dollars, not the guard ledger — see the module docstring's
     # SEPARATE REAL SPEND FROM GUARD SPEND section.
     print(f"spent ${result.real_spent:.2f} (guard ledger ${result.spent:.2f})")
-    if result.circuit_broken:
+    if result.connection_leaked:
+        print(
+            "stopped: a DuckDB connection leaked while closing an arm's "
+            "session, and the working copy's integrity substrate can no "
+            "longer be trusted for any later task — a stream of "
+            "unreliable db_corrupted values would be worse than no sweep "
+            "at all. Resume in a fresh process to continue: only the "
+            "current task's own result is affected.",
+            file=sys.stderr,
+        )
+    elif result.circuit_broken:
         print(
             f"stopped: {CIRCUIT_BREAKER_THRESHOLD} consecutive construction "
             "errors across different units — this looks systemic (a "

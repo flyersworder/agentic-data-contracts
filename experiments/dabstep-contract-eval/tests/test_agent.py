@@ -2,14 +2,15 @@ import inspect
 from pathlib import Path
 from typing import Any
 
+import dce.agent as agent
 import duckdb
 import pytest
 from dce.agent import (
+    MAX_TOOL_CALLS,
     _commit_sha,
     _inspect_rejections,
-    _per_request_input_cap,
     _retry_prompt_count,
-    _token_cap,
+    _token_budget_usd,
     _tool_call_names,
     build_result_row,
     run_task,
@@ -40,7 +41,7 @@ ROW_KWARGS: dict[str, Any] = dict(
     enforcement_blocks=0,
     retry_prompts=0,
     request_limit=50,
-    token_cap=126_262,
+    token_cap=732_000,
     golds_hash="deadbeef",
 )
 
@@ -102,69 +103,66 @@ def test_pinned_models_remain_unpriceable_by_genai_prices():
     that `genai-prices` has no pricing data for any of the four ids in
     `dce.pricing.MODELS`, so pydantic-ai's `cost_limit` is a silent no-op
     (`CostNotFoundWarning`, not an error) for every model this experiment
-    runs — which is why `run_task` derives its own `_token_cap` instead of
-    trusting `cost_limit`. A collection failure on this whole test file
-    would already prove the assertion the hard way (it runs on import); this
-    gives it a readable name and failure message instead.
+    runs — which is why `run_task` relies on the fixed `TOKEN_BUDGET`
+    instead of trusting `cost_limit`. A collection failure on this whole
+    test file would already prove the assertion the hard way (it runs on
+    import); this gives it a readable name and failure message instead.
     """
     import dce.agent as agent_module
 
     agent_module._assert_cost_limit_is_unenforceable_for_pinned_models()
 
 
-# ── _token_cap ───────────────────────────────────────────────────────────
+# ── TOKEN_BUDGET / PER_REQUEST_INPUT_TOKEN_CAP ──────────────────────────
+#
+# N1 (a correction to a correction): an earlier version derived the runaway
+# guard from a dollar figure (`per_task_usd`); at $1.00 that cleared 11 of
+# 12 (model x arm) cells but left `gpt-5.6-sol x manual_prompt` short of the
+# ~26 requests `tool_calls_limit=25` implies needing, because dollars-per-
+# turn is exactly the dimension that differs across arms. The guard is now
+# expressed in tokens, sized off the iteration budget it must never bind
+# before, uniformly across every arm and model — see `TOKEN_BUDGET`'s
+# module-level comment for the full reasoning.
 
 
-def test_token_cap_is_per_task_usd_divided_by_the_pricier_rate():
-    # gpt-5.6-sol: price_in=2.00, price_out=10.00 USD/1M tokens — priced off
-    # the pricier price_out (output, not input, is the expensive side for
-    # every pinned model; see _token_cap's docstring for why price_in would
-    # not actually bound spend), so $0.25 buys 25,000 tokens, not 125,000.
-    assert _token_cap("openai/gpt-5.6-sol", 0.25) == 25_000
+def test_token_budget_is_the_iteration_budget_times_the_worst_arm_floor_times_growth():
+    expected = agent.REQUEST_BUDGET * agent.MAX_ARM_FLOOR * agent.GROWTH
+    assert agent.TOKEN_BUDGET == expected
 
 
-def test_token_cap_scales_with_per_task_usd():
-    assert _token_cap("openai/gpt-5.6-sol", 0.50) == 50_000
-
-
-@pytest.mark.parametrize("model_id", list(MODELS))
-def test_token_cap_is_a_true_upper_bound_on_spend_regardless_of_input_output_mix(
-    model_id,
-):
-    """The property that matters, not a specific number — so this survives a
-    future edit to `dce/pricing.py`'s prices. `total_tokens_limit` bounds
-    input and output tokens together, undifferentiated, so the cap must hold
-    even in the worst case where every one of those tokens turns out to be
-    priced at the model's more expensive rate.
+def test_token_budget_clears_every_arms_iteration_budget_with_margin():
+    """The property N1 exists to guarantee: TOKEN_BUDGET, divided by even
+    the WORST arm's measured per-request input floor, must comfortably
+    exceed `tool_calls_limit + 5` requests — for every arm, since
+    TOKEN_BUDGET is uniform across all of them (not derived per model, so
+    this is not parametrized over MODELS: the same token figure applies to
+    every one).
     """
-    per_task_usd = 0.25
-    spec = MODELS[model_id]
-    cap = _token_cap(model_id, per_task_usd)
-    worst_case_cost = cap * max(spec.price_in, spec.price_out) / 1_000_000
-    assert worst_case_cost <= per_task_usd
+    needed_requests = MAX_TOOL_CALLS + 5
+    arm_floors = {"schema_only": 122, "manual_prompt": 6_096, "contract": 1_415}
+    for arm, floor in arm_floors.items():
+        request_budget = agent.TOKEN_BUDGET / floor
+        assert request_budget >= needed_requests, (arm, request_budget)
 
 
-# ── _per_request_input_cap ──────────────────────────────────────────────
-
-
-def test_per_request_input_cap_is_a_quarter_of_the_whole_task_cap():
+def test_per_request_input_token_cap_is_a_quarter_of_token_budget():
     # N2: closes the gap total_tokens_limit leaves open (checked only
     # BETWEEN requests) by bounding one request's input to a fraction of
-    # the same whole-task _token_cap, so one oversized tool return cannot
+    # the same whole-task TOKEN_BUDGET, so one oversized tool return cannot
     # alone consume the entire runaway-guard budget in a single step.
-    model, per_task_usd = "openai/gpt-5.6-sol", 1.00
-    assert (
-        _per_request_input_cap(model, per_task_usd)
-        == _token_cap(model, per_task_usd) // 4
-    )
+    assert agent.PER_REQUEST_INPUT_TOKEN_CAP == agent.TOKEN_BUDGET // 4
 
 
 @pytest.mark.parametrize("model_id", list(MODELS))
-def test_per_request_input_cap_never_exceeds_the_whole_task_cap(model_id):
-    per_task_usd = 1.00
-    assert _per_request_input_cap(model_id, per_task_usd) <= _token_cap(
-        model_id, per_task_usd
-    )
+def test_token_budget_usd_is_priced_off_the_pricier_rate(model_id):
+    """Reported for visibility only — does not drive `TOKEN_BUDGET` itself,
+    which is fixed and model-independent (see its module-level comment).
+    Priced off `max(price_in, price_out)` for the same true-worst-case
+    reason the retired `_token_cap` was.
+    """
+    spec = MODELS[model_id]
+    expected = agent.TOKEN_BUDGET * max(spec.price_in, spec.price_out) / 1_000_000
+    assert _token_budget_usd(model_id) == pytest.approx(expected)
 
 
 # ── _commit_sha ──────────────────────────────────────────────────────────
@@ -381,10 +379,10 @@ def test_run_task_sizes_usage_limits_as_a_runaway_guard_not_a_dollar_budget(
 ):
     """N1: `tool_calls_limit` is the uniform iteration control across arms
     (25, untouched by `per_task_usd`); `total_tokens_limit` and
-    `per_request_input_tokens_limit` are runaway guards sized off
-    `per_task_usd` at the model's pricier rate, not felt per-task budgets —
-    verified against the actual `UsageLimits` reaching `run_sync`, on the
-    default `per_task_usd=1.00`, for the priciest pinned model.
+    `per_request_input_tokens_limit` are the fixed, model-independent
+    `TOKEN_BUDGET` / `PER_REQUEST_INPUT_TOKEN_CAP` — not a dollar-derived
+    figure, and identical regardless of which model or arm is passed —
+    verified against the actual `UsageLimits` reaching `run_sync`.
     """
     seen = {}
 
@@ -393,23 +391,24 @@ def test_run_task_sizes_usage_limits_as_a_runaway_guard_not_a_dollar_budget(
             seen["limits"] = usage_limits
             return _fake_result("0.12", usage)
 
-    run_task(
-        TASK,
-        "contract",
-        "openai/gpt-5.6-sol",
-        tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
-        agent_factory=lambda **_: Fake(),
-    )
-    limits = seen["limits"]
-    assert limits.tool_calls_limit == 25
-    assert limits.request_limit == 50
-    # gpt-5.6-sol: max(price_in, price_out) = 10.00 USD/1M -> $1.00 buys
-    # 100,000 tokens; a quarter of that per single request.
-    assert limits.total_tokens_limit == 100_000
-    assert limits.per_request_input_tokens_limit == 25_000
+    for model in ("z-ai/glm-5.3-flash", "openai/gpt-5.6-sol"):
+        run_task(
+            TASK,
+            "contract",
+            model,
+            tmp_path / "x.duckdb",
+            {"manual": "m", "payments_readme": "r"},
+            gold="0.12",
+            golds_hash="deadbeef",
+            agent_factory=lambda **_: Fake(),
+        )
+        limits = seen["limits"]
+        assert limits.tool_calls_limit == 25
+        assert limits.request_limit == 50
+        assert limits.total_tokens_limit == agent.TOKEN_BUDGET
+        assert (
+            limits.per_request_input_tokens_limit == agent.PER_REQUEST_INPUT_TOKEN_CAP
+        )
 
 
 def test_run_task_stamps_the_golds_hash_it_was_given(tmp_path: Path):

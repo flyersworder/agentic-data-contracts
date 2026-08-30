@@ -205,10 +205,12 @@ def test_a_trace_preserves_a_thinking_part(tmp_path: Path):
     """Reasoning is the most valuable thing in a transcript for diagnosis — it
     is where the model says WHY it wrote the query it wrote.
 
-    This asserts the trace does not drop it, which matters because the first
-    real traces contained none: that turned out to be the models not emitting
-    reasoning while tools are bound, not the trace losing it. Distinguishing
-    those two required exactly this test.
+    This asserts the trace does not drop it. The first real traces contained
+    none, which briefly looked like tool use suppressing reasoning — it was
+    really just `glm-5.3-flash` reasoning very little (~20 tokens) plus a probe
+    prompt too easy to need any. Given a question that requires thought,
+    `deepseek-v4-pro-0813` emits ~1,100 reasoning tokens and ~4.6 KB of
+    content per task, all of which lands in the trace.
     """
     from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 
@@ -231,12 +233,11 @@ def test_a_trace_preserves_a_thinking_part(tmp_path: Path):
 
 
 def test_reasoning_tokens_are_recorded_on_the_row():
-    """`REASONING_EFFORT` is pinned on faith; this is how the sweep checks it.
-
-    The effort knob's measured effect (133 reasoning tokens unset vs 45-55 set)
-    was taken on a TOOL-FREE call. With tools bound — the experiment's actual
-    path — three of four pinned models emitted zero reasoning on a probe. This
-    field turns that from an anecdote into a column.
+    """Reasoning spend varies by model far more than by effort setting, so it
+    is recorded rather than assumed: measured on one hard task with tools
+    bound, `glm-5.3-flash` spent ~20 reasoning tokens where
+    `deepseek-v4-pro-0813` spent 1,096 — 49% of its output tokens, billed at
+    the output rate.
     """
     from dce.agent import _reasoning_tokens, build_result_row
 

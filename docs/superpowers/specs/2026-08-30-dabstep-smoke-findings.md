@@ -239,30 +239,40 @@ knob as well as a quality knob.
 stamped on every row. Uniform across arms — it is a model setting, not an arm
 setting.
 
-### Correction: that measurement was taken on the wrong path
+### Refinement: reasoning on the tool-calling path varies by MODEL, not by much else
 
-The 133-vs-45 figure above comes from a **tool-free** call. This experiment
-never makes tool-free calls. With tools bound, reasoning largely disappears:
+The 133-vs-45 figure above was measured on a **tool-free** call, and this
+experiment never makes one. A first re-probe with a trivial prompt (`17*23`)
+found near-zero reasoning under tool use and briefly suggested the knob was
+inert here. That was wrong: the prompt was too easy to require any thought.
 
-| model | thinking parts | reasoning tokens |
-|---|:-:|---:|
-| deepseek-v4-flash-0731 | 1 | 8 |
-| deepseek-v4-pro-0813 | 0 | 0 |
-| glm-5.3-flash | 0 | 0 |
-| gpt-5.6-sol | 0 | 0 |
+Given a question that actually needs reasoning, every pinned model emits it
+**alongside** its tool calls — confirmed on the raw OpenRouter wire and again
+through pydantic-ai, which surfaces it as a `ThinkingPart`:
 
-That probe used a trivial prompt, so it is weak on its own — but the real
-task-1480 trace (arm C, glm, a hard task) shows **0 reasoning tokens across all
-five turns at 601 output tokens**, which is not an easy-prompt artifact.
+| model | reasoning tokens | reasoning content |
+|---|---:|---:|
+| glm-5.3-flash | ~20 | 66 chars |
+| gpt-5.6-sol | ~71 | 430 chars |
+| deepseek-v4-pro-0813 | **1,123** | **4,543 chars** |
 
-So `REASONING_EFFORT` is probably close to inert on the path that matters, and
-F10's claim that it is "a cost knob as well as a quality knob" is not supported
-for tool-calling. The pin STAYS — an explicit recorded value still beats a
-per-endpoint default that varies with routing — but the justification is
-reproducibility, not cost.
+End-to-end on a real hard task (1480, arm C, `deepseek-v4-pro`): 7 thinking
+parts, 4,652 chars, `reasoning_tokens=1096` — **49% of that run's 2,232 output
+tokens**, billed at the output rate. Verdict `correct`.
 
-`reasoning_tokens` is now recorded on every row so the full sweep answers this
-empirically instead of inheriting a claim measured on the wrong path.
+So F10's original claim stands for the models that reason: reasoning IS a cost
+lever, materially so on the strong model. What the smoke run's empty traces
+actually showed is that **`glm-5.3-flash` barely reasons** (~20 tokens), not
+that the harness loses reasoning. Since the smoke run used only glm, its
+traces were bound to look empty.
+
+Two consequences:
+
+- Traces will be far richer on the primary comparison (`deepseek-v4-pro`) than
+  anything the smoke run suggested — ~4.6 KB of the model's own reasoning per
+  task, which is the single most useful artifact for diagnosing a wrong answer.
+- `reasoning_tokens` is recorded per row so the sweep measures this across
+  models and arms instead of inheriting any single probe's answer.
 
 ## F11 — the account data policy silently removes endpoints
 

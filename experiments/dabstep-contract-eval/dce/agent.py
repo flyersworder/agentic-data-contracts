@@ -626,16 +626,23 @@ def build_result_row(
         "provider_tag": MODELS[model].provider_tag,
         "quantization": MODELS[model].quantization,
         "reasoning_effort": REASONING_EFFORT,
-        # MEASURED, NOT ASSUMED. `REASONING_EFFORT` is pinned because an
-        # explicit value beats a per-endpoint default, but its measured effect
-        # was taken on a TOOL-FREE call (133 reasoning tokens unset against
-        # 45-55 at any explicit effort) and does not describe this
-        # experiment's actual path. With tools bound, three of the four pinned
-        # models emitted ZERO reasoning tokens on a probe, and a real hard task
-        # (1480, arm C, glm) produced 601 output tokens with 0 reasoning across
-        # all five turns. Recording the count per row is what turns "the effort
-        # knob may be inert here" from a guess into something the sweep
-        # answers. A subset of `output_tokens`, which is what is billed.
+        # Reasoning tokens actually spent — a subset of `output_tokens`, and
+        # billed at the output rate, which is the pricier one.
+        #
+        # This varies enormously BY MODEL on the tool-calling path, so it is
+        # measured per row rather than assumed. On one hard task (1480, arm C)
+        # with tools bound:
+        #
+        #     glm-5.3-flash          ~20 reasoning tokens   (near zero)
+        #     deepseek-v4-pro-0813  1,096 reasoning tokens  (49% of output)
+        #
+        # A trivial probe once suggested reasoning was absent entirely under
+        # tool use; that was an artifact of a prompt too easy to need any.
+        # Given a question that requires thought, every pinned model emits
+        # reasoning alongside its tool calls, pydantic-ai surfaces it as a
+        # `ThinkingPart`, and `dce.trace` preserves it. For `deepseek-v4-pro`
+        # that is ~4.6 KB of the model's own reasoning per task — the single
+        # most useful thing in a transcript for diagnosing a wrong answer.
         "reasoning_tokens": reasoning_tokens,
         "input_tokens": in_tok,
         "output_tokens": out_tok,

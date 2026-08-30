@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import duckdb
 import pytest
-from dce.arms import ARMS, build_arm
+from dce.arms import ARMS, build_arm, check_and_restore, make_working_copy
 from pydantic_ai import ModelRetry
 
 DOCS = {"manual": "FEE RULE ALPHA: match on card_scheme.", "payments_readme": "cols"}
@@ -198,7 +198,10 @@ def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
 
     setup_a = build_arm("schema_only", db, DOCS)
     out_a = _tool(setup_a, "execute_sql").function("SELECT psp_reference FROM payments")
-    assert "-- truncated at 3 rows" in out_a
+    # The marker carries the true total too, not just that a cut happened:
+    # arm C keeps `row_count` regardless of truncation, so arm A must learn
+    # the same thing about the rows it didn't see.
+    assert "-- truncated at 3 rows (10 total)" in out_a
 
     setup_c = build_arm("contract", db, DOCS)
     out_c = asyncio.run(
@@ -206,7 +209,59 @@ def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
             _CTX, sql="SELECT psp_reference FROM main.payments"
         )
     )
-    assert "-- truncated at 3 rows" in out_c
+    assert "-- truncated at 3 rows (10 total)" in out_c
 
     setup_a.close()
     setup_c.close()
+
+
+def test_check_and_restore_detects_a_mutation_made_while_a_governed_arm_is_open(
+    tmp_path,
+):
+    """C1b regression test.
+
+    Reproduces the reported sequence: arm `contract`'s connection stays open
+    (as it does for the arm's whole lifetime) while an ungoverned arm mutates
+    the shared database underneath it. DuckDB keeps that mutation in a `.wal`
+    sidecar until something checkpoints, so a check that only digests the
+    main file reports a false `corrupted=False` right when the database is
+    being destroyed — this is the reported false negative. It must now report
+    `corrupted=True` regardless of whether the connection that caused it is
+    still open, and — once every arm has actually been closed, the only valid
+    sequence (see the module docstring) — the repair must be genuine and
+    durable, verified by reopening the file fresh.
+    """
+    pristine = tmp_path / "pristine.duckdb"
+    con = duckdb.connect(str(pristine))
+    con.execute("CREATE TABLE payments AS SELECT 1 AS psp_reference")
+    con.close()
+
+    working = make_working_copy(pristine, tmp_path / "working.duckdb")
+
+    setup_c = build_arm("contract", working, DOCS)  # holds a connection open
+    setup_a = build_arm("schema_only", working, DOCS)
+    out = _tool(setup_a, "execute_sql").function("DROP TABLE payments")
+    assert not out.startswith("ERROR")  # the mutation succeeds -- by design
+
+    # The reported false negative happened exactly here: checking while a
+    # governed arm's connection is still open.
+    mid_flight = check_and_restore(working, pristine)
+    assert mid_flight.corrupted is True
+    assert mid_flight.wal_present is True
+
+    # The documented, only-valid sequence: close every arm for the task
+    # first. DuckDB checkpoints a live connection's own state onto the main
+    # file when it finally closes -- independent of whatever this module did
+    # to the file while it was open -- so the mid-flight restore above is not
+    # guaranteed to have survived. A check performed only now is genuinely
+    # valid, and must still catch and repair whatever state that leaves.
+    setup_a.close()
+    setup_c.close()
+
+    result = check_and_restore(working, pristine)
+    assert result.corrupted is True
+
+    con = duckdb.connect(str(working))
+    tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
+    con.close()
+    assert "payments" in tables

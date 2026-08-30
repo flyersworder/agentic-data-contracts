@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from dce.data import CONTEXT_FILES, DATASET, build_duckdb, download_context, load_tasks
-from dce.golds import check_dev_gate, reconstruct
+from dce.golds import PLURALITY_THRESHOLD, check_dev_gate, reconstruct_with_shares
 
 # Discovered by inspecting the live dataset tree (Task 3, Step 5):
 #   data/submissions/v1__<submission_id>__<DD-MM-YYYY>.jsonl  — 2194 files, 5.1 GB
@@ -72,16 +72,44 @@ def main() -> None:
     (data / "tasks.json").write_text(json.dumps(tasks, indent=2))
 
     submissions, scores = load_leaderboard_artifacts(data / "hf")
-    golds, exclusions = reconstruct(submissions, scores)
-    ok, mismatches = check_dev_gate(golds, load_tasks("dev"))
+    corpus_ids: set[str] = set()
+    for answers in submissions.values():
+        corpus_ids |= answers.keys()
+
+    golds, exclusions, shares = reconstruct_with_shares(submissions, scores)
+    ok, mismatches, absent = check_dev_gate(golds, load_tasks("dev"), corpus_ids)
 
     (data / "golds.json").write_text(json.dumps(golds, indent=2))
     (data / "exclusions.json").write_text(json.dumps(exclusions, indent=2))
+    (data / "gold_shares.json").write_text(json.dumps(shares, indent=2))
 
-    print(f"golds: {len(golds)} / {len(tasks)} tasks")
+    print(
+        f"golds: {len(golds)} / {len(tasks)} tasks "
+        f"(plurality threshold {PLURALITY_THRESHOLD})"
+    )
+    if shares:
+        ordered = sorted(shares.values())
+        print(
+            f"  plurality share of accepted golds: "
+            f"min={ordered[0]:.3f} median={ordered[len(ordered) // 2]:.3f} "
+            f"max={ordered[-1]:.3f}"
+        )
     for reason in sorted(set(exclusions.values())):
         print(f"  excluded {sum(v == reason for v in exclusions.values())}: {reason}")
-    print(f"dev gate: {'PASS' if ok else 'FAIL — ' + ', '.join(mismatches)}")
+
+    # Never print a clean PASS: the gate cannot see the dev tasks that appear in
+    # no submission file, and the output has to say so.
+    if not ok:
+        verdict = f"FAIL — {', '.join(mismatches)}"
+    elif absent:
+        verdict = (
+            f"PASS on {len(load_tasks('dev')) - len(absent)} in-corpus dev tasks "
+            f"— WEAKENED: {len(absent)} dev tasks are absent from every "
+            f"submission file and could not be checked ({', '.join(absent)})"
+        )
+    else:
+        verdict = "PASS"
+    print(f"dev gate: {verdict}")
     if not ok:
         raise SystemExit("dev gate failed; see the spec's fallback before spending")
 

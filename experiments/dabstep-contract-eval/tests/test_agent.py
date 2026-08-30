@@ -1,11 +1,13 @@
 import inspect
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pytest
 from dce.agent import (
     _commit_sha,
     _inspect_rejections,
+    _per_request_input_cap,
     _retry_prompt_count,
     _token_cap,
     _tool_call_names,
@@ -21,7 +23,7 @@ TASK = {
     "level": "hard",
 }
 
-ROW_KWARGS = dict(
+ROW_KWARGS: dict[str, Any] = dict(
     task=TASK,
     arm="contract",
     model="deepseek/deepseek-v4-pro-0813",
@@ -142,6 +144,29 @@ def test_token_cap_is_a_true_upper_bound_on_spend_regardless_of_input_output_mix
     assert worst_case_cost <= per_task_usd
 
 
+# ── _per_request_input_cap ──────────────────────────────────────────────
+
+
+def test_per_request_input_cap_is_a_quarter_of_the_whole_task_cap():
+    # N2: closes the gap total_tokens_limit leaves open (checked only
+    # BETWEEN requests) by bounding one request's input to a fraction of
+    # the same whole-task _token_cap, so one oversized tool return cannot
+    # alone consume the entire runaway-guard budget in a single step.
+    model, per_task_usd = "openai/gpt-5.6-sol", 1.00
+    assert (
+        _per_request_input_cap(model, per_task_usd)
+        == _token_cap(model, per_task_usd) // 4
+    )
+
+
+@pytest.mark.parametrize("model_id", list(MODELS))
+def test_per_request_input_cap_never_exceeds_the_whole_task_cap(model_id):
+    per_task_usd = 1.00
+    assert _per_request_input_cap(model_id, per_task_usd) <= _token_cap(
+        model_id, per_task_usd
+    )
+
+
 # ── _commit_sha ──────────────────────────────────────────────────────────
 
 
@@ -192,20 +217,19 @@ def test_result_row_carries_full_provenance():
 
 
 def test_result_row_prices_from_the_pinned_table():
-    row = build_result_row(
-        **{
-            **ROW_KWARGS,
-            "answer": "x",
-            "answer_normalized": "x",
-            "gold": "y",
-            "verdict": "incorrect",
-            "in_tok": 1_000_000,
-            "out_tok": 0,
-            "cached_tok": 0,
-            "tool_calls": [],
-            "inspect_rejections": 0,
-        }
-    )
+    kwargs: dict[str, Any] = {
+        **ROW_KWARGS,
+        "answer": "x",
+        "answer_normalized": "x",
+        "gold": "y",
+        "verdict": "incorrect",
+        "in_tok": 1_000_000,
+        "out_tok": 0,
+        "cached_tok": 0,
+        "tool_calls": [],
+        "inspect_rejections": 0,
+    }
+    row = build_result_row(**kwargs)
     assert row["usd"] == pytest.approx(0.66)
 
 
@@ -352,6 +376,42 @@ def test_run_task_threads_the_effective_cap_into_the_agent_factory(tmp_path: Pat
     assert seen["retries"] == 50
 
 
+def test_run_task_sizes_usage_limits_as_a_runaway_guard_not_a_dollar_budget(
+    tmp_path: Path,
+):
+    """N1: `tool_calls_limit` is the uniform iteration control across arms
+    (25, untouched by `per_task_usd`); `total_tokens_limit` and
+    `per_request_input_tokens_limit` are runaway guards sized off
+    `per_task_usd` at the model's pricier rate, not felt per-task budgets —
+    verified against the actual `UsageLimits` reaching `run_sync`, on the
+    default `per_task_usd=1.00`, for the priciest pinned model.
+    """
+    seen = {}
+
+    class Fake:
+        def run_sync(self, *a, usage=None, usage_limits=None, **k):
+            seen["limits"] = usage_limits
+            return _fake_result("0.12", usage)
+
+    run_task(
+        TASK,
+        "contract",
+        "openai/gpt-5.6-sol",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    limits = seen["limits"]
+    assert limits.tool_calls_limit == 25
+    assert limits.request_limit == 50
+    # gpt-5.6-sol: max(price_in, price_out) = 10.00 USD/1M -> $1.00 buys
+    # 100,000 tokens; a quarter of that per single request.
+    assert limits.total_tokens_limit == 100_000
+    assert limits.per_request_input_tokens_limit == 25_000
+
+
 def test_run_task_stamps_the_golds_hash_it_was_given(tmp_path: Path):
     class Fake:
         def run_sync(self, *a, usage=None, **k):
@@ -386,10 +446,11 @@ def _tool_call(name: str):
     return Part()
 
 
-def _tool_return(name: str, content):
+def _tool_return(name: str, content: str):
     class Part:
         part_kind = "tool-return"
         tool_name = name
+        content: str
 
     p = Part()
     p.content = content
@@ -406,7 +467,7 @@ def _retry_prompt(name: str | None = None):
 
 def _msg(*parts):
     class Msg:
-        pass
+        parts: list
 
     m = Msg()
     m.parts = list(parts)

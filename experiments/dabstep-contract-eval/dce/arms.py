@@ -113,7 +113,18 @@ ARMS: tuple[str, ...] = ("schema_only", "manual_prompt", "contract")
 # by `_truncate_run_query` (the library's `run_query` does not cap rows on its
 # own) — so no arm is advantaged by seeing an uncapped result the others
 # cannot.
-MAX_ROWS = 10_000
+#
+# 1,000, not 10,000: a 10,000-row tool return is useless to a model answering
+# a DABStep question and costs a fortune to ship as a single request's input
+# — measured, a 10,000-row `payments` result serializes to roughly 429k
+# tokens, which then becomes the *next* request's input in full (dce/agent.py
+# review, N2). 1,000 rows is still far beyond anything a DABStep answer
+# needs, cuts that worst case roughly tenfold, and — because it is applied
+# identically to every arm, same as the value it replaces — is a harness
+# property, not a confound. The truncation marker below already reports the
+# true total row count, so cutting the cap does not hide anything from the
+# model; it only stops the model from being handed all of it at once.
+MAX_ROWS = 1_000
 
 BASE_PROMPT = (
     "You are a data analyst answering questions over a DuckDB database.\n"

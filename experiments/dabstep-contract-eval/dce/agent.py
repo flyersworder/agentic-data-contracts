@@ -28,6 +28,36 @@ MAX_TOOL_CALLS: int = 25
 # being an invisible library default.
 REQUEST_LIMIT: int = 50
 
+# N2's fix: `total_tokens_limit` is only checked BETWEEN requests, so nothing
+# by itself stops one enormous single request. Demonstrated overshoot before
+# these existed: a 10,000-row `payments` result serialising to ~429k tokens
+# (see `dce/arms.py`'s `MAX_ROWS`, since lowered to 1,000 for the same
+# reason) became the next request's input in full, costing ~$0.86 on
+# `gpt-5.6-sol` alone — $1.80 total against a $0.25 cap that request never
+# got a chance to enforce because it only fires between requests, not within
+# one. Two closures, both applied identically to every arm/model so neither
+# is a confound:
+#
+#   * `MAX_OUTPUT_TOKENS_PER_REQUEST` bounds one model turn's OUTPUT via
+#     `ModelSettings(max_tokens=...)` — previously unset, so a single
+#     response (reasoning tokens included) was unbounded.
+#   * `UsageLimits.per_request_input_tokens_limit` (set in `run_task`, sized
+#     as a fraction of `_token_cap` — see `_PER_REQUEST_INPUT_FRACTION`)
+#     bounds one request's INPUT.
+#
+# 4,000 output tokens is generous for a data-analyst answer with some
+# reasoning attached, while still being nowhere near the size of a runaway
+# tool-return-turned-input.
+MAX_OUTPUT_TOKENS_PER_REQUEST: int = 4_000
+
+# The fraction of the whole-task `_token_cap` that a single request's INPUT
+# may consume on its own — see `MAX_OUTPUT_TOKENS_PER_REQUEST`'s comment
+# above for why this exists. 1/4 means one oversized tool return can eat at
+# most a quarter of the task's entire runaway-guard budget before
+# `per_request_input_tokens_limit` stops it outright, rather than being
+# allowed to consume the whole thing (or more, pre-N2) in a single step.
+_PER_REQUEST_INPUT_FRACTION: float = 0.25
+
 
 def _tool_call_names(messages: list) -> list[str]:
     """Ordered tool names attempted during a run, from its message history.
@@ -170,8 +200,25 @@ def _assert_cost_limit_is_unenforceable_for_pinned_models() -> None:
     `_token_cap` was written without accounting for. Raising loudly here,
     once, at import time, means that day is a deliberate code change instead
     of a silent shift in what "capped at `per_task_usd`" actually means.
+
+    A tripwire must never be able to bring down the thing it is watching.
+    `genai-prices` is only a *transitive* dependency (pulled in by
+    `pydantic-ai-slim`, not declared here), so importing it at module scope
+    without a fallback would make `import dce.agent` — and therefore the
+    whole sweep — fail outright the day a pydantic-ai release drops it or
+    renames it. A missing `genai_prices` is silently treated as "cannot
+    disprove `_token_cap`'s reason for existing", not as this assertion's
+    problem to raise about. Likewise, `calc_price`'s failure mode is only
+    documented as `LookupError` today; catching bare `Exception` here means
+    a future release raising some other exception type for the same "can't
+    price this" case still reads as "still unpriceable" rather than crashing
+    every import — only a genuinely *successful*, exception-free
+    `calc_price` call is treated as news worth stopping the run for.
     """
-    import genai_prices
+    try:
+        import genai_prices
+    except ImportError:
+        return
 
     for model_id in MODELS:
         try:
@@ -180,7 +227,7 @@ def _assert_cost_limit_is_unenforceable_for_pinned_models() -> None:
                 model_ref=model_id,
                 provider_id="openrouter",
             )
-        except LookupError:
+        except Exception:
             continue
         raise AssertionError(
             f"GOOD NEWS, ACTION NEEDED: genai-prices can now price "
@@ -200,34 +247,64 @@ _assert_cost_limit_is_unenforceable_for_pinned_models()
 
 
 def _token_cap(model: str, per_task_usd: float) -> int:
-    """A hard total-token ceiling for one task, standing in for the
-    `cost_limit` that `_assert_cost_limit_is_unenforceable_for_pinned_models`
-    proves cannot be trusted for any pinned model.
+    """A RUNAWAY GUARD, not a per-task budget — the ceiling this experiment
+    puts on `total_tokens_limit` because `cost_limit` cannot be trusted (see
+    `_assert_cost_limit_is_unenforceable_for_pinned_models`).
+
+    This distinction is load-bearing and was gotten backwards once already:
+    cost is a REPORTED OUTCOME of this experiment ("arm B costs more per
+    turn than arm A" is one of the findings it exists to produce), not a
+    quantity to equalise across arms by capping it uniformly in dollars.
+    Arm C carries nine tool schemas against arms A/B's three, and arm B
+    carries the full manual/readme text in its system prompt — both cost
+    more per request than arm A, structurally, before a single token of
+    actual reasoning happens. A uniform dollar cap on top of that turns
+    "capped at $X" into a wildly non-uniform *iteration* budget across arms,
+    and it bites hardest on exactly the arm carrying the most context — a
+    confound `dce/arms.py`'s module docstring already fought hard to keep
+    out of `retries`, reintroduced here by a different route. The uniform
+    iteration control is, and stays, `tool_calls_limit=max_tool_calls`
+    (identical across every arm — see `dce/arms.py`'s RETRY BUDGET section).
+    Real spend control lives at the sweep level (`--max-spend`, arm-
+    agnostic), not here. `_token_cap`'s only job is to stop a genuinely
+    pathological run — an infinite loop, a single oversized request (see
+    `MAX_OUTPUT_TOKENS_PER_REQUEST` / `_per_request_input_cap` for that
+    narrower case) — from spending without limit; it must be loose enough
+    that no arm's normal operation ever reaches it before `tool_calls_limit`
+    does. `run_task`'s default `per_task_usd=1.00` (not the tighter values
+    tried and rejected earlier) reflects that: it is sized to stay out of the
+    way, not to be a felt constraint.
 
     Priced off `max(price_in, price_out)` — the MORE EXPENSIVE of a model's
-    two per-token rates, deliberately, not the cheaper one. `total_tokens_
-    limit` bounds input and output tokens together, undifferentiated, and
-    output is the pricier side for every pinned model — DABStep's fee
-    questions are exactly the kind that provoke long reasoning, and
-    reasoning tokens bill as output. Pricing off `price_in` instead once
-    looked like a reasonable approximation but is not a bound at all: at
-    $0.25, an all-output run on `deepseek-v4-pro-0813` would have been
-    capped at 378,787 tokens by a `price_in`-derived limit, and 378,787
-    output tokens cost $0.75 — three times the intended limit (`gpt-5.6-sol`
-    would have been five times over). Do not "optimise" this back to
-    `price_in` for a larger, more permissive cap — that reintroduces exactly
-    this hole. Yes, this makes the cap more conservative (`deepseek-v4-pro`
-    drops from 378,787 to ~126,262 tokens): a task that gets truncated early
-    is a visible `hit_limit` row that can be re-run at a higher budget: a
-    task that quietly costs several times `per_task_usd` is money that
-    cannot be recovered. This is still an approximation, not exact cost
-    accounting — it does not know the real input/output split a task will
-    have — but unlike the `price_in`-derived version, it is a true upper
-    bound on spend regardless of that split.
+    two per-token rates, deliberately, not the cheaper one — for a second,
+    independent reason: `total_tokens_limit` bounds input and output tokens
+    together, undifferentiated, and output is the pricier side for every
+    pinned model. Pricing off `price_in` is not a bound on spend at all: an
+    all-output run priced that way could cost several times `per_task_usd`
+    before tripping (`deepseek-v4-pro-0813` up to 3x, `gpt-5.6-sol` up to 5x,
+    measured). Do not "optimise" this back to `price_in` for a larger cap —
+    that reintroduces exactly that hole, and a task truncated early (a
+    visible `hit_limit` row, re-runnable at a higher budget) is always the
+    better failure mode than a run that quietly costs several times its
+    intended cap in money that cannot be recovered.
     """
     spec = MODELS[model]
     rate = max(spec.price_in, spec.price_out)
     return int(per_task_usd / rate * 1_000_000)
+
+
+def _per_request_input_cap(model: str, per_task_usd: float) -> int:
+    """A ceiling on ONE request's input tokens — closes the gap
+    `total_tokens_limit` leaves open (see `MAX_OUTPUT_TOKENS_PER_REQUEST`'s
+    module-level comment): that limit is only checked BETWEEN requests, so
+    nothing stops a single oversized tool return from becoming the very next
+    request's input in full, in one step, regardless of how much of
+    `_token_cap`'s budget remains. Sized as `_PER_REQUEST_INPUT_FRACTION` of
+    the same whole-task `_token_cap`, so one runaway request can consume at
+    most a bounded slice of the task's total runaway-guard budget rather
+    than potentially all of it (or, before N2, more than all of it) at once.
+    """
+    return max(1, int(_token_cap(model, per_task_usd) * _PER_REQUEST_INPUT_FRACTION))
 
 
 def build_result_row(
@@ -323,7 +400,16 @@ def _default_agent_factory(
         # or a caller doing exactly that silently reinstates the confound
         # this comment describes.
         retries=retries,
-        model_settings=ModelSettings(temperature=0.0, seed=0, timeout=300),
+        # N2: bounds one model turn's OUTPUT tokens — previously unset, so a
+        # single response (reasoning tokens included) was unbounded between
+        # the between-request `total_tokens_limit` checks. See
+        # `MAX_OUTPUT_TOKENS_PER_REQUEST`'s module-level comment.
+        model_settings=ModelSettings(
+            temperature=0.0,
+            seed=0,
+            timeout=300,
+            max_tokens=MAX_OUTPUT_TOKENS_PER_REQUEST,
+        ),
     )
 
 
@@ -337,11 +423,18 @@ def run_task(
     *,
     golds_hash: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
-    per_task_usd: float = 0.25,
+    # A runaway guard, not a per-task budget — see `_token_cap`'s docstring.
+    # $1.00 is sized to stay out of the way of every arm's normal operation
+    # (even arm B's larger per-request floor on the priciest pinned model),
+    # not to be a felt constraint; real spend control is `--max-spend` at
+    # the sweep level, arm-agnostic.
+    per_task_usd: float = 1.00,
     agent_factory=None,
 ) -> dict:
+    import warnings
+
     from pydantic_ai import capture_run_messages
-    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.exceptions import CostNotFoundWarning, UsageLimitExceeded
     from pydantic_ai.usage import RunUsage, UsageLimits
 
     setup = build_arm(arm, db_path, docs)
@@ -359,14 +452,36 @@ def run_task(
         )
         token_cap = _token_cap(model, per_task_usd)
         limits = UsageLimits(
+            # THE uniform iteration control across arms — see `dce/arms.py`'s
+            # module docstring. `total_tokens_limit`/`cost_limit` below are
+            # runaway guards, not budgets, and must stay loose enough never
+            # to bind before this one does in normal operation.
             tool_calls_limit=max_tool_calls,
             request_limit=REQUEST_LIMIT,
             # Real protection against runaway spend does not come from this
             # — see `_assert_cost_limit_is_unenforceable_for_pinned_models`
             # — but it is left in place for any pinned model that ever does
-            # become priceable, and as documented intent.
+            # become priceable, and as documented intent. Suppressed below
+            # (`CostNotFoundWarning`) rather than left to fire on every one
+            # of a sweep's thousand-plus calls.
             cost_limit=Decimal(str(per_task_usd)),
+            # A runaway guard (dead loop, degenerate huge request), NOT a
+            # per-task budget — see `_token_cap`'s docstring for why sizing
+            # this as a felt cost control was tried and reverted.
             total_tokens_limit=token_cap,
+            # N2: bounds one single request's input — closes the gap this
+            # limit alone leaves open (checked only BETWEEN requests). See
+            # `_per_request_input_cap`'s docstring. Not preemptive
+            # (`UsageLimits.count_tokens_before_request` is unset): pydantic-ai
+            # documents that knob as supported for Anthropic/Google/Bedrock/
+            # OpenAI-Responses, not the OpenAI-Chat-Completions-style model
+            # `_default_agent_factory` builds, so an oversized request is
+            # still sent and billed once before this stops the run — it
+            # prevents a SECOND one, not the first one's cost. Real
+            # protection against the first oversized request is
+            # `dce/arms.py`'s `MAX_ROWS` (cut from 10,000 to 1,000 for
+            # exactly this reason).
+            per_request_input_tokens_limit=_per_request_input_cap(model, per_task_usd),
         )
 
         answer, verdict = "", "unset"
@@ -384,7 +499,17 @@ def run_task(
         # rejections survive a cap trip or error too.
         with capture_run_messages() as messages:
             try:
-                result = agent.run_sync(prompt, usage_limits=limits, usage=usage)
+                # `cost_limit` is passed above knowing it cannot fire for any
+                # pinned model (`_assert_cost_limit_is_unenforceable_for_
+                # pinned_models`) — pydantic-ai's own acknowledgment of that
+                # is a `CostNotFoundWarning` on every single call, which
+                # would otherwise fire well over a thousand times across a
+                # full sweep for a fact already established once at import
+                # time. Suppressed here, not globally, so it stays scoped to
+                # the one call site that provokes it.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=CostNotFoundWarning)
+                    result = agent.run_sync(prompt, usage_limits=limits, usage=usage)
                 answer = str(result.output).strip()
             except UsageLimitExceeded:
                 # A cap trip is a harness artifact, not a wrong answer — see

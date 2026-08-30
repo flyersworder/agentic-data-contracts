@@ -35,6 +35,19 @@ def test_three_arms_with_the_spec_names():
     assert ARMS == ("schema_only", "manual_prompt", "contract")
 
 
+def test_max_rows_is_capped_well_below_ten_thousand():
+    """Pins the lowered `MAX_ROWS` (dce/agent.py review, N2): a 10,000-row
+    tool return serializes to roughly 429k tokens and becomes the next
+    request's input in full — useless to a model and expensive to ship. 1,000
+    rows is still far beyond any DABStep answer's needs; a future edit
+    creeping this back toward 10,000 should fail here, loudly, rather than
+    only show up as an unexplained cost spike in a live sweep.
+    """
+    import dce.arms as arms_mod
+
+    assert arms_mod.MAX_ROWS == 1_000
+
+
 def test_schema_only_prompt_contains_no_manual_text(db):
     setup = build_arm("schema_only", db, DOCS)
     assert "FEE RULE ALPHA" not in setup.system_prompt

@@ -98,6 +98,32 @@ def _norm(value: str) -> str:
     return _norm_atom(text)
 
 
+#: Task ids whose reconstructed gold is PROVABLY WRONG, and the evidence.
+#:
+#: Consensus reconstruction inherits the leaderboard's errors: if most correct
+#: submissions agree on a wrong value, plurality accepts it. These five were
+#: independently verified against the data by MotherDuck Labs, who reconstruct
+#: golds the same way (`hf_consensus`) and publish their exclusions:
+#: https://github.com/motherduckdb/labs/tree/main/projects/agentic-sql-context-mcp
+#: (`data/bad_golds.json`, evidence in `docs/error-fixes.md`).
+#:
+#: Excluded rather than corrected. Substituting our own answer would make this
+#: experiment score itself against a key it wrote, which is exactly the failure
+#: mode the reconstruction exists to avoid. A task with no trustworthy gold is
+#: unanswerable here, not answerable-with-our-answer.
+#:
+#: Scoring an arm wrong for being right is not a neutral error: it depresses
+#: every arm's accuracy and adds noise to the paired comparison, and the arms
+#: most likely to reach the CORRECT value are the ones most penalised.
+VERIFIED_WRONG_GOLDS: dict[str, str] = {
+    "2404": "T13 delta: correct 0.0157; gold 0.01 unreproducible by any method",
+    "2439": "T13 delta: correct -15.3436; gold -15.35",
+    "2507": "T12 delta: correct -53.2784; gold -53.25 (fee has NULL volume/fraud)",
+    "2509": "T12 delta: correct -36.6097; gold -36.58 (same)",
+    "60": "worst fraud segment: gold names ES, the LOWEST-fraud country",
+}
+
+
 class Reconstruction(NamedTuple):
     """(golds, exclusions, shares) — shares covers accepted golds only."""
 
@@ -114,8 +140,9 @@ def reconstruct_with_shares(
 ) -> Reconstruction:
     """Reconstruct golds, recording each gold's plurality share.
 
-    `exclusions` maps task_id -> one of `no_correct_submission`,
-    `insufficient_agreement`, `below_plurality_threshold`.
+    `exclusions` maps task_id -> one of `verified_wrong_gold`,
+    `no_correct_submission`, `insufficient_agreement`,
+    `below_plurality_threshold`.
 
     `plurality_threshold` must exceed 0.5, so that an accepted group is always a
     strict majority and never a tie broken by dict ordering.
@@ -140,6 +167,12 @@ def reconstruct_with_shares(
     shares: dict[str, float] = {}
 
     for task_id in sorted(seen):
+        # Checked before any consensus arithmetic: a gold verified wrong is
+        # wrong however strong its plurality, and several of these have
+        # near-unanimous agreement behind them.
+        if task_id in VERIFIED_WRONG_GOLDS:
+            exclusions[task_id] = "verified_wrong_gold"
+            continue
         groups = by_task.get(task_id, {})
         if not groups:
             exclusions[task_id] = "no_correct_submission"

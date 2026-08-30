@@ -520,3 +520,79 @@ def test_report_does_not_raise_on_a_row_with_an_explicit_null_arm(tmp_path):
     _write(path, rows)
 
     report(path)  # must not raise TypeError
+
+
+# ── scorer staleness and verified-wrong golds ───────────────────────────────
+
+
+def _graded_row(task_id, arm, answer, gold, verdict, scorer, **extra):
+    return {
+        "task_id": task_id,
+        "arm": arm,
+        "model": "z-ai/glm-5.3-flash",
+        "level": "hard",
+        "answer": answer,
+        "gold": gold,
+        "verdict": verdict,
+        "scorer": scorer,
+        "usd": 0.001,
+        "usd_guard": 0.001,
+        **extra,
+    }
+
+
+def test_stale_scorer_rows_are_detected():
+    """Silence would be a claim that the file's verdicts came from the grading
+    rules in force now."""
+    from dce.stats import stale_scorer_rows
+
+    rows = [
+        _graded_row("1", "contract", "yes", "yes", "correct", "fallback"),
+        _graded_row("2", "contract", "yes", "yes", "correct", "official-vendored"),
+    ]
+    assert stale_scorer_rows(rows) == {"fallback": 1}
+
+
+def test_rescore_replays_a_scorer_change_from_stored_answers():
+    """The exact case that moved a headline: `Yes.` against gold `yes` was
+    graded wrong by the old fallback and right by DABStep's own scorer."""
+    from dce.stats import rescore
+
+    rows = [_graded_row("30", "schema_only", "Yes.", "yes", "incorrect", "fallback")]
+    out = rescore(rows)
+    assert out[0]["verdict"] == "correct"
+    assert out[0]["scorer"] != "fallback"
+    # Non-destructive: the caller's row is untouched.
+    assert rows[0]["verdict"] == "incorrect"
+
+
+def test_rescore_leaves_harness_failures_alone():
+    """A `hit_limit` row has no answer to re-grade; inventing one would turn a
+    harness failure into a wrong answer and quietly inflate the denominator."""
+    from dce.stats import rescore
+
+    rows = [_graded_row("9", "contract", "", "12.91", "hit_limit", "fallback")]
+    assert rescore(rows)[0]["verdict"] == "hit_limit"
+
+
+def test_report_drops_verified_wrong_gold_tasks(tmp_path):
+    """They cannot be answered correctly by construction, so counting them
+    depresses every arm and penalises hardest the arms most likely to reach the
+    true value."""
+    import json
+
+    from dce.stats import report
+
+    path = tmp_path / "r.jsonl"
+    rows = [
+        _graded_row("60", "contract", "PT", "ES", "incorrect", "official-vendored"),
+        _graded_row(
+            "1712", "contract", "12.91", "12.91", "correct", "official-vendored"
+        ),
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    out = report(path)
+    assert "verified-wrong gold" in out
+    assert "60" in out.split("\n")[0]
+    # The surviving task is the only one counted.
+    assert "1/1" in out

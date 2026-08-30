@@ -215,3 +215,37 @@ def test_the_gate_fails_when_golds_are_empty_and_the_corpus_covers_the_dev_ids()
     assert ok is False
     assert mismatches == ["1"]
     assert absent == []
+
+
+# ── verified-wrong golds ────────────────────────────────────────────────────
+
+
+def test_verified_wrong_golds_are_excluded_before_any_consensus_arithmetic():
+    """Consensus inherits the leaderboard's errors: if most CORRECT
+    submissions agree on a wrong value, plurality accepts it. Several of these
+    five have near-unanimous agreement behind them, so the check must precede
+    the vote rather than filter its output.
+    """
+    from dce.golds import VERIFIED_WRONG_GOLDS, reconstruct_with_shares
+
+    subs = {f"a{i}": {"60": "ES", "99": "ok"} for i in range(50)}
+    scores = {f"a{i}": {"60": True, "99": True} for i in range(50)}
+    result = reconstruct_with_shares(subs, scores)
+
+    assert "60" in VERIFIED_WRONG_GOLDS
+    # Unanimous, and still excluded.
+    assert "60" not in result.golds
+    assert result.exclusions["60"] == "verified_wrong_gold"
+    assert result.golds["99"] == "ok"
+
+
+def test_verified_wrong_golds_are_excluded_not_corrected():
+    """Substituting our own answer would make this experiment score itself
+    against a key it wrote — the exact failure the reconstruction exists to
+    avoid. A task with no trustworthy gold is unanswerable here."""
+    from dce.golds import VERIFIED_WRONG_GOLDS
+
+    assert set(VERIFIED_WRONG_GOLDS) == {"2404", "2439", "2507", "2509", "60"}
+    # Reasons, not replacement values: nothing here is usable as a gold.
+    for task_id, reason in VERIFIED_WRONG_GOLDS.items():
+        assert isinstance(reason, str) and len(reason) > 20, task_id

@@ -283,6 +283,62 @@ def _raw_rows(path: Path) -> list[dict]:
     return _read_rows(path)
 
 
+def rescore(rows: list[dict]) -> list[dict]:
+    """Re-grade every answered row from its stored `answer` and `gold`.
+
+    Every row keeps the answer text and the gold it was graded against, so a
+    scorer change is replayable without re-running (or re-paying for) a single
+    model call. That property was designed in for adjudicating a disputed
+    verdict; it earns its keep whenever the scorer itself moves.
+
+    It has moved once already, and materially. Rows carrying
+    `scorer: "fallback"` were graded by a hand-rolled normalizer STRICTER than
+    DABStep's own — it marked `Yes.` wrong against a gold of `yes` — and that
+    alone moved `schema_only vs contract` from p=0.0156 to p=0.0703 across the
+    significance line. Reporting those stale verdicts as though they were the
+    current grading would republish that false positive.
+
+    Only `correct`/`incorrect` rows are touched. A `hit_limit` or `error` row
+    has no answer to re-grade, and inventing one would convert a harness
+    failure into a wrong answer.
+    """
+    from dce.grade import active_scorer, score
+
+    out = []
+    for row in rows:
+        if row.get("verdict") not in ANSWER_VERDICTS:
+            out.append(row)
+            continue
+        try:
+            verdict = (
+                "correct"
+                if score(row.get("answer", ""), row.get("gold", ""))
+                else "incorrect"
+            )
+        except Exception:
+            verdict = "scoring_error"
+        out.append({**row, "verdict": verdict, "scorer": active_scorer()})
+    return out
+
+
+def stale_scorer_rows(rows: list[dict]) -> dict[str, int]:
+    """Rows whose recorded `scorer` is not the one installed now.
+
+    Silence here is a claim: that the verdicts in this file were produced by
+    the grading rules currently in force. When that is false the report must
+    say so rather than let a reader assume it.
+    """
+    from dce.grade import active_scorer
+
+    now = active_scorer()
+    counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        recorded = row.get("scorer")
+        if recorded and recorded != now:
+            counts[recorded] += 1
+    return dict(counts)
+
+
 def _scored(rows: list[dict]) -> list[dict]:
     """Rows where the model produced a graded answer."""
     return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
@@ -535,10 +591,51 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     ]
 
 
-def report(path: Path) -> str:
+def report(path: Path, *, rescore_stale: bool = True) -> str:
     rows = load(path)
     raw_rows = _raw_rows(path)
     lines: list[str] = []
+
+    from dce.golds import VERIFIED_WRONG_GOLDS
+
+    # Tasks whose gold is verified wrong are dropped before anything is
+    # counted. They cannot be answered correctly by construction, so leaving
+    # them in depresses every arm and adds noise to the paired comparison --
+    # and penalises hardest the arms most likely to reach the true value.
+    dropped = sorted(
+        {r["task_id"] for r in rows if r.get("task_id") in VERIFIED_WRONG_GOLDS}
+    )
+    if dropped:
+        rows = [r for r in rows if r.get("task_id") not in VERIFIED_WRONG_GOLDS]
+        raw_rows = [r for r in raw_rows if r.get("task_id") not in VERIFIED_WRONG_GOLDS]
+        lines.append(
+            f"NOTE: dropped {len(dropped)} task(s) with a verified-wrong gold "
+            f"({', '.join(dropped)}) -- see dce.golds.VERIFIED_WRONG_GOLDS."
+        )
+
+    stale = stale_scorer_rows(rows)
+    if stale:
+        from dce.grade import active_scorer
+
+        detail = ", ".join(
+            f"{n} row(s) by {name!r}" for name, n in sorted(stale.items())
+        )
+        if rescore_stale:
+            rows = rescore(rows)
+            lines.append(
+                f"NOTE: {detail} were graded by a scorer other than the one "
+                f"installed now ({active_scorer()!r}); every answered row has "
+                "been RE-GRADED from its stored answer and gold. Pass "
+                "rescore_stale=False to report the stored verdicts verbatim."
+            )
+        else:
+            lines.append(
+                f"WARNING: {detail}, not the installed {active_scorer()!r}. "
+                "Verdicts below are as recorded and are NOT comparable with "
+                "rows graded by the current scorer."
+            )
+    if lines:
+        lines.append("")
 
     def slice_of(pool: list[dict], model: str, arm: str) -> list[dict]:
         return [r for r in pool if r.get("model") == model and r.get("arm") == arm]

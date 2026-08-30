@@ -20,14 +20,21 @@ disclosed, not corrected.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import NamedTuple
 
 _BRACKETS = re.compile(r"^[\[\('\"]+|[\]\)'\"]+$")
 
 #: A clear supermajority. Deliberately well below the ~0.95 median share
-#: observed in the corpus, so the choice is not tuned to the data.
+#: observed in the corpus, so the choice is not tuned to the data. Must be
+#: strictly above 0.5: at exactly 0.5 a two-way tie would be "accepted" and
+#: the winner decided by dict insertion order, which is not a consensus.
 PLURALITY_THRESHOLD = 0.75
+
+#: The dev tasks that DABStep's submission files actually cover. A gate that
+#: verified fewer than this checked less than it was designed to and must not
+#: be reported as a pass — see `check_dev_gate`.
+MIN_DEV_CHECKS = 6
 
 
 def _norm_atom(value: str) -> str:
@@ -45,6 +52,16 @@ def _norm(value: str) -> str:
     order-insensitive for lists, so two correct submissions that differ only in
     ordering are the same answer, and treating them as a conflict would be a
     normalizer bug rather than a real disagreement.
+
+    **Do not add a thousands-separator guard here.** `"1,234.56"` deliberately
+    shreds to `"1.000000, 234.560000"`. That looks like a bug and is not: in
+    this dataset the comma-joined form is overwhelmingly a merchant-id list,
+    and `"709,741,454"` — three ids — matches every thousands-separator pattern
+    you would reach for, so such a guard silently collapses real lists into the
+    single number 709741454. A genuinely thousands-formatted answer still
+    normalizes *consistently* across submissions, so agreement is unaffected;
+    a shredded id list is not. This exact "fix" was written and reverted once
+    already, caught only by `test_list_answers_agree_regardless_of_ordering`.
     """
     text = _BRACKETS.sub("", str(value).strip()).strip().lower()
     if "," in text:
@@ -73,7 +90,16 @@ def reconstruct_with_shares(
 
     `exclusions` maps task_id -> one of `no_correct_submission`,
     `insufficient_agreement`, `below_plurality_threshold`.
+
+    `plurality_threshold` must exceed 0.5, so that an accepted group is always a
+    strict majority and never a tie broken by dict ordering.
     """
+    if plurality_threshold <= 0.5:
+        raise ValueError(
+            f"plurality_threshold must be > 0.5 to exclude ties, got "
+            f"{plurality_threshold}"
+        )
+
     by_task: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     seen: set[str] = set()
 
@@ -100,7 +126,13 @@ def reconstruct_with_shares(
         if share < plurality_threshold:
             exclusions[task_id] = "below_plurality_threshold"
             continue
-        golds[task_id] = plurality[0]
+        # The *modal* raw rendering, not an arbitrary member of the group.
+        # Agreement was established up to `_norm`, but this string is what Task 4
+        # grades model output against with a different normalizer, so a bracketed
+        # or trailing-junk variant that happens to sort first would be graded as
+        # the gold. Task 1217, for one, has 561 submissions writing the clean
+        # form and 115 writing '[POS: 88.49, Ecommerce: 97.68, ]'.
+        golds[task_id] = Counter(plurality).most_common(1)[0][0]
         shares[task_id] = share
 
     return Reconstruction(golds, exclusions, shares)
@@ -143,6 +175,12 @@ def check_dev_gate(
 
     Without `corpus_ids` nothing is excused: a dev task missing from `golds` is
     a mismatch, so the gate can never pass vacuously.
+
+    `ok` additionally requires that at least one check actually ran. Absence of
+    mismatches is not evidence when nothing was compared: an empty `dev_tasks`,
+    or a corpus that covers none of them (an empty or failed download), would
+    otherwise report a clean pass having verified nothing — the worst possible
+    outcome for a go/no-go that gates spending.
     """
     known = (
         corpus_ids
@@ -157,4 +195,5 @@ def check_dev_gate(
         and _norm(golds.get(str(task["task_id"]), "\x00missing"))
         != _norm(task["answer"])
     ]
-    return DevGate(not mismatches, mismatches, absent)
+    checked = len(dev_tasks) - len(absent)
+    return DevGate(bool(checked) and not mismatches, mismatches, absent)

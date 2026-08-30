@@ -1,3 +1,4 @@
+import pytest
 from dce.golds import check_dev_gate, reconstruct, reconstruct_with_shares
 
 
@@ -165,3 +166,52 @@ def test_dev_gate_still_fails_on_an_in_corpus_mismatch_when_others_are_absent():
     assert ok is False
     assert mismatches == ["1"]
     assert absent == ["99"]
+
+
+def test_the_stored_gold_is_the_modal_rendering_of_its_group():
+    # Agreement was established up to _norm, but the stored string is what Task 4
+    # grades against with a different normalizer. A bracketed variant that merely
+    # sorts first must not become the gold.
+    submissions = {f"clean{i}": {"1": "POS: 88.49, Ecommerce: 97.68"} for i in range(5)}
+    submissions["aaa_bracketed"] = {"1": "[POS: 88.49, Ecommerce: 97.68, ]"}
+    submissions["bbb_bracketed"] = {"1": "[POS: 88.49, Ecommerce: 97.68, ]"}
+    scores = {agent: {"1": True} for agent in submissions}
+    golds, _ = reconstruct(submissions, scores)
+    assert golds["1"] == "POS: 88.49, Ecommerce: 97.68"
+
+
+def test_a_threshold_that_would_admit_a_tie_is_rejected():
+    # At exactly 0.5 a two-way tie "wins" by dict insertion order, which is not
+    # a consensus. The report tabulates a 0.60 sweep; 0.50 must not be reachable.
+    submissions = {"a": {"1": "x"}, "b": {"1": "x"}}
+    scores = {"a": {"1": True}, "b": {"1": True}}
+    for bad in (0.5, 0.4, 0.0):
+        with pytest.raises(ValueError, match="must be > 0.5"):
+            reconstruct(submissions, scores, plurality_threshold=bad)
+
+
+def test_the_gate_fails_when_no_dev_task_could_be_checked():
+    # An empty or failed download covers none of the dev ids. Absence of
+    # mismatches is not evidence when nothing was compared.
+    dev = [{"task_id": "1", "answer": "0.12"}, {"task_id": "2", "answer": "NL"}]
+    ok, mismatches, absent = check_dev_gate({}, dev, corpus_ids=set())
+    assert ok is False
+    assert mismatches == []
+    assert absent == ["1", "2"]
+
+
+def test_the_gate_fails_on_an_empty_dev_split():
+    ok, mismatches, absent = check_dev_gate({"1": "0.12"}, [])
+    assert ok is False
+    assert mismatches == []
+    assert absent == []
+
+
+def test_the_gate_fails_when_golds_are_empty_and_the_corpus_covers_the_dev_ids():
+    # Reconstruction produced nothing, but the corpus does cover the dev tasks:
+    # that is a real mismatch, not an excusable absence.
+    dev = [{"task_id": "1", "answer": "0.12"}]
+    ok, mismatches, absent = check_dev_gate({}, dev, corpus_ids={"1"})
+    assert ok is False
+    assert mismatches == ["1"]
+    assert absent == []

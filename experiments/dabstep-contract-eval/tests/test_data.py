@@ -5,7 +5,7 @@ from pathlib import Path
 
 import duckdb
 from dce.data import DATASET_REVISION, build_duckdb
-from dce.prepare import write_golds
+from dce.prepare import Corpus, write_golds
 
 
 def test_build_duckdb_creates_one_table_per_source(tmp_path: Path):
@@ -46,6 +46,8 @@ _HUB_CALLS = {
     "hf_hub_download",
     "snapshot_download",
     "list_repo_files",
+    "list_repo_tree",
+    "get_paths_info",
     "repo_info",
     "dataset_info",
     "load_dataset",
@@ -64,7 +66,7 @@ def test_every_hub_call_pins_the_dataset_revision():
     # different gold set on a later run and score arms against different golds.
     package = Path(__file__).resolve().parent.parent / "dce"
     offenders = []
-    for path in sorted(package.glob("*.py")):
+    for path in sorted(package.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
@@ -96,7 +98,7 @@ def test_at_least_one_download_helper_is_covered_by_that_check():
     package = Path(__file__).resolve().parent.parent / "dce"
     found = sum(
         1
-        for path in package.glob("*.py")
+        for path in package.rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text()))
         if isinstance(node, ast.Call)
         and (
@@ -121,3 +123,21 @@ def test_the_gold_file_describes_the_revision_and_threshold_it_came_from(
     assert envelope["threshold"] == 0.75
     assert envelope["count"] == 2
     assert envelope["golds"] == {"1": "0.12", "2": "NL"}
+
+
+def test_the_gold_file_records_which_corpus_produced_it(tmp_path: Path):
+    # Same revision, different filesystem, different corpus: the envelope has to
+    # make that visible rather than let two unequal gold sets look comparable.
+    corpus = Corpus(
+        submissions={},
+        scores={},
+        expected=2205,
+        consumed=2199,
+        manifest_sha256="deadbeef" * 8,
+        missing=[],
+        shadowed=[],
+    )
+    envelope = write_golds(tmp_path / "golds.json", {"1": "0.12"}, corpus=corpus)
+    assert envelope["submissions_expected"] == 2205
+    assert envelope["submissions_consumed"] == 2199
+    assert envelope["manifest_sha256"] == "deadbeef" * 8

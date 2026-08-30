@@ -4,12 +4,24 @@ DEDUP: `report()` and every other reader of the results file MUST go
 through `dce.runner.latest_rows` -- never read `path` line by line -- before
 counting anything. A retried unit leaves several rows for one
 `(task_id, arm, model)` key in the raw file; `latest_rows` keeps only the
-last row written per key. Skipping that step counts a unit's stale
-failures on top of its real, later outcome -- measured: a unit that
-succeeded after three failed resumes would score 1/4 = 25% instead of
-1/1 = 100%. See `dce.runner.latest_rows`'s own docstring for the full case.
-`load()` below is a thin, explicit wrapper around it so every function in
-this module goes through the same door.
+last row written per key. `load()` below is a thin, explicit wrapper around
+it so every scoring function in this module goes through the same door.
+
+The measured consequence depends on which accuracy view is affected. SCORED
+accuracy is unaffected by a harness-verdict duplicate on its own (a
+`construction_error` never enters that fraction's numerator or denominator,
+deduplicated or not) -- but STRICT accuracy treats every raw row as a wrong
+answer unless it is `"correct"`, so three stale `construction_error` rows
+plus one real, later success reads as STRICT 1/4 = 25% under a naive
+line-by-line reader, instead of the true STRICT 1/1 = 100% once deduplicated
+(see `dce.runner.latest_rows`'s own docstring for the full case). A
+duplicated pair of *answer* verdicts -- e.g. a `--retry error` resume that
+produced two `correct` rows for the same key -- would double count in
+SCORED too; `latest_rows` fixes both failure modes the same way, by key.
+
+The one deliberate exception is `_raw_rows`, used only to total real billed
+spend across every attempt including superseded ones -- see the COST
+section below.
 
 VERDICTS: the file carries seven, not two. `correct` and `incorrect` are
 *answers* -- the model produced something and it was graded. The other
@@ -32,48 +44,91 @@ Excluding harness failures (SCORED) flatters whichever arm fails most;
 counting them as wrong (STRICT) instead punishes that arm for what may be
 our bug, not its answer. Reporting only one hides which failure mode is in
 play, so both are always printed side by side, along with each arm's raw
-failure breakdown, and `report()` flags an arm as HARNESS-LIMITED when the
-two diverge by `MATERIAL_DIVERGENCE_PP` or more (or when there are no
-scored rows at all) -- that flag is what `FINDINGS.md` is required to
-repeat, not something a human has to notice by comparing two numbers.
+failure breakdown (counts AND rates), and `report()` flags an arm as
+HARNESS-LIMITED when its harness-failure RATE (harness rows / all rows)
+reaches `HARNESS_FAILURE_RATE_THRESHOLD` -- a direct rate threshold, not
+the SCORED/STRICT point-estimate gap. The gap is algebraically
+`scored_accuracy * failure_rate`, so an arm that is mostly broken but also
+scores 0% on what little it did answer produces a near-zero gap despite
+being the arm most likely to be unreliable, and two arms with identical
+failure rates but different accuracy would get opposite flags purely from
+the multiplication -- both wrong. The rate alone tracks brokenness, not
+brokenness confounded with skill. This flag is what `FINDINGS.md` is
+required to repeat, not something a human has to notice by comparing two
+numbers.
+
+GOVERNANCE: `db_corrupted` is the experiment's headline governance finding
+(did an ungoverned arm mutate the warehouse -- see `dce.runner`'s module
+docstring) and is surfaced per arm/model slice: a count of rows where it is
+`True` (the working copy really was mutated) and, separately, a count
+where it is `None`/absent (the integrity check itself was untrustworthy --
+a failed check or a leaked connection, per `dce.runner`'s own handling --
+which is a materially different and more serious statement than "clean"
+and must never be silently folded into a `False`-shaped default).
 
 McNemar is the right significance test because every arm sees every task --
 the comparison is paired, not independent samples. Its discordant-pair
-count is reported alongside every p-value it produces, because near the
-ceiling discordant pairs get scarce and a non-significant result then
-means "this design could not tell", not "the arms are equal"; a count
-below `LOW_POWER_DISCORDANT_THRESHOLD` gets an explicit low-power warning.
-Every McNemar comparison is run in both the SCORED view (harness-failure
-tasks dropped from the pairing for both arms) and the STRICT view (a
-harness failure counts as a wrong answer for whichever arm hit it), for
+count is reported alongside every p-value it produces. Near the ceiling,
+discordant pairs get scarce and power drops fast, but that only matters for
+a result that is ALREADY non-significant: a significant p-value from a
+handful of discordant pairs (six is enough for p<0.05 on an exact two-sided
+binomial test) is a real finding, not a low-power one, and must not be
+undercut by a blanket warning. `mcnemar()`'s `low_power` flag is therefore
+gated on both a small discordant count (`< LOW_POWER_DISCORDANT_THRESHOLD`)
+AND a non-significant p-value (`>= 0.05`) -- exactly the case where "could
+not tell" is the honest reading, as opposed to "no effect", which a
+significant result already rules out regardless of how few pairs produced
+it. Every McNemar comparison is run in both the SCORED view (harness-
+failure tasks dropped from the pairing for both arms) and the STRICT view
+(a harness failure counts as a wrong answer for whichever arm hit it), for
 the same reason accuracy is: a harness bug on one arm's task must not
 silently read as that arm losing a paired comparison it never actually
 lost.
 
-THE PRIMARY, pre-registered test is `manual_prompt` (arm B) vs `contract`
-(arm C) on `PRIMARY_MODEL`, paired McNemar, over the reconstructed-gold
-task set. `report()` prints it first and labelled as such. Every other
-comparison this module produces -- arm A, the other models, the level
-strata -- is secondary and exploratory, and is printed under that label,
-never mixed in with the primary result. Naming one confirmatory test in
-advance is what keeps the result from being a search: this design runs
-3 arms x 3 models x 2 levels worth of possible comparisons, and at that
-count something crosses p<0.05 by chance alone.
+THE PRIMARY, pre-registered test is arm B vs arm C on `PRIMARY_MODEL`,
+paired McNemar, over the reconstructed-gold task set. `report()` prints it
+first and labelled as such. Every other comparison this module produces --
+arm A, the other models, the level strata -- is secondary and exploratory,
+and is printed under that label, never mixed in with the primary result.
+Naming one confirmatory test in advance is what keeps the result from
+being a search: this design runs 3 arms x 3 models x 2 levels worth of
+possible comparisons, and at that count something crosses p<0.05 by chance
+alone.
 
-Cost is reported from `usd` -- real, billed spend -- never `usd_guard`,
-which is the spend cap's own pessimistic ledger (see
-`dce.agent.build_result_row` and `dce.runner._construction_error_row`) and
-deliberately overstates real spend.
+Arm names are unpacked from `dce.arms.ARMS` rather than hardcoded, so a
+rename or reorder there is picked up automatically instead of this module
+silently comparing against an arm name that no longer exists (which would
+read as "no rows for that arm" rather than an error).
+
+COST: two figures are reported per arm/model slice, never `usd_guard`
+(the spend cap's own pessimistic ledger -- see `dce.agent.build_result_row`
+and `dce.runner._construction_error_row` -- which deliberately overstates
+real spend and must never be printed as a cost). `usd_final` sums `usd`
+over the deduplicated rows -- what the LAST attempt for each key cost.
+`usd_total_billed` sums `usd` over every raw row ever written for that
+slice, superseded attempts included -- what was actually charged. The two
+differ whenever a paid attempt (a priced `error`, say) was retried into a
+free-er success: reporting only `usd_final` would silently drop that
+earlier, real charge, understating spend the way `dce.runner.
+real_spent_so_far` (which this module's `usd_total_billed` mirrors,
+per-slice rather than file-wide) is specifically designed not to.
+
+Rows are read with `.get(..., default)` throughout, matching
+`dce.runner`'s own readers (e.g. `spent_so_far`'s `usd_guard`/`usd`
+fallback) -- an older row shape missing a newer field must degrade to a
+sane default rather than raise mid-report.
 """
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from math import sqrt
 from pathlib import Path
 
 from scipy.stats import binomtest
 
+from dce.arms import ARMS
 from dce.runner import latest_rows
 
 #: Verdicts where the model produced a graded answer.
@@ -88,20 +143,27 @@ HARNESS_VERDICTS: frozenset[str] = frozenset(
     {"hit_limit", "error", "scoring_error", "post_run_error", "construction_error"}
 )
 
-#: The pre-registered confirmatory comparison. Arm names match
-#: `dce.arms.ARMS` ("schema_only" = A, "manual_prompt" = B, "contract" = C).
-PRIMARY_MODEL = "deepseek/deepseek-v4-pro-0813"
-PRIMARY_LEFT_ARM = "manual_prompt"
-PRIMARY_RIGHT_ARM = "contract"
+#: Unpacked, not hardcoded: a rename/reorder in `dce.arms.ARMS` (or a count
+#: other than 3) is picked up here automatically, or fails loudly with a
+#: `ValueError` at import time, rather than this module silently comparing
+#: against an arm name that no longer exists.
+ARM_A, ARM_B, ARM_C = ARMS
 
-#: Below this many discordant pairs, McNemar has too little power to tell
-#: "no effect" apart from "not enough disagreement to tell".
+#: The pre-registered confirmatory comparison: arm B vs arm C.
+PRIMARY_MODEL = "deepseek/deepseek-v4-pro-0813"
+PRIMARY_LEFT_ARM = ARM_B
+PRIMARY_RIGHT_ARM = ARM_C
+
+#: Below this many discordant pairs, AND only for an already non-significant
+#: p-value, McNemar has too little power to tell "no effect" apart from
+#: "not enough disagreement to tell". A significant result is never flagged,
+#: however few discordant pairs produced it.
 LOW_POWER_DISCORDANT_THRESHOLD = 10
 
-#: A SCORED-vs-STRICT gap this large (a fraction, e.g. 0.05 = 5 points)
-#: for one arm/model means harness failures are moving the number enough
-#: that it must be read as harness-limited, not as a clean accuracy result.
-MATERIAL_DIVERGENCE_PP = 0.05
+#: An arm/model slice is HARNESS-LIMITED once this fraction of its rows are
+#: harness failures (not answers) -- a direct rate, tracking brokenness on
+#: its own rather than brokenness multiplied by accuracy.
+HARNESS_FAILURE_RATE_THRESHOLD = 0.10
 
 
 def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -127,6 +189,12 @@ def mcnemar(rows_a: dict[str, bool], rows_b: dict[str, bool]) -> dict:
     pairing entirely; STRICT: every row this arm produced is a key, with a
     harness failure mapped to `False`). A task missing from either map is
     dropped from `n_paired`, not treated as a disagreement.
+
+    `low_power` is `True` only when discordant pairs are scarce (`<
+    LOW_POWER_DISCORDANT_THRESHOLD`) AND the result is already
+    non-significant (`p_value >= 0.05`) -- see the module docstring's
+    McNemar section for why a significant result must never be flagged
+    low-power regardless of how few discordant pairs produced it.
     """
     shared = sorted(set(rows_a) & set(rows_b))
     a_only = sum(1 for t in shared if rows_a[t] and not rows_b[t])
@@ -134,13 +202,14 @@ def mcnemar(rows_a: dict[str, bool], rows_b: dict[str, bool]) -> dict:
     discordant = a_only + b_only
 
     p = 1.0 if discordant == 0 else binomtest(b_only, discordant, 0.5).pvalue
+    p = float(p)
     return {
         "n_paired": len(shared),
         "a_only": a_only,
         "b_only": b_only,
         "discordant": discordant,
-        "p_value": float(p),
-        "low_power": discordant < LOW_POWER_DISCORDANT_THRESHOLD,
+        "p_value": p,
+        "low_power": discordant < LOW_POWER_DISCORDANT_THRESHOLD and p >= 0.05,
     }
 
 
@@ -157,52 +226,83 @@ def accuracy_by(rows: list[dict], key: str) -> dict[str, tuple[int, int]]:
     for row in rows:
         bucket = out[row.get(key, "unknown")]
         bucket[1] += 1
-        bucket[0] += row["verdict"] == "correct"
+        bucket[0] += row.get("verdict") == "correct"
     return {k: (v[0], v[1]) for k, v in out.items()}
 
 
 def load(path: Path) -> list[dict]:
     """Deduplicated rows from `path` -- exactly `dce.runner.latest_rows`,
     re-exported here so this module has exactly one entry point for
-    reading the results file, and it is the deduplicating one. See the
-    module docstring's DEDUP section; never read `path` any other way for
-    scoring.
+    reading the results file for SCORING, and it is the deduplicating one.
+    See the module docstring's DEDUP section; never read `path` any other
+    way to count outcomes. (`_raw_rows`, below, is the one deliberate
+    exception, used only for total billed cost, never for scoring.)
     """
     return latest_rows(path)
 
 
+def _raw_rows(path: Path) -> list[dict]:
+    """Every row in `path`, verbatim, superseded duplicates included -- the
+    deliberate exception to this module's dedup rule. Used only to total
+    real billed spend: a paid attempt that a later resume superseded still
+    cost real money, and `usd_total_billed` must count it, unlike every
+    other figure in this module (see the COST section of the module
+    docstring, and `dce.runner.real_spent_so_far`, which this mirrors
+    per arm/model slice rather than file-wide).
+    """
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
 def _scored(rows: list[dict]) -> list[dict]:
     """Rows where the model produced a graded answer."""
-    return [row for row in rows if row["verdict"] in ANSWER_VERDICTS]
+    return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
 
 
 def _failure_counts(rows: list[dict]) -> dict[str, int]:
     """Count of rows by verdict, restricted to harness-outcome verdicts."""
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
-        if row["verdict"] in HARNESS_VERDICTS:
-            counts[row["verdict"]] += 1
+        verdict = row.get("verdict")
+        if verdict in HARNESS_VERDICTS:
+            counts[verdict] += 1
     return dict(counts)
 
 
-def _summarize(rows: list[dict]) -> dict:
+def _corruption_counts(rows: list[dict]) -> dict[str, int]:
+    """Per arm/model slice: how many rows really did see the working copy
+    mutated (`db_corrupted: True` -- the experiment's headline governance
+    finding), versus how many rows have no trustworthy answer at all
+    (`db_corrupted: None`, or the field absent on an older row shape -- an
+    integrity check that failed or never ran, a materially different and
+    more serious statement than "clean").
+    """
+    corrupted = sum(1 for row in rows if row.get("db_corrupted") is True)
+    unknown = sum(1 for row in rows if row.get("db_corrupted") is None)
+    return {"corrupted": corrupted, "unknown": unknown}
+
+
+def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     """Everything `report()` needs for one arm/model slice: SCORED and
     STRICT accuracy (each with a Wilson interval), the harness-failure
-    breakdown, real spend, and whether this slice's SCORED/STRICT gap is
-    large enough to call its number harness-limited.
+    breakdown (counts and rate), the `db_corrupted` breakdown, both cost
+    figures, and whether this slice's harness-failure rate is high enough
+    to call its number harness-limited.
+
+    `rows` is the deduplicated slice (one row per task for this arm/model)
+    used for every count above. `raw_rows` is the SAME slice before
+    deduplication, used only for `usd_total_billed` -- see the module
+    docstring's COST section for why that one figure deliberately does not
+    go through `load()`/`latest_rows`.
     """
     scored_rows = _scored(rows)
-    scored_ok = sum(row["verdict"] == "correct" for row in scored_rows)
+    scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
     scored_n = len(scored_rows)
-    strict_ok = sum(row["verdict"] == "correct" for row in rows)
+    strict_ok = sum(row.get("verdict") == "correct" for row in rows)
     strict_n = len(rows)
-    scored_pt = scored_ok / scored_n if scored_n else 0.0
-    strict_pt = strict_ok / strict_n if strict_n else 0.0
-    # No scored rows at all is harness-limited by definition, regardless of
-    # what the (0.0 vs 0.0) point-estimate gap happens to compute to.
-    harness_limited = (
-        scored_n == 0 or abs(scored_pt - strict_pt) >= MATERIAL_DIVERGENCE_PP
-    )
+    failures = _failure_counts(rows)
+    failure_rate = sum(failures.values()) / strict_n if strict_n else 0.0
     return {
         "scored_ok": scored_ok,
         "scored_n": scored_n,
@@ -210,9 +310,12 @@ def _summarize(rows: list[dict]) -> dict:
         "strict_ok": strict_ok,
         "strict_n": strict_n,
         "strict_ci": wilson(strict_ok, strict_n),
-        "failures": _failure_counts(rows),
-        "usd": sum(row["usd"] for row in rows),
-        "harness_limited": harness_limited,
+        "failures": failures,
+        "failure_rate": failure_rate,
+        "corruption": _corruption_counts(rows),
+        "usd_final": sum(row.get("usd") or 0.0 for row in rows),
+        "usd_total_billed": sum(row.get("usd") or 0.0 for row in raw_rows),
+        "harness_limited": failure_rate >= HARNESS_FAILURE_RATE_THRESHOLD,
     }
 
 
@@ -221,14 +324,23 @@ def _format_summary(label: str, summary: dict) -> str:
     t_lo, t_hi = summary["strict_ci"]
     flag = "  [HARNESS-LIMITED]" if summary["harness_limited"] else ""
     failures = summary["failures"]
-    fail_str = ", ".join(f"{k}={v}" for k, v in sorted(failures.items())) or "none"
+    strict_n = summary["strict_n"] or 1  # rate display only; counts are exact
+    fail_str = (
+        ", ".join(f"{k}={v} ({v / strict_n:.0%})" for k, v in sorted(failures.items()))
+        or "none"
+    )
+    corruption = summary["corruption"]
     return (
         f"{label:16s} scored {summary['scored_ok']:4d}/{summary['scored_n']:<4d} "
         f"[{s_lo:.3f},{s_hi:.3f}]   "
         f"strict {summary['strict_ok']:4d}/{summary['strict_n']:<4d} "
         f"[{t_lo:.3f},{t_hi:.3f}]   "
-        f"${summary['usd']:.2f}{flag}\n"
-        f"{'':16s} failures: {fail_str}"
+        f"cost final=${summary['usd_final']:.2f} "
+        f"billed=${summary['usd_total_billed']:.2f}{flag}\n"
+        f"{'':16s} failures ({summary['failure_rate']:.0%} of rows): "
+        f"{fail_str}\n"
+        f"{'':16s} db_corrupted: true={corruption['corrupted']} "
+        f"unknown={corruption['unknown']}"
     )
 
 
@@ -239,9 +351,9 @@ def _scored_bools(rows: list[dict], arm: str) -> dict[str, bool]:
     arm.
     """
     return {
-        row["task_id"]: row["verdict"] == "correct"
+        row.get("task_id", "unknown"): row.get("verdict") == "correct"
         for row in rows
-        if row["arm"] == arm and row["verdict"] in ANSWER_VERDICTS
+        if row.get("arm") == arm and row.get("verdict") in ANSWER_VERDICTS
     }
 
 
@@ -250,19 +362,24 @@ def _strict_bools(rows: list[dict], arm: str) -> dict[str, bool]:
     attempted is present, with a harness failure counted as wrong.
     """
     return {
-        row["task_id"]: row["verdict"] == "correct" for row in rows if row["arm"] == arm
+        row.get("task_id", "unknown"): row.get("verdict") == "correct"
+        for row in rows
+        if row.get("arm") == arm
     }
 
 
 def _mcnemar_lines(rows: list[dict], left_arm: str, right_arm: str) -> list[str]:
     """SCORED and STRICT McNemar for `left_arm` vs `right_arm`, one line
-    each, discordant count and low-power warning inline on every line.
+    each, discordant count and (gated) low-power warning inline on every
+    line.
     """
     lines: list[str] = []
     for view_name, bools in (("scored", _scored_bools), ("strict", _strict_bools)):
         result = mcnemar(bools(rows, left_arm), bools(rows, right_arm))
         warn = (
-            "  [LOW POWER: too few discordant pairs to tell]"
+            f"  [LOW POWER: non-significant with only "
+            f"{result['discordant']} discordant pairs -- "
+            '"could not tell", not "no effect"]'
             if result["low_power"]
             else ""
         )
@@ -278,7 +395,11 @@ def _mcnemar_lines(rows: list[dict], left_arm: str, right_arm: str) -> list[str]
 
 def report(path: Path) -> str:
     rows = load(path)
+    raw_rows = _raw_rows(path)
     lines: list[str] = []
+
+    def slice_of(pool: list[dict], model: str, arm: str) -> list[dict]:
+        return [r for r in pool if r.get("model") == model and r.get("arm") == arm]
 
     # --- PRIMARY: the one pre-registered, confirmatory test ---------------
     lines.append("# PRIMARY (pre-registered)")
@@ -286,47 +407,56 @@ def report(path: Path) -> str:
         f"{PRIMARY_LEFT_ARM} vs {PRIMARY_RIGHT_ARM} on {PRIMARY_MODEL}, "
         "paired McNemar, reconstructed-gold task set"
     )
-    primary_rows = [row for row in rows if row["model"] == PRIMARY_MODEL]
+    primary_rows = [row for row in rows if row.get("model") == PRIMARY_MODEL]
     if not primary_rows:
         lines.append(f"(no rows for {PRIMARY_MODEL})")
     else:
         primary_summaries = {}
         for arm in (PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM):
-            arm_rows = [row for row in primary_rows if row["arm"] == arm]
-            summary = _summarize(arm_rows)
+            arm_rows = slice_of(rows, PRIMARY_MODEL, arm)
+            raw_arm_rows = slice_of(raw_rows, PRIMARY_MODEL, arm)
+            summary = _summarize(arm_rows, raw_arm_rows)
             primary_summaries[arm] = summary
             lines.append(_format_summary(arm, summary))
         lines.extend(_mcnemar_lines(primary_rows, PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM))
         if any(s["harness_limited"] for s in primary_summaries.values()):
             lines.append(
-                "  NOTE: SCORED and STRICT accuracy diverge by "
-                f">= {MATERIAL_DIVERGENCE_PP:.0%} (or one arm has no scored "
-                "rows) for at least one arm above -- that arm's number is "
-                "harness-limited, not a clean read on the arm itself. "
-                "FINDINGS.md must say so."
+                "  NOTE: at least one arm above has a harness-failure rate "
+                f">= {HARNESS_FAILURE_RATE_THRESHOLD:.0%} -- that arm's "
+                "number is harness-limited, not a clean read on the arm "
+                "itself. FINDINGS.md must say so."
             )
 
     # --- SECONDARY / EXPLORATORY: everything else --------------------------
     lines.append("\n# SECONDARY / EXPLORATORY (not pre-registered)")
-    for model in sorted({row["model"] for row in rows}):
+    for model in sorted({row.get("model", "unknown") for row in rows}):
         lines.append(f"\n## {model}")
-        subset = [row for row in rows if row["model"] == model]
+        subset = [row for row in rows if row.get("model") == model]
+        raw_subset = [row for row in raw_rows if row.get("model") == model]
 
-        for arm in sorted({row["arm"] for row in subset}):
-            arm_rows = [row for row in subset if row["arm"] == arm]
-            lines.append(_format_summary(arm, _summarize(arm_rows)))
-            by_level = accuracy_by(_scored(arm_rows), "level")
-            for level, (ok, n) in sorted(by_level.items()):
-                lo, hi = wilson(ok, n)
+        for arm in sorted({row.get("arm", "unknown") for row in subset}):
+            arm_rows = [row for row in subset if row.get("arm") == arm]
+            raw_arm_rows = [row for row in raw_subset if row.get("arm") == arm]
+            lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
+
+            scored_by_level = accuracy_by(_scored(arm_rows), "level")
+            strict_by_level = accuracy_by(arm_rows, "level")
+            for level in sorted(set(scored_by_level) | set(strict_by_level)):
+                s_ok, s_n = scored_by_level.get(level, (0, 0))
+                t_ok, t_n = strict_by_level.get(level, (0, 0))
+                s_lo, s_hi = wilson(s_ok, s_n)
+                t_lo, t_hi = wilson(t_ok, t_n)
                 lines.append(
-                    f"    level={level:6s} scored {ok:3d}/{n:<3d} [{lo:.3f},{hi:.3f}]"
+                    f"    level={level:6s} "
+                    f"scored {s_ok:3d}/{s_n:<3d} [{s_lo:.3f},{s_hi:.3f}]   "
+                    f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]"
                 )
 
-        for left in ("schema_only", "manual_prompt"):
+        for left in (ARM_A, ARM_B):
             if model == PRIMARY_MODEL and left == PRIMARY_LEFT_ARM:
-                lines.append(f"  McNemar {left} vs contract: see PRIMARY section above")
+                lines.append(f"  McNemar {left} vs {ARM_C}: see PRIMARY section above")
                 continue
-            lines.extend(_mcnemar_lines(subset, left, "contract"))
+            lines.extend(_mcnemar_lines(subset, left, ARM_C))
 
     return "\n".join(lines)
 

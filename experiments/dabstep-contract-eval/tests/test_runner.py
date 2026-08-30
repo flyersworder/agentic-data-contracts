@@ -803,6 +803,7 @@ def test_construction_error_row_has_build_result_row_shape():
         gold="g",
         verdict="correct",
         forced_answer=False,
+        trace_path=None,
         in_tok=1,
         out_tok=1,
         cached_tok=0,

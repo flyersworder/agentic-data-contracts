@@ -872,6 +872,8 @@ def _construction_error_row(
         # nothing for the forcing turn to force. Present so every row in a
         # results file has the same keys.
         "forced_answer": False,
+        # No model call happened, so there is no transcript to point at.
+        "trace_path": None,
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
         "reasoning_effort": REASONING_EFFORT,
@@ -912,6 +914,7 @@ def sweep(
     golds_hash: str,
     run_task_fn=run_task,
     retry_verdicts: tuple[str, ...] = (),
+    trace_dir: Path | None = None,
 ) -> SweepResult:
     """Run every not-yet-completed (task, arm, model) triple, appending one
     JSON row per unit of work to `out`, until the next task's reservation
@@ -976,6 +979,7 @@ def sweep(
                         docs,
                         gold,
                         golds_hash=golds_hash,
+                        trace_dir=trace_dir,
                     )
                 except AgentConstructionError as exc:
                     # The ONLY exception `run_task_fn` is expected to raise
@@ -1334,6 +1338,21 @@ def main() -> None:
     parser.add_argument("--golds", type=Path, default=Path("data/golds.json"))
     parser.add_argument("--tasks", type=Path, default=Path("data/tasks.json"))
     parser.add_argument(
+        "--traces",
+        type=Path,
+        default=None,
+        help=(
+            "Directory for full per-run transcripts (default: "
+            "traces/<out-stem>/). Pass --no-traces to switch them off. A "
+            "result row records THAT a run failed; only a trace records why."
+        ),
+    )
+    parser.add_argument(
+        "--no-traces",
+        action="store_true",
+        help="Do not write transcripts. Saves disk, and gives up diagnosis.",
+    )
+    parser.add_argument(
         "--retry",
         choices=["error", "post_run_error"],
         default=None,
@@ -1377,6 +1396,12 @@ def main() -> None:
         "payments_readme": Path("data/hf/data/context/payments-readme.md").read_text(),
     }
 
+    # Default the trace directory off the results filename, so two sweeps
+    # writing different results files cannot interleave their transcripts.
+    trace_dir = (
+        None if args.no_traces else (args.traces or Path("traces") / args.out.stem)
+    )
+
     result = sweep(
         tasks,
         tuple(args.arms),
@@ -1388,6 +1413,7 @@ def main() -> None:
         max_spend=args.max_spend,
         golds_hash=golds_hash,
         retry_verdicts=(args.retry,) if args.retry else (),
+        trace_dir=trace_dir,
     )
     # Real dollars, not the guard ledger — see the module docstring's
     # SEPARATE REAL SPEND FROM GUARD SPEND section.

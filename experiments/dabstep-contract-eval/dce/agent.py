@@ -39,6 +39,7 @@ from dce.arms import build_arm
 from dce.frozen import digest
 from dce.grade import _clean, active_scorer, score
 from dce.pricing import MODELS, cost
+from dce.trace import write_trace
 
 # A harness cap, not a contract limit — applied identically to every arm so
 # no arm gets more iterations than another (see the retries note below, and
@@ -572,6 +573,7 @@ def build_result_row(
     gold: str,
     verdict: str,
     forced_answer: bool,
+    trace_path: str | None,
     in_tok: int,
     out_tok: int,
     cached_tok: int,
@@ -606,6 +608,10 @@ def build_result_row(
         # from a volunteered one, and an analysis that pooled the two silently
         # would be comparing two things under one name.
         "forced_answer": forced_answer,
+        # Where this run's full transcript landed, relative to the traces
+        # root — or None when traces are off or the write failed. A row is
+        # the claim; the trace is the evidence behind it.
+        "trace_path": trace_path,
         # F3 — the pinned endpoint and the reasoning effort in force, so a
         # results file says which model was actually served rather than only
         # which id was requested. THE OBSERVED PROVIDER IS DELIBERATELY NOT
@@ -751,6 +757,9 @@ def _priced_fallback_row(
         # no answer here for the forcing turn to have produced. Present so
         # every row in a results file has the same keys.
         "forced_answer": False,
+        # The tail raised before a trace path was known; the trace itself may
+        # still exist on disk under `trace_name(task_id, arm, model)`.
+        "trace_path": None,
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
         "reasoning_effort": REASONING_EFFORT,
@@ -879,6 +888,7 @@ def run_task(
     # priceable.
     per_task_usd: float = 1.00,
     agent_factory=None,
+    trace_dir=None,
 ) -> dict:
     import warnings
 
@@ -1014,6 +1024,18 @@ def run_task(
                 verdict = "error"
                 answer = f"{type(exc).__name__}: {exc}"
 
+        # The full transcript, written before the bookkeeping below can
+        # raise. `write_trace` swallows its own failures and returns None, so
+        # a lost trace can never cost the paid row that follows — see
+        # `dce/trace.py`'s FAILURE POLICY.
+        trace_path = write_trace(
+            trace_dir,
+            task_id=str(task["task_id"]),
+            arm=arm,
+            model=model,
+            messages=list(messages),
+        )
+
         # EVERYTHING FROM HERE THROUGH `build_result_row` RUNS AFTER THE
         # BILLABLE CALL HAS ALREADY HAPPENED (or the cap already tripped):
         # `usage` already holds real, non-refundable counts by this point.
@@ -1070,6 +1092,7 @@ def run_task(
                 gold=gold,
                 verdict=verdict,
                 forced_answer=forced_answer,
+                trace_path=trace_path,
                 in_tok=usage.input_tokens,
                 out_tok=usage.output_tokens,
                 cached_tok=usage.cache_read_tokens,

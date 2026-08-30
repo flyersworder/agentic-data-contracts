@@ -35,6 +35,7 @@ ROW_KWARGS: dict[str, Any] = dict(
     gold="0.12",
     verdict="correct",
     forced_answer=False,
+    trace_path=None,
     in_tok=30_000,
     out_tok=2_000,
     cached_tok=0,

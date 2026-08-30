@@ -26,6 +26,26 @@ def test_build_duckdb_creates_one_table_per_source(tmp_path: Path):
     )
 
 
+def test_build_duckdb_does_not_ingest_a_leading_index_header_as_data(tmp_path: Path):
+    # Real DABStep annex files (acquirer_countries.csv, merchant_category_codes.csv)
+    # carry a leading unnamed pandas-index column. Its header cell is blank, which
+    # can defeat DuckDB's header sniffer: the blank header vs. an integer index
+    # doesn't type-differ enough for confident detection, so it falls back to
+    # "no header" and ingests the header row itself as data (column0/column1/
+    # column2 names, header text as the first row).
+    csv = tmp_path / "acquirer_countries.csv"
+    csv.write_text(
+        ",acquirer,country_code\n0,gringotts,GB\n1,the_savings_and_loan_bank,US\n"
+    )
+    db = tmp_path / "dabstep.duckdb"
+    build_duckdb({"acquirer_countries": csv}, db)
+
+    con = duckdb.connect(str(db))
+    columns = [r[0] for r in con.execute("DESCRIBE acquirer_countries").fetchall()]
+    assert columns[1:] == ["acquirer", "country_code"]
+    assert con.execute("SELECT count(*) FROM acquirer_countries").fetchone()[0] == 2
+
+
 def test_build_duckdb_is_idempotent(tmp_path: Path):
     # Re-running the loader must not double the rows; the sweep may restart.
     csv = tmp_path / "acquirer_countries.csv"

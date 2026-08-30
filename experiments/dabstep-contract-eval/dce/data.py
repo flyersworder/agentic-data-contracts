@@ -58,10 +58,18 @@ def build_duckdb(files: dict[str, Path], db_path: Path) -> None:
     con = duckdb.connect(str(db_path))
     try:
         for table, path in files.items():
+            # `read_csv_auto` alone can fail header detection on a CSV whose
+            # first column is an unnamed pandas index: the header row's blank
+            # first field doesn't type-differ enough from the data ("", 'x',
+            # 'y' vs. 0, 'x', 'y') for the sniffer to be confident, so it
+            # falls back to no-header and ingests the header as a data row
+            # (acquirer_countries.csv, merchant_category_codes.csv both hit
+            # this). Forcing header=true is correct for every CSV here,
+            # including the ones that already auto-detected correctly.
             reader = (
                 f"read_json_auto('{path}')"
                 if path.suffix == ".json"
-                else f"read_csv_auto('{path}')"
+                else f"read_csv('{path}', header=true, auto_detect=true)"
             )
             con.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM {reader}")
     finally:

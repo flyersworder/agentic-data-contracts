@@ -39,8 +39,16 @@ def test_contract_defines_at_least_one_metric():
     assert len(source.get_metrics()) >= 1
 
 
-# The digest of the contract as frozen on 2026-08-30, after the third and last
-# authoring pass. Every scored result row carries this value; a result whose
+# The digest of the contract as frozen on 2026-08-30, after the fourth and last
+# authoring pass. The fourth was forced from outside the contract: `dce/data.py`
+# had been ingesting the annex CSVs' header row as data, so
+# `merchant_category_codes` and `acquirer_countries` loaded with positional
+# column names. The loader was fixed to match DABStep's official environment —
+# the one our gold answers were scored in — the two tables gained real column
+# names, and the contract had to stop describing columns that no longer exist.
+# No part of the encoding was reconsidered in that pass.
+#
+# Every scored result row carries this value; a result whose
 # digest differs was produced against a different contract and is not comparable
 # with the rest of the sweep.
 #
@@ -60,7 +68,7 @@ def test_contract_defines_at_least_one_metric():
 # actually reads (domain and metric descriptions, table and column
 # descriptions) does move it, while a comment-only edit does not.
 FROZEN_DIGEST = (
-    "sha256:a08313254de3d91f367fa2ad7f01855084db111c09da62810a177c7c60fec92e"
+    "sha256:e438ecf7964bb051ce9cd81767006d8dc1cfe4214a2d2fefa8a5b73b554e227e"
 )
 
 

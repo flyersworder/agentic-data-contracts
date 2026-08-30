@@ -415,25 +415,30 @@ tables:
   - schema: main
     table: merchant_category_codes
     # The manual names `merchant_category_codes.csv` as the annex holding "a
-    # complete list of MCC" (manual 3) but documents none of its columns, and
-    # the table loads with positional column names. Saying which positional
-    # column holds what would be an empirical discovery about the loaded data
-    # rather than something either source document states, so this contract
-    # does not claim it — the agent must look.
+    # complete list of MCC" (manual 3) but documents none of its columns. Names
+    # and types below are schema, which every arm reads out of `describe_table`;
+    # what the columns *mean* is an empirical read of the data rather than
+    # something either source document states, so this contract does not claim
+    # it — the agent must look.
+    #
+    # `mcc` is VARCHAR, not an integer: five of the 769 codes carry a leading
+    # zero (0742, 0743, 0744, 0763, 0780), so treating the column as a number
+    # loses them. That is a type, not an interpretation.
     columns:
-      - {name: column0, type: BIGINT, description: "Positional column of the annexed MCC list; contents not documented in manual.md or payments-readme.md."}
-      - {name: column1, type: VARCHAR, description: "Positional column of the annexed MCC list; contents not documented in manual.md or payments-readme.md."}
-      - {name: column2, type: VARCHAR, description: "Positional column of the annexed MCC list; contents not documented in manual.md or payments-readme.md."}
+      - {name: column0, type: BIGINT, description: "Unnamed leading column of the annexed MCC list; not documented in manual.md or payments-readme.md."}
+      - {name: mcc, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md. Text, not an integer — some values carry a leading zero."}
+      - {name: description, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md."}
 
   - schema: main
     table: acquirer_countries
     # Not mentioned anywhere in manual.md or payments-readme.md. Listed as an
     # allowed table because it ships with the DABStep context, but the contract
-    # has nothing documented to say about it.
+    # has nothing documented to say about it. Names and types are schema; no
+    # meaning is asserted for any of the three.
     columns:
-      - {name: column0, type: BIGINT, description: "Not documented in manual.md or payments-readme.md — positional column, schema only."}
-      - {name: column1, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — positional column, schema only."}
-      - {name: column2, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — positional column, schema only."}
+      - {name: column0, type: BIGINT, description: "Unnamed leading column; not documented in manual.md or payments-readme.md."}
+      - {name: acquirer, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — schema only."}
+      - {name: country_code, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — schema only."}
 
 relationships:
   - from: main.payments.merchant
@@ -445,12 +450,17 @@ relationships:
       three (manual 5), so matching a transaction to a fee rule needs this join.
 
   # No edge is declared from `merchant_data.merchant_category_code` into
-  # `merchant_category_codes`. The manual says only that the annex holds "a
-  # complete list of MCC" (manual 3); it names no join column, and the loaded
-  # table's columns are positional, so any edge would rest on an empirical read
-  # of the data rather than on the source documents. The `merchants` domain
-  # says where the list lives; finding the column is left to the agent, the
-  # same way arms A and B must find it.
+  # `merchant_category_codes`. The reason is simply that neither source document
+  # names a join column: the manual says only that the annex holds "a complete
+  # list of MCC" (manual 3). Declaring the edge would assert a correspondence
+  # between two columns that only reading the data establishes, and the
+  # `merchants` domain already says where the list lives. Finding the column is
+  # left to the agent, the same way arms A and B must find it.
+  #
+  # (An earlier version of this comment also leaned on the annex loading with
+  # positional column names. It no longer does — the loader was fixed and the
+  # columns are named — and the reason above is the one that always did the
+  # work.)
   #
   # No relationship is declared between `payments` and `fees`: a transaction is
   # matched to a fee rule by a multi-field predicate with null-means-any

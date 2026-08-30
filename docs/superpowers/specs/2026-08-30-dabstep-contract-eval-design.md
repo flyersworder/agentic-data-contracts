@@ -46,8 +46,10 @@ constructed failure cases. The `inspect_query` counts reported under Metrics are
 
 ## Arms
 
-Three arms. Identical model, agent loop, turn cap, retry policy and budget. They
-differ **only** in what context reaches the agent.
+Three arms. Identical model, agent loop, turn cap, retry policy and budget. The
+intended contrast is what context reaches the agent — but see **What this
+comparison is, and is not**, below: the arms are not a clean context-only
+contrast, and the writeup must not claim they are.
 
 | Arm | Name | Context given | Role |
 |---|---|---|---|
@@ -80,8 +82,9 @@ reporting a tie as a tie.
 
 The contract is authored **only** from `manual.md` and `payments-readme.md`. It
 is committed, and its `contract_digest()` recorded, **before the first scored
-run**. Arms B and C then carry provably identical knowledge in different form,
-so the comparison isolates representation rather than content.
+run**. Arms B and C then carry identical **documented** knowledge in different
+form. That is a weaker claim than "provably identical knowledge", and it is
+deliberately weaker — see **What this comparison is, and is not**.
 
 The digest is written into every result row. A post-hoc contract edit is
 therefore detectable by anyone reading `results/*.jsonl` against git history —
@@ -89,6 +92,50 @@ it is not a promise made in prose. Any edit to the contract after scoring begins
 invalidates the run, and the run restarts from scratch.
 
 No question text, no gold answer, and no score is consulted while authoring.
+
+## What this comparison is, and is not
+
+Authoring the contract against the real warehouse — which is what curating a
+contract actually involves — put things into arm C that arm B does not have.
+This is recorded here, before any score exists, because a skeptical reader will
+find it and it must not read as an excuse constructed afterwards.
+
+Arms B and C carry identical **documented** knowledge: everything the contract
+says about the domain comes from `manual.md` and `payments-readme.md`, both of
+which arm B holds verbatim. On top of that, arm C carries four things arm B
+does not:
+
+1. **Three value-shape observations** — facts true of the loaded data that
+   neither source document states. Six of eight band literals; `capture_delay`
+   being a day count that needs band mapping; and, the one that could
+   plausibly move a score, **the empty list as a wildcard**: the manual says a
+   `NULL` fee-rule field matches everything, while the data uses `[]` and is
+   never null, so an agent faithfully transcribing the manual writes `IS NULL`
+   and silently loses 720 / 112 / 127 rows. The contract encodes the behaviour
+   that is true of the data. Removing it would have made the contract encode a
+   rule known to be false, which is not a fair representation of the library
+   either — but it does mean the treatment is *curation against the real data*,
+   not *the same knowledge in a different shape*.
+2. **3,042 characters of procedural tool descriptions** shipped by the library
+   itself, against 167 characters for arms A/B's three tools. Several coach
+   procedure rather than describe function: `inspect_query` states the model
+   "MUST call `lookup_metric` first"; `run_query` says to "prefer this tool
+   over any other SQL or data-access path"; `lookup_domain` says to
+   "understand business context before querying".
+3. **An arm-C-only workflow sentence** in the system prompt, prescribing the
+   lookup-then-inspect-then-run sequence.
+4. **A `SELECT *` prohibition** (`no_select_star`), enforced by the contract.
+
+Items 2–4 are decomposition scaffolding. They are a legitimate part of what
+"using the library" means — they are not an artifact of this harness — but they
+give a skeptical reader a **live alternative explanation for any arm-C win**:
+that arm C was told *how to work the problem*, not merely *what the data
+means*. `FINDINGS.md` must state that alternative explicitly rather than let a
+reader discover it.
+
+For the same reason, `FINDINGS.md` must report the always-on prompt ratio as
+**4.41x**, the figure that counts tool schemas — which are always-on context —
+and must never quote the 9.77x system-prompt-only ratio on its own.
 
 ## Data
 
@@ -387,7 +434,10 @@ comparison that is arm C's main expected win. Checked and recorded at smoke time
 
 **Contract authoring quality is a confound.** A badly authored contract measures
 the author, not the library. Mitigated by freezing before any score is seen, and
-by arm B carrying identical source knowledge.
+by arm B carrying identical source *documents*. Only partly mitigated, and the
+residue is real: curating a contract against the live warehouse is part of the
+treatment, so arm C also holds three value-shape observations arm B cannot
+have — see **What this comparison is, and is not**.
 
 ## Reporting
 

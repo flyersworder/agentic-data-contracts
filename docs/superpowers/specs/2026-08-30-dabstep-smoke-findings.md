@@ -155,11 +155,58 @@ Whether to run on a VPS is open. With resume already working, a sleeping laptop
 merely resumes, so a VPS is a reliability convenience rather than a
 requirement.
 
+## F8 — raising `TOKEN_BUDGET` raised the spend guard's reserve floor with it
+
+`dce.runner._next_reserve` reserves one call ahead before making it, and its
+pre-observation floor is `dce.agent._token_budget_usd(model)` — the real worst
+case implied by the token guard. Raising `TOKEN_BUDGET` 4.5x (F6) therefore
+raised that floor by the same factor:
+
+| model | old floor | new floor |
+|---|---:|---:|
+| deepseek-v4-flash-0731 | $0.132 | $0.593 |
+| glm-5.3-flash | $0.183 | $0.824 |
+| deepseek-v4-pro-0813 | $1.449 | $6.522 |
+| gpt-5.6-sol | $7.320 | $32.940 |
+
+The guard is not wrong — the ceiling really did rise — and because it reserves
+only one call ahead, the practical effect is that a sweep stops one floor short
+of `--max-spend` rather than reserving the floor for every remaining task. But
+for `gpt-5.6-sol` the floor now exceeds any sane subset budget: a `--max-spend`
+under ~$33 would make zero calls. The Sol subset must either be given a budget
+comfortably above its floor or run under a tighter model-specific token guard.
+
+Deliberately NOT fixed by weakening `_next_reserve`: keeping the floor in the
+estimate after observations exist is a decision that already has a measured
+82% budget overrun behind it.
+
+## Implementation notes — two pydantic-ai behaviours that only a real `Agent` shows
+
+Both were caught by the end-to-end forcing-turn test and passed silently under
+fake agents. Recorded because both are the kind of thing a reviewer would
+reasonably assume works the other way.
+
+1. **Usage limits are checked against the cumulative `RunUsage`.** Passing the
+   main run's `usage` into the forcing turn is what bills it onto the row — but
+   pydantic-ai compares limits to that same object, so an absolute
+   `request_limit=2` is measured against the requests the main run already
+   spent. It raised *"the next request would exceed the request_limit of 2"*
+   with `usage.requests` at 4, and the forcing turn never reached the model.
+   Both limits must be offsets from the counts already banked.
+
+2. **`run_sync(toolsets=[])` does not remove the agent's own tools.** It clears
+   only the extra run-time toolsets; tools registered via `Agent(tools=...)` —
+   how every arm here is built — stay callable. With `toolsets=[]` alone the
+   model still emitted a `list_tables` call on the forcing turn and died on the
+   tool-call limit instead of answering. `_tool_less_twin` builds a fresh
+   `Agent` on the same model and settings with no tools at all.
+
 ## Status
 
-F1, F2, F5, F6 (the caps) are being fixed now. F3 and F4 (provider pin and
-cache-aware pricing) follow. F7 (scope, parallelism, VPS) awaits a decision.
+- **Done:** F1, F2, F5, F6 — the caps, plus the forcing turn.
+- **Next:** F3 (provider pin + per-row provider) and F4 (cache-aware pricing).
+- **Open:** F7 (scope, parallelism, VPS) and F8's Sol budget await a decision.
 
-No result produced before these fixes may be used in FINDINGS: the frozen
-contract and gold set are unaffected, but every `usd` recorded so far is
-inflated, and every `hit_limit` row is an artifact of a cap that has changed.
+No result produced before F3 and F4 land may be used in FINDINGS: `usd` is
+still inflated and the serving provider is still unrecorded.
+

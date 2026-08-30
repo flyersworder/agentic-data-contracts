@@ -34,6 +34,7 @@ ROW_KWARGS: dict[str, Any] = dict(
     answer_normalized="0.12",
     gold="0.12",
     verdict="correct",
+    forced_answer=False,
     in_tok=30_000,
     out_tok=2_000,
     cached_tok=0,
@@ -622,7 +623,7 @@ def test_run_task_sizes_usage_limits_as_a_runaway_guard_not_a_dollar_budget(
             agent_factory=lambda **_: Fake(),
         )
         limits = seen["limits"]
-        assert limits.tool_calls_limit == 25
+        assert limits.tool_calls_limit == 40
         assert limits.request_limit == 50
         assert limits.total_tokens_limit == agent.TOKEN_BUDGET
         assert (
@@ -954,3 +955,425 @@ def test_run_task_recovers_tokens_and_transcript_after_a_real_cap_trip(
     assert row["usd"] > 0
     assert row["tool_calls"]
     assert row["inspect_rejections"] == 2
+
+
+# ── F1/F2/F5/F6: the caps re-planned after the first smoke run ──────────────
+#
+# Every constant below is pinned with the measurement that moved it, so a
+# future edit reverting one fails against evidence rather than against taste.
+# Source: docs/superpowers/specs/2026-08-30-dabstep-smoke-findings.md.
+
+
+def test_max_output_tokens_leaves_room_for_a_reasoning_models_reasoning():
+    """F1. 4,000 was sized for "a data-analyst answer with some reasoning
+    attached" — false for a reasoning model, whose reasoning tokens count
+    against `max_tokens` and can exhaust it BEFORE ANY ANSWER TEXT EXISTS.
+    Measured live: `z-ai/glm-5.3-flash` spent 49 of 50 completion tokens on
+    reasoning for a one-number reply, and arm B died with "Model token limit
+    (4000) exceeded before any response was generated".
+
+    The failure was arm-asymmetric — it killed only the arm whose larger
+    prompt induced the longest reasoning — which makes the old value a
+    confound, not merely a tight cap.
+    """
+    assert agent.MAX_OUTPUT_TOKENS_PER_REQUEST == 16_000
+
+
+def test_default_agent_factory_threads_the_output_cap_into_model_settings():
+    """The constant is only worth pinning if it reaches the model."""
+    import os
+
+    os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model="z-ai/glm-5.3-flash", system_prompt="s", tools=[], retries=3
+    )
+    assert (built.model_settings or {})[
+        "max_tokens"
+    ] == agent.MAX_OUTPUT_TOKENS_PER_REQUEST
+
+
+def test_token_budget_cannot_bind_before_the_tool_call_cap_at_worst_growth():
+    """F6 — the regression that matters, and the one the old test missed.
+
+    The old guard divided `TOKEN_BUDGET` by each arm's per-request input
+    FLOOR. A floor ignores growth: the full conversation is resent as input
+    every turn, so real consumption per request rises with turn count, and it
+    rises FASTEST for the arm whose tool returns are largest. Measured over
+    one hard task:
+
+        schema_only     5,807 tokens/request   0.95x the 6,100 floor
+        manual_prompt  11,844 tokens/request   1.94x
+        contract       45,977 tokens/request   7.54x
+
+    At GROWTH=4 the consequence was the exact confound N1 claims to have
+    removed: `TOKEN_BUDGET` bound arm C at 22 tool calls while arm A ran to
+    28 — the token guard, not `tool_calls_limit`, became the binding
+    iteration control, and it bound earliest for the arm carrying the most
+    context. `tool_calls_limit` must be the single uniform iteration control;
+    this asserts the token guard clears a full iteration budget even at the
+    worst growth ever observed.
+    """
+    worst_observed_growth = 7.54
+    per_request_at_worst = agent.MAX_ARM_FLOOR * worst_observed_growth
+    requests_afforded = agent.TOKEN_BUDGET / per_request_at_worst
+    assert requests_afforded >= agent.REQUEST_BUDGET, requests_afforded
+
+
+def test_growth_multiplier_carries_margin_over_the_worst_observed_growth():
+    """Companion to the above: the multiplier itself must exceed the worst
+    growth actually seen, not merely happen to clear it after rounding."""
+    assert agent.GROWTH >= 7.54 * 1.5
+
+
+def test_max_tool_calls_was_raised_after_two_of_three_arms_ran_out():
+    """F2. On the first hard task attempted, arm A exhausted 28 tool calls and
+    arm C 22, both returning an empty answer. 25 was not a budget either could
+    finish inside."""
+    assert agent.MAX_TOOL_CALLS == 40
+    assert agent.REQUEST_BUDGET == agent.MAX_TOOL_CALLS + 5
+
+
+# ── F2: the forcing turn ────────────────────────────────────────────────────
+
+
+def _msg(*parts):
+    from pydantic_ai.messages import ModelResponse
+
+    return ModelResponse(parts=list(parts))
+
+
+def test_trim_dangling_tool_calls_drops_an_unanswered_trailing_call():
+    """A cap trips mid-turn, so the captured transcript usually ends with tool
+    calls that never ran. Providers reject a history containing a tool call
+    with no matching result, so the forcing turn would fail for a reason with
+    nothing to do with the model."""
+    from pydantic_ai.messages import ModelRequest, ToolCallPart, ToolReturnPart
+
+    answered_call = _msg(ToolCallPart(tool_name="run_query", args={}, tool_call_id="a"))
+    answer = ModelRequest(
+        parts=[ToolReturnPart(tool_name="run_query", content="ok", tool_call_id="a")]
+    )
+    dangling = _msg(ToolCallPart(tool_name="run_query", args={}, tool_call_id="b"))
+
+    trimmed = agent._trim_dangling_tool_calls([answered_call, answer, dangling])
+    assert trimmed == [answered_call, answer]
+
+
+def test_trim_dangling_tool_calls_keeps_a_complete_transcript_intact():
+    from pydantic_ai.messages import ModelRequest, ToolCallPart, ToolReturnPart
+
+    msgs = [
+        _msg(ToolCallPart(tool_name="run_query", args={}, tool_call_id="a")),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="run_query", content="ok", tool_call_id="a")
+            ]
+        ),
+    ]
+    assert agent._trim_dangling_tool_calls(msgs) == msgs
+
+
+def test_trim_dangling_tool_calls_counts_a_retry_prompt_as_an_answer():
+    """A `ModelRetry` (arm C's governed tools raise these) answers a tool call
+    just as a return does — treating it as unanswered would throw away the
+    rejection that is arm C's whole mechanism."""
+    from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart
+
+    msgs = [
+        _msg(ToolCallPart(tool_name="inspect_query", args={}, tool_call_id="a")),
+        ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    content="blocked", tool_name="inspect_query", tool_call_id="a"
+                )
+            ]
+        ),
+    ]
+    assert agent._trim_dangling_tool_calls(msgs) == msgs
+
+
+def test_trim_dangling_tool_calls_returns_empty_for_an_all_dangling_transcript():
+    from pydantic_ai.messages import ToolCallPart
+
+    msgs = [_msg(ToolCallPart(tool_name="run_query", args={}, tool_call_id="b"))]
+    assert agent._trim_dangling_tool_calls(msgs) == []
+
+
+def test_force_final_answer_returns_empty_rather_than_raising():
+    """Strictly a recovery path. It runs after a cap has already tripped on a
+    row that is already priced and already returnable, so any failure here must
+    degrade to the caller's `hit_limit` — never replace it with an exception."""
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+    from pydantic_ai.usage import RunUsage
+
+    class Exploding:
+        def run_sync(self, *a, **k):
+            raise RuntimeError("provider rejected the history")
+
+    history = [
+        ModelRequest(
+            parts=[ToolReturnPart(tool_name="t", content="ok", tool_call_id="a")]
+        )
+    ]
+    assert agent._force_final_answer(Exploding(), history, RunUsage()) == ""
+
+
+def test_force_final_answer_returns_empty_for_an_empty_history():
+    from pydantic_ai.usage import RunUsage
+
+    class NeverCalled:
+        def run_sync(self, *a, **k):  # pragma: no cover - must not run
+            raise AssertionError("should not be called with no history")
+
+    assert agent._force_final_answer(NeverCalled(), [], RunUsage()) == ""
+
+
+def test_force_final_answer_limits_are_offsets_against_cumulative_usage():
+    """Regression for a bug only a REAL `Agent` run surfaced.
+
+    Passing the main run's `usage` is what bills the forcing turn onto the row
+    — but pydantic-ai checks usage limits against that same CUMULATIVE object.
+    So absolute limits are compared against what the main run already spent: a
+    bare `request_limit=2` raised "the next request would exceed the
+    request_limit of 2" with `usage.requests` already at 4, and the forcing
+    turn never reached the model at all. Both limits must therefore be offsets
+    from the counts already banked.
+    """
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+    from pydantic_ai.usage import RunUsage
+
+    seen = {}
+
+    class Fake:
+        def run_sync(self, prompt, **kw):
+            seen.update(kw, prompt=prompt)
+            kw["usage"].input_tokens += 500
+            kw["usage"].output_tokens += 20
+
+            class R:
+                output = "  12.91  "
+
+            return R()
+
+    usage = RunUsage()
+    usage.input_tokens = 1_000
+    usage.requests = 4
+    usage.tool_calls = 3
+    history = [
+        ModelRequest(
+            parts=[ToolReturnPart(tool_name="t", content="ok", tool_call_id="a")]
+        )
+    ]
+    assert agent._force_final_answer(Fake(), history, usage) == "12.91"
+
+    limits = seen["usage_limits"]
+    assert limits.request_limit == 4 + agent.FORCED_ANSWER_REQUEST_LIMIT
+    # No FURTHER tool calls beyond the 3 already made — not an absolute 0,
+    # which would trip immediately.
+    assert limits.tool_calls_limit == 3
+    assert seen["message_history"] == history
+    assert "final answer" in seen["prompt"]
+    # The extra turn's tokens land on the row rather than vanishing.
+    assert usage.input_tokens == 1_500 and usage.output_tokens == 20
+
+
+def test_tool_less_twin_actually_has_no_tools():
+    """The second bug the end-to-end test caught: `run_sync(toolsets=[])`
+    clears only the EXTRA run-time toolsets, leaving the agent's own
+    `Agent(tools=...)` tools callable. Measured: the model emitted a
+    `list_tables` call on the forcing turn and died on the tool-call limit
+    instead of answering.
+    """
+    from pydantic_ai import Agent
+    from pydantic_ai.models.function import FunctionModel
+
+    def a_tool() -> str:
+        """A tool."""
+        return "x"
+
+    original = Agent(FunctionModel(lambda m, i: None), tools=[a_tool], retries=1)
+    twin = agent._tool_less_twin(original)
+
+    assert twin is not original
+    assert twin.model is original.model
+
+    # The property that matters, asserted through pydantic-ai's own view of
+    # what the model will be offered.
+    def tool_names(a):
+        return {t.name for t in a._function_toolset.tools.values()}
+
+    assert "a_tool" in tool_names(original)
+    assert tool_names(twin) == set()
+
+
+def test_tool_less_twin_falls_back_to_the_agent_it_cannot_clone():
+    """A test double has no `.model`; the fallback must not raise, so the
+    forcing turn degrades to the naive path rather than to an exception."""
+
+    class Double:
+        pass
+
+    d = Double()
+    assert agent._tool_less_twin(d) is d
+
+
+def test_run_task_forces_an_answer_after_a_cap_trip_and_scores_it(tmp_path: Path):
+    """The point of F2: a `hit_limit` row is paid for and unscoreable. Two of
+    three arms ended exactly there on the first hard task. One tool-less turn
+    turns that waste into a graded result."""
+    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+
+    class CapThenAnswer:
+        def __init__(self):
+            self.n = 0
+
+        def run_sync(self, *a, usage=None, **k):
+            self.n += 1
+            if self.n == 1:
+                usage.input_tokens, usage.output_tokens, usage.requests = 900, 40, 5
+                raise UsageLimitExceeded("tool call limit")
+
+            class R:
+                output = "0.12"
+
+            return R()
+
+    forced_history = [
+        ModelRequest(
+            parts=[ToolReturnPart(tool_name="t", content="ok", tool_call_id="a")]
+        )
+    ]
+    monkey = agent._trim_dangling_tool_calls
+    try:
+        agent._trim_dangling_tool_calls = lambda _m: forced_history
+        row = run_task(
+            TASK,
+            "contract",
+            "z-ai/glm-5.3-flash",
+            tmp_path / "x.duckdb",
+            {"manual": "m", "payments_readme": "r"},
+            gold="0.12",
+            golds_hash="h",
+            agent_factory=lambda **_: CapThenAnswer(),
+        )
+    finally:
+        agent._trim_dangling_tool_calls = monkey
+
+    assert row["verdict"] == "correct"
+    assert row["answer"] == "0.12"
+    # The row must say the answer was forced: a forced answer is a different
+    # measurement from a volunteered one, and pooling them silently would be
+    # comparing two things under one name.
+    assert row["forced_answer"] is True
+
+
+def test_run_task_keeps_hit_limit_when_the_forcing_turn_produces_nothing(
+    tmp_path: Path,
+):
+    """The forcing turn can only improve a row, never corrupt one."""
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    class CapThenFail:
+        def __init__(self):
+            self.n = 0
+
+        def run_sync(self, *a, usage=None, **k):
+            self.n += 1
+            if self.n == 1:
+                usage.input_tokens, usage.output_tokens, usage.requests = 900, 40, 5
+                raise UsageLimitExceeded("tool call limit")
+            raise RuntimeError("forcing turn also failed")
+
+    row = run_task(
+        TASK,
+        "contract",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="h",
+        agent_factory=lambda **_: CapThenFail(),
+    )
+    assert row["verdict"] == "hit_limit"
+    assert row["forced_answer"] is False
+    # The already-spent money still survives the cap trip (CR1).
+    assert row["input_tokens"] == 900 and row["usd"] > 0
+
+
+def test_every_row_shape_carries_forced_answer():
+    """`stats.py` reads whole columns; a key present on some rows and absent
+    on others is a silent `None` in the middle of an analysis."""
+    from dce.runner import _construction_error_row
+
+    real = build_result_row(**ROW_KWARGS)
+    fallback = _priced_fallback_row(
+        task=TASK,
+        arm="contract",
+        model="z-ai/glm-5.3-flash",
+        gold="g",
+        golds_hash="h",
+        usage=None,
+        verdict="post_run_error",
+        note="x",
+    )
+    construction = _construction_error_row(
+        TASK, "contract", "z-ai/glm-5.3-flash", "g", "h", RuntimeError("boom")
+    )
+    for row in (real, fallback, construction):
+        assert "forced_answer" in row
+        assert isinstance(row["forced_answer"], bool)
+
+
+def test_forcing_turn_survives_a_real_cap_trip_end_to_end(contract_db: Path):
+    """The one test the fakes cannot stand in for.
+
+    `_trim_dangling_tool_calls` exists because a real cap trips MID-TURN,
+    leaving tool calls in the transcript that never ran — and a provider
+    rejects such a history outright. Whether the trim actually yields a
+    resendable transcript is a property of pydantic-ai's real message
+    plumbing, not of our fakes: a fake agent never registers anything with
+    `capture_run_messages`, so every fake-driven forcing test above runs
+    against an empty history and proves nothing about this.
+
+    Here a real `Agent` on a `FunctionModel` calls a tool until
+    `tool_calls_limit` trips, and the forcing turn must still extract an
+    answer from what it built.
+    """
+    from pydantic_ai import Agent
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    def fn(messages, info):
+        # No tools available => the forcing turn. Answer it.
+        if not info.function_tools:
+            return ModelResponse(
+                parts=[TextPart("12.91")],
+                usage=RequestUsage(input_tokens=30, output_tokens=4),
+            )
+        # Otherwise keep calling a tool forever, so the cap is what stops us.
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="list_tables", args={})],
+            usage=RequestUsage(input_tokens=20, output_tokens=5),
+        )
+
+    def factory(*, model, system_prompt, tools, retries):
+        return Agent(FunctionModel(fn), tools=tools, retries=retries)
+
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        contract_db,
+        {"manual": "m", "payments_readme": "r"},
+        gold="12.91",
+        golds_hash="h",
+        max_tool_calls=3,
+        agent_factory=factory,
+    )
+    assert row["forced_answer"] is True
+    assert row["answer"] == "12.91"
+    assert row["verdict"] == "correct"
+    # The forcing turn's own tokens are billed onto the row, not lost.
+    assert row["input_tokens"] > 0 and row["usd"] > 0

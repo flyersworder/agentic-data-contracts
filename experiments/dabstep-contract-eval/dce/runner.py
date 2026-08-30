@@ -866,6 +866,10 @@ def _construction_error_row(
         "answer_normalized": "",
         "gold": gold,
         "verdict": "construction_error",
+        # Always False: no model call ever happened on this path, so there was
+        # nothing for the forcing turn to force. Present so every row in a
+        # results file has the same keys.
+        "forced_answer": False,
         "input_tokens": 0,
         "output_tokens": 0,
         "cached_tokens": 0,

@@ -347,6 +347,19 @@ def test_worst_case_task_group_usd_sums_across_multiple_models_too():
 # ── sweep: the spend cap ─────────────────────────────────────────────────
 
 
+#: A `--max-spend` sized off the live pessimistic reserve floor rather than a
+#: hardcoded dollar figure: one full reserve, plus room for 1.5 calls at
+#: `_CALL_USD`. Under `_next_reserve`'s rule that admits exactly two calls and
+#: refuses the third, whatever `TOKEN_BUDGET` (and so the floor) happens to be
+#: — F6 moved that floor 4.5x, which is precisely how a hardcoded figure here
+#: turns a real property into an arithmetic coincidence.
+_CALL_USD: float = 0.40
+
+
+def _budget_for_exactly_two_calls(model: str) -> float:
+    return _token_budget_usd(model) + 1.5 * _CALL_USD
+
+
 def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
     calls = []
 
@@ -367,6 +380,7 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
     ]
     golds = {str(i): "g" for i in range(10)}
     db_path = _make_pristine(tmp_path)
+    max_spend = _budget_for_exactly_two_calls(GLM)
     result = sweep(
         tasks,
         ("schema_only",),
@@ -375,16 +389,19 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
         out=tmp_path / "r.jsonl",
         db_path=db_path,
         docs={},
-        max_spend=1.00,
+        max_spend=max_spend,
         golds_hash="h",
         run_task_fn=fake_run,
     )
-    # First call reserves the $0.183 floor (nothing observed yet); each
-    # subsequent reserve is the max observed so far ($0.40). Two calls cost
-    # $0.80; a third would reserve another $0.40 on top, projecting $1.20 —
-    # over the $1.00 cap — so the guard stops at two.
+    # Derived from the floor rather than hardcoded, so a change to
+    # `TOKEN_BUDGET` (which moved this floor 4.5x at F6) cannot silently turn
+    # this into an arithmetic coincidence: with a budget of one pessimistic
+    # reserve plus 1.5 calls, exactly two $0.40 calls fit. The first reserves
+    # the floor (nothing observed yet); each later one reserves the max
+    # observed so far against that same floor. A third would project past the
+    # cap, so the guard stops at two.
     assert len(calls) == 2
-    assert result.spent <= 1.00
+    assert result.spent <= max_spend
     assert result.truncated is True
 
 
@@ -443,6 +460,7 @@ def test_sweep_seeds_spent_from_existing_rows_across_resumes(tmp_path: Path):
     golds = {str(i): "g" for i in range(10)}
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
+    max_spend = _budget_for_exactly_two_calls(GLM)
 
     for _ in range(4):  # four separate "process" invocations
         sweep(
@@ -453,13 +471,18 @@ def test_sweep_seeds_spent_from_existing_rows_across_resumes(tmp_path: Path):
             out=out,
             db_path=db_path,
             docs={},
-            max_spend=1.00,
+            max_spend=max_spend,
             golds_hash="h",
             run_task_fn=fake_run,
         )
 
-    assert spent_so_far(out) <= 1.00
-    assert len(calls) == 2  # only the first invocation's two calls ever ran
+    assert spent_so_far(out) <= max_spend
+    # Two, for the reason spelled out in
+    # `test_sweep_stops_before_exceeding_max_spend`: the budget is sized off
+    # the live floor, not a hardcoded figure. Only the FIRST invocation's two
+    # calls ever ran — the point of this test is that the other three
+    # invocations resumed into an already-exhausted budget.
+    assert len(calls) == 2
 
 
 def test_sweep_reserves_the_whole_task_group_before_starting_it(tmp_path: Path):
@@ -779,6 +802,7 @@ def test_construction_error_row_has_build_result_row_shape():
         answer_normalized="a",
         gold="g",
         verdict="correct",
+        forced_answer=False,
         in_tok=1,
         out_tok=1,
         cached_tok=0,

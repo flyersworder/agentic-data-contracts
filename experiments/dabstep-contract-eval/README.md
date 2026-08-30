@@ -102,7 +102,7 @@ git commit -m "smoke run"
 | `manual_prompt` | The above, plus all 22k characters of DABStep's `manual.md` verbatim in the system prompt. The baseline to beat. | same three, ungoverned |
 | `contract` | The library's nine governed tools over a frozen, digest-pinned contract. No manual text. | `lookup_metric`, `lookup_domain`, `inspect_query`, `run_query`, … |
 
-The arms share one row cap (1,000 rows per tool result, applied identically),
+The arms share one row cap (50 rows per tool result, applied identically),
 one token budget, one working copy of the warehouse, and one task order.
 
 **The arms are not a clean context-only contrast**, and any writeup has to say

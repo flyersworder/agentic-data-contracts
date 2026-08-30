@@ -43,7 +43,15 @@ from dce.pricing import MODELS, cost
 # A harness cap, not a contract limit — applied identically to every arm so
 # no arm gets more iterations than another (see the retries note below, and
 # `dce/arms.py`'s module docstring on why that symmetry matters).
-MAX_TOOL_CALLS: int = 25
+MAX_TOOL_CALLS: int = 40
+
+# RAISED FROM 25 AFTER THE FIRST SMOKE RUN (F2, see
+# `docs/superpowers/specs/2026-08-30-dabstep-smoke-findings.md`). On the first
+# hard task attempted, TWO of three arms exhausted the budget and returned an
+# empty answer: a `hit_limit` row is unscoreable, so it costs full price and
+# contributes nothing to accuracy. Raising the cap alone would not fix that —
+# a bigger budget still ends in the same unscoreable row when it runs out —
+# which is why `_force_final_answer` below exists alongside it.
 
 # pydantic-ai's own current default for `UsageLimits.request_limit`, made
 # explicit rather than inherited — verified against the installed library in
@@ -70,10 +78,26 @@ REQUEST_LIMIT: int = 50
 #   * `UsageLimits.per_request_input_tokens_limit` (set in `run_task` as
 #     `PER_REQUEST_INPUT_TOKEN_CAP`, below) bounds one request's INPUT.
 #
-# 4,000 output tokens is generous for a data-analyst answer with some
-# reasoning attached, while still being nowhere near the size of a runaway
-# tool-return-turned-input.
-MAX_OUTPUT_TOKENS_PER_REQUEST: int = 4_000
+# The output bound must clear a reasoning model's reasoning, not just its
+# answer — see the F1 note directly below, which is why 4,000 was wrong.
+MAX_OUTPUT_TOKENS_PER_REQUEST: int = 16_000
+
+# RAISED FROM 4,000 AFTER THE FIRST SMOKE RUN (F1). The old value assumed
+# "4,000 output tokens is generous for a data-analyst answer with some
+# reasoning attached". That is false for a reasoning model: reasoning tokens
+# count against `max_tokens`, and the cap can therefore fire BEFORE ANY ANSWER
+# TEXT EXISTS. Measured against the live API, `z-ai/glm-5.3-flash` spent 49 of
+# 50 completion tokens on reasoning for a trivial one-number reply. Arm B died
+# on exactly this:
+#
+#     UnexpectedModelBehavior: Model token limit (4000) exceeded before any
+#     response was generated.
+#
+# THE FAILURE WAS ARM-ASYMMETRIC, WHICH IS WHY THIS IS A CONFOUND AND NOT JUST
+# A BUG. The cap is nominally uniform, but it killed only arm B — the arm whose
+# larger prompt induced the longest reasoning. A cap that preferentially kills
+# whichever arm carries the most context biases the comparison this experiment
+# exists to make.
 
 # ── The uniform per-task runaway guard ──────────────────────────────────
 #
@@ -113,10 +137,28 @@ MAX_ARM_FLOOR: int = 6_100
 # the full conversation so far (every prior tool call and tool return) is
 # resent as input on each request under this API family, so real
 # consumption grows with turn count rather than staying flat at the floor.
-# 4x is a deliberately blunt safety multiplier over the floor-only estimate
-# above, not a measured constant — chosen to be generous rather than tight,
-# per the reasoning below.
-GROWTH: int = 4
+# RAISED FROM 4x AFTER THE FIRST SMOKE RUN (F6). 4x was "a deliberately blunt
+# safety multiplier", never measured. Measured growth is ARM-DEPENDENT, because
+# a tool return's size is a property of the arm's tools:
+#
+#     schema_only     5,807 tokens/request   0.95x the 6,100 floor
+#     manual_prompt  11,844 tokens/request   1.94x
+#     contract       45,977 tokens/request   7.54x
+#
+# At GROWTH=4 the consequence was the exact confound N1 above claims to have
+# removed: `TOKEN_BUDGET` (732,000) bound arm C at 22 tool calls while arm A ran
+# to 28. The token guard — not `tool_calls_limit` — became the binding iteration
+# control, and it bound EARLIEST FOR THE ARM CARRYING THE MOST CONTEXT. Moving
+# the guard out of dollars and into tokens was necessary but not sufficient: a
+# guard uniform in tokens is still non-uniform in iterations whenever growth
+# differs by arm.
+#
+# Two changes restore the intended property. `dce/arms.py`'s `MAX_ROWS` (cut
+# 1,000 -> 50) attacks arm C's growth at its root, and 12x here — the worst
+# observed 7.54x with a 1.6x margin — sizes the guard so it cannot bind before
+# `tool_calls_limit` does for any arm. `tool_calls_limit` is once again the
+# single uniform iteration control; this is a runaway stop and nothing more.
+GROWTH: int = 12
 
 # TOKEN_BUDGET is the uniform runaway guard itself: sized off the iteration
 # budget, the worst arm's floor, and a growth margin — not off a dollar
@@ -157,6 +199,146 @@ def _tool_call_names(messages: list) -> list[str]:
             if getattr(part, "part_kind", "") == "tool-call":
                 names.append(part.tool_name)
     return names
+
+
+FORCED_ANSWER_PROMPT = (
+    "You have run out of tool calls. Do not attempt any further tool calls.\n"
+    "Using only the evidence already gathered above, state your single best "
+    "final answer to the original question now, in exactly the format the "
+    "answer guidelines require and with no other text. If the evidence is "
+    "incomplete, still give your best estimate rather than refusing."
+)
+
+#: Requests the forcing turn is allowed. Two, not one: a model that emits a
+#: tool call anyway (despite `toolsets=[]` leaving it none to call) burns a
+#: request producing nothing, and one retry is enough to recover from that
+#: without reopening an unbounded loop.
+FORCED_ANSWER_REQUEST_LIMIT: int = 2
+
+
+def _trim_dangling_tool_calls(messages: list) -> list:
+    """Drop trailing messages whose tool calls were never answered.
+
+    A cap trips mid-turn, so the captured transcript usually ends with a
+    `ModelResponse` carrying `ToolCallPart`s that never ran. Sending that back
+    as history is rejected by the provider — every tool call must have a
+    matching result — so the forcing turn would fail for a reason that has
+    nothing to do with the model. Trimming to the last complete exchange is
+    what makes the transcript resendable.
+
+    Returns a new list; never mutates the caller's.
+    """
+    answered = {
+        getattr(part, "tool_call_id", None)
+        for message in messages
+        for part in getattr(message, "parts", [])
+        if getattr(part, "part_kind", "") in ("tool-return", "retry-prompt")
+    }
+    trimmed = list(messages)
+    while trimmed:
+        parts = getattr(trimmed[-1], "parts", [])
+        dangling = [
+            part
+            for part in parts
+            if getattr(part, "part_kind", "") == "tool-call"
+            and getattr(part, "tool_call_id", None) not in answered
+        ]
+        if not dangling:
+            break
+        trimmed.pop()
+    return trimmed
+
+
+def _tool_less_twin(agent):
+    """An `Agent` on the same model and settings, with no tools at all.
+
+    `run_sync(toolsets=[])` is NOT sufficient, which is the trap here: it
+    clears only the EXTRA toolsets passed at run time, leaving the agent's own
+    tools — the ones registered by `Agent(tools=...)`, which is how every arm
+    here is built — fully callable. Measured against a real `Agent`: with
+    `toolsets=[]` the model still emitted a `list_tables` call and the forcing
+    turn died on the tool-call limit instead of answering. A fake agent cannot
+    show this, because a fake has no toolset machinery to leave behind.
+
+    Falls back to the agent itself if a twin cannot be built (a test double
+    with no `.model`); the caller passes `toolsets=[]` either way, so the
+    fallback is no worse than the naive approach and never raises.
+    """
+    try:
+        from pydantic_ai import Agent
+
+        return Agent(agent.model, model_settings=agent.model_settings)
+    except Exception:
+        return agent
+
+
+def _force_final_answer(agent, messages: list, usage) -> str:
+    """Re-ask once, with no tools, for the answer the run never committed to.
+
+    THE PROBLEM THIS SOLVES (F2). A `hit_limit` row is unscoreable: the run is
+    paid for in full and contributes nothing to accuracy. On the first hard task
+    of the first smoke run, two of three arms ended exactly there with an empty
+    answer. Raising `MAX_TOOL_CALLS` does not fix this — a larger budget still
+    terminates in the same empty row when it runs out.
+
+    The agent has usually done most of the work by the time a cap trips; what it
+    has not done is commit to an answer. So we hand back the transcript it built
+    and ask for the answer with `toolsets=[]` — no tools to call, nothing to
+    explore, one thing left to do.
+
+    `usage` is the SAME `RunUsage` the main run mutated, so this turn's tokens
+    are billed onto the row rather than vanishing. Applied identically to every
+    arm, and recorded on the row as `forced_answer`, so no analysis can mistake
+    a forced answer for one the model volunteered.
+
+    Returns the answer, or `""` if this turn cannot produce one. It is strictly
+    a recovery path: every failure here leaves the caller's `hit_limit` verdict
+    exactly as it was, so the forcing turn can only improve a row, never
+    corrupt one.
+    """
+    import warnings
+
+    from pydantic_ai.exceptions import CostNotFoundWarning
+    from pydantic_ai.usage import UsageLimits
+
+    history = _trim_dangling_tool_calls(messages)
+    if not history:
+        return ""
+    runner = _tool_less_twin(agent)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=CostNotFoundWarning)
+            result = runner.run_sync(
+                FORCED_ANSWER_PROMPT,
+                message_history=history,
+                # Belt and braces alongside `_tool_less_twin`: `toolsets=[]`
+                # alone does NOT do this (see that function's docstring).
+                toolsets=[],
+                usage=usage,
+                # BOTH LIMITS ARE OFFSETS, NOT ABSOLUTES. Passing the main
+                # run's `usage` is what bills this turn onto the row, but
+                # pydantic-ai checks limits against that SAME cumulative
+                # object — so a bare `request_limit=2` is compared to the
+                # requests the main run already spent and trips before this
+                # turn ever reaches the model. (Measured: it raised
+                # "next request would exceed the request_limit of 2" with
+                # `usage.requests` already at 4, and the forcing turn made no
+                # call at all. Only a real `Agent` run surfaces this; a fake
+                # agent never accumulates usage the limits can collide with.)
+                usage_limits=UsageLimits(
+                    # No FURTHER tool calls beyond those already made.
+                    tool_calls_limit=usage.tool_calls,
+                    request_limit=usage.requests + FORCED_ANSWER_REQUEST_LIMIT,
+                    per_request_input_tokens_limit=PER_REQUEST_INPUT_TOKEN_CAP,
+                ),
+            )
+        return str(result.output).strip()
+    except Exception:
+        # Deliberately broad. This runs after a cap has ALREADY tripped, on a
+        # row that is already priced and already returnable; a failure here
+        # must degrade to the `hit_limit` the caller was about to record, not
+        # replace it with an exception.
+        return ""
 
 
 def _inspect_rejections(messages: list) -> int:
@@ -369,6 +551,7 @@ def build_result_row(
     answer_normalized: str,
     gold: str,
     verdict: str,
+    forced_answer: bool,
     in_tok: int,
     out_tok: int,
     cached_tok: int,
@@ -397,6 +580,12 @@ def build_result_row(
         "answer_normalized": answer_normalized,
         "gold": gold,
         "verdict": verdict,
+        # F2: True when the answer came from `_force_final_answer` — a
+        # tool-less turn taken after a cap tripped — rather than from the run
+        # itself. Recorded because a forced answer is a different measurement
+        # from a volunteered one, and an analysis that pooled the two silently
+        # would be comparing two things under one name.
+        "forced_answer": forced_answer,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached_tok,
@@ -513,6 +702,11 @@ def _priced_fallback_row(
         "answer_normalized": "",
         "gold": gold,
         "verdict": verdict,
+        # Always False: this row exists because the bookkeeping tail raised,
+        # and it carries no answer at all ("answer" is "" above), so there is
+        # no answer here for the forcing turn to have produced. Present so
+        # every row in a results file has the same keys.
+        "forced_answer": False,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": getattr(usage, "cache_read_tokens", 0) or 0,
@@ -691,6 +885,7 @@ def run_task(
         token_cap = TOKEN_BUDGET
 
         answer, verdict = "", "unset"
+        forced_answer = False
         # `Agent.run_sync` mutates `usage` in place as the run progresses,
         # so it holds real counts even when the call below raises — reading
         # token/turn counts off it (rather than off a would-be `result`,
@@ -722,6 +917,15 @@ def run_task(
                 # the module-level `MAX_TOOL_CALLS` note and
                 # `tests/test_agent.py`.
                 verdict = "hit_limit"
+                # F2: rather than bank an unscoreable empty row, spend one
+                # tool-less turn asking for the answer the run never committed
+                # to. Only a non-empty answer changes anything — `verdict`
+                # returns to "unset" so the scoring block below grades it like
+                # any other answer, and `forced_answer` records that it came
+                # from here.
+                forced = _force_final_answer(agent, list(messages), usage)
+                if forced:
+                    answer, verdict, forced_answer = forced, "unset", True
             except Exception as exc:
                 verdict = "error"
                 answer = f"{type(exc).__name__}: {exc}"
@@ -781,6 +985,7 @@ def run_task(
                 answer_normalized=answer_normalized,
                 gold=gold,
                 verdict=verdict,
+                forced_answer=forced_answer,
                 in_tok=usage.input_tokens,
                 out_tok=usage.output_tokens,
                 cached_tok=usage.cache_read_tokens,

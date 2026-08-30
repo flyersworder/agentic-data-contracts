@@ -114,17 +114,32 @@ ARMS: tuple[str, ...] = ("schema_only", "manual_prompt", "contract")
 # own) — so no arm is advantaged by seeing an uncapped result the others
 # cannot.
 #
-# 1,000, not 10,000: a 10,000-row tool return is useless to a model answering
-# a DABStep question and costs a fortune to ship as a single request's input
-# — measured, a 10,000-row `payments` result serializes to roughly 429k
-# tokens, which then becomes the *next* request's input in full (dce/agent.py
-# review, N2). 1,000 rows is still far beyond anything a DABStep answer
-# needs, cuts that worst case roughly tenfold, and — because it is applied
-# identically to every arm, same as the value it replaces — is a harness
-# property, not a confound. The truncation marker below already reports the
-# true total row count, so cutting the cap does not hide anything from the
-# model; it only stops the model from being handed all of it at once.
-MAX_ROWS = 1_000
+# Cut twice, each time on measurement. N2 cut 10,000 -> 1,000: a 10,000-row
+# `payments` result serializes to roughly 429k tokens, which then becomes the
+# *next* request's input in full. F5 cut 1,000 -> 50 after the first smoke
+# run, because 1,000 was still large enough to do the same thing more slowly
+# — arm C averaged 45,977 input tokens per request against arm A's 5,807 on a
+# single hard task, and that growth (not the tool-call cap) is what stopped
+# it. A tool return is not paid for once: it stays in the conversation and is
+# resent as input on every later turn, so its cost compounds with turn count,
+# fastest for the arm whose returns are largest.
+#
+# 50 rows is still beyond anything a DABStep answer needs — the questions ask
+# for aggregates, so 1,000 raw rows were never what an arm needed, only what
+# it could ask for. Applied identically to every arm, same as the values it
+# replaces, so this is a harness property and not a confound. The truncation
+# marker below reports the true total row count, so cutting the cap hides
+# nothing from the model; it only stops the model being handed all of it at
+# once.
+MAX_ROWS = 50
+
+# CUT FROM 1,000 AFTER THE FIRST SMOKE RUN (F5). A tool return is not paid for
+# once: it stays in the conversation and is resent as input on EVERY subsequent
+# turn, so an oversized return compounds with turn count. Measured on one hard
+# task, arm C averaged 45,977 input tokens per request against arm A's 5,807 —
+# 8x — and that growth, not the tool-call cap, is what stopped it (see
+# `dce/agent.py`'s `GROWTH`). DABStep answers are aggregates; 1,000 raw rows
+# were never the thing an arm needed, only the thing it could ask for.
 
 BASE_PROMPT = (
     "You are a data analyst answering questions over a DuckDB database.\n"

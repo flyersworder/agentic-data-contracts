@@ -38,17 +38,25 @@ def test_three_arms_with_the_spec_names():
     assert ARMS == ("schema_only", "manual_prompt", "contract")
 
 
-def test_max_rows_is_capped_well_below_ten_thousand():
-    """Pins the lowered `MAX_ROWS` (dce/agent.py review, N2): a 10,000-row
-    tool return serializes to roughly 429k tokens and becomes the next
-    request's input in full — useless to a model and expensive to ship. 1,000
-    rows is still far beyond any DABStep answer's needs; a future edit
-    creeping this back toward 10,000 should fail here, loudly, rather than
-    only show up as an unexplained cost spike in a live sweep.
+def test_max_rows_stays_small_enough_not_to_poison_the_context():
+    """Pins `MAX_ROWS` (N2, then F5 after the first smoke run).
+
+    A tool return is not paid for once: it stays in the conversation and is
+    resent as input on every subsequent turn, so its cost compounds with turn
+    count. N2 cut this 10,000 -> 1,000 after a 10,000-row return serialized to
+    ~429k tokens. F5 cut it again, 1,000 -> 50, after arm C averaged 45,977
+    input tokens per request against arm A's 5,807 on one hard task — an 8x
+    gap that made the token guard, not the tool-call cap, the binding
+    iteration control for the arm carrying the most context.
+
+    DABStep answers are aggregates; 1,000 raw rows were never what an arm
+    needed, only what it could ask for. A future edit creeping this back up
+    should fail here, loudly, rather than surface as an unexplained cost spike
+    in a live sweep.
     """
     import dce.arms as arms_mod
 
-    assert arms_mod.MAX_ROWS == 1_000
+    assert arms_mod.MAX_ROWS == 50
 
 
 def test_schema_only_prompt_contains_no_manual_text(db):

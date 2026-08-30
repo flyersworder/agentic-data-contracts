@@ -19,6 +19,8 @@ disclosed, not corrected.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections import Counter, defaultdict
 from typing import NamedTuple
@@ -35,6 +37,30 @@ PLURALITY_THRESHOLD = 0.75
 #: verified fewer than this checked less than it was designed to and must not
 #: be reported as a pass — see `check_dev_gate`.
 MIN_DEV_CHECKS = 6
+
+
+def golds_sha256(golds: dict[str, str]) -> str:
+    """A content fingerprint of the gold set itself — the ground truth every
+    accuracy number is scored against.
+
+    THE HASH THAT WAS MISSING. `dce.prepare.write_golds` stored only
+    `manifest_sha256`, a fingerprint of the SUBMISSION CORPUS, and
+    `dce.runner._load_golds` stamped that into every result row as
+    `golds_hash`. Two gold sets reconstructed from the same corpus at
+    different plurality thresholds differ in CONTENT while carrying an
+    IDENTICAL `manifest_sha256` — and that is not a hypothetical: Ruling 8
+    requires re-running `prepare` at 0.60 / 0.75 / 0.90 to publish the
+    sensitivity table, `data/golds.json` is gitignored, so an in-place
+    overwrite leaves no trace anywhere. That is exactly the confound
+    pinning `revision` was introduced to prevent, with a hole on the
+    threshold axis.
+
+    Canonical form (`sort_keys=True`, no whitespace) so the digest depends
+    on the mapping's content alone, not on dict ordering or on how the
+    envelope happened to be indented.
+    """
+    canonical = json.dumps(golds, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _norm_atom(value: str) -> str:

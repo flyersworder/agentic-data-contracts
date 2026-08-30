@@ -383,3 +383,119 @@ def test_report_prints_both_final_and_total_billed_cost_never_usd_guard(tmp_path
     assert "final=$0.01" in left_line
     assert "billed=$0.31" in left_line
     assert "$99.00" not in text
+
+
+# ── per-slice instrumentation ────────────────────────────────────────────
+
+
+def _arm_block(text: str, arm: str) -> str:
+    """One arm's whole `_format_summary` block -- the header line plus the
+    failure, db_corrupted and instrumentation lines that hang off it, which
+    are indented continuations rather than lines of their own."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"{arm:16s}"))
+    end = start + 1
+    while end < len(lines) and lines[end].startswith(" " * 16):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
+def test_report_prints_token_and_turn_means_per_slice(tmp_path):
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct")
+        | {"input_tokens": 1000, "output_tokens": 100, "cached_tokens": 0, "turns": 3},
+        _row("t2", PRIMARY_LEFT_ARM, "correct")
+        | {"input_tokens": 3000, "output_tokens": 300, "cached_tokens": 0, "turns": 5},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "in=2000" in text
+    assert "out=200" in text
+    assert "turns/row 4.0" in text
+
+
+def test_report_surfaces_cached_tokens_so_the_caching_gate_can_be_read(tmp_path):
+    """The smoke-run gate: if OpenRouter prompt-caches the 22k-char
+    manual-in-prompt arm and nothing else, the cost comparison measures the
+    provider's caching policy rather than the arms -- and `dce.pricing`
+    bills cache reads at the full input rate, so it is invisible in the
+    dollar figures. This is the only place it shows."""
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct") | {"cached_tokens": 8000},
+        _row("t1", PRIMARY_RIGHT_ARM, "correct") | {"cached_tokens": 0},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "cached total 8,000" in _arm_block(text, PRIMARY_LEFT_ARM)
+    assert "cached total 0" in _arm_block(text, PRIMARY_RIGHT_ARM)
+
+
+def test_report_prints_governed_tool_counters_for_arm_c_only(tmp_path):
+    counters = {
+        "inspect_rejections": 4,
+        "enforcement_blocks": 2,
+        "retry_prompts": 7,
+    }
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct") | counters,
+        _row("t1", PRIMARY_LEFT_ARM, "correct") | counters,
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "enforcement_blocks=2" in text
+    assert text.count("governed-tool counters") == 2  # PRIMARY + SECONDARY
+    assert "descriptive instrumentation, not a governance claim" in text
+    # Arm B has no contract to enforce; printing zeros there would dress a
+    # structural absence up as a measurement.
+    assert "enforcement_blocks" not in _arm_block(text, PRIMARY_LEFT_ARM)
+
+
+def test_instrumentation_does_not_raise_on_an_older_row_without_the_fields(
+    tmp_path,
+):
+    path = tmp_path / "results.jsonl"
+    _write(path, [_row("t1", PRIMARY_RIGHT_ARM, "correct")])
+    assert "turns/row 0.0" in report(path)
+
+
+# ── unequal task sets across arms ────────────────────────────────────────
+
+
+def test_report_warns_when_the_arms_did_not_see_the_same_tasks(tmp_path):
+    """A sweep that stops mid task-group (circuit breaker, leaked
+    connection, truncated budget) leaves arms with different denominators.
+    McNemar drops the unshared tasks silently; nothing else says a word."""
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct"),
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_LEFT_ARM, "correct"),  # arm C never ran t2
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "did NOT see the same task set" in text
+    assert "1 tasks common to all" in text
+
+
+def test_report_does_not_warn_when_every_arm_saw_every_task(tmp_path):
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct"),
+        _row("t1", PRIMARY_RIGHT_ARM, "incorrect"),
+        _row("t2", PRIMARY_LEFT_ARM, "incorrect"),
+        _row("t2", PRIMARY_RIGHT_ARM, "correct"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "did NOT see the same task set" not in report(path)

@@ -211,6 +211,7 @@ def test_result_row_carries_full_provenance():
         "token_cap",
         "contract_digest",
         "golds_hash",
+        "scorer",
         "commit_sha",
         "adc_version",
     ):

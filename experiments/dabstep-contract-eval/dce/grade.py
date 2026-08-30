@@ -21,6 +21,23 @@ def _official(predicted: str, gold: str) -> bool | None:
     return bool(question_scorer(predicted, gold))
 
 
+def active_scorer() -> str:
+    """Which scorer `score()` will actually use, right now: `"official"`
+    when `dabstep_benchmark` is importable, `"fallback"` otherwise.
+
+    Recorded on every result row (`dce.agent.build_result_row`) because the
+    choice is made at import time by whatever happens to be installed, and
+    the two scorers are not guaranteed to agree. `dabstep_benchmark` is NOT
+    a dependency of this experiment, so today every row is scored by the
+    fallback and `_official` is dead code — but installing it mid-sweep
+    (directly, or as a transitive dependency of something else) would
+    switch the scorer silently and split one results file across two
+    grading rules with nothing in the file to show it. This makes that
+    visible per row instead of per environment.
+    """
+    return "fallback" if _official("x", "x") is None else "official"
+
+
 def _clean(value: str) -> str:
     return _BRACKETS.sub("", str(value).strip()).strip()
 

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 import pytest
-from dce.grade import score
+from dce.grade import active_scorer, score
 
 _GOLDS_PATH = Path(__file__).parent.parent / "data" / "golds.json"
 
@@ -110,3 +110,13 @@ def test_every_numeric_comma_gold_uses_the_reconstruction_separator():
         and re.search(r",(?!\s)", gold)
     }
     assert not violations, violations
+
+
+def test_active_scorer_names_the_scorer_actually_in_use():
+    """`dabstep_benchmark` is not a dependency of this experiment, so the
+    fallback normalizer grades every row and the official path is dead
+    code. The field exists so that installing it mid-experiment — which
+    would switch scorers silently — is visible per row rather than only in
+    an environment nobody recorded."""
+    assert active_scorer() in {"official", "fallback"}
+    assert active_scorer() == "fallback"

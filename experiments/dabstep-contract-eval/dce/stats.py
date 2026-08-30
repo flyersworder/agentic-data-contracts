@@ -113,6 +113,29 @@ earlier, real charge, understating spend the way `dce.runner.
 real_spent_so_far` (which this module's `usd_total_billed` mirrors,
 per-slice rather than file-wide) is specifically designed not to.
 
+INSTRUMENTATION: every slice also reports the per-row means of the counts
+`dce.agent.build_result_row` writes -- `input_tokens`, `output_tokens`,
+`cached_tokens`, `turns` -- because three commitments depend on them and
+nothing else in this repo reads them.
+
+`cached_tokens` per arm is a GATE, not a curiosity, and it has to be read
+AT the smoke run rather than after the sweep: arm B carries all 22k chars
+of `manual.md` in its system prompt, so if OpenRouter prompt-caches that
+arm and not the others, the cost comparison between arms is measuring the
+provider's caching policy rather than the arms. `dce.pricing` has no
+discounted cache-read rate and bills every cached token at the full input
+rate (see `build_result_row`'s own comment), so a silently cached arm B
+shows up nowhere in the dollar figures -- only here.
+
+The three arm-C-only counters (`inspect_rejections`, `enforcement_blocks`,
+`retry_prompts`) are reported for the `contract` arm alone, since the other
+two arms have no contract to enforce and would report a structural zero.
+They are DESCRIPTIVE INSTRUMENTATION -- how often the governed tools
+refused something -- and are labelled as such in the output. They are not
+a governance result: a block is not evidence that the block was necessary,
+and none of them enters an accuracy figure, a McNemar table, or any
+pre-registered comparison.
+
 Rows are read with `.get(..., default)` throughout, matching
 `dce.runner`'s own readers (e.g. `spent_so_far`'s `usd_guard`/`usd`
 fallback) -- an older row shape missing a newer field must degrade to a
@@ -121,7 +144,6 @@ sane default rather than raise mid-report.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from math import sqrt
 from pathlib import Path
@@ -129,7 +151,7 @@ from pathlib import Path
 from scipy.stats import binomtest
 
 from dce.arms import ARMS
-from dce.runner import latest_rows
+from dce.runner import _read_rows, latest_rows
 
 #: Verdicts where the model produced a graded answer.
 ANSWER_VERDICTS: frozenset[str] = frozenset({"correct", "incorrect"})
@@ -249,10 +271,16 @@ def _raw_rows(path: Path) -> list[dict]:
     other figure in this module (see the COST section of the module
     docstring, and `dce.runner.real_spent_so_far`, which this mirrors
     per arm/model slice rather than file-wide).
+
+    Reads through `dce.runner._read_rows` -- the same reader `load()`
+    reaches through `latest_rows` -- so the two agree exactly about what
+    the file contains, including its one forgiveness: an unparseable FINAL
+    line (a torn tail from a killed or out-of-space write) is skipped, a
+    corrupt line anywhere else still raises. Parsing the file a second,
+    independent way here is what made a full disk take down the analysis as
+    well as the resume.
     """
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return _read_rows(path)
 
 
 def _scored(rows: list[dict]) -> list[dict]:
@@ -295,6 +323,13 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     deduplication, used only for `usd_total_billed` -- see the module
     docstring's COST section for why that one figure deliberately does not
     go through `load()`/`latest_rows`.
+
+    `instrumentation` carries the per-row means of the token/turn counts
+    and, for the `contract` arm only, the totals of the three governed-tool
+    counters -- see the module docstring's INSTRUMENTATION section for what
+    each is for and what it is not. `governance` is `None` for any slice
+    that is not entirely arm C, so a mixed or ungoverned slice reports
+    nothing rather than a structural zero.
     """
     scored_rows = _scored(rows)
     scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
@@ -316,6 +351,52 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
         "usd_final": sum(row.get("usd") or 0.0 for row in rows),
         "usd_total_billed": sum(row.get("usd") or 0.0 for row in raw_rows),
         "harness_limited": failure_rate >= HARNESS_FAILURE_RATE_THRESHOLD,
+        "instrumentation": _instrumentation(rows),
+        "governance": _governance_counts(rows),
+    }
+
+
+def _mean(rows: list[dict], key: str) -> float:
+    """Mean of `row[key]` over `rows`, treating a missing/null value as 0 --
+    an older row shape must degrade, not raise (see the module docstring's
+    last paragraph). `0.0` for an empty slice."""
+    if not rows:
+        return 0.0
+    return sum(row.get(key, 0) or 0 for row in rows) / len(rows)
+
+
+def _instrumentation(rows: list[dict]) -> dict:
+    """Per-row means of the token and turn counts, plus the `cached_tokens`
+    TOTAL for the slice.
+
+    The total is reported next to the mean because the caching gate is a
+    yes/no question -- did this arm get prompt-cached at all -- and a mean
+    of, say, 12.4 over 400 rows answers it far less plainly than a total of
+    4,960 next to a flat 0 on another arm.
+    """
+    return {
+        "mean_input_tokens": _mean(rows, "input_tokens"),
+        "mean_output_tokens": _mean(rows, "output_tokens"),
+        "mean_cached_tokens": _mean(rows, "cached_tokens"),
+        "cached_tokens_total": sum(row.get("cached_tokens", 0) or 0 for row in rows),
+        "mean_turns": _mean(rows, "turns"),
+    }
+
+
+def _governance_counts(rows: list[dict]) -> dict | None:
+    """Totals of the three governed-tool counters, for a slice that is
+    entirely arm C; `None` otherwise.
+
+    Descriptive instrumentation, NOT a governance claim -- see the module
+    docstring's INSTRUMENTATION section. Arms A and B have no contract to
+    enforce, so reporting these for them would print a structural zero
+    dressed as a measurement.
+    """
+    if not rows or {row.get("arm") for row in rows} != {ARM_C}:
+        return None
+    return {
+        key: sum(row.get(key, 0) or 0 for row in rows)
+        for key in ("inspect_rejections", "enforcement_blocks", "retry_prompts")
     }
 
 
@@ -330,6 +411,26 @@ def _format_summary(label: str, summary: dict) -> str:
         or "none"
     )
     corruption = summary["corruption"]
+    inst = summary["instrumentation"]
+    instrumentation_line = (
+        f"\n{'':16s} tokens/row: in={inst['mean_input_tokens']:.0f} "
+        f"out={inst['mean_output_tokens']:.0f} "
+        f"cached={inst['mean_cached_tokens']:.0f} "
+        f"(cached total {inst['cached_tokens_total']:,}); "
+        f"turns/row {inst['mean_turns']:.1f}"
+    )
+    governance = summary["governance"]
+    governance_line = (
+        (
+            f"\n{'':16s} governed-tool counters (descriptive "
+            "instrumentation, not a governance claim): "
+            f"inspect_rejections={governance['inspect_rejections']} "
+            f"enforcement_blocks={governance['enforcement_blocks']} "
+            f"retry_prompts={governance['retry_prompts']}"
+        )
+        if governance
+        else ""
+    )
     return (
         f"{label:16s} scored {summary['scored_ok']:4d}/{summary['scored_n']:<4d} "
         f"[{s_lo:.3f},{s_hi:.3f}]   "
@@ -341,6 +442,7 @@ def _format_summary(label: str, summary: dict) -> str:
         f"{fail_str}\n"
         f"{'':16s} db_corrupted: true={corruption['corrupted']} "
         f"unknown={corruption['unknown']}"
+        f"{instrumentation_line}{governance_line}"
     )
 
 
@@ -393,6 +495,42 @@ def _mcnemar_lines(rows: list[dict], left_arm: str, right_arm: str) -> list[str]
     return lines
 
 
+def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
+    """A loud line when the arms in `rows` did not all see the same tasks.
+
+    The comparison is paired and every accuracy denominator assumes each arm
+    attempted the same task set -- but `dce.runner.sweep` can stop MID
+    TASK-GROUP: both the `circuit_broken` and the `connection_leaked` paths
+    `break` out of the per-arm loop before the remaining arms of that task
+    have run, and a `--max-spend` truncation on a partly-written group does
+    the same. The result is arms with different denominators, which McNemar
+    silently absorbs (a task missing from either side is simply dropped
+    from the pairing) and the Wilson intervals silently narrow or widen on.
+    Nothing else in this module would say a word about it.
+    """
+    by_arm = {
+        arm: {row.get("task_id") for row in rows if row.get("arm") == arm}
+        for arm in sorted({row.get("arm", "unknown") for row in rows})
+    }
+    distinct = {frozenset(ids) for ids in by_arm.values()}
+    if len(by_arm) < 2 or len(distinct) == 1:
+        return []
+    everywhere = set.intersection(*by_arm.values())
+    detail = ", ".join(
+        f"{arm}={len(ids)} ({len(ids - everywhere)} not shared)"
+        for arm, ids in by_arm.items()
+    )
+    return [
+        f"  WARNING: the arms on {model} did NOT see the same task set "
+        f"({detail}; {len(everywhere)} tasks common to all). A sweep that "
+        "stopped mid task-group (a tripped circuit breaker, a leaked "
+        "connection, or a truncated budget) leaves lopsided arms, so these "
+        "accuracy denominators are not comparable as they stand and the "
+        "McNemar pairing silently drops the unshared tasks. Re-run to "
+        "complete the groups, or restrict the analysis to the shared tasks."
+    ]
+
+
 def report(path: Path) -> str:
     rows = load(path)
     raw_rows = _raw_rows(path)
@@ -419,6 +557,19 @@ def report(path: Path) -> str:
             primary_summaries[arm] = summary
             lines.append(_format_summary(arm, summary))
         lines.extend(_mcnemar_lines(primary_rows, PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM))
+        # Scoped to the two arms this test actually pairs: a lopsided third
+        # arm is a secondary-section problem, but a lopsided B/C pair
+        # undermines the one pre-registered result.
+        lines.extend(
+            _unequal_task_set_warning(
+                [
+                    row
+                    for row in primary_rows
+                    if row.get("arm") in (PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM)
+                ],
+                PRIMARY_MODEL,
+            )
+        )
         if any(s["harness_limited"] for s in primary_summaries.values()):
             lines.append(
                 "  NOTE: at least one arm above has a harness-failure rate "
@@ -451,6 +602,8 @@ def report(path: Path) -> str:
                     f"scored {s_ok:3d}/{s_n:<3d} [{s_lo:.3f},{s_hi:.3f}]   "
                     f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]"
                 )
+
+        lines.extend(_unequal_task_set_warning(subset, model))
 
         for left in (ARM_A, ARM_B):
             if model == PRIMARY_MODEL and left == PRIMARY_LEFT_ARM:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
 
@@ -19,6 +21,7 @@ from dce.golds import (
     MIN_DEV_CHECKS,
     PLURALITY_THRESHOLD,
     check_dev_gate,
+    golds_sha256,
     reconstruct_with_shares,
 )
 
@@ -155,10 +158,17 @@ def write_golds(
     threshold that produced it. Anything scoring against this file can assert
     it is reading the same ground truth every arm was scored against.
 
-    `manifest_sha256` fingerprints the submission files actually consumed, so
-    two runs at the same revision that nonetheless saw different corpora (a
-    case-insensitive filesystem, a partial download) are distinguishable rather
-    than silently comparable.
+    TWO HASHES, TWO DIFFERENT FACTS, and conflating them was a real
+    confound. `manifest_sha256` fingerprints the submission files actually
+    consumed, so two runs at the same revision that nonetheless saw different
+    corpora (a case-insensitive filesystem, a partial download) are
+    distinguishable rather than silently comparable. It says nothing about the
+    golds: two gold sets reconstructed from the SAME corpus at thresholds 0.60
+    and 0.75 differ in content and carry an identical `manifest_sha256` — and
+    `dce.runner` stamped exactly that value into every result row as
+    `golds_hash`. `golds_sha256` fingerprints the gold mapping itself, which is
+    what a result row needs to be able to claim it was scored against a
+    specific ground truth. Both stay in the envelope.
     """
     envelope = {
         "revision": revision,
@@ -167,13 +177,64 @@ def write_golds(
         "submissions_expected": corpus.expected if corpus else None,
         "submissions_consumed": corpus.consumed if corpus else None,
         "manifest_sha256": corpus.manifest_sha256 if corpus else None,
+        "golds_sha256": golds_sha256(golds),
         "golds": golds,
     }
     path.write_text(json.dumps(envelope, indent=2))
     return envelope
 
 
+def _golds_path(data: Path, threshold: float) -> Path:
+    """`data/golds.json` for the primary threshold; a threshold-tagged
+    sibling for any other.
+
+    Ruling 8 requires publishing gold counts at 0.60 / 0.75 / 0.90, so this
+    module is EXPECTED to be re-run at non-primary thresholds — and
+    `data/` is gitignored, so an in-place overwrite would leave no trace
+    anywhere for a later sweep to notice. Sensitivity runs therefore write
+    beside the primary file rather than over it. `dce.runner._load_golds`
+    refuses a non-primary threshold as a second line of defence; this is
+    the first.
+    """
+    if threshold == PLURALITY_THRESHOLD:
+        return data / "golds.json"
+    return data / f"golds_threshold_{threshold:g}.json"
+
+
+def _coverage_by_level(
+    tasks: list[dict], golds: dict[str, str]
+) -> dict[str, tuple[int, int]]:
+    """level -> (golded tasks, total tasks). FINDINGS is required to report
+    gold coverage per stratum — the levels are the one stratification that
+    is exact rather than heuristic (see Ruling 11) — and nothing else in
+    the pipeline computes it.
+    """
+    totals: Counter[str] = Counter()
+    golded: Counter[str] = Counter()
+    for task in tasks:
+        level = str(task.get("level", "unknown"))
+        totals[level] += 1
+        if str(task["task_id"]) in golds:
+            golded[level] += 1
+    return {level: (golded[level], totals[level]) for level in sorted(totals)}
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(prog="dce.prepare")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=PLURALITY_THRESHOLD,
+        help="plurality share required to accept a reconstructed gold "
+        f"(default {PLURALITY_THRESHOLD}, the pre-registered value). Any "
+        "other value is a SENSITIVITY run: it writes "
+        "data/golds_threshold_<t>.json instead of data/golds.json, and the "
+        "runner refuses to score against it — see Ruling 8, which requires "
+        "reporting gold counts at 0.60 / 0.75 / 0.90",
+    )
+    args = parser.parse_args()
+    threshold: float = args.threshold
+
     data = Path("data")
     files = download_context(data / "hf")
     build_duckdb({k: files[k] for k in CONTEXT_FILES}, data / "dabstep.duckdb")
@@ -187,13 +248,14 @@ def main() -> None:
         corpus_ids |= answers.keys()
 
     golds, exclusions, shares = reconstruct_with_shares(
-        corpus.submissions, corpus.scores
+        corpus.submissions, corpus.scores, plurality_threshold=threshold
     )
     dev_tasks = load_tasks("dev")
     ok, mismatches, absent = check_dev_gate(golds, dev_tasks, corpus_ids)
     checked = len(dev_tasks) - len(absent)
 
-    write_golds(data / "golds.json", golds, corpus=corpus)
+    golds_path = _golds_path(data, threshold)
+    envelope = write_golds(golds_path, golds, threshold=threshold, corpus=corpus)
     (data / "exclusions.json").write_text(json.dumps(exclusions, indent=2))
     (data / "gold_shares.json").write_text(json.dumps(shares, indent=2))
 
@@ -209,8 +271,12 @@ def main() -> None:
         )
     print(
         f"golds: {len(golds)} / {len(tasks)} tasks "
-        f"(plurality threshold {PLURALITY_THRESHOLD})"
+        f"(plurality threshold {threshold}) -> {golds_path} "
+        f"[golds_sha256 {envelope['golds_sha256'][:12]}]"
     )
+    for level, (golded, total) in _coverage_by_level(tasks, golds).items():
+        share = golded / total if total else 0.0
+        print(f"  coverage level={level}: {golded} / {total} ({share:.1%})")
     if shares:
         ordered = sorted(shares.values())
         print(
@@ -247,6 +313,13 @@ def main() -> None:
         )
     if not ok:
         raise SystemExit("dev gate failed; see the spec's fallback before spending")
+    if threshold != PLURALITY_THRESHOLD:
+        print(
+            f"NOTE: this was a SENSITIVITY run at threshold {threshold}. "
+            f"data/golds.json was NOT touched; the counts above belong to "
+            f"{golds_path} and are for the FINDINGS sensitivity table only. "
+            "No sweep will score against them."
+        )
 
 
 if __name__ == "__main__":

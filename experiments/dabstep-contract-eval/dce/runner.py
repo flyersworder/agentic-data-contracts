@@ -48,11 +48,17 @@ reference, `check_and_restore` raising) and asserts the row always lands —
 so a fifth frame introduced later has to explicitly break a test, not slip
 past silently the way the first three did.
 
-TWO EDGES OF "REACHES DISK" THAT ARE DOCUMENTED, NOT CLOSED: `fh.write`/
-`fh.flush` can still fail outright (a full disk, mid-write) with no
-further fallback — there is no stderr last-resort dump if the OS refuses
-the write itself, only for what `json.dumps` cannot serialize. And
-`flush()` is not `fsync()`: it hands the bytes to the OS's page cache, which
+A FULL DISK IS HANDLED ON BOTH SIDES, not documented away: `fh.write`/
+`fh.flush` failing dumps the serialized row to stderr before re-raising
+(so a priced row is recoverable by hand from the log), and `_read_rows`
+forgives an unparseable FINAL line — a torn tail is what a killed or
+out-of-space append leaves behind, and raising on it used to make the
+entire accumulated results file unreadable to every reader at once,
+turning a one-row loss into a dead paid sweep. A corrupt line anywhere
+but the last still raises.
+
+ONE EDGE OF "REACHES DISK" THAT IS DOCUMENTED, NOT CLOSED: `flush()` is
+not `fsync()`: it hands the bytes to the OS's page cache, which
 survives THIS PROCESS dying (a crash, a `raise`, `SIGKILL`) but not the
 MACHINE dying before the OS itself flushes that cache to disk. "Reaches
 disk" in this module means "survives process death", not "survives power
@@ -234,6 +240,8 @@ from dce.agent import (
 from dce.arms import ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
 from dce.frozen import digest
+from dce.golds import PLURALITY_THRESHOLD, golds_sha256
+from dce.grade import active_scorer
 from dce.pricing import MODELS
 
 #: A reservation must never be read as "this call is free." Observed `usd`
@@ -301,10 +309,60 @@ class SweepResult:
     connection_leaked: bool = False
 
 
+def _summable(value) -> float:
+    """`value` as a float when it is a real, finite number; `0.0` for
+    anything else (`None`, a string, a `bool`, NaN, infinity).
+
+    The spend readers below run over rows written by every past version of
+    this code, and over a torn or hand-edited file, so a single bad value
+    must cost that row's contribution rather than the whole read. `bool` is
+    excluded deliberately, for the same reason `_validated_usd` excludes
+    it: `True` would otherwise silently price a row at $1.00.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    value = float(value)
+    return value if math.isfinite(value) else 0.0
+
+
 def _read_rows(path: Path) -> list[dict]:
+    """Every JSON row in `path`, with ONE forgiveness: an unparseable FINAL
+    line is skipped (loudly, on stderr) instead of raising.
+
+    A torn last line is the one legitimate artifact of a killed or ENOSPC
+    write — `fh.write` handing over fewer bytes than it was given, or the
+    process dying between the write and the flush — and it costs exactly
+    the one row it truncated. Raising on it instead made the whole
+    accumulated results file unreadable to SIX readers at once
+    (`spent_so_far`, `real_spent_so_far`, `completed_keys`, `latest_rows`,
+    and, through `latest_rows`, `dce.stats.load`/`report`), so a full disk
+    stopped costing one row and started costing the entire paid sweep:
+    resume could not tell what was already done, and analysis could not
+    read any of it, until a human hand-truncated the file.
+
+    A corrupt line ANYWHERE ELSE still raises. Only the tail can be torn by
+    an interrupted append; a bad line in the middle means something rewrote
+    the file, which is not a truncation and must not be silently skipped.
+    """
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    rows: list[dict] = []
+    for index, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if index != len(lines) - 1:
+                raise
+            print(
+                f"WARNING: {path} ends in an unparseable line "
+                f"({len(line)} chars) — a torn tail from an interrupted or "
+                "out-of-space write. Skipping it; every earlier row was read "
+                "normally, and the lost row's unit is simply re-attempted on "
+                "the next resume.",
+                file=sys.stderr,
+            )
+    return rows
 
 
 def _construction_error_state(
@@ -339,7 +397,7 @@ def _construction_error_state(
 
 
 def completed_keys(
-    path: Path, *, retry_error: bool = False
+    path: Path, *, retry_verdicts: tuple[str, ...] = ()
 ) -> set[tuple[str, str, str]]:
     """(task_id, arm, model) triples a resumed sweep should skip.
 
@@ -356,9 +414,13 @@ def completed_keys(
         ordinary bug (a signature mismatch, say); unbounded free retries
         would hide such a bug behind a wall of skip-forever rows forever,
         instead of surfacing it loudly after two tries.
-      * `error` — done unless `retry_error` is set, since an `error` row
-        already cost money and a resume should not silently re-pay for it
-        without being asked.
+      * `error` / `post_run_error` — done unless named in
+        `retry_verdicts` (`--retry`), since both already cost money and a
+        resume should not silently re-pay for them without being asked.
+        `post_run_error` is OUR bug (bookkeeping after a completed model
+        call), so re-running it is sometimes exactly right once the bug is
+        fixed — hence its presence among the choices, not because it is
+        cheap.
       * `hit_limit` / `scoring_error` — need no special case: both are
         terminal by design (a `hit_limit` needs a deliberate higher-budget
         re-run, not an automatic retry at the same budget; a
@@ -375,7 +437,7 @@ def completed_keys(
             if trailing_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS:
                 done.add(key)  # retries exhausted: terminal, stop retrying
             continue
-        if verdict == "error" and retry_error:
+        if verdict in retry_verdicts:
             continue
         done.add(key)
     return done
@@ -428,16 +490,19 @@ def spent_so_far(path: Path) -> float:
 
     Falls back to a row's `usd` when `usd_guard` is absent (an older row
     shape from before the two were split — see the module docstring's
-    SEPARATE REAL SPEND FROM GUARD SPEND section) and is tolerant of a
-    missing/null value entirely — unlike the strict validation `sweep`
-    itself applies to rows it is producing right now; see that function's
-    docstring for why the two need different strictness.
+    SEPARATE REAL SPEND FROM GUARD SPEND section). A missing, null,
+    non-numeric or non-finite value contributes `0.0` rather than raising:
+    this reader runs over rows written by every past version of this code,
+    so it must degrade rather than brick every future resume — unlike the
+    strict validation `sweep` applies to rows it is producing right now;
+    see that function's docstring for why the two need different
+    strictness. (This docstring previously claimed that tolerance while a
+    string `usd` still raised `TypeError` on the `+=`; `_summable` is what
+    makes the claim true.)
     """
     total = 0.0
     for row in _read_rows(path):
-        usd = row.get("usd_guard", row.get("usd"))
-        if usd:
-            total += usd
+        total += _summable(row.get("usd_guard", row.get("usd")))
     return total
 
 
@@ -448,12 +513,13 @@ def real_spent_so_far(path: Path) -> float:
     two pessimistically-priced construction errors and one real $0.01
     success has `spent_so_far` well above $0.01 but `real_spent_so_far`
     exactly $0.01).
+
+    Non-numeric and non-finite values contribute `0.0` rather than raising,
+    for the same reason — see `spent_so_far` and `_summable`.
     """
     total = 0.0
     for row in _read_rows(path):
-        usd = row.get("usd")
-        if usd:
-            total += usd
+        total += _summable(row.get("usd"))
     return total
 
 
@@ -519,9 +585,9 @@ def _seed_observed_by_model(path: Path) -> dict[str, list[float]]:
     """
     by_model: dict[str, list[float]] = {}
     for row in _read_rows(path):
-        usd_guard = row.get("usd_guard", row.get("usd"))
+        usd_guard = _summable(row.get("usd_guard", row.get("usd")))
         model = row.get("model")
-        if usd_guard and model:
+        if usd_guard and isinstance(model, str):
             by_model.setdefault(model, []).append(usd_guard)
     return by_model
 
@@ -615,9 +681,31 @@ def _safe_json_dumps(row: dict) -> str:
          on a `dict` has its own built-in cycle guard (renders `{...}` for
          a self-reference rather than recursing or raising), and places no
          constraint on key types at all, so this covers both gaps layer 2
-         leaves open. A handful of string-valued identifying fields
-         (`task_id`, `arm`, `model`, `verdict`) are copied out best-effort
-         so the row stays findable by simple tools even in this shape.
+         leaves open.
+
+    THE ENVELOPE MUST CARRY THE PRICE, not merely enough to find the line.
+    Layer 3 landing a row that reads `$0.00` is the SAME failure this
+    module's central invariant exists to prevent, one layer deeper: a
+    resumed sweep really spent the money, `spent_so_far` summed `0.0`, and
+    `--max-spend` stopped binding at all (reproduced: 20 resumes, $24.00
+    real, 20 rows on disk, `spent_so_far` $0.00). So `usd` and `usd_guard`
+    are carried, normalized through `_priced_or_pessimistic` exactly as the
+    write site itself normalizes them — by the time `sweep` calls this,
+    both are already validated finite floats, and a pessimistic ceiling is
+    the right answer for any other caller's malformed row.
+
+    `level` and `db_corrupted` are carried for the same reason one layer
+    out: without `level`, `dce.stats.accuracy_by(rows, "level")` buckets
+    the row as `"unknown"` and the stratum tables silently misreport;
+    without `db_corrupted`, the experiment's HEADLINE governance finding
+    is misattributed (a `True` reads as absent, i.e. "check never ran").
+
+    The four identifying fields are `str()`-coerced and ALWAYS present,
+    never filtered on `isinstance`. A non-`str` `task_id` used to make the
+    envelope omit the key entirely, after which `latest_rows` and
+    `completed_keys` — which index `row["task_id"]` — raised `KeyError` on
+    the whole file, taking down every future resume AND `dce.stats.report`.
+    A wrong-typed identifier is a nuisance; a missing one is a brick.
     """
     try:
         return json.dumps(row)
@@ -633,9 +721,25 @@ def _safe_json_dumps(row: dict) -> str:
     except Exception:
         envelope["unserializable_row"] = "<could not stringify row>"
     for key in ("task_id", "arm", "model", "verdict"):
-        value = row.get(key)
-        if isinstance(value, str):
-            envelope[key] = value
+        try:
+            envelope[key] = str(row.get(key))
+        except Exception:
+            envelope[key] = "unknown"
+    try:
+        envelope["level"] = str(row.get("level", "unknown"))
+    except Exception:
+        envelope["level"] = "unknown"
+    corrupted = row.get("db_corrupted")
+    envelope["db_corrupted"] = corrupted if isinstance(corrupted, bool) else None
+    model = row.get("model")
+    for key in ("usd", "usd_guard"):
+        try:
+            value, _ = _priced_or_pessimistic(
+                row, key, model if isinstance(model, str) else ""
+            )
+        except Exception:
+            value = WORST_CASE_TOKEN_BUDGET_USD
+        envelope[key] = value
     try:
         return json.dumps(envelope)
     except Exception:
@@ -694,6 +798,10 @@ def _construction_error_row(
         "token_cap": 0,
         "contract_digest": digest(),
         "golds_hash": golds_hash,
+        # The scorer in force for this process — see
+        # `dce.agent.build_result_row`. Nothing was scored here (no call
+        # was ever made), but the column stays uniform across row shapes.
+        "scorer": active_scorer(),
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
         "error": f"{type(exc).__name__}: {exc}",
@@ -712,7 +820,7 @@ def sweep(
     max_spend: float,
     golds_hash: str,
     run_task_fn=run_task,
-    retry_error: bool = False,
+    retry_verdicts: tuple[str, ...] = (),
 ) -> SweepResult:
     """Run every not-yet-completed (task, arm, model) triple, appending one
     JSON row per unit of work to `out`, until the next task's reservation
@@ -724,7 +832,7 @@ def sweep(
     `task_id -> answer` mapping (callers reading the on-disk envelope must
     unwrap it first; see `_load_golds`).
     """
-    done = completed_keys(out, retry_error=retry_error)
+    done = completed_keys(out, retry_verdicts=retry_verdicts)
     todo = pending(tasks, arms, models, done)
     by_id = {t["task_id"]: t for t in tasks}
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -847,9 +955,29 @@ def sweep(
                 # THE ONE WRITE SITE. `_safe_json_dumps` cannot itself
                 # raise, by construction — see its own docstring for why
                 # `default=repr` alone (a non-`str` dict key, a circular
-                # reference) is not enough.
-                fh.write(_safe_json_dumps(row) + "\n")
-                fh.flush()
+                # reference) is not enough, and why the envelope it falls
+                # back to must carry the PRICE and not just the line.
+                payload = _safe_json_dumps(row)
+                try:
+                    fh.write(payload + "\n")
+                    fh.flush()
+                except Exception:
+                    # The OS refused the bytes (a full disk, most likely).
+                    # Nothing here can make them land, but the row is
+                    # already priced, so it must not vanish silently: dump
+                    # it to stderr — where a redirected log or a scrollback
+                    # can still recover it by hand — and then let the
+                    # failure stop the sweep loudly.
+                    print(
+                        f"FATAL: could not write a priced result row to {out} "
+                        "(a full disk?). The row follows verbatim on the next "
+                        "line so it can be recovered by hand; the sweep stops "
+                        "now rather than continuing to spend money it cannot "
+                        "record.",
+                        file=sys.stderr,
+                    )
+                    print(payload, file=sys.stderr)
+                    raise
 
                 spent += usd_guard
                 real_spent += usd
@@ -927,7 +1055,7 @@ def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
 
 
 def _load_golds(path: Path) -> tuple[dict[str, str], str]:
-    """Read the golds envelope and return (task_id -> answer map, manifest hash).
+    """Read the golds envelope and return (task_id -> answer map, gold hash).
 
     `data/golds.json` is an envelope
     (`{"revision", "threshold", "count", "golds", "submissions_expected",
@@ -939,8 +1067,23 @@ def _load_golds(path: Path) -> tuple[dict[str, str], str]:
     loud and immediate instead of a confusing crash deep in the sweep.
 
     The `revision` check is what catches a smoke run and a full sweep being
-    scored against two different ground-truth snapshots: nothing else in the
-    pipeline would notice.
+    scored against two different ground-truth snapshots on the DATASET
+    axis. The `threshold` check is its counterpart on the RECONSTRUCTION
+    axis: Ruling 8 requires re-running `dce.prepare` at 0.60 / 0.75 / 0.90
+    to publish the sensitivity table, and `data/golds.json` is gitignored,
+    so an in-place overwrite at another threshold would otherwise be
+    invisible to the sweep, to git, and to the results file alike.
+
+    `golds_hash` — stamped into EVERY result row — is
+    `dce.golds.golds_sha256`, a fingerprint of the gold mapping itself. It
+    used to be `manifest_sha256`, which fingerprints the SUBMISSION CORPUS:
+    identical across two gold sets that differ in every answer, because
+    they were reconstructed from the same corpus. The stored value is
+    verified against a recomputation here rather than trusted, so a
+    hand-edited envelope (hash kept, answers changed) is caught too; an
+    envelope written before this field existed is simply hashed on the fly.
+    `manifest_sha256` stays in the envelope — it still records which corpus
+    was consumed, which is a different and also-necessary fact.
     """
     envelope = json.loads(path.read_text())
     if (
@@ -960,7 +1103,24 @@ def _load_golds(path: Path) -> tuple[dict[str, str], str]:
             "score a sweep against a different dataset snapshot than the "
             "one golds.json was reconstructed from"
         )
-    return envelope["golds"], envelope["manifest_sha256"]
+    if envelope.get("threshold") != PLURALITY_THRESHOLD:
+        raise SystemExit(
+            f"golds threshold {envelope.get('threshold')!r} does not match "
+            f"dce.golds.PLURALITY_THRESHOLD {PLURALITY_THRESHOLD!r}; this "
+            "golds.json was reconstructed under a different consensus rule "
+            "(a sensitivity run, most likely — see Ruling 8). Re-run "
+            "`python -m dce.prepare` to restore the primary gold set before "
+            "scoring anything against it"
+        )
+    computed = golds_sha256(envelope["golds"])
+    stored = envelope.get("golds_sha256")
+    if stored is not None and stored != computed:
+        raise SystemExit(
+            f"golds.json's stored golds_sha256 {stored!r} does not match the "
+            f"hash of the golds it contains ({computed!r}) — the file has "
+            "been edited since it was written; refusing to score against it"
+        )
+    return envelope["golds"], computed
 
 
 def _find_repo_root(cwd: Path | None = None) -> Path:
@@ -1077,10 +1237,11 @@ def main() -> None:
     parser.add_argument("--tasks", type=Path, default=Path("data/tasks.json"))
     parser.add_argument(
         "--retry",
-        choices=["error"],
+        choices=["error", "post_run_error"],
         default=None,
-        help="also retry rows with this verdict on resume (an 'error' row "
-        "already cost money; 'construction_error' rows are retried "
+        help="also retry rows with this verdict on resume (an 'error' or "
+        "'post_run_error' row already cost money; 'construction_error' rows "
+        "are retried "
         f"automatically, up to {MAX_CONSTRUCTION_ATTEMPTS} trailing "
         "attempts, regardless of this flag)",
     )
@@ -1128,7 +1289,7 @@ def main() -> None:
         docs=docs,
         max_spend=args.max_spend,
         golds_hash=golds_hash,
-        retry_error=args.retry == "error",
+        retry_verdicts=(args.retry,) if args.retry else (),
     )
     # Real dollars, not the guard ledger — see the module docstring's
     # SEPARATE REAL SPEND FROM GUARD SPEND section.

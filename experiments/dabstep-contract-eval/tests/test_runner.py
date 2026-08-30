@@ -4,6 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import dce.runner as runner_module
+import dce.stats as stats_module
 import pytest
 from dce.agent import (
     WORST_CASE_TOKEN_BUDGET_USD,
@@ -12,6 +13,7 @@ from dce.agent import (
     build_result_row,
 )
 from dce.data import DATASET_REVISION
+from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.runner import (
     CIRCUIT_BREAKER_THRESHOLD,
     MAX_CONSTRUCTION_ATTEMPTS,
@@ -87,7 +89,9 @@ def test_completed_keys_retries_construction_error_rows_below_the_cap(tmp_path: 
     )
     assert MAX_CONSTRUCTION_ATTEMPTS > 1  # a single attempt must be below the cap
     assert completed_keys(path) == set()
-    assert completed_keys(path, retry_error=True) == set()  # unaffected by the flag
+    assert (
+        completed_keys(path, retry_verdicts=("error",)) == set()
+    )  # unaffected by the flag
 
 
 def test_completed_keys_stops_retrying_construction_error_after_the_cap(
@@ -124,7 +128,7 @@ def test_completed_keys_retries_error_rows_only_when_requested(tmp_path: Path):
         + "\n"
     )
     assert completed_keys(path) == {("1", "contract", "m")}
-    assert completed_keys(path, retry_error=True) == set()
+    assert completed_keys(path, retry_verdicts=("error",)) == set()
 
 
 def test_completed_keys_treats_hit_limit_and_scoring_error_as_terminal(tmp_path: Path):
@@ -139,7 +143,7 @@ def test_completed_keys_treats_hit_limit_and_scoring_error_as_terminal(tmp_path:
         + "\n"
     )
     # Terminal regardless of --retry error: that flag is scoped to "error" only.
-    assert completed_keys(path, retry_error=True) == {
+    assert completed_keys(path, retry_verdicts=("error",)) == {
         ("1", "contract", "m"),
         ("2", "contract", "m"),
     }
@@ -844,7 +848,60 @@ def test_load_golds_returns_map_and_hash(tmp_path: Path):
     )
     golds, golds_hash = _load_golds(path)
     assert golds == {"1": "42"}
-    assert golds_hash == "deadbeef"
+    # NOT `manifest_sha256` ("deadbeef"): that fingerprints the submission
+    # CORPUS and is identical for two gold sets that differ in every
+    # answer. `golds_hash` must fingerprint the golds themselves.
+    assert golds_hash == golds_sha256({"1": "42"})
+    assert golds_hash != "deadbeef"
+
+
+def _envelope(mapping: dict[str, str], **overrides) -> str:
+    envelope = {
+        "revision": DATASET_REVISION,
+        "threshold": PLURALITY_THRESHOLD,
+        "count": len(mapping),
+        "submissions_expected": 1,
+        "submissions_consumed": 1,
+        "manifest_sha256": "deadbeef",
+        "golds_sha256": golds_sha256(mapping),
+        "golds": mapping,
+    }
+    envelope.update(overrides)
+    return json.dumps(envelope)
+
+
+def test_two_gold_sets_from_one_corpus_get_different_hashes(tmp_path: Path):
+    """The confound this closes: Ruling 8 requires re-running `prepare` at
+    0.60/0.75/0.90, `data/golds.json` is gitignored, and the two envelopes
+    carry an IDENTICAL `manifest_sha256` because they were reconstructed
+    from the same submission corpus. Under the old code both sweeps stamped
+    the same `golds_hash` into every row while being scored against
+    different ground truth."""
+    loose = tmp_path / "loose.json"
+    tight = tmp_path / "tight.json"
+    loose.write_text(_envelope({"1": "42", "2": "43"}))
+    tight.write_text(_envelope({"1": "42"}))
+
+    _, loose_hash = _load_golds(loose)
+    _, tight_hash = _load_golds(tight)
+    assert loose_hash != tight_hash
+
+
+def test_load_golds_rejects_a_threshold_mismatch(tmp_path: Path):
+    path = tmp_path / "golds.json"
+    path.write_text(_envelope({"1": "42"}, threshold=0.60))
+    with pytest.raises(SystemExit):
+        _load_golds(path)
+
+
+def test_load_golds_rejects_an_edited_envelope(tmp_path: Path):
+    """Stored hash kept, answers changed by hand."""
+    path = tmp_path / "golds.json"
+    path.write_text(
+        _envelope({"1": "42"}, golds={"1": "999"}),
+    )
+    with pytest.raises(SystemExit):
+        _load_golds(path)
 
 
 def test_load_golds_rejects_revision_mismatch(tmp_path: Path):
@@ -882,6 +939,62 @@ def test_load_golds_rejects_a_bare_mapping(tmp_path: Path):
         raise AssertionError("must raise SystemExit, not KeyError") from None
     except SystemExit:
         pass
+
+
+# ── torn tail (ENOSPC / killed mid-write) ────────────────────────────────
+
+
+def _row(task_id: str, **extra) -> str:
+    row = {
+        "task_id": task_id,
+        "arm": "contract",
+        "model": GLM,
+        "verdict": "correct",
+        "usd": 0.01,
+        "usd_guard": 0.01,
+    }
+    row.update(extra)
+    return json.dumps(row)
+
+
+def test_a_torn_final_line_does_not_break_any_reader(tmp_path: Path):
+    """A full disk (or a `SIGKILL` mid-append) leaves a truncated LAST
+    line. It must cost that one row, not the entire accumulated results
+    file: before this, all six readers raised `JSONDecodeError` and the
+    paid sweep became unreadable to both resume and analysis until a human
+    hand-truncated it."""
+    path = tmp_path / "r.jsonl"
+    path.write_text(_row("1") + "\n" + _row("2") + "\n" + '{"task_id": "3", "usd')
+
+    assert spent_so_far(path) == pytest.approx(0.02)
+    assert real_spent_so_far(path) == pytest.approx(0.02)
+    assert completed_keys(path) == {("1", "contract", GLM), ("2", "contract", GLM)}
+    assert {r["task_id"] for r in latest_rows(path)} == {"1", "2"}
+    assert {r["task_id"] for r in stats_module.load(path)} == {"1", "2"}
+    assert {r["task_id"] for r in stats_module._raw_rows(path)} == {"1", "2"}
+    stats_module.report(path)  # must not raise
+
+
+def test_a_corrupt_line_mid_file_still_raises_loudly(tmp_path: Path):
+    """Only the TAIL can be torn by an interrupted append. A bad line in
+    the middle means something rewrote the file, which is not a truncation
+    and must never be silently skipped past."""
+    path = tmp_path / "r.jsonl"
+    path.write_text(_row("1") + "\n" + "{not json at all" + "\n" + _row("3") + "\n")
+
+    with pytest.raises(json.JSONDecodeError):
+        spent_so_far(path)
+    with pytest.raises(json.JSONDecodeError):
+        latest_rows(path)
+    with pytest.raises(json.JSONDecodeError):
+        stats_module._raw_rows(path)
+
+
+def test_spend_summers_skip_a_non_numeric_value(tmp_path: Path):
+    path = tmp_path / "r.jsonl"
+    path.write_text(_row("1") + "\n" + _row("2", usd="1.20", usd_guard="1.20") + "\n")
+    assert spent_so_far(path) == pytest.approx(0.01)
+    assert real_spent_so_far(path) == pytest.approx(0.01)
 
 
 # ── clean-tree guard ─────────────────────────────────────────────────────
@@ -1079,6 +1192,55 @@ def test_safe_json_dumps_survives_a_circular_reference():
     parsed = json.loads(_safe_json_dumps(row))
     assert "unserializable_row" in parsed
     assert parsed["task_id"] == "1"
+
+
+def test_safe_json_dumps_envelope_carries_the_price_level_and_corruption():
+    """The layer-3 envelope must not be a bare "here is a line" marker: a
+    row landing without `usd`/`usd_guard` prices it at $0.00 for every
+    reader (the spend cap included), without `level` it is bucketed as
+    level="unknown" by `dce.stats.accuracy_by`, and without `db_corrupted`
+    the experiment's headline governance finding is misattributed."""
+    row: dict = {
+        "task_id": "1",
+        "arm": "contract",
+        "model": GLM,
+        "verdict": "correct",
+        "level": "hard",
+        "db_corrupted": True,
+        "usd": 1.20,
+        "usd_guard": 1.20,
+        (1, 2): "a tuple key: nothing but layer 3 can serialize this row",
+    }
+    parsed = json.loads(_safe_json_dumps(row))
+    assert "unserializable_row" in parsed
+    assert parsed["usd"] == pytest.approx(1.20)
+    assert parsed["usd_guard"] == pytest.approx(1.20)
+    assert parsed["level"] == "hard"
+    assert parsed["db_corrupted"] is True
+
+
+def test_safe_json_dumps_envelope_always_carries_a_task_id(tmp_path: Path):
+    """A non-`str` `task_id` used to be filtered out of the envelope by an
+    `isinstance` check, leaving the key ABSENT -- after which `latest_rows`
+    and `completed_keys` (both of which index `row["task_id"]`) raised
+    `KeyError` over the whole file, taking down every future resume and all
+    of `dce.stats`. Coerced with `str()`, never filtered."""
+    row: dict = {
+        "task_id": 7,  # an int, not a str
+        "arm": "contract",
+        "model": GLM,
+        "verdict": "correct",
+        (1, 2): "forces layer 3",
+    }
+    parsed = json.loads(_safe_json_dumps(row))
+    assert parsed["task_id"] == "7"
+    assert parsed["arm"] == "contract"
+    assert parsed["verdict"] == "correct"
+
+    path = tmp_path / "r.jsonl"
+    path.write_text(json.dumps(parsed) + "\n")
+    assert latest_rows(path)  # must not raise KeyError
+    assert completed_keys(path) == {("7", "contract", GLM)}
 
 
 # ── real_spent_so_far ────────────────────────────────────────────────────
@@ -1732,3 +1894,19 @@ def test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write(
     # Either the row parsed with its real fields, or it landed via the
     # unserializable-row envelope -- either way it reached disk, legibly.
     assert row.get("task_id") == "1" or "unserializable_row" in row
+
+    # THE ROW LANDING IS NOT ENOUGH -- THE PRICE HAS TO LAND WITH IT.
+    # A row that reaches disk at $0.00 reproduces the exact failure this
+    # whole pin exists to prevent (a resumed sweep spending real money
+    # while `spent_so_far` reads zero and `--max-spend` stops binding),
+    # just one layer deeper: in `_safe_json_dumps`'s own fallback envelope
+    # rather than in the loop that calls it. The envelope used to carry
+    # only task_id/arm/model/verdict, so the two serialization cases below
+    # (`non_str_dict_key`, `circular_reference`) passed the assertion above
+    # while the ledger read $0.00.
+    assert spent_so_far(out) > 0, "the row landed but its price did not"
+    # And every reader of the file must still work afterwards: both of
+    # these index `row["task_id"]`, so an envelope that dropped the key
+    # would take down every future resume AND the whole analysis.
+    latest_rows(out)
+    completed_keys(out)

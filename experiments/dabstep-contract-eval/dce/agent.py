@@ -37,7 +37,7 @@ from pathlib import Path
 
 from dce.arms import build_arm
 from dce.frozen import digest
-from dce.grade import _clean, score
+from dce.grade import _clean, active_scorer, score
 from dce.pricing import MODELS, cost
 
 # A harness cap, not a contract limit — applied identically to every arm so
@@ -428,6 +428,13 @@ def build_result_row(
         "token_cap": token_cap,
         "contract_digest": digest(),
         "golds_hash": golds_hash,
+        # WHICH scorer produced `verdict`. `dce.grade` prefers DABStep's
+        # official `question_scorer` when `dabstep_benchmark` is importable
+        # and falls back to its own normalizer otherwise; that decision is
+        # made by whatever is installed at import time, so without this
+        # field a mid-experiment install would re-grade later rows under
+        # different rules with nothing in the results file to show it.
+        "scorer": active_scorer(),
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
     }
@@ -524,6 +531,10 @@ def _priced_fallback_row(
         "token_cap": TOKEN_BUDGET,
         "contract_digest": digest(),
         "golds_hash": golds_hash,
+        # The scorer in force for this process — see `build_result_row`.
+        # Present on every row shape so the analysis has one uniform
+        # column rather than a field that appears only on some rows.
+        "scorer": active_scorer(),
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
         "note": note,

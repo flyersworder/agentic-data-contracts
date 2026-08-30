@@ -5,7 +5,13 @@ from pathlib import Path
 
 import duckdb
 from dce.data import DATASET_REVISION, build_duckdb
-from dce.prepare import Corpus, write_golds
+from dce.golds import PLURALITY_THRESHOLD, golds_sha256
+from dce.prepare import (
+    Corpus,
+    _coverage_by_level,
+    _golds_path,
+    write_golds,
+)
 
 
 def test_build_duckdb_creates_one_table_per_source(tmp_path: Path):
@@ -161,3 +167,47 @@ def test_the_gold_file_records_which_corpus_produced_it(tmp_path: Path):
     assert envelope["submissions_expected"] == 2205
     assert envelope["submissions_consumed"] == 2199
     assert envelope["manifest_sha256"] == "deadbeef" * 8
+
+
+def test_the_gold_file_fingerprints_the_golds_not_only_the_corpus(tmp_path: Path):
+    """Two gold sets reconstructed from ONE corpus at two thresholds differ
+    in content and share an identical `manifest_sha256`. Ruling 8 requires
+    exactly those re-runs, and `data/` is gitignored, so nothing else could
+    catch an in-place overwrite. `golds_sha256` is what a result row's
+    `golds_hash` must be."""
+    corpus = Corpus(
+        submissions={},
+        scores={},
+        expected=2205,
+        consumed=2199,
+        manifest_sha256="deadbeef" * 8,
+        missing=[],
+        shadowed=[],
+    )
+    loose = write_golds(
+        tmp_path / "loose.json", {"1": "0.12", "2": "NL"}, threshold=0.60, corpus=corpus
+    )
+    tight = write_golds(
+        tmp_path / "tight.json", {"1": "0.12"}, threshold=0.75, corpus=corpus
+    )
+    assert loose["manifest_sha256"] == tight["manifest_sha256"]
+    assert loose["golds_sha256"] != tight["golds_sha256"]
+    assert loose["golds_sha256"] == golds_sha256({"1": "0.12", "2": "NL"})
+
+
+def test_a_sensitivity_threshold_never_overwrites_the_primary_gold_file(
+    tmp_path: Path,
+):
+    assert _golds_path(tmp_path, PLURALITY_THRESHOLD).name == "golds.json"
+    assert _golds_path(tmp_path, 0.60).name == "golds_threshold_0.6.json"
+    assert _golds_path(tmp_path, 0.90).name == "golds_threshold_0.9.json"
+
+
+def test_gold_coverage_is_broken_down_by_level():
+    tasks = [
+        {"task_id": "1", "level": "easy"},
+        {"task_id": "2", "level": "easy"},
+        {"task_id": "3", "level": "hard"},
+    ]
+    coverage = _coverage_by_level(tasks, {"1": "a", "3": "b"})
+    assert coverage == {"easy": (1, 2), "hard": (1, 1)}

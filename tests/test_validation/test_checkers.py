@@ -162,6 +162,42 @@ class TestNoSelectStarChecker:
         result = NoSelectStarChecker().check_ast(ast)
         assert not result.passed
 
+    def test_qualified_star_blocked(self) -> None:
+        """`t.*` is a star projection wearing a prefix."""
+        ast = _parse("SELECT o.* FROM analytics.orders o")
+        result = NoSelectStarChecker().check_ast(ast)
+        assert not result.passed
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT COUNT(*) FROM analytics.orders",
+            "SELECT region, COUNT(*) FROM analytics.orders GROUP BY region",
+            "SELECT COUNT(*) OVER () FROM analytics.orders",
+            "SELECT COUNT(*) FILTER (WHERE status = 'x') FROM analytics.orders",
+        ],
+    )
+    def test_count_star_is_not_select_star(self, sql: str) -> None:
+        """`COUNT(*)` projects no columns at all — it is the opposite of the
+        over-broad read this checker exists to stop.
+
+        It used to be rejected, because `find_all(exp.Star)` matches any Star
+        anywhere in the tree and `COUNT(*)` parses as `Count(this=Star())`.
+        Measured cost in the DABStep sweep: 86 false rejections across 124 of
+        401 tasks, each one telling the agent "SELECT * is not allowed" about
+        a query containing no SELECT *. An agent cannot comply with a
+        diagnosis that is not true of its query, so it burned turns guessing.
+        """
+        result = NoSelectStarChecker().check_ast(_parse(sql))
+        assert result.passed, result.message
+
+    def test_count_star_over_a_starred_subquery_is_still_blocked(self) -> None:
+        """The inner `SELECT *` is the violation; the outer COUNT(*) is not.
+        Allowing COUNT(*) must not create a wrapper that smuggles one in."""
+        ast = _parse("SELECT COUNT(*) FROM (SELECT * FROM analytics.orders) t")
+        result = NoSelectStarChecker().check_ast(ast)
+        assert not result.passed
+
 
 class TestRequiredFilterChecker:
     def test_filter_present_passes(self) -> None:

@@ -2035,3 +2035,319 @@ def test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write(
     # would take down every future resume AND the whole analysis.
     latest_rows(out)
     completed_keys(out)
+
+
+# ── sweep: concurrency ───────────────────────────────────────────────────
+#
+# Every test below exists because parallelism reaches four pieces of state
+# the serial loop never had to share: the results file handle, the spend
+# ledger, the per-model observation history, and the working copy. The
+# working copy is the one that is not merely a data race — see
+# `test_sweep_gives_each_worker_its_own_working_copy`.
+
+
+def _fast_row(task, arm, model, *a, **k):
+    return {
+        "task_id": task["task_id"],
+        "arm": arm,
+        "model": model,
+        "usd": 0.001,
+        "usd_guard": 0.001,
+        "verdict": "correct",
+    }
+
+
+def _numbered_tasks(n: int) -> list[dict]:
+    return [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(n)
+    ]
+
+
+def test_sweep_at_one_worker_writes_rows_in_pending_order(tmp_path: Path):
+    """The default must stay bit-identical to the serial sweep: same rows,
+    same order. Every other test in this file asserts against `workers=1`
+    implicitly, so a regression here would look like a hundred unrelated
+    failures rather than one."""
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(4)
+    sweep(
+        tasks,
+        ("schema_only", "contract"),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=_fast_row,
+    )
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert [(r["task_id"], r["arm"]) for r in rows] == [
+        (t, a) for t in "0123" for a in ("schema_only", "contract")
+    ]
+
+
+def test_sweep_runs_groups_concurrently_when_workers_exceeds_one(tmp_path: Path):
+    """The point of the whole change: at `workers=N`, N task groups are in
+    flight at once. Asserted with a barrier rather than a timing
+    measurement — a wall-clock assertion is the classic flaky test, and a
+    barrier that never trips fails deterministically."""
+    import threading
+
+    barrier = threading.Barrier(3, timeout=10)
+
+    def blocking_row(task, arm, model, *a, **k):
+        if arm == "schema_only":
+            # Only the first call of each group waits, so the barrier is
+            # measuring concurrent GROUPS, not concurrent arms.
+            barrier.wait()
+        return _fast_row(task, arm, model)
+
+    tasks = _numbered_tasks(3)
+    sweep(
+        tasks,
+        ("schema_only", "contract"),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=blocking_row,
+        workers=3,
+    )
+    # Reaching here at all means all three groups were inside
+    # `run_task_fn` simultaneously; a serial sweep deadlocks on the
+    # barrier's timeout instead.
+
+
+def test_sweep_gives_each_worker_its_own_working_copy(tmp_path: Path):
+    """NOT merely a data race. `check_and_restore` repairs a corrupted
+    working copy by copying the 26 MB pristine file back over it. Sharing
+    one copy across workers would land that `copyfile` in the middle of
+    another worker's live query, and — worse for the experiment —
+    `db_corrupted` would stop attributing corruption to the arm that
+    caused it. That field IS the headline governance finding, so a shared
+    copy would not just be slow or flaky; it would be wrong."""
+    import threading
+
+    seen: list[Path] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=10)
+
+    def record_db(task, arm, model, db, *a, **k):
+        with lock:
+            seen.append(db)
+        if arm == "schema_only":
+            barrier.wait()
+        return _fast_row(task, arm, model)
+
+    pristine = _make_pristine(tmp_path)
+    tasks = _numbered_tasks(2)
+    sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=pristine,
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=record_db,
+        workers=2,
+    )
+    assert pristine not in seen
+    assert len(set(seen)) == 2, "each worker must get its own working copy"
+    assert set(seen) == {_working_db_path(pristine, 0), _working_db_path(pristine, 1)}
+    for path in set(seen):
+        assert path.exists()
+
+
+def test_working_db_path_keeps_the_historical_name_for_worker_zero(tmp_path: Path):
+    """A `workers=1` resume must reuse the same file a pre-concurrency
+    sweep left behind, not orphan it under a new name."""
+    pristine = tmp_path / "d"
+    assert _working_db_path(pristine) == _working_db_path(pristine, 0)
+    assert _working_db_path(pristine, 0).name == "d.working"
+    assert _working_db_path(pristine, 1).name == "d.working-1"
+
+
+def test_concurrent_writes_land_one_parseable_row_per_unit(tmp_path: Path):
+    """The module's central invariant — one row per unit of work, on disk —
+    survives eight threads sharing one file handle. An unsynchronized
+    `write` + `flush` interleaves partial lines, which reads back as
+    corruption in the middle of the file, which `_read_rows` (correctly)
+    refuses to forgive."""
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(40)
+    sweep(
+        tasks,
+        ("schema_only", "manual_prompt", "contract"),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=_fast_row,
+        workers=8,
+    )
+    lines = out.read_text().splitlines()
+    assert len(lines) == 120
+    rows = [json.loads(line) for line in lines]  # raises if any line is torn
+    assert {(r["task_id"], r["arm"]) for r in rows} == {
+        (t["task_id"], arm)
+        for t in tasks
+        for arm in ("schema_only", "manual_prompt", "contract")
+    }
+
+
+def test_sweep_counts_in_flight_reservations_against_the_cap(tmp_path: Path):
+    """The serial guard reserved one group, ran it, then reserved the next.
+    Concurrently, N groups are dispatched before any of them has banked a
+    cost, so a guard that only reads `spent` would admit N groups against a
+    budget for one. The reservation must be held from dispatch to
+    completion, not merely computed at dispatch."""
+    import threading
+
+    started = threading.Semaphore(0)
+    release = threading.Event()
+    calls: list[str] = []
+    lock = threading.Lock()
+
+    def blocking_row(task, arm, model, *a, **k):
+        with lock:
+            calls.append(task["task_id"])
+        started.release()
+        release.wait(timeout=10)
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": _CALL_USD,
+            "usd_guard": _CALL_USD,
+            "verdict": "correct",
+        }
+
+    tasks = _numbered_tasks(10)
+    max_spend = _budget_for_exactly_two_calls(GLM)
+
+    def unblock() -> None:
+        # Let every worker that can start, start; then release them all.
+        # `daemon` plus a timeout so a failing sweep cannot leave this
+        # thread blocked forever and hang the whole test session.
+        started.acquire(timeout=10)
+        release.set()
+
+    watcher = threading.Thread(target=unblock, daemon=True)
+    watcher.start()
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=max_spend,
+        golds_hash="h",
+        run_task_fn=blocking_row,
+        workers=8,
+    )
+    release.set()
+    watcher.join(timeout=10)
+    # The serial sweep admits exactly two $0.40 calls under this budget.
+    # Eight workers must not admit more: the floor reservation for a single
+    # in-flight group already consumes most of the cap, so at most two
+    # groups can ever be in flight at once.
+    assert len(calls) <= 2
+    assert result.spent <= max_spend
+    assert result.truncated is True
+
+
+def test_sweep_stops_dispatching_new_groups_once_the_circuit_breaks(tmp_path: Path):
+    """A systemic failure (a missing API key) fails every unit identically.
+    The serial breaker `break`s out of the loop; the concurrent one has to
+    stop the QUEUE, or the remaining groups drain through at full
+    guard-ledger cost while the breaker's verdict sits unread."""
+
+    def always_fails(task, arm, model, *a, **k):
+        raise AgentConstructionError("no OPENROUTER_API_KEY")
+
+    tasks = _numbered_tasks(60)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=1_000_000.0,
+        golds_hash="h",
+        run_task_fn=always_fails,
+        workers=4,
+    )
+    assert result.circuit_broken is True
+    rows = [
+        json.loads(line) for line in (tmp_path / "r.jsonl").read_text().splitlines()
+    ]
+    # The breaker trips at CIRCUIT_BREAKER_THRESHOLD; at `workers` in
+    # flight, at most `workers - 1` further groups can already be running
+    # when it does. Nothing beyond that may be dispatched.
+    assert len(rows) < len(tasks)
+    assert len(rows) <= CIRCUIT_BREAKER_THRESHOLD + 4
+
+
+def test_sweep_reraises_a_worker_bug_after_the_pool_drains(tmp_path: Path):
+    """A real bug in `run_task_fn` stops the sweep loudly — that property
+    predates concurrency and must survive it. The difference is that the
+    exception now has to cross a thread boundary, and the rows already in
+    flight must still land before it surfaces."""
+
+    def explodes_on_one_task(task, arm, model, *a, **k):
+        if task["task_id"] == "3":
+            raise RuntimeError("a real bug")
+        return _fast_row(task, arm, model)
+
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(8)
+    with pytest.raises(RuntimeError, match="a real bug"):
+        sweep(
+            tasks,
+            ("schema_only",),
+            (GLM,),
+            {t["task_id"]: "g" for t in tasks},
+            out=out,
+            db_path=_make_pristine(tmp_path),
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=explodes_on_one_task,
+            workers=4,
+        )
+    # Whatever else happened, no row was torn or lost on the way out.
+    for line in out.read_text().splitlines():
+        json.loads(line)
+
+
+def test_sweep_rejects_a_nonsensical_worker_count(tmp_path: Path):
+    with pytest.raises(ValueError, match="workers"):
+        sweep(
+            TASKS,
+            ("schema_only",),
+            (GLM,),
+            {"1": "g"},
+            out=tmp_path / "r.jsonl",
+            db_path=_make_pristine(tmp_path),
+            docs={},
+            max_spend=1.0,
+            golds_hash="h",
+            run_task_fn=_fast_row,
+            workers=0,
+        )

@@ -216,6 +216,55 @@ NOT cover):
     row sitting earlier in the file gets silently counted as a wrong answer
     on top of the real, later outcome.
 
+CONCURRENCY (`--workers N`, default 1). `sweep` runs N TASK GROUPS at once
+on N threads. The unit of dispatch is the whole group (every arm x model for
+one task), never an individual unit, which is what preserves two properties
+the serial loop got for free: a truncation still lands on a task boundary (so
+a paired analysis never has a half-finished task), and one task's arms still
+share one copy of the database.
+
+Four pieces of state became shared, and each is handled explicitly rather
+than hoped about:
+
+  * THE RESULTS FILE. Still exactly ONE write site, now inside
+    `_SweepLedger.record`, which holds the lock across write + flush +
+    spend update. An unsynchronized `write`/`flush` interleaves partial
+    lines, and a torn line in the MIDDLE of the file (not the tail) is the
+    one corruption `_read_rows` deliberately refuses to forgive — it would
+    brick every reader of the whole paid sweep at once.
+  * THE SPEND LEDGER. Serially, `spent` alone was a sufficient basis for the
+    cap check because nothing was ever in flight. With N groups running,
+    N-1 of them have spent money no row has banked yet, so the reservation
+    is now HELD from dispatch to completion (`_SweepLedger.reserved`) and
+    the check is `spent + reserved + this group`. This double-counts a
+    running group; the error is always toward stopping early, which is the
+    only direction a spend guard may be wrong in.
+  * THE WORKING COPY — the one that is not merely a data race. Each worker
+    gets its OWN copy (`<db>.working`, `<db>.working-1`, ...). One shared
+    copy would put `check_and_restore`'s whole-file repair `copyfile` in the
+    middle of another worker's live query, and would destroy the
+    attribution of `db_corrupted` to the arm that caused it — and
+    `db_corrupted` IS this experiment's headline governance finding, so a
+    shared copy would be wrong, not just flaky.
+  * THE STOP CONDITIONS. A worker cannot `break` its peers, so budget
+    truncation, the circuit breaker, a leaked connection, and a real bug all
+    set a `threading.Event` that every worker checks before pulling more
+    work. Groups already in flight run to completion and their rows land:
+    stopping must never cost a row that has already been paid for. An
+    exception that must stop the sweep is parked on the ledger and re-raised
+    by `sweep` after the pool drains, preserving the serial ordering (write,
+    flush, spend update, THEN propagate).
+
+The circuit breaker's "consecutive" now means consecutive in COMPLETION
+order, which under concurrency is not dispatch order. That is still the
+right reading: it asks whether the last N things that finished were all
+construction failures, which is exactly the systemic-failure signal (a
+missing `OPENROUTER_API_KEY` fails every unit identically) it exists to
+catch.
+
+At `workers=1` every behaviour above — including the order rows are written
+in — is identical to the serial sweep this replaced.
+
 Two gaps recorded here as deliberately unfixed, not silently tolerated —
 see `dce/agent.py`'s module docstring for the full detail on both:
 
@@ -234,8 +283,10 @@ import argparse
 import itertools
 import json
 import math
+import queue
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -625,8 +676,15 @@ def pending(tasks, arms, models, done) -> list[tuple[str, str, str]]:
     ]
 
 
-def _working_db_path(pristine: Path) -> Path:
-    return pristine.with_name(pristine.name + ".working")
+def _working_db_path(pristine: Path, worker: int = 0) -> Path:
+    """Worker 0 keeps the historical `.working` name so a single-worker
+    resume reuses the file a pre-concurrency sweep left behind instead of
+    orphaning it; every other worker gets its own suffixed copy. See
+    `_worker` for why the copies cannot be shared.
+    """
+    if worker == 0:
+        return pristine.with_name(pristine.name + ".working")
+    return pristine.with_name(f"{pristine.name}.working-{worker}")
 
 
 def _next_reserve(observed: list[float], floor: float) -> float:
@@ -902,6 +960,327 @@ def _construction_error_row(
     }
 
 
+class _SweepLedger:
+    """Every piece of state `sweep`'s workers share, behind ONE lock.
+
+    Concurrency does not relax the module's central invariant — a priced row
+    still reaches disk before anything else may throw — it only moves the
+    enforcement point. `record` IS the one write site, and it holds the lock
+    across the write, the flush, and the spend/observation update, so no two
+    workers can interleave a partial line or lose an update to a read-modify-
+    write race on `spent`.
+
+    THE RESERVATION IS NOW HELD, NOT JUST COMPUTED. Serially, `sweep` reserved
+    one task group, ran it, banked the cost, and reserved the next: `spent`
+    alone was a sufficient basis for the check because nothing was ever in
+    flight. With `workers` groups running at once, `workers - 1` of them have
+    spent real money that no row has banked yet, so a guard reading `spent`
+    alone would admit `workers` groups against a budget for one. `reserved`
+    holds each in-flight group's ceiling from dispatch (`try_reserve`) to
+    completion (`release`), and the check is against `spent + reserved`.
+
+    That deliberately DOUBLE-COUNTS a group while it runs: its rows bank into
+    `spent` as they land while its reservation is still held. The error is
+    always in the conservative direction — the sweep stops slightly early,
+    never slightly over — which is the only direction a spend guard is allowed
+    to be wrong in.
+
+    STOPPING IS A FLAG, NOT A `break`. The serial loop broke out of two nested
+    `for`s. A worker cannot break its peers, so every stop condition (budget,
+    circuit breaker, leaked connection, a real bug) sets `stop`, which every
+    worker checks before pulling more work. Groups already in flight run to
+    completion and their rows land — stopping the sweep must never cost a row
+    that has already been paid for.
+    """
+
+    def __init__(
+        self,
+        fh,
+        *,
+        spent: float,
+        real_spent: float,
+        observed: dict[str, list[float]],
+        max_spend: float,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._fh = fh
+        self.spent = spent
+        self.real_spent = real_spent
+        self.observed = observed
+        self.max_spend = max_spend
+        self.reserved = 0.0
+        self.consecutive_construction_errors = 0
+        self.truncated = False
+        self.circuit_broken = False
+        self.connection_leaked = False
+        self.pending_exc: BaseException | None = None
+        self.stop = threading.Event()
+
+    def try_reserve(self, group, task_id: str) -> float | None:
+        """Reserve a whole task group's ceiling, or refuse it and stop the
+        sweep. Returns the amount held (to hand back to `release`), or `None`
+        if this group must not run.
+
+        The reservation covers the entire group and is taken before the
+        group's first call, so a truncation always lands on a task boundary
+        and a paired analysis never has to discard a half-finished task —
+        the same property the serial loop had, for the same reason.
+        """
+        with self._lock:
+            if self.stop.is_set():
+                return None
+            amount = sum(
+                _next_reserve(self.observed.get(model, []), _token_budget_usd(model))
+                for _, _, model in group
+            )
+            if self.spent + self.reserved + amount > self.max_spend:
+                print(
+                    f"stopping: ${self.spent:.2f} spent + "
+                    f"${self.reserved:.2f} reserved in flight + "
+                    f"${amount:.2f} for task {task_id!r}'s group would "
+                    f"exceed ${self.max_spend:.2f}"
+                )
+                self.truncated = True
+                self.stop.set()
+                return None
+            self.reserved += amount
+            return amount
+
+    def release(self, amount: float) -> None:
+        with self._lock:
+            self.reserved -= amount
+
+    def record(self, row: dict, model: str, usd: float, usd_guard: float) -> None:
+        """THE ONE WRITE SITE, plus the accounting that must not be separable
+        from it. See `_safe_json_dumps` for why serialization cannot raise.
+        """
+        payload = _safe_json_dumps(row)
+        with self._lock:
+            try:
+                self._fh.write(payload + "\n")
+                self._fh.flush()
+            except Exception:
+                # The OS refused the bytes (a full disk, most likely).
+                # Nothing here can make them land, but the row is already
+                # priced, so it must not vanish silently: dump it to stderr
+                # — where a redirected log or a scrollback can still recover
+                # it by hand — and then let the failure stop the sweep
+                # loudly.
+                print(
+                    "FATAL: could not write a priced result row (a full "
+                    "disk?). The row follows verbatim on the next line so "
+                    "it can be recovered by hand; the sweep stops now "
+                    "rather than continuing to spend money it cannot "
+                    "record.",
+                    file=sys.stderr,
+                )
+                print(payload, file=sys.stderr)
+                raise
+
+            self.spent += usd_guard
+            self.real_spent += usd
+            if usd_guard > 0:
+                self.observed.setdefault(model, []).append(usd_guard)
+
+            # Counted in COMPLETION order, which under concurrency is not
+            # dispatch order. That is the right reading anyway: the breaker
+            # asks "are the last N things that finished all construction
+            # failures", which is exactly the systemic-failure signal
+            # (a missing OPENROUTER_API_KEY fails every unit identically)
+            # it exists to catch.
+            if row.get("verdict") == "construction_error":
+                self.consecutive_construction_errors += 1
+            else:
+                self.consecutive_construction_errors = 0
+            if self.consecutive_construction_errors >= CIRCUIT_BREAKER_THRESHOLD:
+                self.circuit_broken = True
+                self.stop.set()
+
+    def fail(self, exc: BaseException) -> None:
+        """Hold the FIRST exception that must stop the sweep, and stop it.
+
+        Serially this was a bare `raise` from inside the loop. A worker
+        thread's `raise` reaches nobody, so the exception is parked here and
+        re-raised by `sweep` once the pool has drained — after every in-flight
+        row has landed, which is the same ordering the serial code had (write,
+        flush, spend update, *then* propagate).
+        """
+        with self._lock:
+            if self.pending_exc is None:
+                self.pending_exc = exc
+            self.stop.set()
+
+
+def _run_group(
+    group,
+    working: Path,
+    ledger: _SweepLedger,
+    *,
+    by_id: dict,
+    golds: dict,
+    docs,
+    golds_hash: str,
+    run_task_fn,
+    trace_dir: Path | None,
+    db_path: Path,
+) -> None:
+    """Run every (arm, model) unit of ONE task against ONE worker's working
+    copy. Lifted verbatim out of `sweep`'s inner loop; the only changes are
+    that shared state goes through `ledger` and that a stop condition sets a
+    flag instead of `break`ing a loop the caller no longer owns.
+    """
+    for task_id, arm, model in group:
+        gold = golds.get(task_id, "")
+        try:
+            row = run_task_fn(
+                by_id[task_id],
+                arm,
+                model,
+                working,
+                docs,
+                gold,
+                golds_hash=golds_hash,
+                trace_dir=trace_dir,
+            )
+        except AgentConstructionError as exc:
+            # The ONLY exception `run_task_fn` is expected to raise (see the
+            # module docstring and `AgentConstructionError` itself) —
+            # anything else is a real bug and stops the sweep loudly rather
+            # than silently treating a possibly-billable failure as a free
+            # construction error.
+            row = _construction_error_row(
+                by_id[task_id], arm, model, gold, golds_hash, exc
+            )
+
+        # INVARIANT (see module docstring): `row` now exists and is priced.
+        # Every failure between here and `ledger.record` is COLLECTED onto
+        # `row` — never raised through — so the row always reaches the one
+        # write site. `pending_exc`, if set, only gets to stop the sweep
+        # AFTER the write, the flush, and the spend update.
+        pending_exc: Exception | None = None
+
+        # `run_task` stamps `close_error` when its OWN `setup.close()`
+        # failed — meaning the connection may still be open. That does not
+        # just invalidate THIS task's `check_and_restore` call: a still-open
+        # connection can keep mutating this worker's working copy underneath
+        # whatever runs next on it, so every later check by this worker
+        # would be equally untrustworthy, each looking just as authoritative
+        # as a real one. The experiment's headline governance finding is
+        # "did an ungoverned arm mutate the warehouse" — a stream of
+        # unreliable `db_corrupted` values is worse than no sweep at all, so
+        # the whole sweep stops rather than running `check_and_restore`
+        # again against unknown state.
+        row_leaked = row.get("close_error") is not None
+        if row_leaked:
+            row["db_corrupted"] = None
+            row["integrity_error"] = (
+                "DuckDB connection leaked while closing this "
+                f"task's arm ({row['close_error']}); the working "
+                "copy's integrity substrate can no longer be "
+                "trusted for this or any later task in this sweep"
+            )
+        else:
+            try:
+                integrity = check_and_restore(working, db_path)
+                row["db_corrupted"] = integrity.corrupted
+            except Exception as exc:
+                row["db_corrupted"] = None
+                row["integrity_error"] = f"{type(exc).__name__}: {exc}"
+                pending_exc = exc
+
+        # Pricing is NORMALIZED, never raised through — the same
+        # collect-then-carry-on policy `integrity_error` gets just above.
+        usd, usd_error = _priced_or_pessimistic(row, "usd", model)
+        usd_guard, usd_guard_error = _priced_or_pessimistic(row, "usd_guard", model)
+        row["usd"] = usd
+        row["usd_guard"] = usd_guard
+        pricing_errors = [e for e in (usd_error, usd_guard_error) if e]
+        if pricing_errors:
+            row["pricing_error"] = "; ".join(pricing_errors)
+            if pending_exc is None:
+                pending_exc = ValueError(row["pricing_error"])
+
+        ledger.record(row, model, usd, usd_guard)
+
+        # Only now, after the row is safely on disk and every counter is
+        # updated, do the stop conditions get to act.
+        if row_leaked:
+            ledger.connection_leaked = True
+            ledger.stop.set()
+            print(
+                "stopping: a DuckDB connection leaked while closing "
+                f"task {task_id!r}'s arm; the working copy's "
+                "integrity substrate can no longer be trusted for "
+                "any later task in this sweep. Resume in a fresh "
+                "process to continue — only this task's own "
+                "check_and_restore result is affected."
+            )
+            return
+
+        if pending_exc is not None:
+            ledger.fail(pending_exc)
+            return
+
+        if ledger.circuit_broken:
+            print(
+                f"stopping: {CIRCUIT_BREAKER_THRESHOLD} consecutive "
+                "construction errors across different units — "
+                "likely a systemic problem (missing "
+                "OPENROUTER_API_KEY? a bad model id?), not "
+                "per-task bad luck"
+            )
+            return
+
+
+def _worker(
+    index: int,
+    work_q,
+    ledger: _SweepLedger,
+    *,
+    db_path: Path,
+    **group_kwargs,
+) -> None:
+    """One worker thread: pull task groups until the queue is empty or the
+    sweep stops.
+
+    THE WORKING COPY IS PER WORKER, AND THAT IS NOT AN OPTIMIZATION.
+    `check_and_restore` repairs a corrupted copy by copying the whole
+    pristine file back over it. Sharing one copy across workers would land
+    that `copyfile` in the middle of another worker's live query — and, far
+    worse for the experiment, `db_corrupted` would stop attributing
+    corruption to the arm that caused it, since any worker's ungoverned arm
+    could have been the one that mutated the shared file. `db_corrupted` IS
+    the headline governance finding, so a shared copy would not be merely
+    flaky; it would be wrong.
+
+    Created lazily, on this worker's first group, so a `--workers 8` run over
+    two remaining units does not copy the database eight times.
+    """
+    working: Path | None = None
+    try:
+        while not ledger.stop.is_set():
+            try:
+                task_id, group = work_q.get_nowait()
+            except queue.Empty:
+                return
+            amount = ledger.try_reserve(group, task_id)
+            if amount is None:
+                return
+            try:
+                if working is None:
+                    working = make_working_copy(
+                        db_path, _working_db_path(db_path, index)
+                    )
+                _run_group(group, working, ledger, db_path=db_path, **group_kwargs)
+            finally:
+                ledger.release(amount)
+    except BaseException as exc:  # noqa: BLE001 - re-raised by `sweep`
+        # A worker's `raise` reaches nobody. Park it and stop the sweep; the
+        # main thread re-raises it after the pool drains, so a real bug still
+        # stops the sweep loudly rather than silently losing one worker.
+        ledger.fail(exc)
+
+
 def sweep(
     tasks,
     arms,
@@ -916,6 +1295,7 @@ def sweep(
     run_task_fn=run_task,
     retry_verdicts: tuple[str, ...] = (),
     trace_dir: Path | None = None,
+    workers: int = 1,
 ) -> SweepResult:
     """Run every not-yet-completed (task, arm, model) triple, appending one
     JSON row per unit of work to `out`, until the next task's reservation
@@ -926,7 +1306,20 @@ def sweep(
     handed to `run_task_fn` — see the module docstring. `golds` is the plain
     `task_id -> answer` mapping (callers reading the on-disk envelope must
     unwrap it first; see `_load_golds`).
+
+    `workers` task groups run concurrently, each on its OWN working copy of
+    the database. The unit of dispatch is the whole task group (every arm x
+    model for one task), never an individual unit: that is what keeps a
+    truncation on a task boundary and keeps one task's arms on one copy of
+    the database. At `workers=1` the behaviour — including row order — is
+    identical to the serial sweep this replaced. Threads, not processes: the
+    work is network I/O inside `run_sync`, and one shared file handle plus
+    one shared spend ledger is a far smaller surface to get right than the
+    same state split across processes.
     """
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, got {workers}")
+
     done = completed_keys(out, retry_verdicts=retry_verdicts)
     todo = pending(tasks, arms, models, done)
     by_id = {t["task_id"]: t for t in tasks}
@@ -947,189 +1340,50 @@ def sweep(
     # the very next resume.
     _repair_torn_tail(out)
 
-    working = make_working_copy(db_path, _working_db_path(db_path))
-    truncated = False
-    circuit_broken = False
-    connection_leaked = False
-    consecutive_construction_errors = 0
+    # Pre-filled before any worker starts, so `queue.Empty` unambiguously
+    # means "all work dispatched" rather than "nothing ready yet".
+    work_q: queue.Queue = queue.Queue()
+    for task_id, group_iter in itertools.groupby(todo, key=lambda t: t[0]):
+        work_q.put((task_id, list(group_iter)))
 
     with out.open("a") as fh:
-        for task_id, group_iter in itertools.groupby(todo, key=lambda t: t[0]):
-            group = list(group_iter)
-            group_reserve = sum(
-                _next_reserve(observed.get(model, []), _token_budget_usd(model))
-                for _, _, model in group
+        ledger = _SweepLedger(
+            fh,
+            spent=spent,
+            real_spent=real_spent,
+            observed=observed,
+            max_spend=max_spend,
+        )
+        group_kwargs = dict(
+            by_id=by_id,
+            golds=golds,
+            docs=docs,
+            golds_hash=golds_hash,
+            run_task_fn=run_task_fn,
+            trace_dir=trace_dir,
+        )
+        threads = [
+            threading.Thread(
+                target=_worker,
+                args=(i, work_q, ledger),
+                kwargs={"db_path": db_path, **group_kwargs},
+                name=f"dce-sweep-{i}",
             )
-            if spent + group_reserve > max_spend:
-                print(
-                    f"stopping: ${spent:.2f} spent + ${group_reserve:.2f} "
-                    f"reserved for task {task_id!r}'s group would exceed "
-                    f"${max_spend:.2f}"
-                )
-                truncated = True
-                break
+            for i in range(workers)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
-            gold = golds.get(task_id, "")
-            for _, arm, model in group:
-                try:
-                    row = run_task_fn(
-                        by_id[task_id],
-                        arm,
-                        model,
-                        working,
-                        docs,
-                        gold,
-                        golds_hash=golds_hash,
-                        trace_dir=trace_dir,
-                    )
-                except AgentConstructionError as exc:
-                    # The ONLY exception `run_task_fn` is expected to raise
-                    # (see the module docstring and `AgentConstructionError`
-                    # itself) — anything else is a real bug and is left to
-                    # propagate, stopping the sweep loudly rather than
-                    # silently treating a possibly-billable failure as a
-                    # free construction error.
-                    row = _construction_error_row(
-                        by_id[task_id], arm, model, gold, golds_hash, exc
-                    )
-
-                # INVARIANT (see module docstring): `row` now exists and is
-                # priced. THERE IS EXACTLY ONE WRITE SITE, below
-                # (`_safe_json_dumps` + `fh.write`), and every failure
-                # between here and it is COLLECTED onto `row` — never
-                # raised through — so the row always reaches that one
-                # site. `pending_exc`, if set, only gets to propagate
-                # AFTER the write, the flush, and the spend update.
-                pending_exc: Exception | None = None
-
-                # `run_task` stamps `close_error` when its OWN `setup.close()`
-                # failed — meaning the connection may still be open. That
-                # does not just invalidate THIS task's `check_and_restore`
-                # call: a still-open connection can keep mutating the
-                # working copy underneath whatever runs next, so EVERY
-                # later check in this sweep would be equally untrustworthy,
-                # each looking just as authoritative as a real one. The
-                # experiment's headline governance finding is "did an
-                # ungoverned arm mutate the warehouse" — a stream of
-                # unreliable `db_corrupted` values is worse than no sweep
-                # at all, so this task's working copy is retired: the row
-                # still reaches disk, but the sweep then stops rather than
-                # running `check_and_restore` again against unknown state.
-                row_leaked = row.get("close_error") is not None
-                if row_leaked:
-                    row["db_corrupted"] = None
-                    row["integrity_error"] = (
-                        "DuckDB connection leaked while closing this "
-                        f"task's arm ({row['close_error']}); the working "
-                        "copy's integrity substrate can no longer be "
-                        "trusted for this or any later task in this sweep"
-                    )
-                else:
-                    try:
-                        integrity = check_and_restore(working, db_path)
-                        row["db_corrupted"] = integrity.corrupted
-                    except Exception as exc:
-                        row["db_corrupted"] = None
-                        row["integrity_error"] = f"{type(exc).__name__}: {exc}"
-                        pending_exc = exc
-
-                # Pricing is NORMALIZED, never raised through — the same
-                # collect-then-carry-on policy `integrity_error` gets just
-                # above, not the opposite one a bare `row["usd"]` access
-                # used to apply here (a `Decimal`, a NaN, a missing key, an
-                # infinite value all used to raise and lose the row; same
-                # frame, same already-spent money, and there is no reason
-                # for the two policies to differ). `usd_guard` stays
-                # required in spirit — a row that never sets it gets
-                # `"usd_guard missing"` in `pricing_error`, not a silent
-                # `guard == real` default.
-                usd, usd_error = _priced_or_pessimistic(row, "usd", model)
-                usd_guard, usd_guard_error = _priced_or_pessimistic(
-                    row, "usd_guard", model
-                )
-                row["usd"] = usd
-                row["usd_guard"] = usd_guard
-                pricing_errors = [e for e in (usd_error, usd_guard_error) if e]
-                if pricing_errors:
-                    row["pricing_error"] = "; ".join(pricing_errors)
-                    if pending_exc is None:
-                        pending_exc = ValueError(row["pricing_error"])
-
-                # THE ONE WRITE SITE. `_safe_json_dumps` cannot itself
-                # raise, by construction — see its own docstring for why
-                # `default=repr` alone (a non-`str` dict key, a circular
-                # reference) is not enough, and why the envelope it falls
-                # back to must carry the PRICE and not just the line.
-                payload = _safe_json_dumps(row)
-                try:
-                    fh.write(payload + "\n")
-                    fh.flush()
-                except Exception:
-                    # The OS refused the bytes (a full disk, most likely).
-                    # Nothing here can make them land, but the row is
-                    # already priced, so it must not vanish silently: dump
-                    # it to stderr — where a redirected log or a scrollback
-                    # can still recover it by hand — and then let the
-                    # failure stop the sweep loudly.
-                    print(
-                        f"FATAL: could not write a priced result row to {out} "
-                        "(a full disk?). The row follows verbatim on the next "
-                        "line so it can be recovered by hand; the sweep stops "
-                        "now rather than continuing to spend money it cannot "
-                        "record.",
-                        file=sys.stderr,
-                    )
-                    print(payload, file=sys.stderr)
-                    raise
-
-                spent += usd_guard
-                real_spent += usd
-                if usd_guard > 0:
-                    observed.setdefault(model, []).append(usd_guard)
-
-                if row.get("verdict") == "construction_error":
-                    consecutive_construction_errors += 1
-                else:
-                    consecutive_construction_errors = 0
-                if consecutive_construction_errors >= CIRCUIT_BREAKER_THRESHOLD:
-                    circuit_broken = True
-
-                # Only now, after the row is safely on disk and every
-                # counter above is updated, do the stop conditions below
-                # get to act — loudly, as any of them should, but without
-                # ever losing the row or the spend it represents.
-                if row_leaked:
-                    connection_leaked = True
-                    print(
-                        "stopping: a DuckDB connection leaked while closing "
-                        f"task {task_id!r}'s arm; the working copy's "
-                        "integrity substrate can no longer be trusted for "
-                        "any later task in this sweep. Resume in a fresh "
-                        "process to continue — only this task's own "
-                        "check_and_restore result is affected."
-                    )
-                    break
-
-                if pending_exc is not None:
-                    raise pending_exc
-
-                if circuit_broken:
-                    print(
-                        f"stopping: {CIRCUIT_BREAKER_THRESHOLD} consecutive "
-                        "construction errors across different units — "
-                        "likely a systemic problem (missing "
-                        "OPENROUTER_API_KEY? a bad model id?), not "
-                        "per-task bad luck"
-                    )
-                    break
-            if circuit_broken or connection_leaked:
-                break
+    if ledger.pending_exc is not None:
+        raise ledger.pending_exc
     return SweepResult(
-        spent=spent,
-        real_spent=real_spent,
-        truncated=truncated,
-        circuit_broken=circuit_broken,
-        connection_leaked=connection_leaked,
+        spent=ledger.spent,
+        real_spent=ledger.real_spent,
+        truncated=ledger.truncated,
+        circuit_broken=ledger.circuit_broken,
+        connection_leaked=ledger.connection_leaked,
     )
 
 
@@ -1354,6 +1608,20 @@ def main() -> None:
         help="Do not write transcripts. Saves disk, and gives up diagnosis.",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "task groups to run concurrently, each on its own working copy "
+            "of the database (default 1 = the serial sweep). Runs are pure "
+            "network I/O, so this is close to linear in wall-clock; but "
+            "every model call is pinned to ONE provider endpoint with "
+            "allow_fallbacks:false, so a rate limit there surfaces as an "
+            "error rather than a re-route. Raise it gradually and watch "
+            "the error rate."
+        ),
+    )
+    parser.add_argument(
         "--retry",
         choices=["error", "post_run_error"],
         default=None,
@@ -1378,6 +1646,9 @@ def main() -> None:
     # `assert_clean_tree`'s docstring.
     assert_clean_tree(out=args.out)
 
+    if args.workers < 1:
+        raise SystemExit(f"--workers must be at least 1, got {args.workers}")
+
     worst_group = _worst_case_task_group_usd(args.arms, args.models)
     admits = int(args.max_spend // worst_group) if worst_group > 0 else 0
     print(
@@ -1386,6 +1657,18 @@ def main() -> None:
         f"admits up to {admits} worst-case task-group(s) before the first "
         "observation tightens it"
     )
+    if args.workers > 1 and admits < args.workers:
+        # Reservations are HELD while a group is in flight (see
+        # `_SweepLedger`), so the cap bounds concurrency as well as spend: a
+        # budget admitting fewer worst-case groups than there are workers
+        # runs serially at first no matter what `--workers` says, until
+        # observations tighten the estimate. Said out loud, because the
+        # symptom otherwise looks like the pool being broken.
+        print(
+            f"note: ${args.max_spend:.2f} admits only {admits} worst-case "
+            f"group(s), so fewer than {args.workers} workers will be busy "
+            "until the first observations tighten the reserve"
+        )
 
     golds, golds_hash = _load_golds(args.golds)
     tasks = [t for t in json.loads(args.tasks.read_text()) if t["task_id"] in golds]
@@ -1415,6 +1698,7 @@ def main() -> None:
         golds_hash=golds_hash,
         retry_verdicts=(args.retry,) if args.retry else (),
         trace_dir=trace_dir,
+        workers=args.workers,
     )
     # Real dollars, not the guard ledger — see the module docstring's
     # SEPARATE REAL SPEND FROM GUARD SPEND section.

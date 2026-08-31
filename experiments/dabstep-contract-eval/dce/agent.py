@@ -957,7 +957,11 @@ def run_task(
     import warnings
 
     from pydantic_ai import capture_run_messages
-    from pydantic_ai.exceptions import CostNotFoundWarning, UsageLimitExceeded
+    from pydantic_ai.exceptions import (
+        CostNotFoundWarning,
+        UnexpectedModelBehavior,
+        UsageLimitExceeded,
+    )
     from pydantic_ai.usage import RunUsage, UsageLimits
 
     try:
@@ -1084,6 +1088,40 @@ def run_task(
                 forced = _force_final_answer(agent, list(messages), usage)
                 if forced:
                     answer, verdict, forced_answer = forced, "unset", True
+            except UnexpectedModelBehavior as exc:
+                # THE OUTPUT CAP IS OUR LIMIT TOO, SO IT GETS THE SAME
+                # TREATMENT AS THE OTHERS. `MAX_OUTPUT_TOKENS_PER_REQUEST`
+                # kills a request from inside, so it surfaces here rather than
+                # as `UsageLimitExceeded` — but it is exactly as much a
+                # harness artifact as a tool-call trip, and F2's argument
+                # applies verbatim: bank a scoreable row instead of an
+                # unscoreable one.
+                #
+                # This matters more than it sounds. Raising the cap does not
+                # solve it: 16,000 -> 64,000 simply let `deepseek-v4-flash`
+                # reason 67,516 tokens on the same task instead of 36,155.
+                # An arm with no context can spiral without bound, so ANY
+                # finite cap binds on `schema_only` and on nothing else —
+                # which would hand the contract arm a win manufactured by our
+                # own configuration. Forcing an answer removes the asymmetry
+                # without pretending the spiral did not happen: the row still
+                # records `forced_answer`.
+                #
+                # Narrowed to the cap message on purpose. `UnexpectedModelBehavior`
+                # also covers genuine misbehaviour (an exhausted tool-retry
+                # budget, say), which must stay a visible `error`. If a
+                # pydantic-ai release changes the wording, this degrades to
+                # the old behaviour — an error row — never to a wrong one.
+                if "token limit" not in str(exc).lower():
+                    verdict = "error"
+                    answer = f"{type(exc).__name__}: {exc}"
+                else:
+                    verdict = "hit_limit"
+                    forced = _force_final_answer(agent, list(messages), usage)
+                    if forced:
+                        answer, verdict, forced_answer = forced, "unset", True
+                    else:
+                        answer = f"{type(exc).__name__}: {exc}"
             except Exception as exc:
                 verdict = "error"
                 answer = f"{type(exc).__name__}: {exc}"

@@ -1541,3 +1541,72 @@ def test_output_cap_clears_the_worst_observed_reasoning_run():
         "a per-request cap below the worst observed WHOLE-RUN output will bind "
         "on the arm that reasons most, which is the arm with the least context"
     )
+
+
+def test_output_cap_death_is_forced_like_any_other_cap_trip(tmp_path, monkeypatch):
+    """`MAX_OUTPUT_TOKENS_PER_REQUEST` kills a request from INSIDE, so it
+    arrives as `UnexpectedModelBehavior`, not `UsageLimitExceeded` — and so it
+    used to bypass the forcing turn and bank an unscoreable `error` row.
+
+    That asymmetry is not cosmetic. An arm with no context can reason without
+    bound (measured on `deepseek-v4-flash-0731`: 67,516 tokens on one
+    `schema_only` run, against 36,155 for the same task at the old cap). So
+    ANY finite cap binds on that arm and on no other, which would hand the
+    contract arm a win manufactured by our own configuration. Raising the cap
+    does not fix it — 16,000 -> 64,000 only bought a bigger spiral.
+    """
+
+    class Exploded:
+        def run_sync(self, *a, usage=None, **k):
+            from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+            if usage is not None:
+                usage.input_tokens = 900
+                usage.output_tokens = 64_000
+                usage.requests = 4
+            raise UnexpectedModelBehavior(
+                "Model token limit (64000) exceeded before any response was generated."
+            )
+
+    monkeypatch.setattr(agent, "_force_final_answer", lambda *a, **k: "0.12")
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Exploded(),
+    )
+    assert row["forced_answer"] is True
+    assert row["verdict"] == "correct"
+    # The spend still has to survive the raise, exactly as for a cap trip.
+    assert row["output_tokens"] == 64_000
+
+
+def test_genuine_model_misbehaviour_still_records_an_error(tmp_path, monkeypatch):
+    """The narrowing must bite: only the cap message is forced. An exhausted
+    tool-retry budget is real misbehaviour and has to stay a visible error, or
+    forcing would paper over bugs as well as caps."""
+
+    class Exploded:
+        def run_sync(self, *a, usage=None, **k):
+            from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+            raise UnexpectedModelBehavior("Tool exceeded max retries count of 1")
+
+    monkeypatch.setattr(agent, "_force_final_answer", lambda *a, **k: "0.12")
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Exploded(),
+    )
+    assert row["verdict"] == "error"
+    assert row["forced_answer"] is False
+    assert "max retries" in row["answer"]

@@ -977,8 +977,17 @@ def test_max_output_tokens_leaves_room_for_a_reasoning_models_reasoning():
     The failure was arm-asymmetric — it killed only the arm whose larger
     prompt induced the longest reasoning — which makes the old value a
     confound, not merely a tight cap.
+
+    RAISED AGAIN to 64,000 when the identical failure returned on
+    `deepseek-v4-flash-0731`, which reasons two orders of magnitude harder
+    than the model 16,000 was sized against. There it killed 3 of the first 7
+    `schema_only` rows and nothing in any other arm: the arm with the LEAST
+    context reasons the MOST, so a fixed cap penalises the very baseline the
+    experiment needs to measure honestly — in the direction that flatters
+    this library. See `test_output_cap_clears_the_worst_observed_reasoning_run`
+    for the property that should have been asserted instead of a constant.
     """
-    assert agent.MAX_OUTPUT_TOKENS_PER_REQUEST == 16_000
+    assert agent.MAX_OUTPUT_TOKENS_PER_REQUEST == 64_000
 
 
 def test_default_agent_factory_threads_the_output_cap_into_model_settings():
@@ -1510,3 +1519,25 @@ def test_temperature_is_omitted_for_the_model_that_does_not_support_it():
     body = (built.model_settings or {})["extra_body"]
     assert "temperature" not in body
     assert MODELS["openai/gpt-5.6-sol"].supports_temperature is False
+
+
+def test_output_cap_clears_the_worst_observed_reasoning_run():
+    """The cap must not bind arm-dependently.
+
+    Sized to `glm-5.3-flash` (~380 reasoning tokens/run) it was 16,000 and
+    survived that sweep at 0.2% errors. On `deepseek-v4-flash-0731`, which
+    reasons two orders of magnitude harder, the same value killed 3 of the
+    first 7 `schema_only` rows and none in any other arm — the arm with the
+    least context reasons the most, so a fixed cap penalises exactly the
+    baseline this experiment needs to measure honestly.
+
+    38,983 is the largest whole-run output observed on that model (23 turns);
+    a single request may not be capped below it.
+    """
+    from dce.agent import MAX_OUTPUT_TOKENS_PER_REQUEST
+
+    worst_observed_whole_run = 38_983
+    assert MAX_OUTPUT_TOKENS_PER_REQUEST > worst_observed_whole_run, (
+        "a per-request cap below the worst observed WHOLE-RUN output will bind "
+        "on the arm that reasons most, which is the arm with the least context"
+    )

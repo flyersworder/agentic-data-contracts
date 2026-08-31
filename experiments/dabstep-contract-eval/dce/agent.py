@@ -101,7 +101,38 @@ REQUEST_LIMIT: int = 50
 #
 # The output bound must clear a reasoning model's reasoning, not just its
 # answer — see the F1 note directly below, which is why 4,000 was wrong.
-MAX_OUTPUT_TOKENS_PER_REQUEST: int = 16_000
+MAX_OUTPUT_TOKENS_PER_REQUEST: int = 64_000
+# RAISED AGAIN, 16,000 -> 64,000, AND THIS TIME THE FAILURE WAS ARM-DEPENDENT
+# AND LARGE. F1 raised it 4,000 -> 16,000 after the same error killed one arm
+# of the first smoke run. 16,000 was sized against `glm-5.3-flash`, which
+# reasons ~380 tokens per run; it survived that sweep at 3 errors in 1,604
+# rows (0.2%). `deepseek-v4-flash-0731` reasons two orders of magnitude
+# harder: measured on the first 15 rows of its sweep, a single `schema_only`
+# run spent 36,155 reasoning tokens across 23 turns, and single requests blew
+# past 16,000 on their own.
+#
+# The resulting error rate was 3 of 7 `schema_only` rows and ZERO in the
+# other three arms. That asymmetry is the whole problem, and it is not
+# subtle: an arm with no context flounders, reasons enormously, and dies on a
+# HARNESS parameter — while the arms carrying context finish comfortably. An
+# `error` row scores as wrong, so leaving the cap here would have handed the
+# contract arm a win manufactured by our own configuration, in exactly the
+# direction that flatters this library. That is the same class of mistake as
+# F12, where a stricter-than-official scorer produced a false positive in our
+# favour.
+#
+# 64,000 is chosen against evidence rather than doubled by reflex: the
+# largest WHOLE-RUN output observed on this model is 38,983 tokens across 23
+# turns, so a single request reaching 64,000 would be extraordinary. It stays
+# far below the pinned endpoint's 384,000 ceiling, so it is still a real
+# per-request bound rather than a formality, and `TOKEN_BUDGET` plus
+# `tool_calls_limit` remain the actual runaway guards.
+#
+# THE GENERAL LESSON, worth carrying beyond this experiment: a fixed output
+# cap is not model-independent. It must clear the reasoning volume of the
+# most reasoning-hungry (model, arm) pair in the comparison, and the arm that
+# needs the most reasoning is reliably the one with the least context. Sized
+# to one model, it silently becomes a confound on the next.
 
 # RAISED FROM 4,000 AFTER THE FIRST SMOKE RUN (F1). The old value assumed
 # "4,000 output tokens is generous for a data-analyst answer with some

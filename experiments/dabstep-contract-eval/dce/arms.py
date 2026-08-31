@@ -99,12 +99,17 @@ from typing import TYPE_CHECKING
 import duckdb
 from pydantic_ai import Tool
 
-from dce.frozen import load_contract
+from dce.frozen import load_contract, load_hollow_contract
 
 if TYPE_CHECKING:
     from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 
-ARMS: tuple[str, ...] = ("schema_only", "manual_prompt", "contract")
+ARMS: tuple[str, ...] = (
+    "schema_only",
+    "manual_prompt",
+    "contract",
+    "contract_hollow",
+)
 
 # A harness property, not a contract limit: `semantic.limits.max_rows` is not
 # part of the library's contract schema, and the frozen contract declares no
@@ -429,13 +434,13 @@ def _truncate_run_query(tool_def, max_rows: int):
     )
 
 
-def _governed_tools(db_path: Path):
+def _governed_tools(db_path: Path, *, contract=None):
     from agentic_data_contracts import create_pydantic_ai_tools
     from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
     from agentic_data_contracts.core.session import ContractSession
     from agentic_data_contracts.tools.factory import create_tools
 
-    contract = load_contract()
+    contract = contract if contract is not None else load_contract()
     session = ContractSession(contract)
     adapter = DuckDBAdapter(database=str(db_path))
     tool_defs = create_tools(contract, adapter=adapter, session=session)
@@ -458,14 +463,19 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
-    if arm == "contract":
-        tools, session, adapter = _governed_tools(db_path)
+    if arm in ("contract", "contract_hollow"):
+        # IDENTICAL EXCEPT FOR THE CONTRACT OBJECT. The procedural sentence
+        # below is the thing `contract_hollow` exists to control for, so it is
+        # written once and shared rather than copied — a divergence here would
+        # silently reintroduce the confound the control was built to remove.
+        contract = load_contract() if arm == "contract" else load_hollow_contract()
+        tools, session, adapter = _governed_tools(db_path, contract=contract)
         prompt = (
             f"{BASE_PROMPT}\n\n"
             "A data contract governs this database. Look up the domain and the "
             "metrics that apply before writing SQL, and validate every query "
             "with inspect_query before running it.\n\n"
-            f"{load_contract().to_system_prompt()}"
+            f"{contract.to_system_prompt()}"
         )
         return ArmSetup(prompt, tools, session, adapter)
 

@@ -35,7 +35,12 @@ def _tool(setup, name: str):
 
 
 def test_three_arms_with_the_spec_names():
-    assert ARMS == ("schema_only", "manual_prompt", "contract")
+    assert ARMS == (
+        "schema_only",
+        "manual_prompt",
+        "contract",
+        "contract_hollow",
+    )
 
 
 def test_max_rows_stays_small_enough_not_to_poison_the_context():

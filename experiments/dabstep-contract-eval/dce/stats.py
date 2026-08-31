@@ -165,11 +165,30 @@ HARNESS_VERDICTS: frozenset[str] = frozenset(
     {"hit_limit", "error", "scoring_error", "post_run_error", "construction_error"}
 )
 
-#: Unpacked, not hardcoded: a rename/reorder in `dce.arms.ARMS` (or a count
-#: other than 3) is picked up here automatically, or fails loudly with a
-#: `ValueError` at import time, rather than this module silently comparing
-#: against an arm name that no longer exists.
-ARM_A, ARM_B, ARM_C = ARMS
+#: Named, not positional: `dce.arms.ARMS` grew a fourth arm
+#: (`contract_hollow`) and the old `ARM_A, ARM_B, ARM_C = ARMS` unpack failed
+#: loudly at import, which is exactly what it was written to do. Resolving by
+#: NAME rather than by position keeps that property — an arm renamed out of
+#: existence still raises here at import — while no longer breaking on a
+#: fourth arm being added.
+#:
+#: `ARM_C` is the treatment every other arm is compared against, so it is the
+#: one name this module hardcodes.
+ARM_C = "contract"
+ARM_A = "schema_only"
+ARM_B = "manual_prompt"
+ARM_D = "contract_hollow"
+for _name in (ARM_A, ARM_B, ARM_C, ARM_D):
+    if _name not in ARMS:
+        raise ValueError(
+            f"dce.stats expects arm {_name!r}, absent from dce.arms.ARMS "
+            f"({ARMS}) — rename the constant here or the arm there, but do "
+            "not let this module compare against an arm that no longer exists"
+        )
+
+#: Every non-treatment arm, in `ARMS` order, each compared against `ARM_C`.
+#: Derived so a fifth arm needs no edit here.
+COMPARISON_ARMS: tuple[str, ...] = tuple(a for a in ARMS if a != ARM_C)
 
 #: The pre-registered confirmatory comparison: arm B vs arm C.
 PRIMARY_MODEL = "deepseek/deepseek-v4-pro-0813"
@@ -710,7 +729,7 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
 
         lines.extend(_unequal_task_set_warning(subset, model))
 
-        for left in (ARM_A, ARM_B):
+        for left in COMPARISON_ARMS:
             if model == PRIMARY_MODEL and left == PRIMARY_LEFT_ARM:
                 lines.append(f"  McNemar {left} vs {ARM_C}: see PRIMARY section above")
                 continue

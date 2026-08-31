@@ -1,0 +1,66 @@
+# Unattended sweep on a VPS: survives a reboot, resumes where it left off.
+#
+# The runner's resume is verified, not assumed — a SIGKILL mid-flight and a
+# hand-torn tail both resumed to the exact expected row count with nothing
+# lost and nothing re-run. What was missing was something to invoke it after
+# an accidental restart. That is this file.
+#
+# Install:
+#   sudo cp deploy/dce-sweep.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dce-sweep
+#   journalctl -u dce-sweep -f
+#
+# Edit User, WorkingDirectory and ExecStart's flags before enabling.
+
+[Unit]
+Description=DABStep contract-eval sweep (resumable)
+After=network-online.target
+Wants=network-online.target
+# A crash loop that never writes a row (a bad path, a missing key) costs no
+# money but looks busy forever. Five starts in ten minutes and systemd gives
+# up and leaves the unit failed, where `systemctl status` will say so.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=dce
+WorkingDirectory=/opt/agentic-data-contracts/experiments/dabstep-contract-eval
+
+# OPENROUTER_API_KEY lives here, mode 0600, OUTSIDE the repository. Never a
+# key in the unit file: `systemctl show` prints Environment= to any user.
+EnvironmentFile=/etc/dce/env
+
+ExecStart=/usr/bin/env uv run python -m dce.runner \
+    --models z-ai/glm-5.3-flash \
+    --workers 4 \
+    --max-spend 12 \
+    --out results/glm-full.jsonl
+
+# EXIT CODE POLICY — the runner's taxonomy, mapped onto restart decisions:
+#   0  completed            -> stop. Nothing left to do.
+#   1  uncaught exception   -> restart. Could be transient (the network).
+#   2  spend cap reached    -> STOP. A human must decide to raise the cap;
+#                             restarting would just re-hit it every 30s.
+#   3  circuit breaker      -> STOP. Systemic (a missing key, a bad model
+#                             id). Restarting cannot fix it and would write
+#                             thousands of phantom-priced rows trying.
+#   4  DuckDB conn leaked   -> restart. "Resume in a fresh process" IS the
+#                             documented recovery for this one.
+# Signals (OOM kill, reboot, SIGKILL) also restart: resume handles them.
+Restart=on-failure
+RestartPreventExitStatus=2 3
+RestartSec=30
+
+# The sweep holds a single-instance lock on its results file, so a systemd
+# restart racing a not-quite-dead predecessor is refused rather than
+# duplicated. Give the old process time to die on its own first.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

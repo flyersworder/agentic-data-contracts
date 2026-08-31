@@ -1,5 +1,6 @@
 import contextlib
 import json
+import os
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,9 +15,11 @@ from dce.agent import (
 )
 from dce.data import DATASET_REVISION
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
+from dce.lockfile import SweepLockedError, lock_path_for, sweep_lock
 from dce.runner import (
     CIRCUIT_BREAKER_THRESHOLD,
     MAX_CONSTRUCTION_ATTEMPTS,
+    SNAPSHOT_EVERY_ROWS,
     SweepResult,
     _construction_error_row,
     _exit_code_for,
@@ -36,6 +39,7 @@ from dce.runner import (
     latest_rows,
     pending,
     real_spent_so_far,
+    snapshot_path_for,
     spent_so_far,
     sweep,
 )
@@ -2423,3 +2427,135 @@ def test_the_budget_still_truncates_when_it_is_genuinely_exhausted(tmp_path: Pat
     assert result.truncated is True
     assert result.spent <= max_spend
     assert len((tmp_path / "r.jsonl").read_text().splitlines()) == 2
+
+
+# ── sweep: crash-safety on an unattended box ─────────────────────────────
+
+
+def test_sweep_refuses_to_start_while_another_holds_the_results_file(tmp_path: Path):
+    """Two sweeps on one results file duplicate paid work AND share
+    `<db>.working`, so one instance's `make_working_copy` lands on top of the
+    other's live DuckDB connection — false `db_corrupted` on the experiment's
+    headline metric. See `dce/lockfile.py`."""
+    out = tmp_path / "r.jsonl"
+    with sweep_lock(out):
+        with pytest.raises(SweepLockedError):
+            sweep(
+                TASKS,
+                ("schema_only",),
+                (GLM,),
+                {"1": "g"},
+                out=out,
+                db_path=_make_pristine(tmp_path),
+                docs={},
+                max_spend=100.0,
+                golds_hash="h",
+                run_task_fn=_fast_row,
+            )
+    assert not out.exists(), "a refused sweep must not have written anything"
+
+
+def test_sweep_releases_the_lock_so_a_restart_can_resume(tmp_path: Path):
+    out = tmp_path / "r.jsonl"
+    for _ in range(3):
+        sweep(
+            TASKS,
+            ("schema_only",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=_make_pristine(tmp_path),
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=_fast_row,
+            retry_verdicts=("correct",),
+        )
+    assert not lock_path_for(out).exists()
+    assert len(out.read_text().splitlines()) == 3
+
+
+def test_every_row_is_fsynced_before_the_next_one_is_written(
+    tmp_path: Path, monkeypatch
+):
+    """`flush()` hands bytes to the OS page cache: that survives this process
+    dying (proven by SIGKILL probes) but not the MACHINE dying. On an
+    unattended VPS the machine is exactly what dies. Rows arrive about once a
+    minute per worker, so there is no throughput argument for batching this."""
+    synced: list[int] = []
+    real_fsync = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(fd), real_fsync(fd))[1])
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(5)
+    sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=_fast_row,
+    )
+    # One per row, plus the lockfile's own and any snapshot's.
+    assert len(synced) >= 5
+
+
+def test_the_snapshot_is_always_a_complete_parseable_file(tmp_path: Path):
+    """Insurance against the loss fsync cannot cover: operator error, a bad
+    disk, a bug that truncates the results file. Written to a temp name and
+    `os.replace`d, so the snapshot is never itself half-written — a torn
+    backup is worse than none, because it is trusted."""
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(SNAPSHOT_EVERY_ROWS + 3)
+    sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=_fast_row,
+        workers=4,
+    )
+    snapshot = snapshot_path_for(out)
+    assert snapshot.exists()
+    rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
+    # The final snapshot is taken after the pool drains, so it is complete.
+    assert len(rows) == len(tasks)
+    assert snapshot.read_text() == out.read_text()
+
+
+def test_a_snapshot_exists_even_if_the_sweep_never_finishes(tmp_path: Path):
+    """The whole point: the snapshot has to be there when the machine dies
+    mid-sweep, not only when the sweep ends politely."""
+    out = tmp_path / "r.jsonl"
+    tasks = _numbered_tasks(80)
+
+    def explodes_late(task, arm, model, *a, **k):
+        if task["task_id"] == "70":
+            raise RuntimeError("machine trouble")
+        return _fast_row(task, arm, model)
+
+    with pytest.raises(RuntimeError):
+        sweep(
+            tasks,
+            ("schema_only",),
+            (GLM,),
+            {t["task_id"]: "g" for t in tasks},
+            out=out,
+            db_path=_make_pristine(tmp_path),
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=explodes_late,
+        )
+    snapshot = snapshot_path_for(out)
+    assert snapshot.exists()
+    rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
+    assert len(rows) >= SNAPSHOT_EVERY_ROWS

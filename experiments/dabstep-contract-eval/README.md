@@ -17,7 +17,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 237 tests, deterministic and offline
+uv run pytest -q                     # 327 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -68,12 +68,22 @@ uv run python -m dce.stats results/smoke12.jsonl
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |
 | `--golds` | `data/golds.json` | The gold envelope. Its `revision`, `threshold` and content hash are all checked. |
 | `--tasks` | `data/tasks.json` | Task list; filtered to those that have a gold. |
+| `--workers` | `1` | Task groups to run concurrently, each on its own working copy. See [Unattended runs](deploy/README.md) before raising it. |
 | `--retry` | none | `error` or `post_run_error` — also re-run rows with that verdict on resume. Both already cost money, which is why neither is retried by default. `construction_error` rows are retried automatically (twice, then given up on loudly). |
 
 **Runs are resumable and resumption is automatic**: re-run the identical
 command and every completed `(task, arm, model)` is skipped. `--max-spend` is
 a budget for the whole results file, not for one invocation, so a resume of a
 `--max-spend 40.00` run stops at $40 total, not at $80.
+
+Verified, not assumed: a `SIGKILL` at 142/180 rows, and separately a
+hand-torn tail plus a crash loop, both resumed to exactly 180 rows with
+nothing missing and nothing re-run. Every row is `fsync`ed before the next is
+written, and the file is snapshotted every 25 rows to
+`<out>.jsonl.snapshot`. **Only one sweep at a time may hold a results
+file** — a second is refused, because two would duplicate paid work and share
+`<db>.working`, corrupting `db_corrupted` for both. For running this
+unattended on a VPS, see [`deploy/README.md`](deploy/README.md).
 
 **The sweep refuses to start on a dirty working tree.** Every result row
 stamps `commit_sha`, and with an editable path dependency the library under

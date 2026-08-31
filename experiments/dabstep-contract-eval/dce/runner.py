@@ -67,12 +67,32 @@ one row. `_repair_torn_tail` truncates a genuinely torn tail before the
 first append (matching what the read side already forgives) rather than
 appending onto it.
 
-ONE EDGE OF "REACHES DISK" THAT IS DOCUMENTED, NOT CLOSED: `flush()` is
-not `fsync()`: it hands the bytes to the OS's page cache, which
-survives THIS PROCESS dying (a crash, a `raise`, `SIGKILL`) but not the
-MACHINE dying before the OS itself flushes that cache to disk. "Reaches
-disk" in this module means "survives process death", not "survives power
-loss".
+"REACHES DISK" IS NOW LITERAL, AND WAS NOT ALWAYS. `flush()` alone hands
+the bytes to the OS page cache, which survives THIS PROCESS dying (a
+crash, a `raise`, `SIGKILL` — verified by probe) but not the MACHINE
+dying before that cache is written out. Since the sweep is meant to run
+unattended on a VPS, where the machine is exactly what dies, every write
+is followed by `os.fsync`. Rows arrive about once a minute per worker,
+so there was no throughput argument for batching it. Two residual
+edges, both stated rather than papered over: on macOS `fsync` does not
+force the drive's own cache (`F_FULLFSYNC` would), so a laptop run keeps
+the weaker guarantee; and `fsync` protects the file's CONTENT, not the
+file — operator error, a bad disk, or a bug that truncates it are
+covered instead by the periodic side copy (`SNAPSHOT_EVERY_ROWS`),
+written to a temp name and `os.replace`d so the backup is never itself
+half-written.
+
+ONE SWEEP PER RESULTS FILE, ENFORCED. `sweep` holds an `O_EXCL` lock on
+`<out>.lock` for its whole duration (`dce/lockfile.py`). Two concurrent
+sweeps were reproduced here by accident: the results file came through
+intact — every row landed, nothing was torn, `latest_rows` dedupes —
+which is exactly what makes it dangerous, because nothing in the output
+says it happened. What does not survive is the money (72 units paid for
+twice) and `db_corrupted`: both instances share `<db>.working`, so one's
+`make_working_copy` copies the pristine database over a file the other
+holds a live DuckDB connection on, and the resulting corruption is
+attributed to an arm that did nothing. An auto-restarting supervisor is
+precisely the setting where this happens unwatched.
 
 EXIT CODE TAXONOMY (`main()`, via `_exit_code_for` plus one path it does
 NOT cover):
@@ -280,10 +300,13 @@ see `dce/agent.py`'s module docstring for the full detail on both:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import itertools
 import json
 import math
+import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -305,6 +328,7 @@ from dce.data import DATASET_REVISION
 from dce.frozen import digest
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.grade import active_scorer
+from dce.lockfile import sweep_lock
 from dce.pricing import MODELS
 
 #: A reservation must never be read as "this call is free." Observed `usd`
@@ -344,6 +368,13 @@ MAX_CONSTRUCTION_ATTEMPTS: int = 2
 #: `MAX_CONSTRUCTION_ATTEMPTS`'s own comment for the precise relationship
 #: the two constants are required to keep.
 CIRCUIT_BREAKER_THRESHOLD: int = 5
+
+#: Rows between snapshots of the results file. Insurance against the losses
+#: `fsync` cannot cover — operator error, a bad disk, a bug that truncates
+#: the file — not against process death, which `fsync` already handles. A
+#: 1,203-row sweep's file is ~2 MB, so the copy is free next to a ~3-minute
+#: run; this is sized for "how much would I hate to lose", not for I/O.
+SNAPSHOT_EVERY_ROWS: int = 25
 
 
 @dataclass
@@ -676,6 +707,12 @@ def pending(tasks, arms, models, done) -> list[tuple[str, str, str]]:
     ]
 
 
+def snapshot_path_for(out: Path) -> Path:
+    """Beside the results file it copies, like the lockfile: the three travel
+    together across a `scp` or a VPS rebuild."""
+    return out.with_name(out.name + ".snapshot")
+
+
 def _working_db_path(pristine: Path, worker: int = 0) -> Path:
     """Worker 0 keeps the historical `.working` name so a single-worker
     resume reuses the file a pre-concurrency sweep left behind instead of
@@ -1001,7 +1038,9 @@ class _SweepLedger:
         real_spent: float,
         observed: dict[str, list[float]],
         max_spend: float,
+        out: Path,
     ) -> None:
+        self._out = out
         # A Condition, not a bare Lock: a group that does not fit RIGHT NOW
         # may fit once an in-flight reservation is released, and `try_reserve`
         # has to be able to wait for that. See its own docstring.
@@ -1012,6 +1051,7 @@ class _SweepLedger:
         self.observed = observed
         self.max_spend = max_spend
         self.reserved = 0.0
+        self._rows_since_snapshot = 0
         self.consecutive_construction_errors = 0
         self.truncated = False
         self.circuit_broken = False
@@ -1078,6 +1118,40 @@ class _SweepLedger:
             # holding is now available to them.
             self._cond.notify_all()
 
+    def _snapshot_locked(self) -> None:
+        """Copy the results file aside. Callers already hold `_cond`, so no
+        writer can be mid-line.
+
+        Written to a temp name and `os.replace`d, because a torn backup is
+        worse than no backup: it is trusted. A snapshot that cannot be taken
+        is reported and forgiven — losing the insurance must never cost the
+        sweep it is insuring.
+        """
+        self._rows_since_snapshot = 0
+        snapshot = snapshot_path_for(self._out)
+        tmp = snapshot.with_name(snapshot.name + ".tmp")
+        try:
+            shutil.copyfile(self._out, tmp)
+            with open(tmp, "rb") as fh:
+                os.fsync(fh.fileno())
+            os.replace(tmp, snapshot)
+        except Exception as exc:
+            print(
+                f"WARNING: could not snapshot {self._out} to {snapshot} "
+                f"({type(exc).__name__}: {exc}); the sweep continues, but "
+                "the results file has no side copy right now",
+                file=sys.stderr,
+            )
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+
+    def snapshot(self) -> None:
+        """Take a snapshot now, whatever the row counter says — used once the
+        pool has drained, so the side copy is never up to
+        `SNAPSHOT_EVERY_ROWS` rows behind the file it protects."""
+        with self._cond:
+            self._snapshot_locked()
+
     def _stop_locked(self) -> None:
         """Stop the sweep. Callers already hold `_cond`.
 
@@ -1098,6 +1172,16 @@ class _SweepLedger:
             try:
                 self._fh.write(payload + "\n")
                 self._fh.flush()
+                # `flush()` hands the bytes to the OS page cache, which
+                # survives THIS PROCESS dying — verified by SIGKILL probes —
+                # but not the MACHINE dying before the cache is written out.
+                # On an unattended VPS the machine is exactly what dies, so
+                # the guarantee is bought outright: rows arrive about once a
+                # minute per worker, which leaves no throughput argument for
+                # batching this. (On Linux `fsync` reaches the device; macOS
+                # needs `F_FULLFSYNC` for the same promise, so a laptop run
+                # keeps the weaker guarantee.)
+                os.fsync(self._fh.fileno())
             except Exception:
                 # The OS refused the bytes (a full disk, most likely).
                 # Nothing here can make them land, but the row is already
@@ -1127,6 +1211,10 @@ class _SweepLedger:
             # failures", which is exactly the systemic-failure signal
             # (a missing OPENROUTER_API_KEY fails every unit identically)
             # it exists to catch.
+            self._rows_since_snapshot += 1
+            if self._rows_since_snapshot >= SNAPSHOT_EVERY_ROWS:
+                self._snapshot_locked()
+
             if row.get("verdict") == "construction_error":
                 self.consecutive_construction_errors += 1
             else:
@@ -1363,6 +1451,46 @@ def sweep(
     if workers < 1:
         raise ValueError(f"workers must be at least 1, got {workers}")
 
+    # Taken BEFORE anything is read or written, and released on every exit
+    # path: two sweeps sharing one results file duplicate paid work and,
+    # worse, share `<db>.working`, so one's `make_working_copy` lands on top
+    # of the other's live DuckDB connection. See `dce/lockfile.py` — the
+    # failure was reproduced, and the results file gives no sign of it.
+    with sweep_lock(out):
+        return _sweep_locked(
+            tasks,
+            arms,
+            models,
+            golds,
+            out=out,
+            db_path=db_path,
+            docs=docs,
+            max_spend=max_spend,
+            golds_hash=golds_hash,
+            run_task_fn=run_task_fn,
+            retry_verdicts=retry_verdicts,
+            trace_dir=trace_dir,
+            workers=workers,
+        )
+
+
+def _sweep_locked(
+    tasks,
+    arms,
+    models,
+    golds,
+    *,
+    out: Path,
+    db_path: Path,
+    docs,
+    max_spend: float,
+    golds_hash: str,
+    run_task_fn,
+    retry_verdicts: tuple[str, ...],
+    trace_dir: Path | None,
+    workers: int,
+) -> SweepResult:
+    """`sweep`'s body, with the single-instance lock already held."""
     done = completed_keys(out, retry_verdicts=retry_verdicts)
     todo = pending(tasks, arms, models, done)
     by_id = {t["task_id"]: t for t in tasks}
@@ -1396,6 +1524,7 @@ def sweep(
             real_spent=real_spent,
             observed=observed,
             max_spend=max_spend,
+            out=out,
         )
         group_kwargs = dict(
             by_id=by_id,
@@ -1416,8 +1545,14 @@ def sweep(
         ]
         for thread in threads:
             thread.start()
-        for thread in threads:
-            thread.join()
+        try:
+            for thread in threads:
+                thread.join()
+        finally:
+            # After the pool drains, whatever happened: the side copy must
+            # not be up to SNAPSHOT_EVERY_ROWS rows behind the file it
+            # protects just because the sweep ended badly.
+            ledger.snapshot()
 
     if ledger.pending_exc is not None:
         raise ledger.pending_exc

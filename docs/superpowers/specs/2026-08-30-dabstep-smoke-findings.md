@@ -155,6 +155,62 @@ Whether to run on a VPS is open. With resume already working, a sleeping laptop
 merely resumes, so a VPS is a reliability convenience rather than a
 requirement.
 
+### F7a — parallelism: done (`--workers N`)
+
+Cost was never the constraint; wall-clock was. A glm sweep over the 401
+golded tasks is 1,203 runs at ~$0.0033 each — about **$4** — and **61 hours
+serial**.
+
+`sweep` now dispatches whole *task groups* to a thread pool. The unit of
+dispatch is the group, never an individual run, which preserves the two
+properties the serial loop had for free: a truncation still lands on a task
+boundary, and one task's arms still share one copy of the database. At
+`workers=1` the behaviour, row order included, is identical to the serial
+sweep.
+
+Four pieces of state became shared. Three were the expected ones — the
+results file (one lock-held write site), the spend ledger, the per-model
+observation history. The fourth was not:
+
+**The working copy has to be per worker, and that is not an optimisation.**
+`check_and_restore` repairs a corrupted copy by copying the whole 26 MB
+pristine file back over it. One shared copy would land that `copyfile` inside
+another worker's live query — and, worse, `db_corrupted` would stop
+attributing corruption to the arm that caused it, since any concurrent
+worker's ungoverned arm could have been the one that mutated the shared file.
+`db_corrupted` *is* this experiment's headline governance finding, so a
+shared copy would not have been merely flaky; it would have been wrong.
+
+**A near-miss worth recording, because it is a class of bug and not a typo.**
+The first draft treated "this group does not fit against `spent + reserved`"
+as budget exhaustion, exactly as the serial code did. But a reservation is a
+worst-case *ceiling* ($0.824/call on glm) and real costs run ~100x smaller
+(~$0.003), so at `--workers N` the Nth worker routinely fails that check
+purely because N-1 ceilings are held right now. Measured on the regression
+test against that draft:
+
+> `stopping: $0.00 spent + $0.82 reserved in flight + $0.82 for task '1'`
+> `would exceed $1.42`
+
+— the whole sweep stopped after **one group**, having spent $0.40 of a $1.42
+budget. On the real sweep that is a 1,203-run job quietly ending at run 3,
+with a plausible-looking "stopped at the cap" message and no other symptom.
+The fix: refuse permanently only when there is nothing in flight to wait for
+(`reserved == 0`, which is exactly the serial condition), otherwise wait on a
+condition variable for a release and re-check.
+
+The general lesson, which is the same one F6 taught: **a guard whose serial
+and concurrent readings differ is not a guard until you say which one you
+mean.** Both halves are now pinned by tests — a blocked group must still run,
+and a genuinely exhausted budget must still truncate.
+
+Validated end-to-end against the live API: 4 tasks x 3 arms x glm at
+`--workers 4` completed 12/12 with three workers concurrently active
+(`.working`, `.working-1`, `.working-2`), `db_corrupted: False` on every row,
+12 traces written without collision, $0.03. Correctness, not throughput —
+the speedup itself is worth measuring in the first minutes of the real sweep
+rather than inferred from a 12-run sample.
+
 ## F8 — raising `TOKEN_BUDGET` raised the spend guard's reserve floor with it
 
 `dce.runner._next_reserve` reserves one call ahead before making it, and its
@@ -379,8 +435,18 @@ so a dispute can be re-adjudicated from a stored row.
 ## Status
 
 - **Done:** F1, F2, F5, F6 (caps + forcing turn); F3, F4, F9, F10, F11
-  (endpoint pin, cache-aware pricing, temperature, reasoning effort).
-- **Open:** F7 (scope, parallelism, VPS) and F8's Sol budget await a decision.
+  (endpoint pin, cache-aware pricing, temperature, reasoning effort); F7a
+  (parallelism).
+- **Decided:** F7's scope — glm first, over all 401 golded tasks, as a
+  scale rehearsal *and* the adversarial test of arm C's fetch-gated context
+  (glm is the weakest reasoner of the four, ~20 reasoning tokens under tool
+  use; MotherDuck's finding is that low-reasoning models skip fetch-gated
+  context). It is explicitly **not** the headline: a flash model floors near
+  zero on hard tasks and no leaderboard baseline runs one, so comparability
+  needs `deepseek-v4-pro`.
+- **Open:** where to run it (a VPS is being provided) and F8's Sol budget,
+  which binds nothing until a Sol subset is actually run — glm's $2.47/group
+  ceiling is immaterial against any sane cap.
 
 Every result produced before these fixes is void for FINDINGS purposes: the
 recorded `usd` was inflated, the serving endpoint was unpinned and unrecorded,

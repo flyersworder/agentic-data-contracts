@@ -5,7 +5,7 @@ manual-in-prompt baseline and a schema-only floor on the
 [DABStep](https://huggingface.co/datasets/adyen/DABstep) benchmark.
 
 Design: `docs/superpowers/specs/2026-08-30-dabstep-contract-eval-design.md`.
-Results and conclusions: `FINDINGS.md` (written after the sweep).
+Results and conclusions: **[`FINDINGS.md`](FINDINGS.md)** — glm-5.3-flash, 401 tasks, 1,203 runs, complete.
 
 **Read the [Money](#money-read-this-before-the-first-paid-run) section before
 the first paid run.** The reservation arithmetic is the single most surprising

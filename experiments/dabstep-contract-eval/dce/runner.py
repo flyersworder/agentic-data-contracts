@@ -328,7 +328,7 @@ from dce.data import DATASET_REVISION
 from dce.frozen import digest
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.grade import active_scorer
-from dce.lockfile import sweep_lock
+from dce.lockfile import lock_path_for, sweep_lock
 from dce.pricing import MODELS
 
 #: A reservation must never be read as "this call is free." Observed `usd`
@@ -1693,7 +1693,9 @@ def assert_clean_tree(
         does not depend on which directory the sweep happened to be invoked
         from.
       * `out` itself — the sweep's own results file, exactly, NOT its
-        parent directory — is excluded from the dirty check. `results/` is
+        parent directory — plus the two sidecars derived from it
+        (`<out>.snapshot`, `<out>.lock`), are excluded from the dirty
+        check. `results/` is
         deliberately committed (the tamper-evidence claim depends on it
         being readable in git history), so `out` being freshly written
         between commits is expected and would otherwise make every resumed
@@ -1727,7 +1729,18 @@ def assert_clean_tree(
         except ValueError:
             out_rel = None
         if out_rel is not None:
-            lines = [line for line in lines if _porcelain_path(line) != out_rel]
+            # `out` AND the two sidecars the sweep derives from it. Without
+            # this, the crash insurance blocks the crash recovery: the
+            # snapshot lands beside `out`, makes the tree dirty, and the
+            # next invocation — every restart of an unattended sweep —
+            # refuses to start. Exempted by exact name rather than by
+            # `out_rel` prefix, so a previous run's `glm-full.jsonl.bak`
+            # still has to be clean.
+            exempt = {out_rel}
+            for sidecar in (snapshot_path_for(out), lock_path_for(out)):
+                with contextlib.suppress(ValueError):
+                    exempt.add(sidecar.resolve().relative_to(root.resolve()).as_posix())
+            lines = [line for line in lines if _porcelain_path(line) not in exempt]
 
     dirty = "\n".join(lines).strip()
     if dirty:

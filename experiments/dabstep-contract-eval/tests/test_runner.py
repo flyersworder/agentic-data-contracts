@@ -2559,3 +2559,46 @@ def test_a_snapshot_exists_even_if_the_sweep_never_finishes(tmp_path: Path):
     assert snapshot.exists()
     rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
     assert len(rows) >= SNAPSHOT_EVERY_ROWS
+
+
+def test_clean_tree_exempts_the_out_files_own_sidecars(tmp_path: Path):
+    """The snapshot and the lock are DERIVED from `out` and land beside it.
+    Left unexempted they make the tree dirty, so the very next invocation —
+    which is to say every restart of an unattended sweep — refuses to start.
+    That defeats the entire point of writing them: the crash insurance would
+    itself block the crash recovery.
+
+    Caught on the VPS before the first long run, by `git status` and not by a
+    test, which is why this one exists.
+    """
+    out = tmp_path / "results" / "glm-full.jsonl"
+    assert_clean_tree(
+        out=out,
+        repo_root=tmp_path,
+        git_status_fn=lambda: (
+            "?? results/glm-full.jsonl\n"
+            "?? results/glm-full.jsonl.snapshot\n"
+            "?? results/glm-full.jsonl.lock\n"
+        ),
+    )
+
+
+def test_clean_tree_still_rejects_a_sidecar_of_a_different_run(tmp_path: Path):
+    """Exempting `<out>.*` by prefix would let a PREVIOUS run's results file
+    through under a name like `glm-full.jsonl.bak`. Only the two sidecars
+    this sweep actually writes are exempt, by exact name."""
+    out = tmp_path / "results" / "glm-full.jsonl"
+    with pytest.raises(SystemExit, match="smoke12"):
+        assert_clean_tree(
+            out=out,
+            repo_root=tmp_path,
+            git_status_fn=lambda: (
+                "?? results/glm-full.jsonl.snapshot\n M results/smoke12.jsonl\n"
+            ),
+        )
+    with pytest.raises(SystemExit, match="glm-full.jsonl.bak"):
+        assert_clean_tree(
+            out=out,
+            repo_root=tmp_path,
+            git_status_fn=lambda: "?? results/glm-full.jsonl.bak\n",
+        )

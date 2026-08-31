@@ -258,6 +258,90 @@ mutated the warehouse. The governed-tool counters (218 inspect rejections,
 527 enforcement blocks, 529 retry prompts in arm C) are descriptive
 instrumentation and are deliberately *not* offered as a governance claim.
 
+## Related work: MotherDuck Guides, and what the comparison means
+
+MotherDuck reports **418 of 419 DABStep questions correct (99.8%)** with
+Gemini 3 Flash at ~$0.02/question, and separately **96–98% with a local Qwen
+27B**, using "Guides" — markdown context stored in the warehouse and fetched
+through their MCP server. Their headline is the same claim as ours, measured
+the same way: Guides raise accuracy by **72 percentage points** and cut cost
+~55% against an agent discovering context on its own.
+
+That is an independent replication of this experiment's finding, at a much
+higher absolute score. Two things are worth stating plainly about the gap.
+
+**Most of it is work relocated, not reasoning improved.** DABStep's
+difficulty is the fee-matching rule: NULL means "applies to every value",
+plus list membership over account type, ACI and MCC. This contract carries
+that rule as *prose the model must reimplement in SQL every time*, and the
+model gets it wrong on set-membership questions. Encode the same rule once as
+an executable macro and the agent's job collapses from *derive the rule* to
+*call the macro*. Verified directly: tasks 1500 and 1502, both of which the
+contract arm answered incorrectly, are answered **exactly** by
+
+```sql
+CREATE MACRO wild(col, val) AS
+    (col IS NULL OR len(col) = 0 OR list_contains(col, val));
+SELECT string_agg(ID::VARCHAR, ', ' ORDER BY ID) FROM fees
+WHERE wild(account_type, 'O') AND wild(aci, 'C');
+```
+
+MotherDuck's own guidance lists pre-computed views among its five steps, and
+a separate post of theirs reports 93.2% from "a simple prompt with views and
+macros". So a large share of 55% -> 99.8% is the semantic layer doing work the
+agent no longer has to do.
+
+**And the benchmark's shape flatters that approach.** 450 questions come from
+26 templates; 294 of 332 hard tasks here are fee questions. Pre-built views
+are maximally effective when the question space is enumerable in advance,
+which is exactly DABStep's construction. A macro contributes nothing to a
+question nobody wrote it for. The declarative layer measured in this document
+is the layer that has to cover the *unanticipated* question — which makes
+55.1% a measurement of a harder thing than the benchmark's ceiling suggests,
+not a worse attempt at the same thing.
+
+**Neither methodology is disclosed for the 99.8% run.** The post defers to a
+repository and states neither the provenance of the Guide content, nor why
+419 rather than 450 questions, nor whether the official scorer was used, nor
+how many iterations it took. This is not an accusation — but our leaderboard
+analysis found a strong tuning gradient (organisations submitting once: 19.6%
+median hard; submitting 21+ times: 54.2%), and a third-party analysis of
+Guides independently warns against "hardcoding answers to questions" and
+urges measuring generalisation to unseen questions. A reader cannot rule that
+in or out, and neither can we.
+
+### What is unique here
+
+Their comparison is Guides vs no-Guides: two accuracy numbers, from which no
+mechanism can be recovered. Was it the content, the MCP fetch loop, or the
+views? This experiment answers that question and, as far as we know, is the
+only one that does:
+
+| | MotherDuck | this experiment |
+|---|---|---|
+| comparison | Guides vs none | four arms |
+| separates content from tooling | no | **yes** (`contract_hollow`) |
+| statistical test | two accuracies | paired McNemar, 148 vs 23 |
+| artifact frozen before seeing questions | undisclosed | **yes**, digest-pinned |
+| harness and transcripts published | defers to a repo | full, 1,604 traces |
+
+**Content 87%, scaffolding 13%.** That decomposition is the contribution;
+the accuracy number is not.
+
+### The deliberate non-response
+
+The obvious reaction is to make this library's metric semantics executable —
+a `compute_metric` / `compose_metric_query` tool that runs a declared
+`sql_expression` rather than describing it — and re-run. That feature is
+worth building, and it is already on the roadmap for independent reasons.
+
+It is deliberately **not** being built before publishing this, because it
+would be designed from knowledge of which tasks this run lost. That is
+fitting to the test set, and it would spend the strongest methodological
+asset here: a contract authored from the vendor manual alone and frozen
+before any question was read. The order is measure, ship, re-measure — this
+document is the baseline the feature will be judged against.
+
 ## What this run does not show
 
 - **One model.** glm-5.3-flash only. The pre-registered primary comparison is

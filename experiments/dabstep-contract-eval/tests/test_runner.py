@@ -2351,3 +2351,75 @@ def test_sweep_rejects_a_nonsensical_worker_count(tmp_path: Path):
             run_task_fn=_fast_row,
             workers=0,
         )
+
+
+def test_a_group_blocked_by_in_flight_reservations_waits_instead_of_truncating(
+    tmp_path: Path,
+):
+    """The bug this pins: a reservation is a worst-case CEILING, and real
+    costs run ~100x smaller. At `--workers N` the Nth worker routinely finds
+    `spent + reserved + amount > max_spend` purely because N-1 ceilings are
+    held right now — on a budget that would fund hundreds more groups in
+    sequence. Reading that as truncation stopped the entire sweep after
+    `workers - 1` groups, silently, on a budget that was barely touched.
+
+    Here: 8 groups, 8 workers, and a cap sized so at most two ceilings fit
+    at once — but each call actually costs a thousandth of its ceiling, so
+    every group must still run.
+    """
+    tasks = _numbered_tasks(8)
+    floor = _token_budget_usd(GLM)
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        # Room for two concurrent ceilings and nothing like eight.
+        max_spend=2.5 * floor,
+        golds_hash="h",
+        run_task_fn=_fast_row,
+        workers=8,
+    )
+    rows = (tmp_path / "r.jsonl").read_text().splitlines()
+    assert len(rows) == 8, "every group must run; a held ceiling is not a cap hit"
+    assert result.truncated is False
+    assert result.spent < floor
+
+
+def test_the_budget_still_truncates_when_it_is_genuinely_exhausted(tmp_path: Path):
+    """The other half of the same property: waiting for a release must not
+    turn the spend cap into a suggestion. With nothing in flight to wait for
+    (`reserved == 0`), a group that does not fit still stops the sweep —
+    exactly the serial condition."""
+    tasks = _numbered_tasks(20)
+    max_spend = _budget_for_exactly_two_calls(GLM)
+
+    def real_cost(task, arm, model, *a, **k):
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": _CALL_USD,
+            "usd_guard": _CALL_USD,
+            "verdict": "correct",
+        }
+
+    result = sweep(
+        tasks,
+        ("schema_only",),
+        (GLM,),
+        {t["task_id"]: "g" for t in tasks},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=max_spend,
+        golds_hash="h",
+        run_task_fn=real_cost,
+        workers=4,
+    )
+    assert result.truncated is True
+    assert result.spent <= max_spend
+    assert len((tmp_path / "r.jsonl").read_text().splitlines()) == 2

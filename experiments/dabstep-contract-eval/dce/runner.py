@@ -1002,7 +1002,10 @@ class _SweepLedger:
         observed: dict[str, list[float]],
         max_spend: float,
     ) -> None:
-        self._lock = threading.Lock()
+        # A Condition, not a bare Lock: a group that does not fit RIGHT NOW
+        # may fit once an in-flight reservation is released, and `try_reserve`
+        # has to be able to wait for that. See its own docstring.
+        self._cond = threading.Condition()
         self._fh = fh
         self.spent = spent
         self.real_spent = real_spent
@@ -1025,37 +1028,73 @@ class _SweepLedger:
         group's first call, so a truncation always lands on a task boundary
         and a paired analysis never has to discard a half-finished task —
         the same property the serial loop had, for the same reason.
+
+        "DOES NOT FIT" AND "BUDGET EXHAUSTED" ARE DIFFERENT ANSWERS, AND
+        CONFLATING THEM ENDS THE SWEEP EARLY. Serially they were the same
+        thing: nothing was ever in flight, so a group that did not fit could
+        never fit. Concurrently, a group that does not fit against
+        `spent + reserved` may fit perfectly well once another group's
+        reservation is released — reservations are worst-case ceilings and
+        real costs run ~100x smaller, so on a budget that would in fact fund
+        hundreds more sequential groups, the Nth worker routinely fails this
+        check simply because N-1 ceilings are already held. Calling that
+        truncation would end the whole sweep at `workers - 1` groups.
+
+        So: refuse permanently ONLY when nothing is in flight to wait for
+        (`reserved == 0`) — which is exactly the serial condition, and why
+        `workers=1` behaves identically. Otherwise wait for a release and
+        re-check. Termination is not at risk: every holder eventually
+        releases, and the last release leaves `reserved == 0`, which forces
+        a verdict either way.
         """
-        with self._lock:
-            if self.stop.is_set():
-                return None
-            amount = sum(
-                _next_reserve(self.observed.get(model, []), _token_budget_usd(model))
-                for _, _, model in group
-            )
-            if self.spent + self.reserved + amount > self.max_spend:
-                print(
-                    f"stopping: ${self.spent:.2f} spent + "
-                    f"${self.reserved:.2f} reserved in flight + "
-                    f"${amount:.2f} for task {task_id!r}'s group would "
-                    f"exceed ${self.max_spend:.2f}"
+        with self._cond:
+            while True:
+                if self.stop.is_set():
+                    return None
+                amount = sum(
+                    _next_reserve(
+                        self.observed.get(model, []), _token_budget_usd(model)
+                    )
+                    for _, _, model in group
                 )
-                self.truncated = True
-                self.stop.set()
-                return None
-            self.reserved += amount
-            return amount
+                if self.spent + self.reserved + amount <= self.max_spend:
+                    self.reserved += amount
+                    return amount
+                if self.reserved == 0:
+                    print(
+                        f"stopping: ${self.spent:.2f} spent + ${amount:.2f} "
+                        f"reserved for task {task_id!r}'s group would exceed "
+                        f"${self.max_spend:.2f}"
+                    )
+                    self.truncated = True
+                    self._stop_locked()
+                    return None
+                self._cond.wait()
 
     def release(self, amount: float) -> None:
-        with self._lock:
+        with self._cond:
             self.reserved -= amount
+            # Wake anyone parked in `try_reserve`: the budget this group was
+            # holding is now available to them.
+            self._cond.notify_all()
+
+    def _stop_locked(self) -> None:
+        """Stop the sweep. Callers already hold `_cond`.
+
+        `notify_all` is not optional: a worker parked in `try_reserve`'s
+        wait is not watching `stop`, so without a wake-up it would sit there
+        until some unrelated release happened to arrive — and if the
+        stopping worker was the last holder, none ever would.
+        """
+        self.stop.set()
+        self._cond.notify_all()
 
     def record(self, row: dict, model: str, usd: float, usd_guard: float) -> None:
         """THE ONE WRITE SITE, plus the accounting that must not be separable
         from it. See `_safe_json_dumps` for why serialization cannot raise.
         """
         payload = _safe_json_dumps(row)
-        with self._lock:
+        with self._cond:
             try:
                 self._fh.write(payload + "\n")
                 self._fh.flush()
@@ -1094,7 +1133,12 @@ class _SweepLedger:
                 self.consecutive_construction_errors = 0
             if self.consecutive_construction_errors >= CIRCUIT_BREAKER_THRESHOLD:
                 self.circuit_broken = True
-                self.stop.set()
+                self._stop_locked()
+
+    def stop_for_leaked_connection(self) -> None:
+        with self._cond:
+            self.connection_leaked = True
+            self._stop_locked()
 
     def fail(self, exc: BaseException) -> None:
         """Hold the FIRST exception that must stop the sweep, and stop it.
@@ -1105,10 +1149,10 @@ class _SweepLedger:
         row has landed, which is the same ordering the serial code had (write,
         flush, spend update, *then* propagate).
         """
-        with self._lock:
+        with self._cond:
             if self.pending_exc is None:
                 self.pending_exc = exc
-            self.stop.set()
+            self._stop_locked()
 
 
 def _run_group(
@@ -1205,8 +1249,7 @@ def _run_group(
         # Only now, after the row is safely on disk and every counter is
         # updated, do the stop conditions get to act.
         if row_leaked:
-            ledger.connection_leaked = True
-            ledger.stop.set()
+            ledger.stop_for_leaked_connection()
             print(
                 "stopping: a DuckDB connection leaked while closing "
                 f"task {task_id!r}'s arm; the working copy's "

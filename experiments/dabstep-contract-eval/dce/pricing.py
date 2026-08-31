@@ -60,13 +60,35 @@ MODELS: dict[str, ModelSpec] = {
         # established; first-party DeepSeek is 2.75x dearer here ($0.22) AND
         # unreachable under this account's data policy (see the module note in
         # `dce/agent.py` on `_PROVIDER_PIN`).
+        # `baidu/fp8`: PINNED ON THROUGHPUT AS WELL AS PRICE, which the
+        # original pin was not. F3 chose endpoints on quantization and cost
+        # alone; that is incomplete for a model this verbose. Measured on an
+        # identical 3,000-token reasoning request, all fp8:
+        #
+        #     baidu       156.8 tok/s   0.0650 / 0.1299 / 0.0130
+        #     baseten     112.3 tok/s   0.1300 / 0.2600 / 0.0280
+        #     deepinfra    77.9 tok/s   0.0800 / 0.1800 / 0.0160   <- old pin
+        #     parasail     55.1 tok/s   0.1400 / 0.2800 / 0.0500
+        #     akashml      24.6 tok/s   0.0650 / 0.1800 / 0.0160
+        #
+        # Baidu dominates the old pin on BOTH axes at the same quantization —
+        # 2.0x the throughput and cheaper on all three prices — so there is no
+        # trade-off to weigh. Throughput matters here in a way it did not for
+        # `glm-5.3-flash`: this model emits ~12,600 output tokens per run
+        # against glm's ~1,700, so wall-clock is dominated by generation and a
+        # 2x slower endpoint is a 2x longer sweep.
+        #
+        # fp8 deliberately retained rather than taking a cheaper fp4 endpoint
+        # (Relace/Sail at $0.065): fp4 and fp8 are different models in effect,
+        # and glm is pinned to fp8, so this keeps quantization constant across
+        # the two model families being compared.
         ModelSpec(
             "deepseek/deepseek-v4-flash-0731",
-            provider_tag="deepinfra/fp8",
+            provider_tag="baidu/fp8",
             quantization="fp8",
-            price_in=0.08,
-            price_out=0.18,
-            price_cached=0.016,
+            price_in=0.065,
+            price_out=0.1299,
+            price_cached=0.013,
             supports_temperature=True,
             role="weak",
         ),

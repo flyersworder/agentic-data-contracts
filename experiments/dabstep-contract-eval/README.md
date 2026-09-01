@@ -254,11 +254,12 @@ Known, deliberate, and disclosed rather than fixed:
   the money was billed, no row was written, and the guard ledger never sees
   it. Every other failure path between "the call returned" and "the row is on
   disk" writes the row first.
-* **`flush()` is not `fsync()`.** A written row survives this process dying —
-  a crash, an exception, `SIGKILL` — because the bytes are in the OS page
-  cache. It does not survive the *machine* dying before the OS flushes that
-  cache. "Reaches disk" here means "survives process death", not "survives
-  power loss".
+* **`fsync` does not reach the drive's cache on macOS.** Every row write is
+  now followed by `os.fsync` (this entry previously said otherwise, and was
+  stale — see `dce.runner`'s module docstring), so a row survives the machine
+  dying on Linux, which is where sweeps actually run. On macOS `fsync` does
+  not force the drive's own cache — `F_FULLFSYNC` would — so a laptop run
+  keeps the weaker "survives process death" guarantee.
 * A torn final line (a full disk, a killed write) is skipped by every reader
   with a warning, costing that one row. A corrupt line anywhere else still
   raises loudly.

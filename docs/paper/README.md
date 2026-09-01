@@ -5,11 +5,12 @@ draft executes is [`../paper-plan.md`](../paper-plan.md); the numbers all come
 from [`../../experiments/dabstep-contract-eval/FINDINGS.md`](../../experiments/dabstep-contract-eval/FINDINGS.md).
 
 ```bash
-make        # build main.pdf
-make check  # fail on overfull boxes or unresolved refs
+make          # rebuild figures if stale, then main.pdf
+make figures  # figures only
+make check    # fail on overfull boxes or unresolved refs
 ```
 
-Currently 12 pages with `article`. Requires only a basic TeX Live install —
+Currently 13 pages with `article`. Requires only a basic TeX Live install —
 `multirow` and `balance` were dropped rather than added as dependencies.
 
 ## Switching to the PVLDB template
@@ -30,17 +31,24 @@ to promote one or two more; `make check` will say which.
 
 ## What is not finished
 
-- **Author affiliation is blank** in `main.tex`. Deliberate — fill before
-  submission.
-- **`refs.bib` has a `CITE:` note on `motherduck-guides`**: it needs the exact
-  post URLs and dates for both the 99.8% run and the 93.2% "views and macros"
-  figure. The other three entries need a check that URLs still resolve.
-- **The artifact URL in `10-conclusion.tex` is a placeholder.**
+- **`motherduck-semantic` has no publication date.** The post carries no
+  byline or date on the page; it is cited with an access date. Worth one more
+  attempt before submission.
 - **No pro-sweep results.** Section 5 reports two flash-tier models. The
-  pre-registered comparison is unrun, and §10 currently states that as a debt
-  rather than reporting it. When the sweep lands, §5.5 (capability
-  interaction) gains a third row and §10's future-work paragraph shrinks by
-  one item.
-- **No figures.** Everything is tables. A single plot of hard accuracy against
-  bare-schema baseline, one line per arm, would carry §5.5 better than
-  `tab:interaction` does — worth adding once there is a third point to plot.
+  pre-registered comparison is unrun, and §10 states that as a debt rather
+  than reporting it. When the sweep lands: `tab:interaction` and
+  `fig-interaction` each gain a third point, `fig-ablation` a third series,
+  the caveat in `fig:interaction`'s caption comes out, and §10's future-work
+  paragraph loses an item.
+
+## Figures
+
+`figures/make_figures.py` regenerates all three from the raw result rows —
+they are not committed as opaque images. The script **asserts every value it
+draws against the number printed in the paper** and fails the build on a
+mismatch, so the prose and the plots cannot drift apart.
+
+Colour always means *arm*, never model and never rank; model is carried by
+marker shape and line style, so the figures survive greyscale printing. The
+four hues are validated all-pairs for colour-vision deficiency (worst ΔE 9.2)
+and normal-vision separation (worst ΔE 16.3).

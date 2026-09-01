@@ -87,7 +87,19 @@ both --- there is no accuracy/cost tradeoff to report here.
 \subsection{The ablation: content, not scaffolding}
 \label{sec:ablation}
 
-On hard tasks the gain splits into a scaffolding step and a content step:
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig-ablation.pdf}
+\caption{The two steps of the ablation, on both models. Adding nine governed
+tools, the retrieval instruction, the table allow-list and the operation rules
+--- with the prose emptied --- moves hard accuracy by $+0.0$ to $+5.4$ points.
+Restoring the prose moves it by $+34.1$ to $+35.8$. Bars are Wilson 95\%
+intervals; the first step's intervals overlap on both models.}
+\label{fig:ablation}
+\end{figure}
+
+On hard tasks the gain splits into a scaffolding step and a content step
+(Figure~\ref{fig:ablation}):
 
 \begin{center}
 \footnotesize
@@ -144,6 +156,16 @@ is available, and searches harder.
 
 \subsection{Efficiency}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig-cost.pdf}
+\caption{Accuracy against spend, all four arms on both models. \armC{} is the
+cheapest arm \emph{and} the most accurate on each model, so there is no
+tradeoff to report. Cost differences between the two models reflect different
+token prices and are not comparable across runs; the within-run ordering is.}
+\label{fig:cost}
+\end{figure}
+
 \begin{table*}[t]
 \centering
 \small
@@ -174,8 +196,19 @@ only arm that never exhausted its output budget on either model.
 \subsection{Capability interaction}
 \label{sec:interaction}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig-interaction.pdf}
+\caption{Hard accuracy against base-model capability, where capability is the
+bare-schema arm's own accuracy. \armM{} climbs 20.0 points between the two
+models while \armC{} moves 1.5, so the lines converge. \textbf{Two points per
+line cannot distinguish convergence from a shared ceiling}
+(Section~\ref{sec:interaction}); a third model is required and is not yet run.}
+\label{fig:interaction}
+\end{figure}
+
 The two runs bracket an interaction, ordered by what each model achieves from a
-bare schema:
+bare schema (Figure~\ref{fig:interaction}):
 
 \begin{table*}[t]
 \centering

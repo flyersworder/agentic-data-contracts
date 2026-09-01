@@ -3,16 +3,20 @@
 
 \subsection{Context layers}
 
-MotherDuck reports 418 of 419 DABStep questions correct (99.8\%) with Gemini~3
-Flash at roughly \$0.02 per question, and separately 96--98\% with a local
-27B model, using ``Guides'' --- markdown context stored in the warehouse and
-fetched through an MCP server~\cite{motherduck-guides}. Their headline claim is
-the same as ours and measured the same way: context raises accuracy by 72
-percentage points while cutting cost by roughly 55\%.
+MotherDuck's ``Guides'' --- markdown context stored in the warehouse and
+fetched through an MCP server --- raise DABStep accuracy by 72 percentage
+points while cutting cost per run by 55\%, with Gemini~3 Flash answering 418 of
+419 held-out questions correctly (99.8\%) at about two cents per
+question~\cite{motherduck-guides}. A companion report reaches 98.6\% with a
+locally hosted 27B model at 4-bit quantization, falling to 96.4\% at
+3-bit~\cite{motherduck-local}.
 
-That is an independent corroboration of the direction of our finding, at a far
-higher absolute score. Because a reader will otherwise stop at the difference
-between 99.8\% and 56.6\%, we state plainly what that difference is made of.
+Their headline claim is the same as ours and measured the same way: adding
+curated context to an agent that lacks it produces a large accuracy gain. That
+is an independent corroboration of the \emph{direction} of our finding, at a
+far higher absolute score. Because a reader will otherwise stop at the
+difference between 99.8\% and 56.6\%, we state plainly what that difference is
+made of.
 
 \subsection{When the semantics get compiled}
 
@@ -21,7 +25,7 @@ executable form.
 
 \begin{center}
 \small
-\begin{tabular}{@{}p{0.28\columnwidth}p{0.28\columnwidth}p{0.28\columnwidth}@{}}
+\begin{tabular}{@{}p{0.29\columnwidth}p{0.21\columnwidth}p{0.29\columnwidth}@{}}
 \toprule
  & \tabhead{Views / macros} & \tabhead{Declarative contract} \\
 \midrule
@@ -33,15 +37,25 @@ Fails when & nobody anticipated the question & the model misapplies the rule \\
 \end{tabular}
 \end{center}
 
-MotherDuck's own guidance lists pre-computed views among its five steps, and a
-separate post of theirs reports 93.2\% from ``a simple prompt with views and
-macros''. \textbf{So a large share of the distance between our numbers and
-theirs is work relocated from the agent to a human author, not reasoning
-improved.}
+A second MotherDuck report makes the contribution of pre-computation unusually
+legible, because it reports a progression rather than a single
+number~\cite{motherduck-semantic}. Retrieving context fragments by vector
+search ``capped out around 88\%''. Baking the knowledge into the
+warehouse instead --- schema comments, macros, derived tables --- reached 93\%,
+which the author notes would rank first on the leaderboard. A hierarchical
+semantic layer over the raw data, authored by a large model and refined
+iteratively, reached 100\%.
 
-We verified this directly rather than inferring it. Tasks 1500 and 1502, both
-of which our contract arm answered incorrectly, are answered \emph{exactly} by
-a five-line macro encoding the wildcard rule the contract states in prose:
+\textbf{The 88 $\rightarrow$ 93 $\rightarrow$ 100 progression is a measurement
+of how much of this benchmark pre-computation can absorb.} Each step moves work
+out of the agent and into an artifact prepared in advance. A large share of the
+distance between our numbers and theirs is therefore work relocated, not
+reasoning improved.
+
+We verified this on our own failures rather than inferring it. Tasks 1500 and
+1502, both of which our contract arm answered incorrectly, are answered
+\emph{exactly} by a five-line macro encoding the wildcard rule that our
+contract states in prose:
 
 \begin{lstlisting}[language=SQL]
 CREATE MACRO wild(col, val) AS
@@ -66,17 +80,51 @@ The declarative layer measured here is the layer that must cover the
 \emph{unanticipated} question. \textbf{56.6\% is therefore a measurement of a
 harder task, not a worse attempt at the same one.}
 
-We want to be careful not to convert that into a claim we cannot support.
-Maintaining one macro per metric per dialect is a real and growing burden, but
-we have no data on where it crosses over against the cost of authoring domain
-prose. \textbf{We do not claim the contract approach scales better.} We claim
-only that the two degrade differently: a missing macro degrades to nothing,
-while a contract degrades gracefully to a model reasoning from a description.
+We are careful not to convert that into a claim we cannot support. Maintaining
+one macro per metric per dialect is a real and growing burden, but we have no
+data on where it crosses over against the cost of authoring domain prose.
+\textbf{We do not claim the contract approach scales better.} We claim only
+that the two degrade differently: a missing macro degrades to nothing, while a
+contract degrades gracefully to a model reasoning from a description.
 
 The generous reading is also the correct one. These are complementary layers,
 not competitors --- macros optimise the head of the question distribution, a
 contract covers the tail, and in a system with both, the contract is what tells
 the agent which macro exists and when to call it.
+
+\subsection{Coupling and generalisation}
+
+Two coupling costs are documented in the sources themselves, and both bear on
+how a single leaderboard number should be read.
+
+\textbf{Coupling to the serving model.} The author of the 100\% result is
+explicit that the artifact does not travel: \emph{``The recipe is portable
+[\ldots] The tuned artifact is coupled. The serving model is a cheap, swappable
+commodity right up until you swap it, at which point you're not changing a
+setting, you're re-running the loop.''}~\cite{motherduck-semantic} A layer
+refined against one model is re-tuned when the model changes. Our contract was
+authored once, frozen, and run unchanged against two model families.
+
+\textbf{Coupling to the question set.} Independent commentary on Guides warns
+against exactly this: \emph{``Do not hardcode answers to questions. A Guide
+that passes your known questions by hardcoding their specifics will fail the
+ones you have not seen, including a held-out test set''}, and urges
+practitioners to \emph{``measure whether the Guide generalizes to new
+questions, not whether it clears the benchmark you tuned it
+against''}~\cite{corrdyn-guides}.
+
+We make no claim that any particular published result is tuned in this way, and
+we have no evidence that it is. The point is structural, and one observation
+from our gold reconstruction supports it: across the 2{,}199 published DABStep
+submissions, organisations submitting once achieve a median hard-split accuracy
+of 19.6\%, while those submitting 21 or more times achieve 54.2\%. That gradient
+is equally consistent with genuine iterative improvement. But on a benchmark of
+26 templates with a public leaderboard, a single reported accuracy carries
+little information about generalisation unless the submission count and the
+artifact's provenance are stated alongside it.
+
+Ours are stated: one sweep per model, no tuning against the task set, and a
+digest-pinned artifact frozen 35 commits before the first run.
 
 \subsection{What is distinctive here}
 
@@ -97,24 +145,6 @@ Transcripts released & repository & \textbf{3{,}208} \\
 \end{center}
 
 The contribution is the decomposition, not the accuracy.
-
-\subsection{Interpreting published leaderboard scores}
-
-One observation from reconstructing golds bears on how any DABStep number
-should be read. Across the 2{,}199 published submissions, organisations
-submitting once achieve a median hard-split accuracy of 19.6\%; those
-submitting 21 or more times achieve 54.2\%. Independent commentary on Guides
-similarly warns against hardcoding answers and urges measuring generalisation
-to unseen questions.
-
-We draw no conclusion about any particular entrant --- a strong tuning gradient
-is equally consistent with genuine iterative improvement --- and methodology is
-not disclosed in enough detail for the 99.8\% run to rule anything in or out.
-The point is structural: on a benchmark of 26 templates with a public
-leaderboard, a single reported accuracy carries little information about
-generalisation unless the submission count and the artifact's provenance are
-stated. Ours are: one sweep per model, no tuning against the task set, and a
-digest-pinned artifact frozen 35 commits before the first run.
 
 \subsection{The deliberate non-response}
 

@@ -1,11 +1,22 @@
 # Two pdflatex passes bracket bibtex: the first writes the .aux bibtex reads,
 # and the last two resolve \ref and \cite forward references. Dropping either
 # trailing pass leaves "??" in the PDF.
-.PHONY: all clean check
+.PHONY: all clean check figures
 
 all: main.pdf
 
-main.pdf: main.tex refs.bib $(wildcard sections/*.tex)
+FIGS := figures/fig-ablation.pdf figures/fig-cost.pdf figures/fig-interaction.pdf
+
+# Regenerated from the raw result rows, not committed as opaque images.
+# The script asserts every value it draws against the paper's own numbers.
+figures: $(FIGS)
+
+$(FIGS): figures/make_figures.py \
+         ../../experiments/dabstep-contract-eval/results/glm-full.jsonl \
+         ../../experiments/dabstep-contract-eval/results/dsflash-full.jsonl
+	cd figures && uv run make_figures.py
+
+main.pdf: main.tex refs.bib $(FIGS) $(wildcard sections/*.tex)
 	pdflatex -interaction=nonstopmode -halt-on-error main.tex
 	-bibtex main
 	pdflatex -interaction=nonstopmode -halt-on-error main.tex

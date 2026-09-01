@@ -28,9 +28,15 @@ this as a first-class threat rather than a footnote (Section~\ref{sec:threats}),
 and it is central to interpreting results that use pre-computed views
 (Section~\ref{sec:related}).
 
-Published hard-split accuracies from credible entrants cluster around
-20--26\%: Google's \texttt{simple\_baseline} at 26\%, an Adyen GPT-5.4 entry at
-22.2\%, a Hugging Face Claude~4 Sonnet entry at 19.8\%.
+The benchmark's own paper reports its strongest evaluated agent, o4-mini with a
+reasoning prompt, at \textbf{14.55\% on the hard split} against 76.39\% on the
+easy one~\cite{dabstep} --- the gap that motivates the benchmark. Leaderboard
+entrants have since improved on that: published hard-split accuracies from
+credible named submissions cluster around 20--26\%, with Google's
+\texttt{simple\_baseline} at 26\%, an Adyen GPT-5.4 entry at 22.2\% and a
+Hugging Face Claude~4 Sonnet entry at 19.8\%. We use that 20--26\% band as the
+validity check on our own reimplementation of the prompt-based approach
+(Section~\ref{sec:results}).
 
 \subsection{Context layers and semantic layers}
 

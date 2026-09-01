@@ -184,42 +184,46 @@ the rest are writing.
 
 ### Which model
 
-Cost is projected from run B's measured token profile (86% cache hit rate,
-548,952 input / 39,238 output tokens per task across three arms) at list
-prices. **Upper bounds**: a stronger model needs fewer turns, and run B's
-contract arm already used 40% fewer turns than its baselines.
+**Corrected 2026-09-01.** The figures below replace an earlier table built from
+OpenRouter *list* prices. `dce/pricing.py` pins `deepseek-v4-pro-0813` to the
+`alibaba` endpoint at $0.5808/$1.7424/$0.0581 per 1M (in/out/cached), roughly
+half list — so the pre-registered sweep costs about **half** what this plan
+previously said.
 
-| model | 200 tasks | 332 hard | 401 all |
+Projected from run B's measured token profile across the three sweep arms
+(77k fresh input, 472k cached, 39k output per task; 86% cache hit) at each
+model's **pinned endpoint** price. Upper bounds: a stronger model needs fewer
+turns, and run B's contract arm already used 40% fewer than its baselines.
+
+| model (pinned endpoint) | per task | 240 tasks | **all 401** |
 |---|---:|---:|---:|
-| **`deepseek/deepseek-v4-pro-0813`** (pre-registered) | **$47** | $78 | $94 |
-| `qwen/qwen3-max` | $57 | $95 | $115 |
-| `z-ai/glm-5.3` (run A's family) | $81 | $134 | $162 |
-| `anthropic/claude-sonnet-5` | $128 | $213 | $257 |
-| `openai/gpt-5.4` | $180 | $299 | $361 |
+| **`deepseek-v4-pro-0813`** [alibaba] — pre-registered | $0.141 | $34 | **$56** |
+| `openai/gpt-5.6-sol` [openai] — cross-family | $0.641 | $154 | $257 |
+| `z-ai/glm-5.3-flash` [z-ai] — already run | $0.023 | $5 | $9 |
 
-The pre-registered model is also the cheapest credible option, which resolves
-the tension between methodological duty and budget. Its weakness is family:
-run B is already DeepSeek, so pro does not answer "is this a
-Chinese-open-weight-model quirk".
+**At $56 there is no reason to subsample.** The power analysis below was written
+when the sweep looked like a $94 decision; it now argues only about what the run
+can *detect*, not about how many tasks to buy. Run all 401, matching run A's
+task set exactly.
 
-**Do not pick the third model by reputation — measure it.** What gap 2 needs
-is a point further along the *capability axis*, and that axis is operationally
-defined here as `schema_only` accuracy (13.9% glm -> 22.6% deepseek). Run a
-one-arm, 40-task `schema_only` probe across candidates and pick on the
-measured baseline:
+The pre-registered model is also the only affordable one, which resolves the
+tension between methodological duty and budget. Its weakness is family: run B is
+already DeepSeek, so pro does not answer "is this a Chinese-open-weight-model
+quirk". `gpt-5.6-sol` is the pinned cross-family option at $257 for a full
+sweep, or ~$51 for an 80-task partial arm — worth considering *only* if the
+capability probe shows it materially stronger, since a model we cannot afford to
+sweep is a model the probe cannot inform a decision about.
 
-| probe (schema_only, 40 tasks) | cost |
-|---|---:|
-| `openai/gpt-5.6-luna-pro` | $1.2 |
-| `deepseek/deepseek-v4-pro-0813` | $3.9 |
-| `openai/gpt-5.4-mini` | $4.5 |
-| `qwen/qwen3-max` | $4.7 |
-| `z-ai/glm-5.3` | $6.5 |
-| `anthropic/claude-sonnet-5` | $10.7 |
-| `openai/gpt-5.4` | $15.1 |
+**Do not pick the third model by reputation — measure it.** What gap 2 needs is
+a point further along the *capability axis*, and that axis is operationally
+`schema_only` accuracy (13.9% glm -> 22.6% deepseek-flash). A one-arm,
+50-task `schema_only` probe costs ~$3 on pro and ~$13 on sol.
 
-All seven is **$47** — the price of the full pro sweep, and it buys the
-knowledge of which sweep is worth running. A cheaper subset of four is ~$20.
+**A constraint the runner enforces:** the spend cap must admit one worst-case
+task-group reserve, computed from the per-request token cap (3.29M) times the
+model's output price. For `gpt-5.6-sol` that is ~$33 per group *before any
+observation tightens it*, so a probe of that model cannot run under a cap below
+~$35 however little it will actually spend. Probe models one at a time.
 
 ### Which arms
 

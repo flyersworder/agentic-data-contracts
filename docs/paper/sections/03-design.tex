@@ -83,10 +83,13 @@ test is knowledge, not tokens.
 
 \subsection{What is held fixed}
 
-Across all four arms: row limit (50 rows per result), tool-call cap (40),
-token budget, temperature (0), reasoning effort (\texttt{medium}), model,
-provider endpoint and quantization, task set, gold set, scorer, and the verbatim
-answer-format instruction. Cost, token counts, turn counts, tool calls and
+Across all four arms \emph{within} a run: row limit (50 rows per result),
+tool-call cap (40), token budget, sampling temperature, reasoning effort
+(\texttt{medium}), model, provider endpoint and quantization, task set, gold
+set, scorer, and the verbatim answer-format instruction. Temperature is 0 on
+runs~A and~B and the provider default on run~C, whose model does not accept the
+parameter --- it is identical across the four arms either way, which is what
+the paired comparisons require. Cost, token counts, turn counts, tool calls and
 per-row database integrity are recorded for every run.
 
 The row limit deserves a note because an earlier iteration of this experiment
@@ -94,7 +97,7 @@ got it wrong. With a 1{,}000-row limit, the governed arm looked 11$\times$ more
 expensive than the baselines; the cause was oversized result payloads poisoning
 the context window, not the contract. Symmetric limits are not a detail.
 
-\subsection{Two models}
+\subsection{Three runs}
 
 We ran the full design three times: on \texttt{glm-5.3-flash} (run~A),
 \texttt{deepseek-v4-flash} (run~B) and \texttt{gpt-5.6-sol} (run~C), each

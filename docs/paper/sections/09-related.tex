@@ -15,8 +15,8 @@ Their headline claim is the same as ours and measured the same way: adding
 curated context to an agent that lacks it produces a large accuracy gain. That
 is an independent corroboration of the \emph{direction} of our finding, at a
 far higher absolute score. Because a reader will otherwise stop at the
-difference between 99.8\% and 56.6\%, we state plainly what that difference is
-made of.
+difference between 99.8\% and our own best hard-split figure of 77.4\%, we
+state plainly what that difference is made of.
 
 \subsection{When the semantics get compiled}
 
@@ -68,6 +68,9 @@ WHERE wild(account_type, 'O') AND wild(aci, 'C');
 \end{lstlisting}
 
 The agent's job collapses from \emph{derive the rule} to \emph{call the macro}.
+Section~\ref{sec:derivation} generalises this from two hand-picked tasks to the
+whole fee family, by compiling the contract's declared expressions rather than
+hand-writing a macro.
 
 \subsection{Why the benchmark flatters pre-computation}
 
@@ -76,8 +79,17 @@ set are fee questions. Pre-built views are maximally effective when the question
 space is enumerable in advance, which is exactly this benchmark's construction.
 A macro contributes nothing to a question nobody wrote it for, and the
 declarative layer measured here is the layer that must cover the
-\emph{unanticipated} question. \textbf{56.6\% is therefore a measurement of a
-harder task, not a worse attempt at the same one.}
+\emph{unanticipated} question. \textbf{Our hard-split figures are therefore a
+measurement of a harder task, not a worse attempt at the same one.}
+
+Section~\ref{sec:derivation} puts a number on how much harder, because the
+compiled form of our own contract is exactly the artifact this subsection is
+about. It answers 176 of the 332 hard tasks outright and none of the other 148,
+so \textbf{a pre-computed layer of this kind tops out at 53\% of the hard split
+on this benchmark} --- and the remaining 148 tasks, which consume a macro's
+output and reason on top of it, are where the declarative layer has to work.
+That is a measurement of the boundary this subsection previously argued for
+qualitatively.
 
 We are careful not to convert that into a claim we cannot support. Maintaining
 one macro per metric per dialect is a real and growing burden, but we have no
@@ -98,7 +110,7 @@ is portable [\ldots] The tuned artifact is coupled. The serving model is a
 cheap, swappable commodity right up until you swap it, at which point you're not
 changing a setting, you're re-running the loop.''}~\cite{motherduck-semantic} A
 layer refined against one model is re-tuned when the model changes; our contract
-was authored once, frozen, and run unchanged against two model families.
+was authored once, frozen, and run unchanged against three model families.
 Independent commentary on Guides warns of the second: \emph{``Do not hardcode
 answers to questions [\ldots] will fail the ones you have not seen, including a
 held-out test set''}, urging practitioners to measure \emph{``whether the Guide

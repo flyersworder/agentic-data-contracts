@@ -30,9 +30,9 @@ the contract describes. Non-fee cells are counts, not rates.}
 \label{tab:feebucket}
 \end{table*}
 
-``Hard accuracy'' on this benchmark is close to ``fee-question accuracy''. The
-honest statement of the result is therefore: \textbf{a contract carrying a
-domain's semantics produces a large gain on questions in that domain.}
+``Hard accuracy'' on this benchmark is close to ``fee-question accuracy'', so
+the result states as: \textbf{a contract carrying a domain's semantics produces
+a large gain on questions in that domain.}
 
 \textbf{On the non-fee bucket there is no contract advantage on any model} ---
 against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C. At 38, 30
@@ -50,10 +50,39 @@ scores 1--2 out of 30 for \emph{every} arm on runs~A and~B. Run~C partially
 solves it (\armS{} 8, \armH{} 5, \armC{} 4, \armM{} 2 of 30), which is a second
 slice where the bare baseline leads.
 
+\subsection{The contract resolves ambiguities the manual leaves open}
+\label{sec:threats-interpretation}
+
+The arms are matched on the sources they may consult, not on how those sources
+read. \texttt{semantic.yml} marks seven clauses with a sentence beginning
+\texttt{INTERPRETATION}, flagging where a metric commits to a reading the
+prose does not force. Three are glosses of wording the manual supplies
+outright. One derives the \texttt{capture\_delay} day-count-to-band mapping by
+applying the manual's own band definitions to a column of days. The remaining
+three go further, and we state them plainly: the manual says a \texttt{null}
+field ``applies to all possible values,'' but the annexed \texttt{fees} data
+encodes that wildcard for list-typed fields as an \emph{empty list}, which the
+manual never mentions; and two band metrics break a tie on values sitting
+exactly on a shared boundary, which the manual's ``between A and B'' does not
+decide.
+
+All three are recoverable from the annexed data, which every arm could query,
+and none supplies a task's answer. But they were recovered once, by us, and
+handed to one arm. The empty-list clause in particular is load-bearing: the
+counterfactual lesion that reverses it is diagnostic on 87 of the 97 tasks in
+the payments families: on those tasks, a macro built with the misreading
+returns a different answer from the one built with the clause, so an agent
+lacking the clause has somewhere to go wrong. A reader should
+therefore treat the contract arm's margin as combining two things this
+experiment does not separate --- delivery of what the manual states, and
+resolution of what it leaves open. Separating them needs a fifth arm carrying
+the contract with its \texttt{INTERPRETATION} clauses stripped, which we did
+not run.
+
 \subsection{One benchmark, and a concentrated one}
 
-No amount of compute fixes this. 450 tasks reducing to 113 question shapes ---
-27 of which cover three quarters of the benchmark --- is a narrow question
+No amount of compute fixes this. 450 tasks reduce to 113 question shapes, 27
+of which cover three quarters of the benchmark. That is a narrow question
 space, and results on it should not be read as results about analytics agents
 in general.
 
@@ -77,6 +106,30 @@ have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
 mind. Under-powered comparisons are the norm in this literature rather than the
 exception~\cite{little-power}.
 
+\subsection{Contamination}
+
+DABStep is public, and so is the material an agent needs to answer it. Our own
+gold reconstruction (Section~\ref{sec:golds}) makes the point sharply: we
+recovered 59 hard-split answers from public sources alone, which is a
+demonstration that the answer key exists in machine-readable form outside the
+withheld split. Nothing stops that material from having entered a model's
+training data, and we ran no contamination probe --- no canary strings, no
+perturbed restatements of the questions, no comparison against a
+post-cutoff-held-out set.
+
+This bears asymmetrically on the capability claims. Our three models are
+ordered by capability, but they are also ordered by release date, so
+``stronger model'' and ``more recent training data'' are collinear across
+every comparison in Section~\ref{sec:derivation}. A memorising model would
+show exactly what we report: high accuracy on the \emph{macro} bucket, whose
+tasks follow the benchmark's most common shapes, and a smaller gain on the
+\emph{derived} bucket, whose tasks compose them. We do not believe this
+explains the result, because the frontier model's contract arm scores 94.9\%
+while its schema-only arm scores 31.8\% on the same tasks, and memorisation
+should not care which context the agent was handed. But that argument is an
+inference, not a measurement, and a contamination probe would settle what it
+only makes plausible.
+
 \subsection{One frontier point, and a trend that already broke once}
 
 Every capability claim in this paper rests on a single strong model. We have
@@ -93,25 +146,23 @@ five frontier models found the opposite on GAIA, with the most capable model
 gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Run~C also differs from the others in provider and model
 family, so any run-C contrast confounds capability with both.
 
-\subsection{Reconstructed golds}
+\subsection{Three limits recorded elsewhere}
 
-401 of 450 tasks, by plurality over officially-graded-correct submissions at a
-0.75 threshold, with five verified-wrong golds excluded and one template family
-(59/59) independently reproduced from the database. See
-Section~\ref{sec:golds}. The reader cannot check this independently, which is
-why we plan the external validation described there.
-
-\subsection{Run B's truncation}
-
-29\% of rows lost to provider rate-limiting, near-uniform across arms, with
-114 of 122 lost tasks losing all four arms together. Detailed in
-Section~\ref{sec:truncation}. It costs power, not validity, and it widens
-run~B's intervals by roughly 20\% relative to run~A.
+Golds cover 401 of 450 tasks, by plurality over officially-graded-correct
+submissions at a 0.75 threshold, with five verified-wrong golds excluded and
+one template family (59/59) reproduced from the database
+(Section~\ref{sec:golds}); a reader cannot check this independently, which is
+why we plan the external validation described there. Run~B lost 29\% of its
+rows to provider rate-limiting, near-uniformly across arms, 114 of the 122 lost
+tasks losing all four arms together (Section~\ref{sec:truncation}); it costs
+power, not validity, and widens run~B's intervals by roughly 20\% relative to
+run~A. And nobody outside the project can verify that no benchmark question was
+consulted while the contract was authored (Section~\ref{sec:protocol}).
 
 We draw one methodological lesson from it that generalises beyond this paper.
 Pinning a single provider endpoint with fallbacks disabled is correct for
-validity --- it is what holds quantization, price and throughput fixed across
-arms --- but it transfers responsibility for transient failures to the harness.
+validity, since it holds quantization, price and throughput fixed across arms,
+but it transfers responsibility for transient failures to the harness.
 Ours had no retry for HTTP 429, so a temporary condition became 466 permanent
 rows. The sweep exited cleanly and finished ahead of schedule, and nothing
 looked wrong until the results were read. Benchmark harnesses that pin
@@ -135,20 +186,16 @@ known; its magnitude is not separable from the model change, and we do not
 attempt to estimate it. The runs also used different provider endpoints. Each
 run's internal contrasts are sound; cross-run differences are suggestive only.
 
-\subsection{Self-attested provenance}
+\subsection{The forced-answer policy}
 
-Nobody outside the project can verify that no benchmark question was consulted
-while the contract was authored (Section~\ref{sec:protocol}).
-
-\subsection{Harness failures are reported, not hidden}
-
-We report scored and strict accuracy for every arm throughout
-(Section~\ref{sec:protocol}). One design decision follows from that choice. When an agent exhausts its output budget
-the harness forces a final answer rather than discarding the run. In run~A that
-produced one additional correct answer out of 59 (nearly worthless for
-accuracy), but it eliminated unscoreable rows, and those rows were 41 \armS{},
-18 \armM{} and \textbf{zero} in either governed arm. Dropping them would have
-inflated the two baselines by silently discarding their hardest runs. Run~B
-repeats the pattern: 55, 42, 15 and zero. Run~C forces 8 answers in \armH{} and
-none anywhere else --- \armC{} is the only arm that never exhausted its budget
-on any of the three runs.
+When an agent exhausts its output budget the harness forces a final answer
+instead of discarding the run. In run~A that produced one additional correct
+answer out of 59, nearly worthless for accuracy, but it eliminated unscoreable
+rows --- and those rows were 41 \armS{}, 18 \armM{} and \textbf{zero} in either
+governed arm. Dropping them would have inflated the two baselines by silently
+discarding their hardest runs. Run~B repeats the pattern (49, 38, 15 and zero
+on the complete-case set; 55, 42 and 15 before it), and run~C forces 8 answers
+in \armH{} and none elsewhere. \armC{} is the only arm that never exhausted its
+budget on any run. The policy therefore works against the treatment, and we
+report scored and strict accuracy for every arm throughout
+(Section~\ref{sec:protocol}).

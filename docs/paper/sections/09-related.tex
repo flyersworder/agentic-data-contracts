@@ -3,8 +3,8 @@
 
 \subsection{Context layers}
 
-MotherDuck's ``Guides'' --- markdown context stored in the warehouse and
-fetched through an MCP server --- raise DABStep accuracy by 72 percentage
+MotherDuck's ``Guides'', markdown context stored in the warehouse and fetched
+through an MCP server, raise DABStep accuracy by 72 percentage
 points while cutting cost per run by 55\%, with Gemini~3 Flash answering 418 of
 419 held-out questions correctly (99.8\%) at about two cents per
 question~\cite{motherduck-guides}. A companion report reaches 98.6\% with a
@@ -74,9 +74,9 @@ hand-writing a macro.
 
 \subsection{Why the benchmark flatters pre-computation}
 
-DABStep's 450 questions reduce to 113 shapes, 27 of which cover three quarters
-of the benchmark, and 294 of 332 hard tasks in our set are fee questions. Pre-built views are maximally effective when the question
-space is enumerable in advance, which is exactly this benchmark's construction.
+DABStep's question space is concentrated (Section~\ref{sec:background}), and
+294 of the 332 hard tasks in our set are fee questions. Pre-built views are
+maximally effective when the question space is enumerable in advance, which is exactly this benchmark's construction.
 A macro contributes nothing to a question nobody wrote it for, and the
 declarative layer measured here is the layer that must cover the
 \emph{unanticipated} question. \textbf{Our hard-split figures are therefore a
@@ -88,14 +88,13 @@ the rest, and the tasks it cannot reach are the ones that consume a macro's
 output and reason on top of it. That is a measurement of the boundary this
 subsection would otherwise argue for qualitatively.
 
-We are careful not to convert that into a claim we cannot support. Maintaining
-one macro per metric per dialect is a real and growing burden, but we have no
-data on where it crosses over against the cost of authoring domain prose.
+Maintaining one macro per metric per dialect is a real and growing burden, but
+we have no data on where it crosses over against the cost of authoring domain
+prose.
 \textbf{We do not claim the contract approach scales better} --- only that the
 two degrade differently: a missing macro degrades to nothing, while a contract
-degrades to a model reasoning from a description. The generous reading --- that
-these are complementary layers rather than competitors --- is also the correct
-one. These are complementary layers, not competitors: macros
+degrades to a model reasoning from a description. These are complementary
+layers, not competitors: macros
 optimise the head of the question distribution, a contract covers the tail, and
 in a system with both, the contract is what tells the agent which macro exists
 and when to call it.

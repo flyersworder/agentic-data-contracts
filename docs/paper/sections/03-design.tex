@@ -100,16 +100,14 @@ got it wrong. With a 1{,}000-row limit, the governed arm looked 11$\times$ more
 expensive than the baselines; the cause was oversized result payloads poisoning
 the context window, not the contract. Symmetric limits are not a detail.
 
-They were also not perfectly symmetric here. A post-hoc review found that the
-50-row cap was applied to the governed arms' \texttt{run\_query} but not to
-their \texttt{preview\_table}, which the library clamps at 100 rows of its own
-accord, so a governed arm could see up to 100 rows from a preview where an
-ungoverned arm sees 50 from \texttt{execute\_sql}. Across all three runs this
-occurred on \textbf{31 preview calls}, against many thousands of tool calls.
-The asymmetry is small but it runs \emph{in the treatment's favour}, so we
-state it rather than leave it to be found: the governed arms occasionally
-received twice the rows per preview that the baselines could. The harness is
-fixed for future runs; the reported runs are as they ran.
+They were also not perfectly symmetric here. The 50-row cap reached the
+governed arms' \texttt{run\_query} but not their \texttt{preview\_table}, which
+the library clamps at 100 rows of its own accord. A governed arm could
+therefore see 100 rows from a preview where an ungoverned arm saw 50 from
+\texttt{execute\_sql}. That happened on \textbf{31 preview calls} across all
+three runs, against many thousands of tool calls: small, but in the treatment's
+favour. The harness is fixed for future runs; the reported runs are as they
+ran.
 
 \subsection{Three runs}
 \label{sec:runs}

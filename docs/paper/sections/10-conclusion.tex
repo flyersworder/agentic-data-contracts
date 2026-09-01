@@ -29,20 +29,32 @@ shrink with capability; we stated both, and the third model overturned both.
 is the methodological result of this paper and the one we would most want a
 reader to carry away.
 
+The same transcripts carry a second, narrower result. Declared rules that the
+model merely reads stopped every mutating statement it would otherwise have
+submitted --- 144 to zero, on the two models that reached for the idiom at all
+--- while the enforcement layer standing behind those rules never had to fire.
+On the third model no arm attempted a write, so the hazard disappeared before
+the mechanism could be tested on it.
+
 Three limits bound all of this. The gain appears only inside the domain the
 contract describes. The benchmark is a single one, and a concentrated one. And
 no run
 repeats, so nothing here estimates within-condition variance.
 
-\paragraph{Future work.} Repeat runs, to put a variance estimate under every
-number here --- the largest gap, and largest for the frontier run, whose
-temperature could not be pinned. A second frontier model, since every
-capability claim now rests on one and a trend has already broken once under
-exactly that condition. And an executable metric layer, built \emph{after} this
-measurement rather than before it, so that the declarative and executable
-contributions can be told apart the way content and scaffolding are told apart
-here --- a direction the derivation-gap result makes more interesting, since it
-bounds how much such a layer could still buy.
+\paragraph{Future work.} Three things, in order of what they would settle.
+Repeat runs would put a variance estimate under every number here; that is the
+largest gap, and largest for the frontier run, whose temperature could not be
+pinned. A second frontier model would test every capability claim in this
+paper, all of which now rest on one, which is the exact condition under which a
+claim here has already broken once. And an executable metric layer, built
+\emph{after} this measurement instead of before it, would separate the
+declarative contribution from the executable one the way this paper separates
+content from scaffolding.
+
+What we would defend today is narrower than what two models supported: the
+content in a context layer does most of the work, the scaffolding does some,
+and the cost of making an agent derive a query instead of looking it up is
+falling fast enough that it should not decide the design.
 
 \section*{Artifact Availability}
 

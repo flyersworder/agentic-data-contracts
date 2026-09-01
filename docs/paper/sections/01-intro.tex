@@ -53,9 +53,9 @@ explicit that we do not attempt the third (Section~\ref{sec:related} explains
 why, and why that makes our absolute numbers lower and our question harder).
 
 The design turns on a fourth arm. \armH{} takes the same frozen contract the
-treatment arm uses and empties every field of prose --- domain summaries, metric
+treatment arm uses and empties every field of prose (domain summaries, metric
 descriptions, the SQL expression that carries the fee formula, column and
-relationship descriptions --- while leaving names, types, structure, the table
+relationship descriptions) while leaving names, types, structure, the table
 allow-list, the forbidden-operation rules and all nine governed tools
 byte-for-byte identical. The agent still receives the instruction to look things
 up, still has the tool, and still calls it. It is simply told nothing when it
@@ -77,22 +77,25 @@ generalise.
 
 \textbf{Delivery matters as much as possession}
 (Section~\ref{sec:mechanism}). Both the contract arm and the prompt arm are
-given the governing rule; only the contract arm applies it. The difference is a
-2{,}475-character prompt plus one targeted lookup, versus a 24{,}177-character
-wall of text. Reading the SQL the agents actually submitted turns this from an inference
-into an observation (Section~\ref{sec:clauses}): on tasks needing
+given the governing rule; only the contract arm applies it. The difference is
+where the rule sits: reachable by one targeted lookup, or buried in a wall of
+text. Reading the SQL the agents actually submitted turns this from an
+inference into an observation (Section~\ref{sec:clauses}): on tasks needing
 all six of the contract's load-bearing clauses, the contract arm writes every
 one of them 39\%, 65\% and 98\% of the time against the prompt arm's 3\%, 9\%
 and 4\%.
 
-\textbf{The derivation gap collapses with capability}
+\textbf{Capability arrives unevenly across the two kinds of task}
 (Section~\ref{sec:derivation}). The contract compiles: transcribing its
 declared SQL expressions into two views reproduces gold on 176 of 176 covered
 tasks, so on those tasks the information is provably sufficient and any
-shortfall is a failure to derive. That shortfall is 39.2, 37.3 and
-\textbf{5.1} points across the three models. This is the finding with the most
-consequence for the economics above, and we recorded it as a prediction in the
-public artifact repository before the third run executed.
+shortfall is a failure to derive. That shortfall --- the \emph{derivation gap}
+--- is 39.2, 37.3 and \textbf{5.1} points across the three models, while on
+tasks that compose the same semantics further it moves only from 54.1 to 43.9.
+The same capability increment closes 87\% of the first and 19\% of the second.
+This is the finding with the most consequence for the economics above, and we
+recorded it as a prediction in the public artifact repository before the third
+run executed.
 
 \textbf{Governance is measurable and nearly free}
 (Section~\ref{sec:governance}), on models that need governing. Ungoverned arms

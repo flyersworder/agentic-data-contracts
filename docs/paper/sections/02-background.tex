@@ -19,9 +19,12 @@ over account type, authorisation characteristic and merchant category code. An
 agent that reads the schema and writes idiomatic SQL gets a clean, wrong
 number, the failure a context layer claims to fix.
 
-\textbf{Golds are withheld and grading is centralised}, so the benchmark
-resists the overfitting that makes many text-to-SQL results hard to trust ---
-a hazard with its own literature~\cite{ladder,leaderboard-illusion}. Among
+\textbf{Golds are withheld and grading is centralised}, which raises the cost
+of the overfitting that makes many text-to-SQL results hard to
+trust~\cite{ladder,leaderboard-illusion}. It does not remove it: the sources an
+agent reads are public, and Section~\ref{sec:golds} recovers 59 hard-split
+answers from them, so withholding constrains tuning against the split without
+making the answers unavailable. Among
 text-to-SQL benchmarks, DABStep sits where Spider~\cite{spider} and
 Spider~2.0~\cite{spider2} do not: its difficulty is documentation, not schema
 scale. We use it for that reason, and Section~\ref{sec:threats} says what the

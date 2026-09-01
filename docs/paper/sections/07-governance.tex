@@ -134,19 +134,19 @@ check reported clean, so the detection is trustworthy.
 statements are not malformed SQL that a validator would catch; the ungoverned
 tool opens a fresh read-write connection per call and passes them through, so
 \texttt{CREATE TABLE} succeeds silently. Because \texttt{TEMP} tables are
-connection-scoped, a temp table never survives to the next tool call --- the
-model receives no signal that it did anything wrong, only that its own table
-vanished, and the natural repair is to stop using \texttt{TEMP}. The escalation
-is therefore an interaction between the model's idiom and the tool's connection
-lifecycle, not model misbehaviour alone. A session-scoped connection would
-likely have prevented it. This does not weaken the contrast --- the governed
-arms faced the identical harness and emitted nothing --- but \textbf{the size
-of the hazard is partly a property of this harness}, and a different tool
-design would produce a different attempt count.
+connection-scoped, a temp table never survives to the next tool call, so the
+model receives no signal that it did anything wrong --- only that its own table
+vanished --- and the natural repair is to stop using \texttt{TEMP}. The
+escalation is an interaction between the model's idiom and the tool's
+connection lifecycle, and a session-scoped connection would likely have
+prevented it.
 
-\textbf{One corruption event is an anecdote, not a rate.} The defensible number
-is the 144 attempts, and the defensible claim is narrower than it first
-appears: on models that reach for the mutating idiom, declared rules stopped
-them from trying. Whether declared rules deter a model that was not going to
-try anyway is untested, and as models stop reaching for that idiom the hazard
-this experiment measures shrinks on its own.
+Two limits follow. \textbf{The size of the hazard is partly a property of this
+harness}, so a different tool design would produce a different attempt count;
+the contrast survives, because the governed arms faced the identical harness
+and emitted nothing. And one corruption event is an anecdote, not a rate: the
+defensible number is the 144 attempts, and the defensible claim is that on
+models which reach for the mutating idiom, declared rules stopped them from
+trying. Whether such rules deter a model that was not going to try is untested,
+and run~C suggests the hazard shrinks on its own as models stop reaching for
+the idiom.

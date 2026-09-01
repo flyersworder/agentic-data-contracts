@@ -7,7 +7,9 @@ retrieval scaffolding that delivers it, or from the pre-computed views and
 macros that usually accompany it.
 
 We report a controlled four-arm ablation on DABStep, run three times across
-three model families spanning a wide capability range. A fourth arm, \armH{}, is derived mechanically from the same frozen artifact:
+three model families spanning a wide capability range. One run lost 29\% of its
+rows to provider rate-limiting, near-uniformly across arms; it is reported on
+the 279 tasks scoreable in all four, and is underpowered throughout. A fourth arm, \armH{}, is derived mechanically from the same frozen artifact:
 every field of prose is emptied, while the tool surface, retrieval instruction,
 table allow-list and operation rules stay byte-for-byte fixed. It isolates the
 scaffolding from the semantics.
@@ -26,9 +28,13 @@ The contract is also executable. Transcribing its declared
 answers exactly on 176 of 176 covered tasks, which proves the artifact contains
 what those tasks need and converts each arm's accuracy into efficiency against a
 proven ceiling. Measured that way, the contract arm recovers 60.8\%, 62.7\% and
-\textbf{94.9\%} of what it was given: \textbf{the derivation gap is not a fixed
-cost of the declarative approach but one that collapses with model
-capability}, a prediction we recorded publicly before the third run executed.
+\textbf{94.9\%} of what it was given, against 45.9\%, 46.5\% and 56.1\% on tasks
+that compose those semantics further: \textbf{capability arrives unevenly,
+closing 87\% of the gap on tasks the contract answers directly and 19\% on
+tasks built on top of them}. The cost of making an agent derive a query rather
+than pre-computing it is therefore transient, which we recorded as a prediction
+publicly before the third run executed; the cost of the reasoning built above
+that query is not.
 
 We also find that the advantage over a hand-written prompt is not monotone in
 capability, and that the effect is not detectable outside the domain the

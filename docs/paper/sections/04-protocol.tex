@@ -16,15 +16,13 @@ the 22{,}127-character manual.
 was frozen roughly 35 commits before run~A. Any post-hoc edit would change the
 hash and invalidate every row.
 
-One defect in this machinery, found by a post-hoc review of the harness and
-reported rather than quietly repaired: the digest is stamped unconditionally,
-so \armH{}'s rows also carry the \emph{real} contract's hash rather than the
-hollow artifact's (\texttt{sha256:c46a767d\ldots}). \armH{}'s rows are therefore
-pinned to a file that arm never loaded, and the stamp is inert for that arm.
-It affects no result --- which artifact each arm loaded is fixed by the harness
-and independently evidenced by the hollow arm's empty-placeholder responses and
-by the $n$-gram tests of Section~\ref{sec:hollow} --- but the per-row
-tamper-evidence we claim for \armH{} is not there. The harness is fixed; the
+The machinery has one defect. The digest is stamped unconditionally, so
+\armH{}'s rows carry the \emph{real} contract's hash instead of the hollow
+artifact's (\texttt{sha256:c46a767d\ldots}) --- pinned to a file that arm never
+loaded. No result changes. Which artifact each arm loaded is fixed by the
+harness, and the hollow arm's empty-placeholder responses and the $n$-gram
+tests of Section~\ref{sec:hollow} evidence it independently. What is missing is
+the per-row tamper-evidence we claim for \armH{}. The harness is fixed; the
 released rows are left as they ran.
 
 \textbf{The limit is stated.} Nobody outside the project can verify that no
@@ -105,11 +103,3 @@ harness failures flatters whichever arm fails most; counting them as wrong
 punishes an arm for what may be our bug. Reporting one alone hides which is in
 play. An arm whose harness-failure \emph{rate} crosses a threshold is flagged
 automatically, and that flag propagates into every report.
-
-\subsection{Artifacts}
-
-The harness, the frozen contract and its hollow derivative, all 4{,}812
-per-run transcripts including model reasoning traces, and the raw result rows
-are released. Every row records the commit, contract digest, gold-set hash,
-scorer identity, provider endpoint, quantization, token counts, cost and a
-post-run database integrity check.

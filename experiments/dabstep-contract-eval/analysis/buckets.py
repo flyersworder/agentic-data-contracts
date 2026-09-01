@@ -49,6 +49,12 @@ def main(paths: list[str]) -> None:
                 seen[str(r["task_id"])].add(r["arm"])
         complete = {t for t, a in seen.items() if a >= set(ARMS)}
         dropped = len({str(r["task_id"]) for r in rows}) - len(complete)
+        if not complete:
+            # A probe or smoke file has no paired tasks at all. Say so rather
+            # than dying on an empty slice when a `results/*.jsonl` glob picks
+            # it up (which the documented invocation does).
+            print(f"\nskipping {Path(path).name}: no task has all four arms")
+            continue
         rows = [r for r in rows if str(r["task_id"]) in complete]
         model = sorted({r["model"] for r in rows})[0].split("/")[-1]
         tally: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
@@ -77,5 +83,6 @@ if __name__ == "__main__":
     args = sys.argv[1:] or [
         str(ROOT / "results" / "glm-full.jsonl"),
         str(ROOT / "results" / "dsflash-full.jsonl"),
+        str(ROOT / "results" / "sol-full.jsonl"),
     ]
     main(args)

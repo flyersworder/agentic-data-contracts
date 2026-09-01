@@ -164,6 +164,25 @@ FAMILIES: list[tuple[str, str, str]] = [
     ),
 ]
 
+# The macro families whose answer requires joining `payments` to `fees`, and
+# therefore exercise every clause of `analysis/macro.sql`. The other four
+# families resolve straight off `fees` / `merchant_category_codes`, so any
+# analysis that lesions or inspects the macro's own predicates MUST restrict
+# itself to these -- a lesion cannot change an answer that never touched the
+# lesioned views, and counting those tasks as "undiagnosed" silently conflates
+# "no lesion matched" with "no lesion could apply".
+PAYMENTS_FAMILIES = frozenset(
+    {
+        "total_fees_day",
+        "total_fees_month",
+        "total_fees_year",
+        "fee_ids_day",
+        "fee_ids_month",
+        "fee_ids_year",
+        "merchants_for_fee",
+    }
+)
+
 # Questions that USE fee semantics but ask a counterfactual or an optimisation
 # on top of them: the macro is a building block, not the answer.
 DERIVED = [

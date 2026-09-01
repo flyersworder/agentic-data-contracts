@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from counterfactuals import family_of  # noqa: E402
+from coverage import PAYMENTS_FAMILIES  # noqa: E402
 from dce.stats import ANSWER_VERDICTS, load  # noqa: E402
 
 ARMS = ["schema_only", "contract_hollow", "manual_prompt", "contract"]
@@ -59,22 +60,6 @@ CLAUSES: dict[str, str] = {
     "natural_month": r"day_of_year\s*-\s*1|make_date",
     "fraud_volume": r"has_fraudulent_dispute",
 }
-
-# The families whose answer requires joining payments to fees, and therefore
-# every clause above. The fee-table-only families (`avg_fee_*`,
-# `fee_ids_by_at_aci`) need no monthly aggregate and are excluded, so every row
-# compared here has the same clause requirement.
-PAYMENTS_FAMILIES = frozenset(
-    {
-        "total_fees_day",
-        "total_fees_month",
-        "total_fees_year",
-        "fee_ids_day",
-        "fee_ids_month",
-        "fee_ids_year",
-        "merchants_for_fee",
-    }
-)
 
 
 def sql_of(path: Path) -> str:
@@ -155,7 +140,11 @@ def collect(run: Path, results: Path) -> tuple[str, dict]:
 
 def main(argv: list[str]) -> None:
     within = "--within" in argv
-    runs = [a for a in argv if not a.startswith("--")] or ["glm-full", "dsflash-full"]
+    runs = [a for a in argv if not a.startswith("--")] or [
+        "glm-full",
+        "dsflash-full",
+        "sol-full",
+    ]
     try:
         from scipy.stats import fisher_exact
     except ImportError:  # pragma: no cover

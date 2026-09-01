@@ -385,89 +385,99 @@ labelling. Seven of the nine are diagnostic on 34–95 of the 176 tasks;
 `exclusive_bands` is diagnostic on none, because no golded task sits exactly on
 a band boundary.
 
-**Wrong answers on macro-bucket hard tasks:**
+**Wrong answers, restricted to the 97 payments-joined fee tasks** — the only
+families a lesion of `macro.sql` can reach. The other four macro families
+(`avg_fee_*`, `fee_ids_by_at_aci`) resolve straight off `fees` and never touch
+the lesioned views, so every wrong answer on them is undiagnosable by
+construction:
 
 | | wrong | single lesion | lesion pair | undiagnosed |
 |---|---:|---:|---:|---:|
-| glm `schema_only` | 171 | 4 | 0 | 167 |
-| glm `contract_hollow` | 158 | 11 | 0 | 146 |
-| glm `manual_prompt` | 150 | 4 | 2 | 143 |
-| glm `contract` | 69 | **0** | **0** | 69 |
-| ds-flash `schema_only` | 108 | 0 | 2 | 106 |
-| ds-flash `contract_hollow` | 106 | 2 | 1 | 103 |
-| ds-flash `manual_prompt` | 73 | 1 | 0 | 72 |
-| ds-flash `contract` | 44 | **0** | **0** | 44 |
-| sol `schema_only` | 120 | **27** | 0 | 93 |
-| sol `contract_hollow` | 94 | **20** | 0 | 73 |
-| sol `manual_prompt` | 89 | 2 | 1 | 85 |
-| sol `contract` | 9 | **0** | **0** | 9 |
+| glm `schema_only` | 92 | 4 | 0 | 88 |
+| glm `contract_hollow` | 80 | 11 | 0 | 68 |
+| glm `manual_prompt` | 75 | 4 | 2 | 68 |
+| glm `contract` | 12 | **0** | **0** | 12 |
+| ds-flash `schema_only` | 59 | 0 | 2 | 57 |
+| ds-flash `contract_hollow` | 63 | 2 | 1 | 60 |
+| ds-flash `manual_prompt` | 40 | 1 | 0 | 39 |
+| ds-flash `contract` | 23 | **0** | **0** | 23 |
+| sol `schema_only` | 46 | **27** | 0 | 19 |
+| sol `contract_hollow` | 37 | **20** | 0 | 16 |
+| sol `manual_prompt` | 26 | 2 | 1 | 22 |
+| sol `contract` | **0** | — | — | — |
+
+That restriction is a correction. An earlier version of this section pooled all
+176 macro tasks, which inflated every `undiagnosed` count with tasks no lesion
+could ever explain — and did so *unevenly*: 71% of contract-arm errors fell on
+the unreachable families against 52% elsewhere, biasing the very comparison the
+table exists to make. The claim below is the corrected one, and it is about
+30x weaker than what this document previously reported.
 
 Three things follow.
 
-**On the two weaker models the method fails, and that is a finding.** 27 of
-879 wrong answers (3.1%) are explained by one named convention error, and all
-35 lesion pairs add almost nothing. Those agents do not fail by holding one
+**On the two weaker models the method mostly fails, and that is a finding.**
+27 of 444 wrong answers (6.1%) are explained by one named convention error, and
+all 35 lesion pairs add almost nothing. Those agents do not fail by holding one
 crisp misconception — they fail idiosyncratically, in ways a fixed catalogue of
-conventions does not enumerate. (A tenth lesion, dropping rule-matching
-entirely, was tested to explain `contract_hollow`'s over-counting on glm: it
-answers 1227x gold where the arm answers 87x, so that is not the mechanism
-either.)
+conventions does not enumerate. **The derivation gap is therefore not closable
+by documenting five more conventions**, which is the intervention its size
+would otherwise invite. (A tenth lesion, dropping rule-matching entirely, was
+tested to explain `contract_hollow`'s over-counting on glm: it answers 1227x
+gold where the arm answers 87x, so that is not the mechanism either.)
 
 **On sol the method works, and the reason is the interesting part.** Its
-diagnosis rate is 16.0% overall and **22.5% for `schema_only`** — seven times
-glm's and ds-flash's. A frontier model given only a bare schema writes SQL that
-is structurally right and wrong in exactly one nameable convention, so a single
-lesion reproduces its answer. The weaker models' SQL is wrong in ways that no
-single convention describes. **Error legibility is itself a function of
-capability**, which is a caution for any failure-taxonomy method calibrated on
-weak models — including an LLM judge.
+diagnosis rate is **45.9%** overall and **59%** for `schema_only` — an order of
+magnitude above glm's 8.1% and ds-flash's 3.2%. A frontier model given only a
+bare schema writes SQL that is structurally right and wrong in exactly one
+nameable convention, so a single lesion reproduces its answer exactly. The
+weaker models' SQL is wrong in ways no single convention describes.
+**Error legibility is itself a function of capability** — a caution for any
+failure-taxonomy method calibrated on weak models, an LLM judge included.
 
 **On every model, the contract arm contributes none of the diagnosable
-errors.** Zero of 122 contract-arm errors are a named convention mistake,
-against 77 of 1,069 elsewhere (Fisher exact **p = 3×10⁻⁴**). The contract
+errors.** Zero of 35 contract-arm errors are a named convention mistake,
+against 77 of 518 elsewhere (Fisher exact **p = 0.0091**). The contract
 eliminates precisely the misconceptions it documents; what survives is made of
-something else. On sol the contract arm has only 9 wrong answers on this bucket
-in total, and none of them is a convention error.
+something else.
+
+The cleanest statement of that is sol's, and it needs no test: **on these 97
+tasks sol's contract arm is not wrong once** (97/97, against 85/97 on glm and
+47/97 on ds-flash). There are no errors left to diagnose.
 
 ### How wrong, in orders of magnitude
 
-Restricted to the single-number families, the ratio of the agent's answer to
-gold:
+Same 97 tasks, restricted to the single-number families; the ratio of the
+agent's answer to gold:
 
 | | n | median | <2x | 2-10x | 10-100x | >100x |
 |---|---:|---:|---:|---:|---:|---:|
-| glm `schema_only` | 101 | 1.01 | 68% | 17% | 13% | 2% |
-| glm `contract_hollow` | 101 | **70.4** | 22% | 9% | **53%** | 16% |
-| glm `manual_prompt` | 93 | 0.96 | 82% | 18% | 0% | 0% |
-| glm `contract` | 40 | 0.99 | **92%** | 5% | 2% | 0% |
-| ds-flash `schema_only` | 55 | 1.02 | 76% | 13% | 5% | 5% |
-| ds-flash `contract_hollow` | 47 | 1.03 | 70% | 15% | 9% | 6% |
-| ds-flash `manual_prompt` | 45 | 0.90 | 91% | 9% | 0% | 0% |
-| ds-flash `contract` | 25 | 2.81 | 36% | 20% | 16% | 28% |
-| sol `schema_only` | 85 | 1.00 | 95% | 2% | 2% | 0% |
-| sol `contract_hollow` | 61 | 1.01 | 90% | 10% | 0% | 0% |
-| sol `manual_prompt` | 65 | 0.96 | 91% | 5% | 2% | 3% |
-| sol `contract` | 9 | 0.99 | 100% | 0% | 0% | 0% |
+| glm `schema_only` | 42 | 0.96 | 38% | 33% | 24% | 5% |
+| glm `contract_hollow` | 43 | **64.0** | 7% | 12% | **77%** | 5% |
+| glm `manual_prompt` | 35 | 0.61 | 57% | 43% | 0% | 0% |
+| glm `contract` | 1 | — | — | — | — | — |
+| ds-flash `schema_only` | 20 | 1.08 | 65% | 20% | 5% | 10% |
+| ds-flash `contract_hollow` | 18 | 1.39 | 44% | 33% | 22% | 0% |
+| ds-flash `manual_prompt` | 23 | 0.57 | 83% | 17% | 0% | 0% |
+| ds-flash `contract` | 12 | 20.41 | 17% | 33% | 33% | 17% |
+| sol `schema_only` | 27 | 0.97 | **93%** | 0% | 7% | 0% |
+| sol `contract_hollow` | 17 | 1.00 | 71% | 29% | 0% | 0% |
+| sol `manual_prompt` | 19 | 0.66 | 79% | 5% | 5% | 11% |
+| sol `contract` | 0 | — | — | — | — | — |
 
-**The order-of-magnitude tail is a weak-model phenomenon.** On sol every arm
-sits at 90–100% within 2x of gold and the `>100x` column is empty except for
-three answers; on glm, 15% of `schema_only` answers and 69% of
-`contract_hollow` answers are off by more than 10x. A wrong answer from a
-capable model is a near-miss; a wrong answer from a weak one can be off by two
-orders of magnitude. This is the same fact the counterfactual diagnosis rate
+**One pattern is monotone across all three models.** On the bare-schema arm,
+the share of wrong answers within 2x of gold rises 38% → 65% → 93%. A wrong
+answer from a capable model is a near-miss; a wrong answer from a weak one can
+be off by two orders of magnitude. This is the same fact the diagnosis rate
 reports from the other side — capable models fail legibly.
 
-One pattern holds on all three models: **`manual_prompt` is never off by more
-than 10x** (0%, 0%, 3%). Knowledge in the prompt appears to keep the query's
-shape right even when the answer is wrong.
-
-Two rows do not replicate and should not be leaned on. glm's `contract_hollow`
-over-counts by a median 70x — nine governed tools that return nothing, and the
-agent stops constraining the fee-rule join — but neither ds-flash's nor sol's
-hollow arm shows anything like it (medians 1.03 and 1.01). ds-flash's
-`contract` row is the reverse anomaly and rests on 25 answers. Separating those
-from noise needs the repeat runs Section "What these runs do not show" already
-calls for.
+**Nothing else here replicates, and one claim previously made in this document
+does not survive the correction.** An earlier version reported that
+`manual_prompt` is never off by more than 10x on any model; restricted to the
+families the analysis can actually speak to, sol's `manual_prompt` puts 11% of
+its wrong answers beyond 100x. glm's `contract_hollow` over-counts by a median
+64x while neither other model's does, and the contract-arm rows rest on 1, 12
+and 0 answers. **Treat this table as exploratory**; separating these from noise
+needs the repeat runs the limitations section already calls for.
 
 ### Does the contract's vocabulary reach the SQL? A behavioural check
 

@@ -39,6 +39,7 @@ from coverage import (  # noqa: E402
     DB,
     FAMILIES,
     MACRO,
+    PAYMENTS_FAMILIES,
     answer,
     classify,
     load_golded,
@@ -206,6 +207,11 @@ def build(*lesions: str) -> duckdb.DuckDBPyConnection:
         con.execute(f"CREATE VIEW {t} AS SELECT * FROM src.{t}")
     con.execute(sql)
     post = [name for name in lesions if name in POST_LESIONS]
+    if len(post) > 1:
+        raise ValueError(
+            f"two post-lesions requested ({post}); both redefine the same view, "
+            "so applying both silently drops one -- pass one"
+        )
     if post:
         con.execute("CREATE TABLE tfm_base AS SELECT * FROM transaction_fee_matches")
         con.execute(
@@ -257,8 +263,12 @@ def family_of() -> dict[str, str]:
     return {tid: key for tid, key, _ in macro_tasks()}
 
 
-def macro_tasks() -> list[tuple[str, str, re.Match]]:
-    """(task_id, family_key, match) for every task the true macro answers."""
+def macro_tasks(payments_only: bool = False) -> list[tuple[str, str, re.Match]]:
+    """(task_id, family_key, match) for every task the true macro answers.
+
+    `payments_only` keeps just the families that join `payments` to `fees` --
+    the only ones a lesion of `macro.sql` can affect at all.
+    """
     golded, _ = load_golded()
     out = []
     for t in golded:
@@ -266,13 +276,14 @@ def macro_tasks() -> list[tuple[str, str, re.Match]]:
         for key, _cat, rx in FAMILIES:
             m = re.match(rx, q)
             if m:
-                out.append((str(t["task_id"]), key, m))
+                if not payments_only or key in PAYMENTS_FAMILIES:
+                    out.append((str(t["task_id"]), key, m))
                 break
     return out
 
 
 def main(paths: list[str]) -> None:
-    tasks = macro_tasks()
+    tasks = macro_tasks(payments_only=True)
     _, golds = load_golded()
     names = list(LESIONS) + list(POST_LESIONS)
 
@@ -290,9 +301,15 @@ def main(paths: list[str]) -> None:
         con.close()
 
     # A lesion that still lands on gold is not diagnostic for that task.
+    # `preds[...][tid]` is "" when a lesioned macro raised. An empty prediction
+    # is not a diagnosis: without this guard it inflates the diagnostic count
+    # and lets any empty agent answer be attributed to that misconception. The
+    # paired branch below has always guarded it.
     diagnostic = {
         name: {
-            tid for tid in preds[name] if not score(preds[name][tid], str(golds[tid]))
+            tid
+            for tid in preds[name]
+            if preds[name][tid] and not score(preds[name][tid], str(golds[tid]))
         }
         for name in names
     }
@@ -338,12 +355,20 @@ def main(paths: list[str]) -> None:
             if r.get("verdict") in ANSWER_VERDICTS:
                 seen[str(r["task_id"])].add(r["arm"])
         complete = {t for t, a in seen.items() if a >= set(ARMS)}
+        # ONLY the payments-joined families. The other four macro families
+        # resolve straight off `fees` / `merchant_category_codes`, so no lesion
+        # of `macro.sql` can change their answer -- every one of their wrong
+        # answers lands in `undiagnosed` by construction. Including them does
+        # not merely dilute: the share differs sharply by arm (71% of
+        # contract-arm errors against 52% elsewhere), so it biases the very
+        # comparison this table exists to make.
         wrong = [
             r
             for r in rows
             if r["verdict"] == "incorrect"
             and str(r["task_id"]) in complete
             and cat.get(str(r["task_id"])) == "macro"
+            and fam.get(str(r["task_id"])) in PAYMENTS_FAMILIES
         ]
 
         tally: dict[str, Counter] = defaultdict(Counter)
@@ -372,7 +397,8 @@ def main(paths: list[str]) -> None:
         head = "".join(f"{b:>9s}" for b in BANDS)
         print(f"{'arm':18s}{'n':>5s}{'median':>9s}{head}{'over':>7s}")
         for arm in ARMS:
-            ratios = []
+            ratios: list[float] = []
+            dropped = 0
             for r in wrong:
                 if r["arm"] != arm:
                     continue
@@ -380,7 +406,17 @@ def main(paths: list[str]) -> None:
                 if fam.get(tid) not in NUMERIC_FAMILIES:
                     continue
                 got, gold = as_number(r["answer_normalized"]), as_number(golds[tid])
-                if got is None or gold in (None, 0) or got <= 0:
+                # `gold <= 0` is guarded symmetrically with `got`: a negative
+                # gold would make the ratio negative and `band()` would raise
+                # in `math.log10`. Today's fee golds are all positive.
+                if got is None or gold is None or gold <= 0:
+                    continue
+                # An answer of exactly 0 is a plausible wrong answer for a fee
+                # total but has no magnitude relative to gold. Count and report
+                # it rather than dropping it silently, so `n` reconciles with
+                # the `wrong` column above.
+                if got <= 0:
+                    dropped += 1
                     continue
                 ratios.append(got / gold)
             if not ratios:
@@ -389,9 +425,10 @@ def main(paths: list[str]) -> None:
             med = sorted(ratios)[len(ratios) // 2]
             over = sum(1 for x in ratios if x > 1)
             cells = "".join(f"{100 * b[k] / len(ratios):8.0f}%" for k in BANDS)
+            note = f"   ({dropped} non-positive omitted)" if dropped else ""
             print(
                 f"{arm:18s}{len(ratios):5d}{med:9.2f}{cells}"
-                f"{100 * over / len(ratios):6.0f}%"
+                f"{100 * over / len(ratios):6.0f}%{note}"
             )
 
 
@@ -399,5 +436,6 @@ if __name__ == "__main__":
     args = sys.argv[1:] or [
         str(ROOT / "results" / "glm-full.jsonl"),
         str(ROOT / "results" / "dsflash-full.jsonl"),
+        str(ROOT / "results" / "sol-full.jsonl"),
     ]
     main(args)

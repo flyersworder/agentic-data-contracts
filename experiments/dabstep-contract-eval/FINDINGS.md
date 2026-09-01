@@ -541,9 +541,9 @@ optimistic. Every arm is affected identically and the contrasts are unmoved.
 ## Related work: MotherDuck Guides, and what the comparison means
 
 MotherDuck reports **418 of 419 DABStep questions correct (99.8%)** with
-Gemini 3 Flash at ~$0.02/question, and separately **96–98% with a local Qwen
-27B**, using "Guides" — markdown context stored in the warehouse and fetched
-through their MCP server. Their headline is the same claim as ours, measured
+Gemini 3 Flash at ~$0.02/question, and separately **98.6% with a local
+Qwen3.8 27B** at 4-bit quantization (96.4% at 3-bit), using "Guides" — markdown
+context stored in the warehouse and fetched through their MCP server. Their headline is the same claim as ours, measured
 the same way: Guides raise accuracy by **72 percentage points** and cut cost
 ~55% against an agent discovering context on its own.
 
@@ -566,10 +566,19 @@ SELECT string_agg(ID::VARCHAR, ', ' ORDER BY ID) FROM fees
 WHERE wild(account_type, 'O') AND wild(aci, 'C');
 ```
 
-MotherDuck's own guidance lists pre-computed views among its five steps, and
-a separate post of theirs reports 93.2% from "a simple prompt with views and
-macros". So a large share of 55% -> 99.8% is the semantic layer doing work the
-agent no longer has to do.
+MotherDuck's own guidance lists pre-computed views among its five steps, and a
+separate post of theirs reports a **progression**: vector-search retrieval of
+context fragments "capped out around 88%"; baking the knowledge into the
+warehouse as schema comments, macros and derived tables reached **93%**; a
+hierarchical semantic layer over raw data, authored by a large model and
+refined iteratively, reached **100%**. Each step moves work out of the agent
+and into an artifact prepared in advance, so a large share of 55% -> 99.8% is
+the semantic layer doing work the agent no longer has to do.
+
+*(Corrected 2026-09-01: this section previously quoted "93.2% from a simple
+prompt with views and macros". That phrasing appears in no MotherDuck post —
+the verified figure is the 88 -> 93 -> 100 progression above, which makes the
+same point with more of the mechanism visible.)*
 
 **And the benchmark's shape flatters that approach.** 450 questions come from
 26 templates; 294 of 332 hard tasks here are fee questions. Pre-built views
@@ -580,15 +589,25 @@ is the layer that has to cover the *unanticipated* question — which makes
 55.1% a measurement of a harder thing than the benchmark's ceiling suggests,
 not a worse attempt at the same thing.
 
-**Neither methodology is disclosed for the 99.8% run.** The post defers to a
-repository and states neither the provenance of the Guide content, nor why
-419 rather than 450 questions, nor whether the official scorer was used, nor
-how many iterations it took. This is not an accusation — but our leaderboard
+**Two coupling costs are stated in the sources themselves.** The author of the
+100% result writes that *"The recipe is portable [...] The tuned artifact is
+coupled. The serving model is a cheap, swappable commodity right up until you
+swap it, at which point you're not changing a setting, you're re-running the
+loop."* A layer refined against one model is re-tuned when the model changes;
+our contract was frozen once and run unchanged against two model families.
+Separately, third-party commentary on Guides warns *"Do not hardcode answers to
+questions [...] will fail the ones you have not seen, including a held-out test
+set"* and urges measuring *"whether the Guide generalizes to new questions, not
+whether it clears the benchmark you tuned it against"*.
+
+**Methodology is not disclosed for the 99.8% run.** The post defers to a
+repository and states neither the provenance of the Guide content, nor why 419
+rather than 450 questions, nor whether the official scorer was used, nor how
+many iterations it took. This is not an accusation — but our leaderboard
 analysis found a strong tuning gradient (organisations submitting once: 19.6%
-median hard; submitting 21+ times: 54.2%), and a third-party analysis of
-Guides independently warns against "hardcoding answers to questions" and
-urges measuring generalisation to unseen questions. A reader cannot rule that
-in or out, and neither can we.
+median hard; submitting 21+ times: 54.2%), which is equally consistent with
+genuine iterative improvement. A reader cannot rule it in or out, and neither
+can we.
 
 ### What is unique here
 

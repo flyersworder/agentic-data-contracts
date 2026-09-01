@@ -78,7 +78,7 @@ a reviewer who forms that impression in §1 will not revise it in §8.
 | covers | metrics someone anticipated | any question over the described domain |
 | authoring cost | one macro per metric, tested and maintained | one description per domain |
 | fails when | the question was not anticipated | the model reimplements the rule wrongly |
-| DABStep score | 93.2% from "a simple prompt with views and macros" (MotherDuck's own post) | 55.1% / 56.6% |
+| DABStep score | 88% retrieval -> **93%** warehouse-baked macros/views -> **100%** hierarchical semantic layer (MotherDuck's own progression) | 55.1% / 56.6% |
 
 DABStep is 450 questions from **26 templates**, and 294 of 332 hard tasks here
 are fee questions. That is a question space enumerable in advance, which is
@@ -92,6 +92,11 @@ a human author, not reasoning improved.
 Verified concretely in `FINDINGS.md`: tasks 1500 and 1502, both of which the
 contract arm got wrong, are answered exactly by a five-line `wild()` macro
 encoding the NULL-wildcard rule the contract states in prose.
+
+Two coupling costs are quoted from the sources rather than speculated about:
+the 100% author writes that "the tuned artifact is coupled" to the serving
+model, and third-party commentary warns against hardcoding answers and urges
+measuring generalisation to unseen questions. Attribute both; accuse nobody.
 
 **Be generous about it, because the generous reading is the correct one.**
 These are complementary layers, not competitors. Macros optimise the head of

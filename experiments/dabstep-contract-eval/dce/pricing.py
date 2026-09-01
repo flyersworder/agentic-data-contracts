@@ -122,30 +122,32 @@ MODELS: dict[str, ModelSpec] = {
             supports_temperature=True,
             role="cross_family_control",
         ),
-        # `openai/flex`: half the price of the `openai` standard tier AND
-        # faster, which is the opposite of what this pin used to assume. The
-        # comment here previously rejected flex because it "queues, and
-        # wall-clock is the binding constraint" -- asserted, never measured.
-        # Measured 2026-09-01 against the standard tier, same prompt, same
-        # 700-token cap: serially 69.9 vs 70.5 tok/s (a wash), and under the
-        # sweep's real 6-way concurrency 413 vs 299 tok/s aggregate, with
-        # per-request latency 7.9-10.1s against 10.6-14.0s. Flex is a service
-        # tier, not different weights -- same 1.05M context, same (unknown)
-        # quantization -- so no fidelity is being traded for the price.
+        # `openai`: the standard tier, because it is the only one measured
+        # to WORK. `openai/flex` is half price and, measured, faster --
+        # serially 69.9 vs 70.5 tok/s, and 413 vs 299 tok/s aggregate under
+        # 6-way concurrency. It was pinned here on 2026-09-01 on the strength
+        # of those numbers and reverted the same day: under sustained sweep
+        # load it returned bodies with `choices`/`model`/`object` all null on
+        # 39 of 68 rows (58%), uniformly across arms, which pydantic-ai
+        # cannot parse and the harness records as a terminal error. See
+        # `results/sol-flex-aborted.jsonl`.
+        #
+        # The lesson is about what that benchmark measured, not about flex.
+        # Throughput under a burst is not reliability under sustained load:
+        # flex is best-effort by design and sheds requests rather than
+        # queueing them, and three bursts of six requests never sampled that.
+        # The same model on this standard tier ran the 50-row capability
+        # probe with zero failures.
+        #
         # `openai/fast` is 2x dearer than standard; `azure/*` and
         # `amazon-bedrock/*` are 2.2x-2.75x dearer than that.
-        #
-        # Flex is best-effort by design and MAY queue under load we did not
-        # sample. That risk is one-way: a pin cannot change mid-run without
-        # mixing providers inside one results file, so if flex degrades the
-        # answer is to wait it out (the sweep resumes) rather than re-pin.
         ModelSpec(
             "openai/gpt-5.6-sol",
-            provider_tag="openai/flex",
+            provider_tag="openai",
             quantization="unknown",
-            price_in=1.00,
-            price_out=5.00,
-            price_cached=0.10,
+            price_in=2.00,
+            price_out=10.00,
+            price_cached=0.20,
             # Not in this model's OpenRouter `supported_parameters`.
             supports_temperature=False,
             role="frontier_subset",

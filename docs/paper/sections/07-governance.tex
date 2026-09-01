@@ -84,6 +84,13 @@ the model \emph{emitted}, not of what survived validation. Zero does not mean
 rows the enforcement layer never had to fire in a governed arm, because the
 declared rules stopped the attempts upstream of it.
 
+Neither layer is novel in itself. Capability-based enforcement outside the
+model is the design behind CaMeL~\cite{camel}, and policy compliance under a
+prompt-stated document is what $\tau$-bench measures~\cite{tau-bench}. What is
+less established is the first layer's efficacy: RuLES finds models breaking
+simple stated rules even with no adversary present~\cite{rules}, which is the
+published expectation our 144-to-0 result runs against.
+
 This distinction matters for what the number is evidence of. The 144-to-0
 contrast measures the \emph{declarative} mechanism: rules the model reads and
 complies with, which cost nothing at query time and depend on compliance. It is

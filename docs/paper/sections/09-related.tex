@@ -74,8 +74,8 @@ hand-writing a macro.
 
 \subsection{Why the benchmark flatters pre-computation}
 
-DABStep's 450 questions come from 26 templates, and 294 of 332 hard tasks in our
-set are fee questions. Pre-built views are maximally effective when the question
+DABStep's 450 questions reduce to 113 shapes, 27 of which cover three quarters
+of the benchmark, and 294 of 332 hard tasks in our set are fee questions. Pre-built views are maximally effective when the question
 space is enumerable in advance, which is exactly this benchmark's construction.
 A macro contributes nothing to a question nobody wrote it for, and the
 declarative layer measured here is the layer that must cover the
@@ -138,14 +138,21 @@ set, and a digest-pinned artifact frozen 35 commits before the first run.
  & \tabhead{Prior} & \tabhead{This work} \\
 \midrule
 Comparison             & with/without & four arms \\
-Content vs.\ tooling & bundled & \textbf{separated}, arm~D \\
-Statistical test       & 2 accuracies & \textbf{McNemar}, all pairs \\
-Further models         & no           & \textbf{two}, one frontier \\
+Content vs.\ tooling & bundled & \textbf{separated}, \armH{} \\
 Artifact frozen first  & undisclosed  & \textbf{yes}, digest-pinned \\
 Transcripts            & a repo link  & \textbf{4{,}812} released \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+Two rows we would once have claimed here belong to others. Paired testing
+across several models is not distinctive: a semantic-layer benchmark reports a
+paired comparison across three frontier models~\cite{semantic-paired}, and
+dbt's replication runs 11 questions $\times$ 20 repetitions on four
+models~\cite{dbt-benchmark} --- better within-condition variance discipline
+than our $k{=}1$ (Section~\ref{sec:threats}). Paired McNemar is likewise
+standard practice for comparing learners on one run, not a
+contribution~\cite{dietterich}.
 
 The contribution is the decomposition, not the accuracy.
 

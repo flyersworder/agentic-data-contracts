@@ -52,8 +52,12 @@ has different tools, a procedural instruction, and semantic content. The first
 objection any reader raises is that the tools or the instruction might be doing
 the work. \armH{} holds both fixed and removes only the third.
 
-It is \emph{derived} from the frozen contract by a generator rather than
-hand-authored, so the difference between the two artifacts is exactly the diff.
+The move is a familiar one: strip the semantic content of a prompt component
+while holding its form fixed, and see what the form alone was
+worth~\cite{min-demonstrations}. Here the component is a whole retrieval layer.
+\armH{} is \emph{generated} from the frozen contract rather than hand-authored,
+so the only difference between the two artifacts is the one the generator
+makes, and it is auditable as a diff.
 Emptied: domain summaries and descriptions, metric descriptions, the
 \texttt{sql\_expression} field that carries the fee formula, and all column and
 relationship descriptions. Retained byte-for-byte: every name, every type, the

@@ -31,12 +31,20 @@ deployed bundles at least three things:
       metric once so the agent calls it instead of deriving it.
 \end{enumerate}
 
-Each has a different economics. Semantic content is written once per domain and
-tends to exist already, in a vendor manual or a data dictionary. Scaffolding is
-engineering, paid once. Pre-computed macros are paid \emph{per metric}, forever,
-and only cover metrics somebody anticipated. A practitioner deciding where to
-spend needs to know which of the three bought the 72 points. No published
-experiment says.
+The three have different economics. Semantic content is written once per domain
+and tends to exist already, in a vendor manual or a data dictionary.
+Scaffolding is engineering, paid once. Pre-computed macros are paid \emph{per
+metric}, forever, and only cover metrics somebody anticipated. A practitioner
+deciding where to spend needs to know which of the three bought the 72 points.
+
+Prior work has isolated the first. BIRD withholds and supplies human-written
+evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA reports that
+database documentation doubles parser accuracy~\cite{kaggledbqa}; an ontology
+layer over an enterprise SQL schema moves GPT-4 from 16\% to
+54\%~\cite{sequeda-kg}. What none of them separates is content from the
+\emph{scaffolding that delivers it}: the tools, the retrieval instruction and
+the narrowed table surface that arrive with any curated catalogue, and that a
+with/without comparison necessarily bundles together.
 
 \subsection*{Contribution}
 

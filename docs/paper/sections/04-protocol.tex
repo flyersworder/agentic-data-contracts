@@ -19,12 +19,12 @@ hash and invalidate every row.
 One defect in this machinery, found by a post-hoc review of the harness and
 reported rather than quietly repaired: the digest is stamped unconditionally,
 so \armH{}'s rows also carry the \emph{real} contract's hash rather than the
-hollow artifact's (\texttt{sha256:c46a767d\ldots}). Arm~D's rows are therefore
+hollow artifact's (\texttt{sha256:c46a767d\ldots}). \armH{}'s rows are therefore
 pinned to a file that arm never loaded, and the stamp is inert for that arm.
 It affects no result --- which artifact each arm loaded is fixed by the harness
 and independently evidenced by the hollow arm's empty-placeholder responses and
 by the $n$-gram tests of Section~\ref{sec:hollow} --- but the per-row
-tamper-evidence we claim for arm~D is not there. The harness is fixed; the
+tamper-evidence we claim for \armH{} is not there. The harness is fixed; the
 released rows are left as they ran.
 
 \textbf{The limit is stated.} Nobody outside the project can verify that no
@@ -91,8 +91,12 @@ conservative choice; it is a different experiment.
 \subsection{Statistics}
 
 Every arm sees every task, so all comparisons are paired and we use McNemar's
-exact test throughout, reporting the discordant-pair count and its split
-alongside every $p$-value. Proportions carry Wilson intervals.
+exact test~\cite{mcnemar} throughout, reporting the discordant-pair count and
+its split alongside every $p$-value. Dietterich's comparison of tests for
+learning algorithms recommends McNemar specifically for algorithms executed
+once~\cite{dietterich}, which is our case. Proportions carry Wilson
+intervals~\cite{wilson,brown-cai-dasgupta}. We report $p$-values without
+multiplicity correction and flag this in Section~\ref{sec:threats}.
 
 We report accuracy two ways for every arm. \textsc{scored} accuracy is
 correct/(correct + incorrect), excluding harness failures from both halves.

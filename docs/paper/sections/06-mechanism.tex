@@ -44,6 +44,11 @@ and produced the identical wrong number. The contract arm called
 back: \emph{``rules that apply to credit transactions: is\_credit true or
 null''}.
 
+Long contexts are not read uniformly --- retrieval quality falls for material
+buried mid-prompt~\cite{lost-in-the-middle} --- and what a tool's documentation
+says changes what an agent does with it~\cite{tool-documentation}. Both bear on
+what follows.
+
 \textbf{The decisive detail is that \texttt{manual.md} documents this rule
 too.} \armM{} had it --- inside a 24{,}177-character system prompt. \armC{}'s
 resident prompt is 2{,}475 characters, with the rule reachable by one targeted

@@ -49,11 +49,12 @@ scores 1--2 out of 30 for \emph{every} arm on runs~A and~B. Run~C partially
 solves it (\armS{} 8, \armH{} 5, \armC{} 4, \armM{} 2 of 30), which is a second
 slice where the bare baseline leads.
 
-\subsection{One benchmark, 26 templates}
+\subsection{One benchmark, and a concentrated one}
 
-Cannot be fixed with compute. 450 tasks generated from 26 templates is a narrow
-question space, and results on it should not be read as results about analytics
-agents in general. We report it plainly rather than hedging around it.
+No amount of compute fixes this. 450 tasks reducing to 113 question shapes ---
+27 of which cover three quarters of the benchmark --- is a narrow question
+space, and results on it should not be read as results about analytics agents
+in general.
 
 \subsection{$k{=}1$}
 
@@ -66,6 +67,15 @@ needs it most, because \texttt{gpt-5.6-sol} does not accept a temperature
 parameter and therefore ran at the provider's default rather than at 0 like the
 other two.
 
+\subsection{Eighteen tests, no multiplicity correction}
+
+Table~\ref{tab:mcnemar} reports 18 pairwise comparisons and we correct none of
+them. The three vs-\armC{} contrasts survive any correction at these
+$p$-values; the \armS{}-vs-\armH{} row, which carries the ablation, does not
+have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
+mind. Under-powered comparisons are the norm in this literature rather than the
+exception~\cite{little-power}.
+
 \subsection{One frontier point, and a trend that already broke once}
 
 Every capability claim in this paper rests on a single strong model. We have
@@ -75,7 +85,11 @@ shrinking margin as a finding, and the third model returned $+27.1$. The
 scaffolding null failed the same way. \textbf{Readers should apply the same
 discount to the derivation-gap result} (Section~\ref{sec:derivation}), which is
 a three-point curve with one frontier point, however sharp the collapse from
-39.2 to 5.1 looks. Run~C also differs from the others in provider and model
+39.2 to 5.1 looks. The literature does not settle the direction either. Some
+prompt scaffolding does lose value as models
+improve~\cite{prompt-engineering-advanced}; but a pre-registered study across
+five frontier models found the opposite on GAIA, with the most capable model
+gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Run~C also differs from the others in provider and model
 family, so any run-C contrast confounds capability with both.
 
 \subsection{Reconstructed golds}

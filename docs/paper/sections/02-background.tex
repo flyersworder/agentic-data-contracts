@@ -20,10 +20,20 @@ agent that reads the schema and writes idiomatic SQL gets a clean, wrong number
 --- which is precisely the failure a context layer claims to fix.
 
 \textbf{Golds are withheld and grading is centralised}, so the benchmark
-resists the overfitting that makes many text-to-SQL results hard to read.
+resists the overfitting that makes many text-to-SQL results hard to trust ---
+a hazard with its own literature~\cite{ladder,leaderboard-illusion}. Among
+text-to-SQL benchmarks, DABStep sits where Spider~\cite{spider} and
+Spider~2.0~\cite{spider2} do not: its difficulty is documentation, not schema
+scale. We use it for that reason, and Section~\ref{sec:threats} says what the
+choice costs.
 
-\textbf{But its question space is small.} 450 test tasks are generated from 26
-templates, and in our task set 294 of 332 hard tasks concern fees. We treat
+\textbf{But its question space is small.} DABStep expands 450 test tasks from a
+smaller set of core questions by varying merchants, schemes, months and
+thresholds~\cite{dabstep}, following GSM-Symbolic's parameterisation
+approach~\cite{gsm-symbolic}. Normalising those varying entities away
+(\texttt{analysis/templates.py}) leaves \textbf{113 distinct question shapes,
+of which 12 cover half the benchmark and 27 cover three quarters}; 73 occur
+exactly once. In our task set 294 of 332 hard tasks concern fees. We treat
 this as a first-class threat rather than a footnote (Section~\ref{sec:threats}),
 and it is central to interpreting results that use pre-computed views
 (Section~\ref{sec:related}).
@@ -50,7 +60,11 @@ the agent still writes the SQL, but writes it knowing what the columns mean.
 \emph{Data contracts} originate in governance rather than assistance: a
 declarative artifact stating what a dataset contains, who owns it and what may
 be done with it, with the Open Data Contract Standard~\cite{odcs} the emerging
-specification.
+specification. They inherit a longer line of dataset documentation ---
+datasheets~\cite{datasheets} and, closer to our use, Croissant's shift from
+prose a human reads to metadata a tool loads~\cite{croissant}. The database
+community's framing of the wider problem is TAG~\cite{tag}: natural-language
+questions over a warehouse need more than translation to SQL.
 
 The artifact under test here is of the third kind and serves both purposes at
 once --- the same YAML supplies the semantics the agent reads and the rules the
@@ -58,8 +72,8 @@ tool layer enforces. The distinction that matters for this paper is \emph{when
 the semantics are compiled}: a macro is compiled ahead of time by a human and
 covers the metrics somebody anticipated; a contract is compiled per query by the
 model and covers whatever question arrives. Section~\ref{sec:related} returns to
-this, because a benchmark generated from 26 templates is close to the best case
-for the former.
+this, because a benchmark whose questions concentrate into so few shapes is
+close to the best case for the former.
 
 \subsection{The system under test}
 

@@ -1,36 +1,37 @@
 Retrieval-augmented ``context layers'' --- curated domain documentation an
 analytics agent fetches at query time --- are reported to produce large accuracy
 gains on text-to-SQL benchmarks. Published results compare a system with a
-context layer against one without, and from two accuracy numbers no mechanism
-can be recovered: the gain might come from the semantic content, from the
+context layer against one without. Two accuracy numbers cannot say which part
+of the layer did the work: the gain might come from the semantic content, from the
 retrieval scaffolding that delivers it, or from the pre-computed views and
 macros that usually accompany it.
 
 We report a controlled four-arm ablation on DABStep, run three times across
-three model families spanning a wide capability range. A fourth arm, \armH{},
-is derived mechanically from the same frozen artifact with every field of prose
-emptied and the tool surface, retrieval instruction, table allow-list and
-operation rules held byte-for-byte fixed, isolating the scaffolding from the
-semantics.
+three model families spanning a wide capability range. A fourth arm, \armH{}, is derived mechanically from the same frozen artifact:
+every field of prose is emptied, while the tool surface, retrieval instruction,
+table allow-list and operation rules stay byte-for-byte fixed. It isolates the
+scaffolding from the semantics.
 
 Contract-delivered semantics raise hard-task accuracy from 13.9\% to 55.1\%,
 22.6\% to 56.6\% and 37.0\% to 77.4\%, beating the same knowledge pasted
 verbatim into the prompt on all three models
-($p{\le}0.0067$, paired McNemar). The content step dominates the scaffolding
-step everywhere, but the scaffolding step is \emph{not} zero: it is undetectable
-on two models and worth $+14.2$ points ($p{=}4{\times}10^{-7}$) on the third.
-We previously reported it as a null and correct that here.
+($p{\le}0.0067$, paired McNemar). The content step dominates the scaffolding step everywhere, but the
+scaffolding step is \emph{not} zero: undetectable on two models and worth
+$+14.2$ points ($p{=}4{\times}10^{-7}$) on the third. \textbf{A null across two
+adjacent models is weak evidence of absence}, and we report the correction that
+follows.
 
-The contract turns out to be executable. Transcribing its declared
+The contract is also executable. Transcribing its declared
 \texttt{sql\_expression} fields into two views reproduces the benchmark's gold
 answers exactly on 176 of 176 covered tasks, which proves the artifact contains
 what those tasks need and converts each arm's accuracy into efficiency against a
-known ceiling. Measured that way, the contract arm recovers 60.8\%, 62.7\% and
+proven ceiling. Measured that way, the contract arm recovers 60.8\%, 62.7\% and
 \textbf{94.9\%} of what it was given: \textbf{the derivation gap is not a fixed
 cost of the declarative approach but one that collapses with model
 capability}, a prediction we recorded publicly before the third run executed.
 
 We also find that the advantage over a hand-written prompt is not monotone in
-capability, report the negative result that the effect does not appear outside
-the domain the contract describes, and release the harness, the digest-pinned
-artifact, all 4{,}812 transcripts and the raw results.
+capability, and that the effect is not detectable outside the domain the
+contract describes, on slices too small to settle the question. The harness,
+the digest-pinned artifact, all 4{,}812 transcripts and the raw results are
+released.

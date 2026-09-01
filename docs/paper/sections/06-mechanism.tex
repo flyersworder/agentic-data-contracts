@@ -50,15 +50,15 @@ says changes what an agent does with it~\cite{tool-documentation}. Both bear on
 what follows.
 
 \textbf{The decisive detail is that \texttt{manual.md} documents this rule
-too.} \armM{} had it --- inside a 24{,}177-character system prompt. \armC{}'s
+too.} \armM{} had it, inside a 24{,}177-character system prompt. \armC{}'s
 resident prompt is 2{,}475 characters, with the rule reachable by one targeted
 call.
 
 The finding is not that the contract arm was given more information. Both arms
 had the information. Only one of them used it. What the contract changes is not
-what is knowable but what is \emph{reachable at the moment of use} --- which is
-a claim about delivery, and it is why a result that looks like it is about
-documentation is really about retrieval structure over the same documentation.
+what is knowable but what is \emph{reachable at the moment of use}. That is a
+claim about delivery, not content: the result looks like it is about
+documentation, and is really about the structure that retrieves it.
 
 \subsection{Where the treatment arm loses}
 
@@ -98,11 +98,12 @@ from accuracy. It can be observed directly, by reading the SQL each agent
 submitted rather than the answer it produced.
 
 We defined one detector per load-bearing clause of the contract's fee
-semantics --- the \texttt{NULL}-wildcard disjunct, the empty-list wildcard, the
+semantics: the \texttt{NULL}-wildcard disjunct, the empty-list wildcard, the
 capture-delay band mapping, a per-merchant monthly aggregate, the natural-month
-reconstruction, and fraud measured on euro volume --- and restricted the
-comparison to the 97 task families that require all six, so every row compared
-carries the same requirement. The detectors are deliberately permissive: the
+reconstruction, and fraud measured on euro volume. We then restricted the
+comparison to the 97 \emph{tasks} that require all six --- 69 on run~B, whose
+truncation cost the rest --- so every row compared carries the same
+requirement. The detectors are deliberately permissive: the
 question is whether the agent expressed the idea, not whether it copied the
 contract's phrasing.
 
@@ -139,7 +140,8 @@ makes the point concretely: on run~A it writes more clauses than \armM{} and
 still scores at the bare-schema floor. The measure captures whether the
 contract's vocabulary reaches the query, not whether the query is any good.
 
-We record one confound because its uncontrolled form is seductive. Pooled
+We record one confound because the uncontrolled version of this number is
+tempting to report. Pooled
 across families, \armC{} attempts that wrote the \texttt{NULL}-wildcard clause
 were correct 90\% of the time against 23\% for those that did not --- a
 67-point effect, with similar gaps for four other clauses. It is an artifact of

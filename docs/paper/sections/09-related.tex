@@ -82,22 +82,20 @@ declarative layer measured here is the layer that must cover the
 \emph{unanticipated} question. \textbf{Our hard-split figures are therefore a
 measurement of a harder task, not a worse attempt at the same one.}
 
-Section~\ref{sec:derivation} puts a number on how much harder, because the
-compiled form of our own contract is exactly the artifact this subsection is
-about. It answers 176 of the 332 hard tasks outright and none of the other 148,
-so \textbf{a pre-computed layer of this kind tops out at 53\% of the hard split
-on this benchmark} --- and the remaining 148 tasks, which consume a macro's
-output and reason on top of it, are where the declarative layer has to work.
-That is a measurement of the boundary this subsection previously argued for
-qualitatively.
+Section~\ref{sec:derivation} puts a number on how much harder: the compiled
+form of our own contract answers 53\% of the hard split outright and none of
+the rest, and the tasks it cannot reach are the ones that consume a macro's
+output and reason on top of it. That is a measurement of the boundary this
+subsection would otherwise argue for qualitatively.
 
 We are careful not to convert that into a claim we cannot support. Maintaining
 one macro per metric per dialect is a real and growing burden, but we have no
 data on where it crosses over against the cost of authoring domain prose.
 \textbf{We do not claim the contract approach scales better} --- only that the
 two degrade differently: a missing macro degrades to nothing, while a contract
-degrades to a model reasoning from a description. The generous reading is also
-the correct one. These are complementary layers, not competitors: macros
+degrades to a model reasoning from a description. The generous reading --- that
+these are complementary layers rather than competitors --- is also the correct
+one. These are complementary layers, not competitors: macros
 optimise the head of the question distribution, a contract covers the tail, and
 in a system with both, the contract is what tells the agent which macro exists
 and when to call it.
@@ -156,7 +154,7 @@ contribution~\cite{dietterich}.
 
 The contribution is the decomposition, not the accuracy.
 
-\subsection{The deliberate non-response}
+\subsection{Why we did not build the obvious fix}
 
 The obvious response to Section~\ref{sec:mechanism} is to make this library's
 metric semantics executable --- a tool that runs a declared SQL expression

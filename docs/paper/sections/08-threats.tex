@@ -7,7 +7,8 @@ otherwise}
 This is the sharpest limit on the result, so we give it first.
 
 DABStep's hard set is dominated by one question family: 294 of 332 hard tasks
-in run~A concern fees, and the contract encodes fee-domain semantics.
+in run~A concern fees, and the contract encodes fee-domain semantics
+(Table~\ref{tab:feebucket}).
 
 \begin{table*}[t]
 \centering
@@ -136,23 +137,16 @@ run's internal contrasts are sound; cross-run differences are suggestive only.
 
 \subsection{Self-attested provenance}
 
-The contract's header declares that every fact in it came from
-\texttt{manual.md} and the dataset README. A reader can verify that it contains
-nothing beyond those documents. Nobody outside the project can verify that no
-benchmark question was consulted while it was authored. We state this rather
-than argue it away.
+Nobody outside the project can verify that no benchmark question was consulted
+while the contract was authored (Section~\ref{sec:protocol}).
 
 \subsection{Harness failures are reported, not hidden}
 
-Not every non-correct row is a wrong answer: an arm can hit an output cap or
-raise. Excluding such rows flatters whichever arm fails most; counting them as
-wrong punishes an arm for a harness defect. We report both views for every arm
-throughout and flag any arm whose harness-failure rate crosses a threshold.
-
-One design decision follows from this. When an agent exhausts its output budget
+We report scored and strict accuracy for every arm throughout
+(Section~\ref{sec:protocol}). One design decision follows from that choice. When an agent exhausts its output budget
 the harness forces a final answer rather than discarding the run. In run~A that
-produced one additional correct answer out of 59 --- nearly worthless for
-accuracy --- but it eliminated unscoreable rows, and those rows were 41 \armS{},
+produced one additional correct answer out of 59 (nearly worthless for
+accuracy), but it eliminated unscoreable rows, and those rows were 41 \armS{},
 18 \armM{} and \textbf{zero} in either governed arm. Dropping them would have
 inflated the two baselines by silently discarding their hardest runs. Run~B
 repeats the pattern: 55, 42, 15 and zero. Run~C forces 8 answers in \armH{} and

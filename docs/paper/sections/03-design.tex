@@ -5,7 +5,7 @@
 
 Every arm sees the same tasks, the same warehouse, the same model, the same
 answer-format instruction and the same scorer. They differ in two dimensions:
-what tools the agent has, and what it knows.
+what tools the agent has, and what it knows (Table~\ref{tab:arms}).
 
 \begin{table}[t]
 \centering
@@ -35,8 +35,8 @@ it doubles as our operational definition of model capability.
 \texttt{manual.md} is pasted verbatim into the system prompt, which brings it
 to 24{,}177 characters. Tools are identical to \armS{}. This arm exists to
 validate the harness against the leaderboard band, and it is the comparison a
-practitioner actually faces --- the alternative to a contract is not ignorance,
-it is a long prompt.
+practitioner actually faces: the alternative to a contract is not ignorance but
+a long prompt.
 
 \armC{} is the treatment: nine governed tools, and a 2{,}475-character system
 prompt that names the domains and metrics available and instructs the agent to
@@ -47,8 +47,8 @@ look them up before writing SQL.
 \subsection{The hollow control}
 \label{sec:hollow}
 
-Arm \armC{} differs from the baselines along three dimensions at once --- it
-has different tools, a procedural instruction, and semantic content. The first
+Arm \armC{} differs from the baselines along three dimensions at once:
+different tools, a procedural instruction, and semantic content. The first
 objection any reader raises is that the tools or the instruction might be doing
 the work. \armH{} holds both fixed and removes only the third.
 
@@ -75,7 +75,7 @@ into the hollow contract, and that the real contract does share 6-grams with
 it}. The second half is what makes the first meaningful: it establishes that
 the check can fail, rather than passing vacuously.
 
-The transcripts confirm exercise end to end. In run~A, \armH{} called
+The transcripts confirm the retrieval loop ran end to end. In run~A, \armH{} called
 \texttt{lookup\_domain} on 272 of 401 tasks and received the empty placeholder
 282 times. The retrieval loop ran; there was nothing behind it.
 
@@ -90,10 +90,9 @@ test is knowledge, not tokens.
 Across all four arms \emph{within} a run: row limit (50 rows per result),
 tool-call cap (40), token budget, sampling temperature, reasoning effort
 (\texttt{medium}), model, provider endpoint and quantization, task set, gold
-set, scorer, and the verbatim answer-format instruction. Temperature is 0 on
-runs~A and~B and the provider default on run~C, whose model does not accept the
-parameter --- it is identical across the four arms either way, which is what
-the paired comparisons require. Cost, token counts, turn counts, tool calls and
+set, scorer, and the verbatim answer-format instruction. Temperature is identical across the four arms
+within each run, which is what the paired comparisons require; its value
+differs between runs (Section~\ref{sec:runs}). Cost, token counts, turn counts, tool calls and
 per-row database integrity are recorded for every run.
 
 The row limit deserves a note because an earlier iteration of this experiment
@@ -104,7 +103,7 @@ the context window, not the contract. Symmetric limits are not a detail.
 They were also not perfectly symmetric here. A post-hoc review found that the
 50-row cap was applied to the governed arms' \texttt{run\_query} but not to
 their \texttt{preview\_table}, which the library clamps at 100 rows of its own
-accord --- so a governed arm could see up to 100 rows from a preview where an
+accord, so a governed arm could see up to 100 rows from a preview where an
 ungoverned arm sees 50 from \texttt{execute\_sql}. Across all three runs this
 occurred on \textbf{31 preview calls}, against many thousands of tool calls.
 The asymmetry is small but it runs \emph{in the treatment's favour}, so we
@@ -113,6 +112,7 @@ received twice the rows per preview that the baselines could. The harness is
 fixed for future runs; the reported runs are as they ran.
 
 \subsection{Three runs}
+\label{sec:runs}
 
 We ran the full design three times: on \texttt{glm-5.3-flash} (run~A),
 \texttt{deepseek-v4-flash} (run~B) and \texttt{gpt-5.6-sol} (run~C), each
@@ -123,5 +123,4 @@ they differ in model, provider, and one library fix
 (Section~\ref{sec:threats}). Reasoning effort is set to \texttt{medium}
 throughout, though that is a nominal setting rather than an equated one, and
 temperature is held at 0 on runs~A and~B but not on run~C, whose model does not
-accept the parameter. Each run's internal contrasts are sound; cross-run
-differences are suggestive only.
+accept the parameter.

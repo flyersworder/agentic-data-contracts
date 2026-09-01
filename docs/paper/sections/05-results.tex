@@ -63,7 +63,8 @@ arm is affected identically.
 \end{tabular}
 \caption{Accuracy and cost. Hard splits are $n{=}332$, 226 and 332; easy are
 69, 53 and 69. \armC{} is the most accurate arm on all three models, and the
-cheapest on the two weaker ones.}
+cheapest on the two weaker ones. Cost against accuracy is plotted in
+Figure~\ref{fig:cost}.}
 \label{tab:headline}
 \end{table*}
 
@@ -88,7 +89,8 @@ three runs do not agree on it.}
 \label{tab:mcnemar}
 \end{table*}
 
-\armC{} wins every comparison on all three models. On the two weaker models it
+\armC{} wins every comparison on all three models
+(Tables~\ref{tab:headline} and~\ref{tab:mcnemar}). On the two weaker models it
 is also the cheapest arm, so there is no accuracy/cost tradeoff to report; on
 run~C that coincidence ends (Section~\ref{sec:efficiency}).
 
@@ -108,7 +110,7 @@ $+35.8$ and $+26.2$. Bars are Wilson 95\% intervals.}
 \end{figure}
 
 On hard tasks the gain splits into a scaffolding step and a content step
-(Figure~\ref{fig:ablation}):
+(Figure~\ref{fig:ablation}; costs and work in Table~\ref{tab:efficiency}):
 
 \begin{center}
 \footnotesize
@@ -147,11 +149,10 @@ not survive a significance test, and an earlier version of this paper claimed
 that the content was the whole effect and the scaffolding contributed nothing
 measurable. Run~C refutes that claim. Two of three models favour the
 scaffolding and one is flat; none favours the bare schema. On run~A the hard
-slice alone is already $p{=}0.015$ (16/34) --- the 0.058 above is the
-all-401 test, which the easy tasks dilute.
+slice alone is already $p{=}0.015$ (16/34); the 0.058 above is the all-401 test, diluted by
+the easy tasks.
 
-What the fourth arm was built to test survives intact, and it is the claim the
-paper needs. A reader's first objection to \armC{} is that the contract might
+What the fourth arm was built to test survives intact. A reader's first objection to \armC{} is that the contract might
 be helping through some mechanism other than its knowledge --- a narrowed
 table surface, an imposed procedure, or simply making the agent slow down.
 That deflationary reading predicts \armH{} captures most of the gain. It does
@@ -160,8 +161,8 @@ run~C, $6.6{\times}$ on run~A, and the whole of the effect on run~B, where the
 scaffolding step is zero. \textbf{Scaffolding is a real but secondary effect that the content
 dominates everywhere.}
 
-The correction also carries a methodological lesson we think is worth more
-than the claim it replaced. A null result on two models, with a pooled
+The correction carries a methodological lesson worth more than the claim it
+replaced. A null result on two models, with a pooled
 $p{=}0.29$ and disagreeing signs, looked like solid evidence of absence. It
 was evidence of a small sample spanning too narrow a capability range.
 
@@ -172,9 +173,8 @@ most tool calls of any arm (6{,}375 against 4{,}155) for the fewest correct
 answers. In run~C it is the most expensive arm outright (\$22.09) and the only
 arm of the four to exhaust its output budget. The transcripts show why: the agent
 calls \texttt{lookup\_domain}, is told nothing is available, and searches
-harder. On run~C it makes that call on 401 of 401 tasks, 804 times in total
---- the model that gains most from the scaffolding is also the one that
-exercises it hardest.
+harder. On run~C it makes that call on 401 of 401 tasks, 804 times in total. The model that gains most from the scaffolding is also the
+one that exercises it hardest.
 
 \subsection{Efficiency}
 \label{sec:efficiency}
@@ -226,8 +226,8 @@ Reporting accuracy without cost yields needlessly expensive agents and
 mistaken conclusions about where accuracy comes from~\cite{agents-that-matter},
 which is why this table sits beside the accuracy one.
 
-\armC{} is not thinking harder --- it has less to search for, and that holds on
-all three models: it uses the fewest turns and by far the least reasoning
+\armC{} is not thinking harder; it has less to search for. That holds on all
+three models: it uses the fewest turns and by far the least reasoning
 everywhere. It is also the only arm that never exhausted its output budget on
 any run.
 
@@ -253,7 +253,7 @@ models did not survive the third} (Section~\ref{sec:interaction}).}
 \end{figure}
 
 Ordered by what each model achieves from a bare schema
-(Figure~\ref{fig:interaction}):
+(Figure~\ref{fig:interaction} and Table~\ref{tab:interaction}):
 
 \begin{table*}[t]
 \centering
@@ -280,8 +280,8 @@ not a monotone function of base capability. An earlier version of this paper
 reported the shrinking margin as a finding; a two-point trend was not evidence
 for one, and we say so here rather than quietly dropping it.
 
-Run~C does settle the question those two points raised, and against the reading
-we leaned toward. The candidate explanations of the 55.1\%/56.6\% coincidence
+Run~C does settle the question those two points raised, and it settles it
+against the reading we had leaned toward. The candidate explanations of the 55.1\%/56.6\% coincidence
 were:
 
 \begin{enumerate}
@@ -296,8 +296,8 @@ were:
 Reading~2 predicted \armC{} stays near 56\% on a stronger model. It reached
 \textbf{77.4\%}. There is no benchmark ceiling at 56\%, and the near-identical
 55.1\%/56.6\% was a coincidence. Reading~1's specific prediction --- a
-monotonically shrinking margin --- is refuted by the $+27.1$. Both simple
-stories are wrong, and three points are not enough to install a third.
+monotonically shrinking margin --- is refuted by the $+27.1$. Both simple stories are wrong, and three points are not enough to support a
+third.
 
 \subsection{The contract compiles, and the residual gap is derivation}
 \label{sec:derivation}
@@ -308,10 +308,10 @@ recovering all of it would look like. We can establish that, because the
 contract is executable in a sense we did not design for.
 
 The frozen artifact carries a \texttt{sql\_expression} field on each declared
-metric. Transcribing those fields into two DuckDB views --- the fee-rule match
+metric. We transcribed those fields into two DuckDB views: the fee-rule match
 predicate, the natural-month reconstruction, the monthly volume and fraud-level
 aggregates, the fee formula, and the instruction to sum over all matched
-(transaction, rule) pairs --- yields a pre-computed fee layer of the kind a
+(transaction, rule) pairs. The result is a pre-computed fee layer of the kind a
 context-layer product ships. Nothing in it is authored independently of the
 contract. The only work the transcription adds is \emph{composition}:
 correlating the two placeholders in the month-scoped predicate to a
@@ -335,7 +335,8 @@ set on this benchmark. We do not offer that as a bound on pre-computation in
 general --- Section~\ref{sec:related} reports a hierarchical semantic layer
 reaching 100\% here --- only on a layer compiled from a domain contract's
 declared expressions. On the 176 where the information is provably
-sufficient, whatever an agent fails to get is a failure to derive:
+sufficient, whatever an agent fails to get is a failure to derive
+(Table~\ref{tab:buckets}):
 
 \begin{table*}[t]
 \centering
@@ -371,8 +372,8 @@ the same domain-specificity as the fee/non-fee split
 (Section~\ref{sec:threats}), measured on a cleaner boundary.
 
 \textbf{The derivation gap collapses with capability.} \armC{} on \emph{macro}
-scores 60.8\%, 62.7\% and 94.9\% --- a shortfall of 39.2, 37.3 and
-\textbf{5.1} points below a ceiling we have proven reachable. On two models
+scores 60.8\%, 62.7\% and 94.9\%, a shortfall of 39.2, 37.3 and \textbf{5.1}
+points below a ceiling we have proven reachable. On two models
 this looked like a fixed ${\approx}38$-point tax, model-invariant to within two
 points. It is not a tax. We recorded this prediction in the public artifact
 repository before run~C executed, stating that the capability reading predicted

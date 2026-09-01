@@ -8,7 +8,7 @@ Face around a payments warehouse: 138{,}236 transactions, a fee rule table, and
 merchant and MCC reference data, with two documents of human-written context
 --- \texttt{manual.md} (22{,}127 characters) and a dataset README.
 
-Two properties make it the right benchmark for our question, and one makes it a
+Two properties make it the right benchmark for our question; a third is a
 limitation we return to in Section~\ref{sec:threats}.
 
 \textbf{Its difficulty is semantic, not syntactic.} The hard split does not
@@ -16,8 +16,8 @@ require exotic SQL. It requires knowing the fee-matching rule: a \texttt{NULL}
 in a \texttt{fees} column means \emph{this rule applies to every value of that
 column}, not \emph{unknown}, and matching additionally involves list membership
 over account type, authorisation characteristic and merchant category code. An
-agent that reads the schema and writes idiomatic SQL gets a clean, wrong number
---- which is precisely the failure a context layer claims to fix.
+agent that reads the schema and writes idiomatic SQL gets a clean, wrong
+number, the failure a context layer claims to fix.
 
 \textbf{Golds are withheld and grading is centralised}, so the benchmark
 resists the overfitting that makes many text-to-SQL results hard to trust ---
@@ -55,8 +55,8 @@ layers} in the classical sense --- dbt metrics, Cube, LookML --- define metrics
 as executable artifacts, so the agent calls a metric rather than deriving it and
 correctness is inherited from the definition. \emph{Context layers} store
 natural-language documentation next to the data and retrieve it at query time;
-MotherDuck Guides~\cite{motherduck-guides} is the best-documented instance, and
-the agent still writes the SQL, but writes it knowing what the columns mean.
+MotherDuck Guides~\cite{motherduck-guides} is the best-documented instance. The
+agent still writes the SQL, but writes it knowing what the columns mean.
 \emph{Data contracts} originate in governance rather than assistance: a
 declarative artifact stating what a dataset contains, who owns it and what may
 be done with it, with the Open Data Contract Standard~\cite{odcs} the emerging
@@ -92,6 +92,6 @@ sqlglot~\cite{sqlglot} and checked statically; where a database adapter is
 available, a dry run follows. A rejected query returns a reason to the model
 rather than an error to the user.
 
-We stress that the library is not the contribution. It is the instrument, and
+The library is not the contribution. It is the instrument, and
 the experiment is designed so that its identity does not matter: \armH{} runs
 the identical library, tools and rules with the prose removed.

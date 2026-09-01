@@ -12,7 +12,7 @@ additional cost.
 We counted mutating statements the model actually \emph{submitted} to a SQL
 tool --- \texttt{CREATE TABLE}/\texttt{VIEW}, \texttt{DROP}, \texttt{INSERT},
 \texttt{UPDATE}, \texttt{DELETE}, \texttt{ALTER}, \texttt{TRUNCATE} at a
-statement position in the query argument.
+statement position in the query argument (Table~\ref{tab:governance}).
 
 \begin{table*}[t]
 \centering
@@ -28,17 +28,16 @@ C (sol)      & \textbf{0}    & \textbf{0}    & \textbf{0} & \textbf{0} \\
 \textbf{Total} & \textbf{51 (10)} & \textbf{93 (14)} & \textbf{0} & \textbf{0} \\
 \bottomrule
 \end{tabular}
-\caption{Mutating statements submitted, by arm. Fisher exact on traces
-containing at least one: $p{=}4{\times}10^{-7}$ for run~A alone,
-$p{=}6{\times}10^{-8}$ pooled over runs~A and~B. Run~C contributes nothing in
-either direction: no arm attempted a write.}
+\caption{Mutating statements submitted, by arm. Fisher exact (two-sided, as
+throughout) on traces containing at least one: $p{=}8{\times}10^{-7}$ for
+run~A alone, $p{=}1{\times}10^{-7}$ pooled over runs~A and~B. Run~C
+contributes nothing in either direction: no arm attempted a write.}
 \label{tab:governance}
 \end{table*}
 
 \textbf{144 mutating statements across 24 tasks in the ungoverned arms; zero in
-either governed arm, on either model that produced any.} Run~B alone gives
-$p{=}0.13$ --- it is underpowered here as elsewhere --- so the result rests on
-run~A and the pooling.
+either governed arm, on both models where any arm attempted a write.} Run~B alone gives $p{=}0.25$ (it is underpowered here as elsewhere), so the
+result rests on run~A and the pooling.
 
 \paragraph{Run~C produces no events at all, and that is a limitation rather
 than a confirmation.} \texttt{gpt-5.6-sol}, handed a raw SQL tool and no rules,
@@ -49,11 +48,12 @@ The transcripts suggest why, and it is not that the stronger model is better
 behaved in the abstract. Holding an intermediate result is a need every model
 has; what differs is the idiom. Run~C uses common table expressions on 59\% and
 55\% of its ungoverned traces, against 32\%/30\% on run~A and 26\%/27\% on
-run~B, and attempts \texttt{CREATE TEMP} zero times against run~A's 22 and
-run~B's 3. \textbf{Capability changed which idiom the model reaches for, not
+run~B. \texttt{CREATE TEMP} appears in 22 of run~A's ungoverned traces and 3 of
+run~B's, and in none of run~C's --- 120 and 4 statements respectively, against
+zero. \textbf{Capability changed which idiom the model reaches for, not
 whether it needs one.} We cannot separate that from a trained disposition
 against writing to a warehouse; the idiom substitution is evidence for the
-former and not proof against the latter.
+capability explanation, not proof against the disposition one.
 
 \subsection{Two layers, and only the first was exercised}
 

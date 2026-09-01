@@ -122,16 +122,30 @@ MODELS: dict[str, ModelSpec] = {
             supports_temperature=True,
             role="cross_family_control",
         ),
-        # `openai`: the standard tier. `openai/flex` is half price but queues,
-        # and wall-clock is already this experiment's binding constraint;
-        # `azure/*` and `amazon-bedrock/*` are 2.2x-2.75x dearer.
+        # `openai/flex`: half the price of the `openai` standard tier AND
+        # faster, which is the opposite of what this pin used to assume. The
+        # comment here previously rejected flex because it "queues, and
+        # wall-clock is the binding constraint" -- asserted, never measured.
+        # Measured 2026-09-01 against the standard tier, same prompt, same
+        # 700-token cap: serially 69.9 vs 70.5 tok/s (a wash), and under the
+        # sweep's real 6-way concurrency 413 vs 299 tok/s aggregate, with
+        # per-request latency 7.9-10.1s against 10.6-14.0s. Flex is a service
+        # tier, not different weights -- same 1.05M context, same (unknown)
+        # quantization -- so no fidelity is being traded for the price.
+        # `openai/fast` is 2x dearer than standard; `azure/*` and
+        # `amazon-bedrock/*` are 2.2x-2.75x dearer than that.
+        #
+        # Flex is best-effort by design and MAY queue under load we did not
+        # sample. That risk is one-way: a pin cannot change mid-run without
+        # mixing providers inside one results file, so if flex degrades the
+        # answer is to wait it out (the sweep resumes) rather than re-pin.
         ModelSpec(
             "openai/gpt-5.6-sol",
-            provider_tag="openai",
+            provider_tag="openai/flex",
             quantization="unknown",
-            price_in=2.00,
-            price_out=10.00,
-            price_cached=0.20,
+            price_in=1.00,
+            price_out=5.00,
+            price_cached=0.10,
             # Not in this model's OpenRouter `supported_parameters`.
             supports_temperature=False,
             role="frontier_subset",

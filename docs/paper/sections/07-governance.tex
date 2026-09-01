@@ -1,0 +1,101 @@
+\section{Governance}
+\label{sec:governance}
+
+The contract under test declares forbidden operations as well as semantics, and
+the tool layer enforces them. Because the same runs that measure accuracy also
+record every statement the agent submitted and a post-run integrity check on
+the database, a second result falls out of the same 3{,}208 transcripts at no
+additional cost.
+
+\subsection{144 mutation attempts, all in ungoverned arms}
+
+We counted mutating statements the model actually \emph{submitted} to a SQL
+tool --- \texttt{CREATE TABLE}/\texttt{VIEW}, \texttt{DROP}, \texttt{INSERT},
+\texttt{UPDATE}, \texttt{DELETE}, \texttt{ALTER}, \texttt{TRUNCATE} at a
+statement position in the query argument.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Run} & \armS{} & \armM{} & \armC{} & \armH{} \\
+\midrule
+A (glm)      & 27 (8 tasks)  & 92 (13 tasks) & \textbf{0} & \textbf{0} \\
+B (deepseek) & 24 (2 tasks)  & 1 (1 task)    & \textbf{0} & \textbf{0} \\
+\midrule
+\textbf{Total} & \textbf{51 (10)} & \textbf{93 (14)} & \textbf{0} & \textbf{0} \\
+\bottomrule
+\end{tabular}
+\caption{Mutating statements submitted, by arm. Fisher exact on traces
+containing at least one: $p{=}4{\times}10^{-7}$ for run~A alone,
+$p{=}6{\times}10^{-8}$ pooled.}
+\label{tab:governance}
+\end{table*}
+
+\textbf{144 mutating statements across 24 tasks in the ungoverned arms; zero in
+either governed arm, on either model.} Run~B alone gives $p{=}0.13$ --- it is
+underpowered here as elsewhere --- so the result rests on run~A and the pooling.
+
+\subsection{Deterrence, not interception}
+
+The mechanism is not the one we expected, and the transcripts are unambiguous
+about it.
+
+A rejected tool call still appears in the transcript as a tool call: the count
+above is of what the model \emph{emitted}, not what survived validation. Zero
+therefore does not mean ``attempted and blocked''. It means \textbf{never
+attempted}. The forbidden-operation rules, stated declaratively in the
+contract and visible in the system prompt, deterred the behaviour rather than
+intercepting it.
+
+This is a cheaper mechanism than enforcement and a more fragile one. It costs
+nothing at query time, and it depends on the model's compliance rather than on
+the validator. Our data cannot distinguish a model that will not attempt from
+a model that would be caught if it did --- both produce zero. We report what the
+transcripts support: with the rules present, the attempts stop.
+
+\subsection{One escalation reached the database}
+
+The post-run integrity check flagged exactly one row in 3{,}208: task~68,
+\armS{}, run~B. It is 1 of the 24 attempting tasks because DuckDB
+\texttt{TEMP} tables die with the connection; only this run escalated to
+persistent tables.
+
+The escalation was deliberate, and the model narrates it. It first issued
+\texttt{CREATE TEMP TABLE feats}, and on the next call received
+\texttt{Table with name feats does not exist!}. Its reasoning:
+
+\begin{quote}\small\itshape
+``TEMP table per session? The previous CREATE TEMP TABLE in the same
+connection. The tool might use separate connections per call, so temp tables
+don't persist. Let me create a regular table\ldots''
+\end{quote}
+
+and, having established that they now persist:
+
+\begin{quote}\small\itshape
+``Since tables persist across calls (non-temp), I can do sequential UPDATE
+operations.''
+\end{quote}
+
+It then hand-rolled Gaussian elimination across twelve statements ---
+\texttt{DROP TABLE IF EXISTS m1; CREATE TABLE m1 AS \ldots} through
+\texttt{m6} --- to solve a linear system, and answered the question wrongly
+as well.
+
+This is worth reporting not because it is common but because of its shape. It
+is not an injection, a jailbreak, or an adversarial prompt. It is a competent
+agent routing around a session boundary to finish its work, in which every
+individual statement is locally reasonable. No test suite written in advance
+would have anticipated this particular path, which is the argument for a
+declarative rule that does not need to.
+
+The run used a disposable per-worker copy of the warehouse, so nothing real was
+harmed, and the integrity check itself reported clean (no integrity or
+connection errors) --- the detection is trustworthy.
+
+\paragraph{We do not overclaim from $n{=}1$.} One corruption event is an
+anecdote, not a rate. The defensible number is the 144 attempts, and the
+defensible claim is about attempt frequency under declared rules, not about how
+often attempts become damage.

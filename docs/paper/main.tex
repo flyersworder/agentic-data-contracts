@@ -1,0 +1,86 @@
+% Which Part of the Context Layer Does the Work?
+%
+% TARGET: PVLDB "Experiment, Analysis & Benchmark" track; arXiv preprint
+% (primary cs.DB).
+%
+% This file deliberately uses stock `article` + `twocolumn` so that it
+% compiles with a plain TeX Live install and no downloaded class file.
+% To switch to the PVLDB template, replace the \documentclass line with
+%
+%     \documentclass[sigconf, nonacm]{acmart}
+%
+% and drop the \geometry, \titleformat and abstract-environment blocks
+% below; acmart supplies all three. Nothing in the section files depends
+% on the class.
+
+\documentclass[10pt,twocolumn]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+
+\setlength{\parskip}{0pt}
+\setlength{\columnsep}{0.28in}
+
+% Tables in this paper are dense; give them room to breathe.
+\renewcommand{\arraystretch}{1.12}
+\newcommand{\tabhead}[1]{\textbf{#1}}
+
+% Arm names appear constantly; one macro each keeps them typographically
+% identical everywhere and makes a global rename a one-line change.
+\newcommand{\armS}{\textsc{schema\_only}}
+\newcommand{\armM}{\textsc{manual\_prompt}}
+\newcommand{\armC}{\textsc{contract}}
+\newcommand{\armH}{\textsc{contract\_hollow}}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  framesep=3pt,
+  rulecolor=\color{gray!50},
+  showstringspaces=false,
+}
+
+\title{\vspace{-2em}\bfseries Which Part of the Context Layer Does the Work?\\
+\large A Controlled Ablation of Contract-Delivered Semantics for Agentic SQL}
+
+\author{
+  Qing Ye\\
+  \small\texttt{yeqi519@gmail.com}
+  % AFFILIATION: left blank deliberately. Fill before submission.
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{sections/00-abstract}
+\end{abstract}
+
+\input{sections/01-intro}
+\input{sections/02-background}
+\input{sections/03-design}
+\input{sections/04-protocol}
+\input{sections/05-results}
+\input{sections/06-mechanism}
+\input{sections/07-governance}
+\input{sections/08-threats}
+\input{sections/09-related}
+\input{sections/10-conclusion}
+
+\bibliographystyle{abbrv}
+\bibliography{refs}
+
+\end{document}

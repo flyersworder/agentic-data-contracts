@@ -1,0 +1,229 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Run B lost 29\% of its rows}
+\label{sec:truncation}
+
+We state this before the numbers, because every run~B figure is conditioned on
+it.
+
+Roughly 1{,}000 rows into run~B, the pinned provider endpoint began returning
+HTTP 429. The harness had no retry for that status, so each throttled request
+was written to the results file as a terminal error: 466 of 468 error rows are
+rate limits. Error rate was 0.2\% over the first 1{,}000 rows, 31\% over the
+next 200, and 100\% thereafter. The sweep then \emph{finished early}, because a
+throttled request fails instantly, and exited cleanly.
+
+The loss costs power, not validity, and the evidence for that is specific:
+
+\begin{itemize}
+\itemsep2pt
+\item Errors are near-uniform across arms --- 113, 116, 118 and 121 of 401
+      rows. No arm is preferentially damaged.
+\item 114 of the 122 lost tasks lost \emph{all four} arms together, because
+      the runner schedules a task's arms close in time. Independent per-arm
+      failure would have left roughly 99 complete tasks; 279 survived.
+      Missingness is a property of \emph{when} a task ran.
+\item Complete-case figures and per-arm figures over each arm's own
+      denominator agree to within one point.
+\end{itemize}
+
+We therefore report run~B on the 279 tasks scoreable in all four arms. One
+residual caveat: the lost tasks are slightly enriched for hard (87\% against
+83\% overall), so run~B's absolute accuracies are marginally optimistic. Every
+arm is affected identically.
+
+\subsection{Headline}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Arm} & \tabhead{Overall} & \tabhead{Hard} & \tabhead{Easy} & \tabhead{Cost} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run A --- \texttt{glm-5.3-flash}, 401 tasks}}\\
+\armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
+\armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.97 \\
+\armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
+\armS{} & 22.7\% & 13.9\% & 65.2\% & \$0.76 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run B --- \texttt{deepseek-v4-flash}, 279 tasks}}\\
+\armC{} & \textbf{61.3\%} & \textbf{56.6\%} & 81.1\% & \textbf{\$1.05} \\
+\armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
+\armS{} & 33.0\% & 22.6\% & 77.4\% & \$1.79 \\
+\armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy and cost. Hard splits are $n{=}332$ (run~A) and $n{=}226$
+(run~B); easy are 69 and 53. \armC{} is both the most accurate and the
+cheapest arm on both models.}
+\label{tab:headline}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\tabhead{Comparison} & \tabhead{Run A} & \tabhead{Run B} \\
+\midrule
+\armS{} vs \armC{}     & $3{\times}10^{-31}$ \,\, 14/\textbf{155} & $2{\times}10^{-15}$ \,\, 14/\textbf{93} \\
+\armM{} vs \armC{}     & $2{\times}10^{-17}$ \,\, 29/\textbf{134} & \textbf{0.0067} \,\, 30/\textbf{56} \\
+\armH{} vs \armC{}     & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} \\
+\armS{} vs \armM{}     & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 \\
+\armM{} vs \armH{}     & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 \\
+\textbf{\armS{} vs \armH{}} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 \\
+\bottomrule
+\end{tabular}
+\caption{Every pairwise paired McNemar: $p$-value, then discordant pairs won by
+the left arm / by the right arm. The last row carries the ablation.}
+\label{tab:mcnemar}
+\end{table*}
+
+\armC{} wins every comparison on both models. It is also the cheapest arm on
+both --- there is no accuracy/cost tradeoff to report here.
+
+\subsection{The ablation: content, not scaffolding}
+\label{sec:ablation}
+
+On hard tasks the gain splits into a scaffolding step and a content step:
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+ & \tabhead{Run A} & \tabhead{Run B} \\
+\midrule
+\armS{}                     & 13.9\% & 22.6\% \\
+${+}$ tools, procedure (\armH{}) & 19.3\% & 22.6\% \\
+${+}$ prose (\armC{})            & \textbf{55.1\%} & \textbf{56.6\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{The content step is the whole effect. The scaffolding step is not
+distinguishable from zero.}
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+& $\Delta$ hard & discordant & $p$ \\
+\midrule
+Run A    & $+5.4$ pp & 55 (20/35) & 0.058 \\
+Run B    & $+0.0$ pp & 34 (19/15) & 0.61 \\
+Pooled   & ---       & 89 (39/50) & 0.29 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The two runs do not agree on the sign. Nine governed tools, the retrieval
+instruction, the table allow-list and the operation rules --- with no semantics
+behind them --- buy nothing measurable over a bare schema.
+
+This is a null result and we hold it to the standard of one: it is compatible
+with a small positive effect our sample cannot resolve. What it excludes is an
+effect large enough to account for a meaningful share of the 35-point content
+step.
+
+The direction of the claim is worth stating plainly. A reader's first
+objection to \armC{} is that the contract might be helping through some
+mechanism other than its knowledge. \armH{} holds every such mechanism fixed
+and lands on the bare-schema baseline. The null strengthens the paper rather
+than qualifying it.
+
+\paragraph{Empty tools are not free.} In run~A, \armH{} is the most expensive
+arm per correct answer and burns the most reasoning of any arm (543{,}565
+tokens against \armC{}'s 154{,}247). In run~B it makes the most tool calls of
+any arm (6{,}375 against 4{,}155) for the fewest correct answers. The
+transcripts show why: the agent calls \texttt{lookup\_domain}, is told nothing
+is available, and searches harder.
+
+\subsection{Efficiency}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & \armS{} & \armM{} & \armH{} & \armC{} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run A}}\\
+Turns / task      & 12.1 & 9.8 & 8.4 & \textbf{7.1} \\
+Tool calls        & 5{,}137 & 4{,}286 & 4{,}105 & \textbf{3{,}355} \\
+Reasoning tokens  & 444k & 416k & 544k & \textbf{154k} \\
+Forced answers    & 41 & 18 & 0 & \textbf{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run B}}\\
+Turns / task      & 13.7 & 12.8 & 11.4 & \textbf{8.2} \\
+Tool calls        & 5{,}489 & 4{,}770 & 6{,}375 & \textbf{4{,}155} \\
+Reasoning / task  & 10{,}941 & 9{,}243 & 10{,}765 & \textbf{4{,}844} \\
+Forced answers    & 55 & 42 & 15 & \textbf{0} \\
+\bottomrule
+\end{tabular}
+\caption{The governed arm wins while doing less work.}
+\label{tab:efficiency}
+\end{table*}
+
+\armC{} is not thinking harder --- it has less to search for. It is also the
+only arm that never exhausted its output budget on either model.
+
+\subsection{Capability interaction}
+\label{sec:interaction}
+
+The two runs bracket an interaction, ordered by what each model achieves from a
+bare schema:
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Hard tasks & \armS{} & \armM{} & \armC{} & \armC{}${-}$\armM{} \\
+\midrule
+\texttt{glm-5.3-flash}     & 13.9\% & 22.9\% & 55.1\% & $+32.2$ \\
+\texttt{deepseek-v4-flash} & 22.6\% & 42.9\% & 56.6\% & $+13.7$ \\
+\bottomrule
+\end{tabular}
+\caption{The margin over a hand-written prompt shrinks as the bare-schema
+baseline rises.}
+\label{tab:interaction}
+\end{table*}
+
+\armM{} improves by 20.0 points between the two models; \armC{} improves by
+1.5. The contract arm lands in almost the same place on both while the
+prompt-based arm climbs toward it.
+
+Two readings, and our data do not separate them:
+
+\begin{enumerate}
+\itemsep2pt
+\item \textbf{Structured context substitutes for capability.} The contract
+      supplies what a weaker model cannot infer; a stronger model extracts more
+      of the same semantics from prose unaided.
+\item \textbf{The contract arm is near a benchmark ceiling.} Both models land
+      at ${\approx}56\%$, and Section~\ref{sec:threats} identifies a 30-task
+      template that no arm on either model solves.
+\end{enumerate}
+
+The near-identical 55.1\%/56.6\% is more consistent with a shared ceiling than
+with coincidence, so reading~2 is not idle. Separating them requires a stronger
+model, where reading~1 predicts continued convergence and reading~2 predicts
+\armC{} pinned near 56\% while \armM{} rises to meet it. \textbf{We make no
+claim about frontier models from these two runs.}
+
+\subsection{Where the effect is absent}
+
+\armM{} reproduces the published leaderboard band on run~A --- 22.9\% hard
+against a 20--26\% band for credible named entrants, on a model weaker than any
+of them. This is the check that licenses the comparison at all: the harness
+measures what the leaderboard measures. On run~B the same arm reaches 42.9\%,
+above the band, which is a statement about the model rather than the harness.
+
+On easy tasks all four arms fall within overlapping intervals on both runs
+(61--74\% and 70--91\%), and \armC{} is not the best of them --- \armM{} leads
+on easy tasks in both runs. The contract does nothing for questions that need
+no domain knowledge, which is what it should do.

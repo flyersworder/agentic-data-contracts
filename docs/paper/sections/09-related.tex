@@ -1,0 +1,131 @@
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Context layers}
+
+MotherDuck reports 418 of 419 DABStep questions correct (99.8\%) with Gemini~3
+Flash at roughly \$0.02 per question, and separately 96--98\% with a local
+27B model, using ``Guides'' --- markdown context stored in the warehouse and
+fetched through an MCP server~\cite{motherduck-guides}. Their headline claim is
+the same as ours and measured the same way: context raises accuracy by 72
+percentage points while cutting cost by roughly 55\%.
+
+That is an independent corroboration of the direction of our finding, at a far
+higher absolute score. Because a reader will otherwise stop at the difference
+between 99.8\% and 56.6\%, we state plainly what that difference is made of.
+
+\subsection{When the semantics get compiled}
+
+The two approaches differ in \emph{when} a metric's definition is turned into
+executable form.
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.28\columnwidth}p{0.28\columnwidth}p{0.28\columnwidth}@{}}
+\toprule
+ & \tabhead{Views / macros} & \tabhead{Declarative contract} \\
+\midrule
+Compiled & ahead of time, by a human & per query, by the model \\
+Covers & anticipated metrics & any question in the domain \\
+Cost & one macro per metric, maintained & one description per domain \\
+Fails when & nobody anticipated the question & the model misapplies the rule \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+MotherDuck's own guidance lists pre-computed views among its five steps, and a
+separate post of theirs reports 93.2\% from ``a simple prompt with views and
+macros''. \textbf{So a large share of the distance between our numbers and
+theirs is work relocated from the agent to a human author, not reasoning
+improved.}
+
+We verified this directly rather than inferring it. Tasks 1500 and 1502, both
+of which our contract arm answered incorrectly, are answered \emph{exactly} by
+a five-line macro encoding the wildcard rule the contract states in prose:
+
+\begin{lstlisting}[language=SQL]
+CREATE MACRO wild(col, val) AS
+  (col IS NULL OR len(col) = 0
+   OR list_contains(col, val));
+SELECT string_agg(ID::VARCHAR, ', '
+                  ORDER BY ID)
+FROM fees
+WHERE wild(account_type, 'O') AND wild(aci, 'C');
+\end{lstlisting}
+
+The agent's job collapses from \emph{derive the rule} to \emph{call the macro}.
+
+\subsection{Why the benchmark flatters pre-computation}
+
+DABStep's 450 questions come from 26 templates, and 294 of 332 hard tasks in
+our set are fee questions. Pre-built views are maximally effective when the
+question space is enumerable in advance, which is exactly this benchmark's
+construction. A macro contributes nothing to a question nobody wrote it for.
+
+The declarative layer measured here is the layer that must cover the
+\emph{unanticipated} question. \textbf{56.6\% is therefore a measurement of a
+harder task, not a worse attempt at the same one.}
+
+We want to be careful not to convert that into a claim we cannot support.
+Maintaining one macro per metric per dialect is a real and growing burden, but
+we have no data on where it crosses over against the cost of authoring domain
+prose. \textbf{We do not claim the contract approach scales better.} We claim
+only that the two degrade differently: a missing macro degrades to nothing,
+while a contract degrades gracefully to a model reasoning from a description.
+
+The generous reading is also the correct one. These are complementary layers,
+not competitors --- macros optimise the head of the question distribution, a
+contract covers the tail, and in a system with both, the contract is what tells
+the agent which macro exists and when to call it.
+
+\subsection{What is distinctive here}
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.29\columnwidth}p{0.21\columnwidth}p{0.29\columnwidth}@{}}
+\toprule
+ & \tabhead{Prior reports} & \tabhead{This work} \\
+\midrule
+Comparison & with vs without & four arms \\
+Separates content from tooling & no & \textbf{yes}, via arm~D \\
+Statistical test & two accuracies & paired McNemar, all pairs \\
+Second model & no & \textbf{yes}, same direction \\
+Artifact frozen pre-hoc & undisclosed & \textbf{yes}, digest-pinned \\
+Transcripts released & repository & \textbf{3{,}208} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The contribution is the decomposition, not the accuracy.
+
+\subsection{Interpreting published leaderboard scores}
+
+One observation from reconstructing golds bears on how any DABStep number
+should be read. Across the 2{,}199 published submissions, organisations
+submitting once achieve a median hard-split accuracy of 19.6\%; those
+submitting 21 or more times achieve 54.2\%. Independent commentary on Guides
+similarly warns against hardcoding answers and urges measuring generalisation
+to unseen questions.
+
+We draw no conclusion about any particular entrant --- a strong tuning gradient
+is equally consistent with genuine iterative improvement --- and methodology is
+not disclosed in enough detail for the 99.8\% run to rule anything in or out.
+The point is structural: on a benchmark of 26 templates with a public
+leaderboard, a single reported accuracy carries little information about
+generalisation unless the submission count and the artifact's provenance are
+stated. Ours are: one sweep per model, no tuning against the task set, and a
+digest-pinned artifact frozen 35 commits before the first run.
+
+\subsection{The deliberate non-response}
+
+The obvious response to Section~\ref{sec:mechanism} is to make this library's
+metric semantics executable --- a tool that runs a declared SQL expression
+rather than describing it --- and re-run. That feature is worth building and is
+on the roadmap for independent reasons.
+
+It was deliberately \textbf{not} built before this measurement, because it
+would be designed from knowledge of which tasks the contract arm lost. That is
+fitting to the test set, and it would spend the strongest methodological asset
+here: an artifact authored from the vendor manual alone and frozen before any
+question was read. The order is measure, ship, re-measure. This paper is the
+baseline that feature will be judged against.

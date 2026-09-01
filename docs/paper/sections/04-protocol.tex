@@ -1,0 +1,99 @@
+\section{Protocol}
+\label{sec:protocol}
+
+\subsection{The contract was frozen before the experiment}
+
+The most obvious way to fake this result is to write a contract that answers
+the benchmark. Three safeguards, of decreasing strength.
+
+\textbf{Provenance is declared.} The contract's header records that every fact
+in it came from \texttt{manual.md} and the dataset README, and nothing else. A
+reader can verify this claim by reading 2{,}475 characters against 22{,}127.
+
+\textbf{The artifact is digest-pinned.} The contract is content-hashed
+(\texttt{sha256:e438ecf7\ldots}) and every result row records the digest it ran
+under. It was frozen roughly 35 commits before run~A. Any post-hoc edit would
+change the hash and invalidate every row.
+
+\textbf{The limit is stated.} Nobody outside the project can verify that no
+benchmark question was read while the contract was authored. We claim
+provenance; we cannot prove intent. This is a genuine limitation and we do not
+argue it away.
+
+\subsection{Gold reconstruction}
+\label{sec:golds}
+
+DABStep withholds golds for its 450 test tasks, which is good for the benchmark
+and inconvenient for anyone running an offline ablation. We reconstruct them
+from the leaderboard's own published artifacts, and because this is the one
+component a reader cannot check independently, we describe it in full.
+
+Every submission to the DABStep leaderboard publishes a per-task file
+containing, for each task, the submitted answer and whether the official grader
+marked it correct. At the time of reconstruction the corpus held 2{,}199 such
+submissions.
+
+Reconstruction proceeds by plurality over \emph{officially-graded-correct}
+answers only:
+
+\begin{enumerate}
+\itemsep2pt
+\item An answer enters the vote only if DABStep's own grader marked that
+      submission correct on that task. Crowd agreement alone is never
+      sufficient; the benchmark's own verdict is the admission criterion.
+\item Answers are normalised with the benchmark's own normaliser, so
+      submissions differing only in formatting or list order agree.
+\item A task yields a gold only if one answer holds at least a 75\% plurality
+      of admitted votes. Median realised share: 0.981.
+\end{enumerate}
+
+This yields golds for \textbf{401 of 450 tasks} (332 hard, 69 easy). Five
+further tasks were excluded after manual verification showed the consensus
+answer to be wrong --- consensus inherits the leaderboard's errors, and we
+found some.
+
+\paragraph{Independent verification.} Consensus is an argument, not a
+measurement, so we checked it against the database. The largest template family
+--- the fee-average questions --- was recomputed directly from DuckDB using the
+matching rule documented in \texttt{manual.md}. \textbf{All 59 reconstructed
+golds reproduce exactly.}
+
+\paragraph{Planned external validation.} A leaderboard submission would convert
+this argument into a measurement: because submissions publish per-task official
+verdicts, submitting our answers would return an official judgement on the exact
+answers we scored against reconstructed golds, yielding a measured agreement
+rate. We report this as planned work rather than claiming it.
+
+\subsection{Grading}
+
+Answers are graded by DABStep's own scorer, vendored verbatim at a pinned
+revision. Each result row records which scorer graded it.
+
+This is load-bearing rather than housekeeping. Our own fallback normaliser,
+written before the official scorer was vendored, was \emph{stricter} than the
+benchmark. On a 12-task pilot that manufactured a significant result in this
+library's favour that the official rules do not support ($p{=}0.0156$ against
+$p{=}0.0703$). A scorer that is stricter than the benchmark is not a
+conservative choice; it is a different experiment.
+
+\subsection{Statistics}
+
+Every arm sees every task, so all comparisons are paired and we use McNemar's
+exact test throughout, reporting the discordant-pair count and its split
+alongside every $p$-value. Proportions carry Wilson intervals.
+
+We report accuracy two ways for every arm. \textsc{scored} accuracy is
+correct/(correct + incorrect), excluding harness failures from both halves.
+\textsc{strict} accuracy counts every non-correct row as wrong. Excluding
+harness failures flatters whichever arm fails most; counting them as wrong
+punishes an arm for what may be our bug. Reporting one alone hides which is in
+play. An arm whose harness-failure \emph{rate} crosses a threshold is flagged
+automatically, and that flag propagates into every report.
+
+\subsection{Artifacts}
+
+The harness, the frozen contract and its hollow derivative, all 3{,}208
+per-run transcripts including model reasoning traces, and the raw result rows
+are released. Every row records the commit, contract digest, gold-set hash,
+scorer identity, provider endpoint, quantization, token counts, cost and a
+post-run database integrity check.

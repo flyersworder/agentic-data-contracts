@@ -1,0 +1,105 @@
+\section{Experimental Design}
+\label{sec:design}
+
+\subsection{Four arms}
+
+Every arm sees the same tasks, the same warehouse, the same model, the same
+answer-format instruction and the same scorer. They differ in two dimensions:
+what tools the agent has, and what it knows.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\tabhead{Arm} & \tabhead{Tools} & \tabhead{Knowledge} & \tabhead{Role} \\
+\midrule
+\armS{} & raw SQL  & none             & floor \\
+\armM{} & raw SQL  & manual in prompt & baseline \\
+\armH{} & governed & \emph{none}      & control \\
+\armC{} & governed & contract         & treatment \\
+\bottomrule
+\end{tabular}
+\caption{The four arms. \armH{} differs from \armC{} only in that its prose
+fields are empty.}
+\label{tab:arms}
+\end{table}
+
+\armS{} is the floor: three ungoverned tools (\texttt{list\_tables},
+\texttt{describe\_table}, \texttt{execute\_sql}), a 281-character system prompt,
+no documentation. It measures what the model can do from the schema alone, and
+it doubles as our operational definition of model capability.
+
+\armM{} is the published approach reimplemented. DABStep's own
+\texttt{manual.md} is pasted verbatim into the system prompt, which brings it
+to 24{,}177 characters. Tools are identical to \armS{}. This arm exists to
+validate the harness against the leaderboard band, and it is the comparison a
+practitioner actually faces --- the alternative to a contract is not ignorance,
+it is a long prompt.
+
+\armC{} is the treatment: nine governed tools, and a 2{,}475-character system
+prompt that names the domains and metrics available and instructs the agent to
+look them up before writing SQL.
+
+\armH{} is the control that makes the ablation an ablation.
+
+\subsection{The hollow control}
+\label{sec:hollow}
+
+Arm \armC{} differs from the baselines along three dimensions at once --- it
+has different tools, a procedural instruction, and semantic content. The first
+objection any reader raises is that the tools or the instruction might be doing
+the work. \armH{} holds both fixed and removes only the third.
+
+It is \emph{derived} from the frozen contract by a generator rather than
+hand-authored, so the difference between the two artifacts is exactly the diff.
+Emptied: domain summaries and descriptions, metric descriptions, the
+\texttt{sql\_expression} field that carries the fee formula, and all column and
+relationship descriptions. Retained byte-for-byte: every name, every type, the
+structure, the table allow-list, the forbidden-operation rules, and the
+identical nine-tool surface.
+
+The agent in \armH{} therefore receives the same instruction to look things up,
+has the same tool to do it with, and calls that tool --- and is told
+\emph{``No documentation is available for this domain''}.
+
+\paragraph{The control is verified, not assumed.} A control that silently
+leaked its content would invalidate the experiment, so we test both directions.
+The test suite asserts that \textbf{no 6-gram of \texttt{manual.md} survives
+into the hollow contract, and that the real contract does share 6-grams with
+it}. The second half is what makes the first meaningful: it establishes that
+the check can fail, rather than passing vacuously.
+
+The transcripts confirm exercise end to end. In run~A, \armH{} called
+\texttt{lookup\_domain} on 272 of 401 tasks and received the empty placeholder
+282 times. The retrieval loop ran; there was nothing behind it.
+
+\paragraph{Prompt length is deliberately not held constant} (1{,}984 characters
+for \armH{} against 2{,}475 for \armC{}). Padding the hollow arm to match would
+substitute one confound for another --- text that reads as content but carries
+none, which is a different treatment, not a cleaner control. The variable under
+test is knowledge, not tokens.
+
+\subsection{What is held fixed}
+
+Across all four arms: row limit (50 rows per result), tool-call cap (40),
+token budget, temperature (0), reasoning effort (\texttt{medium}), model,
+provider endpoint and quantization, task set, gold set, scorer, and the verbatim
+answer-format instruction. Cost, token counts, turn counts, tool calls and
+per-row database integrity are recorded for every run.
+
+The row limit deserves a note because an earlier iteration of this experiment
+got it wrong. With a 1{,}000-row limit, the governed arm looked 11$\times$ more
+expensive than the baselines; the cause was oversized result payloads poisoning
+the context window, not the contract. Symmetric limits are not a detail.
+
+\subsection{Two models}
+
+We ran the full design twice, on \texttt{glm-5.3-flash} (run~A) and
+\texttt{deepseek-v4-flash} (run~B), both pinned to a single provider endpoint
+at fp8 quantization with fallbacks disabled, so that quantization, price and
+throughput are fixed within a run. The two runs are separate experiments rather
+than replicates: they differ in model, provider, and one library fix
+(Section~\ref{sec:threats}). Each run's internal contrasts are sound; cross-run
+differences are suggestive only.

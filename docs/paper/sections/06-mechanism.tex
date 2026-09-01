@@ -1,0 +1,86 @@
+\section{Mechanism}
+\label{sec:mechanism}
+
+Aggregate accuracy does not explain itself. This section traces one task end to
+end, then reports where the treatment arm fails.
+
+\subsection{Possession is not delivery}
+
+Task 1278 asks for \emph{the average fee NexPay would charge for a credit
+transaction of 50 EUR}.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \tabhead{Answer} & \\
+\midrule
+Gold      & \texttt{0.352294} & \\
+\armC{}   & \texttt{0.352294} & correct \\
+\armM{}   & \texttt{0.353053} & wrong \\
+\armS{}   & \texttt{0.353053} & wrong \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both figures reproduce directly against the warehouse:
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{WHERE is\_credit IS NULL OR is\_credit = true} & \texttt{0.352294} \\
+\texttt{WHERE is\_credit = true} & \texttt{0.353053} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A \texttt{NULL} in a \texttt{fees} column means \emph{this rule applies to
+every value}, not \emph{unknown}. Both baselines dropped the \texttt{NULL} rows
+and produced the identical wrong number. The contract arm called
+\texttt{lookup\_domain("fees")}, and its recorded reasoning states the rule
+back: \emph{``rules that apply to credit transactions: is\_credit true or
+null''}.
+
+\textbf{The decisive detail is that \texttt{manual.md} documents this rule
+too.} \armM{} had it --- inside a 24{,}177-character system prompt. \armC{}'s
+resident prompt is 2{,}475 characters, with the rule reachable by one targeted
+call.
+
+The finding is not that the contract arm was given more information. Both arms
+had the information. Only one of them used it. What the contract changes is not
+what is knowable but what is \emph{reachable at the moment of use} --- which is
+a claim about delivery, and it is why a result that looks like it is about
+documentation is really about retrieval structure over the same documentation.
+
+\subsection{Where the treatment arm loses}
+
+In run~A, \armC{} loses 14 tasks to \armS{} and 29 to \armM{}, 10 to both. Two
+modes account for nearly all of them.
+
+\textbf{Set membership under \texttt{NULL} wildcards} --- the same rule as
+above, failing in the other direction. On task 1500 (\emph{fee IDs that apply
+to account\_type = O and aci = C}) \armC{} returns both false positives and
+false negatives while \armM{} matches exactly. Applying ``\texttt{NULL} means
+all'' to an enumeration is harder than applying it to an average: the model
+must decide, per column, whether a \texttt{NULL} widens the match.
+
+\textbf{Near-miss arithmetic} --- task 1274, gold \texttt{0.126459}, \armC{}
+\texttt{0.125516}: a real computation with a wrong rounding or filter.
+
+\paragraph{These are not retrieval failures.} \texttt{lookup\_domain} is called
+on 331 of 401 tasks in \armC{}; the 70 that skip it are \emph{easier for every
+arm} (\armS{} scores 41\% there against 19\% elsewhere), and 26 of the 33
+losses occur on tasks where the lookup \emph{was} performed. The agent fetches
+the rule and misapplies it.
+
+That diagnosis points at a specific remedy, and points away from another.
+Hoisting rule bodies into the resident prompt would not obviously help, since
+the rule was already fetched. Making the wildcard semantics \emph{executable}
+--- a tool that resolves which fee rules match a transaction, rather than prose
+the model reimplements in SQL each time --- addresses the observed failure
+directly. Section~\ref{sec:related} returns to this, because it is exactly the
+boundary between what we measured and what pre-computed semantic layers
+provide.

@@ -1,0 +1,81 @@
+\section{Background}
+\label{sec:background}
+
+\subsection{DABStep}
+
+DABStep~\cite{dabstep} is a data-analysis benchmark built by Adyen and Hugging
+Face around a payments warehouse: 138{,}236 transactions, a fee rule table, and
+merchant and MCC reference data, with two documents of human-written context
+--- \texttt{manual.md} (22{,}127 characters) and a dataset README.
+
+Two properties make it the right benchmark for our question, and one makes it a
+limitation we return to in Section~\ref{sec:threats}.
+
+\textbf{Its difficulty is semantic, not syntactic.} The hard split does not
+require exotic SQL. It requires knowing the fee-matching rule: a \texttt{NULL}
+in a \texttt{fees} column means \emph{this rule applies to every value of that
+column}, not \emph{unknown}, and matching additionally involves list membership
+over account type, authorisation characteristic and merchant category code. An
+agent that reads the schema and writes idiomatic SQL gets a clean, wrong number
+--- which is precisely the failure a context layer claims to fix.
+
+\textbf{Golds are withheld and grading is centralised}, so the benchmark
+resists the overfitting that makes many text-to-SQL results hard to read.
+
+\textbf{But its question space is small.} 450 test tasks are generated from 26
+templates, and in our task set 294 of 332 hard tasks concern fees. We treat
+this as a first-class threat rather than a footnote (Section~\ref{sec:threats}),
+and it is central to interpreting results that use pre-computed views
+(Section~\ref{sec:related}).
+
+Published hard-split accuracies from credible entrants cluster around
+20--26\%: Google's \texttt{simple\_baseline} at 26\%, an Adyen GPT-5.4 entry at
+22.2\%, a Hugging Face Claude~4 Sonnet entry at 19.8\%.
+
+\subsection{Context layers and semantic layers}
+
+Three families of approach exist, and they are routinely conflated.
+
+\emph{Semantic layers} in the classical sense --- dbt metrics, Cube, LookML ---
+define metrics as executable artifacts. The agent does not derive the metric; it
+calls it. Correctness is inherited from the definition.
+
+\emph{Context layers} store natural-language documentation next to the data and
+retrieve it at query time. MotherDuck Guides~\cite{motherduck-guides} is the
+best-documented instance. The agent must still write the SQL, but writes it
+knowing what the columns mean.
+
+\emph{Data contracts} originate in governance rather than assistance: a
+declarative artifact stating what a dataset contains, who owns it, and what may
+be done with it. The Open Data Contract Standard~\cite{odcs} is the emerging
+specification. The artifact under test here is of this third kind and is used
+for both purposes at once --- the same YAML supplies the semantics the agent
+reads and the rules the tool layer enforces.
+
+The distinction that matters for this paper is \emph{when the semantics are
+compiled}. A macro is compiled ahead of time by a human and covers the metrics
+somebody anticipated. A contract is compiled per query by the model and covers
+whatever question arrives. The two are complementary, they fail in opposite
+circumstances, and --- as Section~\ref{sec:related} argues --- a benchmark
+generated from 26 templates is close to the best case for the former.
+
+\subsection{The system under test}
+
+\texttt{agentic-data-contracts} is an open-source Python library that loads a
+YAML contract and exposes the warehouse to an agent through nine governed
+tools. Two properties are load-bearing here.
+
+\textbf{The contract is the single source of both semantics and rules.} The
+same file that describes what a fee is also declares which tables are
+reachable and which operations are forbidden. The agent reads the first through
+\texttt{lookup\_domain} and \texttt{lookup\_metric}; the tool layer enforces the
+second before any statement reaches the database.
+
+\textbf{Validation is two-layer.} Every query is parsed with
+sqlglot~\cite{sqlglot} and checked statically; where a database adapter is
+available, a dry run follows. A rejected query returns a reason to the model
+rather than an error to the user.
+
+We stress that the library is not the contribution. It is the instrument, and
+the experiment is designed so that its identity does not matter: \armH{} runs
+the identical library, tools and rules with the prose removed.

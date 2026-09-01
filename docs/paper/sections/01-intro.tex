@@ -1,0 +1,88 @@
+\section{Introduction}
+
+An analytics agent pointed at a warehouse it does not understand fails in a
+characteristic way. It reads the schema, writes plausible SQL, and returns a
+number that is wrong for a reason no column name records: a code whose values
+mean something specific to the business, a join whose cardinality depends on a
+convention, a \texttt{NULL} that means \emph{applies to everything} rather than
+\emph{unknown}. The query runs. The answer is confidently wrong.
+
+The industry's answer is the \emph{context layer}: curated documentation stored
+alongside the data and fetched by the agent at query time. Recent reports are
+striking. MotherDuck's ``Guides'' raise DABStep accuracy by 72 percentage
+points while cutting cost by roughly 55\%~\cite{motherduck-guides}. Similar
+claims accompany every semantic-layer product now shipping.
+
+These results share a shape: system-with-layer against system-without-layer,
+two accuracy numbers, a large difference. That design establishes \emph{that}
+context layers work. It cannot establish \emph{which part} works --- and the
+part matters, because the parts have wildly different costs. A context layer as
+deployed bundles at least three things:
+
+\begin{enumerate}
+\itemsep2pt
+\item \textbf{Semantic content} --- prose describing what the columns mean,
+      how the metrics are defined, which conventions hold.
+\item \textbf{Retrieval scaffolding} --- the tools that fetch it, the
+      instruction to fetch before writing SQL, and the narrowed table
+      surface that comes with a curated catalogue.
+\item \textbf{Pre-computed artifacts} --- views and macros that encode a
+      metric once so the agent calls it instead of deriving it.
+\end{enumerate}
+
+Each has a different economics. Semantic content is written once per domain and
+tends to exist already, in a vendor manual or a data dictionary. Scaffolding is
+engineering, paid once. Pre-computed macros are paid \emph{per metric}, forever,
+and only cover metrics somebody anticipated. A practitioner deciding where to
+spend needs to know which of the three bought the 72 points. No published
+experiment says.
+
+\subsection*{Contribution}
+
+We report a controlled ablation that separates the first two, and we are
+explicit that we do not attempt the third (Section~\ref{sec:related} explains
+why, and why that makes our absolute numbers lower and our question harder).
+
+The design turns on a fourth arm. \armH{} takes the same frozen contract the
+treatment arm uses and empties every field of prose --- domain summaries,
+metric descriptions, the SQL expression that carries the fee formula, column
+and relationship descriptions --- while leaving names, types, structure, the
+table allow-list, the forbidden-operation rules and all nine governed tools
+byte-for-byte identical. The agent still has the retrieval loop, still receives
+the instruction to look things up before writing SQL, and still calls
+\texttt{lookup\_domain}. It is simply told nothing when it does.
+
+Everything the deflationary reading attributes the gain to is present in
+\armH{}. Only the semantics are gone.
+
+Our findings:
+
+\begin{itemize}
+\itemsep3pt
+\item \textbf{The content is the whole effect.} Contract-delivered semantics
+      take hard-task accuracy from 13.9\% to 55.1\% and from 22.6\% to 56.6\%
+      on two model families, and beat the same knowledge pasted verbatim into
+      the prompt on both.
+\item \textbf{The scaffolding contributes nothing measurable.} \armH{} is
+      indistinguishable from a bare schema on both models ($p{=}0.058$,
+      $p{=}0.61$, pooled $p{=}0.29$), and the two runs do not agree on the
+      sign. This is a null result, and we report it as one.
+\item \textbf{Delivery matters as much as possession.} Both the contract arm
+      and the prompt arm are given the governing rule. Only the contract arm
+      applies it. The contract arm's resident prompt is 2{,}475 characters
+      against 24{,}177; the difference is a targeted lookup versus a wall of
+      text.
+\item \textbf{Governance is measurable and nearly free.} Ungoverned arms
+      submitted 144 mutating statements across 24 tasks; governed arms
+      submitted none, and never attempted.
+\item \textbf{The advantage shrinks as models strengthen.} The margin over a
+      hand-written prompt falls from $+32.2$ to $+13.7$ points between our two
+      models. We report both readings this admits and state that our data
+      cannot separate them.
+\end{itemize}
+
+We also report where the effect is absent. On the 38 and 30 hard tasks that do
+not concern the domain the contract describes, the contract arm holds no
+advantage over a hand-written prompt. The gain is domain-specific by
+construction, which is what a domain contract should do and is also the sharpest
+limit on what a single benchmark can show.

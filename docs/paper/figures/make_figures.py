@@ -30,6 +30,7 @@ import math
 from pathlib import Path
 
 import matplotlib
+import matplotlib.ticker
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -195,12 +196,13 @@ def fig_ladder(acc: dict, out: Path) -> None:
         (1.5, "contract_hollow", "contract", "+ contract prose", INK),
     ]
     for y, lo_arm, hi_arm, what, ink in steps:
+        # min and max of ALL runs, not deltas[0]/deltas[1]. With two runs
+        # those were the same thing; with three, indexing the first two
+        # silently dropped the largest delta -- which on the scaffolding step
+        # is run C's +14.2, the entire reason this section is a correction.
         deltas = sorted(pct(m, hi_arm) - pct(m, lo_arm) for m in RUNS)
-        span = (
-            f"{deltas[0]:+.1f} pp"
-            if abs(deltas[1] - deltas[0]) < 0.6
-            else f"{deltas[0]:+.1f} to {deltas[1]:+.1f} pp"
-        )
+        lo, hi = deltas[0], deltas[-1]
+        span = f"{lo:+.1f} pp" if abs(hi - lo) < 0.6 else f"{lo:+.1f} to {hi:+.1f} pp"
         ax.annotate(
             f"{what}\n{span}",
             xy=(62, y),
@@ -254,8 +256,18 @@ def fig_cost(acc: dict, cost: dict, out: Path) -> None:
             )
     ax.set_xlabel("cost of the run (USD)", fontsize=7.5, color=INK_MUTED)
     ax.set_ylabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
-    ax.set_xlim(0.4, 2.05)
-    ax.set_ylim(5, 68)
+    # Log scale, and wide enough for run C. The three runs' costs span
+    # $0.67 to $22.09 -- a 33x range that a linear axis cannot show without
+    # collapsing runs A and B onto the origin. The previous limits (0.4, 2.05)
+    # silently placed all four run-C points off-canvas while the legend went
+    # on advertising the model.
+    ax.set_xscale("log")
+    ax.set_xlim(0.55, 30)
+    ax.set_ylim(5, 85)
+    ax.set_xticks([0.6, 1, 2, 5, 10, 20])
+    ax.get_xaxis().set_major_formatter(
+        matplotlib.ticker.FuncFormatter(lambda v, _: f"${v:g}")
+    )
     ax.grid(color=GRID, lw=0.5)
     style_axes(ax)
 
@@ -303,13 +315,16 @@ def fig_interaction(acc: dict, out: Path) -> None:
     """Accuracy against base-model capability, one line per arm.
 
     The x axis is the bare-schema arm's own accuracy: our operational
-    definition of what the model can do unaided. Two points per line is
-    thin, and the caption says so -- a third lands with the pre-registered
-    sweep.
+    definition of what the model can do unaided. Three points per line, and
+    the third is what breaks the apparent convergence of the first two.
     """
     fig, ax = plt.subplots(figsize=(3.3, 2.3))
     xs = [acc[m]["schema_only"][0] / acc[m]["schema_only"][1] * 100 for m in RUNS]
 
+    # Nudges in POINTS, applied only where two lines end within ~1.5 points
+    # of each other. Run C's manual_prompt (50.3) and contract_hollow (51.2)
+    # would otherwise print their labels on top of one another.
+    label_dy = {"contract": 0.0, "manual_prompt": -5.0, "contract_hollow": 5.0}
     for a in ("contract", "manual_prompt", "contract_hollow"):
         ys = [acc[m][a][0] / acc[m][a][1] * 100 for m in RUNS]
         ax.plot(xs, ys, "-", color=COLOR[a], lw=1.6, zorder=2)
@@ -320,7 +335,7 @@ def fig_interaction(acc: dict, out: Path) -> None:
         ax.annotate(
             LABEL[a],
             xy=(xs[-1], ys[-1]),
-            xytext=(4, 0),
+            xytext=(4, label_dy[a]),
             textcoords="offset points",
             va="center",
             fontsize=6.5,
@@ -329,7 +344,7 @@ def fig_interaction(acc: dict, out: Path) -> None:
 
     # y = x is the no-benefit line: an arm on it does no better than the
     # bare schema. Without it the reader has no reference for "flat".
-    lim = [10, 62]
+    lim = [10, 80]
     ax.plot(lim, lim, ":", color=GRID, lw=0.9, zorder=1)
     ax.annotate(
         "y = x: no gain over a bare schema",
@@ -341,8 +356,12 @@ def fig_interaction(acc: dict, out: Path) -> None:
         va="bottom",
     )
 
-    ax.set_xlim(11.5, 31)
-    ax.set_ylim(10, 66)
+    # Wide enough for run C: its schema_only x is 37.0 and its contract y is
+    # 77.4, both outside the previous (11.5, 31) x (10, 66) window, so the
+    # third model -- the whole point of this figure's caption -- was drawn
+    # off-canvas.
+    ax.set_xlim(11.5, 41)
+    ax.set_ylim(10, 84)
     ax.set_xlabel(
         "base-model capability:\nschema_only hard accuracy (%)",
         fontsize=7.5,

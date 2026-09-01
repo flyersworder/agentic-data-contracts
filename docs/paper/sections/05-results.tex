@@ -44,7 +44,7 @@ arm is affected identically.
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run A --- \texttt{glm-5.3-flash}, 401 tasks}}\\
 \armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
-\armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.97 \\
+\armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.96 \\
 \armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
 \armS{} & 22.7\% & 13.9\% & 65.2\% & \$0.76 \\
 \midrule
@@ -156,8 +156,8 @@ be helping through some mechanism other than its knowledge --- a narrowed
 table surface, an imposed procedure, or simply making the agent slow down.
 That deflationary reading predicts \armH{} captures most of the gain. It does
 not, on any model: the content step is $1.8{\times}$ the scaffolding step on
-the model where scaffolding matters most, and unboundedly larger on the other
-two. \textbf{Scaffolding is a real but secondary effect that the content
+run~C, $6.6{\times}$ on run~A, and the whole of the effect on run~B, where the
+scaffolding step is zero. \textbf{Scaffolding is a real but secondary effect that the content
 dominates everywhere.}
 
 The correction also carries a methodological lesson we think is worth more
@@ -165,12 +165,12 @@ than the claim it replaced. A null result on two models, with a pooled
 $p{=}0.29$ and disagreeing signs, looked like solid evidence of absence. It
 was evidence of a small sample spanning too narrow a capability range.
 
-\paragraph{Empty tools are not free.} In run~A, \armH{} is the most expensive
-arm per correct answer and burns the most reasoning of any arm (543{,}565
-tokens against \armC{}'s 154{,}247). In run~B it makes the most tool calls of
-any arm (6{,}375 against 4{,}155) for the fewest correct answers. In run~C it
-is the most expensive arm outright (\$22.09) and the only arm besides
-\armS{} to exhaust its output budget. The transcripts show why: the agent
+\paragraph{Empty tools are not free.} In run~A, \armH{} burns the most
+reasoning of any arm (524{,}639 tokens against \armC{}'s 154{,}247) and costs
+\$0.0080 per correct answer against \armC{}'s \$0.0029. In run~B it makes the
+most tool calls of any arm (6{,}375 against 4{,}155) for the fewest correct
+answers. In run~C it is the most expensive arm outright (\$22.09) and the only
+arm of the four to exhaust its output budget. The transcripts show why: the agent
 calls \texttt{lookup\_domain}, is told nothing is available, and searches
 harder. On run~C it makes that call on 401 of 401 tasks, 804 times in total
 --- the model that gains most from the scaffolding is also the one that
@@ -199,8 +199,8 @@ within-run ordering is.}
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run A}}\\
 Turns / task      & 12.1 & 9.8 & 8.4 & \textbf{7.1} \\
-Tool calls        & 5{,}137 & 4{,}286 & 4{,}105 & \textbf{3{,}355} \\
-Reasoning tokens  & 444k & 416k & 544k & \textbf{154k} \\
+Tool calls        & 5{,}134 & 4{,}282 & 4{,}110 & \textbf{3{,}355} \\
+Reasoning tokens  & 428k & 400k & 525k & \textbf{154k} \\
 Forced answers    & 41 & 18 & 0 & \textbf{0} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run B}}\\
@@ -326,8 +326,11 @@ Classifying all 401 tasks by question shape alone --- never by gold, never by
 any arm's output --- gives 176 tasks the compiled contract answers outright
 (all hard), 148 that need those semantics \emph{plus} a counterfactual or an
 optimisation it does not encode, and 77 with no fee semantics at all. A
-pre-computed macro layer therefore tops out at 53\% of the hard set on this
-benchmark, however good it is. On the 176 where the information is provably
+pre-computed macro layer \emph{of this kind} therefore reaches 53\% of the hard
+set on this benchmark. We do not offer that as a bound on pre-computation in
+general --- Section~\ref{sec:related} reports a hierarchical semantic layer
+reaching 100\% here --- only on a layer compiled from a domain contract's
+declared expressions. On the 176 where the information is provably
 sufficient, whatever an agent fails to get is a failure to derive:
 
 \begin{table*}[t]

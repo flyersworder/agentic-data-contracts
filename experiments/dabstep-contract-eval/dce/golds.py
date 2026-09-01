@@ -95,6 +95,14 @@ def _norm(value: str) -> str:
         parts = [part for part in parts if part]
         if len(parts) > 1:
             return ", ".join(sorted(parts))
+        # Exactly one surviving part means the commas were punctuation, not
+        # separators. Falling through to `_norm_atom(text)` would re-parse the
+        # ORIGINAL comma-bearing string, so "709," normalises to itself while
+        # "709" normalises to "709.000000" -- two submissions of the same
+        # answer landing in different agreement groups and depressing the
+        # plurality share on a task that may then fall under threshold.
+        if parts:
+            return parts[0]
     return _norm_atom(text)
 
 

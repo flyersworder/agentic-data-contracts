@@ -2,7 +2,9 @@
 
 **Three independent runs of the same four-arm ablation, on three models
 spanning a wide capability range.** Shared across all: **contract digest**
-`sha256:e438ecf7…`, **hollow digest** `sha256:c46a767d…` · **golds**
+`sha256:e438ecf7…`, **hollow digest** `sha256:c46a767d…` (but see the note on
+digest stamping under [Operational findings](#operational-findings) — every
+row, arm D included, carries the *real* contract's digest) · **golds**
 `a4388e9ee823` (401/450 tasks) · **scorer** DABStep's own, vendored at
 `d4431c2e` · `reasoning_effort=medium`.
 
@@ -876,6 +878,28 @@ disposable per-worker copy, so nothing real was harmed.
 are the defensible number.
 
 ## Operational findings
+
+### Two harness defects found by a post-hoc code review
+
+Neither changes a number; both undercut something this document asserts, and
+both are recorded rather than quietly repaired. The harness is fixed for future
+runs; the released rows are left exactly as they ran.
+
+**Arm D's digest stamp is inert.** `build_result_row` stamped `digest()`
+unconditionally, so all 1,203 `contract_hollow` rows carry the real contract's
+hash instead of the hollow artifact's, and `hollow_digest()` had zero call
+sites. Which artifact each arm loaded is not in doubt — it is fixed by the
+harness, evidenced by arm D's empty-placeholder tool responses, and checked by
+the 6-gram tests — but the per-row tamper-evidence claimed for arm D was not
+there.
+
+**The 50-row cap was not applied to `preview_table`.** Only `run_query` was
+wrapped, and the library clamps `preview_table` at 100 rows on its own, so a
+governed arm could receive up to 100 rows from a preview where an ungoverned
+arm gets 50 from `execute_sql`. It happened on **31 preview calls across the
+three runs**, out of many thousands of tool calls. Small, but it runs **in the
+treatment's favour**, which is the direction that obliges disclosure.
+
 
 **The forcing turn is nearly worthless for accuracy, and valuable anyway**
 (run A). It fired 59 times and produced 1 correct answer. But `hit_limit` rows —

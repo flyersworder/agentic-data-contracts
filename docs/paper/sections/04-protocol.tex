@@ -12,9 +12,20 @@ reader can verify this claim by reading the 60{,}181-character contract against
 the 22{,}127-character manual.
 
 \textbf{The artifact is digest-pinned.} The contract is content-hashed
-(\texttt{sha256:e438ecf7\ldots}) and every result row records the digest it ran
-under. It was frozen roughly 35 commits before run~A. Any post-hoc edit would
-change the hash and invalidate every row.
+(\texttt{sha256:e438ecf7\ldots}) and every result row records that digest. It
+was frozen roughly 35 commits before run~A. Any post-hoc edit would change the
+hash and invalidate every row.
+
+One defect in this machinery, found by a post-hoc review of the harness and
+reported rather than quietly repaired: the digest is stamped unconditionally,
+so \armH{}'s rows also carry the \emph{real} contract's hash rather than the
+hollow artifact's (\texttt{sha256:c46a767d\ldots}). Arm~D's rows are therefore
+pinned to a file that arm never loaded, and the stamp is inert for that arm.
+It affects no result --- which artifact each arm loaded is fixed by the harness
+and independently evidenced by the hollow arm's empty-placeholder responses and
+by the $n$-gram tests of Section~\ref{sec:hollow} --- but the per-row
+tamper-evidence we claim for arm~D is not there. The harness is fixed; the
+released rows are left as they ran.
 
 \textbf{The limit is stated.} Nobody outside the project can verify that no
 benchmark question was read while the contract was authored. We claim

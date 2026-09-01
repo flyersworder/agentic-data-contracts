@@ -37,7 +37,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dce.arms import build_arm
-from dce.frozen import digest
+from dce.frozen import digest, hollow_digest
 from dce.grade import _clean, active_scorer, score
 from dce.pricing import MODELS, cost
 from dce.trace import write_trace
@@ -232,6 +232,20 @@ TOKEN_BUDGET: int = REQUEST_BUDGET * MAX_ARM_FLOOR * GROWTH
 # runaway-guard budget in a single step, rather than being allowed to
 # consume the whole thing (or more, pre-N2) at once.
 PER_REQUEST_INPUT_TOKEN_CAP: int = TOKEN_BUDGET // 4
+
+
+def arm_digest(arm: str) -> str:
+    """The digest of the contract artifact `arm` actually loads.
+
+    `contract_hollow` loads the mechanically derived hollow contract, so its
+    rows must be pinned to `hollow_digest()`. Stamping `digest()` on every row
+    regardless -- which this harness did for runs A, B and C -- leaves arm D's
+    rows carrying tamper-evidence for a file that arm never read, which is the
+    one provenance claim the stamp exists to support. The ungoverned arms load
+    no contract at all and keep the real digest as a record of which frozen
+    experiment they belong to.
+    """
+    return hollow_digest() if arm == "contract_hollow" else digest()
 
 
 def _tool_call_names(messages: list) -> list[str]:
@@ -734,7 +748,7 @@ def build_result_row(
         # actually bound (`tool_calls_limit`, `request_limit`, or this one)
         # without re-deriving it by hand.
         "token_cap": token_cap,
-        "contract_digest": digest(),
+        "contract_digest": arm_digest(arm),
         "golds_hash": golds_hash,
         # WHICH scorer produced `verdict`. `dce.grade` prefers DABStep's
         # official `question_scorer` when `dabstep_benchmark` is importable
@@ -874,7 +888,7 @@ def _priced_fallback_row(
         "retry_prompts": 0,
         "request_limit": REQUEST_LIMIT,
         "token_cap": TOKEN_BUDGET,
-        "contract_digest": digest(),
+        "contract_digest": arm_digest(arm),
         "golds_hash": golds_hash,
         # The scorer in force for this process — see `build_result_row`.
         # Present on every row shape so the analysis has one uniform

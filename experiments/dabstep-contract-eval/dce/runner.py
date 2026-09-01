@@ -321,11 +321,11 @@ from dce.agent import (
     _commit_sha,
     _spec_field,
     _token_budget_usd,
+    arm_digest,
     run_task,
 )
 from dce.arms import ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
-from dce.frozen import digest
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.grade import active_scorer
 from dce.lockfile import lock_path_for, sweep_lock
@@ -985,7 +985,7 @@ def _construction_error_row(
         "retry_prompts": 0,
         "request_limit": 0,
         "token_cap": 0,
-        "contract_digest": digest(),
+        "contract_digest": arm_digest(arm),
         "golds_hash": golds_hash,
         # The scorer in force for this process — see
         # `dce.agent.build_result_row`. Nothing was scored here (no call

@@ -444,8 +444,16 @@ def _governed_tools(db_path: Path, *, contract=None):
     session = ContractSession(contract)
     adapter = DuckDBAdapter(database=str(db_path))
     tool_defs = create_tools(contract, adapter=adapter, session=session)
+    # BOTH row-returning tools, not just `run_query`. The library clamps
+    # `preview_table` at 100 rows of its own accord, so leaving it unwrapped
+    # handed the governed arms up to 100 rows per preview against the 50 the
+    # ungoverned arms get from `execute_sql` -- an asymmetry in the treatment's
+    # favour, on the very control the row cap exists to equalise. Measured on
+    # runs A-C: 31 `preview_table` calls asked for more than 50 rows.
     tool_defs = [
-        _truncate_run_query(t, MAX_ROWS) if t.name == "run_query" else t
+        _truncate_run_query(t, MAX_ROWS)
+        if t.name in ("run_query", "preview_table")
+        else t
         for t in tool_defs
     ]
     tools = create_pydantic_ai_tools(contract, tools=tool_defs, session=session)

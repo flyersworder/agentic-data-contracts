@@ -91,7 +91,7 @@ first and labelled as such. Every other comparison this module produces --
 arm A, the other models, the level strata -- is secondary and exploratory,
 and is printed under that label, never mixed in with the primary result.
 Naming one confirmatory test in advance is what keeps the result from
-being a search: this design runs 3 arms x 3 models x 2 levels worth of
+being a search: this design runs 4 arms x 4 pinned models x 2 levels worth of
 possible comparisons, and at that count something crosses p<0.05 by chance
 alone.
 
@@ -122,14 +122,18 @@ nothing else in this repo reads them.
 AT the smoke run rather than after the sweep: arm B carries all 22k chars
 of `manual.md` in its system prompt, so if OpenRouter prompt-caches that
 arm and not the others, the cost comparison between arms is measuring the
-provider's caching policy rather than the arms. `dce.pricing` has no
-discounted cache-read rate and bills every cached token at the full input
-rate (see `build_result_row`'s own comment), so a silently cached arm B
-shows up nowhere in the dollar figures -- only here.
+provider's caching policy rather than the arms. `dce.pricing` DOES apply a
+discounted `price_cached` rate (5x-30x below `price_in`) to the real
+`cache_read_tokens`, so differential caching flows straight into `usd_final`
+and `usd_total_billed` -- the dollar figures are caching-SENSITIVE, and this
+counter is how you tell whether the arms were cached differently. (An earlier
+version of this paragraph claimed the opposite, from a time when `pricing`
+billed every cached token at the full input rate.)
 
-The three arm-C-only counters (`inspect_rejections`, `enforcement_blocks`,
-`retry_prompts`) are reported for the `contract` arm alone, since the other
-two arms have no contract to enforce and would report a structural zero.
+The three governed-arm counters (`inspect_rejections`, `enforcement_blocks`,
+`retry_prompts`) are reported for `contract` and `contract_hollow`, since the
+two ungoverned arms have no contract to enforce and would report a structural
+zero.
 They are DESCRIPTIVE INSTRUMENTATION -- how often the governed tools
 refused something -- and are labelled as such in the output. They are not
 a governance result: a block is not evidence that the block was necessary,
@@ -460,14 +464,21 @@ def _instrumentation(rows: list[dict]) -> dict:
 
 def _governance_counts(rows: list[dict]) -> dict | None:
     """Totals of the three governed-tool counters, for a slice that is
-    entirely arm C; `None` otherwise.
+    entirely governed arms; `None` otherwise.
 
     Descriptive instrumentation, NOT a governance claim -- see the module
     docstring's INSTRUMENTATION section. Arms A and B have no contract to
     enforce, so reporting these for them would print a structural zero
     dressed as a measurement.
+
+    BOTH governed arms, not just the treatment. `contract_hollow` is built
+    through the same `_governed_tools` path and records the same three
+    counters, and arm D exists precisely to separate contract TOOLING from
+    contract CONTENT -- these counters are the direct measurement of that
+    separation, so gating them to arm C dropped them from every report.
     """
-    if not rows or {row.get("arm") for row in rows} != {ARM_C}:
+    arms = {row.get("arm") for row in rows}
+    if not rows or not arms <= {ARM_C, ARM_D}:
         return None
     return {
         key: sum(row.get(key, 0) or 0 for row in rows)

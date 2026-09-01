@@ -316,6 +316,88 @@ above — now localised to the bucket where it means something.
 **`contract_hollow` tracks `schema_only` in both buckets**, consistent with the
 null result reported earlier; the bucket split gives it nowhere to hide.
 
+### Counterfactual macros: the contract kills the named errors, and the rest are idiosyncratic
+
+Lesion exactly one convention in the compiled macro and it becomes wrong in a
+single, nameable way. `analysis/counterfactuals.py` builds nine such lesions —
+NULL read as "matches nothing" rather than "applies to all values", an empty
+list read the same way, the merchant's raw `capture_delay` compared against the
+fee table's bands without mapping days to a band, fraud level as a share of
+transaction count rather than of euro volume, monthly volume as a count, bands
+read as exclusive, the `day_of_year` reconstruction off by one, and charging one
+matching rule per transaction instead of summing over all matched pairs (by
+lowest ID, and by highest fee). Each is a textual substitution on `macro.sql`
+guarded by an exact-occurrence assertion, so a change to the macro fails loudly
+here rather than silently lesioning something else.
+
+The lesions produce distinct, plausible numbers: on task 1748 (gold 15237.49)
+`first_match` answers 9211.73, `raw_capture_delay` 14898.61,
+`null_not_wildcard` 900.48. A wrong agent answer that matched one would
+identify the misconception outright — no LLM judge, no rubric, no hand
+labelling. Seven of the nine are diagnostic on 34–95 of the 176 tasks;
+`exclusive_bands` is diagnostic on none, because no golded task sits exactly on
+a band boundary.
+
+**Wrong answers on macro-bucket hard tasks:**
+
+| | wrong | single lesion | lesion pair | undiagnosed |
+|---|---:|---:|---:|---:|
+| glm `schema_only` | 171 | 4 | 0 | 167 |
+| glm `contract_hollow` | 158 | 11 | 0 | 146 |
+| glm `manual_prompt` | 150 | 4 | 2 | 143 |
+| glm `contract` | 69 | **0** | **0** | 69 |
+| ds-flash `schema_only` | 108 | 0 | 2 | 106 |
+| ds-flash `contract_hollow` | 106 | 2 | 1 | 103 |
+| ds-flash `manual_prompt` | 73 | 1 | 0 | 72 |
+| ds-flash `contract` | 44 | **0** | **0** | 44 |
+
+Two things follow, and they pull in opposite directions.
+
+**The method mostly fails, and that is a finding.** 27 of 879 wrong answers
+(3.1%) are explained by one named convention error; all 35 lesion pairs add
+almost nothing on top. Agents do not fail by holding one crisp misconception —
+they fail idiosyncratically, in ways a fixed catalogue of conventions does not
+enumerate. **The derivation gap is therefore not closable by documenting five
+more conventions**, which is the intervention the gap's size would otherwise
+seem to invite. (A tenth lesion, dropping rule-matching entirely, was tested to
+explain `contract_hollow`'s over-counting on glm: it answers 1227x gold where
+the arm answers 87x, so that is not the mechanism either.)
+
+**Within the errors it does explain, the contract arm contributes none.** Zero
+of 113 contract-arm errors are diagnosable as a named convention mistake,
+against 27 of 766 elsewhere (Fisher exact **p = 0.039**). The contract
+eliminates precisely the misconceptions it documents; what survives is made of
+something else. That is the sharpest available statement about what the
+remaining 37-39 pp is *not*.
+
+### How wrong, in orders of magnitude
+
+Restricted to the single-number families, the ratio of the agent's answer to
+gold:
+
+| | n | median | <2x | 2-10x | 10-100x | >100x |
+|---|---:|---:|---:|---:|---:|---:|
+| glm `schema_only` | 101 | 1.01 | 68% | 17% | 13% | 2% |
+| glm `contract_hollow` | 101 | **70.4** | 22% | 9% | **53%** | 16% |
+| glm `manual_prompt` | 93 | 0.96 | 82% | 18% | 0% | 0% |
+| glm `contract` | 40 | 0.99 | **92%** | 5% | 2% | 0% |
+| ds-flash `schema_only` | 55 | 1.02 | 76% | 13% | 5% | 5% |
+| ds-flash `contract_hollow` | 47 | 1.03 | 70% | 15% | 9% | 6% |
+| ds-flash `manual_prompt` | 45 | 0.90 | 91% | 9% | 0% | 0% |
+| ds-flash `contract` | 25 | 2.81 | 36% | 20% | 16% | 28% |
+
+One pattern holds on both models: **`manual_prompt` is never off by more than
+10x.** Knowledge in the prompt appears to keep the query's shape right even
+when the answer is wrong.
+
+Nothing else here replicates. glm's `contract_hollow` over-counts by a median
+70x — nine governed tools that return nothing, and the agent stops constraining
+the fee-rule join — but ds-flash's hollow arm shows no such thing (median
+1.03). ds-flash's `contract` row is the reverse anomaly, and rests on 25
+answers. **Treat this table as an observation about glm's hollow arm, not as a
+result**; separating it from noise needs the repeat runs Section "What these
+runs do not show" already calls for.
+
 ### A prediction, recorded before the third model lands
 
 The `gpt-5.6-sol` sweep was still running when this section was written. The

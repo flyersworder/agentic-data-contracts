@@ -398,6 +398,61 @@ answers. **Treat this table as an observation about glm's hollow arm, not as a
 result**; separating it from noise needs the repeat runs Section "What these
 runs do not show" already calls for.
 
+### Does the contract's vocabulary reach the SQL? A behavioural check
+
+The two instruments above read agents' *answers*. This one reads the SQL they
+actually submitted (`analysis/clauses.py`, over the stored transcripts), and
+asks a prior question: do the contract's clauses appear in the query at all?
+
+Six detectors, one per load-bearing clause of the compiled macro — the
+NULL-wildcard disjunct, the empty-list wildcard, the capture-delay band
+mapping, a per-merchant monthly aggregate, the natural-month reconstruction,
+and fraud measured on `has_fraudulent_dispute`. They are deliberately
+permissive: the question is whether the agent expressed the idea, so a detector
+demanding the contract's exact phrasing would measure copying rather than use.
+The comparison is restricted to the families that join payments to fees, so
+**every row compared needs all six**.
+
+| | glm (97 tasks) | | ds-flash (69 tasks) | |
+|---|---:|---:|---:|---:|
+| | mean /6 | wrote all 6 | mean /6 | wrote all 6 |
+| schema_only | 2.92 | 7% | 3.07 | 4% |
+| contract_hollow | 3.86 | 14% | 3.17 | 4% |
+| manual_prompt | 3.41 | 3% | 3.48 | 9% |
+| **contract** | **5.05** | **39%** | **5.36** | **65%** |
+
+`contract` vs `manual_prompt`, Fisher exact on wrote-all-six:
+**p = 2×10⁻¹⁰** (glm) and **p = 3×10⁻¹²** (ds-flash); against `schema_only`,
+p = 1×10⁻⁷ and 7×10⁻¹⁵.
+
+**This is the delivery result made behavioural rather than inferred.**
+`manual_prompt` is handed the same knowledge, as prose, in its system prompt.
+It writes all six clauses 3% and 9% of the time; the contract arm writes them
+39% and 65%. The knowledge is possessed in both arms and expressed in only one,
+which is what "delivery matters as much as possession" has until now been
+asserting from accuracy alone.
+
+**What it does not measure.** Clause presence says nothing about whether an
+attempt succeeds. Within any arm, attempts that got the task right and
+attempts that got it wrong write the same clauses — on both models, every
+Fisher p ≥ 0.45 (`--within` prints this). `contract_hollow` makes the point
+concretely: on glm it writes more clauses than `manual_prompt` (14% vs 3%) and
+still scores at the bare-schema floor. The measure captures whether the
+contract's vocabulary reaches the query, not whether the query is any good.
+
+**A confound worth recording, because the uncontrolled version is seductive.**
+Pooling across families, contract-arm attempts that wrote the NULL-wildcard
+clause were correct 90% of the time against 23% for those that did not — a
++67 pp effect, with similar gaps for four other clauses. It is an artifact.
+Different families require different clauses, so "wrote the clause" partly
+encodes "drew an easier family". Restricting to a single required-clause set,
+as the table above does, removes the confound and the entire within-arm effect
+disappears. Only the between-arm comparison holds tasks constant.
+
+One arm-level figure does not replicate and should not be leaned on: glm's
+`contract_hollow` writes more clauses than its `manual_prompt`, and ds-flash's
+does not.
+
 ### A prediction, recorded before the third model lands
 
 The `gpt-5.6-sol` sweep was still running when this section was written. The

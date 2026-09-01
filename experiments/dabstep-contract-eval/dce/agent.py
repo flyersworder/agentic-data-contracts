@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from decimal import Decimal
 from importlib.metadata import version
 from pathlib import Path
@@ -266,6 +267,36 @@ FORCED_ANSWER_PROMPT = (
 #: request producing nothing, and one retry is enough to recover from that
 #: without reopening an unbounded loop.
 FORCED_ANSWER_REQUEST_LIMIT: int = 2
+
+
+#: A rate-limited request is not a result. `provider.allow_fallbacks: false`
+#: (F3) deliberately turns an unhonourable pin into an error rather than a
+#: silent re-route to another endpoint — which is right for validity, and
+#: leaves us owning the retry. Measured: the deepseek-v4-flash sweep ran clean
+#: for 1,135 rows and was then cut off by its endpoint, recording 466 HTTP 429s
+#: as terminal `error` rows and finishing "early" because a throttled request
+#: fails instantly. 29% of that sweep was unusable for a transport condition
+#: that resolves by waiting.
+#:
+#: Bounded on purpose. Backing off forever would convert a quota exhaustion
+#: into a hung sweep, which is worse than a recorded failure: after these
+#: attempts the row still lands as an `error` and the sweep moves on, exactly
+#: as before.
+RATE_LIMIT_RETRIES: int = 4
+RATE_LIMIT_BACKOFF_S: tuple[float, ...] = (20.0, 60.0, 180.0, 420.0)
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    """True for a transport-level 429 from the provider.
+
+    Matched on the status code rather than the message: pydantic-ai wraps the
+    provider's body verbatim, so the text varies by vendor while `429` does
+    not. A non-429 transport error stays terminal — retrying a 400 just spends
+    the same money four more times.
+    """
+    if getattr(exc, "status_code", None) == 429:
+        return True
+    return "status_code: 429" in str(exc)
 
 
 def _trim_dangling_tool_calls(messages: list) -> list:
@@ -1070,9 +1101,24 @@ def run_task(
                 # full sweep for a fact already established once at import
                 # time. Suppressed here, not globally, so it stays scoped to
                 # the one call site that provokes it.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", category=CostNotFoundWarning)
-                    result = agent.run_sync(prompt, usage_limits=limits, usage=usage)
+                # RETRY A 429, DO NOT RECORD IT. See `RATE_LIMIT_RETRIES`.
+                # `usage` is threaded through unchanged, so a partially-billed
+                # attempt still counts toward the row's cost — a retry must
+                # not make spent money disappear.
+                for attempt in range(RATE_LIMIT_RETRIES + 1):
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter(
+                                "ignore", category=CostNotFoundWarning
+                            )
+                            result = agent.run_sync(
+                                prompt, usage_limits=limits, usage=usage
+                            )
+                        break
+                    except Exception as exc:
+                        if attempt >= RATE_LIMIT_RETRIES or not _is_rate_limited(exc):
+                            raise
+                        time.sleep(RATE_LIMIT_BACKOFF_S[attempt])
                 answer = str(result.output).strip()
             except UsageLimitExceeded:
                 # A cap trip is a harness artifact, not a wrong answer — see

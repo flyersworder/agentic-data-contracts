@@ -1610,3 +1610,96 @@ def test_genuine_model_misbehaviour_still_records_an_error(tmp_path, monkeypatch
     assert row["verdict"] == "error"
     assert row["forced_answer"] is False
     assert "max retries" in row["answer"]
+
+
+def test_a_rate_limited_request_is_retried_not_recorded(tmp_path, monkeypatch):
+    """A 429 is a transport condition that resolves by waiting, not a result.
+
+    `provider.allow_fallbacks: false` (F3) deliberately turns an unhonourable
+    pin into an error rather than a silent re-route, which is right for
+    validity and leaves us owning the retry. Without one, the
+    deepseek-v4-flash sweep ran clean for 1,135 rows, was cut off by its
+    endpoint, and recorded 466 HTTP 429s as terminal `error` rows — 29% of the
+    sweep lost, and it "finished early" because a throttled request fails
+    instantly.
+    """
+    calls = {"n": 0}
+
+    class Throttled:
+        def run_sync(self, *a, usage=None, **k):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise RuntimeError(
+                    "ModelHTTPError: status_code: 429, model_name: deepseek/x"
+                )
+
+            class R:
+                output = "0.12"
+
+            if usage is not None:
+                usage.input_tokens, usage.output_tokens, usage.requests = 10, 5, 1
+            return R()
+
+    monkeypatch.setattr(agent.time, "sleep", lambda s: None)
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Throttled(),
+    )
+    assert calls["n"] == 3, "should have retried twice, then succeeded"
+    assert row["verdict"] == "correct"
+
+
+def test_a_persistent_rate_limit_still_terminates(tmp_path, monkeypatch):
+    """Bounded on purpose: backing off forever turns a quota exhaustion into a
+    hung sweep, which is worse than a recorded failure."""
+    calls = {"n": 0}
+
+    class AlwaysThrottled:
+        def run_sync(self, *a, usage=None, **k):
+            calls["n"] += 1
+            raise RuntimeError("ModelHTTPError: status_code: 429, model_name: x")
+
+    monkeypatch.setattr(agent.time, "sleep", lambda s: None)
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: AlwaysThrottled(),
+    )
+    assert calls["n"] == agent.RATE_LIMIT_RETRIES + 1
+    assert row["verdict"] == "error"
+    assert "429" in row["answer"]
+
+
+def test_a_non_429_transport_error_is_not_retried(tmp_path, monkeypatch):
+    """Retrying a 400 just spends the same money four more times."""
+    calls = {"n": 0}
+
+    class BadRequest:
+        def run_sync(self, *a, usage=None, **k):
+            calls["n"] += 1
+            raise RuntimeError("ModelHTTPError: status_code: 400, model_name: x")
+
+    monkeypatch.setattr(agent.time, "sleep", lambda s: None)
+    row = run_task(
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: BadRequest(),
+    )
+    assert calls["n"] == 1
+    assert row["verdict"] == "error"

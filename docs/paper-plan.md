@@ -264,6 +264,62 @@ substitutes** — which reframes the interaction rather than closing it, and is 
 result neither reading in Section 5.5 predicts. That question needs the contract
 and manual_prompt arms, so it needs the sweep.
 
+### Probe result: sol supplies the third point, pro does not
+
+**Both probes run 2026-09-01**, `schema_only`, 50 stratified tasks each,
+$2.40 and $2.11. On the 40 hard tasks all four models have scored:
+
+| model | hard | 95% CI | vs sol (McNemar) |
+|---|---:|---|---|
+| `glm-5.3-flash` | 6/40 = 15.0% | [7, 29] | 0 / 11, **p=0.0010** |
+| `deepseek-v4-flash` | 10/40 = 25.0% | [14, 40] | 0 / 7, **p=0.0156** |
+| `deepseek-v4-pro` | 11/40 = 27.5% | [16, 43] | 1 / 7, p=0.0703 |
+| **`gpt-5.6-sol`** | **17/40 = 42.5%** | [29, 58] | --- |
+
+Sol essentially dominates: it takes 7--11 tasks the others miss and gives up
+one. It is also the cheapest and fastest of the three ($0.042/task, 8.3
+turns/row against pro's $0.048 and 17.4).
+
+**This falsified an interim conclusion recorded in this plan**, that
+bare-schema accuracy was "capability-insensitive on this benchmark". The
+15--27% band was a property of the model tier sampled, not of the task. The
+lesson is narrow and worth keeping: three models that cluster are not a
+ceiling, and the reframing was written after three points and would have been
+wrong.
+
+### The decision, and the criterion pre-committed before results
+
+**Running the four-arm 401-task sweep on `gpt-5.6-sol` ($28, flex tier).** It
+supplies the capability point pro cannot, it is cross-family (killing "an
+open-weight quirk"), and it is the cheapest of the candidates.
+
+**`deepseek-v4-pro` is deferred, not cancelled.** It is the pre-registered
+primary, so the substitution has to be argued rather than assumed:
+
+> We pre-specified `deepseek-v4-pro-0813` as the primary comparison. A
+> capability probe (n=50, published) showed it does not differ from the flash
+> tier on the bare-schema arm --- 27.5% vs 25.0%, 3 discordant pairs, p=1.0 ---
+> so it would not supply the capability contrast the primary was chosen to
+> provide. We substituted `gpt-5.6-sol`, selected by the same pre-specified
+> criterion, and publish the probe that drove the substitution.
+
+What makes that legitimate rather than a researcher degree of freedom: **the
+probe measured the covariate, not the effect.** Model selection used
+bare-schema accuracy while blind to the `contract` vs `manual_prompt` contrast
+the paper is about. Selecting on a covariate measured independently of the
+treatment comparison does not bias the comparison.
+
+To keep it that way, the criterion for running pro after all is fixed **now**,
+before the sol sweep reports:
+
+1. Sol's sweep is compromised the way run B was --- a truncation, or a harness
+   failure rate above 5%.
+2. Sol's result is ambiguous in a way a fourth capability point at 27.5% would
+   actually resolve.
+
+Not "if we dislike the answer". If neither condition fires, pro stays unrun and
+the substitution paragraph above goes in the paper.
+
 ### Which arms
 
 **Three, not four: `schema_only`, `manual_prompt`, `contract`.** Drop

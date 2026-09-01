@@ -25,7 +25,7 @@ executable form.
 
 \begin{center}
 \small
-\begin{tabular}{@{}p{0.29\columnwidth}p{0.21\columnwidth}p{0.29\columnwidth}@{}}
+\begin{tabular}{@{}L{0.29\columnwidth}L{0.21\columnwidth}L{0.29\columnwidth}@{}}
 \toprule
  & \tabhead{Views / macros} & \tabhead{Declarative contract} \\
 \midrule
@@ -71,75 +71,66 @@ The agent's job collapses from \emph{derive the rule} to \emph{call the macro}.
 
 \subsection{Why the benchmark flatters pre-computation}
 
-DABStep's 450 questions come from 26 templates, and 294 of 332 hard tasks in
-our set are fee questions. Pre-built views are maximally effective when the
-question space is enumerable in advance, which is exactly this benchmark's
-construction. A macro contributes nothing to a question nobody wrote it for.
-
-The declarative layer measured here is the layer that must cover the
+DABStep's 450 questions come from 26 templates, and 294 of 332 hard tasks in our
+set are fee questions. Pre-built views are maximally effective when the question
+space is enumerable in advance, which is exactly this benchmark's construction.
+A macro contributes nothing to a question nobody wrote it for, and the
+declarative layer measured here is the layer that must cover the
 \emph{unanticipated} question. \textbf{56.6\% is therefore a measurement of a
 harder task, not a worse attempt at the same one.}
 
 We are careful not to convert that into a claim we cannot support. Maintaining
 one macro per metric per dialect is a real and growing burden, but we have no
 data on where it crosses over against the cost of authoring domain prose.
-\textbf{We do not claim the contract approach scales better.} We claim only
-that the two degrade differently: a missing macro degrades to nothing, while a
-contract degrades gracefully to a model reasoning from a description.
+\textbf{We do not claim the contract approach scales better} --- only that the
+two degrade differently: a missing macro degrades to nothing, while a contract
+degrades to a model reasoning from a description. The generous reading is also
+the correct one. These are complementary layers, not competitors: macros
+optimise the head of the question distribution, a contract covers the tail, and
+in a system with both, the contract is what tells the agent which macro exists
+and when to call it.
 
-The generous reading is also the correct one. These are complementary layers,
-not competitors --- macros optimise the head of the question distribution, a
-contract covers the tail, and in a system with both, the contract is what tells
-the agent which macro exists and when to call it.
+\subsection{Coupling, and reading a leaderboard number}
 
-\subsection{Coupling and generalisation}
-
-Two coupling costs are documented in the sources themselves, and both bear on
-how a single leaderboard number should be read.
-
-\textbf{Coupling to the serving model.} The author of the 100\% result is
-explicit that the artifact does not travel: \emph{``The recipe is portable
-[\ldots] The tuned artifact is coupled. The serving model is a cheap, swappable
-commodity right up until you swap it, at which point you're not changing a
-setting, you're re-running the loop.''}~\cite{motherduck-semantic} A layer
-refined against one model is re-tuned when the model changes. Our contract was
-authored once, frozen, and run unchanged against two model families.
-
-\textbf{Coupling to the question set.} Independent commentary on Guides warns
-against exactly this: \emph{``Do not hardcode answers to questions. A Guide
-that passes your known questions by hardcoding their specifics will fail the
-ones you have not seen, including a held-out test set''}, and urges
-practitioners to \emph{``measure whether the Guide generalizes to new
-questions, not whether it clears the benchmark you tuned it
+Two coupling costs are documented in the sources themselves. The author of the
+100\% result is explicit that the artifact does not travel: \emph{``The recipe
+is portable [\ldots] The tuned artifact is coupled. The serving model is a
+cheap, swappable commodity right up until you swap it, at which point you're not
+changing a setting, you're re-running the loop.''}~\cite{motherduck-semantic} A
+layer refined against one model is re-tuned when the model changes; our contract
+was authored once, frozen, and run unchanged against two model families.
+Independent commentary on Guides warns of the second: \emph{``Do not hardcode
+answers to questions [\ldots] will fail the ones you have not seen, including a
+held-out test set''}, urging practitioners to measure \emph{``whether the Guide
+generalizes to new questions, not whether it clears the benchmark you tuned it
 against''}~\cite{corrdyn-guides}.
 
-We make no claim that any particular published result is tuned in this way, and
-we have no evidence that it is. The point is structural, and one observation
-from our gold reconstruction supports it: across the 2{,}199 published DABStep
-submissions, organisations submitting once achieve a median hard-split accuracy
-of 19.6\%, while those submitting 21 or more times achieve 54.2\%. That gradient
-is equally consistent with genuine iterative improvement. But on a benchmark of
-26 templates with a public leaderboard, a single reported accuracy carries
-little information about generalisation unless the submission count and the
-artifact's provenance are stated alongside it.
-
-Ours are stated: one sweep per model, no tuning against the task set, and a
-digest-pinned artifact frozen 35 commits before the first run.
+We make no claim that any published result is tuned in this way, and have no
+evidence that it is. The point is structural, and our gold reconstruction
+supplies one datum: across the 2{,}199 published DABStep submissions,
+organisations submitting once achieve a median hard-split accuracy of 19.6\%,
+while those submitting 21 or more times achieve 54.2\%. That gradient is equally
+consistent with genuine iterative improvement. But on a small-template benchmark
+with a public leaderboard, a single accuracy carries little information about
+generalisation unless the submission count and the artifact's provenance are
+stated alongside it. Ours are: one sweep per model, no tuning against the task
+set, and a digest-pinned artifact frozen 35 commits before the first run.
 
 \subsection{What is distinctive here}
 
 \begin{center}
-\small
-\begin{tabular}{@{}p{0.29\columnwidth}p{0.21\columnwidth}p{0.29\columnwidth}@{}}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}L{0.365\columnwidth}L{0.20\columnwidth}L{0.36\columnwidth}@{}}
 \toprule
- & \tabhead{Prior reports} & \tabhead{This work} \\
+ & \tabhead{Prior} & \tabhead{This work} \\
 \midrule
-Comparison & with vs without & four arms \\
-Separates content from tooling & no & \textbf{yes}, via arm~D \\
-Statistical test & two accuracies & paired McNemar, all pairs \\
-Second model & no & \textbf{yes}, same direction \\
-Artifact frozen pre-hoc & undisclosed & \textbf{yes}, digest-pinned \\
-Transcripts released & repository & \textbf{3{,}208} \\
+Comparison             & with/without & four arms \\
+Content vs.\ tooling & bundled & \textbf{separated}, arm~D \\
+Statistical test       & 2 accuracies & \textbf{McNemar}, all pairs \\
+Second model           & no           & \textbf{yes}, same result \\
+Artifact frozen first  & undisclosed  & \textbf{yes}, digest-pinned \\
+Transcripts            & a repo link  & \textbf{3{,}208} released \\
 \bottomrule
 \end{tabular}
 \end{center}

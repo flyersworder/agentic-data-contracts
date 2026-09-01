@@ -1,37 +1,32 @@
 Retrieval-augmented ``context layers'' --- curated domain documentation an
-analytics agent fetches at query time --- are reported to produce large
-accuracy gains on text-to-SQL benchmarks. Published results compare a system
-with a context layer against one without, and from two accuracy numbers no
-mechanism can be recovered: the gain might come from the semantic content, from
-the retrieval scaffolding that delivers it, or from the pre-computed views and
+analytics agent fetches at query time --- are reported to produce large accuracy
+gains on text-to-SQL benchmarks. Published results compare a system with a
+context layer against one without, and from two accuracy numbers no mechanism
+can be recovered: the gain might come from the semantic content, from the
+retrieval scaffolding that delivers it, or from the pre-computed views and
 macros that usually accompany it.
 
 We report a controlled four-arm ablation on DABStep, run twice on two model
-families. Three arms vary what the agent knows while a fourth, \armH{}, is
-derived mechanically from the same frozen artifact with every field of prose
-emptied and the tool surface, retrieval instruction, table allow-list and
-operation rules held byte-for-byte fixed. \armH{} isolates the scaffolding from
-the semantics.
+families. A fourth arm, \armH{}, is derived mechanically from the same frozen
+artifact with every field of prose emptied and the tool surface, retrieval
+instruction, table allow-list and operation rules held byte-for-byte fixed,
+isolating the scaffolding from the semantics.
 
 Contract-delivered semantics raise hard-task accuracy from 13.9\% to 55.1\% on
 one model and from 22.6\% to 56.6\% on the other, beating the same knowledge
 pasted verbatim into the prompt in both cases ($p{=}2{\times}10^{-17}$ and
-$p{=}0.0067$, paired McNemar). The scaffolding contributes nothing measurable:
-\armH{} is statistically indistinguishable from a bare schema on both models
-($p{=}0.058$ and $p{=}0.61$; pooled $p{=}0.29$), and the two runs disagree on
-the sign. The effect is semantic content, not structure.
+$p{=}0.0067$, paired McNemar). \textbf{The scaffolding contributes nothing
+measurable}: \armH{} is statistically indistinguishable from a bare schema on
+both models ($p{=}0.058$ and $p{=}0.61$; pooled $p{=}0.29$), and the two runs
+disagree on the sign.
 
-A second result falls out of the same transcripts. The two ungoverned arms
+A second result falls out of the same transcripts. The ungoverned arms
 submitted 144 mutating SQL statements across 24 tasks; both governed arms
-submitted zero, on both models ($p{=}6{\times}10^{-8}$). Because a rejected
-call would still appear in the transcript, zero means the agents never
-attempted --- the declared operation rules deterred rather than intercepted.
-One ungoverned run escalated from temporary to persistent tables to work around
-a session boundary, narrating its reasoning as it went, and mutated the
-warehouse.
+submitted zero, on both models ($p{=}6{\times}10^{-8}$). Because a rejected call
+would still appear in the transcript, zero means the agents never attempted ---
+the declared rules deterred rather than intercepted.
 
 We also find that the advantage over a hand-written prompt shrinks as the base
-model strengthens ($+32.2$ vs $+13.7$ percentage points), report the negative
-result that the effect does not appear outside the domain the contract
-describes, and release the harness, the digest-pinned artifact, all 3{,}208
-transcripts and the raw results.
+model strengthens, report the negative result that the effect does not appear
+outside the domain the contract describes, and release the harness, the
+digest-pinned artifact, all 3{,}208 transcripts and the raw results.

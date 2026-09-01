@@ -10,8 +10,10 @@ make figures  # figures only
 make check    # fail on overfull boxes or unresolved refs
 ```
 
-Currently 13 pages with `article`. Requires only a basic TeX Live install —
-`multirow` and `balance` were dropped rather than added as dependencies.
+12 pages with `article`, references included — inside the PVLDB EA&B limit of
+12 excluding references, with headroom for the pro-sweep results. Requires only
+a basic TeX Live install; `multirow` and `balance` were dropped rather than
+added as dependencies.
 
 ## Switching to the PVLDB template
 

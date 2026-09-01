@@ -4,7 +4,7 @@
 The contract under test declares forbidden operations as well as semantics, and
 the tool layer enforces them. Because the same runs that measure accuracy also
 record every statement the agent submitted and a post-run integrity check on
-the database, a second result falls out of the same 3{,}208 transcripts at no
+the database, a second result falls out of the same 4{,}812 transcripts at no
 additional cost.
 
 \subsection{144 mutation attempts, all in ungoverned arms}
@@ -23,19 +23,37 @@ statement position in the query argument.
 \midrule
 A (glm)      & 27 (8 tasks)  & 92 (13 tasks) & \textbf{0} & \textbf{0} \\
 B (deepseek) & 24 (2 tasks)  & 1 (1 task)    & \textbf{0} & \textbf{0} \\
+C (sol)      & \textbf{0}    & \textbf{0}    & \textbf{0} & \textbf{0} \\
 \midrule
 \textbf{Total} & \textbf{51 (10)} & \textbf{93 (14)} & \textbf{0} & \textbf{0} \\
 \bottomrule
 \end{tabular}
 \caption{Mutating statements submitted, by arm. Fisher exact on traces
 containing at least one: $p{=}4{\times}10^{-7}$ for run~A alone,
-$p{=}6{\times}10^{-8}$ pooled.}
+$p{=}6{\times}10^{-8}$ pooled over runs~A and~B. Run~C contributes nothing in
+either direction: no arm attempted a write.}
 \label{tab:governance}
 \end{table*}
 
 \textbf{144 mutating statements across 24 tasks in the ungoverned arms; zero in
-either governed arm, on either model.} Run~B alone gives $p{=}0.13$ --- it is
-underpowered here as elsewhere --- so the result rests on run~A and the pooling.
+either governed arm, on either model that produced any.} Run~B alone gives
+$p{=}0.13$ --- it is underpowered here as elsewhere --- so the result rests on
+run~A and the pooling.
+
+\paragraph{Run~C produces no events at all, and that is a limitation rather
+than a confirmation.} \texttt{gpt-5.6-sol}, handed a raw SQL tool and no rules,
+never once attempted a write. The hazard this result is about did not occur, so
+run~C can neither support nor contradict the claim: there was nothing to deter.
+
+The transcripts suggest why, and it is not that the stronger model is better
+behaved in the abstract. Holding an intermediate result is a need every model
+has; what differs is the idiom. Run~C uses common table expressions on 59\% and
+55\% of its ungoverned traces, against 32\%/30\% on run~A and 26\%/27\% on
+run~B, and attempts \texttt{CREATE TEMP} zero times against run~A's 22 and
+run~B's 3. \textbf{Capability changed which idiom the model reaches for, not
+whether it needs one.} We cannot separate that from a trained disposition
+against writing to a warehouse; the idiom substitution is evidence for the
+former and not proof against the latter.
 
 \subsection{Deterrence, not interception}
 
@@ -54,7 +72,7 @@ transcripts support: with the rules present, the attempts stop.
 
 \subsection{One escalation reached the database}
 
-The post-run integrity check flagged exactly one row in 3{,}208: task~68,
+The post-run integrity check flagged exactly one row in 4{,}812: task~68,
 \armS{}, run~B. It is 1 of the 24 attempting tasks because DuckDB \texttt{TEMP}
 tables die with the connection; only this run escalated to persistent tables.
 
@@ -82,6 +100,23 @@ which is the argument for a declarative rule that does not need to. The run used
 a disposable per-worker copy, so nothing real was harmed, and the integrity
 check reported clean, so the detection is trustworthy.
 
+\paragraph{The harness converts a harmless idiom into a harmful one.} The
+statements are not malformed SQL that a validator would catch; the ungoverned
+tool opens a fresh read-write connection per call and passes them through, so
+\texttt{CREATE TABLE} succeeds silently. Because \texttt{TEMP} tables are
+connection-scoped, a temp table never survives to the next tool call --- the
+model receives no signal that it did anything wrong, only that its own table
+vanished, and the natural repair is to stop using \texttt{TEMP}. The escalation
+is therefore an interaction between the model's idiom and the tool's connection
+lifecycle, not model misbehaviour alone. A session-scoped connection would
+likely have prevented it. This does not weaken the contrast --- the governed
+arms faced the identical harness and emitted nothing --- but \textbf{the size
+of the hazard is partly a property of this harness}, and a different tool
+design would produce a different attempt count.
+
 \textbf{One corruption event is an anecdote, not a rate.} The defensible number
-is the 144 attempts, and the defensible claim is about attempt frequency under
-declared rules, not about how often attempts become damage.
+is the 144 attempts, and the defensible claim is narrower than it first
+appears: on models that reach for the mutating idiom, declared rules stopped
+them from trying. Whether declared rules deter a model that was not going to
+try anyway is untested, and as models stop reaching for that idiom the hazard
+this experiment measures shrinks on its own.

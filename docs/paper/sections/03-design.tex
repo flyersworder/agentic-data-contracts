@@ -96,10 +96,14 @@ the context window, not the contract. Symmetric limits are not a detail.
 
 \subsection{Two models}
 
-We ran the full design twice, on \texttt{glm-5.3-flash} (run~A) and
-\texttt{deepseek-v4-flash} (run~B), both pinned to a single provider endpoint
-at fp8 quantization with fallbacks disabled, so that quantization, price and
-throughput are fixed within a run. The two runs are separate experiments rather
-than replicates: they differ in model, provider, and one library fix
-(Section~\ref{sec:threats}). Each run's internal contrasts are sound; cross-run
+We ran the full design three times: on \texttt{glm-5.3-flash} (run~A),
+\texttt{deepseek-v4-flash} (run~B) and \texttt{gpt-5.6-sol} (run~C), each
+pinned to a single provider endpoint with fallbacks disabled --- the first two
+at fp8 quantization --- so that quantization, price and throughput are fixed
+within a run. The three runs are separate experiments rather than replicates:
+they differ in model, provider, and one library fix
+(Section~\ref{sec:threats}). Reasoning effort is set to \texttt{medium}
+throughout, though that is a nominal setting rather than an equated one, and
+temperature is held at 0 on runs~A and~B but not on run~C, whose model does not
+accept the parameter. Each run's internal contrasts are sound; cross-run
 differences are suggestive only.

@@ -84,3 +84,61 @@ the model reimplements in SQL each time --- addresses the observed failure
 directly. Section~\ref{sec:related} returns to this, because it is exactly the
 boundary between what we measured and what pre-computed semantic layers
 provide.
+
+\subsection{The contract's clauses reach the query}
+\label{sec:clauses}
+
+The claim that delivery matters as much as possession has so far been inferred
+from accuracy. It can be observed directly, by reading the SQL each agent
+submitted rather than the answer it produced.
+
+We defined one detector per load-bearing clause of the contract's fee
+semantics --- the \texttt{NULL}-wildcard disjunct, the empty-list wildcard, the
+capture-delay band mapping, a per-merchant monthly aggregate, the natural-month
+reconstruction, and fraud measured on euro volume --- and restricted the
+comparison to the 97 task families that require all six, so every row compared
+carries the same requirement. The detectors are deliberately permissive: the
+question is whether the agent expressed the idea, not whether it copied the
+contract's phrasing.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Wrote all six clauses & Run A & Run B & Run C \\
+\midrule
+\armS{} & 7\% & 4\% & 8\% \\
+\armH{} & 14\% & 4\% & 8\% \\
+\armM{} & 3\% & 9\% & 4\% \\
+\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{98\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$ and
+$2{\times}10^{-47}$ (Fisher exact). \armM{} holds the same knowledge, as prose,
+in its system prompt.
+
+\textbf{Note what does not move.} \armM{} writes no more of the contract's
+clauses on a frontier model than on a weak one (3\% to 4\%), while \armC{} goes
+to near-total. Capability does not, on its own, make a model extract structure
+from prose; it makes a model much better at \emph{using} structure it is
+handed. That asymmetry is the same one the derivation gap shows
+(Section~\ref{sec:derivation}), measured on behaviour instead of outcomes.
+
+\textbf{What this does not measure.} Clause presence does not predict success.
+Within every arm on every model, attempts that got the task right and attempts
+that got it wrong write the same clauses (every Fisher $p{\ge}0.14$). \armH{}
+makes the point concretely: on run~A it writes more clauses than \armM{} and
+still scores at the bare-schema floor. The measure captures whether the
+contract's vocabulary reaches the query, not whether the query is any good.
+
+We record one confound because its uncontrolled form is seductive. Pooled
+across families, \armC{} attempts that wrote the \texttt{NULL}-wildcard clause
+were correct 90\% of the time against 23\% for those that did not --- a
+67-point effect, with similar gaps for four other clauses. It is an artifact of
+task mix: families differ in which clauses they need, so ``wrote the clause''
+partly encodes ``drew an easier family''. Restricting to a single
+required-clause set, as above, removes the confound and the entire within-arm
+effect disappears.

@@ -20,6 +20,8 @@ A & fee (294)     & 13.9\% & 18.7\% & 24.5\% & \textbf{59.2\%} \\
 A & non-fee (38)  & 5 & 9 & 4 & 9 \\
 B & fee (196)     & 23.0\% & 22.4\% & 44.9\% & \textbf{61.2\%} \\
 B & non-fee (30)  & 6 & 7 & 9 & 8 \\
+C & fee (294)     & 37.1\% & 53.4\% & 53.4\% & \textbf{83.7\%} \\
+C & non-fee (38)  & \textbf{14} & 13 & 10 & 11 \\
 \bottomrule
 \end{tabular}
 \caption{Hard-task accuracy split by whether the question concerns the domain
@@ -31,18 +33,19 @@ the contract describes. Non-fee cells are counts, not rates.}
 honest statement of the result is therefore: \textbf{a contract carrying a
 domain's semantics produces a large gain on questions in that domain.}
 
-\textbf{On the non-fee bucket there is no contract advantage on either model}
---- 9 against 4 in run~A, 8 against 9 in run~B, against \armM{}. At 38 and 30
-tasks these are far too small to be a negative result, and equally unable to
-support a general claim. Both are consistent with the effect being
-domain-specific by construction: outside the domain the contract describes, it
-is inert. That is the expected behaviour of a domain contract, and it is why
-this benchmark cannot answer the general question.
+\textbf{On the non-fee bucket there is no contract advantage on any model} ---
+against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C. At 38, 30
+and 38 tasks these are far too small to be a negative result, and equally
+unable to support a general claim. On run~C the ordering inverts outright:
+\armS{} leads that slice at 14 of 38 while \armC{} takes 11 --- the only slice
+anywhere in the three runs where the bare baseline beats the contract. All
+three are consistent with the effect being domain-specific by construction:
+outside the domain the contract describes it is inert, and a frontier model
+does not rescue it. That is the expected behaviour of a domain contract, and it
+is why this benchmark cannot answer the general question.
 
 A 30-task sub-bucket (\emph{most expensive MCC for a transaction of $N$ euros})
-scores 1--2 out of 30 for \emph{every} arm on \emph{both} models. A template no
-arm solves is a property of the benchmark, and it bears on
-Section~\ref{sec:interaction}: part of what looks like a ceiling may be this.
+scores 1--2 out of 30 for \emph{every} arm on \emph{every} model.
 
 \subsection{One benchmark, 26 templates}
 
@@ -52,11 +55,26 @@ agents in general. We report it plainly rather than hedging around it.
 
 \subsection{$k{=}1$}
 
-Neither run repeats. One task was observed flipping verdict between two
-identical runs during development, so per-task verdicts are not stable. With
-86--155 discordant pairs the headline comparisons are not at risk, but
-\textbf{nothing in this paper estimates within-condition variance}: our two
-runs are different models, not replicates. This is the largest remaining gap.
+No run repeats. One task was observed flipping verdict between two identical
+runs during development, so per-task verdicts are not stable. With 86--164
+discordant pairs the headline comparisons are not at risk, but \textbf{nothing
+in this paper estimates within-condition variance}: our three runs are
+different models, not replicates. This is the largest remaining gap, and run~C
+needs it most, because \texttt{gpt-5.6-sol} does not accept a temperature
+parameter and therefore ran at the provider's default rather than at 0 like the
+other two.
+
+\subsection{One frontier point, and a trend that already broke once}
+
+Every capability claim in this paper rests on a single strong model. We have
+direct evidence for how little that supports: with two models the contract's
+margin over a hand-written prompt fell from $+32.2$ to $+13.7$, we reported the
+shrinking margin as a finding, and the third model returned $+27.1$. The
+scaffolding null failed the same way. \textbf{Readers should apply the same
+discount to the derivation-gap result} (Section~\ref{sec:derivation}), which is
+a three-point curve with one frontier point, however sharp the collapse from
+39.2 to 5.1 looks. Run~C also differs from the others in provider and model
+family, so any run-C contrast confounds capability with both.
 
 \subsection{Reconstructed golds}
 
@@ -82,7 +100,7 @@ rows. The sweep exited cleanly and finished ahead of schedule, and nothing
 looked wrong until the results were read. Benchmark harnesses that pin
 endpoints need a rate-of-progress check, not just a liveness check.
 
-\subsection{The two runs are not perfectly comparable}
+\subsection{The runs are not perfectly comparable}
 
 Run~A's governed arms carried a validator defect: a check intended to reject
 \texttt{SELECT *} also rejected \texttt{COUNT(*)}, because the latter parses
@@ -121,4 +139,6 @@ produced one additional correct answer out of 59 --- nearly worthless for
 accuracy --- but it eliminated unscoreable rows, and those rows were 41 \armS{},
 18 \armM{} and \textbf{zero} in either governed arm. Dropping them would have
 inflated the two baselines by silently discarding their hardest runs. Run~B
-repeats the pattern: 55, 42, 15 and zero.
+repeats the pattern: 55, 42, 15 and zero. Run~C forces 8 answers in \armH{} and
+none anywhere else --- \armC{} is the only arm that never exhausted its budget
+on any of the three runs.

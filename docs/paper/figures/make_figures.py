@@ -40,6 +40,7 @@ RESULTS = HERE.parents[2] / "experiments" / "dabstep-contract-eval" / "results"
 RUNS = {
     "glm-5.3-flash": RESULTS / "glm-full.jsonl",
     "deepseek-v4-flash": RESULTS / "dsflash-full.jsonl",
+    "gpt-5.6-sol": RESULTS / "sol-full.jsonl",
 }
 ARMS = ("schema_only", "manual_prompt", "contract_hollow", "contract")
 
@@ -57,8 +58,8 @@ LABEL = {
     "contract_hollow": "contract_hollow",
     "schema_only": "schema_only",
 }
-MARKER = {"glm-5.3-flash": "o", "deepseek-v4-flash": "s"}
-LINESTYLE = {"glm-5.3-flash": "-", "deepseek-v4-flash": "--"}
+MARKER = {"glm-5.3-flash": "o", "deepseek-v4-flash": "s", "gpt-5.6-sol": "^"}
+LINESTYLE = {"glm-5.3-flash": "-", "deepseek-v4-flash": "--", "gpt-5.6-sol": ":"}
 
 INK = "#0b0b0b"
 INK_MUTED = "#52514e"
@@ -75,6 +76,10 @@ EXPECTED = {
     ("deepseek-v4-flash", "manual_prompt"): (97, 226),
     ("deepseek-v4-flash", "contract_hollow"): (51, 226),
     ("deepseek-v4-flash", "contract"): (128, 226),
+    ("gpt-5.6-sol", "schema_only"): (123, 332),
+    ("gpt-5.6-sol", "manual_prompt"): (167, 332),
+    ("gpt-5.6-sol", "contract_hollow"): (170, 332),
+    ("gpt-5.6-sol", "contract"): (257, 332),
 }
 
 

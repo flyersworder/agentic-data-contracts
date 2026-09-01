@@ -6,31 +6,46 @@ once per domain and often already exists, retrieval scaffolding is engineering
 paid once, and pre-computed macros are paid per metric forever.
 
 Holding the tool surface, the retrieval instruction, the table allow-list and
-the operation rules byte-for-byte fixed and emptying only the prose, the
-treatment arm falls to the bare-schema baseline on both models. The scaffolding
-term is not distinguishable from zero, and the two runs disagree on its sign.
-\textbf{The content does the work} --- and delivery matters as much as
-possession, since the same governing rule was present in the 24{,}177-character
-prompt arm and only the contract arm applied it. The same runs show declared
-operation rules suppressing mutation attempts entirely, by deterrence rather
-than interception.
+the operation rules byte-for-byte fixed and emptying only the prose,
+\textbf{the content step dominates the scaffolding step on every model} --- by
+$1.8{\times}$ where scaffolding matters most and unboundedly where it does not.
+Delivery matters as much as possession: the same governing rule was present in
+the 24{,}177-character prompt arm and only the contract arm applied it, and the
+submitted SQL shows it, with the contract arm writing all six load-bearing
+clauses up to 98\% of the time against the prompt arm's 4\%.
+
+Because the contract's declared expressions compile to a layer that reproduces
+gold exactly, each arm's accuracy can be read as efficiency against a proven
+ceiling. Read that way the contract arm recovers 60.8\%, 62.7\% and 94.9\% of
+what it was handed: \textbf{the cost of requiring an agent to derive, rather
+than handing it a pre-computed macro, is not structural but transient}, and
+already small at the frontier.
+
+We also report two corrections. On two models the scaffolding step was
+indistinguishable from zero and the contract's margin over a prompt appeared to
+shrink with capability; we stated both, and the third model overturned both.
+\textbf{A null across two adjacent models is weak evidence of absence}, which
+is the methodological result of this paper and the one we would most want a
+reader to carry away.
 
 Three limits bound all of this. The gain appears only inside the domain the
-contract describes. The benchmark is a single one with 26 templates. And neither
-run repeats, so nothing here estimates within-condition variance.
+contract describes. The benchmark is a single one with 26 templates. And no run
+repeats, so nothing here estimates within-condition variance.
 
 \paragraph{Future work.} Repeat runs, to put a variance estimate under every
-number here. A stronger model, to separate the two readings of the capability
-interaction in Section~\ref{sec:interaction} --- the pre-registered comparison
-for this study names one, and reporting it is a debt this paper owes. And an
-executable metric layer, built \emph{after} this measurement rather than before
-it, so that the declarative and executable contributions can be told apart the
-way content and scaffolding are told apart here.
+number here --- the largest gap, and largest for the frontier run, whose
+temperature could not be pinned. A second frontier model, since every
+capability claim now rests on one and a trend has already broken once under
+exactly that condition. And an executable metric layer, built \emph{after} this
+measurement rather than before it, so that the declarative and executable
+contributions can be told apart the way content and scaffolding are told apart
+here --- a direction the derivation-gap result makes more interesting, since it
+bounds how much such a layer could still buy.
 
 \section*{Artifact Availability}
 
 The harness, the frozen contract and its mechanically derived hollow variant,
-all 3{,}208 transcripts including model reasoning, and the raw result rows are
+all 4{,}812 transcripts including model reasoning, and the raw result rows are
 available at
 \url{https://github.com/flyersworder/agentic-data-contracts}. Every row records
 the commit, contract digest, gold-set hash, scorer identity, provider endpoint,

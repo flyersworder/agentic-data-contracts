@@ -1,4 +1,5 @@
 \section{Introduction}
+\label{sec:intro}
 
 An analytics agent pointed at a warehouse it does not understand fails in a
 characteristic way. It reads the schema, writes plausible SQL, and returns a
@@ -55,26 +56,43 @@ does. Everything the deflationary reading attributes the gain to is present in
 
 Four findings follow, and one non-finding.
 
-\textbf{The content is the whole effect, and the scaffolding contributes
-nothing measurable} (Section~\ref{sec:ablation}). \armH{} lands on the
-bare-schema baseline on both models. We report that as the null result it is.
+\textbf{The content dominates, and the scaffolding is a real but secondary
+effect} (Section~\ref{sec:ablation}). \armH{} lands on the bare-schema baseline
+on two models and $+14.2$ points above it on the third. Every model puts the
+content step well above the scaffolding step, which is what the fourth arm was
+built to test; but ``the scaffolding contributes nothing'' --- the claim two
+models supported, and which an earlier version of this paper made --- is false.
+We report the correction, because a null with a pooled $p{=}0.29$ that a third
+model overturns at $p{=}4{\times}10^{-7}$ is a caution about how far two models
+generalise.
 
 \textbf{Delivery matters as much as possession}
 (Section~\ref{sec:mechanism}). Both the contract arm and the prompt arm are
 given the governing rule; only the contract arm applies it. The difference is a
 2{,}475-character prompt with a targeted lookup against a 24{,}177-character
-wall of text.
+wall of text. Reading the SQL the agents actually submitted makes this
+behavioural rather than inferred: on tasks needing all six of the contract's
+load-bearing clauses, the contract arm writes every one of them 39\%, 65\% and
+98\% of the time against the prompt arm's 3\%, 9\% and 4\%.
+
+\textbf{The derivation gap collapses with capability}
+(Section~\ref{sec:derivation}). The contract compiles: transcribing its
+declared SQL expressions into two views reproduces gold on 176 of 176 covered
+tasks, so on those tasks the information is provably sufficient and any
+shortfall is a failure to derive. That shortfall is 39.2, 37.3 and
+\textbf{5.1} points across the three models. This is the finding with the most
+consequence for the economics above, and we recorded it as a prediction in the
+public artifact repository before the third run executed.
 
 \textbf{Governance is measurable and nearly free}
-(Section~\ref{sec:governance}). Ungoverned arms submitted 144 mutating
-statements across 24 tasks; governed arms submitted none, and never attempted.
+(Section~\ref{sec:governance}), on models that need governing. Ungoverned arms
+submitted 144 mutating statements across 24 tasks; governed arms submitted
+none, and never attempted. On the strongest model no arm attempted a write at
+all, governed or not --- the hazard disappeared before the mechanism could be
+tested on it.
 
-\textbf{The advantage shrinks as models strengthen}
-(Section~\ref{sec:interaction}), from $+32.2$ to $+13.7$ points over a
-hand-written prompt. We report both readings this admits and state that two
-models cannot separate them.
-
-The non-finding: on the 38 and 30 hard tasks that fall outside the domain the
-contract describes, it holds no advantage over a hand-written prompt. The gain
-is domain-specific by construction --- which is what a domain contract should
-do, and also the sharpest limit on what one benchmark can show.
+The non-finding: on the 38, 30 and 38 hard tasks that fall outside the domain
+the contract describes, it holds no advantage over a hand-written prompt, and
+on the strongest model the bare-schema baseline leads that slice outright. The
+gain is domain-specific by construction --- which is what a domain contract
+should do, and also the sharpest limit on what one benchmark can show.

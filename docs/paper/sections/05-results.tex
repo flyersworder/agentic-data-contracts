@@ -53,48 +53,57 @@ arm is affected identically.
 \armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
 \armS{} & 33.0\% & 22.6\% & 77.4\% & \$1.79 \\
 \armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run C --- \texttt{gpt-5.6-sol}, 401 tasks}}\\
+\armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
+\armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
+\armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
+\armS{} & 43.9\% & 37.0\% & 76.8\% & \$14.52 \\
 \bottomrule
 \end{tabular}
-\caption{Accuracy and cost. Hard splits are $n{=}332$ (run~A) and $n{=}226$
-(run~B); easy are 69 and 53. \armC{} is both the most accurate and the
-cheapest arm on both models.}
+\caption{Accuracy and cost. Hard splits are $n{=}332$, 226 and 332; easy are
+69, 53 and 69. \armC{} is the most accurate arm on all three models, and the
+cheapest on the two weaker ones.}
 \label{tab:headline}
 \end{table*}
 
 \begin{table*}[t]
 \centering
 \small
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-\tabhead{Comparison} & \tabhead{Run A} & \tabhead{Run B} \\
+\tabhead{Comparison} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} \\
 \midrule
-\armS{} vs \armC{}     & $3{\times}10^{-31}$ \,\, 14/\textbf{155} & $2{\times}10^{-15}$ \,\, 14/\textbf{93} \\
-\armM{} vs \armC{}     & $2{\times}10^{-17}$ \,\, 29/\textbf{134} & \textbf{0.0067} \,\, 30/\textbf{56} \\
-\armH{} vs \armC{}     & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} \\
-\armS{} vs \armM{}     & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 \\
-\armM{} vs \armH{}     & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 \\
-\textbf{\armS{} vs \armH{}} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 \\
+\armS{} vs \armC{}     & $3{\times}10^{-31}$ \,\, 14/\textbf{155} & $2{\times}10^{-15}$ \,\, 14/\textbf{93} & $5{\times}10^{-32}$ \,\, 12/\textbf{152} \\
+\armM{} vs \armC{}     & $2{\times}10^{-17}$ \,\, 29/\textbf{134} & \textbf{0.0067} \,\, 30/\textbf{56} & $2{\times}10^{-17}$ \,\, 12/\textbf{96} \\
+\armH{} vs \armC{}     & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} & $2{\times}10^{-17}$ \,\, 18/\textbf{111} \\
+\armS{} vs \armM{}     & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 & $2{\times}10^{-8}$ \,\, 22/78 \\
+\armM{} vs \armH{}     & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 & 0.44 \,\, 58/49 \\
+\textbf{\armS{} vs \armH{}} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 & $\mathbf{4{\times}10^{-7}}$ \,\, 20/\textbf{67} \\
 \bottomrule
 \end{tabular}
 \caption{Every pairwise paired McNemar: $p$-value, then discordant pairs won by
-the left arm / by the right arm. The last row carries the ablation.}
+the left arm / by the right arm. The last row carries the ablation, and the
+three runs do not agree on it.}
 \label{tab:mcnemar}
 \end{table*}
 
-\armC{} wins every comparison on both models. It is also the cheapest arm on
-both --- there is no accuracy/cost tradeoff to report here.
+\armC{} wins every comparison on all three models. On the two weaker models it
+is also the cheapest arm, so there is no accuracy/cost tradeoff to report; on
+run~C that coincidence ends (Section~\ref{sec:efficiency}).
 
-\subsection{The ablation: content, not scaffolding}
+\subsection{The ablation: content dominates scaffolding, but scaffolding is
+not zero}
 \label{sec:ablation}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig-ablation.pdf}
-\caption{The two steps of the ablation, on both models. Adding nine governed
-tools, the retrieval instruction, the table allow-list and the operation rules
---- with the prose emptied --- moves hard accuracy by $+0.0$ to $+5.4$ points.
-Restoring the prose moves it by $+34.1$ to $+35.8$. Bars are Wilson 95\%
-intervals; the first step's intervals overlap on both models.}
+\caption{The two steps of the ablation, on all three models. Adding nine
+governed tools, the retrieval instruction, the table allow-list and the
+operation rules --- with the prose emptied --- moves hard accuracy by $+0.0$,
+$+5.4$ and $+14.2$ points. Restoring the prose moves it by a further $+34.0$,
+$+35.8$ and $+26.2$. Bars are Wilson 95\% intervals.}
 \label{fig:ablation}
 \end{figure}
 
@@ -104,19 +113,20 @@ On hard tasks the gain splits into a scaffolding step and a content step
 \begin{center}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
- & \tabhead{Run A} & \tabhead{Run B} \\
+ & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} \\
 \midrule
-\armS{}                     & 13.9\% & 22.6\% \\
-${+}$ tools, procedure (\armH{}) & 19.3\% & 22.6\% \\
-${+}$ prose (\armC{})            & \textbf{55.1\%} & \textbf{56.6\%} \\
+\armS{}                & 13.9\% & 22.6\% & 37.0\% \\
+${+}$ tools (\armH{})  & 19.3\% & 22.6\% & 51.2\% \\
+${+}$ prose (\armC{})  & \textbf{55.1\%} & \textbf{56.6\%} & \textbf{77.4\%} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{The content step is the whole effect. The scaffolding step is not
-distinguishable from zero.}
+\textbf{The content step is the larger of the two on every model. The
+scaffolding step is model-dependent: absent on one model, substantial on
+another.}
 
 \begin{center}
 \footnotesize
@@ -127,42 +137,56 @@ distinguishable from zero.}
 \midrule
 Run A    & $+5.4$ pp & 55 (20/35) & 0.058 \\
 Run B    & $+0.0$ pp & 34 (19/15) & 0.61 \\
-Pooled   & ---       & 89 (39/50) & 0.29 \\
+Run C    & $+14.2$ pp & 87 (20/67) & $4{\times}10^{-7}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The two runs do not agree on the sign. Nine governed tools, the retrieval
-instruction, the table allow-list and the operation rules --- with no semantics
-behind them --- buy nothing measurable over a bare schema.
+We report this as a correction. On runs~A and~B alone the scaffolding step did
+not survive a significance test, and an earlier version of this paper claimed
+that the content was the whole effect and the scaffolding contributed nothing
+measurable. Run~C refutes that claim. Two of three models favour the
+scaffolding and one is flat; none favours the bare schema. On run~A the hard
+slice alone is already $p{=}0.015$ (16/34) --- the 0.058 above is the
+all-401 test, which the easy tasks dilute.
 
-This is a null result and we hold it to the standard of one: it is compatible
-with a small positive effect our sample cannot resolve. What it excludes is an
-effect large enough to account for a meaningful share of the 35-point content
-step.
+What the fourth arm was built to test survives intact, and it is the claim the
+paper needs. A reader's first objection to \armC{} is that the contract might
+be helping through some mechanism other than its knowledge --- a narrowed
+table surface, an imposed procedure, or simply making the agent slow down.
+That deflationary reading predicts \armH{} captures most of the gain. It does
+not, on any model: the content step is $1.8{\times}$ the scaffolding step on
+the model where scaffolding matters most, and unboundedly larger on the other
+two. \textbf{Scaffolding is a real but secondary effect that the content
+dominates everywhere.}
 
-The direction of the claim is worth stating plainly. A reader's first
-objection to \armC{} is that the contract might be helping through some
-mechanism other than its knowledge. \armH{} holds every such mechanism fixed
-and lands on the bare-schema baseline. The null strengthens the paper rather
-than qualifying it.
+The correction also carries a methodological lesson we think is worth more
+than the claim it replaced. A null result on two models, with a pooled
+$p{=}0.29$ and disagreeing signs, looked like solid evidence of absence. It
+was evidence of a small sample spanning too narrow a capability range.
 
 \paragraph{Empty tools are not free.} In run~A, \armH{} is the most expensive
 arm per correct answer and burns the most reasoning of any arm (543{,}565
 tokens against \armC{}'s 154{,}247). In run~B it makes the most tool calls of
-any arm (6{,}375 against 4{,}155) for the fewest correct answers. The
-transcripts show why: the agent calls \texttt{lookup\_domain}, is told nothing
-is available, and searches harder.
+any arm (6{,}375 against 4{,}155) for the fewest correct answers. In run~C it
+is the most expensive arm outright (\$22.09) and the only arm besides
+\armS{} to exhaust its output budget. The transcripts show why: the agent
+calls \texttt{lookup\_domain}, is told nothing is available, and searches
+harder. On run~C it makes that call on 401 of 401 tasks, 804 times in total
+--- the model that gains most from the scaffolding is also the one that
+exercises it hardest.
 
 \subsection{Efficiency}
+\label{sec:efficiency}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig-cost.pdf}
-\caption{Accuracy against spend, all four arms on both models. \armC{} is the
-cheapest arm \emph{and} the most accurate on each model, so there is no
-tradeoff to report. Cost differences between the two models reflect different
-token prices and are not comparable across runs; the within-run ordering is.}
+\caption{Accuracy against spend, all four arms on all three models. \armC{} is
+the cheapest arm \emph{and} the most accurate on the two weaker models; on
+run~C it is the most accurate but \armM{} is cheaper. Cost differences between
+models reflect different token prices and are not comparable across runs; the
+within-run ordering is.}
 \label{fig:cost}
 \end{figure}
 
@@ -184,14 +208,32 @@ Turns / task      & 13.7 & 12.8 & 11.4 & \textbf{8.2} \\
 Tool calls        & 5{,}489 & 4{,}770 & 6{,}375 & \textbf{4{,}155} \\
 Reasoning / task  & 10{,}941 & 9{,}243 & 10{,}765 & \textbf{4{,}844} \\
 Forced answers    & 55 & 42 & 15 & \textbf{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Run C}}\\
+Turns / task      & 7.9 & 7.6 & 10.4 & \textbf{6.5} \\
+Tool calls        & 5{,}099 & \textbf{4{,}354} & 7{,}997 & 5{,}245 \\
+Reasoning tokens  & 357k & 277k & 311k & \textbf{141k} \\
+Cost / correct    & \$0.082 & \textbf{\$0.062} & \$0.099 & \$0.067 \\
+Forced answers    & 0 & 0 & 8 & \textbf{0} \\
 \bottomrule
 \end{tabular}
-\caption{The governed arm wins while doing less work.}
+\caption{The governed arm wins while doing less work on every model. It is not
+the cheapest arm on run~C.}
 \label{tab:efficiency}
 \end{table*}
 
-\armC{} is not thinking harder --- it has less to search for. It is also the
-only arm that never exhausted its output budget on either model.
+\armC{} is not thinking harder --- it has less to search for, and that holds on
+all three models: it uses the fewest turns and by far the least reasoning
+everywhere. It is also the only arm that never exhausted its output budget on
+any run.
+
+\textbf{The cost claim does not survive run~C, and we withdraw it as a general
+statement.} On the two weaker models \armC{} is the cheapest arm outright. On
+\texttt{gpt-5.6-sol} it costs \$21.32 against \armM{}'s \$14.42: the contract's
+own text is a real input-token bill, and a model whose output tokens are
+expensive relative to its input tokens amortises that bill differently. Per
+correct answer the ordering nearly closes (\$0.067 against \$0.062) but \armM{}
+still edges it. What generalises is the work claim, not the price claim.
 
 \subsection{Capability interaction}
 \label{sec:interaction}
@@ -200,15 +242,14 @@ only arm that never exhausted its output budget on either model.
 \centering
 \includegraphics[width=\columnwidth]{figures/fig-interaction.pdf}
 \caption{Hard accuracy against base-model capability, where capability is the
-bare-schema arm's own accuracy. \armM{} climbs 20.0 points between the two
-models while \armC{} moves 1.5, so the lines converge. \textbf{Two points per
-line cannot distinguish convergence from a shared ceiling}
-(Section~\ref{sec:interaction}); a third model is required and is not yet run.}
+bare-schema arm's own accuracy. The margin over \armM{} is $+32.2$, $+13.7$ and
+$+27.1$: not monotone. \textbf{The apparent convergence between the first two
+models did not survive the third} (Section~\ref{sec:interaction}).}
 \label{fig:interaction}
 \end{figure}
 
-The two runs bracket an interaction, ordered by what each model achieves from a
-bare schema (Figure~\ref{fig:interaction}):
+Ordered by what each model achieves from a bare schema
+(Figure~\ref{fig:interaction}):
 
 \begin{table*}[t]
 \centering
@@ -219,34 +260,131 @@ Hard tasks & \armS{} & \armM{} & \armC{} & \armC{}${-}$\armM{} \\
 \midrule
 \texttt{glm-5.3-flash}     & 13.9\% & 22.9\% & 55.1\% & $+32.2$ \\
 \texttt{deepseek-v4-flash} & 22.6\% & 42.9\% & 56.6\% & $+13.7$ \\
+\texttt{gpt-5.6-sol}       & 37.0\% & 50.3\% & 77.4\% & $+27.1$ \\
 \bottomrule
 \end{tabular}
-\caption{The margin over a hand-written prompt shrinks as the bare-schema
-baseline rises.}
+\caption{The margin over a hand-written prompt is \emph{not} monotone in the
+bare-schema baseline. The two-model trend did not survive a third model.}
 \label{tab:interaction}
 \end{table*}
 
-\armM{} improves by 20.0 points between the two models; \armC{} improves by
-1.5. The contract arm lands in almost the same place on both while the
-prompt-based arm climbs toward it.
+With two models this looked like a clean interaction: \armM{} improved by 20.0
+points while \armC{} moved 1.5, so the margin fell from $+32.2$ to $+13.7$ and
+the lines converged. \textbf{The third model breaks it: $+27.1$.} Whatever
+governs the size of the contract's advantage over a hand-written prompt, it is
+not a monotone function of base capability. An earlier version of this paper
+reported the shrinking margin as a finding; a two-point trend was not evidence
+for one, and we say so here rather than quietly dropping it.
 
-Two readings, and our data do not separate them:
+Run~C does settle the question those two points raised, and against the reading
+we leaned toward. The candidate explanations of the 55.1\%/56.6\% coincidence
+were:
 
 \begin{enumerate}
 \itemsep2pt
 \item \textbf{Structured context substitutes for capability.} The contract
       supplies what a weaker model cannot infer; a stronger model extracts more
-      of the same semantics from prose unaided.
-\item \textbf{The contract arm is near a benchmark ceiling.} Both models land
-      at ${\approx}56\%$, and Section~\ref{sec:threats} identifies a 30-task
-      template that no arm on either model solves.
+      of the same semantics from prose unaided, so the margin keeps shrinking.
+\item \textbf{The contract arm is near a benchmark ceiling}, pinned at
+      ${\approx}56\%$ while \armM{} rises to meet it.
 \end{enumerate}
 
-The near-identical 55.1\%/56.6\% is more consistent with a shared ceiling than
-with coincidence, so reading~2 is not idle. Separating them requires a stronger
-model, where reading~1 predicts continued convergence and reading~2 predicts
-\armC{} pinned near 56\% while \armM{} rises to meet it. \textbf{We make no
-claim about frontier models from these two runs.}
+Reading~2 predicted \armC{} stays near 56\% on a stronger model. It reached
+\textbf{77.4\%}. There is no benchmark ceiling at 56\%, and the near-identical
+55.1\%/56.6\% was a coincidence. Reading~1's specific prediction --- a
+monotonically shrinking margin --- is refuted by the $+27.1$. Both simple
+stories are wrong, and three points are not enough to install a third.
+
+\subsection{The contract compiles, and the residual gap is derivation}
+\label{sec:derivation}
+
+Every result so far compares arms to each other. None of them says how much of
+the contract's own content an agent recovers, because nothing establishes what
+recovering all of it would look like. We can establish that, because the
+contract is executable in a sense we did not design for.
+
+The frozen artifact carries a \texttt{sql\_expression} field on each declared
+metric. Transcribing those fields into two DuckDB views --- the fee-rule match
+predicate, the natural-month reconstruction, the monthly volume and fraud-level
+aggregates, the fee formula, and the instruction to sum over all matched
+(transaction, rule) pairs --- yields a pre-computed fee layer of the kind a
+context-layer product ships. Nothing in it is authored independently of the
+contract. The only work the transcription adds is \emph{composition}:
+correlating the two placeholders in the month-scoped predicate to a
+per-merchant aggregate.
+
+\textbf{The compiled contract reproduces the benchmark's gold answers exactly
+on every task it covers: 176 of 176, graded by the official scorer.} This is a
+statement about the artifact, not about an agent, and it has two uses.
+
+First, it forecloses an objection we cannot otherwise answer: that \armC{} wins
+because the contract is subtly wrong in a benchmark-favouring way. It is not
+wrong; it compiles to gold.
+
+Second, it converts accuracy into \emph{efficiency against a proven ceiling}.
+Classifying all 401 tasks by question shape alone --- never by gold, never by
+any arm's output --- gives 176 tasks the compiled contract answers outright
+(all hard), 148 that need those semantics \emph{plus} a counterfactual or an
+optimisation it does not encode, and 77 with no fee semantics at all. A
+pre-computed macro layer therefore tops out at 53\% of the hard set on this
+benchmark, however good it is. On the 176 where the information is provably
+sufficient, whatever an agent fails to get is a failure to derive:
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{\texttt{glm-5.3-flash}} & \multicolumn{2}{c}{\texttt{deepseek-v4-flash}} & \multicolumn{2}{c}{\texttt{gpt-5.6-sol}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Hard tasks & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} \\
+\midrule
+\armS{} & 2.8\% & 25.0\% & 8.5\% & 34.7\% & 31.8\% & 41.2\% \\
+\armH{} & 10.2\% & 25.7\% & 10.2\% & 31.7\% & 46.6\% & 54.1\% \\
+\armM{} & 14.8\% & 32.4\% & 38.1\% & 44.6\% & 49.4\% & 48.6\% \\
+\armC{} & \textbf{60.8\%} & \textbf{45.9\%} & \textbf{62.7\%} & \textbf{46.5\%} & \textbf{94.9\%} & \textbf{56.1\%} \\
+\midrule
+\emph{compiled contract} & \emph{100\%} & --- & \emph{100\%} & --- & \emph{100\%} & --- \\
+\bottomrule
+\end{tabular}
+\caption{Arms split by whether the compiled contract answers the task outright
+(\emph{macro}, $n{=}176$; 118 on run~B's complete-case set) or requires
+reasoning on top of it (\emph{derived}, $n{=}148$; 101). The gap between
+\armC{} and the compiled contract on \emph{macro} is derivation failure on
+information the agent provably had.}
+\label{tab:buckets}
+\end{table*}
+
+Three readings follow.
+
+\textbf{The contract's advantage concentrates where its semantics apply
+directly.} Over \armS{} it is $+58.0$, $+54.2$ and $+63.1$ points on
+\emph{macro} against $+20.9$, $+11.8$ and $+14.9$ on \emph{derived}. This is
+the same domain-specificity as the fee/non-fee split
+(Section~\ref{sec:threats}), measured on a cleaner boundary.
+
+\textbf{The derivation gap collapses with capability.} \armC{} on \emph{macro}
+scores 60.8\%, 62.7\% and 94.9\% --- a shortfall of 39.2, 37.3 and
+\textbf{5.1} points below a ceiling we have proven reachable. On two models
+this looked like a fixed ${\approx}38$-point tax, model-invariant to within two
+points. It is not a tax. We recorded this prediction in the public artifact
+repository before run~C executed, stating that the capability reading predicted
+``well above 62.7\%, moving toward 100\%'' and the harness reading predicted
+``near 61--63\% like the other two''. The observed value is 94.9\%.
+
+This bears directly on the economics in Section~\ref{sec:intro}. The derivation
+gap is exactly what separates a declarative contract, which requires the agent
+to derive the query, from pre-computed macros, which do not. A gap fixed at 38
+points would be a standing structural cost of the declarative approach. A gap
+that falls to 5 points on a frontier model is a \emph{transient} cost, one the
+trend in model capability is already paying down --- while the per-metric
+authoring cost of a macro layer is paid down by nothing.
+
+\textbf{Where reasoning is required on top of the semantics, capability helps
+far less.} The \emph{derived} bucket moves 45.9\% ${\to}$ 46.5\% ${\to}$ 56.1\%
+across the same three models, against 60.8\% ${\to}$ 62.7\% ${\to}$ 94.9\% on
+\emph{macro}. What survives a frontier model is not difficulty in knowing the
+domain; it is the counterfactual and optimisation reasoning built on top of it.
 
 \subsection{The harness measures what the leaderboard measures}
 

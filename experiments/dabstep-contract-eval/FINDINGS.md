@@ -225,6 +225,110 @@ scores 1–2 out of 30 for *every* arm. A template no arm solves is a property
 of the benchmark, not a weakness of any arm — recorded because a per-arm
 reading of that bucket alone would have looked like a contract failure.
 
+## The contract compiles, so the residual gap is derivation, not information
+
+`analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by
+transcribing the frozen contract's own `sql_expression` fields and adding one
+thing: composition. Every predicate in it comes from `contract/semantic.yml`
+(`fee_rule_matches_transaction`, `fee_rule_matches_merchant_month`,
+`transaction_natural_month`, `merchant_monthly_volume`,
+`merchant_monthly_fraud_level`, `transaction_fee`, `total_transaction_fees`).
+Nothing was authored independently of the contract. The only work the file does
+on its own is correlate `:volume` and `:fraud_ratio` — the two placeholders that
+make `fee_rule_matches_merchant_month` "NOT RUNNABLE AS WRITTEN" — to a
+per-merchant natural-month aggregate.
+
+**It reproduces gold exactly on every task it covers: 176/176, 100%**
+(`uv run python analysis/coverage.py`, graded by the vendored official scorer).
+
+| family | n | exact |
+|---|---:|---:|
+| `total_fees_day` / `_month` / `_year` | 45 | 45 |
+| `fee_ids_day` / `_month` / `_year` | 45 | 45 |
+| `merchants_for_fee` | 7 | 7 |
+| `avg_fee_credit` / `_account` / `_account_mcc` | 59 | 59 |
+| `fee_ids_by_at_aci` | 20 | 20 |
+| **total** | **176** | **176 (100%)** |
+
+This is a statement about the artifact, not about an agent: **the contract
+contains complete and correct information for 176 of the 332 hard tasks.** Two
+consequences follow.
+
+First, it rules out a reviewer's obvious objection — that the contract arm wins
+because the contract is subtly wrong in a benchmark-favouring way. It is not
+wrong; it compiles to gold.
+
+Second, and more useful, it turns the contract arm's accuracy into an
+*efficiency against a known ceiling*. Where the information is provably
+present, whatever the agent fails to get is a failure to derive, not a
+consequence of missing context.
+
+### What a pre-computed macro layer can and cannot reach
+
+Classifying all 401 golded tasks by question shape alone — never by gold, never
+by any arm's output (`analysis/coverage.py:classify`):
+
+| bucket | tasks | hard | what it means |
+|---|---:|---:|---|
+| `macro` | 176 | 176 | the compiled contract answers it outright |
+| `derived` | 148 | 148 | needs fee semantics *plus* a counterfactual or an optimisation the macro does not encode |
+| `unrelated` | 77 | 8 | no fee semantics involved (mostly the easy set) |
+
+So a pre-computed view/macro layer of the kind a context-layer product ships
+tops out at **53% of the hard set** on this benchmark, however good it is. The
+remaining 148 hard tasks — "what delta would this merchant pay if fee 17's rate
+changed", "which ACI should they steer to" — consume the macro's output and
+reason on top of it. `macro` is a lower bound on macro coverage: it counts the
+families we actually implemented, and some `derived` tasks might yield to a
+cleverer artifact.
+
+### The arms, split by bucket
+
+`uv run python analysis/buckets.py`, hard tasks, complete cases:
+
+| | glm `macro` | glm `derived` | ds-flash `macro` | ds-flash `derived` |
+|---|---:|---:|---:|---:|
+| n | 176 | 148 | 118 | 101 |
+| schema_only | 2.8% | 25.0% | 8.5% | 34.7% |
+| contract_hollow | 10.2% | 25.7% | 10.2% | 31.7% |
+| manual_prompt | 14.8% | 32.4% | 38.1% | 44.6% |
+| **contract** | **60.8%** | **45.9%** | **62.7%** | **46.5%** |
+| *compiled contract (oracle)* | *100%* | — | *100%* | — |
+
+Three readings, in descending order of confidence.
+
+**The contract's advantage concentrates where its semantics apply directly.**
+Over `schema_only` it is +58.0 pp (glm) and +54.2 pp (ds-flash) on `macro`,
+against +20.9 pp and +11.8 pp on `derived`. Over `manual_prompt` the same shape
+is sharper still: +46.0 / +24.6 on `macro`, +13.5 / +1.9 on `derived`. This is
+what a domain contract should do, and it is the same domain-specificity the
+fee/non-fee split shows, measured on a cleaner boundary.
+
+**The derivation gap is large and nearly model-invariant.** On `macro` the
+information is provably sufficient, yet the contract arm recovers 60.8% and
+62.7% of it. **Roughly 37–39 pp of the hard set's headroom is neither missing
+context nor benchmark difficulty — it is the agent failing to apply knowledge
+it was given and provably had.** That the two figures land within 2 pp of each
+other, on models a generation apart in capability, is the sharpest version of
+the "contract arm lands in almost the same place on both models" observation
+above — now localised to the bucket where it means something.
+
+**`contract_hollow` tracks `schema_only` in both buckets**, consistent with the
+null result reported earlier; the bucket split gives it nowhere to hide.
+
+### A prediction, recorded before the third model lands
+
+The `gpt-5.6-sol` sweep was still running when this section was written. The
+two readings of the capability trend make opposite predictions about it:
+
+- If the derivation gap is capability-bound, sol's contract arm on `macro`
+  should sit well above 62.7% and move toward the oracle's 100%.
+- If it is a property of the harness or the task format rather than the model,
+  sol should land near 61–63% like the other two.
+
+Recorded here before the data exists, so the answer is a test rather than a
+description.
+
 ## Efficiency
 
 **`contract` is the cheapest arm on both models while also being the most

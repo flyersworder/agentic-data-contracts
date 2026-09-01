@@ -64,6 +64,55 @@ escalation as it went.
 This matters for an EA&B audience independently of accuracy: it is a measured
 safety property of the same artifact, on the same runs, at no extra cost.
 
+## Positioning: anticipated metrics vs unanticipated ones
+
+The paper's most likely misreading is "they score 55% where MotherDuck scores
+99.8%, so this is worse." §8 must close that off early and explicitly, because
+a reviewer who forms that impression in §1 will not revise it in §8.
+
+**The two approaches compile the semantics at different times.**
+
+| | pre-built views / macros | declarative contract |
+|---|---|---|
+| the metric is | compiled ahead of time, by a human | prose the model compiles per query |
+| covers | metrics someone anticipated | any question over the described domain |
+| authoring cost | one macro per metric, tested and maintained | one description per domain |
+| fails when | the question was not anticipated | the model reimplements the rule wrongly |
+| DABStep score | 93.2% from "a simple prompt with views and macros" (MotherDuck's own post) | 55.1% / 56.6% |
+
+DABStep is 450 questions from **26 templates**, and 294 of 332 hard tasks here
+are fee questions. That is a question space enumerable in advance, which is
+the best case for the pre-built approach and a case real warehouses do not
+offer. A macro contributes nothing to a question nobody wrote it for; the
+declarative layer is the one that has to cover the unanticipated question.
+**So 55.1% is a measurement of a harder task, not a worse attempt at the same
+one** — and the gap to 99.8% is substantially work relocated from the agent to
+a human author, not reasoning improved.
+
+Verified concretely in `FINDINGS.md`: tasks 1500 and 1502, both of which the
+contract arm got wrong, are answered exactly by a five-line `wild()` macro
+encoding the NULL-wildcard rule the contract states in prose.
+
+**Be generous about it, because the generous reading is the correct one.**
+These are complementary layers, not competitors. Macros optimise the head of
+the distribution; a contract covers the tail — and in a system with both, the
+contract is what tells the agent which macro exists and when to call it. Say
+this. A paper that frames a well-engineered competing result as a rival it
+beats is a paper a reviewer distrusts.
+
+It also sets up the roadmap honestly: this library's own deferred
+`compose_metric_query` **is** the executable layer, and it was deliberately
+not built before this measurement so that the declarative contribution could
+be isolated first. That is the same argument as the "deliberate non-response"
+section in `FINDINGS.md`, and the two must not contradict each other.
+
+Scalability is the open question to state rather than answer: one macro per
+metric per dialect is a maintenance burden that grows with the metric
+catalogue, and we have no data on where that crosses over. Do not claim the
+contract approach scales better. Claim only that it degrades differently —
+gracefully on unanticipated questions, where a missing macro degrades to
+nothing.
+
 ## Structure, and what exists today
 
 | § | content | status |
@@ -94,9 +143,7 @@ the rest are writing.
    pre-registered one sits unrun is the single most attackable thing in the
    paper — a reviewer who notices reads it as reporting the runs that worked.
    Either run it or de-register it in print with a stated reason; running it
-   is far better. Full 401x4 is roughly **$60-90** (pro is ~9x flash on input,
-   ~10x on output, against run B's $6.32); a stratified subsample is
-   proportionally less.
+   is far better. **Design in the next section.**
 2. **The capability interaction needs a third point.** `contract` −
    `manual_prompt` is +32.2pp on glm and +13.7pp on deepseek, and `contract`
    itself barely moves between them (55.1% -> 56.6%). Two readings — context
@@ -127,6 +174,98 @@ the rest are writing.
    inspect-rejection count falls 218 -> 29. Report run A as a floor. The
    defect's direction is confirmed, its magnitude is tangled with the model
    change.
+
+## The pro sweep: design
+
+### Which model
+
+Cost is projected from run B's measured token profile (86% cache hit rate,
+548,952 input / 39,238 output tokens per task across three arms) at list
+prices. **Upper bounds**: a stronger model needs fewer turns, and run B's
+contract arm already used 40% fewer turns than its baselines.
+
+| model | 200 tasks | 332 hard | 401 all |
+|---|---:|---:|---:|
+| **`deepseek/deepseek-v4-pro-0813`** (pre-registered) | **$47** | $78 | $94 |
+| `qwen/qwen3-max` | $57 | $95 | $115 |
+| `z-ai/glm-5.3` (run A's family) | $81 | $134 | $162 |
+| `anthropic/claude-sonnet-5` | $128 | $213 | $257 |
+| `openai/gpt-5.4` | $180 | $299 | $361 |
+
+The pre-registered model is also the cheapest credible option, which resolves
+the tension between methodological duty and budget. Its weakness is family:
+run B is already DeepSeek, so pro does not answer "is this a
+Chinese-open-weight-model quirk".
+
+**Do not pick the third model by reputation — measure it.** What gap 2 needs
+is a point further along the *capability axis*, and that axis is operationally
+defined here as `schema_only` accuracy (13.9% glm -> 22.6% deepseek). Run a
+one-arm, 40-task `schema_only` probe across candidates and pick on the
+measured baseline:
+
+| probe (schema_only, 40 tasks) | cost |
+|---|---:|
+| `openai/gpt-5.6-luna-pro` | $1.2 |
+| `deepseek/deepseek-v4-pro-0813` | $3.9 |
+| `openai/gpt-5.4-mini` | $4.5 |
+| `qwen/qwen3-max` | $4.7 |
+| `z-ai/glm-5.3` | $6.5 |
+| `anthropic/claude-sonnet-5` | $10.7 |
+| `openai/gpt-5.4` | $15.1 |
+
+All seven is **$47** — the price of the full pro sweep, and it buys the
+knowledge of which sweep is worth running. A cheaper subset of four is ~$20.
+
+### Which arms
+
+**Three, not four: `schema_only`, `manual_prompt`, `contract`.** Drop
+`contract_hollow`. Its null is established on two models and pooled, and the
+pro run's job is the interaction, not the decomposition. `schema_only` must
+stay — it *is* the capability axis the interaction is measured against.
+Saves 25%.
+
+### How many tasks
+
+Not all of them. But the reason is not cost, and this must be understood
+before the run is designed:
+
+Power to detect `contract` > `manual_prompt` at alpha=0.05, discordance rate
+0.30, by task count and psi (the share of discordant pairs favouring
+`contract`; glm 0.82, deepseek 0.65):
+
+| n | psi=0.80 | psi=0.70 | psi=0.65 | psi=0.60 | psi=0.575 |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 0.91 | 0.52 | 0.31 | 0.14 | 0.09 |
+| 200 | 1.00 | 0.86 | 0.61 | 0.29 | 0.18 |
+| 279 | 1.00 | 0.95 | 0.75 | 0.42 | 0.24 |
+| **401** | 1.00 | 0.99 | **0.90** | **0.55** | **0.34** |
+
+**If the trend continues and psi falls to 0.60 on pro, even all 401 tasks
+gives 55% power.** Sample size cannot rescue a shrinking effect. So the pro
+run must be designed and reported as an **estimation** run — a confidence
+interval on the paired difference — and not as a significance test it may be
+unable to pass. Reporting "p>0.05, no effect" from an underpowered arm would
+be the worst outcome available, and it is avoidable only by saying so in
+advance.
+
+Precision, by contrast, is affordable. 95% CI half-width on the paired
+accuracy difference at discordance 0.30, and near-independent of the effect
+size:
+
+| n | 100 | 150 | 200 | 250 | 332 | 401 |
+|---|---:|---:|---:|---:|---:|---:|
+| half-width | ±10.5 | ±8.6 | **±7.5** | ±6.7 | ±5.8 | ±5.3 |
+
+**n=200 gives ±7.5pp**, which separates deepseek's +13.7pp from zero and is
+the point where the curve flattens. Recommended design: **200 hard + 40 easy,
+stratified random, seed fixed and recorded in the plan before the run.** The
+easy stratum is the null control — the contract should do nothing there, and
+it does on both runs.
+
+Cost at 3 arms x 240 tasks on the pre-registered model: **~$55**.
+
+Pre-specify the subsample and the estimation framing *before* running, so
+that neither looks chosen after seeing the result.
 
 ## The leaderboard submission
 
@@ -160,13 +299,15 @@ Conditions, since it is public and effectively one-shot per agent name:
    is dead
 2. **Start drafting now.** Sections 1-4 and 6-9 do not depend on any pending
    run; every number they need is in `FINDINGS.md`.
-3. Pre-registered `deepseek-v4-pro` sweep (gaps 1+2) — the one run that must
-   happen before submission
-4. k>1 probe (gap 3)
-5. Fold both into section 5; arXiv preprint
-6. All-450 contract-arm run + leaderboard submission (gap 4), on the user's
+3. Capability probe (~$20-47) -> pick the third model on measured
+   `schema_only` accuracy, not reputation
+4. Pre-registered sweep, 3 arms x 240 stratified tasks (~$55) — the one run
+   that must happen before submission
+5. k>1 probe (gap 3)
+6. Fold both into section 5; arXiv preprint
+7. All-450 contract-arm run + leaderboard submission (gap 4), on the user's
    go-ahead
-7. Submit to PVLDB EA&B
+8. Submit to PVLDB EA&B
 
 Drafting and the pro sweep are independent and should run concurrently. Do
 not post the preprint before the pro sweep lands: a v1 that omits its own

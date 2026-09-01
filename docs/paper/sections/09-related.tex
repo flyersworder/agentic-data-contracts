@@ -1,7 +1,7 @@
 \section{Related Work}
 \label{sec:related}
 
-\subsection{Context layers}
+\subsection{Context layers, and when their semantics get compiled}
 
 MotherDuck's ``Guides'', markdown context stored in the warehouse and fetched
 through an MCP server, raise DABStep accuracy by 72 percentage
@@ -17,8 +17,6 @@ is an independent corroboration of the \emph{direction} of our finding, at a
 far higher absolute score. Because a reader will otherwise stop at the
 difference between 99.8\% and our own best hard-split figure of 77.4\%, we
 state plainly what that difference is made of.
-
-\subsection{When the semantics get compiled}
 
 The two approaches differ in \emph{when} a metric's definition is turned into
 executable form.
@@ -74,8 +72,8 @@ hand-writing a macro.
 
 \subsection{Why the benchmark flatters pre-computation}
 
-DABStep's question space is concentrated (Section~\ref{sec:background}), and
-294 of the 332 hard tasks in our set are fee questions. Pre-built views are
+DABStep's question space is concentrated and its hard split is nearly all fee
+questions (Section~\ref{sec:background}). Pre-built views are
 maximally effective when the question space is enumerable in advance, which is exactly this benchmark's construction.
 A macro contributes nothing to a question nobody wrote it for, and the
 declarative layer measured here is the layer that must cover the
@@ -125,7 +123,7 @@ generalisation unless the submission count and the artifact's provenance are
 stated alongside it. Ours are: one sweep per model, no tuning against the task
 set, and a digest-pinned artifact frozen 35 commits before the first run.
 
-\subsection{What is distinctive here}
+\subsection{What is distinctive here, and what was deliberately left out}
 
 \begin{center}
 \footnotesize
@@ -152,8 +150,6 @@ standard practice for comparing learners on one run, not a
 contribution~\cite{dietterich}.
 
 The contribution is the decomposition, not the accuracy.
-
-\subsection{Why we did not build the obvious fix}
 
 The obvious response to Section~\ref{sec:mechanism} is to make this library's
 metric semantics executable --- a tool that runs a declared SQL expression

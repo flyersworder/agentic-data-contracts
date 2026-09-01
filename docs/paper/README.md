@@ -10,10 +10,9 @@ make figures  # figures only
 make check    # fail on overfull boxes or unresolved refs
 ```
 
-12 pages with `article`, references included — inside the PVLDB EA&B limit of
-12 excluding references, with headroom for the pro-sweep results. Requires only
-a basic TeX Live install; `multirow` and `balance` were dropped rather than
-added as dependencies.
+19 pages with `article`, references included. Requires only a basic TeX Live
+install; `multirow` and `balance` were dropped rather than added as
+dependencies.
 
 ## Switching to the PVLDB template
 
@@ -36,12 +35,9 @@ to promote one or two more; `make check` will say which.
 - **`motherduck-semantic` has no publication date.** The post carries no
   byline or date on the page; it is cited with an access date. Worth one more
   attempt before submission.
-- **No pro-sweep results.** Section 5 reports two flash-tier models. The
-  pre-registered comparison is unrun, and §10 states that as a debt rather
-  than reporting it. When the sweep lands: `tab:interaction` and
-  `fig-interaction` each gain a third point, `fig-ablation` a third series,
-  the caveat in `fig:interaction`'s caption comes out, and §10's future-work
-  paragraph loses an item.
+- **arXiv abstract field.** The PDF abstract is about 330 words; arXiv's
+  metadata abstract is capped at 1,920 characters, so the submission form
+  needs a shortened paste.
 
 ## Figures
 

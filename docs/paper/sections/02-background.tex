@@ -27,8 +27,7 @@ answers from them, so withholding constrains tuning against the split without
 making the answers unavailable. Among
 text-to-SQL benchmarks, DABStep sits where Spider~\cite{spider} and
 Spider~2.0~\cite{spider2} do not: its difficulty is documentation, not schema
-scale. We use it for that reason, and Section~\ref{sec:threats} says what the
-choice costs.
+scale.
 
 \textbf{But its question space is small.} DABStep expands 450 test tasks from a
 smaller set of core questions by varying merchants, schemes, months and
@@ -53,7 +52,9 @@ validity check on our own reimplementation of the prompt-based approach
 
 \subsection{Context layers and semantic layers}
 
-Three families of approach exist and are routinely conflated. \emph{Semantic
+Three families of approach exist and are routinely conflated.
+
+\emph{Semantic
 layers} in the classical sense --- dbt metrics, Cube, LookML --- define metrics
 as executable artifacts, so the agent calls a metric rather than deriving it and
 correctness is inherited from the definition. \emph{Context layers} store
@@ -63,7 +64,9 @@ agent still writes the SQL, but writes it knowing what the columns mean.
 \emph{Data contracts} originate in governance rather than assistance: a
 declarative artifact stating what a dataset contains, who owns it and what may
 be done with it, with the Open Data Contract Standard~\cite{odcs} the emerging
-specification. They inherit a longer line of dataset documentation ---
+specification.
+
+The third family inherits a longer line of dataset documentation ---
 datasheets~\cite{datasheets} and, closer to our use, Croissant's shift from
 prose a human reads to metadata a tool loads~\cite{croissant}. The database
 community's framing of the wider problem is TAG~\cite{tag}: natural-language

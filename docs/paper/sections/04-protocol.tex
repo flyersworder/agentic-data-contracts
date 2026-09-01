@@ -74,7 +74,7 @@ verdicts, submitting our answers would return an official judgement on the exact
 answers we scored against reconstructed golds, yielding a measured agreement
 rate. We report this as planned work rather than claiming it.
 
-\subsection{Grading}
+\subsection{Grading and statistics}
 
 Answers are graded by DABStep's own scorer, vendored verbatim at a pinned
 revision. Each result row records which scorer graded it.
@@ -85,8 +85,6 @@ benchmark. On a 12-task pilot that manufactured a significant result in this
 library's favour that the official rules do not support ($p{=}0.0156$ against
 $p{=}0.0703$). A scorer that is stricter than the benchmark is not a
 conservative choice; it is a different experiment.
-
-\subsection{Statistics}
 
 Every arm sees every task, so all comparisons are paired and we use McNemar's
 exact test~\cite{mcnemar} throughout, reporting the discordant-pair count and

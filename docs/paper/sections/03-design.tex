@@ -75,9 +75,9 @@ into the hollow contract, and that the real contract does share 6-grams with
 it}. The second half is what makes the first meaningful: it establishes that
 the check can fail, rather than passing vacuously.
 
-The transcripts confirm the retrieval loop ran end to end. In run~A, \armH{} called
-\texttt{lookup\_domain} on 272 of 401 tasks and received the empty placeholder
-282 times. The retrieval loop ran; there was nothing behind it.
+The transcripts confirm it: in run~A, \armH{} called \texttt{lookup\_domain}
+on 272 of 401 tasks and received the empty placeholder 282 times. The loop
+ran; there was nothing behind it.
 
 \paragraph{Prompt length is deliberately not held constant} (1{,}984 characters
 for \armH{} against 2{,}475 for \armC{}). Padding the hollow arm to match would
@@ -85,31 +85,7 @@ substitute one confound for another --- text that reads as content but carries
 none, which is a different treatment, not a cleaner control. The variable under
 test is knowledge, not tokens.
 
-\subsection{What is held fixed}
-
-Across all four arms \emph{within} a run: row limit (50 rows per result),
-tool-call cap (40), token budget, sampling temperature, reasoning effort
-(\texttt{medium}), model, provider endpoint and quantization, task set, gold
-set, scorer, and the verbatim answer-format instruction. Temperature is identical across the four arms
-within each run, which is what the paired comparisons require; its value
-differs between runs (Section~\ref{sec:runs}). Cost, token counts, turn counts, tool calls and
-per-row database integrity are recorded for every run.
-
-The row limit deserves a note because an earlier iteration of this experiment
-got it wrong. With a 1{,}000-row limit, the governed arm looked 11$\times$ more
-expensive than the baselines; the cause was oversized result payloads poisoning
-the context window, not the contract. Symmetric limits are not a detail.
-
-They were also not perfectly symmetric here. The 50-row cap reached the
-governed arms' \texttt{run\_query} but not their \texttt{preview\_table}, which
-the library clamps at 100 rows of its own accord. A governed arm could
-therefore see 100 rows from a preview where an ungoverned arm saw 50 from
-\texttt{execute\_sql}. That happened on \textbf{31 preview calls} across all
-three runs, against many thousands of tool calls: small, but in the treatment's
-favour. The harness is fixed for future runs; the reported runs are as they
-ran.
-
-\subsection{Three runs}
+\subsection{Three runs, and what is held fixed within each}
 \label{sec:runs}
 
 We ran the full design three times: on \texttt{glm-5.3-flash} (run~A),
@@ -118,7 +94,16 @@ pinned to a single provider endpoint with fallbacks disabled --- the first two
 at fp8 quantization --- so that quantization, price and throughput are fixed
 within a run. The three runs are separate experiments rather than replicates:
 they differ in model, provider, and one library fix
-(Section~\ref{sec:threats}). Reasoning effort is set to \texttt{medium}
+(Section~\ref{sec:harness-asym}). Reasoning effort is set to \texttt{medium}
 throughout, though that is a nominal setting rather than an equated one, and
 temperature is held at 0 on runs~A and~B but not on run~C, whose model does not
 accept the parameter.
+
+Everything else is fixed across all four arms \emph{within} a run: row limit
+(50 rows per result, with one small exception recorded in
+Section~\ref{sec:harness-asym}), tool-call cap (40), token budget, sampling
+temperature, reasoning effort, model, provider endpoint and quantization, task
+set, gold set, scorer, and the verbatim answer-format instruction. Identical
+temperature within a run is what the paired comparisons require; its value
+differing between runs is not. Cost, token counts, turn counts, tool calls and
+per-row database integrity are recorded for every run.

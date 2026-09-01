@@ -50,6 +50,12 @@ scores 1--2 out of 30 for \emph{every} arm on runs~A and~B. Run~C partially
 solves it (\armS{} 8, \armH{} 5, \armC{} 4, \armM{} 2 of 30), which is a second
 slice where the bare baseline leads.
 
+The benchmark is also a single one, and a concentrated one: 450 tasks reduce
+to 113 question shapes, 27 of which cover three quarters of the benchmark
+(Section~\ref{sec:background}). No amount of compute fixes that, and results
+on so narrow a question space should not be read as results about analytics
+agents in general.
+
 \subsection{The contract resolves ambiguities the manual leaves open}
 \label{sec:threats-interpretation}
 
@@ -70,7 +76,7 @@ All three are recoverable from the annexed data, which every arm could query,
 and none supplies a task's answer. But they were recovered once, by us, and
 handed to one arm. The empty-list clause in particular is load-bearing: the
 counterfactual lesion that reverses it is diagnostic on 87 of the 97 tasks in
-the payments families: on those tasks, a macro built with the misreading
+the payments families. On those tasks a macro built with the misreading
 returns a different answer from the one built with the clause, so an agent
 lacking the clause has somewhere to go wrong. A reader should
 therefore treat the contract arm's margin as combining two things this
@@ -79,25 +85,17 @@ resolution of what it leaves open. Separating them needs a fifth arm carrying
 the contract with its \texttt{INTERPRETATION} clauses stripped, which we did
 not run.
 
-\subsection{One benchmark, and a concentrated one}
-
-No amount of compute fixes this. 450 tasks reduce to 113 question shapes, 27
-of which cover three quarters of the benchmark. That is a narrow question
-space, and results on it should not be read as results about analytics agents
-in general.
-
-\subsection{$k{=}1$}
+\subsection{\texorpdfstring{Statistical power: $k{=}1$, and eighteen
+uncorrected tests}{Statistical power: k=1, and eighteen uncorrected tests}}
 
 No run repeats. One task was observed flipping verdict between two identical
-runs during development, so per-task verdicts are not stable. With 86--164
+runs during development, so per-task verdicts are not stable. With 86--172
 discordant pairs the headline comparisons are not at risk, but \textbf{nothing
 in this paper estimates within-condition variance}: our three runs are
 different models, not replicates. This is the largest remaining gap, and run~C
 needs it most, because \texttt{gpt-5.6-sol} does not accept a temperature
 parameter and therefore ran at the provider's default rather than at 0 like the
 other two.
-
-\subsection{Eighteen tests, no multiplicity correction}
 
 Table~\ref{tab:mcnemar} reports 18 pairwise comparisons and we correct none of
 them. The three vs-\armC{} contrasts survive any correction at these
@@ -133,10 +131,9 @@ only makes plausible.
 \subsection{One frontier point, and a trend that already broke once}
 
 Every capability claim in this paper rests on a single strong model. We have
-direct evidence for how little that supports: with two models the contract's
-margin over a hand-written prompt fell from $+32.2$ to $+13.7$, we reported the
-shrinking margin as a finding, and the third model returned $+27.1$. The
-scaffolding null failed the same way. \textbf{Readers should apply the same
+direct evidence for how little that supports: two claims written against
+runs~A and~B did not survive run~C (Section~\ref{sec:reversals}).
+\textbf{Readers should apply the same
 discount to the derivation-gap result} (Section~\ref{sec:derivation}), which is
 a three-point curve with one frontier point, however sharp the collapse from
 39.2 to 5.1 looks. The literature does not settle the direction either. Some
@@ -146,31 +143,14 @@ five frontier models found the opposite on GAIA, with the most capable model
 gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Run~C also differs from the others in provider and model
 family, so any run-C contrast confounds capability with both.
 
-\subsection{Three limits recorded elsewhere}
+\subsection{Harness asymmetries}
+\label{sec:harness-asym}
 
-Golds cover 401 of 450 tasks, by plurality over officially-graded-correct
-submissions at a 0.75 threshold, with five verified-wrong golds excluded and
-one template family (59/59) reproduced from the database
-(Section~\ref{sec:golds}); a reader cannot check this independently, which is
-why we plan the external validation described there. Run~B lost 29\% of its
-rows to provider rate-limiting, near-uniformly across arms, 114 of the 122 lost
-tasks losing all four arms together (Section~\ref{sec:truncation}); it costs
-power, not validity, and widens run~B's intervals by roughly 20\% relative to
-run~A. And nobody outside the project can verify that no benchmark question was
-consulted while the contract was authored (Section~\ref{sec:protocol}).
+Three properties of the harness treated the arms unequally, two against the
+governed arms and one, small, in their favour; a fourth makes the runs less
+comparable to each other.
 
-We draw one methodological lesson from it that generalises beyond this paper.
-Pinning a single provider endpoint with fallbacks disabled is correct for
-validity, since it holds quantization, price and throughput fixed across arms,
-but it transfers responsibility for transient failures to the harness.
-Ours had no retry for HTTP 429, so a temporary condition became 466 permanent
-rows. The sweep exited cleanly and finished ahead of schedule, and nothing
-looked wrong until the results were read. Benchmark harnesses that pin
-endpoints need a rate-of-progress check, not just a liveness check.
-
-\subsection{The runs are not perfectly comparable}
-
-Run~A's governed arms carried a validator defect: a check intended to reject
+\paragraph{A validator defect, run~A only.} Run~A's governed arms carried a validator defect: a check intended to reject
 \texttt{SELECT *} also rejected \texttt{COUNT(*)}, because the latter parses
 with a \texttt{Star} node. The agent was told \emph{``SELECT * is not allowed''}
 about queries containing no \texttt{SELECT *} --- 161 rejections across 124 of
@@ -180,15 +160,29 @@ complied with, and the transcripts show the agent guessing at unrelated clauses
 before finding a formulation that passed.
 
 This handicapped both contract arms and neither baseline, so run~A's 55.1\% is a
-floor rather than a ceiling. Run~B ran with the fix and its inspect-rejection
-count falls from 218 to 29, confirming the diagnosis. The defect's direction is
-known; its magnitude is not separable from the model change, and we do not
-attempt to estimate it. The runs also used different provider endpoints. Each
-run's internal contrasts are sound; cross-run differences are suggestive only.
+floor rather than a ceiling. Run~B ran with the fix, and the contract arm's
+total inspect-rejection count (218 on run~A, the 161 above among them) falls
+to 29, confirming the diagnosis. The defect's direction is known; its magnitude
+is not separable from the model change, and we do not attempt to estimate it.
 
-\subsection{The forced-answer policy}
+\paragraph{Different endpoints across runs.} The runs used different provider
+endpoints as well as different models. Each run's internal contrasts are
+sound; cross-run differences are suggestive only.
 
-When an agent exhausts its output budget the harness forces a final answer
+\paragraph{The row limit.} Symmetric result limits are not a detail. An
+earlier iteration of this experiment used a 1{,}000-row limit, and the
+governed arm looked 11$\times$ more expensive than the baselines; the cause
+was oversized result payloads poisoning the context window, not the contract.
+The reported runs cap every result at 50 rows, but not perfectly
+symmetrically: the cap reached the governed arms' \texttt{run\_query} but not
+their \texttt{preview\_table}, which the library clamps at 100 rows of its own
+accord. A governed arm could therefore see 100 rows from a preview where an
+ungoverned arm saw 50 from \texttt{execute\_sql}. That happened on
+\textbf{31 preview calls} across all three runs, against many thousands of
+tool calls: small, but in the treatment's favour. The harness is fixed for
+future runs; the reported runs are as they ran.
+
+\paragraph{The forced-answer policy.} When an agent exhausts its output budget the harness forces a final answer
 instead of discarding the run. In run~A that produced one additional correct
 answer out of 59, nearly worthless for accuracy, but it eliminated unscoreable
 rows --- and those rows were 41 \armS{}, 18 \armM{} and \textbf{zero} in either

@@ -28,12 +28,21 @@ The loss costs power, not validity, and the evidence for that is specific:
       denominator agree to within one point.
 \end{itemize}
 
-We therefore report run~B on the 279 tasks scoreable in all four arms. One
+We therefore report run~B on the 279 tasks scoreable in all four arms, with
+intervals roughly 20\% wider than run~A's. One
 residual caveat: the lost tasks are slightly enriched for hard (87\% against
 83\% overall), so run~B's absolute accuracies are marginally optimistic. Every
 arm is affected identically.
 
+One lesson generalises beyond this paper. Pinning a single provider endpoint
+with fallbacks disabled is correct for validity, since it holds quantization,
+price and throughput fixed across arms, but it transfers responsibility for
+transient failures to the harness, and here nothing looked wrong until the
+results were read. Benchmark harnesses that pin endpoints need a
+rate-of-progress check, not just a liveness check.
+
 \subsection{What the third model changed}
+\label{sec:reversals}
 
 Runs~A and~B were run and analysed first, and three of this paper's claims were
 written against them. Run~C overturned two and forced the withdrawal of a
@@ -93,7 +102,7 @@ the two ablation arms (\armH{}, \armS{}) are adjacent throughout.}
 \armH{} vs \armC{}     & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} & $2{\times}10^{-17}$ \,\, 18/\textbf{111} \\
 \armS{} vs \armM{}     & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 & $2{\times}10^{-8}$ \,\, 22/78 \\
 \armM{} vs \armH{}     & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 & 0.44 \,\, 58/49 \\
-\textbf{\armS{} vs \armH{}} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 & $\mathbf{4{\times}10^{-7}}$ \,\, 20/\textbf{67} \\
+\armS{} vs \armH{} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 & $\mathbf{4{\times}10^{-7}}$ \,\, 20/\textbf{67} \\
 \bottomrule
 \end{tabular}
 \caption{Every pairwise paired McNemar: $p$-value, then discordant pairs won by
@@ -107,9 +116,7 @@ three runs do not agree on it.}
 is also the cheapest arm, so there is no accuracy/cost tradeoff to report; on
 run~C that coincidence ends (Section~\ref{sec:efficiency}).
 
-\subsection{The harness measures what the leaderboard measures}
-
-Before any of the comparisons below, one check licenses them. \armM{}
+One check licenses those comparisons. \armM{}
 reproduces the published leaderboard band on run~A: 22.9\% hard against a
 20--26\% band for credible named entrants, on a model weaker than any of them.
 On runs~B and~C the same arm reaches 42.9\% and 50.3\%, above the band, which
@@ -162,19 +169,17 @@ Run C    & $+14.2$ pp & 87 (20/67) & $4{\times}10^{-7}$ \\
 \end{tabular}
 \end{center}
 
-This is the first of the reversals. On runs~A and~B alone the scaffolding step
-did not survive a significance test, and a pooled $p{=}0.29$ with disagreeing
-signs looked like evidence of absence; it was evidence of a capability range
-too narrow to show the effect. Two of three models favour the
-scaffolding and one is flat; none favours the bare schema. On run~A the hard
-slice alone is already $p{=}0.015$ (16/34); the 0.058 above is the all-401 test, diluted by
-the easy tasks.
+On runs~A and~B alone the scaffolding step did not survive a significance
+test, and a pooled $p{=}0.29$ with disagreeing signs looked like evidence of
+absence. It was evidence of a capability range too narrow to show the effect. Two of three models favour the
+scaffolding and one is flat; none favours the bare schema.\footnote{On run~A
+the hard slice alone is already $p{=}0.015$ (16/34); the 0.058 above is the
+all-401 test, diluted by the easy tasks.}
 
-What the fourth arm was built to test survives intact. A reader's first objection to \armC{} is that the contract might
-be helping through some mechanism other than its knowledge: a narrowed table
-surface, an imposed procedure, or simply making the agent slow down.
-That deflationary reading predicts \armH{} captures most of the gain. It does
-not, on any model: the content step is $1.8{\times}$ the scaffolding step on
+What the fourth arm was built to test survives intact. The deflationary
+reading --- that the contract helps through a narrowed table surface, an
+imposed procedure, or simply making the agent slow down --- predicts \armH{}
+captures most of the gain. It does not, on any model: the content step is $1.8{\times}$ the scaffolding step on
 run~C, $6.6{\times}$ on run~A, and the whole of the effect on run~B, where the
 scaffolding step is zero. \textbf{Scaffolding is a real but secondary effect that the content
 dominates everywhere.}
@@ -235,14 +240,13 @@ the cheapest arm on run~C.}
 \label{tab:efficiency}
 \end{table*}
 
-Reporting accuracy without cost yields needlessly expensive agents and
-mistaken conclusions about where accuracy comes from~\cite{agents-that-matter},
-which is why this table sits beside the accuracy one.
-
 \armC{} is not thinking harder; it has less to search for. That holds on all
 three models: it uses the fewest turns and by far the least reasoning
-everywhere. It is also the only arm that never exhausted its output budget on
-any run.
+everywhere, and it is the only arm that never exhausted its output budget on
+any run. Table~\ref{tab:efficiency} sits beside the accuracy table because
+reporting accuracy without cost yields needlessly expensive agents and
+mistaken conclusions about where accuracy comes
+from~\cite{agents-that-matter}.
 
 \textbf{The cost claim does not survive run~C, and we withdraw it as a general
 statement.} On the two weaker models \armC{} is the cheapest arm outright. On
@@ -251,56 +255,6 @@ own text is a real input-token bill, and a model whose output tokens are
 expensive relative to its input tokens amortises that bill differently. Per
 correct answer the ordering nearly closes (\$0.067 against \$0.062) but \armM{}
 still edges it. What generalises is the work claim, not the price claim.
-
-\subsection{Capability interaction}
-\label{sec:interaction}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig-interaction.pdf}
-\caption{Hard accuracy against base-model capability, where capability is the
-bare-schema arm's own accuracy. The margin over \armM{} is $+32.2$, $+13.7$ and
-$+27.1$: not monotone. \textbf{The apparent convergence between the first two
-models did not survive the third} (Section~\ref{sec:interaction}).}
-\label{fig:interaction}
-\end{figure}
-
-Ordered by what each model achieves from a bare schema
-(Figure~\ref{fig:interaction} and Table~\ref{tab:interaction}):
-
-\begin{table*}[t]
-\centering
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Hard tasks & \armS{} & \armM{} & \armC{} & \armC{}${-}$\armM{} \\
-\midrule
-\texttt{glm-5.3-flash}     & 13.9\% & 22.9\% & 55.1\% & $+32.2$ \\
-\texttt{deepseek-v4-flash} & 22.6\% & 42.9\% & 56.6\% & $+13.7$ \\
-\texttt{gpt-5.6-sol}       & 37.0\% & 50.3\% & 77.4\% & $+27.1$ \\
-\bottomrule
-\end{tabular}
-\caption{The margin over a hand-written prompt is \emph{not} monotone in the
-bare-schema baseline. The two-model trend did not survive a third model.}
-\label{tab:interaction}
-\end{table*}
-
-With two models this looked like a clean interaction: \armM{} improved by 20.0
-points while \armC{} moved 1.5, so the margin fell from $+32.2$ to $+13.7$ and
-the lines converged. \textbf{The third model breaks it: $+27.1$.} Whatever
-governs the size of the contract's advantage over a hand-written prompt, it is
-not a monotone function of base capability. This is the second reversal: an
-earlier version of this paper reported the shrinking margin as a finding, on
-two points.
-
-Two readings of the near-identical 55.1\%/56.6\% were available. Structured
-context might substitute for capability, so that a stronger model extracts the
-same semantics from prose unaided and the margin keeps shrinking; or \armC{}
-might have been pinned near a benchmark ceiling at ${\approx}56\%$ while
-\armM{} rose to meet it. Run~C reached \textbf{77.4\%}, so there is no ceiling
-at 56\% and the coincidence was a coincidence; and the $+27.1$ refutes the
-shrinking margin. Both simple stories are wrong, and three points cannot
-support a third.
 
 \subsection{The contract compiles, and the residual gap is derivation}
 \label{sec:derivation}
@@ -419,3 +373,46 @@ authoring cost of a macro layer is paid down by nothing.
 What survives a frontier model, then, is not difficulty in knowing the domain.
 It is the counterfactual and optimisation reasoning built on top of it.
 
+\subsection{The margin over a prompt is not monotone in capability}
+\label{sec:interaction}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig-interaction.pdf}
+\caption{Hard accuracy against base-model capability, where capability is the
+bare-schema arm's own accuracy. The margin over \armM{} is $+32.2$, $+13.7$ and
+$+27.1$: not monotone. \textbf{The apparent convergence between the first two
+models did not survive the third} (Section~\ref{sec:interaction}).}
+\label{fig:interaction}
+\end{figure}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Hard tasks & \armS{} & \armM{} & \armC{} & \armC{}${-}$\armM{} \\
+\midrule
+\texttt{glm-5.3-flash}     & 13.9\% & 22.9\% & 55.1\% & $+32.2$ \\
+\texttt{deepseek-v4-flash} & 22.6\% & 42.9\% & 56.6\% & $+13.7$ \\
+\texttt{gpt-5.6-sol}       & 37.0\% & 50.3\% & 77.4\% & $+27.1$ \\
+\bottomrule
+\end{tabular}
+\caption{The margin over a hand-written prompt is \emph{not} monotone in the
+bare-schema baseline. The two-model trend did not survive a third model.}
+\label{tab:interaction}
+\end{table*}
+
+Ordered by what each model achieves from a bare schema
+(Figure~\ref{fig:interaction} and Table~\ref{tab:interaction}), the contract's
+margin over \armM{} runs $+32.2$, $+13.7$ and $+27.1$. With two models this
+looked like a clean interaction: \armM{} improved by 20.0 points while
+\armC{} moved 1.5, and the lines converged. Two readings were available.
+Structured context might substitute for capability, so that a stronger model
+extracts the same semantics from prose unaided and the margin keeps shrinking;
+or \armC{} might have been pinned near a benchmark ceiling at ${\approx}56\%$
+while \armM{} rose to meet it. Run~C reached \textbf{77.4\%}, so there is no
+ceiling at 56\%, and its $+27.1$ refutes the shrinking margin. Whatever
+governs the size of the contract's advantage over a hand-written prompt, it is
+not a monotone function of base capability, and three points cannot support a
+third story.

@@ -1,43 +1,35 @@
 Retrieval-augmented ``context layers'' --- curated domain documentation an
-analytics agent fetches at query time --- are reported to produce large accuracy
-gains on text-to-SQL benchmarks. Published results compare a system with a
-context layer against one without. Two accuracy numbers cannot say which part
-of the layer did the work: the gain might come from the semantic content, from the
-retrieval scaffolding that delivers it, or from the pre-computed views and
-macros that usually accompany it.
+analytics agent fetches at query time --- are reported to produce large
+accuracy gains on text-to-SQL benchmarks. Those results compare a system with
+a layer against one without, and two accuracy numbers cannot say which part
+of the layer did the work: the semantic content, the retrieval scaffolding
+that delivers it, or the pre-computed views that usually accompany it.
 
-We report a controlled four-arm ablation on DABStep, run three times across
-three model families spanning a wide capability range. One run lost 29\% of its
-rows to provider rate-limiting, near-uniformly across arms; it is reported on
-the 279 tasks scoreable in all four, and is underpowered throughout. A fourth arm, \armH{}, is derived mechanically from the same frozen artifact:
-every field of prose is emptied, while the tool surface, retrieval instruction,
-table allow-list and operation rules stay byte-for-byte fixed. It isolates the
-scaffolding from the semantics.
+We report a controlled four-arm ablation on DABStep across three model
+families. The fourth arm, \armH{}, is derived mechanically from the frozen
+contract: every field of prose is emptied while the tool surface, retrieval
+instruction, table allow-list and operation rules stay byte-for-byte fixed.
 
 Contract-delivered semantics raise hard-task accuracy from 13.9\% to 55.1\%,
 22.6\% to 56.6\% and 37.0\% to 77.4\%, beating the same knowledge pasted
-verbatim into the prompt on all three models
-($p{\le}0.0067$, paired McNemar). The content step dominates the scaffolding step everywhere, but the
-scaffolding step is \emph{not} zero: undetectable on two models and worth
-$+14.2$ points ($p{=}4{\times}10^{-7}$) on the third. \textbf{A null across two
-adjacent models is weak evidence of absence}, and we report the correction that
-follows.
+verbatim into the prompt on all three models ($p{\le}0.0067$, paired
+McNemar). The content step dominates the scaffolding step everywhere, but the
+scaffolding step is not zero: undetectable on two models and worth $+14.2$
+points ($p{=}4{\times}10^{-7}$) on the third. \textbf{A null across two
+adjacent models is weak evidence of absence.}
 
-The contract is also executable. Transcribing its declared
-\texttt{sql\_expression} fields into two views reproduces the benchmark's gold
-answers exactly on 176 of 176 covered tasks, which proves the artifact contains
-what those tasks need and converts each arm's accuracy into efficiency against a
-proven ceiling. Measured that way, the contract arm recovers 60.8\%, 62.7\% and
-\textbf{94.9\%} of what it was given, against 45.9\%, 46.5\% and 56.1\% on tasks
-that compose those semantics further: \textbf{capability arrives unevenly,
-closing 87\% of the gap on tasks the contract answers directly and 19\% on
-tasks built on top of them}. The cost of making an agent derive a query rather
-than pre-computing it is therefore transient, which we recorded as a prediction
-publicly before the third run executed; the cost of the reasoning built above
+The contract is also executable. Transcribing its declared SQL expressions
+into two views reproduces gold on all 176 tasks it covers, 53\% of the hard
+split, so each arm's accuracy can be read as efficiency against a proven
+ceiling. The contract arm recovers 60.8\%, 62.7\% and \textbf{94.9\%} of what
+it was given, against 45.9\%, 46.5\% and 56.1\% on tasks that compose the same
+semantics further. \textbf{Capability arrives unevenly}: the cost of making an
+agent derive a query rather than pre-computing it is transient, as we
+predicted publicly before the third run; the cost of the reasoning built above
 that query is not.
 
-We also find that the advantage over a hand-written prompt is not monotone in
-capability, and that the effect is not detectable outside the domain the
-contract describes, on slices too small to settle the question. The harness,
-the digest-pinned artifact, all 4{,}812 transcripts and the raw results are
+The advantage over a hand-written prompt is not monotone in capability, and
+the effect is not detectable outside the domain the contract describes. One
+run lost 29\% of its rows to rate-limiting and is underpowered throughout. The
+harness, the frozen artifact, all 4{,}812 transcripts and raw results are
 released.

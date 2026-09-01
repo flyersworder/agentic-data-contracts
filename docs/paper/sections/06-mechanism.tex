@@ -44,15 +44,14 @@ and produced the identical wrong number. The contract arm called
 back: \emph{``rules that apply to credit transactions: is\_credit true or
 null''}.
 
-Long contexts are not read uniformly: retrieval quality falls for material
-buried mid-prompt~\cite{lost-in-the-middle}, and what a tool's documentation
-says changes what an agent does with it~\cite{tool-documentation}. Both bear on
-what follows.
-
 \textbf{The decisive detail is that \texttt{manual.md} documents this rule
 too.} \armM{} had it, inside a 24{,}177-character system prompt. \armC{}'s
 resident prompt is 2{,}475 characters, with the rule reachable by one targeted
-call.
+call. Two published results frame the difference: retrieval quality falls for
+material buried mid-prompt~\cite{lost-in-the-middle}, and what a tool's
+documentation says changes what an agent does with
+it~\cite{tool-documentation}. \armM{}'s copy of the rule was buried
+mid-prompt; \armC{}'s was a tool's documentation.
 
 The finding is not that the contract arm was given more information. For
 \emph{this} rule both arms had it, and only one used it. What the contract
@@ -105,16 +104,17 @@ capture-delay band mapping, a per-merchant monthly aggregate, the natural-month
 reconstruction, and fraud measured on euro volume. We then restricted the
 comparison to the 97 \emph{tasks} that require all six (69 on run~B, whose
 truncation cost the rest), so every row compared carries the same
-requirement. The detectors are deliberately permissive: the
-question is whether the agent expressed the idea, not whether it copied the
-contract's phrasing.
+requirement (Table~\ref{tab:clauses}). The detectors are deliberately
+permissive: the question is whether the agent expressed the idea, not whether
+it copied the contract's phrasing.
 
-\begin{center}
+\begin{table}[t]
+\centering
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \begin{tabular}{@{}lrrr@{}}
 \toprule
-Wrote all six clauses & Run A & Run B & Run C \\
+\tabhead{Wrote all six clauses} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} \\
 \midrule
 \armS{} & 7\% & 4\% & 8\% \\
 \armH{} & 14\% & 4\% & 8\% \\
@@ -122,7 +122,12 @@ Wrote all six clauses & Run A & Run B & Run C \\
 \armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{98\%} \\
 \bottomrule
 \end{tabular}
-\end{center}
+\caption{Share of the 97 tasks requiring all six of the contract's
+load-bearing fee clauses (69 on run~B) on which the agent's submitted SQL
+expresses all six. \armM{} holds the same knowledge as prose in its system
+prompt.}
+\label{tab:clauses}
+\end{table}
 
 \armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$ and
 $2{\times}10^{-47}$ (Fisher exact). \armM{} holds the same knowledge, as prose,
@@ -142,11 +147,9 @@ makes the point concretely: on run~A it writes more clauses than \armM{} and
 still scores at the bare-schema floor. The measure captures whether the
 contract's vocabulary reaches the query, not whether the query is any good.
 
-One confound is worth recording, because the uncontrolled version of this
-number is the one that looks impressive. Pooled across families, \armC{} attempts that wrote the \texttt{NULL}-wildcard clause
-were correct 90\% of the time against 23\% for those that did not --- a
-67-point effect, with similar gaps for four other clauses. It is an artifact of
-task mix: families differ in which clauses they need, so ``wrote the clause''
-partly encodes ``drew an easier family''. Restricting to a single
-required-clause set, as above, removes the confound and the entire within-arm
-effect disappears.
+The uncontrolled version of this number is tempting and wrong. Pooled across
+families, \armC{} attempts that wrote the \texttt{NULL}-wildcard clause were
+correct 90\% of the time against 23\% for those that did not, a 67-point
+effect; but families differ in which clauses they need, so ``wrote the
+clause'' partly encodes ``drew an easier family'', and restricting to a single
+required-clause set, as above, removes the effect entirely.

@@ -13,7 +13,8 @@ figures: $(FIGS)
 
 $(FIGS): figures/make_figures.py \
          ../../experiments/dabstep-contract-eval/results/glm-full.jsonl \
-         ../../experiments/dabstep-contract-eval/results/dsflash-full.jsonl
+         ../../experiments/dabstep-contract-eval/results/dsflash-full.jsonl \
+         ../../experiments/dabstep-contract-eval/results/sol-full.jsonl
 	cd figures && uv run make_figures.py
 
 main.pdf: main.tex refs.bib $(FIGS) $(wildcard sections/*.tex)

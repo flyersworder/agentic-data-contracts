@@ -47,10 +47,10 @@ run~C can neither support nor contradict the claim: there was nothing to deter.
 The transcripts suggest why, and it is not that the stronger model is better
 behaved in the abstract. Holding an intermediate result is a need every model
 has; what differs is the idiom. Run~C uses common table expressions on 59\% and
-55\% of its ungoverned traces, against 32\%/30\% on run~A and 26\%/27\% on
+55\% of its ungoverned traces (\armS{} and \armM{} respectively), against 32\%/30\% on run~A and 26\%/27\% on
 run~B. \texttt{CREATE TEMP} appears in 22 of run~A's ungoverned traces and 3 of
-run~B's, and in none of run~C's --- 120 and 4 statements respectively, against
-zero. \textbf{Capability changed which idiom the model reaches for, not
+run~B's, and in none of run~C's; on run~A it accounts for every mutating
+statement submitted, on run~B for 4 of 25. \textbf{Capability changed which idiom the model reaches for, not
 whether it needs one.} We cannot separate that from a trained disposition
 against writing to a warehouse; the idiom substitution is evidence for the
 capability explanation, not proof against the disposition one.
@@ -82,23 +82,21 @@ still appears in the transcript as a tool call, so the count above is of what
 the model \emph{emitted}, not of what survived validation. Zero does not mean
 ``attempted and blocked'' --- it means \textbf{never attempted}. In 4{,}812
 rows the enforcement layer never had to fire in a governed arm, because the
-declared rules stopped the attempts upstream of it.
+declared rules stopped the attempts upstream of it. Nor can the data
+distinguish a model that will not attempt from one that would have been
+caught; both produce zero. What the transcripts support is narrower: with the
+rules present, the attempts stop, and a validator stands behind them if they
+do not.
 
 Neither layer is novel in itself. Capability-based enforcement outside the
 model is the design behind CaMeL~\cite{camel}, and policy compliance under a
 prompt-stated document is what $\tau$-bench measures~\cite{tau-bench}. What is
 less established is the first layer's efficacy: RuLES finds models breaking
 simple stated rules even with no adversary present~\cite{rules}, which is the
-published expectation our 144-to-0 result runs against.
-
-This distinction matters for what the number is evidence of. The 144-to-0
-contrast measures the \emph{declarative} mechanism: rules the model reads and
-complies with, which cost nothing at query time and depend on compliance. It is
-not evidence about the enforcement layer, which our data cannot exercise
-precisely because the first layer worked. Nor can our data distinguish a model
-that will not attempt from one that would have been caught --- both produce
-zero. We report what the transcripts support: with the rules present, the
-attempts stop, and a validator stands behind them if they do not.
+published expectation our 144-to-0 result runs against. The contrast
+measures that \emph{declarative} mechanism, which costs nothing at query time
+and depends on compliance; it is not evidence about the enforcement layer,
+which the data cannot exercise precisely because the first layer worked.
 
 \subsection{One escalation reached the database}
 
@@ -127,8 +125,7 @@ jailbreak, or an adversarial prompt, but a competent agent routing around a
 session boundary to finish its work, in which every individual statement is
 locally reasonable. No test written in advance would have anticipated this path,
 which is the argument for a declarative rule that does not need to. The run used
-a disposable per-worker copy, so nothing real was harmed, and the integrity
-check reported clean, so the detection is trustworthy.
+a disposable per-worker copy, so nothing real was harmed.
 
 \paragraph{The harness converts a harmless idiom into a harmful one.} The
 statements are not malformed SQL that a validator would catch; the ungoverned

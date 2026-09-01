@@ -225,6 +225,45 @@ model's output price. For `gpt-5.6-sol` that is ~$33 per group *before any
 observation tightens it*, so a probe of that model cannot run under a cap below
 ~$35 however little it will actually spend. Probe models one at a time.
 
+### Probe result: pro is not a third capability point
+
+**Run 2026-09-01.** `schema_only`, 50 stratified tasks, $2.40. Paired on the 40
+hard tasks all three models have scored:
+
+| model | hard | 95% CI |
+|---|---:|---|
+| `glm-5.3-flash` | 6/40 = 15.0% | [7, 29] |
+| `deepseek-v4-flash` | 10/40 = 25.0% | [14, 40] |
+| **`deepseek-v4-pro`** | **11/40 = 27.5%** | [16, 43] |
+
+Pro vs flash: 3 discordant pairs (1 vs 2), **p=1.0**. Pro spends 19.4 turns per
+hard task against flash's 18.6 to land in the same place.
+
+**What this does not say.** `schema_only` measures how much *unstated domain
+convention* a model recovers from a bare schema. That a `NULL` in `fees` means
+"applies to every value" is a fact about Adyen's business, not something
+reasoning recovers — so this arm is closer to a floor on missing information
+than a capability test. It is not evidence that pro is a weak model, and the
+plan should stop calling `schema_only` accuracy "the capability axis" without
+that qualification.
+
+**What it does say.** Bare-schema hard accuracy sits in a 15--27% band across
+four models and three families, including the DABStep paper's own o4-mini at
+14.6%, while the contract arm sits at 55--57%. If that survives the `gpt-5.6-sol`
+probe, **the reportable finding is that bare-schema accuracy is largely
+capability-insensitive on this benchmark** — which argues the paper's thesis
+directly (the bottleneck is information, not reasoning) and is stronger than the
+interaction plot it replaces. Section 5.5 would change from "two readings we
+cannot separate" into a result.
+
+**The pro sweep still has a live rationale, and it is not the one this plan
+started with.** The probe measured only the bare-schema arm; how pro behaves
+*with* a contract is unmeasured. If pro reaches materially above flash's 56.6%
+on the contract arm, capability and context are **complementary rather than
+substitutes** — which reframes the interaction rather than closing it, and is a
+result neither reading in Section 5.5 predicts. That question needs the contract
+and manual_prompt arms, so it needs the sweep.
+
 ### Which arms
 
 **Three, not four: `schema_only`, `manual_prompt`, `contract`.** Drop

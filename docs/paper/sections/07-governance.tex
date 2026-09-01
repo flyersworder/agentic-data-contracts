@@ -55,20 +55,43 @@ whether it needs one.} We cannot separate that from a trained disposition
 against writing to a warehouse; the idiom substitution is evidence for the
 former and not proof against the latter.
 
-\subsection{Deterrence, not interception}
+\subsection{Two layers, and only the first was exercised}
 
-A rejected tool call still appears in the transcript as a tool call: the count
-above is of what the model \emph{emitted}, not what survived validation. Zero
-therefore does not mean ``attempted and blocked'' --- it means \textbf{never
-attempted}. The forbidden-operation rules, stated declaratively in the contract
-and visible in the system prompt, deterred the behaviour rather than
-intercepting it.
+The governed arms have two independent defences, both declared as data in the
+contract rather than written as code:
 
-That is a cheaper mechanism than enforcement and a more fragile one: it costs
-nothing at query time and depends on the model's compliance rather than on the
-validator. Our data cannot distinguish a model that will not attempt from one
-that would be caught if it did --- both produce zero. We report what the
-transcripts support: with the rules present, the attempts stop.
+\begin{enumerate}
+\itemsep2pt
+\item \textbf{Declarative.} \texttt{forbidden\_operations} and the table
+      allow-list are rendered into the system prompt, so the agent is told
+      what it may not do before it writes anything.
+\item \textbf{Enforced.} The same two fields drive static checkers that
+      validate every statement before execution. We confirmed this directly:
+      driving the governed query tool against a scratch copy of the warehouse,
+      \texttt{CREATE TABLE}, \texttt{CREATE TEMP TABLE},
+      \texttt{CREATE\ldots VIEW}, \texttt{DROP}, \texttt{UPDATE} and
+      \texttt{INSERT} are each refused with an explicit violation --- the
+      mutations trip both the operation blocklist \emph{and} the table
+      allow-list, since the target is not a declared table --- while an
+      ordinary \texttt{SELECT} over a declared table executes normally. The
+      database is unchanged afterwards.
+\end{enumerate}
+
+\textbf{The experiment exercised only the first layer.} A rejected tool call
+still appears in the transcript as a tool call, so the count above is of what
+the model \emph{emitted}, not of what survived validation. Zero does not mean
+``attempted and blocked'' --- it means \textbf{never attempted}. In 4{,}812
+rows the enforcement layer never had to fire in a governed arm, because the
+declared rules stopped the attempts upstream of it.
+
+This distinction matters for what the number is evidence of. The 144-to-0
+contrast measures the \emph{declarative} mechanism: rules the model reads and
+complies with, which cost nothing at query time and depend on compliance. It is
+not evidence about the enforcement layer, which our data cannot exercise
+precisely because the first layer worked. Nor can our data distinguish a model
+that will not attempt from one that would have been caught --- both produce
+zero. We report what the transcripts support: with the rules present, the
+attempts stop, and a validator stands behind them if they do not.
 
 \subsection{One escalation reached the database}
 

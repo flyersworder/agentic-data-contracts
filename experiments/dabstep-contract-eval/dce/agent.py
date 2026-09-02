@@ -701,7 +701,7 @@ def build_result_row(
         # all is a row the pin held for.
         "provider_tag": MODELS[model].provider_tag,
         "quantization": MODELS[model].quantization,
-        "reasoning_effort": REASONING_EFFORT,
+        "reasoning_effort": reasoning_effort_for(model),
         # Reasoning tokens actually spent — a subset of `output_tokens`, and
         # billed at the output rate, which is the pricier one.
         #
@@ -806,6 +806,33 @@ def _spec_field(model: str, field: str) -> str:
     return getattr(spec, field, "unknown") if spec is not None else "unknown"
 
 
+#: What a `litellm_anthropic` row records in place of `REASONING_EFFORT`.
+#:
+#: `REASONING_EFFORT` is a real OpenRouter parameter this harness sends
+#: explicitly, for the reason its own comment gives: an unset parameter is not a
+#: fixed parameter. That parameter does not exist on Anthropic's Messages API —
+#: the gateway rejects OpenRouter's nested `reasoning` body outright — and this
+#: route sends no thinking configuration at all, so the model reasons at
+#: whatever its own default is. Stamping "medium" on those rows would assert a
+#: control that was never applied, and it would be invisible in the data
+#: precisely because it looks like every other row. This sentinel makes the gap
+#: legible instead, which is the whole point of stamping the field.
+REASONING_EFFORT_UNSET: str = "unset:anthropic-default"
+
+
+def reasoning_effort_for(model: str) -> str:
+    """The `reasoning_effort` to stamp on a row for `model`.
+
+    Falls back to `REASONING_EFFORT` for an unpinned id, matching
+    `_spec_field`'s contract: this is called from `_priced_fallback_row`'s
+    non-raising path too, so an exotic unknown model must not make it throw.
+    """
+    spec = MODELS.get(model)
+    if spec is not None and spec.route == "litellm_anthropic":
+        return REASONING_EFFORT_UNSET
+    return REASONING_EFFORT
+
+
 def _priced_fallback_row(
     *,
     task: dict,
@@ -870,7 +897,7 @@ def _priced_fallback_row(
         "trace_path": None,
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
-        "reasoning_effort": REASONING_EFFORT,
+        "reasoning_effort": reasoning_effort_for(model),
         "reasoning_tokens": _reasoning_tokens(usage),
         "input_tokens": in_tok,
         "output_tokens": out_tok,
@@ -900,6 +927,104 @@ def _priced_fallback_row(
     }
 
 
+def _litellm_anthropic_agent(
+    *, model: str, system_prompt: str, tools: list, retries: int
+):
+    """Build the agent for a `route="litellm_anthropic"` model.
+
+    A SECOND WIRE PROTOCOL, NOT A SECOND BASE URL. These models are Anthropic
+    models reached through an enterprise LiteLLM gateway, and they are
+    built on `AnthropicModel` (the Messages API) rather than `OpenAIChatModel`.
+    The gateway does expose an OpenAI-compatible `/v1/chat/completions` route
+    that works, and taking it would have been a one-line change — it was
+    measured and rejected, for a reason that is about validity and not
+    convenience:
+
+    **Anthropic prompt caching requires explicit `cache_control` breakpoints**,
+    which OpenRouter injects for Anthropic models and the gateway's
+    OpenAI-compatible route does not. Measured over that route: zero
+    `cache_read_input_tokens` on every request. Replaying `results/sol-full.jsonl`
+    — the same $2/$10 rates as this model — with every input token billed fresh
+    puts a full sweep at $196.63 against $72.36, and, fatally, the penalty is
+    ARM-DEPENDENT: 1.86x on `schema_only` against 3.40x on `manual_prompt`. A
+    cost column skewed by a factor that varies with how much context an arm
+    carries measures the route's caching policy rather than the arms — which is
+    precisely the confound `README.md`'s smoke-run check exists to catch, and
+    it would have been baked in rather than merely observed. Verified on this
+    route instead: 5,677 cache-read tokens within one run.
+
+    THREE PARAMETERS THE OPENROUTER PATH SENDS ARE NOT SENT HERE. The gateway
+    fronts Bedrock, which rejects `temperature` at anything but 1 (HTTP 400,
+    "Only temperature=1 is supported"), rejects `seed` outright ("bedrock does
+    not support parameters: ['seed']"), and rejects OpenRouter's nested
+    `reasoning: {effort: ...}` body ("Extra inputs are not permitted"). The
+    first two mean BOTH of this harness's determinism controls are unavailable
+    for this model and its runs are correspondingly less reproducible than the
+    other four — a caveat for any writeup, stamped on every row via
+    `supports_temperature`. The third is replaced by a native thinking budget.
+
+    Everything the arms share — `retries`, the token guard, the tool-call cap,
+    `max_tokens` — is held identical to the OpenRouter path, because those are
+    the controls that keep the arm comparison honest and they are not
+    route-specific.
+    """
+    from anthropic import AsyncAnthropic
+    from httpx2 import AsyncClient
+    from pydantic_ai import Agent
+    from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+
+    base_url = os.environ["LITELLM_BASE_URL"]
+    api_key = os.environ["LITELLM_MASTER_KEY"]
+
+    return Agent(
+        AnthropicModel(
+            model,
+            provider=AnthropicProvider(
+                anthropic_client=AsyncAnthropic(
+                    api_key=api_key,
+                    base_url=base_url,
+                    # The gateway is an internal host behind the enterprise CA,
+                    # which is not in certifi's store — so an unconfigured
+                    # client fails with "unable to get local issuer
+                    # certificate". `SSL_CERT_FILE` (certifi's bundle
+                    # concatenated with the enterprise root) is the documented
+                    # setup; see README. Not disabling verification: this
+                    # request carries a live gateway key.
+                    #
+                    # `max_retries` is left at the Anthropic SDK's default
+                    # rather than pinned to 0. The OpenRouter path inherits the
+                    # OpenAI SDK's default retries the same way, and a sweep
+                    # that turned transient 429s into terminal rows on ONE
+                    # route would differ from the others in how often it loses
+                    # paid work -- an asymmetry in the harness, not in the
+                    # thing under test.
+                    http_client=AsyncClient(timeout=300),
+                )
+            ),
+        ),
+        system_prompt=system_prompt,
+        tools=tools,
+        # Identical to the OpenRouter path — see its comment. A confound
+        # control, not a robustness knob, and it must not vary by route.
+        retries=retries,
+        model_settings=AnthropicModelSettings(
+            timeout=300,
+            # Same bound, same reason as the OpenRouter path. This model's
+            # ceiling is 128k, so the shared 64k value is genuinely available
+            # to it rather than being silently clamped.
+            max_tokens=MAX_OUTPUT_TOKENS_PER_REQUEST,
+            # The two settings that make caching actually happen. NOT
+            # `anthropic_cache` — pydantic-ai's automatic mode places
+            # breakpoints differently; these two mark the instructions and the
+            # trailing message block, which is the pairing verified to produce
+            # cache reads both within and across runs.
+            anthropic_cache_instructions=True,
+            anthropic_cache_messages=True,
+        ),
+    )
+
+
 def _default_agent_factory(
     *, model: str, system_prompt: str, tools: list, retries: int
 ):
@@ -909,6 +1034,10 @@ def _default_agent_factory(
     from pydantic_ai.settings import ModelSettings
 
     spec = MODELS[model]
+    if spec.route == "litellm_anthropic":
+        return _litellm_anthropic_agent(
+            model=model, system_prompt=system_prompt, tools=tools, retries=retries
+        )
     return Agent(
         OpenAIChatModel(
             model, provider=OpenRouterProvider(api_key=os.environ["OPENROUTER_API_KEY"])

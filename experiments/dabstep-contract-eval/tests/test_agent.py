@@ -1411,8 +1411,10 @@ def test_default_agent_factory_pins_the_endpoint_and_the_reasoning_effort():
     assert body["reasoning"]["effort"] == agent.REASONING_EFFORT
 
 
-@pytest.mark.parametrize("model_id", list(MODELS))
-def test_every_model_gets_its_own_pin_not_a_shared_one(model_id):
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "openrouter"]
+)
+def test_every_openrouter_model_gets_its_own_pin_not_a_shared_one(model_id):
     import os
 
     os.environ.setdefault("OPENROUTER_API_KEY", "test-key-never-called")
@@ -1421,6 +1423,60 @@ def test_every_model_gets_its_own_pin_not_a_shared_one(model_id):
     )
     body = (built.model_settings or {})["extra_body"]
     assert body["provider"]["order"] == [MODELS[model_id].provider_tag]
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_anthropic"]
+)
+def test_the_anthropic_route_caches_and_sends_none_of_the_rejected_params(
+    model_id, monkeypatch
+):
+    """The gateway fronts Bedrock, which rejects three things the OpenRouter
+    path sends: `temperature` at anything but 1, `seed` at all, and
+    OpenRouter's nested `reasoning` body. All three were HTTP 400s against the
+    live gateway, so this asserts the settings that actually go out carry none
+    of them — and that the two cache settings which are this route's whole
+    reason for existing are present. Without them the route bills every input
+    token fresh, at a multiplier that varies BY ARM (1.86x-3.40x), which would
+    put the confound into the data rather than merely near it.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key-never-called")
+
+    built = agent._default_agent_factory(
+        model=model_id, system_prompt="s", tools=[], retries=1
+    )
+    settings = built.model_settings or {}
+
+    assert settings["anthropic_cache_instructions"] is True
+    assert settings["anthropic_cache_messages"] is True
+    for rejected in ("temperature", "seed", "extra_body"):
+        assert rejected not in settings, rejected
+
+    # The controls that keep the arm comparison honest are NOT route-specific
+    # and must not drift between the two factories.
+    assert settings["max_tokens"] == agent.MAX_OUTPUT_TOKENS_PER_REQUEST
+    assert settings["timeout"] == 300
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_anthropic"]
+)
+def test_the_anthropic_route_fails_loudly_on_missing_gateway_credentials(
+    model_id, monkeypatch
+):
+    """A missing key must raise at construction, where `run_task` turns it into
+    a `construction_error` row and the circuit breaker trips after five — not
+    fall back to a default provider that would quietly send this key-bearing
+    traffic somewhere else.
+    """
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+
+    with pytest.raises(KeyError):
+        agent._default_agent_factory(
+            model=model_id, system_prompt="s", tools=[], retries=1
+        )
 
 
 def test_spec_field_returns_unknown_rather_than_raising_for_an_unpinned_model():

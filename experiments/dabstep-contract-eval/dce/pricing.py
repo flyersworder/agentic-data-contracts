@@ -21,6 +21,13 @@ The spread is not a rounding error:
 So `provider_tag` and the three prices belong to one another and must move
 together; changing the pin without repricing silently corrupts every `usd` in a
 results file. `tests/test_pricing.py` asserts they stay consistent.
+
+NOT EVERY MODEL HERE IS AN OPENROUTER MODEL. `claudesonnet5` is served by
+an enterprise LiteLLM gateway over Anthropic's own Messages API, and
+`ModelSpec.route` says which of the two wire protocols a spec needs. Everything
+above about pinning still applies to it, but the pin is weaker and the reasons
+differ — see that entry's own comment rather than assuming the OpenRouter
+reasoning transfers.
 """
 
 from __future__ import annotations
@@ -50,6 +57,15 @@ class ModelSpec:
     #: `extra_body` rather than `ModelSettings`.
     supports_temperature: bool
     role: str
+    #: Which serving route reaches this model, and therefore which client
+    #: `dce.agent._default_agent_factory` builds for it. `"openrouter"` is the
+    #: original route (OpenAI-compatible chat completions through
+    #: `OpenRouterProvider`, with the endpoint pin in `extra_body`);
+    #: `"litellm_anthropic"` is Anthropic's own Messages API fronted by an
+    #: an enterprise-internal LiteLLM gateway, which is a different wire protocol,
+    #: not merely a different base URL. Defaulted so the four OpenRouter specs
+    #: above read exactly as they did before this field existed.
+    route: str = "openrouter"
 
 
 MODELS: dict[str, ModelSpec] = {
@@ -151,6 +167,45 @@ MODELS: dict[str, ModelSpec] = {
             # Not in this model's OpenRouter `supported_parameters`.
             supports_temperature=False,
             role="frontier_subset",
+        ),
+        # NOT AN OPENROUTER MODEL. Anthropic Claude Sonnet 5 reached through
+        # an enterprise LiteLLM gateway
+        # (an internal LiteLLM deployment), which fronts Bedrock EU and
+        # resolves this alias to `eu.anthropic.claude-sonnet-5`.
+        #
+        # `provider_tag` carries the resolved upstream rather than an
+        # OpenRouter endpoint tag, and nothing sends it on the wire: the
+        # gateway alias IS the pin. That is a weaker guarantee than the
+        # OpenRouter specs above enjoy — the gateway can be re-pointed at a new
+        # Bedrock snapshot without the alias changing, and no response field
+        # would reveal it. Recorded here so the caveat lives in the data.
+        #
+        # Prices are the gateway's OWN metering, read from `/model/info` on
+        # 2026-09-02 (prod): $2.00 / $10.00 per MTok, $0.20 per MTok cache
+        # read, $2.50 per MTok cache write. Read from the gateway rather than
+        # from Anthropic's list page for exactly the reason this module's
+        # docstring gives for reading OpenRouter's endpoint rather than its
+        # model card: the biller's number is the real one. Note these are
+        # Anthropic's *introductory* Sonnet 5 rates, which its published
+        # schedule ended on 2026-08-31 — the gateway was still metering at the
+        # introductory tier when this was read, and a re-check is cheap.
+        #
+        # `supports_temperature=False`, and it is not a supported-parameters
+        # technicality: Bedrock rejects `temperature=0` outright with HTTP 400
+        # ("Only temperature=1 is supported"), and rejects `seed` the same way.
+        # BOTH of this harness's determinism knobs are therefore unavailable
+        # for this model, which the other four do not have to disclose. See
+        # `dce.agent._litellm_anthropic_agent`.
+        ModelSpec(
+            "claudesonnet5",
+            provider_tag="bedrock-eu/eu.anthropic.claude-sonnet-5",
+            quantization="unknown",
+            price_in=2.00,
+            price_out=10.00,
+            price_cached=0.20,
+            supports_temperature=False,
+            role="frontier_subset",
+            route="litellm_anthropic",
         ),
     )
 }

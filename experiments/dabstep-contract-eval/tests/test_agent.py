@@ -1759,3 +1759,33 @@ def test_a_non_429_transport_error_is_not_retried(tmp_path, monkeypatch):
     )
     assert calls["n"] == 1
     assert row["verdict"] == "error"
+
+
+def test_reasoning_tokens_are_read_under_both_provider_spellings():
+    """The key is provider-specific and reading only one is SILENT. OpenAI-shaped
+    responses report `reasoning_tokens`; Anthropic's Messages API reports
+    `thinking_tokens` for the same quantity, billed the same way at the output
+    rate. Reading only the first spelling recorded a confident 0 on every
+    `claudesonnet5` row -- a column that reads "this model does not reason"
+    while the model reasons and charges for it. Measured through the gateway
+    with `_default_agent_factory` itself: 645 thinking tokens on one run,
+    recorded as 0 before this was fixed.
+    """
+
+    class _Usage:
+        def __init__(self, details):
+            self.details = details
+
+    assert agent._reasoning_tokens(_Usage({"reasoning_tokens": 120})) == 120
+    assert agent._reasoning_tokens(_Usage({"thinking_tokens": 645})) == 645
+    # Summed, not first-wins: a provider reporting both must not have half of
+    # its reasoning silently dropped.
+    assert (
+        agent._reasoning_tokens(_Usage({"reasoning_tokens": 5, "thinking_tokens": 7}))
+        == 12
+    )
+    # Still defensive -- a paid row must never be lost to a usage shape.
+    assert agent._reasoning_tokens(_Usage({})) == 0
+    assert agent._reasoning_tokens(_Usage(None)) == 0
+    assert agent._reasoning_tokens(None) == 0
+    assert agent._reasoning_tokens(_Usage({"thinking_tokens": None})) == 0

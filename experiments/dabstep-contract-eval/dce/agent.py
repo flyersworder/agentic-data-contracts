@@ -781,15 +781,34 @@ class AgentConstructionError(RuntimeError):
     """
 
 
+#: The `RunUsage.details` keys that carry reasoning tokens, in priority order.
+#:
+#: THE KEY IS PROVIDER-SPECIFIC, AND GETTING THIS WRONG IS SILENT. OpenAI-shaped
+#: responses report `reasoning_tokens`; Anthropic's Messages API reports
+#: `thinking_tokens` for the same quantity. Reading only the first name records
+#: a confident `0` on every Anthropic row — not an error, not a warning, just a
+#: column that looks like "this model does not reason" while the model reasons
+#: and bills for it at the output rate. Measured on `claudesonnet5` through the
+#: gateway with this module's own factory: 645 thinking tokens on a single
+#: three-request run, recorded as 0 before this fix.
+_REASONING_TOKEN_KEYS: tuple[str, ...] = ("reasoning_tokens", "thinking_tokens")
+
+
 def _reasoning_tokens(usage) -> int:
     """Reasoning tokens accumulated over a run, or 0 when unreported.
 
     pydantic-ai keeps this in `RunUsage.details`, not as a first-class field,
     so it is read defensively: a provider that omits it, or a future release
     that renames the key, must yield 0 rather than break a paid row.
+
+    Both known spellings are tried (see `_REASONING_TOKEN_KEYS`). They are
+    summed rather than first-wins so a provider that ever reported both could
+    not have half its reasoning silently dropped; in practice exactly one is
+    present, and a missing key contributes nothing.
     """
     try:
-        return int((getattr(usage, "details", None) or {}).get("reasoning_tokens", 0))
+        details = getattr(usage, "details", None) or {}
+        return sum(int(details.get(key, 0) or 0) for key in _REASONING_TOKEN_KEYS)
     except Exception:
         return 0
 

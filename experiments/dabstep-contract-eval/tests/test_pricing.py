@@ -1,15 +1,37 @@
 import pytest
-from dce.agent import REASONING_EFFORT
+from dce.agent import (
+    REASONING_EFFORT,
+    REASONING_EFFORT_UNSET,
+    reasoning_effort_for,
+)
 from dce.pricing import MODELS, cost
 
 
-def test_all_four_models_are_pinned_snapshots():
+def test_every_model_is_a_pinned_snapshot():
     assert set(MODELS) == {
         "deepseek/deepseek-v4-flash-0731",
         "deepseek/deepseek-v4-pro-0813",
         "z-ai/glm-5.3-flash",
         "openai/gpt-5.6-sol",
+        "claudesonnet5",
     }
+
+
+def test_only_openrouter_models_carry_an_openrouter_endpoint_pin():
+    """`claudesonnet5` is not an OpenRouter model, and the difference is not
+    cosmetic: its `provider_tag` names the upstream the enterprise gateway
+    resolves its alias to, and nothing sends that tag on the wire. The
+    OpenRouter specs' `provider_tag` IS the pin, enforced per request; this
+    one is a record of what the alias meant when it was read. Asserting the
+    two are the same kind of thing would be the sort of quiet fiction the
+    module docstring warns about.
+    """
+    by_route = {}
+    for spec in MODELS.values():
+        by_route.setdefault(spec.route, []).append(spec.id)
+    assert set(by_route) == {"openrouter", "litellm_anthropic"}
+    assert by_route["litellm_anthropic"] == ["claudesonnet5"]
+    assert len(by_route["openrouter"]) == 4
 
 
 def test_every_model_pins_an_endpoint_not_just_an_id():
@@ -109,3 +131,23 @@ def test_reasoning_effort_is_an_explicit_value_not_a_provider_default():
     parameter. Every pinned model reasons by default, the default differs by
     endpoint, and reasoning tokens bill at the OUTPUT rate."""
     assert REASONING_EFFORT in {"minimal", "low", "medium", "high"}
+
+
+def test_a_row_never_claims_a_reasoning_effort_that_was_not_sent():
+    """The stamp exists to record the control that was applied. On the
+    Anthropic route no reasoning parameter is sent at all — the gateway
+    rejects OpenRouter's nested `reasoning` body — so stamping "medium" there
+    would assert a control that never happened, and would be undetectable in
+    the results precisely because it matches every other row.
+    """
+    for spec in MODELS.values():
+        stamped = reasoning_effort_for(spec.id)
+        if spec.route == "openrouter":
+            assert stamped == REASONING_EFFORT, spec.id
+        else:
+            assert stamped == REASONING_EFFORT_UNSET, spec.id
+            assert stamped != REASONING_EFFORT, spec.id
+
+    # An unpinned id must not raise: this runs on `_priced_fallback_row`'s
+    # non-raising path, the same contract `_spec_field` documents.
+    assert reasoning_effort_for("not/a-real-model") == REASONING_EFFORT

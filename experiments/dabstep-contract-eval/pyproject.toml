@@ -5,7 +5,7 @@ description = "DABStep contract-context evaluation: schema-only vs manual-in-pro
 requires-python = ">=3.12"
 dependencies = [
     "agentic-data-contracts",
-    "pydantic-ai-slim[openai]>=2.36",
+    "pydantic-ai-slim[anthropic,openai]>=2.36",
     "duckdb>=1.0",
     "huggingface-hub>=0.25",
     "scipy>=1.11",

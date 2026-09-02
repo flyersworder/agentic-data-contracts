@@ -315,13 +315,13 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dce.agent import (
-    REASONING_EFFORT,
     WORST_CASE_TOKEN_BUDGET_USD,
     AgentConstructionError,
     _commit_sha,
     _spec_field,
     _token_budget_usd,
     arm_digest,
+    reasoning_effort_for,
     run_task,
 )
 from dce.arms import ARMS, check_and_restore, make_working_copy
@@ -971,7 +971,7 @@ def _construction_error_row(
         "trace_path": None,
         "provider_tag": _spec_field(model, "provider_tag"),
         "quantization": _spec_field(model, "quantization"),
-        "reasoning_effort": REASONING_EFFORT,
+        "reasoning_effort": reasoning_effort_for(model),
         "reasoning_tokens": 0,
         "input_tokens": 0,
         "output_tokens": 0,

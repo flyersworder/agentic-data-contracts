@@ -52,6 +52,43 @@ Never commit a key, and never write one into a file under the repo — the
 sweep also refuses to start on a dirty working tree (see below), so a stray
 `.env` here would block the run as well as leak the key.
 
+### `claudesonnet5` — the enterprise gateway route
+
+One pinned model is not an OpenRouter model. `claudesonnet5` is Anthropic
+Claude Sonnet 5 reached through an enterprise LiteLLM gateway, which
+fronts Bedrock EU. It reads three variables instead of `OPENROUTER_API_KEY`,
+and the same rule applies — keep them outside the repo:
+
+```
+LITELLM_BASE_URL=https://<your-litellm-gateway>
+LITELLM_MASTER_KEY=<your gateway key>
+SSL_CERT_FILE=<certifi bundle + an enterprise root CA, concatenated>
+```
+
+`SSL_CERT_FILE` is not optional. The gateway is an internal host behind
+the enterprise CA, which is not in certifi's store, so without it every request
+fails with `unable to get local issuer certificate`. Build the bundle by
+concatenating `python -c "import certifi; print(certifi.where())"` with
+`<your-enterprise-root-ca>.pem`.
+
+**This model is less reproducible than the other four, and the results say
+so.** Bedrock rejects `temperature` at anything but 1 and rejects `seed`
+outright (both HTTP 400), so *both* of this harness's determinism controls are
+unavailable for it. It also has no `reasoning_effort`: that is an OpenRouter
+parameter, and the gateway rejects OpenRouter's nested `reasoning` body, so
+these rows stamp `reasoning_effort: "unset:anthropic-default"` rather than
+claiming a control that was never applied.
+
+It runs on Anthropic's Messages API rather than the OpenAI-compatible route,
+which is a deliberate choice and not a stylistic one. The gateway's
+OpenAI-compatible route works but injects no `cache_control`, so it returns
+zero cache reads — and billing every input token fresh costs a *different*
+multiple per arm (1.86x on `schema_only`, 3.40x on `manual_prompt`, replaying
+`results/sol-full.jsonl` at the same $2/$10 rates). That is the caching
+confound the smoke-run checklist below exists to catch, and taking the
+one-line route would have written it into the data. See
+`dce.agent._litellm_anthropic_agent`.
+
 ## Run
 
 ```bash

@@ -74,10 +74,22 @@ concatenating `python -c "import certifi; print(certifi.where())"` with
 **This model is less reproducible than the other four, and the results say
 so.** Bedrock rejects `temperature` at anything but 1 and rejects `seed`
 outright (both HTTP 400), so *both* of this harness's determinism controls are
-unavailable for it. It also has no `reasoning_effort`: that is an OpenRouter
-parameter, and the gateway rejects OpenRouter's nested `reasoning` body, so
-these rows stamp `reasoning_effort: "unset:anthropic-default"` rather than
-claiming a control that was never applied.
+unavailable for it. That is a caveat on this model's rows specifically; it is
+uniform across arms, so it weakens reproducibility rather than biasing the arm
+contrast.
+
+**Reasoning effort IS pinned, at the same `medium` as the other four.**
+Anthropic has no `reasoning_effort` — the gateway rejects OpenRouter's nested
+`reasoning` body — but `anthropic_effort` takes the same scale, so the pin is a
+translation rather than an invented number, and it is sent alongside
+`anthropic_thinking={"type": "adaptive"}`. Both matter: measured *without*
+them, the model reasoned anyway, at whatever default Anthropic ships that day
+(645 thinking tokens on one three-request run), which is precisely the
+invisible drift `REASONING_EFFORT`'s comment exists to prevent.
+
+Note that Anthropic reports these as `thinking_tokens`, not `reasoning_tokens`.
+`_reasoning_tokens` reads both spellings; reading only the first recorded a
+confident `0` on every row of this model while it reasoned and billed for it.
 
 It runs on Anthropic's Messages API rather than the OpenAI-compatible route,
 which is a deliberate choice and not a stylistic one. The gateway's

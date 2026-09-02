@@ -825,30 +825,23 @@ def _spec_field(model: str, field: str) -> str:
     return getattr(spec, field, "unknown") if spec is not None else "unknown"
 
 
-#: What a `litellm_anthropic` row records in place of `REASONING_EFFORT`.
-#:
-#: `REASONING_EFFORT` is a real OpenRouter parameter this harness sends
-#: explicitly, for the reason its own comment gives: an unset parameter is not a
-#: fixed parameter. That parameter does not exist on Anthropic's Messages API —
-#: the gateway rejects OpenRouter's nested `reasoning` body outright — and this
-#: route sends no thinking configuration at all, so the model reasons at
-#: whatever its own default is. Stamping "medium" on those rows would assert a
-#: control that was never applied, and it would be invisible in the data
-#: precisely because it looks like every other row. This sentinel makes the gap
-#: legible instead, which is the whole point of stamping the field.
-REASONING_EFFORT_UNSET: str = "unset:anthropic-default"
-
-
 def reasoning_effort_for(model: str) -> str:
     """The `reasoning_effort` to stamp on a row for `model`.
 
-    Falls back to `REASONING_EFFORT` for an unpinned id, matching
-    `_spec_field`'s contract: this is called from `_priced_fallback_row`'s
-    non-raising path too, so an exotic unknown model must not make it throw.
+    Every route now genuinely sends `REASONING_EFFORT`, so this returns it
+    unconditionally — but through DIFFERENT PARAMETERS, which is why the
+    function exists rather than the constant being inlined again. OpenRouter
+    takes it as `reasoning.effort` in `extra_body`; Anthropic's Messages API
+    takes it as `anthropic_effort` alongside adaptive thinking. The stamp
+    records the effort in force, which is the same on both, and the mechanism
+    is documented per-route in the two factories.
+
+    An earlier revision stamped a `"unset:anthropic-default"` sentinel here,
+    on the then-true belief that the Anthropic route could not be given an
+    effort at all. It could; the sentinel would have recorded a real control
+    as absent. Kept as a function so the next route that genuinely cannot
+    honour the setting has somewhere to say so.
     """
-    spec = MODELS.get(model)
-    if spec is not None and spec.route == "litellm_anthropic":
-        return REASONING_EFFORT_UNSET
     return REASONING_EFFORT
 
 
@@ -1040,6 +1033,24 @@ def _litellm_anthropic_agent(
             # cache reads both within and across runs.
             anthropic_cache_instructions=True,
             anthropic_cache_messages=True,
+            # THE SAME "medium" THE OTHER FOUR MODELS RUN AT, reached through
+            # this API's own knob rather than OpenRouter's. Anthropic has no
+            # `reasoning_effort`; `anthropic_effort` is the equivalent, and it
+            # takes the same scale, so this is a translation of
+            # `REASONING_EFFORT` rather than a newly invented number -- which
+            # is why no `budget_tokens` is guessed at here.
+            #
+            # Not optional, for the reason `REASONING_EFFORT`'s own comment
+            # gives: an unset parameter is not a fixed parameter. Measured
+            # unpinned, this model reasoned anyway (645 thinking tokens on one
+            # three-request run) at whatever default Anthropic ships that day,
+            # which is exactly the invisible drift the pinning exists to stop.
+            #
+            # `adaptive` mirrors how a production agent runs against this
+            # same gateway, where the pairing was validated on reasoning-hard
+            # cases; without it the model reasons shallowly.
+            anthropic_thinking={"type": "adaptive"},
+            anthropic_effort=REASONING_EFFORT,
         ),
     )
 

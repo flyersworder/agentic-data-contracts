@@ -1450,6 +1450,14 @@ def test_the_anthropic_route_caches_and_sends_none_of_the_rejected_params(
 
     assert settings["anthropic_cache_instructions"] is True
     assert settings["anthropic_cache_messages"] is True
+
+    # The effort is genuinely sent, through this API's own knob rather than
+    # OpenRouter's -- so the `reasoning_effort` these rows stamp is true, and
+    # the same value the other four models run at. Measured unpinned, this
+    # model reasoned anyway at Anthropic's own default (645 thinking tokens on
+    # one run), which is the invisible drift the pin exists to stop.
+    assert settings["anthropic_effort"] == agent.REASONING_EFFORT
+    assert settings["anthropic_thinking"] == {"type": "adaptive"}
     for rejected in ("temperature", "seed", "extra_body"):
         assert rejected not in settings, rejected
 

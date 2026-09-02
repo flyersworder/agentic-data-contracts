@@ -1,9 +1,5 @@
 import pytest
-from dce.agent import (
-    REASONING_EFFORT,
-    REASONING_EFFORT_UNSET,
-    reasoning_effort_for,
-)
+from dce.agent import REASONING_EFFORT, reasoning_effort_for
 from dce.pricing import MODELS, cost
 
 
@@ -133,20 +129,15 @@ def test_reasoning_effort_is_an_explicit_value_not_a_provider_default():
     assert REASONING_EFFORT in {"minimal", "low", "medium", "high"}
 
 
-def test_a_row_never_claims_a_reasoning_effort_that_was_not_sent():
-    """The stamp exists to record the control that was applied. On the
-    Anthropic route no reasoning parameter is sent at all — the gateway
-    rejects OpenRouter's nested `reasoning` body — so stamping "medium" there
-    would assert a control that never happened, and would be undetectable in
-    the results precisely because it matches every other row.
+def test_every_route_really_sends_the_effort_its_rows_claim():
+    """The stamp records the control that was applied, so every route has to
+    actually apply it. They use different parameters to do so — OpenRouter's
+    `reasoning.effort` in `extra_body`, Anthropic's `anthropic_effort` — and
+    the per-route factory tests assert each one goes out. This asserts the
+    stamp agrees with them.
     """
     for spec in MODELS.values():
-        stamped = reasoning_effort_for(spec.id)
-        if spec.route == "openrouter":
-            assert stamped == REASONING_EFFORT, spec.id
-        else:
-            assert stamped == REASONING_EFFORT_UNSET, spec.id
-            assert stamped != REASONING_EFFORT, spec.id
+        assert reasoning_effort_for(spec.id) == REASONING_EFFORT, spec.id
 
     # An unpinned id must not raise: this runs on `_priced_fallback_row`'s
     # non-raising path, the same contract `_spec_field` documents.

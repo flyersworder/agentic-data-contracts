@@ -1457,7 +1457,13 @@ def test_the_anthropic_route_caches_and_sends_none_of_the_rejected_params(
     # model reasoned anyway at Anthropic's own default (645 thinking tokens on
     # one run), which is the invisible drift the pin exists to stop.
     assert settings["anthropic_effort"] == agent.REASONING_EFFORT
-    assert settings["anthropic_thinking"] == {"type": "adaptive"}
+    # `display` must stay explicit: it defaults to "omitted" on this model
+    # generation, which yields empty thinking blocks and silently strips the
+    # reasoning out of every trace. Measured: 0 chars vs 456 with this set.
+    assert settings["anthropic_thinking"] == {
+        "type": "adaptive",
+        "display": "summarized",
+    }
     for rejected in ("temperature", "seed", "extra_body"):
         assert rejected not in settings, rejected
 

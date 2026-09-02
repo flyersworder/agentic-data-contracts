@@ -91,6 +91,17 @@ Note that Anthropic reports these as `thinking_tokens`, not `reasoning_tokens`.
 `_reasoning_tokens` reads both spellings; reading only the first recorded a
 confident `0` on every row of this model while it reasoned and billed for it.
 
+**`thinking.display` must stay set to `"summarized"`, or the traces lose the
+reasoning.** On Sonnet 5 and the Opus 5 generation, `display` defaults to
+`"omitted"` — `thinking` blocks come back with empty text and a signature only,
+while the reasoning still happens and is still billed. On Sonnet 4.6 and
+earlier the default was `"summarized"`, so a trace from an older model carries
+reasoning and one from this model would not, with nothing in the data to say
+why. Measured on the same prompt and model: 0 characters at the default, 456
+with `"summarized"`; billing is identical, since `display` controls visibility
+only. What you get is a summary — no current model exposes its raw chain of
+thought.
+
 It runs on Anthropic's Messages API rather than the OpenAI-compatible route,
 which is a deliberate choice and not a stylistic one. The gateway's
 OpenAI-compatible route works but injects no `cache_control`, so it returns

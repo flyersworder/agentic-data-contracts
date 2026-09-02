@@ -1049,7 +1049,25 @@ def _litellm_anthropic_agent(
             # `adaptive` mirrors how a production agent runs against this
             # same gateway, where the pairing was validated on reasoning-hard
             # cases; without it the model reasons shallowly.
-            anthropic_thinking={"type": "adaptive"},
+            # `display` IS LOAD-BEARING AND ITS DEFAULT CHANGED UNDER US.
+            # On Sonnet 5 (and the Opus 5 generation) `display` defaults to
+            # "omitted", which returns `thinking` blocks with EMPTY text and a
+            # signature only — the reasoning still happens and is still billed,
+            # it is simply not shown. On Sonnet 4.6 and earlier the default was
+            # "summarized", so a trace captured from an older model contains
+            # reasoning and one captured here would not, with nothing in the
+            # data to say why.
+            #
+            # Measured on this gateway, same prompt, same model: 0 characters
+            # of thinking at the default, 456 with "summarized". Billing is
+            # identical either way — `display` controls visibility only.
+            #
+            # This is a SUMMARY, not the raw chain of thought, which no current
+            # model exposes. It is what `dce/trace.py` needs to answer its
+            # founding question — did the agent retrieve the rule and ignore
+            # it, or never retrieve it — which the tool-call record alone
+            # cannot separate.
+            anthropic_thinking={"type": "adaptive", "display": "summarized"},
             anthropic_effort=REASONING_EFFORT,
         ),
     )

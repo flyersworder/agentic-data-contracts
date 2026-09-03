@@ -5,7 +5,7 @@
 
 DABStep~\cite{dabstep} is a data-analysis benchmark built by Adyen and Hugging
 Face around a payments warehouse: 138{,}236 transactions, a fee rule table, and
-merchant and MCC reference data, with two documents of human-written context
+merchant and merchant-category-code (MCC) reference data, with two documents of human-written context
 --- \texttt{manual.md} (22{,}127 characters) and a dataset README.
 
 Two properties make it the right benchmark for our question; a third is a
@@ -15,7 +15,8 @@ limitation we return to in Section~\ref{sec:threats}.
 require exotic SQL. It requires knowing the fee-matching rule: a \texttt{NULL}
 in a \texttt{fees} column means \emph{this rule applies to every value of that
 column}, not \emph{unknown}, and matching additionally involves list membership
-over account type, authorisation characteristic and merchant category code. An
+over account type, authorisation characteristics indicator (ACI) and merchant
+category code. An
 agent that reads the schema and writes idiomatic SQL gets a clean, wrong
 number, the failure a context layer claims to fix.
 

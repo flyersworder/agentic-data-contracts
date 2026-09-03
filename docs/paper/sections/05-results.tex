@@ -18,14 +18,15 @@ The loss costs power, not validity, and the evidence for that is specific:
 
 \begin{itemize}
 \itemsep2pt
-\item Errors are near-uniform across arms --- 113, 116, 118 and 121 of 401
+\item Errors are near-uniform across arms: 113, 116, 118 and 121 of 401
       rows. No arm is preferentially damaged.
 \item 114 of the 122 lost tasks lost \emph{all four} arms together, because
       the runner schedules a task's arms close in time. Independent per-arm
       failure would have left roughly 100 complete tasks; 279 survived.
       Missingness is a property of \emph{when} a task ran.
-\item Complete-case figures and per-arm figures over each arm's own
-      denominator agree to within one point.
+\item Figures on the 279 tasks scoreable in all four arms (the complete-case
+      set, used for run~B throughout) and per-arm figures over each arm's
+      own denominator agree to within one point.
 \end{itemize}
 
 We therefore report run~B on the 279 tasks scoreable in all four arms, with
@@ -55,25 +56,25 @@ each is reported below at the number that overturned it.
 \toprule
 \tabhead{Arm} & \tabhead{Overall} & \tabhead{Hard} & \tabhead{Easy} & \tabhead{Cost} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run A --- \texttt{glm-5.3-flash}, 401 tasks}}\\
+\multicolumn{5}{@{}l}{\emph{Run A (\texttt{glm-5.3-flash}, 401 tasks)}}\\
 \armS{} & 22.7\% & 13.9\% & 65.2\% & \$0.76 \\
 \armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
 \armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.96 \\
 \armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run B --- \texttt{deepseek-v4-flash}, 279 tasks}}\\
+\multicolumn{5}{@{}l}{\emph{Run B (\texttt{deepseek-v4-flash}, 279 tasks)}}\\
 \armS{} & 33.0\% & 22.6\% & 77.4\% & \$1.79 \\
 \armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
 \armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
 \armC{} & \textbf{61.3\%} & \textbf{56.6\%} & 81.1\% & \textbf{\$1.05} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run C --- \texttt{gpt-5.6-sol}, 401 tasks}}\\
+\multicolumn{5}{@{}l}{\emph{Run C (\texttt{gpt-5.6-sol}, 401 tasks)}}\\
 \armS{} & 43.9\% & 37.0\% & 76.8\% & \$14.52 \\
 \armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
 \armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
 \armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run D --- Claude Sonnet~5, 401 tasks}}\\
+\multicolumn{5}{@{}l}{\emph{Run D (Claude Sonnet~5, 401 tasks)}}\\
 \armS{} & 31.9\% & 22.9\% & 75.4\% & \textbf{\$36.80} \\
 \armH{} & 44.4\% & 38.0\% & 75.4\% & \$46.08 \\
 \armM{} & 35.2\% & 23.8\% & 89.9\% & \$43.89 \\
@@ -128,7 +129,7 @@ supplies the check on a second model family: 23.8\% for Sonnet~5, against the
 leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
 
 The easy split gives a second, negative check. \armC{} is not the best arm on
-easy tasks in any of the four runs --- \armM{} leads on all four (73.9\%,
+easy tasks in any of the four runs: \armM{} leads on all four (73.9\%,
 90.6\%, 94.2\%, 89.9\% against \armC{}'s 71.0\%, 81.1\%, 85.5\%, 75.4\%). The
 contract does nothing for questions that need no domain knowledge, which is
 what it should do, and an instrument that showed a contract effect there would
@@ -164,7 +165,7 @@ not zero}
 \includegraphics[width=\columnwidth]{figures/fig-ablation.pdf}
 \caption{The two steps of the ablation, on all four models. Adding nine
 governed tools, the retrieval instruction, the table allow-list and the
-operation rules --- with the prose emptied --- moves hard accuracy by $+5.4$,
+operation rules, with the prose emptied, moves hard accuracy by $+5.4$,
 $+0.0$, $+14.2$ and $+15.1$ points across runs~A, B, C and~D. Restoring the
 prose moves it by a further $+35.8$, $+34.0$, $+26.2$ and $+30.4$. Bars are
 Wilson 95\% intervals.}
@@ -172,7 +173,7 @@ Wilson 95\% intervals.}
 \end{figure}
 
 On hard tasks the gain splits into a scaffolding step and a content step. The
-ladder runs \armS{} to \armH{} to \armC{} --- 13.9 to 19.3 to 55.1 on run~A,
+ladder runs \armS{} to \armH{} to \armC{}: 13.9 to 19.3 to 55.1 on run~A,
 22.6 to 22.6 to 56.6 on run~B, 37.0 to 51.2 to 77.4 on run~C, and 22.9 to
 38.0 to 68.4 on run~D (Figure~\ref{fig:ablation}; the same rows in Table~\ref{tab:headline}, costs
 and work in Table~\ref{tab:efficiency}).
@@ -205,8 +206,8 @@ the hard slice alone is already $p{=}0.015$ (16/34); the 0.058 above is the
 all-401 test, diluted by the easy tasks.}
 
 What the fourth arm was built to test survives intact. The deflationary
-reading --- that the contract helps through a narrowed table surface, an
-imposed procedure, or simply making the agent slow down --- predicts \armH{}
+reading, that the contract helps through a narrowed table surface, an
+imposed procedure, or simply making the agent slow down, predicts \armH{}
 captures most of the gain. It does not, on any model: the content step is
 $1.8{\times}$ the scaffolding step on run~C, $2.0{\times}$ on run~D,
 $6.6{\times}$ on run~A, and the whole of the effect on run~B, where the
@@ -287,8 +288,11 @@ per correct answer by about $2{\times}$.}
 
 \armC{} is not thinking harder; it has less to search for. That holds on all
 four models: it uses the fewest turns everywhere and the least reasoning
-everywhere --- by a factor of two to three on runs~A--C, by 12\% on run~D ---
-and it is the only arm that never exhausted its output budget on any run. Table~\ref{tab:efficiency} sits beside the accuracy table because
+everywhere (by a factor of two to three on runs~A--C, by 12\% on run~D), and
+it is the only arm that never exhausted its output budget on any run
+(the forced-answer rows: when the budget runs out the harness forces a final
+answer rather than discarding the run, Section~\ref{sec:harness-asym}).
+Table~\ref{tab:efficiency} sits beside the accuracy table because
 reporting accuracy without cost yields needlessly expensive agents and
 mistaken conclusions about where accuracy comes
 from~\cite{agents-that-matter}.
@@ -338,8 +342,8 @@ any arm's output, gives 176 tasks the compiled contract answers outright
 optimisation it does not encode, and 77 with no fee semantics at all. A
 pre-computed macro layer \emph{of this kind} therefore reaches 53\% of the hard
 set on this benchmark. We do not offer that as a bound on pre-computation in
-general --- Section~\ref{sec:related} reports a hierarchical semantic layer
-reaching 100\% here --- only on a layer compiled from a domain contract's
+general (Section~\ref{sec:related} reports a hierarchical semantic layer
+reaching 100\% here), only on a layer compiled from a domain contract's
 declared expressions. On the 176 where the information is provably
 sufficient, whatever an agent fails to get is a failure to derive
 (Table~\ref{tab:buckets}).
@@ -348,8 +352,8 @@ Two qualifications on the 176 itself. The 97 tasks in the seven payments
 families exercise the full \texttt{payments}-to-\texttt{fees} join that the
 two views encode; the other 79 resolve off \texttt{fees} and
 \texttt{merchant\_category\_codes} alone, using the same wildcard predicates
-transcribed from the same contract fields but not the join. And 59 of those 79
---- the three fee-average families --- are exactly the tasks whose golds
+transcribed from the same contract fields but not the join. And 59 of those 79,
+the three fee-average families, are exactly the tasks whose golds
 Section~\ref{sec:golds} verified against the database using the same matching
 rule the contract declares. On that subset the compiled contract and the gold
 check share a premise, so it is a consistency check, not an independent one.
@@ -396,7 +400,7 @@ capability \armC{} scores 60.8\%, 62.7\%, 73.9\% and \textbf{94.9\%} on
 \emph{derived}. The \emph{macro} series rises with that ordering, with one
 caveat: runs~B and~D are 0.3 points apart on the axis and 11 apart on
 \emph{macro}, so the axis does not order them. The \emph{derived} series rises
-under no ordering --- Sonnet~5 leads it while trailing \texttt{gpt-5.6-sol}
+under no ordering: Sonnet~5 leads it while trailing \texttt{gpt-5.6-sol}
 by 21 points on \emph{macro}. An earlier version of this paper, written
 against three models, said that nearly all of \texttt{gpt-5.6-sol}'s gain
 lands on the \emph{macro} tasks. Sonnet~5's gain over
@@ -406,7 +410,7 @@ narrower: the \emph{macro} gap is smaller on both frontier-class models, and
 the \emph{derived} bucket does not track it.
 
 Read against the compiled ceiling, the \emph{macro} series is a shortfall of
-39.2, 37.3, 26.1 and 5.1 points below an accuracy we have proven reachable --- the
+39.2, 37.3, 26.1 and 5.1 points below an accuracy we have proven reachable: the
 \emph{derivation gap}, the price of making an agent derive a query the
 contract could have pre-computed. That framing is worth stating carefully,
 because against a ceiling of 100\% the gap is arithmetically the arm's error

@@ -10,8 +10,8 @@ additional cost.
 \subsection{166 mutation attempts, all in ungoverned arms}
 
 We counted mutating statements the model actually \emph{submitted} to a SQL
-tool --- \texttt{CREATE TABLE}/\texttt{VIEW}, \texttt{DROP}, \texttt{INSERT},
-\texttt{UPDATE}, \texttt{DELETE}, \texttt{ALTER}, \texttt{TRUNCATE} at a
+tool: \texttt{CREATE TABLE}/\texttt{VIEW}, \texttt{DROP}, \texttt{INSERT},
+\texttt{UPDATE}, \texttt{DELETE}, \texttt{ALTER} or \texttt{TRUNCATE} at a
 statement position in the query argument (Table~\ref{tab:governance}).
 
 \begin{table*}[t]
@@ -48,8 +48,8 @@ never once attempted a write. The hazard this result is about did not occur, so
 run~C can neither support nor contradict the claim: there was nothing to deter.
 
 \paragraph{Run~D supplies the hazard run~C lacked.} Claude Sonnet~5, handed the
-raw tool and the manual, submitted 22 mutating statements on two tasks ---
-both in \armM{}; \armS{} attempted none --- and one of them reached the
+raw tool and the manual, submitted 22 mutating statements on two tasks, both
+in \armM{} (\armS{} attempted none), and one of them reached the
 database (below). Its two governed arms, on the same 401 tasks, submitted
 none. Two attempting tasks cannot carry a test on their own; what they
 establish is that the hazard exists at this capability level, so run~C's zero
@@ -86,10 +86,10 @@ contract rather than written as code:
       driving the governed query tool against a scratch copy of the warehouse,
       \texttt{CREATE TABLE}, \texttt{CREATE TEMP TABLE},
       \texttt{CREATE\ldots VIEW}, \texttt{DROP}, \texttt{UPDATE} and
-      \texttt{INSERT} are each refused with an explicit violation --- the
+      \texttt{INSERT} are each refused with an explicit violation, since the
       mutations trip both the operation blocklist \emph{and} the table
-      allow-list, since the target is not a declared table --- while an
-      ordinary \texttt{SELECT} over a declared table executes normally. The
+      allow-list (the target is not a declared table), while an ordinary
+      \texttt{SELECT} over a declared table executes normally. The
       database is unchanged afterwards.
 \end{enumerate}
 
@@ -135,14 +135,14 @@ Let me create a regular table\ldots''
 
 and, having established that they now persist, \emph{``Since tables persist
 across calls (non-temp), I can do sequential UPDATE operations.''} It then
-hand-rolled Gaussian elimination across twelve statements ---
-\texttt{DROP TABLE IF EXISTS m1; CREATE TABLE m1 AS \ldots} through \texttt{m6}
---- to solve a linear system, and answered the question wrongly as well.
+hand-rolled Gaussian elimination across twelve statements
+(\texttt{DROP TABLE IF EXISTS m1; CREATE TABLE m1 AS \ldots} through
+\texttt{m6}) to solve a linear system, and answered the question wrongly as well.
 
 Run~D's event is the same route taken by a stronger model. On task~2770
 Sonnet~5 lost a \texttt{TEMP} table between calls and reasoned \emph{``The
 temp tables might be getting dropped between separate execute\_sql calls if
-they're using different connections''} --- the identical diagnosis --- and
+they're using different connections''}, the identical diagnosis, and
 batched the chain into a single call, which kept it temporary. On task~2546
 it went straight to \texttt{CREATE OR REPLACE TABLE}, then \texttt{ALTER TABLE
 \ldots ADD COLUMN} and \texttt{UPDATE} against its own persistent table, to
@@ -161,8 +161,8 @@ statements are not malformed SQL that a validator would catch; the ungoverned
 tool opens a fresh read-write connection per call and passes them through, so
 \texttt{CREATE TABLE} succeeds silently. Because \texttt{TEMP} tables are
 connection-scoped, a temp table never survives to the next tool call, so the
-model receives no signal that it did anything wrong --- only that its own table
-vanished --- and the natural repair is to stop using \texttt{TEMP}. The
+model receives no signal that it did anything wrong, only that its own table
+vanished, and the natural repair is to stop using \texttt{TEMP}. The
 escalation is an interaction between the model's idiom and the tool's
 connection lifecycle, and a session-scoped connection would likely have
 prevented it.

@@ -665,7 +665,7 @@ def test_report_names_the_ungraded_rows_it_set_aside(tmp_path):
     path = tmp_path / "results.jsonl"
     _write(path, rows)
 
-    assert "ungraded=1" in _arm_block(report(path), PRIMARY_RIGHT_ARM)
+    assert "ungolded: 1 row(s)" in _arm_block(report(path), PRIMARY_RIGHT_ARM)
 
 
 def test_report_says_nothing_about_ungraded_rows_when_there_are_none(tmp_path):
@@ -676,7 +676,7 @@ def test_report_says_nothing_about_ungraded_rows_when_there_are_none(tmp_path):
     path = tmp_path / "results.jsonl"
     _write(path, rows)
 
-    assert "ungraded" not in report(path)
+    assert "ungolded" not in report(path)
 
 
 def test_ungraded_rows_keep_their_cost_and_corruption(tmp_path):
@@ -739,3 +739,91 @@ def test_strict_mcnemar_does_not_pair_ungraded_tasks(tmp_path):
 
     assert "n_paired=2" not in text
     assert "n_paired=1" in text
+
+
+def _ungolded(task_id: str, arm: str, verdict: str, **kw) -> dict:
+    """A row for a task admitted by `--ungolded run`: no gold exists."""
+    return {**_row(task_id, arm, verdict, **kw), "gold": None}
+
+
+def test_an_ungolded_task_that_fails_the_harness_stays_out_of_the_arithmetic(
+    tmp_path,
+):
+    """An ungolded task only reaches `verdict: "ungraded"` if `run_task`
+    finishes cleanly. Trip a cap or error and the row keeps `hit_limit` /
+    `error` with `gold: null` — so a cut made on VERDICT lets it through into
+    `strict_n` and `failure_rate`, and `--ungolded run` moves numbers the
+    README promises it cannot. The cut has to be "this task has no gold".
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        {**_row("t2", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t3", PRIMARY_RIGHT_ARM, "hit_limit"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+    block = _arm_block(text, PRIMARY_RIGHT_ARM)
+
+    assert "strict    2/2" in block
+    assert "failures (0% of rows)" in block
+    assert "HARNESS-LIMITED" not in block
+    assert "strict   2/3" not in text
+
+
+def test_report_counts_the_harness_failures_among_ungolded_rows(tmp_path):
+    """Excluding ungolded rows from the failure rate must not HIDE a cap trip
+    on 49 tasks. They leave the rate — a different population — and are
+    reported on their own.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+        _ungolded("t3", PRIMARY_RIGHT_ARM, "hit_limit"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "ungolded: 2 row(s)" in block
+    assert "1 harness failure(s)" in block
+
+
+def test_the_ungolded_count_is_not_printed_inside_the_failures_line(tmp_path):
+    """`failures (0% of rows): none, ungraded=49` reads as though 49 rows
+    were failures inside a line that just said 0%. It gets its own line.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    failures_line = next(
+        line
+        for line in _arm_block(report(path), PRIMARY_RIGHT_ARM).splitlines()
+        if "failures (" in line
+    )
+    assert "ungolded" not in failures_line
+    assert "ungraded" not in failures_line
+
+
+def test_stale_scorer_warning_ignores_rows_that_were_never_graded(tmp_path):
+    """`ungraded` rows carry `scorer` like any other, but `rescore` skips
+    them. Counting them inflates the stale-scorer warning and makes its
+    claim — that every answered row has been re-graded — false for them.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a", "scorer": "fallback"},
+        {**_ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"), "scorer": "fallback"},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "1 row(s)" in text
+    assert "2 row(s)" not in text

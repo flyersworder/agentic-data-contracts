@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 373 tests, deterministic and offline
+uv run pytest -q                     # 379 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -323,11 +323,15 @@ uv run python -m dce.submit --results results/submission.jsonl \
 ```
 
 `--ungolded run` does **not** score the extra tasks. They reach `run_task` as
-`gold=None` and are recorded `verdict: "ungraded"`, a verdict in neither
-`ANSWER_VERDICTS` nor `HARNESS_VERDICTS`, so no accuracy figure and no
-harness-failure rate in `dce.stats` can reach them. `dce.stats` prints
-`ungraded=N` on any arm that has some, because dropping rows silently is a
-claim that they did not exist.
+`gold=None`; a clean run records `verdict: "ungraded"`, and one that trips a
+cap or errors keeps its harness verdict with `gold: null`. `dce.stats` cuts on
+**the missing gold, not the verdict** — a verdict-keyed cut would let a capped
+ungolded task into the accuracy denominator — so no accuracy figure and no
+harness-failure rate can reach any of them. They are reported on their own
+line (`ungolded: N row(s) …; M harness failure(s) among them`), because
+dropping rows silently is a claim that they did not exist, and because a cap
+trip across those 49 must be counted rather than hidden by its exclusion from
+the rate.
 
 `dce.submit` emits `{"task_id", "agent_answer"}` per line, reading through
 `latest_rows` so a retried unit contributes its final answer rather than a
@@ -339,7 +343,9 @@ answer came back and our local scorer raised on it, which is the leaderboard's
 call to make. A submission is effectively one-shot
 per agent name and the Space scores a missing task as wrong, so a short file
 is worse than no file. `--results` takes several files, so a fresh all-450
-sweep and a spliced 401 + 49 both work.
+sweep and a spliced 401 + 49 both work. `--out` may not name one of the
+`--results` files, and an empty submission is refused rather than written as a
+blank line.
 
 Uploading is manual and deliberately not automated here: the Space wants a
 browser and metadata (agent name, model family, whether the code is open) that

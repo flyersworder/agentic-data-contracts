@@ -124,9 +124,35 @@ def write_submission(
 
     The file is built in full BEFORE anything is written, so a refusal
     leaves no partial file on disk -- a half-written submission is the
-    artifact most likely to be uploaded by mistake weeks later.
+    artifact most likely to be uploaded by mistake weeks later. An EMPTY
+    result is refused for the same reason: it would land as a single blank
+    line and read as finished.
+
+    `out` may not be one of `results`; see the comment on the check.
     """
+    # Before reading anything. `build_submission` loads every input into
+    # memory first, so writing over a results file SUCCEEDS: a paid sweep --
+    # verdicts, gold, cost, instrumentation, trace pointers -- is replaced by
+    # a two-field answer list, and only `traces/` survives. The README's own
+    # recipe puts the sweep at `results/submission.jsonl` and the export at
+    # `submission.jsonl`, one path component apart.
+    resolved_out = out.resolve()
+    for path in results:
+        if path.resolve() == resolved_out:
+            raise SubmissionError(
+                f"--out {out} is also one of the --results file(s). Writing "
+                "there would overwrite a results file that cost money to "
+                "produce, and the submission carries none of what it holds. "
+                "Choose a different --out."
+            )
+
     rows = build_submission(results, arm=arm, model=model, tasks=tasks)
+    if not rows:
+        raise SubmissionError(
+            f"no tasks to submit: --tasks yielded {len(tasks)} task(s). An "
+            "empty submission would be written as a single blank line and "
+            "look like a finished file. Check the --tasks path."
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
     return len(rows)

@@ -364,6 +364,12 @@ def stale_scorer_rows(rows: list[dict]) -> dict[str, int]:
     now = active_scorer()
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
+        # An ungolded row carries `scorer` like any other (`build_result_row`
+        # sets it unconditionally) but `rescore` skips it — nothing graded it
+        # and nothing will. Counting it both inflates the warning and makes
+        # its claim, that every answered row has been re-graded, false.
+        if _is_ungolded(row):
+            continue
         recorded = row.get("scorer")
         if recorded and recorded != now:
             counts[recorded] += 1
@@ -375,22 +381,45 @@ def _scored(rows: list[dict]) -> list[dict]:
     return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
 
 
-def _graded(rows: list[dict]) -> list[dict]:
-    """Rows that ACCURACY arithmetic may see: everything except the tasks
-    with no gold to score against.
+def _is_ungolded(row: dict) -> bool:
+    """This row's task had no gold to score against.
 
-    Deliberately not the same cut as `_scored`. A harness failure stays in
-    (STRICT accuracy counts it against the arm, which is the point of the
-    STRICT view); an `ungraded` row comes out, because there is no right
-    answer it could have missed.
+    Keyed on `gold`, NOT on `verdict`. A task admitted by `--ungolded run`
+    only reaches `verdict: "ungraded"` if `run_task` finishes cleanly; trip a
+    cap or error and the row keeps `hit_limit`/`error`/`post_run_error`/
+    `construction_error` with `gold: None`. A verdict-keyed cut lets those
+    through into `strict_n` and `failure_rate`, which is exactly the
+    invariant `--ungolded run` is supposed to preserve. The verdict is still
+    checked, as a second signal on any row shape that predates `gold` being
+    nullable.
+
+    The `""` default is load-bearing: `_safe_json_dumps`' salvage envelope
+    has no `gold` key at all, and a row we could not even serialise properly
+    is not evidence that its task was ungolded. It stays in the denominator.
+    """
+    return row.get("gold", "") is None or row.get("verdict") in UNGRADED_VERDICTS
+
+
+def _graded(rows: list[dict]) -> list[dict]:
+    """Rows that ACCURACY and FAILURE-RATE arithmetic may see: everything
+    except the tasks with no gold to score against.
+
+    Deliberately not the same cut as `_scored`. A harness failure on a GOLDED
+    task stays in (STRICT accuracy counts it against the arm, which is the
+    point of the STRICT view); every row for an ungolded task comes out,
+    however it ended, because that task is a different population — there is
+    no right answer it could have missed and no accuracy its failure could
+    make less trustworthy.
 
     Every accuracy or failure-rate denominator must go through this. Cost,
     `db_corrupted` and the instrumentation means must NOT: those rows were
-    really billed and their working copies really were checked, and
-    dropping them there would understate spend and silently delete
-    governance evidence on the 49 tasks a submission sweep adds.
+    really billed and their working copies really were checked, and dropping
+    them there would understate spend and silently delete governance evidence
+    on the 49 tasks a submission sweep adds. What leaves the failure RATE is
+    reported on its own line instead, so a cap trip across those 49 is
+    counted rather than hidden.
     """
-    return [row for row in rows if row.get("verdict") not in UNGRADED_VERDICTS]
+    return [row for row in rows if not _is_ungolded(row)]
 
 
 def _failure_counts(rows: list[dict]) -> dict[str, int]:
@@ -445,7 +474,8 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     # took those rows out of `usd_final`, `_corruption_counts` and
     # `_instrumentation`, where they belong (see `_graded`).
     graded_rows = _graded(rows)
-    ungraded_n = len(rows) - len(graded_rows)
+    ungolded_rows = [row for row in rows if _is_ungolded(row)]
+    ungolded_failures = sum(_failure_counts(ungolded_rows).values())
     scored_rows = _scored(graded_rows)
     scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
     scored_n = len(scored_rows)
@@ -462,7 +492,8 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
         "strict_ci": wilson(strict_ok, strict_n),
         "failures": failures,
         "failure_rate": failure_rate,
-        "ungraded_n": ungraded_n,
+        "ungolded_n": len(ungolded_rows),
+        "ungolded_failures": ungolded_failures,
         "corruption": _corruption_counts(rows),
         "usd_final": sum(row.get("usd") or 0.0 for row in rows),
         "usd_total_billed": sum(row.get("usd") or 0.0 for row in raw_rows),
@@ -534,11 +565,20 @@ def _format_summary(label: str, summary: dict) -> str:
         or "none"
     )
     corruption = summary["corruption"]
-    # Silence here is a claim: that no row was set aside. Printed only when
-    # some were, so the four runs already in FINDINGS render unchanged.
-    ungraded_str = (
-        f", ungraded={summary['ungraded_n']} (answered, no gold to score)"
-        if summary["ungraded_n"]
+    # Its OWN line, not appended to the failures list: `failures (0% of
+    # rows): none, ungraded=49` reads as though 49 rows were failures, inside
+    # a line that just said 0%. Silence here is still a claim -- that no row
+    # was set aside -- so the line appears whenever any were, and the harness
+    # failures among them are counted rather than hidden by their exclusion
+    # from `failure_rate`. Absent entirely on the four runs in FINDINGS.
+    ungolded_line = (
+        (
+            f"\n{'':16s} ungolded: {summary['ungolded_n']} row(s) with no gold "
+            f"to score, excluded from accuracy and from the failure rate "
+            f"above; {summary['ungolded_failures']} harness failure(s) among "
+            "them"
+        )
+        if summary["ungolded_n"]
         else ""
     )
     inst = summary["instrumentation"]
@@ -569,9 +609,9 @@ def _format_summary(label: str, summary: dict) -> str:
         f"cost final=${summary['usd_final']:.2f} "
         f"billed=${summary['usd_total_billed']:.2f}{flag}\n"
         f"{'':16s} failures ({summary['failure_rate']:.0%} of rows): "
-        f"{fail_str}{ungraded_str}\n"
+        f"{fail_str}\n"
         f"{'':16s} db_corrupted: true={corruption['corrupted']} "
-        f"unknown={corruption['unknown']}"
+        f"unknown={corruption['unknown']}{ungolded_line}"
         f"{instrumentation_line}{governance_line}"
     )
 

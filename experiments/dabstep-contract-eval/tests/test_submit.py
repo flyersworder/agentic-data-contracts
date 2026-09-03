@@ -218,3 +218,35 @@ def test_build_submission_accepts_a_scoring_error_answer(tmp_path):
     out = build_submission([results], arm="contract", model=MODEL, tasks=TASKS)
 
     assert out[2] == {"task_id": "3", "agent_answer": "yes"}
+
+
+def test_write_submission_refuses_to_overwrite_one_of_its_inputs(tmp_path):
+    """`build_submission` reads everything into memory first, so writing over
+    a results file SUCCEEDS and replaces a paid sweep — verdicts, gold, cost,
+    instrumentation, trace pointers — with a two-field answer list. The
+    README's own recipe puts the sweep at `results/submission.jsonl` and the
+    export at `submission.jsonl`, one path component apart.
+    """
+    results = _write(
+        tmp_path / "r.jsonl",
+        [_row("1", "138236"), _row("2", "A"), _row("3", "yes")],
+    )
+
+    with pytest.raises(SubmissionError, match="results file"):
+        write_submission(results, [results], arm="contract", model=MODEL, tasks=TASKS)
+
+    assert json.loads(results.read_text().splitlines()[0])["arm"] == "contract"
+
+
+def test_write_submission_refuses_to_write_an_empty_submission(tmp_path):
+    """A `--tasks` file that parses to `[]` finds no problems to report, so
+    the guards stay quiet and a file containing one blank line lands on disk
+    — precisely the artifact most likely to be uploaded weeks later.
+    """
+    results = _write(tmp_path / "r.jsonl", [_row("1", "138236")])
+    out = tmp_path / "submission.jsonl"
+
+    with pytest.raises(SubmissionError, match="no tasks"):
+        write_submission(out, [results], arm="contract", model=MODEL, tasks=[])
+
+    assert not out.exists()

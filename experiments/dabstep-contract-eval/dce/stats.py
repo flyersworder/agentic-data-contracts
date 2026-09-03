@@ -692,6 +692,13 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     from the pairing) and the Wilson intervals silently narrow or widen on.
     Nothing else in this module would say a word about it.
     """
+    # `_graded`, like every other denominator in this module. Without it,
+    # `--ungolded run --arms contract` resumed into an existing multi-arm
+    # file -- the only way to add the 49 without re-paying for the 401 --
+    # leaves the contract arm holding 49 rows no other arm has, and this
+    # warning reads that as a lopsided sweep. It would then tell the operator
+    # to pay to run 49 unscoreable tasks on three more arms.
+    rows = _graded(rows)
     by_arm = {
         arm: {
             row.get("task_id")

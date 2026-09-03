@@ -311,3 +311,40 @@ def test_provenance_names_every_field_the_spliced_rows_disagree_on(tmp_path):
 
     assert diverged["commit_sha"] == ["aaa", "bbb"]
     assert "scorer" not in diverged
+
+
+def test_build_submission_refuses_a_results_path_that_does_not_exist(tmp_path):
+    """`_read_rows` returns `[]` for a missing file without a word — right
+    for the runner (a fresh `--out`), wrong for an exporter whose whole
+    contract is refusing to write. A typo'd override contributes nothing, the
+    earlier file already covers all 450, no guard fires, and stale answers
+    ship on a one-shot submission.
+    """
+    a = _write(
+        tmp_path / "a.jsonl",
+        [_row("1", "138236"), _row("2", "A"), _row("3", "yes")],
+    )
+
+    with pytest.raises(SubmissionError, match="does not exist"):
+        build_submission(
+            [a, tmp_path / "typo.jsonl"], arm="contract", model=MODEL, tasks=TASKS
+        )
+
+
+def test_build_submission_refuses_when_one_side_has_no_contract_digest(tmp_path):
+    """For a FATAL provenance field, absent is the unknown-provenance case the
+    check exists to refuse — not one to skip. Skipping it means a splice
+    whose other half predates the field being stamped sees one distinct
+    value and passes.
+    """
+    a = _write(
+        tmp_path / "a.jsonl",
+        [
+            {**_row("1", "138236"), "contract_digest": "sha256:aaa"},
+            {**_row("2", "A"), "contract_digest": "sha256:aaa"},
+        ],
+    )
+    b = _write(tmp_path / "b.jsonl", [_row("3", "yes")])  # no contract_digest
+
+    with pytest.raises(SubmissionError, match="contract_digest"):
+        build_submission([a, b], arm="contract", model=MODEL, tasks=TASKS)

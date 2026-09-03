@@ -78,13 +78,33 @@ def _select(results: list[Path], *, arm: str, model: str) -> dict[str, dict]:
     """
     by_task: dict[str, dict] = {}
     for path in results:
+        # `latest_rows` -> `_read_rows` returns [] for a path that does not
+        # exist, silently. Right for the runner (a fresh `--out`), wrong
+        # here: a typo'd override would contribute nothing, an earlier file
+        # would already cover all 450, no guard would fire, and stale answers
+        # would ship on a one-shot submission.
+        if not path.exists():
+            raise SubmissionError(
+                f"--results {path} does not exist. A missing input reads as "
+                "an empty one, so the submission would quietly be built from "
+                "whatever the other files hold."
+            )
         for row in latest_rows(path):
             if row.get("arm") == arm and row.get("model") == model:
                 by_task[row["task_id"]] = row
     return by_task
 
 
-def _distinct(rows, field: str) -> list[str]:
+#: Stands in for a provenance field a row does not carry, so that "some rows
+#: predate this field" reads as a DISAGREEMENT rather than as agreement. For a
+#: fatal field, absent is the unknown-provenance case the check exists to
+#: refuse.
+ABSENT = "<absent>"
+
+
+def _distinct(rows, field: str, *, absent_counts: bool = False) -> list[str]:
+    if absent_counts:
+        return sorted({str(row.get(field, ABSENT) or ABSENT) for row in rows})
     return sorted({str(row[field]) for row in rows if row.get(field) is not None})
 
 
@@ -92,7 +112,7 @@ def _assert_one_agent(rows) -> None:
     """Refuse a submission assembled from two different contracts."""
     rows = list(rows)
     for field in FATAL_PROVENANCE:
-        values = _distinct(rows, field)
+        values = _distinct(rows, field, absent_counts=True)
         if len(values) > 1:
             raise SubmissionError(
                 f"the selected rows disagree on {field}: {', '.join(values)}. "

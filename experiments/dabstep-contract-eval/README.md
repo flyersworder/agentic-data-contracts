@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 384 tests, deterministic and offline
+uv run pytest -q                     # 387 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -315,12 +315,17 @@ this:
 ```bash
 # 1. answer every task, including the 49 that cannot be scored locally
 uv run python -m dce.runner --ungolded run --arms contract \
-    --models z-ai/glm-5.3-flash --max-spend 2.00 --out results/submission.jsonl
+    --models z-ai/glm-5.3-flash --max-spend 2.00 --out results/glm-all450.jsonl
 
 # 2. build the file the Space wants
-uv run python -m dce.submit --results results/submission.jsonl \
+uv run python -m dce.submit --results results/glm-all450.jsonl \
     --arm contract --model z-ai/glm-5.3-flash --out submission.jsonl
 ```
+
+The sweep's output lives in `results/` and stays **tracked** — the
+tamper-evidence claim depends on result rows being readable in git history.
+Only the built `submission*.jsonl` at the experiment root is gitignored, and
+that rule is anchored precisely so it cannot swallow a results file.
 
 `--ungolded run` does **not** score the extra tasks. They reach `run_task` as
 `gold=None`; a clean run records `verdict: "ungraded"`, and one that trips a

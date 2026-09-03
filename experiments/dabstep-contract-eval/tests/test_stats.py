@@ -848,3 +848,25 @@ def test_strict_mcnemar_drops_an_ungolded_task_that_failed_the_harness(tmp_path)
 
     assert "n_paired=2" not in text
     assert "n_paired=1" in text
+
+
+def test_an_ungolded_only_arm_does_not_trip_the_unequal_task_set_warning(tmp_path):
+    """`--ungolded run --arms contract` resumed into an existing multi-arm
+    results file is the only way to run the 49 without re-paying for the 401.
+    It leaves the contract arm holding rows no other arm has — which is
+    exactly what this warning looks for, and here it is not a lopsided sweep.
+    Firing tells the operator to pay to run 49 unscoreable tasks on three
+    more arms, while every denominator above the warning is already correct.
+    """
+    rows = [
+        {**_row(f"t{i}", arm, "correct"), "gold": "a"}
+        for i in range(3)
+        for arm in (PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM)
+    ] + [
+        _ungolded("u1", PRIMARY_RIGHT_ARM, "ungraded"),
+        _ungolded("u2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "did NOT see the same task set" not in report(path)

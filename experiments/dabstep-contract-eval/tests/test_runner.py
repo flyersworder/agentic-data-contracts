@@ -2688,9 +2688,10 @@ def test_the_default_submission_file_does_not_dirty_the_tree(tmp_path: Path):
     from `git status --porcelain`, exempting only the sweep's own `--out` and
     its two sidecars. `dce.submit`'s default `--out submission.jsonl` is
     neither, so an un-ignored submission file blocks the NEXT runner
-    invocation entirely — a `--max-spend` truncation resume (which
-    `deploy/supervise.sh` does automatically on exit 2), a `--retry` pass, or
-    another model's sweep.
+    invocation entirely — a `--max-spend` truncation resume, a `--retry`
+    pass, or another model's sweep. (`deploy/supervise.sh` does NOT retry
+    exit 2; it reports and exits. The blocked invocation is the operator's
+    next one.)
 
     This is the same failure `.gitignore` already records having measured for
     leftover `.snapshot` files.
@@ -2708,4 +2709,20 @@ def test_the_default_submission_file_does_not_dirty_the_tree(tmp_path: Path):
     assert result.returncode == 0, (
         f"{target} is not gitignored, so building a submission leaves the "
         "tree dirty and assert_clean_tree blocks the next sweep"
+    )
+
+    # ...but ANCHORED. An unanchored `submission*.jsonl` matches at every
+    # depth, including `results/submission.jsonl` -- a paid sweep's output.
+    # `results/` is deliberately tracked: the tamper-evidence claim depends
+    # on result rows being readable in git history.
+    in_results = "experiments/dabstep-contract-eval/results/submission.jsonl"
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", in_results],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0, (
+        f"{in_results} is gitignored — an unanchored rule is swallowing a "
+        "results file, which must stay tracked as evidence"
     )

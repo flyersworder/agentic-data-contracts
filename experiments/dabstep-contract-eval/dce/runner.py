@@ -929,7 +929,7 @@ def _construction_error_row(
     task: dict,
     arm: str,
     model: str,
-    gold: str,
+    gold: str | None,
     golds_hash: str,
     exc: AgentConstructionError,
 ) -> dict:
@@ -1262,7 +1262,12 @@ def _run_group(
     flag instead of `break`ing a loop the caller no longer owns.
     """
     for task_id, arm, model in group:
-        gold = golds.get(task_id, "")
+        # `.get` WITHOUT a default: a task carrying no reconstructed gold
+        # must reach `run_task` as `None`, which it records `ungraded`.
+        # A `""` default would be scored instead, manufacturing an
+        # `incorrect` verdict on a task that has no right answer to
+        # compare against — and that verdict counts. See `select_tasks`.
+        gold = golds.get(task_id)
         try:
             row = run_task_fn(
                 by_id[task_id],
@@ -1589,6 +1594,32 @@ def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
     return sampled
 
 
+#: How `select_tasks` treats a task with no reconstructed gold.
+#: `"skip"` is every scoring sweep: unscoreable tasks are not run.
+#: `"run"` is a leaderboard submission, which needs an answer for all 450.
+UNGOLDED_MODES: tuple[str, ...] = ("skip", "run")
+
+
+def select_tasks(tasks: list[dict], golds: dict, ungolded: str = "skip") -> list[dict]:
+    """The tasks a sweep will run, given the golds it can score against.
+
+    This used to be an inline comprehension in `main`, and it silently
+    decided something load-bearing: 49 of DABStep's 450 tasks have no
+    reconstructable gold (`dce.golds`), so a scored sweep runs 401. That is
+    right for the ablation and wrong for a leaderboard submission, which is
+    graded on all 450 by DABStep's own withheld answers.
+
+    `ungolded="run"` admits them. They are still not scored — `_run_group`
+    passes `None` rather than `""`, and `run_task` records `ungraded` — so
+    admitting them cannot move an accuracy figure, only fill in answers.
+    """
+    if ungolded not in UNGOLDED_MODES:
+        raise ValueError(f"ungolded must be one of {UNGOLDED_MODES}, got {ungolded!r}")
+    if ungolded == "run":
+        return list(tasks)
+    return [t for t in tasks if t["task_id"] in golds]
+
+
 def _load_golds(path: Path) -> tuple[dict[str, str], str]:
     """Read the golds envelope and return (task_id -> answer map, gold hash).
 
@@ -1784,6 +1815,16 @@ def main() -> None:
     parser.add_argument("--golds", type=Path, default=Path("data/golds.json"))
     parser.add_argument("--tasks", type=Path, default=Path("data/tasks.json"))
     parser.add_argument(
+        "--ungolded",
+        choices=UNGOLDED_MODES,
+        default="skip",
+        help=(
+            "what to do with tasks that have no reconstructed gold: "
+            "skip them (default, every scoring sweep) or run them "
+            "unscored, which a leaderboard submission needs"
+        ),
+    )
+    parser.add_argument(
         "--traces",
         type=Path,
         default=None,
@@ -1862,7 +1903,9 @@ def main() -> None:
         )
 
     golds, golds_hash = _load_golds(args.golds)
-    tasks = [t for t in json.loads(args.tasks.read_text()) if t["task_id"] in golds]
+    tasks = select_tasks(
+        json.loads(args.tasks.read_text()), golds, ungolded=args.ungolded
+    )
     if args.n:
         tasks = _stratified_sample(tasks, args.n)
 

@@ -12,3 +12,16 @@ __pycache__/
 # snapshot blocked the next model's sweep from starting at all.
 results/*.jsonl.snapshot
 results/*.jsonl.lock
+
+# A built submission file. Not ignored, it makes the tree dirty for the NEXT
+# runner invocation -- `assert_clean_tree` exempts only that sweep's own
+# `--out` and its sidecars -- which blocks a truncation resume, a `--retry`
+# pass, or another model's sweep. The same failure `.snapshot` above records.
+# Nothing is lost: a submission is derived from tracked results rows.
+#
+# ANCHORED, and that leading slash is load-bearing. Unanchored, git matches
+# the pattern at every depth, including `results/submission.jsonl` -- which
+# is a paid sweep's output, and `results/` is deliberately tracked. An
+# un-anchored rule silently keeps a 450-task results file out of git while
+# its own comment above claims submissions derive from tracked rows.
+/submission*.jsonl

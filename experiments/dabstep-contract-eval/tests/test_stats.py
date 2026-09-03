@@ -157,6 +157,20 @@ def _arm_line(text: str, arm: str) -> str:
     return next(line for line in text.splitlines() if line.startswith(prefix))
 
 
+def _arm_block(text: str, arm: str) -> str:
+    """`_arm_line` plus the continuation lines belonging to it -- failures,
+    ungraded, db_corrupted. `_arm_line` alone matches only the header, so an
+    assertion about the failure line silently searches the wrong string.
+    """
+    prefix = f"{arm:16s}"
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(prefix))
+    end = start + 1
+    while end < len(lines) and lines[end].startswith(" " * 16):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
 def test_report_scores_the_deduped_row_not_all_three_stale_attempts(tmp_path):
     # A retried unit: two stale construction_error rows, then a real
     # success, all for (task_id="t1", arm=contract, model=PRIMARY_MODEL).
@@ -596,3 +610,263 @@ def test_report_drops_verified_wrong_gold_tasks(tmp_path):
     assert "60" in out.split("\n")[0]
     # The surviving task is the only one counted.
     assert "1/1" in out
+
+
+# ── ungraded rows: present in the file, absent from every denominator ─────
+
+
+def test_ungraded_rows_move_neither_accuracy(tmp_path):
+    """A task with no reconstructed gold is answered but not scored. It is
+    not a wrong answer, so it belongs in no numerator and no denominator —
+    including STRICT's, which does count harness failures against an arm.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+        _row("t3", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    line = _arm_line(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "scored    1/1" in line
+    assert "strict    1/1" in line
+
+
+def test_ungraded_rows_are_not_counted_as_harness_failures(tmp_path):
+    """`ungraded` is a deliberate non-scoring, not the harness breaking. If
+    it landed in the failure numerator every submission run would look
+    HARNESS-LIMITED; if it landed only in the denominator it would dilute a
+    real failure rate and hide one.
+    """
+    rows = [_row(f"t{i}", PRIMARY_RIGHT_ARM, "correct") for i in range(9)]
+    rows.append(_row("t9", PRIMARY_RIGHT_ARM, "error"))
+    rows += [_row(f"u{i}", PRIMARY_RIGHT_ARM, "ungraded") for i in range(90)]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    # 1 error in 10 graded-or-failed rows: 10%, not 1% of 100.
+    assert "failures (10% of rows)" in block
+    assert "HARNESS-LIMITED" in block
+
+
+def test_report_names_the_ungraded_rows_it_set_aside(tmp_path):
+    """Dropping rows silently is a claim that they did not exist. The count
+    is printed so a reader can see the submission run's 49 unscoreable tasks
+    were excluded on purpose rather than lost.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "ungolded: 1 row(s)" in _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+
+def test_report_says_nothing_about_ungraded_rows_when_there_are_none(tmp_path):
+    """Every published run has zero. The line must not appear and clutter
+    the four runs already in FINDINGS.
+    """
+    rows = [_row("t1", PRIMARY_RIGHT_ARM, "correct")]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "ungolded" not in report(path)
+
+
+def test_ungraded_rows_keep_their_cost_and_corruption(tmp_path):
+    """`_summarize` drops ungraded rows from the ACCURACY arithmetic only.
+    They are real runs: they were billed, and their working copy really was
+    checked. Dropping them from `usd_final` makes the cost line disagree with
+    `billed` for a reason the module docstring assigns to superseded
+    duplicates, and dropping them from `db_corrupted` silently deletes the
+    experiment's headline governance finding on 49 of 450 tasks.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct", usd=0.01), "db_corrupted": False},
+        {**_row("t2", PRIMARY_RIGHT_ARM, "ungraded", usd=0.05), "db_corrupted": True},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "db_corrupted: true=1" in block
+    assert "final=$0.06" in block
+
+
+def test_per_level_strict_accuracy_excludes_ungraded_rows(tmp_path):
+    """The level breakdown reads `arm_rows` directly rather than going
+    through `_summarize`, so it is a second denominator that has to exclude
+    them — otherwise the header prints `strict 1/1` and the level line
+    beneath it prints `strict 1/3` off the same rows.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct", level="easy"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded", level="easy"),
+        _row("t3", PRIMARY_RIGHT_ARM, "ungraded", level="easy"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "strict   1/1" in text
+    assert "strict   1/3" not in text
+
+
+def test_strict_mcnemar_does_not_pair_ungraded_tasks(tmp_path):
+    """STRICT pairing counts a harness failure as wrong — a real attempt that
+    produced no right answer. An ungraded task is not that: neither arm could
+    be graded on it, so pairing them inflates `n_paired` with tasks the test
+    says nothing about.
+    """
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct"),
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_LEFT_ARM, "ungraded"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "n_paired=2" not in text
+    assert "n_paired=1" in text
+
+
+def _ungolded(task_id: str, arm: str, verdict: str, **kw) -> dict:
+    """A row for a task admitted by `--ungolded run`: no gold exists."""
+    return {**_row(task_id, arm, verdict, **kw), "gold": None}
+
+
+def test_an_ungolded_task_that_fails_the_harness_stays_out_of_the_arithmetic(
+    tmp_path,
+):
+    """An ungolded task only reaches `verdict: "ungraded"` if `run_task`
+    finishes cleanly. Trip a cap or error and the row keeps `hit_limit` /
+    `error` with `gold: null` — so a cut made on VERDICT lets it through into
+    `strict_n` and `failure_rate`, and `--ungolded run` moves numbers the
+    README promises it cannot. The cut has to be "this task has no gold".
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        {**_row("t2", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t3", PRIMARY_RIGHT_ARM, "hit_limit"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+    block = _arm_block(text, PRIMARY_RIGHT_ARM)
+
+    assert "strict    2/2" in block
+    assert "failures (0% of rows)" in block
+    assert "HARNESS-LIMITED" not in block
+    assert "strict   2/3" not in text
+
+
+def test_report_counts_the_harness_failures_among_ungolded_rows(tmp_path):
+    """Excluding ungolded rows from the failure rate must not HIDE a cap trip
+    on 49 tasks. They leave the rate — a different population — and are
+    reported on their own.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+        _ungolded("t3", PRIMARY_RIGHT_ARM, "hit_limit"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "ungolded: 2 row(s)" in block
+    assert "1 harness failure(s)" in block
+
+
+def test_the_ungolded_count_is_not_printed_inside_the_failures_line(tmp_path):
+    """`failures (0% of rows): none, ungraded=49` reads as though 49 rows
+    were failures inside a line that just said 0%. It gets its own line.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    failures_line = next(
+        line
+        for line in _arm_block(report(path), PRIMARY_RIGHT_ARM).splitlines()
+        if "failures (" in line
+    )
+    assert "ungolded" not in failures_line
+    assert "ungraded" not in failures_line
+
+
+def test_stale_scorer_warning_ignores_rows_that_were_never_graded(tmp_path):
+    """`ungraded` rows carry `scorer` like any other, but `rescore` skips
+    them. Counting them inflates the stale-scorer warning and makes its
+    claim — that every answered row has been re-graded — false for them.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a", "scorer": "fallback"},
+        {**_ungolded("t2", PRIMARY_RIGHT_ARM, "ungraded"), "scorer": "fallback"},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "1 row(s)" in text
+    assert "2 row(s)" not in text
+
+
+def test_strict_mcnemar_drops_an_ungolded_task_that_failed_the_harness(tmp_path):
+    """`_strict_bools` made the verdict-keyed cut `_is_ungolded` exists to
+    replace. An ungolded task that trips a cap on one arm and errors on the
+    other keeps its harness verdicts, so a verdict cut pairs it — and the
+    report then prints `strict 1/1` per arm above an `n_paired=2` line.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_LEFT_ARM, "correct"), "gold": "a"},
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("u1", PRIMARY_LEFT_ARM, "hit_limit"),
+        _ungolded("u1", PRIMARY_RIGHT_ARM, "error"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "n_paired=2" not in text
+    assert "n_paired=1" in text
+
+
+def test_an_ungolded_only_arm_does_not_trip_the_unequal_task_set_warning(tmp_path):
+    """`--ungolded run --arms contract` resumed into an existing multi-arm
+    results file is the only way to run the 49 without re-paying for the 401.
+    It leaves the contract arm holding rows no other arm has — which is
+    exactly what this warning looks for, and here it is not a lopsided sweep.
+    Firing tells the operator to pay to run 49 unscoreable tasks on three
+    more arms, while every denominator above the warning is already correct.
+    """
+    rows = [
+        {**_row(f"t{i}", arm, "correct"), "gold": "a"}
+        for i in range(3)
+        for arm in (PRIMARY_LEFT_ARM, PRIMARY_RIGHT_ARM)
+    ] + [
+        _ungolded("u1", PRIMARY_RIGHT_ARM, "ungraded"),
+        _ungolded("u2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "did NOT see the same task set" not in report(path)

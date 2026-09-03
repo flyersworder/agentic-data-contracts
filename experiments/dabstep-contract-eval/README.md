@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 348 tests, deterministic and offline
+uv run pytest -q                     # 387 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -130,7 +130,8 @@ uv run python -m dce.stats results/smoke12.jsonl
 | `--out` | `results/results.jsonl` | One JSON row per `(task, arm, model)`. Appended to, never rewritten. |
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |
 | `--golds` | `data/golds.json` | The gold envelope. Its `revision`, `threshold` and content hash are all checked. |
-| `--tasks` | `data/tasks.json` | Task list; filtered to those that have a gold. |
+| `--tasks` | `data/tasks.json` | Task list; filtered by `--ungolded`. |
+| `--ungolded` | `skip` | What to do with the 49 tasks that have no reconstructed gold. `skip` is every scoring sweep. `run` answers them **unscored** (`verdict: ungraded`) — only a [leaderboard submission](#leaderboard-submission) needs it. |
 | `--workers` | `1` | Task groups to run concurrently, each on its own working copy. See [Unattended runs](deploy/README.md) before raising it. |
 | `--retry` | none | `error` or `post_run_error` — also re-run rows with that verdict on resume. Both already cost money, which is why neither is retried by default. `construction_error` rows are retried automatically (twice, then given up on loudly). |
 
@@ -304,6 +305,61 @@ Two things to check at the **smoke** run, not after the sweep:
    it is invisible in the dollar figures. This line is the only place it shows.
 2. **`did NOT see the same task set`.** A sweep that stopped mid task-group
    leaves the arms with different denominators.
+
+## Leaderboard submission
+
+DABStep is 450 tasks; the ablation runs the **401** with a reconstructed gold
+(`dce.golds`). A submission has to answer all 450, so it needs both halves of
+this:
+
+```bash
+# 1. answer every task, including the 49 that cannot be scored locally
+uv run python -m dce.runner --ungolded run --arms contract \
+    --models z-ai/glm-5.3-flash --max-spend 2.00 --out results/glm-all450.jsonl
+
+# 2. build the file the Space wants
+uv run python -m dce.submit --results results/glm-all450.jsonl \
+    --arm contract --model z-ai/glm-5.3-flash --out submission.jsonl
+```
+
+The sweep's output lives in `results/` and stays **tracked** — the
+tamper-evidence claim depends on result rows being readable in git history.
+Only the built `submission*.jsonl` at the experiment root is gitignored, and
+that rule is anchored precisely so it cannot swallow a results file.
+
+`--ungolded run` does **not** score the extra tasks. They reach `run_task` as
+`gold=None`; a clean run records `verdict: "ungraded"`, and one that trips a
+cap or errors keeps its harness verdict with `gold: null`. `dce.stats` cuts on
+**the missing gold, not the verdict** — a verdict-keyed cut would let a capped
+ungolded task into the accuracy denominator — so no accuracy figure and no
+harness-failure rate can reach any of them. They are reported on their own
+line (`ungolded: N row(s) …; M harness failure(s) among them`), because
+dropping rows silently is a claim that they did not exist, and because a cap
+trip across those 49 must be counted rather than hidden by its exclusion from
+the rate.
+
+`dce.submit` emits `{"task_id", "agent_answer"}` per line, reading through
+`latest_rows` so a retried unit contributes its final answer rather than a
+stale `error` row's empty string. It **refuses to write at all** — leaving no
+partial file behind — if any task has no row, has a verdict carrying no reply
+(`hit_limit`, `error`, `post_run_error`, `construction_error`), or has a blank
+answer, and names them. `scoring_error` *is* submittable: it means a real
+answer came back and our local scorer raised on it, which is the leaderboard's
+call to make. A submission is effectively one-shot
+per agent name and the Space scores a missing task as wrong, so a short file
+is worse than no file. `--results` takes several files, so a fresh all-450
+sweep and a spliced 401 + 49 both work. `--out` may not name one of the
+`--results` files, and an empty submission is refused rather than written as a
+blank line. Spliced rows are checked for provenance: a disagreement on
+`contract_digest` is refused outright (two contracts is two agents), while
+`commit_sha`, `scorer` and `golds_hash` differences are printed — a splice
+spans two commits by construction, so refusing on that would ban this flow.
+
+Uploading is manual and deliberately not automated here: the Space wants a
+browser and metadata (agent name, model family, whether the code is open) that
+should be entered by a person. Read `docs/paper-plan.md`'s *leaderboard
+submission* section first — it records the conditions the submission is
+committed to, including submitting one arm only.
 
 ## Accepted gaps
 

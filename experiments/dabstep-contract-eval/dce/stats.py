@@ -37,8 +37,9 @@ than one:
 
   * SCORED accuracy: `correct` / (`correct` + `incorrect`) -- harness
     failures dropped from both halves of the fraction entirely.
-  * STRICT accuracy: `correct` / all rows -- harness failures counted as
-    wrong.
+  * STRICT accuracy: `correct` / all GRADED rows -- harness failures counted
+    as wrong. Rows for a task with no gold are not graded rows; see
+    `_is_ungolded`.
 
 Excluding harness failures (SCORED) flatters whichever arm fails most;
 counting them as wrong (STRICT) instead punishes that arm for what may be
@@ -168,6 +169,14 @@ ANSWER_VERDICTS: frozenset[str] = frozenset({"correct", "incorrect"})
 HARNESS_VERDICTS: frozenset[str] = frozenset(
     {"hit_limit", "error", "scoring_error", "post_run_error", "construction_error"}
 )
+
+#: A verdict that is neither an answer nor a harness outcome: the task was
+#: run and answered, but no gold EXISTS to score it against (49 of DABStep's
+#: 450 -- see `dce.golds`). A leaderboard submission has to answer those; the
+#: ablation must not count them. Kept out of ANSWER_VERDICTS so no accuracy
+#: arithmetic can reach it, and out of HARNESS_VERDICTS because nothing
+#: failed -- `_summarize` drops these rows before either denominator.
+UNGRADED_VERDICTS: frozenset[str] = frozenset({"ungraded"})
 
 #: Named, not positional: `dce.arms.ARMS` grew a fourth arm
 #: (`contract_hollow`) and the old `ARM_A, ARM_B, ARM_C = ARMS` unpack failed
@@ -356,6 +365,12 @@ def stale_scorer_rows(rows: list[dict]) -> dict[str, int]:
     now = active_scorer()
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
+        # An ungolded row carries `scorer` like any other (`build_result_row`
+        # sets it unconditionally) but `rescore` skips it — nothing graded it
+        # and nothing will. Counting it both inflates the warning and makes
+        # its claim, that every answered row has been re-graded, false.
+        if _is_ungolded(row):
+            continue
         recorded = row.get("scorer")
         if recorded and recorded != now:
             counts[recorded] += 1
@@ -365,6 +380,47 @@ def stale_scorer_rows(rows: list[dict]) -> dict[str, int]:
 def _scored(rows: list[dict]) -> list[dict]:
     """Rows where the model produced a graded answer."""
     return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
+
+
+def _is_ungolded(row: dict) -> bool:
+    """This row's task had no gold to score against.
+
+    Keyed on `gold`, NOT on `verdict`. A task admitted by `--ungolded run`
+    only reaches `verdict: "ungraded"` if `run_task` finishes cleanly; trip a
+    cap or error and the row keeps `hit_limit`/`error`/`post_run_error`/
+    `construction_error` with `gold: None`. A verdict-keyed cut lets those
+    through into `strict_n` and `failure_rate`, which is exactly the
+    invariant `--ungolded run` is supposed to preserve. The verdict is still
+    checked, as a second signal on any row shape that predates `gold` being
+    nullable.
+
+    The `""` default is load-bearing: `_safe_json_dumps`' salvage envelope
+    has no `gold` key at all, and a row we could not even serialise properly
+    is not evidence that its task was ungolded. It stays in the denominator.
+    """
+    return row.get("gold", "") is None or row.get("verdict") in UNGRADED_VERDICTS
+
+
+def _graded(rows: list[dict]) -> list[dict]:
+    """Rows that ACCURACY and FAILURE-RATE arithmetic may see: everything
+    except the tasks with no gold to score against.
+
+    Deliberately not the same cut as `_scored`. A harness failure on a GOLDED
+    task stays in (STRICT accuracy counts it against the arm, which is the
+    point of the STRICT view); every row for an ungolded task comes out,
+    however it ended, because that task is a different population — there is
+    no right answer it could have missed and no accuracy its failure could
+    make less trustworthy.
+
+    Every accuracy or failure-rate denominator must go through this. Cost,
+    `db_corrupted` and the instrumentation means must NOT: those rows were
+    really billed and their working copies really were checked, and dropping
+    them there would understate spend and silently delete governance evidence
+    on the 49 tasks a submission sweep adds. What leaves the failure RATE is
+    reported on its own line instead, so a cap trip across those 49 is
+    counted rather than hidden.
+    """
+    return [row for row in rows if not _is_ungolded(row)]
 
 
 def _failure_counts(rows: list[dict]) -> dict[str, int]:
@@ -410,12 +466,23 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     that is not entirely arm C, so a mixed or ungoverned slice reports
     nothing rather than a structural zero.
     """
-    scored_rows = _scored(rows)
+    # `graded_rows` for the accuracy block, the FULL slice for everything
+    # else. `strict_n` was `len(rows)`, so an ungraded row counted against
+    # STRICT accuracy exactly as a wrong answer would, and diluted
+    # `failure_rate` -- the denominator HARNESS_FAILURE_RATE_THRESHOLD is
+    # compared against -- so both read as a quieter run than the file
+    # describes. Filtering `rows` outright instead was its own bug: it also
+    # took those rows out of `usd_final`, `_corruption_counts` and
+    # `_instrumentation`, where they belong (see `_graded`).
+    graded_rows = _graded(rows)
+    ungolded_rows = [row for row in rows if _is_ungolded(row)]
+    ungolded_failures = sum(_failure_counts(ungolded_rows).values())
+    scored_rows = _scored(graded_rows)
     scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
     scored_n = len(scored_rows)
-    strict_ok = sum(row.get("verdict") == "correct" for row in rows)
-    strict_n = len(rows)
-    failures = _failure_counts(rows)
+    strict_ok = sum(row.get("verdict") == "correct" for row in graded_rows)
+    strict_n = len(graded_rows)
+    failures = _failure_counts(graded_rows)
     failure_rate = sum(failures.values()) / strict_n if strict_n else 0.0
     return {
         "scored_ok": scored_ok,
@@ -426,6 +493,8 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
         "strict_ci": wilson(strict_ok, strict_n),
         "failures": failures,
         "failure_rate": failure_rate,
+        "ungolded_n": len(ungolded_rows),
+        "ungolded_failures": ungolded_failures,
         "corruption": _corruption_counts(rows),
         "usd_final": sum(row.get("usd") or 0.0 for row in rows),
         "usd_total_billed": sum(row.get("usd") or 0.0 for row in raw_rows),
@@ -497,6 +566,22 @@ def _format_summary(label: str, summary: dict) -> str:
         or "none"
     )
     corruption = summary["corruption"]
+    # Its OWN line, not appended to the failures list: `failures (0% of
+    # rows): none, ungraded=49` reads as though 49 rows were failures, inside
+    # a line that just said 0%. Silence here is still a claim -- that no row
+    # was set aside -- so the line appears whenever any were, and the harness
+    # failures among them are counted rather than hidden by their exclusion
+    # from `failure_rate`. Absent entirely on the four runs in FINDINGS.
+    ungolded_line = (
+        (
+            f"\n{'':16s} ungolded: {summary['ungolded_n']} row(s) with no gold "
+            f"to score, excluded from accuracy and from the failure rate "
+            f"above; {summary['ungolded_failures']} harness failure(s) among "
+            "them"
+        )
+        if summary["ungolded_n"]
+        else ""
+    )
     inst = summary["instrumentation"]
     instrumentation_line = (
         f"\n{'':16s} tokens/row: in={inst['mean_input_tokens']:.0f} "
@@ -527,7 +612,7 @@ def _format_summary(label: str, summary: dict) -> str:
         f"{'':16s} failures ({summary['failure_rate']:.0%} of rows): "
         f"{fail_str}\n"
         f"{'':16s} db_corrupted: true={corruption['corrupted']} "
-        f"unknown={corruption['unknown']}"
+        f"unknown={corruption['unknown']}{ungolded_line}"
         f"{instrumentation_line}{governance_line}"
     )
 
@@ -548,11 +633,24 @@ def _scored_bools(rows: list[dict], arm: str) -> dict[str, bool]:
 def _strict_bools(rows: list[dict], arm: str) -> dict[str, bool]:
     """task_id -> correct, for the STRICT McNemar view: every task this arm
     attempted is present, with a harness failure counted as wrong.
+
+    Ungolded tasks are the one exclusion, and the cut is `_is_ungolded` --
+    the SAME cut `_summarize` makes, keyed on the missing gold rather than on
+    the verdict. Keying it on `verdict in UNGRADED_VERDICTS` (as this did)
+    kept every ungolded task whose run tripped a cap or errored, so the two
+    denominators in one report disagreed: `strict 1/1` per arm above an
+    `n_paired=2` line.
+
+    A harness failure on a GOLDED task is a real attempt that produced no
+    right answer, which is what STRICT is for; a task with no gold is not an
+    attempt that failed. Pairing them adds concordant false/false pairs --
+    harmless to `p_value`, which reads only discordant pairs, but `n_paired`
+    would claim a comparison over tasks neither arm could be graded on.
     """
     return {
         row.get("task_id", "unknown"): row.get("verdict") == "correct"
         for row in rows
-        if row.get("arm") == arm
+        if row.get("arm") == arm and not _is_ungolded(row)
     }
 
 
@@ -594,6 +692,13 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     from the pairing) and the Wilson intervals silently narrow or widen on.
     Nothing else in this module would say a word about it.
     """
+    # `_graded`, like every other denominator in this module. Without it,
+    # `--ungolded run --arms contract` resumed into an existing multi-arm
+    # file -- the only way to add the 49 without re-paying for the 401 --
+    # leaves the contract arm holding 49 rows no other arm has, and this
+    # warning reads that as a lopsided sweep. It would then tell the operator
+    # to pay to run 49 unscoreable tasks on three more arms.
+    rows = _graded(rows)
     by_arm = {
         arm: {
             row.get("task_id")
@@ -725,8 +830,13 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
             ]
             lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
 
-            scored_by_level = accuracy_by(_scored(arm_rows), "level")
-            strict_by_level = accuracy_by(arm_rows, "level")
+            # `_graded` here too: this breakdown does not go through
+            # `_summarize`, so it is a second STRICT denominator. Without it
+            # the header line prints `strict 1/1` and the level line right
+            # beneath prints `strict 1/3` off the same rows.
+            graded_arm_rows = _graded(arm_rows)
+            scored_by_level = accuracy_by(_scored(graded_arm_rows), "level")
+            strict_by_level = accuracy_by(graded_arm_rows, "level")
             for level in sorted(set(scored_by_level) | set(strict_by_level)):
                 s_ok, s_n = scored_by_level.get(level, (0, 0))
                 t_ok, t_n = strict_by_level.get(level, (0, 0))

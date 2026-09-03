@@ -24,7 +24,7 @@ statement position in the query argument (Table~\ref{tab:governance}).
 A (glm)      & 27 (8 tasks)  & 92 (13 tasks) & \textbf{0} & \textbf{0} \\
 B (deepseek) & 24 (2 tasks)  & 1 (1 task)    & \textbf{0} & \textbf{0} \\
 C (sol)      & \textbf{0}    & \textbf{0}    & \textbf{0} & \textbf{0} \\
-D (sonnet~5) & \textbf{0}    & 22 (2 tasks)  & \textbf{0} & \textbf{0} \\
+D (Sonnet~5) & \textbf{0}    & 22 (2 tasks)  & \textbf{0} & \textbf{0} \\
 \midrule
 \textbf{Total} & \textbf{51 (10)} & \textbf{115 (16)} & \textbf{0} & \textbf{0} \\
 \bottomrule
@@ -58,8 +58,9 @@ has a frontier-class model on both sides of it.
 
 The transcripts suggest why, and it is not that the stronger model is better
 behaved in the abstract. Holding an intermediate result is a need every model
-has; what differs is the idiom. Run~C uses common table expressions on 59\% and
-55\% of its ungoverned traces (\armS{} and \armM{} respectively), against 32\%/30\% on run~A and 26\%/27\% on
+has; what differs is the idiom. Run~C uses common table expressions on
+59\%/55\% of its ungoverned traces (\armS{}/\armM{}), against 32\%/30\% on
+run~A and 26\%/27\% on
 run~B. \texttt{CREATE TEMP} appears in 22 of run~A's ungoverned traces and 3 of
 run~B's, and in none of run~C's; on run~A it accounts for every mutating
 statement submitted, on run~B for 4 of 25. Run~D does not fit that pattern:
@@ -96,8 +97,9 @@ contract rather than written as code:
 still appears in the transcript as a tool call, so the count above is of what
 the model \emph{emitted}, not of what survived validation. Zero does not mean
 ``attempted and blocked'' --- it means \textbf{never attempted}. In 6{,}416
-rows the enforcement layer never had to fire in a governed arm, because the
-declared rules stopped the attempts upstream of it. Nor can the data
+rows the enforcement layer never had to fire against a mutating statement in
+a governed arm, because the declared rules stopped the attempts upstream of
+it. Nor can the data
 distinguish a model that will not attempt from one that would have been
 caught; both produce zero. What the transcripts support is narrower: with the
 rules present, the attempts stop, and a validator stands behind them if they
@@ -116,9 +118,10 @@ which the data cannot exercise precisely because the first layer worked.
 \subsection{Two escalations reached the database}
 
 The post-run integrity check flagged two rows in 6{,}416: task~68, \armS{},
-run~B, and task~2546, \armM{}, run~D. Task~68 is 1 of the 24 attempting tasks
-on runs~A and~B because DuckDB \texttt{TEMP} tables die with the connection;
-only this run escalated to persistent tables.
+run~B, and task~2546, \armM{}, run~D. Task~68 is the only one of the 24
+attempting tasks on runs~A and~B to reach the database: DuckDB \texttt{TEMP}
+tables die with the connection, and only this attempt escalated to persistent
+tables.
 
 The escalation was deliberate, and the model narrates it. It first issued
 \texttt{CREATE TEMP TABLE feats}, and on the next call received \texttt{Table

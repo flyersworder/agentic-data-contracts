@@ -48,7 +48,7 @@ look them up before writing SQL.
 \subsection{The hollow control}
 \label{sec:hollow}
 
-Arm \armC{} differs from the baselines along three dimensions at once:
+\armC{} differs from the baselines along three dimensions at once:
 different tools, a procedural instruction, and semantic content. The first
 objection any reader raises is that the tools or the instruction might be doing
 the work. \armH{} holds both fixed and removes only the third.
@@ -80,8 +80,9 @@ The transcripts confirm it: in run~A, \armH{} called \texttt{lookup\_domain}
 on 272 of 401 tasks and received the empty placeholder 282 times. The loop
 ran; there was nothing behind it.
 
-\paragraph{Prompt length is deliberately not held constant} (1{,}984 characters
-for \armH{} against 2{,}475 for \armC{}). Padding the hollow arm to match would
+\paragraph{Prompt length is deliberately not held constant.} \armH{}'s prompt
+is 1{,}984 characters against \armC{}'s 2{,}475. Padding the hollow arm to
+match would
 substitute one confound for another --- text that reads as content but carries
 none, which is a different treatment, not a cleaner control. The variable under
 test is knowledge, not tokens.
@@ -93,21 +94,29 @@ We ran the full design four times: on \texttt{glm-5.3-flash} (run~A),
 \texttt{deepseek-v4-flash} (run~B), \texttt{gpt-5.6-sol} (run~C) and Claude
 Sonnet~5 (run~D), each pinned to a single provider endpoint with fallbacks
 disabled --- the first two at fp8 quantization --- so that quantization, price
-and throughput are fixed within a run. Runs~A--C reach their model through
-OpenRouter. Run~D reaches Bedrock through an enterprise LiteLLM gateway on
-Anthropic's Messages API, a route chosen because the gateway's
-OpenAI-compatible route injects no cache control and bills every input token
-fresh at a multiple that differs by arm ($1.86{\times}$ on \armS{} against
-$3.40{\times}$ on \armM{}, replaying run~C's rows at the same rates), which
-would have written a caching confound into the data. The four runs are
-separate experiments rather than replicates: they differ in model, provider,
-and one library fix (Section~\ref{sec:harness-asym}). Reasoning effort is set
-to \texttt{medium} throughout --- on run~D as \texttt{anthropic\_effort=medium}
-with adaptive thinking, a translation of the same scale --- though that is a
-nominal setting rather than an equated one. Temperature is held at 0 on
-runs~A and~B and on neither of the others: run~C's model does not accept the
-parameter, and run~D's gateway rejects both \texttt{temperature} and
-\texttt{seed} outright, so run~D has neither determinism control.
+and throughput are fixed within a run. We call runs~A and~B the
+\emph{flash-tier} runs and runs~C and~D the \emph{frontier-class} runs; that
+is the vendors' tiering rather than a measured quantity, and
+Section~\ref{sec:threats} records where the measured axis disagrees with it.
+Runs~A--C reach their model through OpenRouter. Run~D reaches Bedrock through
+an enterprise LiteLLM gateway on Anthropic's Messages API. The gateway's
+OpenAI-compatible route was rejected because it injects no cache control and
+bills every input token fresh, at a multiple that differs by arm
+($1.86{\times}$ on \armS{} against $3.40{\times}$ on \armM{}, replaying
+run~C's rows at the same rates); that would have written a caching confound
+into the data. Run~D was executed after the three-model draft of this paper
+was written; its rows carry commit \texttt{b55c932}, the contract digest and
+the hollow digest, which is the evidence that it ran the frozen harness. The
+four runs are separate experiments rather than replicates: they differ in
+model, provider, and one library fix (Section~\ref{sec:harness-asym}).
+Reasoning effort is set to \texttt{medium} throughout --- on run~D as
+\texttt{anthropic\_effort=medium} with adaptive thinking, a translation of the
+same scale --- though that is a nominal setting rather than an equated one:
+under it the contract arm reasons for about 350 tokens per task on run~C and
+about 2{,}050 on run~D. Temperature is held at 0 on runs~A and~B and on
+neither of the others: run~C's model does not accept the parameter, and
+run~D's gateway rejects both \texttt{temperature} and \texttt{seed} outright,
+so run~D has neither determinism control.
 
 Everything else is fixed across all four arms \emph{within} a run: row limit
 (50 rows per result, with one small exception recorded in

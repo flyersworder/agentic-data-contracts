@@ -58,14 +58,14 @@ answers only:
       of admitted votes. Median realised share: 0.981.
 \end{enumerate}
 
-This yields golds for \textbf{401 of 450 tasks} (332 hard, 69 easy). Five
-further tasks were excluded after manual verification showed the consensus
-answer to be wrong. Consensus inherits the leaderboard's errors, and we found
-some.
+After excluding five tasks whose consensus answer manual verification showed
+to be wrong, this yields golds for \textbf{401 of 450 tasks} (332 hard, 69
+easy). Consensus inherits the leaderboard's errors, and we found some.
 
 \paragraph{Independent verification.} Consensus is an argument, not a
-measurement, so we checked it against the database. The largest template family
---- the fee-average questions --- was recomputed directly from DuckDB using the
+measurement, so we checked it against the database. The largest template
+families --- the three fee-average question shapes --- were recomputed
+directly from DuckDB using the
 matching rule documented in \texttt{manual.md}. \textbf{All 59 reconstructed
 golds reproduce exactly.}
 
@@ -82,7 +82,7 @@ revision. Each result row records which scorer graded it.
 
 This is load-bearing rather than housekeeping. Our own fallback normaliser,
 written before the official scorer was vendored, was \emph{stricter} than the
-benchmark. On a 12-task pilot that manufactured a significant result in this
+benchmark. On a 12-task pilot it manufactured a significant result in this
 library's favour that the official rules do not support ($p{=}0.0156$ against
 $p{=}0.0703$). A scorer that is stricter than the benchmark is not a
 conservative choice; it is a different experiment.

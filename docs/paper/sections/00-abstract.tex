@@ -13,24 +13,26 @@ instruction, table allow-list and operation rules stay byte-for-byte fixed.
 Contract-delivered semantics raise hard-task accuracy from 13.9\% to 55.1\%,
 22.6\% to 56.6\%, 22.9\% to 68.4\% and 37.0\% to 77.4\%, beating the same
 knowledge pasted verbatim into the prompt on all four models ($p{\le}0.0067$,
-paired McNemar); on one of them the pasted manual is indistinguishable from a
-bare schema on hard tasks ($p{=}0.72$) while the contract carrying the same
-knowledge adds 45 points. The content step dominates the scaffolding step
-everywhere, but the scaffolding step is not zero: undetectable on the two
-weakest models and worth $+14.2$ and $+15.1$ points ($p{\le}4{\times}10^{-7}$)
-on the two strongest. \textbf{A null across two
-adjacent models is weak evidence of absence.}
+all-task paired McNemar); on one of them the pasted manual is
+indistinguishable from a bare schema on hard tasks ($p{=}0.72$) while the
+contract carrying the same knowledge adds 45 points. The content step
+dominates the scaffolding step everywhere, but the scaffolding step is not
+zero: not significant at the all-task level on the two flash-tier models
+($p{=}0.058$, $0.61$) and worth $+14.2$ and $+15.1$ points
+($p{\le}4{\times}10^{-7}$) on the two frontier-class ones. A null across two
+adjacent models is weak evidence of absence.
 
 The contract is also executable. Transcribing its declared SQL expressions
 into two views reproduces gold on all 176 tasks it covers, 53\% of the hard
 split, so each arm's accuracy can be read as efficiency against a proven
-ceiling. The contract arm recovers 60.8\%, 62.7\%, 73.9\% and \textbf{94.9\%}
-of what it was given, in order of bare-schema capability, against 45.9\%,
-46.5\%, 60.1\% and 56.1\% on tasks that compose the same semantics further.
-\textbf{The derivation gap closes with capability and the composition gap does
-not track it}: the cost of making an agent derive a query rather than
-pre-computing it is transient, as we predicted publicly before the third run
-and a fourth model confirmed in direction if not in size.
+ceiling. The contract arm recovers 60.8\%, 62.7\%, 73.9\% and 94.9\% of what
+it was given, in order of bare-schema capability, against 45.9\%, 46.5\%,
+60.1\% and 56.1\% on tasks that compose the same semantics further. The
+derivation gap is smaller on both frontier-class models (26.1 and 5.1 points
+against ${\approx}38$) and the composition gap is not: the cost of making an
+agent derive a query rather than pre-computing it is transient, as we
+predicted publicly before the third run and a fourth model confirmed in
+direction if not in size.
 
 The advantage over a hand-written prompt is not monotone in capability, and
 the effect is not detectable outside the domain the contract describes. One

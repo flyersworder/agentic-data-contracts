@@ -52,8 +52,8 @@ We report a controlled ablation that separates the first two, and we are
 explicit that we do not attempt the third (Section~\ref{sec:related} explains
 why, and why that makes our absolute numbers lower and our question harder).
 
-The design turns on a fourth arm. \armH{} takes the same frozen contract the
-treatment arm uses and empties every field of prose (domain summaries, metric
+The design turns on a fourth arm, \armH{}, which takes the same frozen
+contract the treatment arm uses and empties every field of prose (domain summaries, metric
 descriptions, the SQL expression that carries the fee formula, column and
 relationship descriptions) while leaving names, types, structure, the table
 allow-list, the forbidden-operation rules and all nine governed tools
@@ -67,13 +67,14 @@ Four findings follow, and one non-finding.
 \textbf{The content dominates, and the scaffolding is a real but secondary
 effect} (Section~\ref{sec:ablation}). \armH{} sits level with the bare-schema
 baseline on one model, $+5.4$ points above it on another, and $+14.2$ and
-$+15.1$ on the two strongest. Every model puts the content step well above the
-scaffolding step, which is what the fourth arm was built to test. But the
-stronger claim, that the scaffolding contributes nothing, is false: two models
-supported it, an earlier version of this paper made it, the third model
-overturned it at $p{=}4{\times}10^{-7}$ against a pooled null of $p{=}0.29$,
-and a fourth, from a third model family, replicated the overturning at
-$p{=}9{\times}10^{-9}$. That is a caution about how far two models generalise.
+$+15.1$ on the two frontier-class models. Every model puts the content step
+well above the scaffolding step, which is what the fourth arm was built to
+test. But the stronger claim, that the scaffolding contributes nothing, is
+false. Two models supported it and an earlier version of this paper made it;
+the third model overturned it at $p{=}4{\times}10^{-7}$ against a pooled null
+of $p{=}0.29$, and a fourth, from a fourth model family, replicated the
+overturning at $p{=}9{\times}10^{-9}$. That is a caution about how far two
+models generalise.
 
 \textbf{Delivery matters as much as possession}
 (Section~\ref{sec:mechanism}). Both the contract arm and the prompt arm are
@@ -95,8 +96,9 @@ sufficient and any shortfall is a failure to derive. That shortfall --- the
 the four models in order of bare-schema capability, while on tasks that
 compose the same semantics further it moves between 54.1 and 39.9 with no
 clean ordering. Between the flash models and the strongest one the same
-capability increment closes 87\% of the first and 19\% of the second; the
-fourth model, which lands between, gains about equally on both. This is the
+capability increment closes 87\% of the first and 19\% of the second (the
+second measured against 100\%, which is not a proven ceiling on that bucket);
+the fourth model, which lands between, gains about equally on both. This is the
 finding with the most consequence for the economics above, and we recorded
 its direction as a prediction in the public artifact repository before the
 third run executed.
@@ -104,15 +106,15 @@ third run executed.
 \textbf{Governance is measurable and nearly free}
 (Section~\ref{sec:governance}), on models that need governing. Ungoverned arms
 submitted 166 mutating statements across 26 tasks; governed arms submitted
-none, and never attempted; the number measures deterrence by the declared
+none and never attempted one. The number measures deterrence by the declared
 rules, not blocking by the enforcement layer behind them. On one of the two
-strongest models no arm attempted a write at all; on the other, an ungoverned
-arm escalated to persistent tables and corrupted the warehouse, so the
-contrast now has a frontier-class model on both sides of it.
+frontier-class models no arm attempted a write at all; on the other, an
+ungoverned arm escalated to persistent tables and corrupted the warehouse, so
+the deterrence contrast now includes a strong model that did try.
 
 The non-finding: on the 38, 30, 38 and 38 hard tasks that fall outside the domain
-the contract describes, the contract holds no advantage over a hand-written
-prompt, and
+the contract describes, the contract holds no detectable advantage over a
+hand-written prompt, and
 on the strongest model the bare-schema baseline leads that slice outright. The
 gain is domain-specific by construction. That is what a domain contract should
 do, and also the sharpest limit on what one benchmark can show.

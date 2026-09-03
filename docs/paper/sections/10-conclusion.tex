@@ -8,13 +8,14 @@ paid once, and pre-computed macros are paid per metric forever.
 Holding the tool surface, the retrieval instruction, the table allow-list and
 the operation rules byte-for-byte fixed and emptying only the prose,
 \textbf{the content step dominates the scaffolding step on every model} --- by
-$1.8{\times}$ and $2.0{\times}$ on the two strongest models, $6.6{\times}$ on
-the weakest, and entirely on the one where scaffolding does nothing at all.
-Delivery matters as much as possession: the same governing rule sat in both
-arms, and only the contract arm applied it --- visibly, in the SQL it
-submitted, where it writes all six load-bearing clauses up to 98\% of the time
-against the prompt arm's 4\%, and on one model the prompt arm is worth nothing
-on hard tasks while the contract arm is worth 45 points.
+$1.8{\times}$ and $2.0{\times}$ on the two frontier-class models,
+$6.6{\times}$ on the weakest, and entirely on the one where scaffolding does
+nothing at all. Delivery matters as much as possession: the same governing
+rule sat in both arms, and only the contract arm applied it --- visibly, in
+the SQL it submitted, where it writes all six load-bearing clauses up to 98\%
+of the time against the prompt arm's 4\%. On one model the prompt arm is
+indistinguishable from a bare schema on hard tasks while the contract arm is
+45 points above both.
 
 Because the contract's declared expressions compile to a layer that reproduces
 gold exactly, each arm's accuracy can be read as efficiency against a proven
@@ -24,20 +25,21 @@ requiring an agent to derive, rather than handing it a pre-computed macro, is
 not structural but transient}, and already small on the strongest model we
 ran.
 
-We also report three corrections. On two models the scaffolding step was
-indistinguishable from zero and the contract's margin over a prompt appeared to
-shrink with capability; we stated both, the third model overturned both, and a
-fourth replicated the overturning. On three models nearly all of the strongest
-model's gain appeared to land on the tasks the contract answers outright; the
-fourth model gained as much on the tasks that compose them.
+We also report four corrections. On two models the scaffolding step was
+indistinguishable from zero, the contract's margin over a prompt appeared to
+shrink with capability, and the contract was the cheapest arm; we stated all
+three, the third model overturned all three, and a fourth replicated the first
+two overturnings. On three models nearly all of the strongest model's gain
+appeared to land on the tasks the contract answers outright; the fourth model
+gained as much on the tasks that compose them.
 \textbf{A null across two adjacent models is weak evidence of absence}, which
 is the methodological result of this paper and the one we would most want a
 reader to carry away.
 
 The same transcripts carry a second, narrower result. Declared rules that the
 model merely reads stopped every mutating statement it would otherwise have
-submitted --- 166 to zero, on the three models that reached for the idiom at all, one
-of them frontier-class --- while the enforcement layer standing behind those
+submitted --- 166 to zero, on the three models that attempted a write at all, one of
+them frontier-class --- while the enforcement layer standing behind those
 rules never had to fire. On the fourth model no arm attempted a write.
 
 Three limits bound all of this. The gain appears only inside the domain the
@@ -47,14 +49,11 @@ repeats, so nothing here estimates within-condition variance.
 
 \paragraph{Future work.} Three things, in order of what they would settle.
 Repeat runs would put a variance estimate under every number here; that is the
-largest gap, and largest for the frontier run, whose temperature could not be
-pinned. A second frontier model was the experiment this paper most needed
-while it rested on one, and run~D was that experiment: it replicated two
-reversals and softened a third claim. What a fifth model would settle is
-whether the derivation gap's size, which the two strong models put 21 points
-apart, is a function of anything the bare-schema arm measures --- that is,
-whether that arm is the right capability axis at all. And an executable
-metric layer, built
+largest gap, and largest for runs~C and~D, whose temperature could not be
+pinned. A fifth model would settle whether the derivation gap's size, which
+the two frontier-class models put 21 points apart, is a function of anything
+the bare-schema arm measures --- that is, whether that arm is the right
+capability axis at all. And an executable metric layer, built
 \emph{after} this measurement instead of before it, would separate the
 declarative contribution from the executable one the way this paper separates
 content from scaffolding.

@@ -73,7 +73,7 @@ Run D — Claude Sonnet 5, all 401 tasks:
 | Arm | tools | knowledge | overall | **hard (n=332)** | easy (n=69) | cost |
 |---|:-:|:-:|---:|---:|---:|---:|
 | **contract** | governed | contract | **279/401 (69.6%)** | **227 (68.4%)** | 52 (75.4%) | $37.97 |
-| **contract_hollow** | **governed** | **none** | 178/401 (44.4%) | **126 (37.9%)** | 52 (75.4%) | $46.08 |
+| **contract_hollow** | **governed** | **none** | 178/401 (44.4%) | **126 (38.0%)** | 52 (75.4%) | $46.08 |
 | manual_prompt | raw SQL | manual in prompt | 141/401 (35.2%) | 79 (23.8%) | 62 (89.9%) | $43.89 |
 | schema_only | raw SQL | none | 128/401 (31.9%) | 76 (22.9%) | 52 (75.4%) | **$36.80** |
 
@@ -111,7 +111,7 @@ On hard tasks, the gain splits into a scaffolding step and a content step:
 ```
                         glm-5.3-flash      deepseek-v4-flash      claudesonnet5         gpt-5.6-sol
 schema_only                 13.9%              22.6%                 22.9%                 37.0%
-  + tools and procedure  →  19.3% (+5.4)       22.6% (+0.0)          37.9% (+15.1)         51.2% (+14.2)  ← contract_hollow
+  + tools and procedure  →  19.3% (+5.4)       22.6% (+0.0)          38.0% (+15.1)         51.2% (+14.2)  ← contract_hollow
   + contract knowledge   →  55.1% (+35.8)      56.6% (+34.0)         68.4% (+30.4)         77.4% (+26.2)  ← contract
 ```
 
@@ -122,7 +122,7 @@ This reverses a claim held through two runs of this experiment. With runs A
 and B alone the scaffolding step did not survive a significance test, and this
 document said so — "not distinguishable from zero", "the content is the whole
 effect". Run C falsifies that, and run D replicates the falsification on a
-third model family. Paired McNemar on `contract_hollow` vs `schema_only`, all
+fourth model family. Paired McNemar on `contract_hollow` vs `schema_only`, all
 401 tasks:
 
 | | Δ hard | discordant | p |
@@ -152,7 +152,7 @@ wider (22.6% vs 42.9%, p=4e-13). On sol the two are statistically
 indistinguishable (51.2% vs 50.3%, p=0.44) — empty governed tools finally buy
 as much as the whole manual pasted into the prompt, but no more, and both
 remain far below the contract's 77.4%. On Sonnet 5 the ordering flips: empty
-governed tools (37.9%) beat the whole manual in the prompt (23.8%) by 14
+governed tools (38.0%) beat the whole manual in the prompt (23.8%) by 14
 points, p=1×10⁻⁴ (27 / 64) — the first model on which scaffolding alone
 outperforms possession of the knowledge as prose. Both still sit 30–45 points
 below the contract.
@@ -323,8 +323,12 @@ describes, it is inert, and a frontier model does not rescue it. That is the
 expected behaviour of a domain contract, and it is also precisely why this
 benchmark cannot answer the general question.
 
-A 30-task sub-bucket ("most expensive MCC for a transaction of N euros")
-scores 1–2 out of 30 for *every* arm. A template no arm solves is a property
+A 30-task sub-bucket inside the fee bucket — "most expensive MCC (10 tasks)
+or ACI (20 tasks) for a transaction of N euros" — scores 0–3 of 30 for *every*
+arm on runs A, B and D (run D: schema 2, hollow 1, contract 1, manual 3; run B
+on its 23 surviving tasks: 0 for schema and hollow). Run C partially solves it
+(8 / 5 / 4 / 2 for schema / hollow / contract / manual), a second slice where
+the bare baseline leads. A template no arm solves is a property
 of the benchmark, not a weakness of any arm — recorded because a per-arm
 reading of that bucket alone would have looked like a contract failure.
 
@@ -681,7 +685,7 @@ it lands between.** Sonnet 5's contract arm scores 73.9% on `macro`
 (130/176): well above the 61–63% the harness reading predicted, well short of
 sol's 94.9%. It was not a pre-registered test — the run was contributed after
 this section was written — but it ran on the frozen harness with the same
-digest-pinned contract, on a third provider and a third model family, and it
+digest-pinned contract, on a third provider and a fourth model family, and it
 confirms the direction of the collapse without reproducing its size.
 
 ## Efficiency
@@ -902,9 +906,9 @@ Counting **mutating statements the model actually submitted to a SQL tool**
 
 **166 mutating statements across 26 tasks in the ungoverned arms; zero in
 either governed arm, on any of the three models that produced any.** Fisher
-exact on traces containing at least one such statement: p=4e-07 for glm
-alone, p=6e-08 pooled over runs A and B, p=3e-08 pooled over A, B and D. (Run
-B's own 3 events give p=0.13 and run D's 2 tasks give p=0.50 — each is
+exact on traces containing at least one such statement: p=8e-07 (two-sided, as throughout) for glm
+alone, p=1e-07 pooled over runs A and B, p=3e-08 pooled over A, B and D. (Run
+B's own 3 events give p=0.25 and run D's 2 tasks give p=0.50 — each is
 underpowered on its own; the result rests on run A and the pooling.)
 
 **Run C produces no governance events at all, in any arm — and that is a

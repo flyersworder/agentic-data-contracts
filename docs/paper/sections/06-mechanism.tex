@@ -6,7 +6,7 @@ end, then reports where the treatment arm fails.
 
 \subsection{Possession is not delivery}
 
-Task 1278 asks for \emph{the average fee NexPay would charge for a credit
+Task~1278 asks for \emph{the average fee NexPay would charge for a credit
 transaction of 50 EUR}.
 
 \begin{center}
@@ -67,13 +67,13 @@ In run~A, \armC{} loses 14 tasks to \armS{} and 29 to \armM{}, 10 to both. Two
 modes account for nearly all of them.
 
 \textbf{Set membership under \texttt{NULL} wildcards} --- the same rule as
-above, failing in the other direction. On task 1500 (\emph{fee IDs that apply
+above, failing in the other direction. On task~1500 (\emph{fee IDs that apply
 to account\_type = O and aci = C}) \armC{} returns both false positives and
 false negatives while \armM{} matches exactly. Applying ``\texttt{NULL} means
 all'' to an enumeration is harder than applying it to an average: the model
 must decide, per column, whether a \texttt{NULL} widens the match.
 
-\textbf{Near-miss arithmetic} --- task 1274, gold \texttt{0.126459}, \armC{}
+\textbf{Near-miss arithmetic} --- task~1274, gold \texttt{0.126459}, \armC{}
 \texttt{0.125516}: a real computation with a wrong rounding or filter.
 
 \paragraph{These are not retrieval failures.} \texttt{lookup\_domain} is called
@@ -81,8 +81,10 @@ on 331 of 401 tasks in \armC{}; the 70 that skip it are \emph{easier for every
 arm} (\armS{} scores 41\% there against 19\% elsewhere), and 26 of the 33
 losses occur on tasks where the lookup \emph{was} performed. The agent fetches
 the rule and misapplies it. Run~D repeats the pattern: \armC{} loses 42 tasks
-(28 hard), \texttt{lookup\_domain} is called on 335 of 401, and the 14 easy
-losses are the easy-split interaction of Section~\ref{sec:results} rather
+(28 hard), \texttt{lookup\_domain} is called on 335 of 401, 35 of the 42
+losses are on tasks where it was called, the 66 that skip it are again easier
+for every arm (\armS{} 79\% there against 23\% elsewhere), and the 14 easy
+losses are the easy-split interaction of Section~\ref{sec:headline} rather
 than a fee-semantics failure.
 
 That diagnosis points at a specific remedy, and points away from another.
@@ -133,12 +135,13 @@ prompt.}
 \end{table}
 
 \armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$,
-$2{\times}10^{-47}$ and $9{\times}10^{-16}$ (Fisher exact). \armM{} holds the same knowledge, as prose,
-in its system prompt.
+$2{\times}10^{-47}$ and $9{\times}10^{-16}$ (Fisher exact).
 
 \textbf{Note what does not move.} \armM{} writes no more of the contract's
-clauses on a frontier model than on a weak one (3\%, 9\%, 4\%, 4\%), while
-\armC{} reaches 55\% and 98\% on the two strongest models. Run~D is the
+clauses on a strong model than on a weak one (3\%, 9\%, 4\%, 4\%), while
+\armC{} reaches 55\% and 98\% on the two frontier-class models --- in the
+same direction as the derivation gap, though not in the same order, since
+run~B's 65\% exceeds run~D's 55\%. Run~D is the
 extreme case: its \armM{} writes all six clauses on 4\% of the tasks that need
 them and scores no better than a bare schema on the hard split; its \armC{}
 writes them on 55\% and scores 45 points higher. Capability does not, on its own, make a model extract structure

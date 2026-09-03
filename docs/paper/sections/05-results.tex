@@ -41,30 +41,12 @@ transient failures to the harness, and here nothing looked wrong until the
 results were read. Benchmark harnesses that pin endpoints need a
 rate-of-progress check, not just a liveness check.
 
-\subsection{What the third and fourth models changed}
-\label{sec:reversals}
-
-Runs~A and~B were run and analysed first, and three of this paper's claims were
-written against them. Run~C overturned two and forced the withdrawal of a
-third. We state the reversals here, together, so that the later sections can report
-them at the number that overturned each: the scaffolding step is not zero
-(Section~\ref{sec:ablation}); the contract's margin over a hand-written prompt
-does not shrink with capability (Section~\ref{sec:interaction}); the contract
-is not the cheapest arm (Section~\ref{sec:efficiency}). Each is reported below
-at the number that overturned it. Everything else in this section held across
-all four models.
-
-Run~D, a fourth model from a fourth family, was run after those reversals were
-written. It replicates the first two: the scaffolding step is $+15.1$ points at
-$p{=}9{\times}10^{-9}$, and the margin over a hand-written prompt is $+44.6$,
-the largest of the four. It also softens one claim the third model had
-introduced --- that capability's gain lands almost entirely on the tasks the
-contract's semantics answer outright (Section~\ref{sec:derivation}) --- and it
-adds a case the first three did not contain: a model on which the pasted
-manual is indistinguishable from a bare schema on hard tasks.
-
 \subsection{Headline}
 \label{sec:headline}
+
+Runs~A and~B were analysed first. Run~C overturned two claims written against
+them and withdrew a third, and run~D replicated the first two overturnings;
+each is reported below at the number that overturned it.
 
 \begin{table*}[t]
 \centering
@@ -74,28 +56,28 @@ manual is indistinguishable from a bare schema on hard tasks.
 \tabhead{Arm} & \tabhead{Overall} & \tabhead{Hard} & \tabhead{Easy} & \tabhead{Cost} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run A --- \texttt{glm-5.3-flash}, 401 tasks}}\\
-\armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
-\armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.96 \\
-\armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
 \armS{} & 22.7\% & 13.9\% & 65.2\% & \$0.76 \\
+\armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
+\armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.96 \\
+\armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run B --- \texttt{deepseek-v4-flash}, 279 tasks}}\\
-\armC{} & \textbf{61.3\%} & \textbf{56.6\%} & 81.1\% & \textbf{\$1.05} \\
-\armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
-\armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
 \armS{} & 33.0\% & 22.6\% & 77.4\% & \$1.79 \\
+\armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
+\armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
+\armC{} & \textbf{61.3\%} & \textbf{56.6\%} & 81.1\% & \textbf{\$1.05} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run C --- \texttt{gpt-5.6-sol}, 401 tasks}}\\
-\armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
-\armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
-\armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
 \armS{} & 43.9\% & 37.0\% & 76.8\% & \$14.52 \\
+\armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
+\armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
+\armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run D --- Claude Sonnet~5, 401 tasks}}\\
-\armC{} & \textbf{69.6\%} & \textbf{68.4\%} & 75.4\% & \$37.97 \\
-\armM{} & 35.2\% & 23.8\% & 89.9\% & \$43.89 \\
-\armH{} & 44.4\% & 38.0\% & 75.4\% & \$46.08 \\
 \armS{} & 31.9\% & 22.9\% & 75.4\% & \textbf{\$36.80} \\
+\armH{} & 44.4\% & 38.0\% & 75.4\% & \$46.08 \\
+\armM{} & 35.2\% & 23.8\% & 89.9\% & \$43.89 \\
+\armC{} & \textbf{69.6\%} & \textbf{68.4\%} & 75.4\% & \$37.97 \\
 \bottomrule
 \end{tabular}
 \caption{Accuracy and cost. Hard splits are $n{=}332$, 226, 332 and 332; easy
@@ -151,12 +133,11 @@ easy tasks in any of the four runs --- \armM{} leads on all four (73.9\%,
 contract does nothing for questions that need no domain knowledge, which is
 what it should do, and an instrument that showed a contract effect there would
 be measuring itself. On run~D the lead is an interaction rather than noise:
-62 of 69 against exactly 52 for each of the other three arms. The transcripts
-locate it. Of the 13 easy tasks \armM{} gets right and \armC{} gets wrong,
-four are ones whose answer is a phrase printed verbatim in
-\texttt{manual.md}, and the rest are prose answers the scorer cannot parse and
-ordinary near-misses. None of it is fee semantics, and on the hard split the
-same arm is last. Where else the effect is absent is reported in
+62 of 69 against exactly 52 for each of the other three arms. Of the 13 easy
+tasks \armM{} gets right and \armC{} gets wrong, four have an answer printed
+verbatim in \texttt{manual.md}; the rest are prose answers the scorer cannot
+parse and ordinary near-misses. None of it is fee semantics, and on the hard
+split the same arm is last. Where else the effect is absent is reported in
 Section~\ref{sec:threats}.
 
 \paragraph{On one model the manual is indistinguishable from a bare schema on
@@ -170,10 +151,9 @@ claim that delivery matters as much as possession, and it is also the one run
 on which empty governed tools (38.0\%) beat the whole manual (23.8\%), hard
 split $p{=}6{\times}10^{-8}$ (15/62). One alternative is not excluded: that
 prompt puts 191k input tokens per task in front of Sonnet~5 against \armS{}'s
-91k, and a context-load effect would produce the same null without any
-delivery mechanism. The clause analysis finds the manual's rules absent from
-the submitted SQL rather than misapplied, which is what either explanation
-predicts, so the two are not separated here.
+91k, and a context-load effect would produce the same null. The clause
+analysis cannot separate the two, since rules absent from the SQL is what both
+predict.
 
 \subsection{The ablation: content dominates scaffolding, but scaffolding is
 not zero}
@@ -268,35 +248,35 @@ within-run ordering is.}
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
- & \armS{} & \armM{} & \armH{} & \armC{} \\
+ & \armS{} & \armH{} & \armM{} & \armC{} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run A}}\\
-Turns / task      & 12.1 & 9.8 & 8.4 & \textbf{7.1} \\
-Tool calls        & 5{,}134 & 4{,}282 & 4{,}110 & \textbf{3{,}355} \\
-Reasoning tokens  & 428k & 400k & 525k & \textbf{154k} \\
-Cost / correct    & \$0.0084 & \$0.0076 & \$0.0080 & \textbf{\$0.0029} \\
-Forced answers    & 41 & 18 & 0 & \textbf{0} \\
+Turns / task & 12.1 & 8.4 & 9.8 & \textbf{7.1} \\
+Tool calls & 5{,}134 & 4{,}110 & 4{,}282 & \textbf{3{,}355} \\
+Reasoning tokens & 428k & 525k & 400k & \textbf{154k} \\
+Cost / correct & \$0.0084 & \$0.0080 & \$0.0076 & \textbf{\$0.0029} \\
+Forced answers & 41 & 0 & 18 & \textbf{0} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run B}}\\
-Turns / task      & 13.7 & 12.8 & 11.4 & \textbf{8.2} \\
-Tool calls        & 5{,}489 & 4{,}770 & 6{,}375 & \textbf{4{,}155} \\
-Reasoning / task  & 10{,}941 & 9{,}243 & 10{,}766 & \textbf{4{,}844} \\
-Cost / correct    & \$0.0195 & \$0.0117 & \$0.0173 & \textbf{\$0.0061} \\
-Forced answers    & 55 & 42 & 15 & \textbf{0} \\
+Turns / task & 13.7 & 11.4 & 12.8 & \textbf{8.2} \\
+Tool calls & 5{,}489 & 6{,}375 & 4{,}770 & \textbf{4{,}155} \\
+Reasoning / task & 10{,}941 & 10{,}766 & 9{,}243 & \textbf{4{,}844} \\
+Cost / correct & \$0.0195 & \$0.0173 & \$0.0117 & \textbf{\$0.0061} \\
+Forced answers & 55 & 15 & 42 & \textbf{0} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run C}}\\
-Turns / task      & 7.9 & 7.6 & 10.4 & \textbf{6.5} \\
-Tool calls        & 5{,}099 & \textbf{4{,}354} & 7{,}997 & 5{,}245 \\
-Reasoning tokens  & 357k & 277k & 311k & \textbf{141k} \\
-Cost / correct    & \$0.082 & \textbf{\$0.062} & \$0.099 & \$0.067 \\
-Forced answers    & 0 & 0 & 8 & \textbf{0} \\
+Turns / task & 7.9 & 10.4 & 7.6 & \textbf{6.5} \\
+Tool calls & 5{,}099 & 7{,}997 & \textbf{4{,}354} & 5{,}245 \\
+Reasoning tokens & 357k & 311k & 277k & \textbf{141k} \\
+Cost / correct & \$0.082 & \$0.099 & \textbf{\$0.062} & \$0.067 \\
+Forced answers & 0 & 8 & 0 & \textbf{0} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Run D}}\\
-Turns / task      & 11.3 & 11.1 & 10.0 & \textbf{7.0} \\
-Tool calls        & 5{,}644 & 5{,}176 & 6{,}494 & \textbf{3{,}791} \\
-Reasoning tokens  & 942k & 1{,}044k & 1{,}411k & \textbf{824k} \\
-Cost / correct    & \$0.288 & \$0.311 & \$0.259 & \textbf{\$0.136} \\
-Forced answers    & 43 & 32 & 27 & \textbf{0} \\
+Turns / task & 11.3 & 10.0 & 11.1 & \textbf{7.0} \\
+Tool calls & 5{,}644 & 6{,}494 & 5{,}176 & \textbf{3{,}791} \\
+Reasoning tokens & 942k & 1{,}411k & 1{,}044k & \textbf{824k} \\
+Cost / correct & \$0.288 & \$0.259 & \$0.311 & \textbf{\$0.136} \\
+Forced answers & 43 & 27 & 32 & \textbf{0} \\
 \bottomrule
 \end{tabular}
 \caption{The governed arm wins while doing less work on every model. It is not
@@ -413,19 +393,17 @@ the same domain-specificity as the fee/non-fee split
 \textbf{The two buckets do not move together.} In order of bare-schema
 capability \armC{} scores 60.8\%, 62.7\%, 73.9\% and \textbf{94.9\%} on
 \emph{macro} against 45.9\%, 46.5\%, \textbf{60.1\%} and 56.1\% on
-\emph{derived}. Ordered by bare-schema score the \emph{macro} series is
-monotone, though runs~B and~D are 0.3 points apart on that axis and 11 apart
-on \emph{macro}, so the ordering between them is not one the axis can
-establish; the \emph{derived} series is not monotone under any ordering ---
-Sonnet~5 is the best of the four models on it while trailing
-\texttt{gpt-5.6-sol} by 21 points on \emph{macro}. An earlier version of this
-paper, written against three models, said that nearly all of
-\texttt{gpt-5.6-sol}'s gain lands on the tasks the contract's own semantics
-answer. That was a description of one model: Sonnet~5's gain over
+\emph{derived}. The \emph{macro} series rises with that ordering, with one
+caveat: runs~B and~D are 0.3 points apart on the axis and 11 apart on
+\emph{macro}, so the axis does not order them. The \emph{derived} series rises
+under no ordering --- Sonnet~5 leads it while trailing \texttt{gpt-5.6-sol}
+by 21 points on \emph{macro}. An earlier version of this paper, written
+against three models, said that nearly all of \texttt{gpt-5.6-sol}'s gain
+lands on the \emph{macro} tasks. Sonnet~5's gain over
 \texttt{deepseek-v4-flash} is $+11.2$ on \emph{macro} and $+13.6$ on
-\emph{derived}. What survives four models is narrower --- the \emph{macro} gap
-is smaller on both frontier-class models, and the \emph{derived} bucket does
-not track it.
+\emph{derived}, so that was a description of one model. What survives four is
+narrower: the \emph{macro} gap is smaller on both frontier-class models, and
+the \emph{derived} bucket does not track it.
 
 Read against the compiled ceiling, the \emph{macro} series is a shortfall of
 39.2, 37.3, 26.1 and 5.1 points below an accuracy we have proven reachable --- the
@@ -435,10 +413,9 @@ because against a ceiling of 100\% the gap is arithmetically the arm's error
 rate, and ``errors fall as models improve'' is not a finding. The finding is
 the contrast with \emph{derived}: between the flash models and the strongest
 one, the same capability increment closes 87\% of the macro-bucket gap and
-19\% of the derived-bucket one (the latter measured against 100\%, which is
-not a proven ceiling on that bucket), and the fourth model's \emph{macro}
-score falls between the flash models and run~C while its \emph{derived} score
-exceeds all three. On two models the
+19\% of the derived-bucket one (the latter against 100\%, not a proven ceiling
+there), and the fourth model's \emph{macro} score falls between the flash
+models and run~C while its \emph{derived} score exceeds all three. On two models the
 macro gap looked like a fixed ${\approx}38$-point tax, model-invariant to
 within two points. It is not a tax. We recorded this prediction in the public
 artifact repository before run~C executed, stating that the capability reading

@@ -35,9 +35,9 @@ to promote one or two more; `make check` will say which.
 - **`motherduck-semantic` has no publication date.** The post carries no
   byline or date on the page; it is cited with an access date. Worth one more
   attempt before submission.
-- **arXiv abstract field.** The PDF abstract is about 330 words; arXiv's
-  metadata abstract is capped at 1,920 characters, so the submission form
-  needs a shortened paste.
+- **arXiv abstract field.** `abstract.txt` is the plain-text abstract for
+  the submission form (about 1,750 characters, under arXiv's 1,920 cap);
+  regenerate it if `sections/00-abstract.tex` changes.
 
 ## Figures
 

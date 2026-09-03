@@ -2602,3 +2602,82 @@ def test_clean_tree_still_rejects_a_sidecar_of_a_different_run(tmp_path: Path):
             repo_root=tmp_path,
             git_status_fn=lambda: "?? results/glm-full.jsonl.bak\n",
         )
+
+
+# ── ungolded tasks: runnable for a submission, never scored ───────────────
+
+
+def test_select_tasks_skips_ungolded_tasks_by_default():
+    """The scoring sweeps must keep their published task set exactly. A task
+    with no reconstructed gold cannot be scored, so it is not run.
+    """
+    from dce.runner import select_tasks
+
+    tasks = [{"task_id": "1"}, {"task_id": "2"}, {"task_id": "3"}]
+    golds = {"1": "a", "3": "c"}
+
+    assert [t["task_id"] for t in select_tasks(tasks, golds)] == ["1", "3"]
+
+
+def test_select_tasks_run_admits_tasks_with_no_gold():
+    """A leaderboard submission needs an answer for all 450 tasks, including
+    the 49 no consensus rule could reconstruct.
+    """
+    from dce.runner import select_tasks
+
+    tasks = [{"task_id": "1"}, {"task_id": "2"}, {"task_id": "3"}]
+    golds = {"1": "a", "3": "c"}
+
+    assert [t["task_id"] for t in select_tasks(tasks, golds, ungolded="run")] == [
+        "1",
+        "2",
+        "3",
+    ]
+
+
+def test_select_tasks_rejects_an_unknown_ungolded_mode():
+    from dce.runner import select_tasks
+
+    with pytest.raises(ValueError, match="ungolded"):
+        select_tasks([{"task_id": "1"}], {}, ungolded="sometimes")
+
+
+def test_sweep_hands_run_task_none_not_empty_string_for_an_ungolded_task(
+    tmp_path: Path,
+):
+    """`golds.get(task_id, "")` would hand `""` to `run_task`, which grades it
+    and returns `incorrect` — a fabricated wrong answer on a task that has no
+    right answer to compare against. The absence of a gold has to reach
+    `run_task` as `None`.
+    """
+    seen: dict[str, object] = {}
+
+    def fake_run(task, arm, model, working, docs, gold, **k):
+        seen[task["task_id"]] = gold
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.0,
+            "usd_guard": 0.0,
+            "verdict": "ungraded" if gold is None else "correct",
+        }
+
+    tasks = [
+        {"task_id": "1", "question": "q", "guidelines": "g", "level": "hard"},
+        {"task_id": "2", "question": "q", "guidelines": "g", "level": "hard"},
+    ]
+    sweep(
+        tasks,
+        ("contract",),
+        (GLM,),
+        {"1": "a"},
+        out=tmp_path / "r.jsonl",
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=fake_run,
+    )
+
+    assert seen == {"1": "a", "2": None}

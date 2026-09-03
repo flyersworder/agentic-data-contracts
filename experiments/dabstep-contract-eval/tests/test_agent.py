@@ -1803,3 +1803,67 @@ def test_reasoning_tokens_are_read_under_both_provider_spellings():
     assert agent._reasoning_tokens(_Usage(None)) == 0
     assert agent._reasoning_tokens(None) == 0
     assert agent._reasoning_tokens(_Usage({"thinking_tokens": None})) == 0
+
+
+# ── ungolded tasks: run them, but never grade them ────────────────────────
+
+
+def test_run_task_leaves_a_task_with_no_gold_ungraded(tmp_path: Path, monkeypatch):
+    """49 of DABStep's 450 tasks have no reconstructed gold. A leaderboard
+    submission has to ANSWER them, but there is nothing to score against —
+    and scoring against the `""` that `dict.get` would hand back grades
+    every one of them `incorrect`, which then enters `dce.stats`'
+    accuracy denominators as a real wrong answer.
+
+    `gold=None` is the explicit "no gold exists" signal: the answer is
+    recorded, `score` is never called, and the verdict is `ungraded`.
+    """
+    import dce.agent as agent_module
+
+    def _must_not_run(_predicted, _gold):
+        raise AssertionError("score() must not be called when there is no gold")
+
+    monkeypatch.setattr(agent_module, "score", _must_not_run)
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK,
+        "contract",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold=None,
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] == "ungraded"
+    assert row["answer"] == "0.12"
+    assert row["gold"] is None
+
+
+def test_run_task_still_grades_a_task_whose_gold_is_the_empty_string(
+    tmp_path: Path,
+):
+    """`None` means "no gold exists"; `""` is a real (if degenerate) gold and
+    must still be scored. Conflating the two is what makes an ungolded task
+    silently gradeable, so the distinction is asserted rather than assumed.
+    """
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK,
+        "contract",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="",
+        golds_hash="deadbeef",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] in {"correct", "incorrect"}

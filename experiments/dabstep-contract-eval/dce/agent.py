@@ -646,7 +646,7 @@ def build_result_row(
     model: str,
     answer: str,
     answer_normalized: str,
-    gold: str,
+    gold: str | None,
     verdict: str,
     forced_answer: bool,
     trace_path: str | None,
@@ -850,7 +850,7 @@ def _priced_fallback_row(
     task: dict,
     arm: str,
     model: str,
-    gold: str,
+    gold: str | None,
     golds_hash: str,
     usage,
     verdict: str,
@@ -1162,7 +1162,7 @@ def run_task(
     model: str,
     db_path: Path,
     docs: dict[str, str],
-    gold: str,
+    gold: str | None,
     *,
     golds_hash: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
@@ -1415,10 +1415,21 @@ def run_task(
             # verdict instead, and the real answer this run produced is
             # preserved either way.
             if verdict == "unset":
-                try:
-                    verdict = "correct" if score(answer, gold) else "incorrect"
-                except Exception:
-                    verdict = "scoring_error"
+                if gold is None:
+                    # No gold EXISTS for this task (49 of DABStep's 450 are
+                    # unreconstructable -- see `dce.golds`). Not a scoring
+                    # failure and not a wrong answer: scoring it against the
+                    # `""` a plain `dict.get` would hand back marks every one
+                    # of them `incorrect` and feeds them straight into
+                    # `dce.stats`' accuracy denominators. `ungraded` is in
+                    # neither ANSWER_VERDICTS nor HARNESS_VERDICTS, so no
+                    # accuracy or failure-rate arithmetic can reach it.
+                    verdict = "ungraded"
+                else:
+                    try:
+                        verdict = "correct" if score(answer, gold) else "incorrect"
+                    except Exception:
+                        verdict = "scoring_error"
 
             answer_normalized = _clean(answer)
 

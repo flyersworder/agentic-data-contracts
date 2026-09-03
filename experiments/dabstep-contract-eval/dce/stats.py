@@ -169,6 +169,14 @@ HARNESS_VERDICTS: frozenset[str] = frozenset(
     {"hit_limit", "error", "scoring_error", "post_run_error", "construction_error"}
 )
 
+#: A verdict that is neither an answer nor a harness outcome: the task was
+#: run and answered, but no gold EXISTS to score it against (49 of DABStep's
+#: 450 -- see `dce.golds`). A leaderboard submission has to answer those; the
+#: ablation must not count them. Kept out of ANSWER_VERDICTS so no accuracy
+#: arithmetic can reach it, and out of HARNESS_VERDICTS because nothing
+#: failed -- `_summarize` drops these rows before either denominator.
+UNGRADED_VERDICTS: frozenset[str] = frozenset({"ungraded"})
+
 #: Named, not positional: `dce.arms.ARMS` grew a fourth arm
 #: (`contract_hollow`) and the old `ARM_A, ARM_B, ARM_C = ARMS` unpack failed
 #: loudly at import, which is exactly what it was written to do. Resolving by
@@ -410,6 +418,13 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     that is not entirely arm C, so a mixed or ungoverned slice reports
     nothing rather than a structural zero.
     """
+    # BEFORE any arithmetic. `strict_n` is `len(rows)`, so an ungraded row
+    # left in `rows` counts against STRICT accuracy exactly as a wrong
+    # answer would, and dilutes `failure_rate` -- which is the denominator
+    # HARNESS_FAILURE_RATE_THRESHOLD is compared against. Both would read as
+    # a quieter, better-behaved run than the file actually describes.
+    ungraded_n = sum(row.get("verdict") in UNGRADED_VERDICTS for row in rows)
+    rows = [row for row in rows if row.get("verdict") not in UNGRADED_VERDICTS]
     scored_rows = _scored(rows)
     scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
     scored_n = len(scored_rows)
@@ -426,6 +441,7 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
         "strict_ci": wilson(strict_ok, strict_n),
         "failures": failures,
         "failure_rate": failure_rate,
+        "ungraded_n": ungraded_n,
         "corruption": _corruption_counts(rows),
         "usd_final": sum(row.get("usd") or 0.0 for row in rows),
         "usd_total_billed": sum(row.get("usd") or 0.0 for row in raw_rows),
@@ -497,6 +513,13 @@ def _format_summary(label: str, summary: dict) -> str:
         or "none"
     )
     corruption = summary["corruption"]
+    # Silence here is a claim: that no row was set aside. Printed only when
+    # some were, so the four runs already in FINDINGS render unchanged.
+    ungraded_str = (
+        f", ungraded={summary['ungraded_n']} (answered, no gold to score)"
+        if summary["ungraded_n"]
+        else ""
+    )
     inst = summary["instrumentation"]
     instrumentation_line = (
         f"\n{'':16s} tokens/row: in={inst['mean_input_tokens']:.0f} "
@@ -525,7 +548,7 @@ def _format_summary(label: str, summary: dict) -> str:
         f"cost final=${summary['usd_final']:.2f} "
         f"billed=${summary['usd_total_billed']:.2f}{flag}\n"
         f"{'':16s} failures ({summary['failure_rate']:.0%} of rows): "
-        f"{fail_str}\n"
+        f"{fail_str}{ungraded_str}\n"
         f"{'':16s} db_corrupted: true={corruption['corrupted']} "
         f"unknown={corruption['unknown']}"
         f"{instrumentation_line}{governance_line}"

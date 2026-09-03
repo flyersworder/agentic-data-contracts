@@ -157,6 +157,20 @@ def _arm_line(text: str, arm: str) -> str:
     return next(line for line in text.splitlines() if line.startswith(prefix))
 
 
+def _arm_block(text: str, arm: str) -> str:
+    """`_arm_line` plus the continuation lines belonging to it -- failures,
+    ungraded, db_corrupted. `_arm_line` alone matches only the header, so an
+    assertion about the failure line silently searches the wrong string.
+    """
+    prefix = f"{arm:16s}"
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(prefix))
+    end = start + 1
+    while end < len(lines) and lines[end].startswith(" " * 16):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
 def test_report_scores_the_deduped_row_not_all_three_stale_attempts(tmp_path):
     # A retried unit: two stale construction_error rows, then a real
     # success, all for (task_id="t1", arm=contract, model=PRIMARY_MODEL).
@@ -596,3 +610,70 @@ def test_report_drops_verified_wrong_gold_tasks(tmp_path):
     assert "60" in out.split("\n")[0]
     # The surviving task is the only one counted.
     assert "1/1" in out
+
+
+# ── ungraded rows: present in the file, absent from every denominator ─────
+
+
+def test_ungraded_rows_move_neither_accuracy(tmp_path):
+    """A task with no reconstructed gold is answered but not scored. It is
+    not a wrong answer, so it belongs in no numerator and no denominator —
+    including STRICT's, which does count harness failures against an arm.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+        _row("t3", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    line = _arm_line(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "scored    1/1" in line
+    assert "strict    1/1" in line
+
+
+def test_ungraded_rows_are_not_counted_as_harness_failures(tmp_path):
+    """`ungraded` is a deliberate non-scoring, not the harness breaking. If
+    it landed in the failure numerator every submission run would look
+    HARNESS-LIMITED; if it landed only in the denominator it would dilute a
+    real failure rate and hide one.
+    """
+    rows = [_row(f"t{i}", PRIMARY_RIGHT_ARM, "correct") for i in range(9)]
+    rows.append(_row("t9", PRIMARY_RIGHT_ARM, "error"))
+    rows += [_row(f"u{i}", PRIMARY_RIGHT_ARM, "ungraded") for i in range(90)]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    # 1 error in 10 graded-or-failed rows: 10%, not 1% of 100.
+    assert "failures (10% of rows)" in block
+    assert "HARNESS-LIMITED" in block
+
+
+def test_report_names_the_ungraded_rows_it_set_aside(tmp_path):
+    """Dropping rows silently is a claim that they did not exist. The count
+    is printed so a reader can see the submission run's 49 unscoreable tasks
+    were excluded on purpose rather than lost.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "ungraded=1" in _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+
+def test_report_says_nothing_about_ungraded_rows_when_there_are_none(tmp_path):
+    """Every published run has zero. The line must not appear and clutter
+    the four runs already in FINDINGS.
+    """
+    rows = [_row("t1", PRIMARY_RIGHT_ARM, "correct")]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    assert "ungraded" not in report(path)

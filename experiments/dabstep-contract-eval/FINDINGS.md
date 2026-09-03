@@ -1,10 +1,11 @@
 # DABStep contract-context eval — findings
 
-**Three independent runs of the same four-arm ablation, on three models
+**Four independent runs of the same four-arm ablation, on four models
 spanning a wide capability range.** Shared across all: **contract digest**
 `sha256:e438ecf7…`, **hollow digest** `sha256:c46a767d…` (but see the note on
 digest stamping under [Operational findings](#operational-findings) — every
-row, arm D included, carries the *real* contract's digest) · **golds**
+row of runs A–C, arm D included, carries the *real* contract's digest; run D
+stamps the hollow digest correctly) · **golds**
 `a4388e9ee823` (401/450 tasks) · **scorer** DABStep's own, vendored at
 `d4431c2e` · `reasoning_effort=medium`.
 
@@ -13,16 +14,22 @@ row, arm D included, carries the *real* contract's digest) · **golds**
 | **A** | `z-ai/glm-5.3-flash` (`z-ai` fp8) | 1,604 | 401/401 tasks | $3.26 | `results/glm-full.jsonl` | `traces/glm-full/` |
 | **B** | `deepseek/deepseek-v4-flash-0731` (`baidu` fp8) | 1,604 | **279/401 tasks** | $6.32 | `results/dsflash-full.jsonl` | `traces/dsflash-full/` |
 | **C** | `openai/gpt-5.6-sol` (`openai`) | 1,604 | 401/401 tasks | $72.36 | `results/sol-full.jsonl` | `traces/sol-full/` |
+| **D** | `claudesonnet5` (Claude Sonnet 5, Bedrock EU via an enterprise LiteLLM gateway) | 1,604 | 401/401 tasks | $164.75 | `results/sonnet5-full.jsonl` | `traces/sonnet5-full/` |
 
 Run A at commit `6836139` (arms A–C) / `d75d269` (arm D); run B at `4d230fa`;
-run C at `04bee43`.
+run C at `04bee43`; run D at `b55c932`.
 
-Temperature is held at 0 on runs A and B. **Run C does not hold it**:
+Temperature is held at 0 on runs A and B. **Runs C and D do not hold it**:
 `gpt-5.6-sol` reports `supports_temperature=False`, so the sampling parameter
-is not accepted and the run is at the provider's default. Reasoning effort is
-`medium` on all three, but that is a nominal setting and not an equated one —
-sol spends 957 reasoning tokens per row against glm's and deepseek's far
-larger appetites.
+is not accepted and run C is at the provider's default; the Bedrock-fronted
+gateway behind run D rejects `temperature` at anything but 1 and rejects
+`seed` outright (both HTTP 400), so run D has neither determinism control
+(see `README.md`, *the enterprise gateway route*). Reasoning effort is
+`medium` on all four — on run D as `anthropic_effort=medium` with adaptive
+thinking, a translation of the same scale rather than an invented setting —
+but that is a nominal setting and not an equated one: sol spends 957 reasoning
+tokens per row and Sonnet 5 between 2,000 and 3,500, against glm's and
+deepseek's far larger appetites.
 
 Run B lost 122 of 401 tasks to provider rate-limiting partway through and is
 reported on its 279-task complete-case set throughout. That truncation is
@@ -32,7 +39,7 @@ each) and clusters in time rather than by task or arm.
 
 ## Headline
 
-**`contract` wins on all three models, by a wide and significant margin.**
+**`contract` wins on all four models, by a wide and significant margin.**
 
 Run A — `glm-5.3-flash`, all 401 tasks:
 
@@ -61,20 +68,33 @@ Run C — `gpt-5.6-sol`, all 401 tasks:
 | **contract_hollow** | **governed** | **none** | 223/401 (55.6%) | **170 (51.2%)** | 53 (76.8%) | $22.09 |
 | schema_only | raw SQL | none | 176/401 (43.9%) | 123 (37.0%) | 53 (76.8%) | $14.52 |
 
+Run D — Claude Sonnet 5, all 401 tasks:
+
+| Arm | tools | knowledge | overall | **hard (n=332)** | easy (n=69) | cost |
+|---|:-:|:-:|---:|---:|---:|---:|
+| **contract** | governed | contract | **279/401 (69.6%)** | **227 (68.4%)** | 52 (75.4%) | $37.97 |
+| **contract_hollow** | **governed** | **none** | 178/401 (44.4%) | **126 (37.9%)** | 52 (75.4%) | $46.08 |
+| manual_prompt | raw SQL | manual in prompt | 141/401 (35.2%) | 79 (23.8%) | 62 (89.9%) | $43.89 |
+| schema_only | raw SQL | none | 128/401 (31.9%) | 76 (22.9%) | 52 (75.4%) | **$36.80** |
+
 Every pairwise paired McNemar — same tasks, same model, same scorer. `a_only`
 is tasks the left arm alone got right; `b_only` the right arm alone:
 
-| comparison | glm-5.3-flash (n=401) | deepseek-v4-flash (n=279) | gpt-5.6-sol (n=401) |
-|---|---|---|---|
-| schema_only vs **contract** | p=3e-31 · 14 / **155** | p=2e-15 · 14 / **93** | p=5e-32 · 12 / **152** |
-| manual_prompt vs **contract** | p=2e-17 · 29 / **134** | p=**0.0067** · 30 / **56** | p=2e-17 · 12 / **96** |
-| contract_hollow vs **contract** | p=9e-24 · 23 / **149** | p=8e-17 · 13 / **96** | p=2e-17 · 18 / **111** |
-| schema_only vs manual_prompt | p=7e-06 · 14 / 50 | p=2e-12 · 5 / 58 | p=2e-08 · 22 / 78 |
-| manual_prompt vs contract_hollow | p=0.033 · 55 / 34 | p=4e-13 · 63 / 6 | p=0.44 · 58 / 49 |
-| **schema_only vs contract_hollow** | **p=0.058** · 20 / 35 | **p=0.61** · 19 / 15 | **p=4e-07** · 20 / **67** |
+| comparison | glm-5.3-flash (n=401) | deepseek-v4-flash (n=279) | gpt-5.6-sol (n=401) | claudesonnet5 (n=401) |
+|---|---|---|---|---|
+| schema_only vs **contract** | p=3e-31 · 14 / **155** | p=2e-15 · 14 / **93** | p=5e-32 · 12 / **152** | p=1e-35 · 11 / **162** |
+| manual_prompt vs **contract** | p=2e-17 · 29 / **134** | p=**0.0067** · 30 / **56** | p=2e-17 · 12 / **96** | p=5e-27 · 22 / **160** |
+| contract_hollow vs **contract** | p=9e-24 · 23 / **149** | p=8e-17 · 13 / **96** | p=2e-17 · 18 / **111** | p=2e-17 · 25 / **126** |
+| schema_only vs manual_prompt | p=7e-06 · 14 / 50 | p=2e-12 · 5 / 58 | p=2e-08 · 22 / 78 | **p=0.066** · 15 / 28 |
+| manual_prompt vs contract_hollow | p=0.033 · 55 / 34 | p=4e-13 · 63 / 6 | p=0.44 · 58 / 49 | p=1e-04 · 27 / **64** |
+| **schema_only vs contract_hollow** | **p=0.058** · 20 / 35 | **p=0.61** · 19 / 15 | **p=4e-07** · 20 / **67** | **p=9e-09** · 14 / **64** |
 
-The last row is the one that carries the ablation, and run C changes what it
-says. It is discussed next.
+The last row is the one that carries the ablation, and runs C and D change
+what it says: the scaffolding step that was invisible on the two flash-tier
+models is p=4e-07 and p=9e-09 on the two stronger ones. It is discussed next.
+Run D's fourth row is its own surprise — the manual pasted into the prompt is
+not distinguishable from a bare schema on Sonnet 5 — and is taken up under
+[the hard tasks](#the-result-is-entirely-in-the-hard-tasks).
 
 ## The ablation is the result
 
@@ -89,39 +109,41 @@ told it to look things up" is the first objection any reader will raise.
 On hard tasks, the gain splits into a scaffolding step and a content step:
 
 ```
-                        glm-5.3-flash      deepseek-v4-flash      gpt-5.6-sol
-schema_only                 13.9%              22.6%                 37.0%
-  + tools and procedure  →  19.3% (+5.4)       22.6% (+0.0)          51.2% (+14.2)  ← contract_hollow
-  + contract knowledge   →  55.1% (+35.8)      56.6% (+34.0)         77.4% (+26.2)  ← contract
+                        glm-5.3-flash      deepseek-v4-flash      claudesonnet5         gpt-5.6-sol
+schema_only                 13.9%              22.6%                 22.9%                 37.0%
+  + tools and procedure  →  19.3% (+5.4)       22.6% (+0.0)          37.9% (+15.1)         51.2% (+14.2)  ← contract_hollow
+  + contract knowledge   →  55.1% (+35.8)      56.6% (+34.0)         68.4% (+30.4)         77.4% (+26.2)  ← contract
 ```
 
 **The content step is the larger of the two on every model. The scaffolding
-step is model-dependent: absent on one model, decisive on another.**
+step is model-dependent: absent on one model, decisive on two.**
 
 This reverses a claim held through two runs of this experiment. With runs A
 and B alone the scaffolding step did not survive a significance test, and this
 document said so — "not distinguishable from zero", "the content is the whole
-effect". Run C falsifies that. Paired McNemar on `contract_hollow` vs
-`schema_only`, all 401 tasks:
+effect". Run C falsifies that, and run D replicates the falsification on a
+third model family. Paired McNemar on `contract_hollow` vs `schema_only`, all
+401 tasks:
 
 | | Δ hard | discordant | p |
 |---|---:|---:|---:|
 | glm-5.3-flash | +5.4 pp | 55 (20 / 35) | 0.058 |
 | deepseek-v4-flash | +0.0 pp | 34 (19 / 15) | 0.61 |
 | **gpt-5.6-sol** | **+14.2 pp** | **87 (20 / 67)** | **4×10⁻⁷** |
+| **claudesonnet5** | **+15.1 pp** | **78 (14 / 64)** | **9×10⁻⁹** |
 
-Two of three models favour the scaffolding and one is flat; none favours the
+Three of four models favour the scaffolding and one is flat; none favours the
 bare schema. On glm the hard-task slice alone is already p=0.015 (16 / 34) —
 the p=0.058 above is the all-401 test, which the easy tasks dilute. So the
 honest summary is not "scaffolding does nothing" but **"scaffolding does
-something on two of three models, and always less than the content does."**
+something on three of four models, and always less than the content does."**
 
 What survives unchanged is the part the fourth arm was built for. The
 deflationary reading of arm C — that the contract helps by narrowing the
 tables in view, imposing a procedure, or making the agent slow down rather
 than by what it says — predicts that arm D should capture most of the gain.
-It does not, on any model: the content step is 2× the scaffolding step on sol
-and unboundedly larger on the other two. **Arm D is no longer a null result;
+It does not, on any model: the content step is 1.8× the scaffolding step on
+sol, 2.0× on Sonnet 5, and unboundedly larger on the other two. **Arm D is no longer a null result;
 it is a smaller effect that the content dominates everywhere.**
 
 **Tooling is not a substitute for content.** On glm, `contract_hollow`
@@ -129,7 +151,11 @@ it is a smaller effect that the content dominates everywhere.**
 wider (22.6% vs 42.9%, p=4e-13). On sol the two are statistically
 indistinguishable (51.2% vs 50.3%, p=0.44) — empty governed tools finally buy
 as much as the whole manual pasted into the prompt, but no more, and both
-remain far below the contract's 77.4%.
+remain far below the contract's 77.4%. On Sonnet 5 the ordering flips: empty
+governed tools (37.9%) beat the whole manual in the prompt (23.8%) by 14
+points, p=1×10⁻⁴ (27 / 64) — the first model on which scaffolding alone
+outperforms possession of the knowledge as prose. Both still sit 30–45 points
+below the contract.
 
 **The empty tools actively cost something.** On glm it is the most expensive
 arm per correct answer — $0.85 for 106 correct against contract's $0.67 for
@@ -138,7 +164,10 @@ contract's 154,247). The mechanism is visible in the transcripts: the model
 calls `lookup_domain`, is told *"No documentation is available for this
 domain"*, and searches harder. On deepseek it makes the most tool calls of
 any arm (6,375, against contract's 4,155) for the fewest correct answers.
-This is also the check that the control did what it claims — see below.
+On Sonnet 5 it is the most expensive arm outright ($46.08), makes the most
+tool calls (6,494), burns the most reasoning (1,411,378 tokens, 1.7× the
+contract arm's) and forces 27 answers. This is also the check that the
+control did what it claims — see below.
 
 ### The control is verified, not assumed
 
@@ -157,7 +186,8 @@ check is known to bite rather than merely to pass.
 
 The transcripts confirm it end to end: on glm, arm D calls `lookup_domain` on
 **272 of 401 tasks** and receives the empty placeholder **282 times**; on sol
-it calls it on **401 of 401 tasks**, 804 times. The tool surface was
+it calls it on **401 of 401 tasks**, 804 times; on Sonnet 5 on **338 of 401
+tasks**, 392 times, plus `lookup_metric` — every metric emptied — 1,620 times. The tool surface was
 exercised; there was simply nothing behind it. That sol both exercises the
 scaffolding hardest and gains the most from it is consistent with the
 scaffolding step being real there.
@@ -168,12 +198,24 @@ content but carries none. The variable under test is knowledge, not tokens.
 
 ## The result is entirely in the hard tasks
 
-On easy tasks the four arms are within noise of each other on all three runs
-(glm 61–74%, deepseek 70–91%, overlapping intervals throughout) and the
-contract arm is not even the best of them — `manual_prompt` leads on easy
-tasks in every run. The contract does nothing for questions that need no
-domain knowledge, which is what it should do. Every bit of the effect is in
-the hard split.
+On easy tasks the four arms are within noise of each other on all four runs
+(glm 61–74%, deepseek 70–91%, sol 77–94%, Sonnet 5 75–90%, overlapping
+intervals throughout) and the contract arm is not even the best of them —
+`manual_prompt` leads on easy tasks in every run. The contract does nothing
+for questions that need no domain knowledge, which is what it should do. Every
+bit of the effect is in the hard split.
+
+On run D the easy-split lead is the largest anywhere: `manual_prompt` 62/69
+against exactly 52/69 for each of the other three arms, and it is an
+interaction rather than noise — 13 easy tasks `manual_prompt` alone gets right
+against 3 the contract arm alone gets right. Four of the 13 are the
+vocabulary-leak tasks the transcript check below identifies (questions such
+as *which boolean factors appear in the fee table*, whose answer is a phrase
+printed verbatim in `manual.md` and in no other arm's context); the rest are
+a mix of prose answers the scorer cannot parse (*"No fraudulent disputes among
+POS transactions"* for a gold of `0.0`) and ordinary near-misses. None of it
+is fee semantics, and none of it survives into the hard split, where the same
+arm is last.
 
 **`manual_prompt` reproduces the published leaderboard band, which is the
 validity check that licenses the comparison at all.** Credible named
@@ -181,13 +223,26 @@ baselines sit at ~20–26% hard (Google simple_baseline 26%, Adyen GPT-5.4
 22.2%, HF Claude 4 Sonnet 19.8%). Our reimplementation of that same approach
 — DABStep's `manual.md` verbatim in the prompt — lands at **22.9%** on glm,
 a flash-tier model weaker than any of those. The harness measures what the
-leaderboard measures.
+leaderboard measures. Run D supplies the same check on a second model family:
+Sonnet 5 with the manual in its prompt lands at **23.8%** hard, against the
+leaderboard's 19.8% for Claude 4 Sonnet under the same approach.
 
 On deepseek the same arm reaches **42.9%**, well above the published band.
 That is a statement about the model, not the harness: `deepseek-v4-flash` is
 simply stronger at this benchmark than the named baselines, and its
 bare-schema floor (22.6% hard) already sits where their manual-in-prompt
 results do. The harness is identical between the two runs.
+
+**On Sonnet 5 the manual in the prompt does nothing on hard tasks.**
+`manual_prompt` scores 79/332 against `schema_only`'s 76/332 — paired McNemar
+on the hard split p=0.72, 17 discordant pairs one way and 14 the other. The
+same 24,177 characters of prose that lift glm by 9 points and deepseek by 20
+lift Sonnet 5 by less than one; the contract carrying the same knowledge lifts
+it by 45.5. This is the sharpest instance in any run of the delivery result:
+possession of the rule is identical in the two arms and the outcome differs by
+a factor of three. The behavioural check below agrees — Sonnet 5's
+`manual_prompt` writes all six of the contract's load-bearing clauses on 4% of
+the tasks that need them, its contract arm on 55%.
 
 ## The contract's advantage does not shrink monotonically with capability
 
@@ -197,11 +252,14 @@ Ordered by how much the model can do with a bare schema:
 |---|---:|---:|---:|---:|
 | glm-5.3-flash | 13.9% | 22.9% | 55.1% | **+32.2 pp** |
 | deepseek-v4-flash | 22.6% | 42.9% | 56.6% | **+13.7 pp** |
+| claudesonnet5 | 22.9% | 23.8% | 68.4% | **+44.6 pp** |
 | gpt-5.6-sol | 37.0% | 50.3% | 77.4% | **+27.1 pp** |
 
 **With two models this looked like a clean interaction — the contract's
 advantage shrinking as models strengthen, +32.2 → +13.7. The third model
-breaks it: +27.1.** Whatever governs the size of the contract's advantage
+breaks it: +27.1. The fourth breaks it again, in the other direction: +44.6,
+the largest margin of all, on a model whose bare-schema score ties
+deepseek's.** Whatever governs the size of the contract's advantage
 over a hand-written prompt, it is not a monotone function of base capability,
 and a two-point trend was not evidence for one. This document previously
 reported that trend as a finding; it should not have.
@@ -219,8 +277,16 @@ Reading 2 predicted `contract` stays near 56% on a frontier model. It reached
 **77.4%**. The near-identical 55.1%/56.6% was a coincidence after all, and
 **there is no benchmark ceiling at 56%.** Reading 1's specific prediction — a
 monotonically shrinking gap — is also refuted by the +27.1. Both simple
-stories are wrong, and three points are not enough to replace them with a
+stories are wrong, and four points are not enough to replace them with a
 third.
+
+What run D adds is that the margin is not a function of the bare-schema score
+at all. Sonnet 5 and deepseek-v4-flash start within 0.3 pp of each other on a
+bare schema (22.9% vs 22.6%) and finish 11.8 pp apart with the contract (68.4%
+vs 56.6%). The bare-schema arm measures what a model does *unaided*, and that
+is a poor proxy for what it does with structure — which is the reason every
+"ordered by capability" statement in this document names the arm doing the
+ordering.
 
 ## Where the effect lives, and why that is a caveat
 
@@ -235,6 +301,8 @@ tasks (89%) mention fees.**
 | deepseek | non-fee (hard) | 30 | 6 | 7 | **9** | 8 |
 | sol | fee (hard) | 294 | 109 (37.1%) | 157 (53.4%) | 157 (53.4%) | **246 (83.7%)** |
 | sol | non-fee (hard) | 38 | **14** | 13 | 10 | 11 |
+| sonnet5 | fee (hard) | 294 | 66 (22.4%) | 118 (40.1%) | 71 (24.1%) | **216 (73.5%)** |
+| sonnet5 | non-fee (hard) | 38 | 10 | 8 | 8 | **11** |
 
 "Hard accuracy" on this benchmark is very close to "fee-question accuracy",
 and the frozen contract encodes fee-domain semantics. The honest statement
@@ -244,12 +312,12 @@ general, and this benchmark cannot supply that evidence — 450 tasks are
 generated from only 26 templates.
 
 **The non-fee bucket shows no contract advantage on any model** — against
-`manual_prompt`, 9 vs 4 on glm, 8 vs 9 on deepseek, 11 vs 10 on sol. With 38,
-30 and 38 tasks these are far too small to read as a negative result, but they
-are equally unable to support the general claim. On sol the ordering inverts
+`manual_prompt`, 9 vs 4 on glm, 8 vs 9 on deepseek, 11 vs 10 on sol, 11 vs 8
+on Sonnet 5. With 38, 30, 38 and 38 tasks these are far too small to read as
+a negative result, but they are equally unable to support the general claim. On sol the ordering inverts
 outright: `schema_only` leads the non-fee bucket at 14/38 while `contract`
-takes 11 — the *only* slice anywhere in these three runs where the bare
-baseline beats the contract. All three runs are consistent with the effect
+takes 11 — the *only* slice anywhere in these four runs where the bare
+baseline beats the contract. All four runs are consistent with the effect
 being domain-specific by construction: outside the domain the contract
 describes, it is inert, and a frontier model does not rescue it. That is the
 expected behaviour of a domain contract, and it is also precisely why this
@@ -321,20 +389,23 @@ cleverer artifact.
 
 `uv run python analysis/buckets.py`, hard tasks, complete cases:
 
-| | glm `macro` | glm `derived` | ds-flash `macro` | ds-flash `derived` | sol `macro` | sol `derived` |
-|---|---:|---:|---:|---:|---:|---:|
-| n | 176 | 148 | 118 | 101 | 176 | 148 |
-| schema_only | 2.8% | 25.0% | 8.5% | 34.7% | 31.8% | 41.2% |
-| contract_hollow | 10.2% | 25.7% | 10.2% | 31.7% | 46.6% | 54.1% |
-| manual_prompt | 14.8% | 32.4% | 38.1% | 44.6% | 49.4% | 48.6% |
-| **contract** | **60.8%** | **45.9%** | **62.7%** | **46.5%** | **94.9%** | **56.1%** |
-| *compiled contract (oracle)* | *100%* | — | *100%* | — | *100%* | — |
+| | glm `macro` | glm `derived` | ds-flash `macro` | ds-flash `derived` | sonnet5 `macro` | sonnet5 `derived` | sol `macro` | sol `derived` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| n | 176 | 148 | 118 | 101 | 176 | 148 | 176 | 148 |
+| schema_only | 2.8% | 25.0% | 8.5% | 34.7% | 6.8% | 37.8% | 31.8% | 41.2% |
+| contract_hollow | 10.2% | 25.7% | 10.2% | 31.7% | 36.4% | 37.2% | 46.6% | 54.1% |
+| manual_prompt | 14.8% | 32.4% | 38.1% | 44.6% | 8.5% | 38.5% | 49.4% | 48.6% |
+| **contract** | **60.8%** | **45.9%** | **62.7%** | **46.5%** | **73.9%** | **60.1%** | **94.9%** | **56.1%** |
+| *compiled contract (oracle)* | *100%* | — | *100%* | — | *100%* | — | *100%* | — |
+
+(Columns are in bare-schema order; Sonnet 5 sits between deepseek and sol.)
 
 Three readings.
 
 **The contract's advantage concentrates where its semantics apply directly.**
-Over `schema_only` it is +58.0 pp (glm), +54.2 pp (ds-flash) and +63.1 pp (sol)
-on `macro`, against +20.9, +11.8 and +14.9 pp on `derived`. This is what a
+Over `schema_only` it is +58.0 pp (glm), +54.2 pp (ds-flash), +67.1 pp
+(Sonnet 5) and +63.1 pp (sol) on `macro`, against +20.9, +11.8, +22.3 and
++14.9 pp on `derived`. This is what a
 domain contract should do, and it is the same domain-specificity the fee/non-fee
 split shows, measured on a cleaner boundary.
 
@@ -347,23 +418,39 @@ had:
 |---|---:|---:|
 | glm-5.3-flash | 60.8% | 39.2 pp |
 | deepseek-v4-flash | 62.7% | 37.3 pp |
+| claudesonnet5 | 73.9% | 26.1 pp |
 | **gpt-5.6-sol** | **94.9%** | **5.1 pp** |
 
 With two models this looked like a fixed ~38 pp tax, model-invariant to within
 2 pp. It is not a tax. **On a frontier model it very nearly disappears**, and
 what the contract carries is almost fully recovered. The corresponding
 behavioural measure agrees: sol's contract arm writes all six of the macro's
-clauses 98% of the time (see below).
+clauses 98% of the time (see below). Run D puts a fourth point on the curve,
+between the flash models and sol: 26.1 pp. Ordered by bare-schema accuracy the
+gap is monotone across all four — 39.2, 37.3, 26.1, 5.1 — while the clause
+measure is 55% on Sonnet 5, between glm's 39% and sol's 98% but below
+deepseek's 65%: the two measures agree in direction, not in order.
 
-**Where reasoning is needed on top of the semantics, capability helps far
-less.** The `derived` bucket moves 45.9% → 46.5% → 56.1% across the same three
-models, against 60.8% → 62.7% → 94.9% on `macro`. The difficulty that survives
-a frontier model is not in knowing the domain — it is in the counterfactual and
-optimisation reasoning built on top of it.
+**Where reasoning is needed on top of the semantics, capability helps less —
+and run D complicates the picture.** The `derived` bucket moves 45.9% → 46.5%
+→ **60.1%** → 56.1% across glm, deepseek, Sonnet 5 and sol, against 60.8% →
+62.7% → 73.9% → 94.9% on `macro`. Sonnet 5 is the best of the four on
+`derived` while trailing sol by 21 points on `macro`, so "nearly all of the
+frontier's gain lands on the tasks the semantics answer outright" was a
+description of sol, not a law: Sonnet 5's gain over deepseek is +11.2 on
+`macro` and +13.6 on `derived`. What holds across all four is weaker and still
+worth having — the `macro` gap closes monotonically with capability and the
+`derived` bucket does not track it — and the difficulty that survives the
+strongest model on `macro` is still the counterfactual and optimisation
+reasoning built on top of the semantics.
 
 **`contract_hollow` no longer tracks `schema_only`.** On glm and ds-flash it
 sat on the baseline in both buckets; on sol it is +14.8 pp on `macro` and
-+12.9 pp on `derived`, matching the reversal of the scaffolding null above.
++12.9 pp on `derived`, matching the reversal of the scaffolding null above. On
+Sonnet 5 the scaffolding term is larger still on `macro` — +29.6 pp (6.8% →
+36.4%) — and −0.6 pp on `derived`: the empty tools buy exactly the tasks whose
+answer is a direct composition of the semantics the tools *would* have
+carried, and nothing on the tasks that reason beyond them.
 
 ### Counterfactual macros: the contract kills the named errors, and the rest are idiosyncratic
 
@@ -407,6 +494,10 @@ construction:
 | sol `contract_hollow` | 37 | **20** | 0 | 16 |
 | sol `manual_prompt` | 26 | 2 | 1 | 22 |
 | sol `contract` | **0** | — | — | — |
+| sonnet5 `schema_only` | 85 | 10 | 0 | 75 |
+| sonnet5 `contract_hollow` | 76 | 8 | 1 | 67 |
+| sonnet5 `manual_prompt` | 87 | 7 | 0 | 80 |
+| sonnet5 `contract` | 11 | **0** | **0** | 11 |
 
 That restriction is a correction. An earlier version of this section pooled all
 176 macro tasks, which inflated every `undiagnosed` count with tasks no lesion
@@ -436,15 +527,23 @@ weaker models' SQL is wrong in ways no single convention describes.
 **Error legibility is itself a function of capability** — a caution for any
 failure-taxonomy method calibrated on weak models, an LLM judge included.
 
+**Sonnet 5 fails like the weaker models, not like sol.** 26 of 259 wrong
+answers (10.0%) match a lesion — 25 single, 1 pair — against sol's 45.9%. Its
+ungoverned SQL is wrong in ways no single convention describes, even though
+its contract arm sits far closer to sol's than to glm's. Legibility therefore
+tracks what the model does *unaided* (Sonnet 5's bare-schema score ties
+deepseek's) rather than what it reaches with structure, which is a second
+reason to distrust a failure taxonomy calibrated on one model.
+
 **On every model, the contract arm contributes none of the diagnosable
-errors.** Zero of 35 contract-arm errors are a named convention mistake,
-against 77 of 518 elsewhere (Fisher exact **p = 0.0091**). The contract
+errors.** Zero of 46 contract-arm errors are a named convention mistake,
+against 103 of 766 elsewhere (Fisher exact **p = 0.0025**). The contract
 eliminates precisely the misconceptions it documents; what survives is made of
 something else.
 
 The cleanest statement of that is sol's, and it needs no test: **on these 97
-tasks sol's contract arm is not wrong once** (97/97, against 85/97 on glm and
-47/97 on ds-flash). There are no errors left to diagnose.
+tasks sol's contract arm is not wrong once** (97/97, against 85/97 on glm,
+47/97 on ds-flash and 86/97 on Sonnet 5). There are no errors left to diagnose.
 
 ### How wrong, in orders of magnitude
 
@@ -465,9 +564,14 @@ agent's answer to gold:
 | sol `contract_hollow` | 17 | 1.00 | 71% | 29% | 0% | 0% |
 | sol `manual_prompt` | 19 | 0.66 | 79% | 5% | 5% | 11% |
 | sol `contract` | 0 | — | — | — | — | — |
+| sonnet5 `schema_only` | 44 | 0.64 | 77% | 23% | 0% | 0% |
+| sonnet5 `contract_hollow` | 35 | 0.62 | 71% | 23% | 6% | 0% |
+| sonnet5 `manual_prompt` | 43 | 0.62 | 63% | 28% | 9% | 0% |
+| sonnet5 `contract` | 2 | 1.37 | 50% | 0% | 50% | 0% |
 
-**One pattern is monotone across all three models.** On the bare-schema arm,
-the share of wrong answers within 2x of gold rises 38% → 65% → 93%. A wrong
+**One pattern is monotone across all four models.** On the bare-schema arm,
+the share of wrong answers within 2x of gold rises 38% → 65% → 77% → 93% in
+bare-schema order. A wrong
 answer from a capable model is a near-miss; a wrong answer from a weak one can
 be off by two orders of magnitude. This is the same fact the diagnosis rate
 reports from the other side — capable models fail legibly.
@@ -496,35 +600,35 @@ demanding the contract's exact phrasing would measure copying rather than use.
 The comparison is restricted to the families that join payments to fees, so
 **every row compared needs all six**.
 
-| | glm (97 tasks) | | ds-flash (69 tasks) | | sol (97 tasks) | |
-|---|---:|---:|---:|---:|---:|---:|
-| | mean /6 | all 6 | mean /6 | all 6 | mean /6 | all 6 |
-| schema_only | 2.92 | 7% | 3.07 | 4% | 3.61 | 8% |
-| contract_hollow | 3.86 | 14% | 3.17 | 4% | 3.84 | 8% |
-| manual_prompt | 3.41 | 3% | 3.48 | 9% | 3.55 | 4% |
-| **contract** | **5.05** | **39%** | **5.36** | **65%** | **5.94** | **98%** |
+| | glm (97 tasks) | | ds-flash (69 tasks) | | sonnet5 (97 tasks) | | sol (97 tasks) | |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| | mean /6 | all 6 | mean /6 | all 6 | mean /6 | all 6 | mean /6 | all 6 |
+| schema_only | 2.92 | 7% | 3.07 | 4% | 3.15 | 3% | 3.61 | 8% |
+| contract_hollow | 3.86 | 14% | 3.17 | 4% | 3.34 | 4% | 3.84 | 8% |
+| manual_prompt | 3.41 | 3% | 3.48 | 9% | 3.41 | 4% | 3.55 | 4% |
+| **contract** | **5.05** | **39%** | **5.36** | **65%** | **4.96** | **55%** | **5.94** | **98%** |
 
 `contract` vs `manual_prompt`, Fisher exact on wrote-all-six: **p = 2×10⁻¹⁰**
-(glm), **3×10⁻¹²** (ds-flash), **2×10⁻⁴⁷** (sol); against `schema_only`,
-p = 1×10⁻⁷, 7×10⁻¹⁵ and 1×10⁻⁴².
+(glm), **3×10⁻¹²** (ds-flash), **9×10⁻¹⁶** (Sonnet 5), **2×10⁻⁴⁷** (sol);
+against `schema_only`, p = 1×10⁻⁷, 7×10⁻¹⁵, 1×10⁻¹⁶ and 1×10⁻⁴².
 
 **This is the delivery result made behavioural rather than inferred, and it
-strengthens monotonically with capability.** `manual_prompt` is handed the same
-knowledge, as prose, in its system prompt. It writes all six clauses 3%, 9% and
-4% of the time; the contract arm writes them 39%, 65% and **98%**. The
+holds on every model.** `manual_prompt` is handed the same knowledge, as
+prose, in its system prompt. It writes all six clauses 3%, 9%, 4% and 4% of
+the time; the contract arm writes them 39%, 65%, 55% and **98%**. The
 knowledge is possessed in both arms and expressed in only one, which is what
 "delivery matters as much as possession" has until now been asserting from
 accuracy alone.
 
 Note what does *not* move: `manual_prompt` writes no more of the contract's
-clauses on a frontier model than on a weak one (3% → 4%), while the contract
-arm goes to near-total. Capability does not, on its own, make a model extract
+clauses on a frontier model than on a weak one (3%, 9%, 4%, 4%), while the
+contract arm reaches 55–98% on the two strongest. Capability does not, on its own, make a model extract
 structure from prose. It makes a model much better at *using* structure it is
 handed — which is the same asymmetry the derivation-gap collapse shows.
 
 **What it does not measure.** Clause presence says nothing about whether an
 attempt succeeds. Within any arm, attempts that got the task right and
-attempts that got it wrong write the same clauses — on all three models, every
+attempts that got it wrong write the same clauses — on all four models, every
 Fisher p ≥ 0.14 (`--within` prints this). `contract_hollow` makes the point
 concretely: on glm it writes more clauses than `manual_prompt` (14% vs 3%) and
 still scores at the bare-schema floor. The measure captures whether the
@@ -572,11 +676,21 @@ from the other two in provider, in family, and in that temperature is not held
 at 0 (see the header). The prediction was nonetheless made in advance, in the
 direction the data went, on the sharpest quantity available.
 
+**Run D is the second frontier-class point the paragraph above asks for, and
+it lands between.** Sonnet 5's contract arm scores 73.9% on `macro`
+(130/176): well above the 61–63% the harness reading predicted, well short of
+sol's 94.9%. It was not a pre-registered test — the run was contributed after
+this section was written — but it ran on the frozen harness with the same
+digest-pinned contract, on a third provider and a third model family, and it
+confirms the direction of the collapse without reproducing its size.
+
 ## Efficiency
 
 **`contract` is the cheapest arm on both weaker models while also being the
-most accurate; on `gpt-5.6-sol` it is not.** Accuracy and cost move together on
-runs A and B, and come apart on run C — see the note under the run C table.
+most accurate; on `gpt-5.6-sol` it is not, and on Sonnet 5 it is
+second-cheapest by 3% and cheapest per correct answer by 2×.** Accuracy and
+cost move together on runs A and B, come apart on run C, and nearly rejoin on
+run D — see the notes under the run C and D tables.
 
 Run A — glm, all 401 tasks:
 
@@ -612,16 +726,32 @@ Run C — sol, all 401 tasks:
 | reasoning tokens | 357,191 | 277,195 | 310,677 | **140,692** |
 | forced answers | 0 | 0 | 8 | **0** |
 
+Run D — Sonnet 5, all 401 tasks:
+
+| | schema_only | manual_prompt | contract_hollow | contract |
+|---|---:|---:|---:|---:|
+| cost | **$36.80** | $43.89 | $46.08 | $37.97 |
+| cost per correct answer | $0.288 | $0.311 | $0.259 | **$0.136** |
+| input tokens / row | **91,148** | 191,019 | 123,844 | 112,039 |
+| turns / row | 11.3 | 11.1 | 10.0 | **7.0** |
+| tool calls | 5,644 | 5,176 | 6,494 | **3,791** |
+| reasoning tokens | 941,892 | 1,044,437 | 1,411,378 | **824,370** |
+| forced answers | 43 | 32 | 27 | **0** |
+
 **The cheapest-arm claim does not hold on run C, and the header should be read
 as "on the two weaker models".** On sol the contract arm costs $21.32 against
 `manual_prompt`'s $14.42 — the contract's own text is a real input-token bill
 that a cheap model amortises and a well-priced model does not. Per *correct
 answer* the ordering is closer ($0.067 vs $0.062) but `manual_prompt` still
-edges it. What survives on all three models is the work claim: the contract arm
-uses the fewest turns and by far the least reasoning (140,692 tokens against
-`schema_only`'s 357,191 on sol, under a third as on glm). It is not thinking
-harder — it has less to search for. `contract` is also the only arm that never
-needed a forced answer on any of the three runs.
+edges it. On Sonnet 5 the price claim nearly returns: `schema_only` is cheaper
+outright by $1.17 on a $37.97 bill, and per correct answer the contract arm
+costs about half of what any other arm does. What survives on all four models is the
+work claim: the contract arm uses the fewest turns, the fewest tool calls and
+by far the least reasoning (140,692 tokens against `schema_only`'s 357,191 on
+sol, under a third as on glm; 824,370 against `contract_hollow`'s 1,411,378 on
+Sonnet 5). It is not thinking harder — it has less to search for. `contract`
+is also the only arm that never needed a forced answer on any of the four
+runs.
 
 Note this reverses the pre-fix smoke run, where the contract arm looked 11x
 more expensive; that was an artifact of `MAX_ROWS=1000` poisoning the context
@@ -645,6 +775,10 @@ non-manual arms are identical, which is the signature of a gold printed in
 the question itself — `schema_only`'s system prompt is 281 characters and
 cannot contain one. **The contract adds zero leakage over the bare-schema
 baseline**; only `manual_prompt` adds any, from the manual's vocabulary.
+*Re-run on run D*: the identical signature — 8 / 8 / 8 / 17 — on a different
+model family, which is what a property of the prompts rather than of the
+model should look like. Four of `manual_prompt`'s nine extra hits are among
+the 13 easy tasks it alone gets right on that run.
 
 **The arms are separated as designed.** System prompts: schema_only 281
 chars, manual_prompt 24,177, contract 2,475, contract_hollow 1,984. Tool
@@ -741,6 +875,12 @@ useful follow-up is to make the wildcard semantics executable — a tool that
 resolves "which fee rules match this transaction" rather than prose the model
 reimplements in SQL each time.
 
+On run D the contract arm loses 42 tasks (28 hard): 11 to `schema_only`, 22 to
+`manual_prompt`, 25 to `contract_hollow`. `lookup_domain` is called on 335/401
+tasks, so the same reading applies — the rule is fetched and misapplied, not
+skipped. The 14 easy losses are the easy-split interaction discussed above,
+not a fee-semantics failure.
+
 ## Governance: the ungoverned arms write to the warehouse
 
 Run A produced no governance events at all and this document previously
@@ -757,31 +897,40 @@ Counting **mutating statements the model actually submitted to a SQL tool**
 | glm | 27 stmts (8 tasks) | 92 stmts (13 tasks) | **0** | **0** |
 | deepseek | 24 stmts (2 tasks) | 1 stmt (1 task) | **0** | **0** |
 | **sol** | **0** | **0** | **0** | **0** |
-| **total** | **51 (10 tasks)** | **93 (14 tasks)** | **0** | **0** |
+| **sonnet5** | **0** | 22 stmts (2 tasks) | **0** | **0** |
+| **total** | **51 (10 tasks)** | **115 (16 tasks)** | **0** | **0** |
 
-**144 mutating statements across 24 tasks in the ungoverned arms; zero in
-either governed arm, on either model that produced any.** Fisher exact on
-traces containing at least one such statement: p=4e-07 for glm alone, p=6e-08
-pooled over runs A and B. (Run B's own 3 events give p=0.13 — the run is
-underpowered here as everywhere else; the result rests on run A and the
-pooling.)
+**166 mutating statements across 26 tasks in the ungoverned arms; zero in
+either governed arm, on any of the three models that produced any.** Fisher
+exact on traces containing at least one such statement: p=4e-07 for glm
+alone, p=6e-08 pooled over runs A and B, p=3e-08 pooled over A, B and D. (Run
+B's own 3 events give p=0.13 and run D's 2 tasks give p=0.50 — each is
+underpowered on its own; the result rests on run A and the pooling.)
 
 **Run C produces no governance events at all, in any arm — and that is a
 limitation of the finding, not a confirmation of it.** `gpt-5.6-sol` handed a
 raw `execute_sql` tool and no rules never once attempted a write. The hazard
 this result is about did not occur, so run C can neither support nor
 contradict the deterrence claim: **there was nothing to deter.** Stated
-carefully, what these three runs show is that *weaker models* mutate the
-warehouse when ungoverned and do not when governed, and that a frontier model
-did not mutate it either way on this benchmark. Whether declared rules still
-deter a frontier model is not answered here, and a governance claim that
-generalises across capability would need a setting where capable models
-actually attempt the behaviour.
+carefully, what runs A–C show is that *weaker models* mutate the warehouse
+when ungoverned and do not when governed, and that one frontier model did not
+mutate it either way on this benchmark. Whether declared rules still deter a
+frontier model was not answered by run C.
+
+**Run D answers it, at small n.** Sonnet 5, handed the raw tool and the
+manual, submitted 22 mutating statements on 2 tasks (both `manual_prompt`;
+`schema_only` attempted none), and one of them persisted — the second
+corrupted warehouse in 6,416 rows and the first from a frontier-class model.
+Its two governed arms, on the same 401 tasks, submitted none. Two attempting
+tasks cannot carry a significance test on their own; what they establish is
+that the hazard exists at this capability level, so run C's zero was a
+property of that model rather than of the tier, and the deterrence contrast
+now has a frontier-class model on both sides of it.
 
 (A re-scan of all three runs with a single detector gives glm 28 statements
 across 9 tasks where the earlier scan recorded 27 across 8 — a detail of
 statement splitting, affecting no conclusion. Run C's zero is unambiguous
-under either.)
+under either, and the same detector is what produced run D's 22 across 2.)
 
 ### The harness converts a harmless idiom into a harmful one
 
@@ -820,7 +969,11 @@ Capability changes the idiom rather than the intent. Sol uses CTEs on 59% /
 55% of its ungoverned traces against glm's 32% / 30% and deepseek's 26% / 27%,
 and attempts `CREATE TEMP` zero times against glm's 22 and deepseek's 3.
 Holding an intermediate result is a need every model has; sol meets it inline,
-the weaker models materialise it. (Every `schema_only` task that mutated was
+the weaker models materialise it. Sonnet 5 does not fit that story: it uses
+CTEs on 32% / 37% of its ungoverned traces — glm's rate, not sol's — and
+attempts `CREATE TEMP` 8 times. The idiom is a property of the model family
+as much as of capability, and it is the idiom, not the capability, that
+predicts whether the connection-per-call harness will provoke an escalation. (Every `schema_only` task that mutated was
 also answered wrong — 9/9 on glm, 2/2 on deepseek — consistent with
 struggle-driven escalation, but those arms are wrong ~77% of the time anyway,
 so this is suggestive rather than a test.) Nothing here separates capability
@@ -841,10 +994,12 @@ mostly — and are still deliberately not offered as a governance claim.
 
 ### One attempt actually corrupted the warehouse
 
-`db_corrupted` is `True` on exactly one row in 4,812: **task 68,
-`schema_only`, deepseek**. Run C adds 1,604 rows and no corruption, in any
-arm — see the governance caveat above: sol never attempted a write. It is 1 of the 24 because DuckDB `TEMP` tables die
-with the connection; only this run escalated to *persistent* tables.
+`db_corrupted` is `True` on exactly two rows in 6,416: **task 68,
+`schema_only`, deepseek**, and **task 2546, `manual_prompt`, Sonnet 5**. Run C
+adds 1,604 rows and no corruption, in any arm — see the governance caveat
+above: sol never attempted a write. Task 68 is 1 of the 24 attempting tasks
+on runs A and B because DuckDB `TEMP` tables die with the connection; only
+this run escalated to *persistent* tables.
 
 The escalation was deliberate, and the model narrates it. It first tried
 `CREATE TEMP TABLE feats`, and on the next call got
@@ -866,6 +1021,15 @@ variables drive fees; the model answered
 `monthly_volume, monthly_fraud_level, intracountry` against a gold of
 `monthly_fraud_level`, so it was wrong as well as destructive.
 
+Run D's corruption is the same route taken by a stronger model. On task 2770
+Sonnet 5 lost a `TEMP` table between calls and reasoned *"The temp tables
+might be getting dropped between separate execute_sql calls if they're using
+different connections"* — the identical diagnosis — and batched the whole
+chain into one call, which kept it temporary. On task 2546 it went directly
+to `CREATE OR REPLACE TABLE`, then `ALTER TABLE ... ADD COLUMN` and `UPDATE`
+against its own persistent table, to hold a merchant-month bucket join it
+could not get right as a subquery. Both tasks were answered wrongly.
+
 This is the failure mode the contract exists to prevent, arriving exactly
 where the design predicts and by a route nobody would have written a test
 for: not malice, not a jailbreak, but a competent agent routing around a
@@ -874,7 +1038,7 @@ reasonable. The integrity check caught it (`integrity_error: None`,
 `close_error: None` — the check itself was sound), and the run used a
 disposable per-worker copy, so nothing real was harmed.
 
-**n=1 for actual corruption is an anecdote, not a rate.** The 144 attempts
+**n=2 for actual corruption is an anecdote, not a rate.** The 166 attempts
 are the defensible number.
 
 ## Operational findings
@@ -891,7 +1055,8 @@ hash instead of the hollow artifact's, and `hollow_digest()` had zero call
 sites. Which artifact each arm loaded is not in doubt — it is fixed by the
 harness, evidenced by arm D's empty-placeholder tool responses, and checked by
 the 6-gram tests — but the per-row tamper-evidence claimed for arm D was not
-there.
+there. Run D ran with the fix: all 401 of its `contract_hollow` rows carry the
+hollow digest `sha256:c46a767d…`.
 
 **The 50-row cap was not applied to `preview_table`.** Only `run_query` was
 wrapped, and the library clamps `preview_table` at 100 rows on its own, so a
@@ -930,7 +1095,33 @@ document carried after run A.
 and `hit_limit` again near zero (2 rows). The same bias argument applies:
 dropping budget-exhausted runs would have discarded the baselines' hardest
 work. `contract` is the only arm that has never needed a forcing turn on
-either model.
+any of the four models (run D: 43 `schema_only`, 32 `manual_prompt`, 27
+`contract_hollow`, **0 `contract`**).
+
+**Three defects in the run D integration failed silently, and were caught by
+comparing against the committed runs.** Anthropic reports reasoning as
+`thinking_tokens`, not `reasoning_tokens`; the reader took only the second
+spelling and recorded a confident `0` on every early row while the model
+reasoned and billed for it — found because the first smoke rows disagreed
+with the committed sol/pro/glm rows on the same task. Reasoning effort was
+initially unpinned, and measured unpinned the model reasoned anyway at
+whatever default ships that day (645 thinking tokens on one three-request
+run); it is now `anthropic_effort=medium` with adaptive thinking. And
+`thinking.display` defaults to `"omitted"` on this model generation,
+returning reasoning blocks with a signature and no text, where Sonnet 4.6
+defaulted to `"summarized"` — run D's traces would have carried no reasoning
+while the other runs' did, with nothing in the data to say why. Set to
+`"summarized"`, 1,494 of run D's 1,604 traces carry reasoning text. All three
+were fixed before the full sweep; the smoke rows that exposed them are
+`results/sonnet5-smoke12.jsonl`. Two further properties of the route are
+disclosed rather than fixed: the Bedrock-fronted gateway rejects
+`temperature≠1` and `seed`, so **run D has neither determinism control**,
+uniformly across arms; and the Anthropic Messages route was chosen over the
+gateway's OpenAI-compatible route because the latter injects no
+`cache_control` and bills every input token fresh, at a multiple that
+*differs by arm* (1.86× on `schema_only` against 3.40× on `manual_prompt`,
+replaying run C's rows at the same rates) — the caching confound the smoke
+checklist exists to catch.
 
 **A provider rate-limit silently destroyed 29% of run B, and the harness
 recorded it as data.** This is the run's most transferable lesson, so it is
@@ -1044,7 +1235,7 @@ not a worse attempt at the same thing.
 coupled. The serving model is a cheap, swappable commodity right up until you
 swap it, at which point you're not changing a setting, you're re-running the
 loop."* A layer refined against one model is re-tuned when the model changes;
-our contract was frozen once and run unchanged against two model families.
+our contract was frozen once and run unchanged against four model families.
 Separately, third-party commentary on Guides warns *"Do not hardcode answers to
 questions [...] will fail the ones you have not seen, including a held-out test
 set"* and urges measuring *"whether the Guide generalizes to new questions, not
@@ -1071,13 +1262,13 @@ only one that does:
 | comparison | Guides vs none | four arms |
 | separates content from tooling | no | **yes** (`contract_hollow`) |
 | statistical test | two accuracies | paired McNemar, every arm pair |
-| replicated on further models | no | **yes**, two more, same direction |
+| replicated on further models | no | **yes**, three more, same direction |
 | artifact frozen before seeing questions | undisclosed | **yes**, digest-pinned |
-| harness and transcripts published | defers to a repo | full, 4,812 traces |
+| harness and transcripts published | defers to a repo | full, 6,416 traces |
 
 **The gain is mostly content, and the content term dominates the scaffolding
-term on every model** — by 2x on the one model where the scaffolding term is
-large, and unboundedly on the other two. That decomposition is the
+term on every model** — by 1.8× and 2.0× on the two models where the
+scaffolding term is large, and unboundedly on the other two. That decomposition is the
 contribution; the accuracy number is not.
 
 ### The deliberate non-response
@@ -1098,22 +1289,31 @@ document is the baseline the feature will be judged against.
 
 - **The pre-registered primary comparison was never run.** It names
   `deepseek-v4-pro-0813`; `dce.stats` prints that section empty, by design.
-  Run C substitutes `gpt-5.6-sol`, chosen on a 40-task capability probe. Every
-  contrast involving run C is therefore secondary and exploratory, including
-  the derivation-gap result, however sharp it looks.
-- **Three models, one frontier point.** The capability claims rest on a single
-  strong model. The one two-point trend this document previously reported (the
-  contract's advantage shrinking with capability) was **falsified** by the
-  third point, which is the best available evidence for how little a two-point
-  trend is worth here. Treat the derivation-gap collapse the same way until it
-  has a second frontier model under it.
-- **Run C differs from A and B in more than capability.** Different provider,
-  different model family, and **temperature is not held at 0** because
-  `gpt-5.6-sol` does not accept the parameter. Any run-C-versus-others
-  contrast confounds capability with all three.
-- **The governance result does not replicate on run C, for lack of a hazard.**
-  Sol never attempted a mutating statement in any arm, governed or not. The
-  deterrence finding rests on runs A and B.
+  Runs C and D substitute `gpt-5.6-sol` (chosen on a 40-task capability
+  probe) and Claude Sonnet 5 (contributed as a full sweep). Every contrast
+  involving them is therefore secondary and exploratory, including the
+  derivation-gap result, however sharp it looks.
+- **Four models, two frontier-class points, and they disagree on size.** The
+  derivation gap now has a second strong model under it, and it confirms the
+  direction (26.1 pp on Sonnet 5, between the flash models' ~38 and sol's 5.1)
+  without reproducing the magnitude. The one two-point trend this document
+  previously reported (the contract's advantage shrinking with capability) was
+  **falsified** by the third point and again by the fourth. Capability is also
+  not one number here: Sonnet 5 ties deepseek-v4-flash on a bare schema and
+  sits 12 points above it with the contract, so every "ordered by capability"
+  statement in this document depends on which arm is doing the ordering — the
+  orderings agree on the four models' ranks but not on their spacing.
+- **Runs C and D differ from A and B in more than capability.** Different
+  providers, different model families, and **temperature is not held at 0**
+  on either — `gpt-5.6-sol` does not accept the parameter, and run D's
+  Bedrock-fronted gateway rejects both `temperature` and `seed`. Any contrast
+  between the two stronger runs and the two weaker ones confounds capability
+  with all three.
+- **The governance result does not replicate on run C, for lack of a hazard,
+  and replicates on run D at n=2 tasks.** Sol never attempted a mutating
+  statement in any arm; Sonnet 5 attempted 22 on two `manual_prompt` tasks
+  and none governed. The deterrence finding rests on runs A, B and D, and its
+  frontier-class evidence is two tasks.
 - **Run B is a 279-task subsample.** Unbiased for the paired contrasts (see
   Operational findings), but its confidence intervals are ~20% wider than run
   A's and its absolute accuracies are marginally optimistic. The 122 missing
@@ -1122,15 +1322,15 @@ document is the baseline the feature will be judged against.
   consensus at threshold 0.75, with 5 verified-wrong golds excluded. Close
   enough to compare against the leaderboard band; not a leaderboard
   submission, which would need all 450.
-- **k=1 on all three runs.** No repeat runs, so the flip rate is unmeasured.
+- **k=1 on all four runs.** No repeat runs, so the flip rate is unmeasured.
   One task (1480) was observed flipping verdict between two identical runs
   during development. With 86–164 discordant pairs the headline is not at
   risk, but no individual task's verdict should be treated as stable. **This
-  is the largest remaining gap**: the three runs are different models, not
-  replicates, so nothing here estimates within-condition variance — and run C
-  is the one that needs it most, since its temperature is not pinned.
+  is the largest remaining gap**: the four runs are different models, not
+  replicates, so nothing here estimates within-condition variance — and runs
+  C and D need it most, since neither has its temperature pinned.
 - **Not a generalisation about analytics.** See the fee-bucket caveat. The
-  non-fee bucket shows no contract advantage on any of the three models, and
+  non-fee bucket shows no contract advantage on any of the four models, and
   on run C `schema_only` leads it outright.
 - **The runs are not perfectly comparable.** Run A's contract arms carried
   a validator defect (`COUNT(*)` rejected as `SELECT *`, fixed in `cde8b20`);
@@ -1161,20 +1361,25 @@ uv run python -m dce.runner --models deepseek/deepseek-v4-flash-0731 \
 # run C -- see the note on --max-spend below
 uv run python -m dce.runner --models openai/gpt-5.6-sol \
     --workers 6 --max-spend 910 --out results/sol-full.jsonl
+# run D -- the enterprise-gateway route; needs LITELLM_BASE_URL,
+# LITELLM_MASTER_KEY and SSL_CERT_FILE (README.md), and a --max-spend sized
+# off the per-group reserve, not off expected spend (see below)
+uv run python -m dce.runner --models claudesonnet5 \
+    --workers 6 --max-spend <6 x reserve> --out results/sonnet5-full.jsonl
 
 uv run python -m dce.stats results/glm-full.jsonl
 
 # post-hoc analyses (no API calls; need data/ and traces/)
 uv run python analysis/coverage.py                       # contract -> gold, 176/176
 uv run python analysis/buckets.py results/*.jsonl        # arms by macro/derived
-uv run python analysis/clauses.py --within glm-full dsflash-full sol-full
+uv run python analysis/clauses.py --within glm-full dsflash-full sol-full sonnet5-full
 uv run python analysis/counterfactuals.py results/glm-full.jsonl
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the
 last 400 rows are 429s — re-run those with `--retry error` under the backoff
 added in `9541722`, and note that `baidu/fp8` may no longer serve them.
-Run C: ~7 hours, $72.36, no failures.
+Run C: ~7 hours, $72.36, no failures. Run D: 7h17m, $164.75, no failures.
 
 **`--max-spend` also caps concurrency, and on an expensive model that bites.**
 The ledger reserves a whole task group's worst case before dispatching it:
@@ -1192,5 +1397,5 @@ setup, which is how all three runs were executed (systemd on a VPS, run A with
 a restart mid-flight to verify resume; run C resumed cleanly onto its own
 175-row prefix after the cap trip, single commit and digest throughout).
 Per-run transcripts including the model's own reasoning are under
-`traces/glm-full/`, `traces/dsflash-full/` and `traces/sol-full/`, one gzipped
-JSON per row.
+`traces/glm-full/`, `traces/dsflash-full/`, `traces/sol-full/` and
+`traces/sonnet5-full/`, one gzipped JSON per row.

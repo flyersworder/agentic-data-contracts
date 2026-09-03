@@ -418,6 +418,148 @@ not post the preprint before the pro sweep lands: a v1 that omits its own
 pre-registered primary invites exactly the objection a v2 would then look
 like it was patching.
 
+## Run D: Claude Sonnet 5, and how it enters the paper (2026-09-03)
+
+A fourth full sweep landed via PR #92: `claudesonnet5`, 401 tasks x 4 arms,
+over an enterprise LiteLLM gateway fronting Bedrock EU, $164.75, zero harness
+failures. `FINDINGS.md` carries it in full as run D. This section records the
+decision on the paper.
+
+### Decision: a full fourth run in the main text, not an appendix
+
+The paper already names this experiment as the one it most needs. The
+conclusion's future work: *"A second frontier model would test every
+capability claim in this paper, all of which now rest on one, which is the
+exact condition under which a claim here has already broken once."* The
+threats section is titled *"One frontier point, and a trend that already
+broke once."* The governance section ends: *"Whether such rules deter a model
+that was not going to try is untested."* Run D speaks to all three, and a
+reader who finds it in an appendix will ask why.
+
+### What run D does to each claim
+
+Replicates, and should be reported as replication:
+
+- **Scaffolding step is not zero.** +15.1 pp hard, p=9e-09 (14/64), on a
+  third model family. "Undetectable on two, +14.2 on the third" becomes
+  "undetectable on the two flash models, +14.2 and +15.1 on the two stronger
+  ones". Content step still dominates: 2.0x on Sonnet 5 (1.8x on sol).
+- **Margin over a prompt is not monotone.** +44.6, the largest of the four,
+  on a model whose bare-schema score (22.9%) ties deepseek's (22.6%).
+- **Delivery over possession, behaviourally.** Contract arm writes all six
+  clauses 55% of the time, manual_prompt 4% (Fisher 9e-16). Fourth model on
+  which the prompt arm sits at 3-9% regardless of capability.
+- **Contract arm contributes no diagnosable error.** 0/11 on run D; pooled
+  0/46 vs 103/766, Fisher p=0.0025.
+- **Work claim.** Fewest turns (7.0), tool calls (3,791), reasoning (824k),
+  zero forced answers (vs 43/32/27). Cost: second-cheapest outright by 3%,
+  cheapest per correct answer by ~2x. The withdrawn price claim stays
+  withdrawn, but the paper can say "cheapest on two, within 3% on a third,
+  and cheapest per correct answer on three of four".
+- **Leaderboard-band check on a second family.** manual_prompt 23.8% hard
+  vs the leaderboard's 19.8% for Claude 4 Sonnet under the same approach.
+
+Extends, with one new sharp result:
+
+- **The manual in the prompt does nothing on Sonnet 5's hard tasks.**
+  79/332 vs 76/332 for a bare schema, McNemar p=0.72. Same 24k characters
+  that lift glm +9 and deepseek +20 lift Sonnet 5 +0.9; the contract carrying
+  the same knowledge lifts it +45.5. This is the strongest instance of the
+  paper's central claim and deserves its own paragraph in Section 5. It also
+  means empty governed tools (37.9%) beat the whole manual (23.8%) on this
+  model, p=1e-04 -- the first model where scaffolding alone outperforms
+  possession as prose.
+- **Governance gets its frontier-class hazard.** 22 mutating statements on 2
+  manual_prompt tasks, none in schema_only, none governed; task 2546
+  escalated to persistent `CREATE OR REPLACE TABLE` + `ALTER` + `UPDATE` and
+  corrupted the warehouse -- the second corruption in 6,416 rows, the first
+  from a strong model, with the same narrated diagnosis as deepseek's ("temp
+  tables might be getting dropped between separate execute_sql calls").
+  Totals become 166 statements / 26 tasks / 0 governed, pooled Fisher 3e-08.
+  n=2 attempting tasks is disclosed as such.
+
+Softens, and the prose must change rather than grow:
+
+- **"Capability arrives unevenly, nearly all of the frontier's gain lands on
+  macro."** Sonnet 5's derivation gap is 26.1 pp (between ~38 and 5.1, and
+  the macro-gap series 39.2 / 37.3 / 26.1 / 5.1 is monotone in bare-schema
+  order), but Sonnet 5 is the *best* of the four models on the derived bucket
+  (60.1% vs sol's 56.1%) while trailing sol by 21 on macro. Its gain over
+  deepseek is +11.2 macro, +13.6 derived. Keep: the macro gap closes with
+  capability, the cost of deriving is transient. Drop: "the derived bucket
+  barely moves" and "what survives a frontier model is only the reasoning on
+  top". The abstract's "capability arrives unevenly" sentence needs rewriting
+  to say the macro gap is what closes, not that derived stands still.
+- **"Capability changed the idiom" (governance).** Sonnet 5 uses CTEs on
+  32%/37% of ungoverned traces -- glm's rate, not sol's 59%/55% -- and
+  attempts CREATE TEMP 8 times. Idiom is model-family, not capability.
+- **"Error legibility is a function of capability."** Lesions diagnose 10%
+  of Sonnet 5's errors (sol 46%, glm 8%, deepseek 3%). Legibility tracks the
+  bare-schema score (where Sonnet 5 ties deepseek), not the contract-arm
+  score. Reword to "tracks what the model does unaided".
+- **"Ordered by capability."** The paper uses bare-schema accuracy as the
+  capability axis. Sonnet 5 and deepseek are 0.3 pp apart on that axis and
+  11.8 pp apart with the contract. Ranks agree under either ordering, spacing
+  does not; say so once in threats and keep the bare-schema axis (it is the
+  only pre-declared one).
+
+### Section-by-section edit list
+
+- **Abstract**: four families; add the 22.9 -> 68.4 pair; scaffolding
+  sentence; four-number recovery series with the derived series beside it;
+  6,416 transcripts.
+- **Intro**: the +5.4 / +0.0 / +14.2 sentence and the 39.2 / 37.3 / 5.1
+  sentence each gain a number; nothing structural.
+- **Protocol**: model table gains a row; a paragraph on the gateway route --
+  Anthropic Messages API (the OpenAI-compatible route bills every input token
+  fresh at an arm-dependent multiple, 1.86x vs 3.40x, a caching confound),
+  `anthropic_effort=medium` as a translation of the same scale, and **neither
+  temperature nor seed is accepted** (HTTP 400), uniform across arms.
+- **Results 5.2** ("what the third model changed"): add one paragraph --
+  the fourth model replicated both reversals and softened one new claim.
+- **Results tables**: headline (run D block), McNemar (column), ablation
+  table (row) and figure (series), efficiency (run D block + cost/correct),
+  buckets (two columns; 9 columns will overflow -- switch to one row per
+  model or drop the oracle row into the caption), interaction (row).
+- **Results prose**: leaderboard check on a second family; the
+  manual-does-nothing paragraph; derivation-gap rewrite per above; "Run D
+  lands between" after the pre-registered prediction, flagged as not
+  pre-registered.
+- **Mechanism**: clauses table column; counterfactual rows; legibility
+  reword; Fisher update.
+- **Governance**: table row; 166/26; second corruption with the quoted
+  reasoning; idiom paragraph reworded; "nothing to deter" paragraph now
+  answered at n=2.
+- **Threats**: retitle "One frontier point" to "Two frontier-class points
+  that disagree on size"; temperature unpinned on *both* strong runs;
+  contamination collinearity now includes Sonnet 5; run D stamps the hollow
+  digest correctly (the arm-D digest defect is runs A-C only); **verify
+  before claiming** whether run D's commit `b55c932` includes the
+  preview_table cap fix, and count preview calls >50 rows either way.
+- **Conclusion**: 1.8x / 6.6x gains 2.0x; recovery series to four; "144 to
+  zero on two models, third never tried" becomes "166 to zero on three of
+  four, including one frontier-class model that did try"; future work:
+  second frontier model is done -- what remains is repeats, the executable
+  metric layer, and a capability axis that is not the bare-schema arm.
+- **Artifact availability**: 6,416 transcripts. Run D's 1,604 traces
+  (32 MB) are on disk under `traces/sonnet5-full/` and git-ignored like the
+  others; the release bundle must include them.
+- **Figures**: `make_figures.py` RUNS/MARKER/LINESTYLE/HARD_EXPECTED gain
+  a fourth entry (diamond, dash-dot); the interaction figure's x-axis puts
+  Sonnet 5 at 22.9 beside deepseek at 22.6, so the two labels need an offset.
+  The script asserts every drawn value against the paper's numbers, so the
+  tables and the script move together.
+
+### Sequencing
+
+If the arXiv v1 has not been posted, fold run D in before posting: a v1 with
+"one frontier point" in its threats section followed weeks later by a v2 that
+adds the point the v1 asked for is the shape of a paper that ran the
+experiment because a reviewer asked. If v1 is already up, this is the v2, and
+the PVLDB submission uses it. Either way the FINDINGS integration is done and
+the paper edit is one focused pass over ten sections plus the figure script,
+with `make check` gating the wider tables.
+
 ## Paper 2 (deferred)
 
 An experience report on deploying governed agentic SQL against a dialect no

@@ -92,14 +92,29 @@ not run.
 \subsection{\texorpdfstring{Statistical power: $k{=}1$, and 24
 uncorrected tests}{Statistical power: k=1, and 24 uncorrected tests}}
 
-No run repeats. One task was observed flipping verdict between two identical
-runs during development, so per-task verdicts are not stable. With 86--182
-discordant pairs the headline comparisons are not at risk, but \textbf{nothing
-in this paper estimates within-condition variance}: our four runs are
-different models, not replicates. This is the largest remaining gap, and
-runs~C and~D need it most: \texttt{gpt-5.6-sol} does not accept a temperature
-parameter, and run~D's gateway rejects both \texttt{temperature} and
-\texttt{seed}, so neither ran at 0 like the first two.
+None of the four runs repeats, so none of them estimates within-condition
+variance: they are different models, not replicates. One near-replicate
+exists. A single-arm sweep of \armC{} over all 450 tasks, run on
+\texttt{glm-5.3-flash} for a leaderboard submission, shares 401 tasks with
+run~A's \armC{} and differs from it only by a validator fix that run~A
+predates. Paired, the two agree on accuracy --- 60.3\% against 57.9\%,
+exact McNemar $p{=}0.35$ --- and \textbf{disagree on 94 of 401 tasks, a
+23.4\% flip rate}, at temperature 0 on a pinned endpoint. On the hard split
+it is 25.9\%; on the easy split both runs score exactly 49/69 while
+disagreeing about which 8 tasks. Because the two runs also differ by that
+validator fix, 23.4\% is an upper bound on run-to-run noise rather than a
+clean estimate of it.
+
+Two consequences. The headline comparisons are not at risk: McNemar reads
+asymmetry, and this churn is symmetric (52 one way, 42 the other). But our
+contrasts rest on 86--182 discordant pairs and noise alone supplies 94, so a
+contrast near that floor is close to the noise, and \textbf{no claim about a
+named task's verdict should be read as reproducible}. Repeats remain the
+largest gap for runs~B, C and~D, and largest for the last two:
+\texttt{gpt-5.6-sol} does not accept a temperature parameter, and run~D's
+gateway rejects both \texttt{temperature} and \texttt{seed}, so neither ran
+at 0 like the first two --- and the glm figure suggests their flip rates are
+higher, not lower.
 
 The pre-registration also named a primary comparison, on
 \texttt{deepseek-v4-pro-0813}, that was never run: a 40-task probe showed it

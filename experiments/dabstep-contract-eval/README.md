@@ -1,6 +1,6 @@
 # DABStep Contract-Context Eval
 
-A three-arm ablation measuring whether contract-delivered context beats a
+A four-arm ablation measuring whether contract-delivered context beats a
 manual-in-prompt baseline and a schema-only floor on the
 [DABStep](https://huggingface.co/datasets/adyen/DABstep) benchmark.
 
@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 327 tests, deterministic and offline
+uv run pytest -q                     # 348 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 

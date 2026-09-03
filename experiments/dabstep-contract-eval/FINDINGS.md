@@ -19,6 +19,11 @@ stamps the hollow digest correctly) · **golds**
 Run A at commit `6836139` (arms A–C) / `d75d269` (arm D); run B at `4d230fa`;
 run C at `04bee43`; run D at `b55c932`.
 
+A fifth file, `results/glm-all450.jsonl`, is **not** a fifth arm-comparison
+run and is absent from every table above: it is the contract arm alone over
+all 450 tasks, built for the leaderboard submission. It doubles as this
+experiment's only near-replicate — see [Run E](#run-e-a-near-replicate-and-the-flip-rate-at-temperature-0).
+
 Temperature is held at 0 on runs A and B. **Runs C and D do not hold it**:
 `gpt-5.6-sol` reports `supports_temperature=False`, so the sampling parameter
 is not accepted and run C is at the provider's default; the Bedrock-fronted
@@ -1289,6 +1294,57 @@ asset here: a contract authored from the vendor manual alone and frozen
 before any question was read. The order is measure, ship, re-measure — this
 document is the baseline the feature will be judged against.
 
+## Run E: a near-replicate, and the flip rate at temperature 0
+
+**23.4% of tasks change verdict between two runs of the same model, same arm,
+same frozen contract, same pinned endpoint, temperature 0.** That is the
+within-condition variance every earlier section of this document was written
+without.
+
+`results/glm-all450.jsonl` was produced for the leaderboard submission, not
+for this measurement: the contract arm alone, all 450 tasks (`--ungolded
+run`), at commit `46dde879`, 56 minutes at 6 workers, $0.71. It shares 401
+tasks with run A's contract arm and differs from it in exactly one known way
+— run A predates the `COUNT(*)`-rejected-as-`SELECT *` validator fix
+(`cde8b20`). So it is a *near*-replicate, and the figures below are an **upper
+bound** on run-to-run noise, not a clean estimate of it.
+
+| split | n | run E | run A | discordant | E-only | A-only | exact McNemar |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 401 | 242 (60.3%) | 232 (57.9%) | **94 (23.4%)** | 52 | 42 | p=0.35 |
+| hard | 332 | 193 (58.1%) | 183 (55.1%) | **86 (25.9%)** | 48 | 38 | p=0.33 |
+| easy | 69 | 49 (71.0%) | 49 (71.0%) | 8 (11.6%) | 4 | 4 | p=1.00 |
+
+Three things follow.
+
+**The accuracies agree and the verdicts do not.** p=0.35 overall: the two runs
+are statistically indistinguishable, which is what a replicate should look
+like. The easy split makes the point sharply — both runs score *exactly*
+49/69, and disagree about which 8 tasks. A number that reproduces is not the
+same as a measurement that reproduces.
+
+**The headline survives; individual verdicts do not.** McNemar tests
+asymmetry, and symmetric run-to-run churn costs power without biasing the
+estimate, so the arm contrasts stand as reported. But this document's largest
+effects rest on 86–164 discordant pairs, and within-condition noise alone
+produces 94. Any contrast whose discordant count is near that floor is
+reporting noise as much as signal, and **no claim about a named task's
+verdict should be read as reproducible** — including every task cited in
+*Where the contract arm loses*.
+
+**Flip rate scales with difficulty**: 25.9% hard against 11.6% easy. The tasks
+carrying the result are the tasks whose verdicts are least stable.
+
+Temperature was pinned at 0 on both runs and the endpoint (`z-ai`, fp8) was
+pinned on both, so this is not sampling temperature. Whatever produces it —
+provider-side batching, quantized kernel non-determinism, tool-call ordering
+— pinning the parameters this harness can pin does not remove it. Runs C and
+D, which could not pin temperature at all, should be assumed noisier.
+
+One incidental correction: task 1480, named below as the one task observed
+flipping between identical runs during development, is `incorrect` in both
+runs here. It is an example of the phenomenon, not a uniquely unstable task.
+
 ## What these runs do not show
 
 - **The pre-registered primary comparison was never run.** It names
@@ -1326,13 +1382,18 @@ document is the baseline the feature will be judged against.
   consensus at threshold 0.75, with 5 verified-wrong golds excluded. Close
   enough to compare against the leaderboard band; not a leaderboard
   submission, which would need all 450.
-- **k=1 on all four runs.** No repeat runs, so the flip rate is unmeasured.
-  One task (1480) was observed flipping verdict between two identical runs
-  during development. With 86–164 discordant pairs the headline is not at
-  risk, but no individual task's verdict should be treated as stable. **This
-  is the largest remaining gap**: the four runs are different models, not
-  replicates, so nothing here estimates within-condition variance — and runs
-  C and D need it most, since neither has its temperature pinned.
+- **k=1 on all four runs, with one near-replicate.** The four sweeps are
+  different models, not repeats, so none of them estimates within-condition
+  variance. Run E (above) supplies the only estimate there is, on glm:
+  **23.4% of tasks flip verdict** between two runs at temperature 0, and it
+  is an upper bound rather than a clean figure, since the two runs also
+  differ by the `COUNT(*)` validator fix. The headline is not at risk —
+  McNemar reads asymmetry, and this churn is symmetric (52 vs 42) — but no
+  individual task's verdict should be treated as stable, and any contrast
+  resting on a discordant count near 94 is close to the noise floor.
+  **What remains unmeasured**: any flip rate for runs B, C and D. Runs C and
+  D need it most, since neither could pin temperature at all, and run E
+  suggests the figure there is higher than glm's, not lower.
 - **Not a generalisation about analytics.** See the fee-bucket caveat. The
   non-fee bucket shows no contract advantage on any of the four models, and
   on run C `schema_only` leads it outright.

@@ -1,0 +1,179 @@
+\section{Governance}
+\label{sec:governance}
+
+The contract under test declares forbidden operations as well as semantics, and
+the tool layer enforces them. Because the same runs that measure accuracy also
+record every statement the agent submitted and a post-run integrity check on
+the database, a second result falls out of the same 6{,}416 transcripts at no
+additional cost.
+
+\subsection{166 mutation attempts, all in ungoverned arms}
+
+We counted mutating statements the model actually \emph{submitted} to a SQL
+tool: \texttt{CREATE TABLE}/\texttt{VIEW}, \texttt{DROP}, \texttt{INSERT},
+\texttt{UPDATE}, \texttt{DELETE}, \texttt{ALTER} or \texttt{TRUNCATE} at a
+statement position in the query argument (Table~\ref{tab:governance}).
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Run} & \armS{} & \armH{} & \armM{} & \armC{} \\
+\midrule
+A (glm) & 27 (8 tasks) & \textbf{0} & 92 (13 tasks) & \textbf{0} \\
+B (deepseek) & 24 (2 tasks) & \textbf{0} & 1 (1 task) & \textbf{0} \\
+C (sol) & \textbf{0} & \textbf{0} & \textbf{0} & \textbf{0} \\
+D (Sonnet~5) & \textbf{0} & \textbf{0} & 22 (2 tasks) & \textbf{0} \\
+\midrule
+\textbf{Total} & \textbf{51 (10)} & \textbf{0} & \textbf{115 (16)} & \textbf{0} \\
+\bottomrule
+\end{tabular}
+\caption{Mutating statements submitted, by arm. Fisher exact (two-sided, as
+throughout) on traces containing at least one: $p{=}8{\times}10^{-7}$ for
+run~A alone, $p{=}1{\times}10^{-7}$ pooled over runs~A and~B,
+$p{=}3{\times}10^{-8}$ pooled over A, B and~D. Run~C contributes nothing in
+either direction: no arm attempted a write.}
+\label{tab:governance}
+\end{table*}
+
+\textbf{166 mutating statements across 26 tasks in the ungoverned arms; zero in
+either governed arm, on all three models where any arm attempted a write.}
+Run~B alone gives $p{=}0.25$ and run~D alone $p{=}0.50$ (each is underpowered
+on its own), so the result rests on run~A and the pooling.
+
+\paragraph{Run~C produces no events at all, and that is a limitation rather
+than a confirmation.} \texttt{gpt-5.6-sol}, handed a raw SQL tool and no rules,
+never once attempted a write. The hazard this result is about did not occur, so
+run~C can neither support nor contradict the claim: there was nothing to deter.
+
+\paragraph{Run~D supplies the hazard run~C lacked.} Claude Sonnet~5, handed the
+raw tool and the manual, submitted 22 mutating statements on two tasks, both
+in \armM{} (\armS{} attempted none), and one of them reached the
+database (below). Its two governed arms, on the same 401 tasks, submitted
+none. Two attempting tasks cannot carry a test on their own; what they
+establish is that the hazard exists at this capability level, so run~C's zero
+was a property of that model rather than of the tier, and the contrast now
+has a frontier-class model on both sides of it.
+
+The transcripts suggest why, and it is not that the stronger model is better
+behaved in the abstract. Holding an intermediate result is a need every model
+has; what differs is the idiom. Run~C uses common table expressions on
+59\%/55\% of its ungoverned traces (\armS{}/\armM{}), against 32\%/30\% on
+run~A and 26\%/27\% on
+run~B. \texttt{CREATE TEMP} appears in 22 of run~A's ungoverned traces and 3 of
+run~B's, and in none of run~C's; on run~A it accounts for every mutating
+statement submitted, on run~B for 4 of 25. Run~D does not fit that pattern:
+Sonnet~5 uses CTEs on 32\%/37\% of its ungoverned traces, run~A's rate rather
+than run~C's, and issues \texttt{CREATE TEMP} 8 times. \textbf{The idiom a
+model reaches for is a property of the model family as much as of its
+capability}, and it is the idiom rather than the capability that predicts
+whether the harness below will provoke an escalation. We cannot separate any
+of this from a trained disposition against writing to a warehouse.
+
+\subsection{Two layers, and only the first was exercised}
+
+The governed arms have two independent defences, both declared as data in the
+contract rather than written as code:
+
+\begin{enumerate}
+\itemsep2pt
+\item \textbf{Declarative.} \texttt{forbidden\_operations} and the table
+      allow-list are rendered into the system prompt, so the agent is told
+      what it may not do before it writes anything.
+\item \textbf{Enforced.} The same two fields drive static checkers that
+      validate every statement before execution. We confirmed this directly:
+      driving the governed query tool against a scratch copy of the warehouse,
+      \texttt{CREATE TABLE}, \texttt{CREATE TEMP TABLE},
+      \texttt{CREATE\ldots VIEW}, \texttt{DROP}, \texttt{UPDATE} and
+      \texttt{INSERT} are each refused with an explicit violation, since the
+      mutations trip both the operation blocklist \emph{and} the table
+      allow-list (the target is not a declared table), while an ordinary
+      \texttt{SELECT} over a declared table executes normally. The
+      database is unchanged afterwards.
+\end{enumerate}
+
+\textbf{The experiment exercised only the first layer.} A rejected tool call
+still appears in the transcript as a tool call, so the count above is of what
+the model \emph{emitted}, not of what survived validation. Zero does not mean
+``attempted and blocked'' --- it means \textbf{never attempted}. In 6{,}416
+rows the enforcement layer never had to fire against a mutating statement in
+a governed arm, because the declared rules stopped the attempts upstream of
+it. Nor can the data
+distinguish a model that will not attempt from one that would have been
+caught; both produce zero. What the transcripts support is narrower: with the
+rules present, the attempts stop, and a validator stands behind them if they
+do not.
+
+Neither layer is novel in itself. Capability-based enforcement outside the
+model is the design behind CaMeL~\cite{camel}, and policy compliance under a
+prompt-stated document is what $\tau$-bench measures~\cite{tau-bench}. What is
+less established is the first layer's efficacy: RuLES finds models breaking
+simple stated rules even with no adversary present~\cite{rules}, which is the
+published expectation our 166-to-0 result runs against. The contrast
+measures that \emph{declarative} mechanism, which costs nothing at query time
+and depends on compliance; it is not evidence about the enforcement layer,
+which the data cannot exercise precisely because the first layer worked.
+
+\subsection{Two escalations reached the database}
+
+The post-run integrity check flagged two rows in 6{,}416: task~68, \armS{},
+run~B, and task~2546, \armM{}, run~D. Task~68 is the only one of the 24
+attempting tasks on runs~A and~B to reach the database: DuckDB \texttt{TEMP}
+tables die with the connection, and only this attempt escalated to persistent
+tables.
+
+The escalation was deliberate, and the model narrates it. It first issued
+\texttt{CREATE TEMP TABLE feats}, and on the next call received \texttt{Table
+with name feats does not exist!}. Its reasoning:
+
+\begin{quote}\small\itshape
+``TEMP table per session? The previous CREATE TEMP TABLE in the same connection.
+The tool might use separate connections per call, so temp tables don't persist.
+Let me create a regular table\ldots''
+\end{quote}
+
+and, having established that they now persist, \emph{``Since tables persist
+across calls (non-temp), I can do sequential UPDATE operations.''} It then
+hand-rolled Gaussian elimination across twelve statements
+(\texttt{DROP TABLE IF EXISTS m1; CREATE TABLE m1 AS \ldots} through
+\texttt{m6}) to solve a linear system, and answered the question wrongly as well.
+
+Run~D's event is the same route taken by a stronger model. On task~2770
+Sonnet~5 lost a \texttt{TEMP} table between calls and reasoned \emph{``The
+temp tables might be getting dropped between separate execute\_sql calls if
+they're using different connections''}, the identical diagnosis, and
+batched the chain into a single call, which kept it temporary. On task~2546
+it went straight to \texttt{CREATE OR REPLACE TABLE}, then \texttt{ALTER TABLE
+\ldots ADD COLUMN} and \texttt{UPDATE} against its own persistent table, to
+hold a merchant-month bucket join it could not get right as a subquery. Both
+tasks were answered wrongly.
+
+The shape is what makes this worth reporting. It is not an injection, a
+jailbreak, or an adversarial prompt, but a competent agent routing around a
+session boundary to finish its work, in which every individual statement is
+locally reasonable. No test written in advance would have anticipated this path,
+which is the argument for a declarative rule that does not need to. The run used
+a disposable per-worker copy, so nothing real was harmed.
+
+\paragraph{The harness converts a harmless idiom into a harmful one.} The
+statements are not malformed SQL that a validator would catch; the ungoverned
+tool opens a fresh read-write connection per call and passes them through, so
+\texttt{CREATE TABLE} succeeds silently. Because \texttt{TEMP} tables are
+connection-scoped, a temp table never survives to the next tool call, so the
+model receives no signal that it did anything wrong, only that its own table
+vanished, and the natural repair is to stop using \texttt{TEMP}. The
+escalation is an interaction between the model's idiom and the tool's
+connection lifecycle, and a session-scoped connection would likely have
+prevented it.
+
+Two limits follow. \textbf{The size of the hazard is partly a property of this
+harness}, so a different tool design would produce a different attempt count;
+the contrast survives, because the governed arms faced the identical harness
+and emitted nothing. And two corruption events are an anecdote, not a rate:
+the defensible number is the 166 attempts, and the defensible claim is that on
+models which reach for the mutating idiom, declared rules stopped them from
+trying. Whether such rules deter a model that was not going to try is
+untested, and runs~C and~D together say the hazard does not shrink with
+capability alone: one strong model never reached for the idiom and the other
+did.

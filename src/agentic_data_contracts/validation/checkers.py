@@ -217,14 +217,42 @@ ENFORCEABLE_OPERATIONS: frozenset[str] = frozenset(
 
 
 class NoSelectStarChecker:
-    """Checks that no SELECT * appears anywhere in the query."""
+    """Checks that no SELECT * appears in any projection list in the query.
+
+    IN A PROJECTION LIST, NOT ANYWHERE IN THE TREE. `find_all(exp.Star)` was
+    the obvious implementation and the wrong one: `COUNT(*)` parses as
+    `Count(this=Star())`, so it matched, and the agent was told "SELECT * is
+    not allowed" about a query containing no `SELECT *`. Measured in the
+    DABStep sweep before the fix: 86 false rejections across 124 of 401
+    tasks, against 20 genuine ones.
+
+    That is worse than a merely noisy check. The message names a construct
+    the query does not contain, so an agent cannot act on it — the
+    transcripts show models re-issuing the same query, then guessing at
+    unrelated clauses, before stumbling onto `COUNT(ID)`. A validator that
+    rejects correct work with a false reason spends the caller's turns and
+    teaches it nothing.
+
+    The rule this checker actually wants is about how many COLUMNS come back:
+    `SELECT *` and `SELECT t.*` project an unbounded, schema-dependent set,
+    while `COUNT(*)` projects exactly one number and reads no column at all.
+    So only a projection that IS a star (or a qualified `t.*`) is rejected;
+    a star nested inside a function is not. A `SELECT *` in a subquery is
+    still caught, because that subquery has its own projection list.
+    """
 
     def check_ast(self, ast: exp.Expression, **_: object) -> CheckResult:
-        if any(ast.find_all(exp.Star)):
-            return CheckResult(
-                passed=False,
-                message="SELECT * is not allowed — specify explicit columns",
-            )
+        for select in ast.find_all(exp.Select):
+            for projection in select.expressions:
+                is_bare_star = isinstance(projection, exp.Star)
+                is_qualified_star = isinstance(projection, exp.Column) and isinstance(
+                    projection.this, exp.Star
+                )
+                if is_bare_star or is_qualified_star:
+                    return CheckResult(
+                        passed=False,
+                        message="SELECT * is not allowed — specify explicit columns",
+                    )
         return CheckResult(passed=True, message="")
 
 

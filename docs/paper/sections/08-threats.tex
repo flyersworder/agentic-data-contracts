@@ -1,0 +1,226 @@
+\section{Threats to Validity}
+\label{sec:threats}
+
+\subsection{The effect is domain-specific, and the benchmark cannot show
+otherwise}
+
+This is the sharpest limit on the result, so we give it first.
+
+DABStep's hard set is dominated by one question family: 294 of 332 hard tasks
+in run~A concern fees, and the contract encodes fee-domain semantics
+(Table~\ref{tab:feebucket}).
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\tabhead{Run} & \tabhead{Bucket} & \armS{} & \armH{} & \armM{} & \armC{} \\
+\midrule
+A & fee (294)     & 13.9\% & 18.7\% & 24.5\% & \textbf{59.2\%} \\
+A & non-fee (38)  & 5 & 9 & 4 & 9 \\
+B & fee (196)     & 23.0\% & 22.4\% & 44.9\% & \textbf{61.2\%} \\
+B & non-fee (30)  & 6 & 7 & \textbf{9} & 8 \\
+C & fee (294)     & 37.1\% & 53.4\% & 53.4\% & \textbf{83.7\%} \\
+C & non-fee (38)  & \textbf{14} & 13 & 10 & 11 \\
+D & fee (294)     & 22.4\% & 40.1\% & 24.1\% & \textbf{73.5\%} \\
+D & non-fee (38)  & 10 & 8 & 8 & \textbf{11} \\
+\bottomrule
+\end{tabular}
+\caption{Hard-task accuracy split by whether the question concerns the domain
+the contract describes. Non-fee cells are counts, not rates.}
+\label{tab:feebucket}
+\end{table*}
+
+``Hard accuracy'' on this benchmark is close to ``fee-question accuracy'', so
+the result should be stated as: \textbf{a contract carrying a domain's semantics produces
+a large gain on questions in that domain.}
+
+\textbf{On the non-fee bucket there is no detectable contract advantage on any
+model} ---
+against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C, 11 to 8
+in run~D. At 38, 30, 38 and 38 tasks these are far too small to be a negative
+result, and equally unable to support a general claim. On run~C the ordering inverts outright:
+\armS{} leads that slice at 14 of 38 while \armC{} takes 11 --- the only
+top-level slice anywhere in the four runs where the bare baseline beats the
+contract. All
+four are consistent with the effect being domain-specific by construction:
+outside the domain the contract describes it is inert, and a frontier-class model
+does not rescue it. That is the expected behaviour of a domain contract, and it
+is why this benchmark cannot answer the general question.
+
+A 30-task sub-bucket inside the fee bucket (\emph{most expensive MCC}, or
+\emph{ACI}, \emph{for a transaction of $N$ euros}; 10 and 20 tasks) scores 0--3 of 30 for
+\emph{every} arm on runs~A, B and~D. Run~C partially solves it (\armS{} 8,
+\armH{} 5, \armC{} 4, \armM{} 2 of 30), which is a second slice where the bare
+baseline leads.
+
+The benchmark is also a single one, and a concentrated one: 450 tasks reduce
+to 113 question shapes, 27 of which cover three quarters of the benchmark
+(Section~\ref{sec:background}). No amount of compute fixes that, and results
+on so narrow a question space should not be read as results about analytics
+agents in general.
+
+\subsection{The contract resolves ambiguities the manual leaves open}
+\label{sec:threats-interpretation}
+
+The arms are matched on the sources they may consult, not on how those sources
+read. \texttt{semantic.yml} marks seven clauses with a sentence beginning
+\texttt{INTERPRETATION}, flagging where a metric commits to a reading the
+prose does not force. Three are glosses of wording the manual supplies
+outright. One derives the \texttt{capture\_delay} day-count-to-band mapping by
+applying the manual's own band definitions to a column of days. The remaining
+three go further, and we state them plainly: the manual says a \texttt{null}
+field ``applies to all possible values'', but the annexed \texttt{fees} data
+encodes that wildcard for list-typed fields as an \emph{empty list}, which the
+manual never mentions; and two band metrics break a tie on values sitting
+exactly on a shared boundary, which the manual's ``between A and B'' does not
+decide.
+
+All three are recoverable from the annexed data, which every arm could query,
+and none supplies a task's answer. But they were recovered once, by us, and
+handed to one arm. The empty-list clause in particular is load-bearing:
+reversing it in the compiled contract changes the answer on 87 of the 97
+tasks in the payments families, so an agent lacking the clause has somewhere
+to go wrong. A reader should
+therefore treat the contract arm's margin as combining two things this
+experiment does not separate --- delivery of what the manual states, and
+resolution of what it leaves open. Separating them needs a fifth arm carrying
+the contract with its \texttt{INTERPRETATION} clauses stripped, which we did
+not run.
+
+\subsection{\texorpdfstring{Statistical power: $k{=}1$, and 24
+uncorrected tests}{Statistical power: k=1, and 24 uncorrected tests}}
+
+No run repeats. One task was observed flipping verdict between two identical
+runs during development, so per-task verdicts are not stable. With 86--182
+discordant pairs the headline comparisons are not at risk, but \textbf{nothing
+in this paper estimates within-condition variance}: our four runs are
+different models, not replicates. This is the largest remaining gap, and
+runs~C and~D need it most: \texttt{gpt-5.6-sol} does not accept a temperature
+parameter, and run~D's gateway rejects both \texttt{temperature} and
+\texttt{seed}, so neither ran at 0 like the first two.
+
+The pre-registration also named a primary comparison, on
+\texttt{deepseek-v4-pro-0813}, that was never run: a 40-task probe showed it
+would not supply a third capability point, and runs~C and~D were chosen in its
+place after that probe. Every contrast involving them is therefore
+exploratory, the derivation-gap result included, and the public prediction of
+Section~\ref{sec:derivation} was recorded against run~C after the substitution
+was made.
+
+Table~\ref{tab:mcnemar} reports 24 pairwise comparisons and we correct none of
+them. The three vs-\armC{} contrasts survive any correction at these
+$p$-values; the \armS{}-vs-\armH{} row, which carries the ablation, does not
+have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
+mind. Underpowered comparisons are the norm in this literature rather than the
+exception~\cite{little-power}.
+
+\subsection{Contamination}
+
+DABStep is public, and so is the material an agent needs to answer it. Our own
+gold reconstruction (Section~\ref{sec:golds}) makes the point sharply: we
+recovered 59 hard-split answers from public sources alone, which is a
+demonstration that the answer key exists in machine-readable form outside the
+withheld split. Nothing stops that material from having entered a model's
+training data, and we ran no contamination probe --- no canary strings, no
+perturbed restatements of the questions, no comparison against a
+post-cutoff held-out set.
+
+This bears asymmetrically on the capability claims. Our four models differ
+in training data as well as in capability, and nothing here separates the
+two, so ``stronger model'' and ``different training data'' are confounded
+across every comparison in Section~\ref{sec:derivation}. A memorising model would
+show exactly what we report: high accuracy on the \emph{macro} bucket, whose
+tasks follow the benchmark's most common shapes, and a smaller gain on the
+\emph{derived} bucket, whose tasks compose them. We do not believe this
+explains the result, because \texttt{gpt-5.6-sol}'s contract arm scores
+94.9\% against 31.8\% for its schema-only arm on the same tasks, and Sonnet~5's
+73.9\% against 6.8\%, and memorisation
+should not care which context the agent was handed. But that argument is an
+inference, not a measurement, and a contamination probe would settle what it
+only makes plausible.
+
+\subsection{Two frontier-class points that disagree on size, and a trend that
+already broke once}
+
+The capability claims in this paper rest on two frontier-class models, and we
+have direct evidence for how little one supported: two claims written against
+runs~A and~B did not survive run~C (Sections~\ref{sec:ablation}
+and~\ref{sec:interaction}), and a third,
+written against runs~A--C, did not survive run~D. \textbf{Readers should apply
+the same discount to the derivation-gap result} (Section~\ref{sec:derivation}):
+the second frontier-class model confirms the direction of the collapse (26.1
+points, between the flash-tier models' ${\approx}38$ and run~C's 5.1) and not
+its size. The two frontier-class models disagree by 21 points on the
+\emph{macro} bucket and by 4, in the other direction, on \emph{derived}.
+Capability is also not one number
+here. Sonnet~5 ties \texttt{deepseek-v4-flash} on the bare-schema arm we use
+as the capability axis and sits 12 points above it with the contract; the two
+orderings agree on every model's rank but not on the spacing, and every
+``ordered by capability'' statement in this paper depends on which arm is
+doing the ordering. The literature does not settle the direction either. Some
+prompt scaffolding does lose value as models
+improve~\cite{prompt-engineering-advanced}; but a pre-registered study across
+five frontier models found the opposite on GAIA, with the most capable model
+gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Runs~C
+and~D also differ from the others in provider and model family, so any
+contrast between the frontier-class runs and the flash-tier ones confounds
+capability with both.
+
+\subsection{Harness asymmetries}
+\label{sec:harness-asym}
+
+Three properties of the harness treated the arms unequally, two against the
+governed arms and one, small, in their favour; a fourth makes the runs less
+comparable to each other.
+
+\paragraph{A validator defect, run~A only.} Run~A's governed arms carried a
+defect in the validator: a check intended to reject \texttt{SELECT *} also
+rejected \texttt{COUNT(*)}, because the latter parses with a \texttt{Star}
+node. The agent was told \emph{``SELECT * is not allowed''} about queries
+containing no \texttt{SELECT *} --- 161 rejections across 124 of 401 tasks;
+replaying the 160 distinct rejected queries showed 79 were falsely rejected. A rejection whose stated reason is not true of the query cannot be
+complied with, and the transcripts show the agent guessing at unrelated clauses
+before finding a formulation that passed.
+
+This handicapped both contract arms and neither baseline, so run~A's 55.1\% is a
+floor rather than a ceiling. Run~B ran with the fix, and the contract arm's
+total count of queries rejected by the validator (218 on run~A, the 161
+above among them) falls to 29, confirming the diagnosis. The defect's direction is known; its magnitude
+is not separable from the model change, and we do not attempt to estimate it.
+
+\paragraph{Different endpoints across runs.} The runs used different provider
+endpoints as well as different models, and run~D a different kind of route
+altogether: an enterprise gateway fronting Bedrock, on the Messages API with
+cache control. Run~D's dollar figures are that gateway's billed rates under
+Messages-API cache pricing; on the same gateway's OpenAI-compatible route the
+arms would have been billed at multiples that differ by arm
+(Section~\ref{sec:runs}), so the run~D cost ordering is a property of the
+route as well as of the arms. Each run's internal contrasts are sound;
+cross-run differences are suggestive only.
+
+\paragraph{The row limit.} Symmetric result limits are not a detail. An
+earlier iteration of this experiment used a 1{,}000-row limit, and the
+governed arm looked $11{\times}$ more expensive than the baselines; the cause
+was oversized result payloads poisoning the context window, not the contract.
+The reported runs cap every result at 50 rows, but not perfectly
+symmetrically: the cap reached the governed arms' \texttt{run\_query} but not
+their \texttt{preview\_table}, which the library clamps at 100 rows of its own
+accord. A governed arm could therefore see 100 rows from a preview where an
+ungoverned arm saw 50 from \texttt{execute\_sql}. That happened on
+\textbf{31 preview calls} across runs~A--C, against many thousands of tool
+calls: small, but in the treatment's favour. Run~D ran with the cap in place
+(484 preview calls, none over 50 rows); runs~A--C are as they ran.
+
+\paragraph{The forced-answer policy.} When an agent exhausts its output budget the harness forces a final answer
+instead of discarding the run. In run~A that produced one additional correct
+answer out of 59, nearly worthless for accuracy, but it eliminated unscoreable
+rows --- and those rows were 41 \armS{}, 18 \armM{} and \textbf{zero} in either
+governed arm. Dropping them would have inflated the two baselines by silently
+discarding their hardest runs. Run~B repeats the pattern (49, 38, 15 and zero
+on the complete-case set; 55, 42 and 15 before it), run~C forces 8 answers in
+\armH{} and none elsewhere, and run~D forces 43, 32, 27 and zero. \armC{} is
+the only arm that never exhausted its budget on any run. The policy therefore works against the treatment, and we
+report scored and strict accuracy for every arm throughout
+(Section~\ref{sec:protocol}).

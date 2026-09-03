@@ -1,0 +1,163 @@
+\section{Mechanism}
+\label{sec:mechanism}
+
+Aggregate accuracy does not explain itself. This section traces one task end to
+end, then reports where the treatment arm fails.
+
+\subsection{Possession is not delivery}
+
+Task~1278 asks for \emph{the average fee NexPay would charge for a credit
+transaction of 50 EUR}.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \tabhead{Answer} & \\
+\midrule
+Gold      & \texttt{0.352294} & \\
+\armC{}   & \texttt{0.352294} & correct \\
+\armM{}   & \texttt{0.353053} & wrong \\
+\armS{}   & \texttt{0.353053} & wrong \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both figures reproduce directly against the warehouse:
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\texttt{WHERE is\_credit IS NULL OR is\_credit = true} & \texttt{0.352294} \\
+\texttt{WHERE is\_credit = true} & \texttt{0.353053} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A \texttt{NULL} in a \texttt{fees} column means \emph{this rule applies to
+every value}, not \emph{unknown}. Both baselines dropped the \texttt{NULL} rows
+and produced the identical wrong number. The contract arm called
+\texttt{lookup\_domain("fees")}, and its recorded reasoning states the rule
+back: \emph{``rules that apply to credit transactions: is\_credit true or
+null''}.
+
+\textbf{The decisive detail is that \texttt{manual.md} documents this rule
+too.} \armM{} had it, inside a 24{,}177-character system prompt. \armC{}'s
+resident prompt is 2{,}475 characters, with the rule reachable by one targeted
+call. Two published results frame the difference: retrieval quality falls for
+material buried mid-prompt~\cite{lost-in-the-middle}, and what a tool's
+documentation says changes what an agent does with
+it~\cite{tool-documentation}. \armM{}'s copy of the rule was buried
+mid-prompt; \armC{}'s was a tool's documentation.
+
+The finding is not that the contract arm was given more information. For
+\emph{this} rule both arms had it, and only one used it. What the contract
+changes here is not what is knowable but what is \emph{reachable at the moment
+of use}: a claim about delivery, not content. That scoping matters, because it
+does not hold for every clause the contract carries
+(Section~\ref{sec:threats-interpretation}); it holds for the ones the manual
+states outright, which is the class this failure belongs to.
+
+\subsection{Where the treatment arm loses}
+
+In run~A, \armC{} loses 14 tasks to \armS{} and 29 to \armM{}, 10 to both. Two
+modes account for nearly all of them.
+
+\textbf{Set membership under \texttt{NULL} wildcards} --- the same rule as
+above, failing in the other direction. On task~1500 (\emph{fee IDs that apply
+to account\_type = O and aci = C}) \armC{} returns both false positives and
+false negatives while \armM{} matches exactly. Applying ``\texttt{NULL} means
+all'' to an enumeration is harder than applying it to an average: the model
+must decide, per column, whether a \texttt{NULL} widens the match.
+
+\textbf{Near-miss arithmetic} --- task~1274, gold \texttt{0.126459}, \armC{}
+\texttt{0.125516}: a real computation with a wrong rounding or filter.
+
+\paragraph{These are not retrieval failures.} \texttt{lookup\_domain} is called
+on 331 of 401 tasks in \armC{}; the 70 that skip it are \emph{easier for every
+arm} (\armS{} scores 41\% there against 19\% elsewhere), and 26 of the 33
+losses occur on tasks where the lookup \emph{was} performed. The agent fetches
+the rule and misapplies it. Run~D repeats the pattern: \armC{} loses 42 tasks
+(28 hard), \texttt{lookup\_domain} is called on 335 of 401, 35 of the 42
+losses are on tasks where it was called, the 66 that skip it are again easier
+for every arm (\armS{} 79\% there against 23\% elsewhere), and the 14 easy
+losses are the easy-split interaction of Section~\ref{sec:headline} rather
+than a fee-semantics failure.
+
+That diagnosis points at a specific remedy, and points away from another.
+Hoisting rule bodies into the resident prompt would not obviously help, since
+the rule was already fetched. Making the wildcard semantics \emph{executable}
+--- a tool that resolves which fee rules match a transaction, rather than prose
+the model reimplements in SQL each time --- addresses the observed failure
+directly. Section~\ref{sec:related} returns to this, because it is exactly the
+boundary between what we measured and what pre-computed semantic layers
+provide.
+
+\subsection{The contract's clauses reach the query}
+\label{sec:clauses}
+
+The claim that delivery matters as much as possession has so far been inferred
+from accuracy. It can be observed directly, by reading the SQL each agent
+submitted rather than the answer it produced.
+
+We defined one detector per load-bearing clause of the contract's fee
+semantics: the \texttt{NULL}-wildcard disjunct, the empty-list wildcard, the
+capture-delay band mapping, a per-merchant monthly aggregate, the natural-month
+reconstruction, and fraud measured on euro volume. We then restricted the
+comparison to the 97 \emph{tasks} that require all six (69 on run~B, whose
+truncation cost the rest), so every row compared carries the same
+requirement (Table~\ref{tab:clauses}). The detectors are deliberately
+permissive: the question is whether the agent expressed the idea, not whether
+it copied the contract's phrasing.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Wrote all six clauses} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} & \tabhead{Run D} \\
+\midrule
+\armS{} & 7\% & 4\% & 8\% & 3\% \\
+\armH{} & 14\% & 4\% & 8\% & 4\% \\
+\armM{} & 3\% & 9\% & 4\% & 4\% \\
+\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{98\%} & \textbf{55\%} \\
+\bottomrule
+\end{tabular}
+\caption{Share of the 97 tasks requiring all six of the contract's
+load-bearing fee clauses (69 on run~B) on which the agent's submitted SQL
+expresses all six. \armM{} holds the same knowledge as prose in its system
+prompt.}
+\label{tab:clauses}
+\end{table}
+
+\armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$,
+$2{\times}10^{-47}$ and $9{\times}10^{-16}$ (Fisher exact).
+
+\textbf{Note what does not move.} \armM{} writes no more of the contract's
+clauses on a strong model than on a weak one (3\%, 9\%, 4\%, 4\%), while
+\armC{} reaches 55\% and 98\% on the two frontier-class models --- in the
+same direction as the derivation gap, though not in the same order, since
+run~B's 65\% exceeds run~D's 55\%. Run~D is the extreme case: 4\% against
+55\% in the SQL, no better than a bare schema against 45 points above it in
+accuracy. Capability does not, on its own, make a model extract structure
+from prose; it makes a model much better at \emph{using} structure it is
+handed. That asymmetry is the same one the derivation gap shows
+(Section~\ref{sec:derivation}), measured on behaviour instead of outcomes.
+
+\textbf{What this does not measure.} Clause presence does not predict success.
+Within every arm on every model, attempts that got the task right and attempts
+that got it wrong write the same clauses (every Fisher $p{\ge}0.14$). \armH{}
+makes the point concretely: on run~A it writes more clauses than \armM{} and
+still scores at the bare-schema floor. The measure captures whether the
+contract's vocabulary reaches the query, not whether the query is any good.
+
+The uncontrolled version of this number is tempting and wrong. Pooled across
+families, \armC{} attempts that wrote the \texttt{NULL}-wildcard clause were
+correct 90\% of the time against 23\% for those that did not, a 67-point
+effect; but families differ in which clauses they need, so ``wrote the
+clause'' partly encodes ``drew an easier family'', and restricting to a single
+required-clause set, as above, removes the effect entirely.

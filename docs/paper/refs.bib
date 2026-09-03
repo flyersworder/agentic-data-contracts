@@ -1,0 +1,428 @@
+@article{dabstep,
+  title   = {{DABstep}: Data Agent Benchmark for Multi-step Reasoning},
+  author  = {Egg, Alex and Iglesias Goyanes, Martin and Kingma, Friso and
+             Mora, Andreu and von Werra, Leandro and Wolf, Thomas},
+  journal = {arXiv preprint arXiv:2506.23719},
+  year    = {2025},
+  note    = {\url{https://arxiv.org/abs/2506.23719}. Leaderboard:
+             \url{https://huggingface.co/spaces/adyen/DABstep}}
+}
+
+@misc{motherduck-guides,
+  title        = {Context Belongs in the Warehouse},
+  author       = {{MotherDuck}},
+  year         = {2026},
+  month        = jul,
+  howpublished = {MotherDuck blog},
+  note         = {\url{https://motherduck.com/blog/context-belongs-in-the-warehouse/},
+                  published 29 July 2026}
+}
+
+@misc{motherduck-semantic,
+  title        = {The Surprising Truth About {AI}-Native Semantic Layers},
+  author       = {{MotherDuck}},
+  year         = {2026},
+  month        = jun,
+  howpublished = {MotherDuck blog},
+  note         = {\url{https://motherduck.com/blog/oops-maybe-we-do-need-semantic-layers/},
+                  published 8 June 2026 (date from the page's metadata; the
+                  page shows no byline)}
+}
+
+@misc{motherduck-primer,
+  title        = {Context, Semantics, and Ontology: A Primer for the Agentic Era},
+  author       = {Sp\"ati, Simon},
+  year         = {2026},
+  month        = sep,
+  howpublished = {MotherDuck blog},
+  note         = {\url{https://motherduck.com/blog/context-layer-vs-semantic-layer-ontology/},
+                  published 2 September 2026}
+}
+
+@misc{motherduck-ai-writes,
+  title        = {{AI} Writes the Semantic Layer},
+  author       = {Matson, Jacob and Monahan, Alex},
+  year         = {2026},
+  month        = aug,
+  howpublished = {MotherDuck blog},
+  note         = {\url{https://motherduck.com/blog/AI-writes-the-semantic-layer/},
+                  published 20 August 2026}
+}
+
+@misc{motherduck-local,
+  title        = {Agentic {SQL} for Free with {Qwen3.8} {27B} and {DuckDB}},
+  author       = {{MotherDuck}},
+  year         = {2026},
+  howpublished = {MotherDuck blog},
+  note         = {\url{https://motherduck.com/blog/Agentic-SQL-for-Free-with-Qwen3.8-27B-and-DuckDB},
+                  accessed 1 September 2026}
+}
+
+@misc{corrdyn-guides,
+  title        = {{MotherDuck} Guides: What to Put in Them, and What to Push Down},
+  author       = {Katz, Ross},
+  year         = {2026},
+  month        = jul,
+  howpublished = {Corrdyn blog},
+  note         = {\url{https://www.corrdyn.com/blog/motherduck-agent-guides/},
+                  published 28 July 2026}
+}
+
+@misc{odcs,
+  title        = {Open Data Contract Standard ({ODCS})},
+  author       = {{Bitol Project, Linux Foundation AI \& Data}},
+  year         = {2025},
+  note         = {\url{https://bitol-io.github.io/open-data-contract-standard/}}
+}
+
+@misc{sqlglot,
+  title  = {{SQLGlot}: A no-dependency {SQL} parser, transpiler and optimizer},
+  author = {Mao, Toby},
+  year   = {2025},
+  note   = {\url{https://github.com/tobymao/sqlglot}}
+}
+
+% ---------------------------------------------------------------------------
+% Text-to-SQL benchmarks and the prior context/documentation ablations.
+% ---------------------------------------------------------------------------
+
+@inproceedings{bird,
+  title     = {Can {LLM} Already Serve as a Database Interface? A {BIg} Bench
+               for Large-Scale Database Grounded Text-to-{SQL}s},
+  author    = {Li, Jinyang and Hui, Binyuan and Qu, Ge and Yang, Jiaxi and
+               Li, Binhua and Li, Bowen and Wang, Bailin and Qin, Bowen and
+               Geng, Ruiying and Huo, Nan and Zhou, Xuanhe and Ma, Chenhao and
+               Li, Guoliang and Chang, Kevin C.-C. and Huang, Fei and
+               Cheng, Reynold and Li, Yongbin},
+  booktitle = {Advances in Neural Information Processing Systems 36:
+               Datasets and Benchmarks Track},
+  year      = {2023},
+  note      = {\url{https://arxiv.org/abs/2305.03111}. The external-knowledge
+               ablation is Section~6.5}
+}
+
+@inproceedings{kaggledbqa,
+  title     = {{KaggleDBQA}: Realistic Evaluation of Text-to-{SQL} Parsers},
+  author    = {Lee, Chia-Hsuan and Polozov, Oleksandr and Richardson, Matthew},
+  booktitle = {Proceedings of the 59th Annual Meeting of the Association for
+               Computational Linguistics (ACL-IJCNLP)},
+  pages     = {2261--2273},
+  year      = {2021},
+  doi       = {10.18653/v1/2021.acl-long.176}
+}
+
+@inproceedings{sequeda-kg,
+  title     = {A Benchmark to Understand the Role of Knowledge Graphs on Large
+               Language Model's Accuracy for Question Answering on Enterprise
+               {SQL} Databases},
+  author    = {Sequeda, Juan and Allemang, Dean and Jacob, Bryon},
+  booktitle = {Proceedings of the 7th Joint Workshop on Graph Data Management
+               Experiences and Systems (GRADES) and Network Data Analytics
+               (NDA)},
+  year      = {2024},
+  doi       = {10.1145/3661304.3661901}
+}
+
+@inproceedings{spider,
+  title     = {{Spider}: A Large-Scale Human-Labeled Dataset for Complex and
+               Cross-Domain Semantic Parsing and Text-to-{SQL} Task},
+  author    = {Yu, Tao and Zhang, Rui and Yang, Kai and Yasunaga, Michihiro and
+               Wang, Dongxu and Li, Zifan and Ma, James and Li, Irene and
+               Yao, Qingning and Roman, Shanelle and Zhang, Zilin and
+               Radev, Dragomir},
+  booktitle = {Proceedings of the 2018 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  pages     = {3911--3921},
+  year      = {2018},
+  doi       = {10.18653/v1/D18-1425}
+}
+
+@inproceedings{spider2,
+  title     = {{Spider} 2.0: Evaluating Language Models on Real-World
+               Enterprise Text-to-{SQL} Workflows},
+  author    = {Lei, Fangyu and Chen, Jixuan and Ye, Yuxiao and Cao, Ruisheng
+               and Shin, Dongchan and Su, Hongjin and Suo, Zhaoqing and
+               Gao, Hongcheng and Hu, Wenjing and Yin, Pengcheng and
+               Zhong, Victor and Xiong, Caiming and Sun, Ruoxi and
+               Arik, Qian Liu and Yu, Tao},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  note      = {\url{https://arxiv.org/abs/2411.07763}}
+}
+
+@inproceedings{tag,
+  title     = {Text2{SQL} is Not Enough: Unifying {AI} and Databases with
+               {TAG}},
+  author    = {Biswal, Asim and Patel, Liana and Jha, Siddarth and
+               Kamsetty, Amog and Liu, Shu and Gonzalez, Joseph E. and
+               Guestrin, Carlos and Zaharia, Matei},
+  booktitle = {Conference on Innovative Data Systems Research (CIDR)},
+  year      = {2025},
+  note      = {\url{https://arxiv.org/abs/2408.14717}}
+}
+
+% ---------------------------------------------------------------------------
+% Why delivery beats stuffing, and what an ablation of prompt content means.
+% ---------------------------------------------------------------------------
+
+@article{lost-in-the-middle,
+  title   = {Lost in the Middle: How Language Models Use Long Contexts},
+  author  = {Liu, Nelson F. and Lin, Kevin and Hewitt, John and
+             Paranjape, Ashwin and Bevilacqua, Michele and Petroni, Fabio and
+             Liang, Percy},
+  journal = {Transactions of the Association for Computational Linguistics},
+  volume  = {12},
+  pages   = {157--173},
+  year    = {2024},
+  doi     = {10.1162/tacl_a_00638}
+}
+
+@inproceedings{min-demonstrations,
+  title     = {Rethinking the Role of Demonstrations: What Makes In-Context
+               Learning Work?},
+  author    = {Min, Sewon and Lyu, Xinxi and Holtzman, Ari and
+               Artetxe, Mikel and Lewis, Mike and Hajishirzi, Hannaneh and
+               Zettlemoyer, Luke},
+  booktitle = {Proceedings of the 2022 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  pages     = {11048--11064},
+  year      = {2022},
+  doi       = {10.18653/v1/2022.emnlp-main.759}
+}
+
+@misc{tool-documentation,
+  title  = {Tool Documentation Enables Zero-Shot Tool-Usage with Large
+            Language Models},
+  author = {Hsieh, Cheng-Yu and Chen, Si-An and Li, Chun-Liang and
+            Fujii, Yasuhisa and Ratner, Alexander and Lee, Chen-Yu and
+            Krishna, Ranjay and Pfister, Tomas},
+  year   = {2023},
+  note   = {\url{https://arxiv.org/abs/2308.00675}}
+}
+
+% ---------------------------------------------------------------------------
+% Statistics. The paper ran these tests without citing any of them.
+% ---------------------------------------------------------------------------
+
+@article{mcnemar,
+  title   = {Note on the Sampling Error of the Difference Between Correlated
+             Proportions or Percentages},
+  author  = {McNemar, Quinn},
+  journal = {Psychometrika},
+  volume  = {12},
+  number  = {2},
+  pages   = {153--157},
+  year    = {1947},
+  doi     = {10.1007/BF02295996}
+}
+
+@article{dietterich,
+  title   = {Approximate Statistical Tests for Comparing Supervised
+             Classification Learning Algorithms},
+  author  = {Dietterich, Thomas G.},
+  journal = {Neural Computation},
+  volume  = {10},
+  number  = {7},
+  pages   = {1895--1923},
+  year    = {1998},
+  doi     = {10.1162/089976698300017197}
+}
+
+@article{wilson,
+  title   = {Probable Inference, the Law of Succession, and Statistical
+             Inference},
+  author  = {Wilson, Edwin B.},
+  journal = {Journal of the American Statistical Association},
+  volume  = {22},
+  number  = {158},
+  pages   = {209--212},
+  year    = {1927},
+  doi     = {10.1080/01621459.1927.10502953}
+}
+
+@article{brown-cai-dasgupta,
+  title   = {Interval Estimation for a Binomial Proportion},
+  author  = {Brown, Lawrence D. and Cai, T. Tony and DasGupta, Anirban},
+  journal = {Statistical Science},
+  volume  = {16},
+  number  = {2},
+  pages   = {101--133},
+  year    = {2001},
+  doi     = {10.1214/ss/1009213286}
+}
+
+@inproceedings{little-power,
+  title     = {With Little Power Comes Great Responsibility},
+  author    = {Card, Dallas and Henderson, Peter and Khandelwal, Urvashi and
+               Jia, Robin and Mahowald, Kyle and Jurafsky, Dan},
+  booktitle = {Proceedings of the 2020 Conference on Empirical Methods in
+               Natural Language Processing (EMNLP)},
+  pages     = {9263--9274},
+  year      = {2020},
+  doi       = {10.18653/v1/2020.emnlp-main.745}
+}
+
+% ---------------------------------------------------------------------------
+% The capability question, in both directions.
+% ---------------------------------------------------------------------------
+
+@misc{scaffold-gaia,
+  title  = {Scaffold Effects on {GAIA}: A Controlled Comparison},
+  author = {Starace, Giulio},
+  year   = {2026},
+  note   = {\url{https://arxiv.org/abs/2606.08529}. Preprint. The
+            pre-registered prediction that more capable models are less
+            scaffold-sensitive is rejected in direction}
+}
+
+@article{prompt-engineering-advanced,
+  title   = {Do Advanced Language Models Eliminate the Need for Prompt
+             Engineering in Software Engineering?},
+  author  = {Wang, Guoqing and Sun, Zeyu and Gong, Zhihao and Ye, Sixiang and
+             Chen, Yizhou and Zhao, Yifan and Liang, Qingyuan and Hao, Dan},
+  journal = {ACM Transactions on Software Engineering and Methodology},
+  volume  = {35},
+  number  = {8},
+  pages   = {1--33},
+  year    = {2026},
+  doi     = {10.1145/3771933}
+}
+
+% ---------------------------------------------------------------------------
+% Governance: agents following, and breaking, stated rules.
+% ---------------------------------------------------------------------------
+
+@misc{rules,
+  title  = {Can {LLM}s Follow Simple Rules?},
+  author = {Mu, Norman and Chen, Sarah and Wang, Zifan and Chen, Sizhe and
+            Karamardian, David and Aljeraisy, Lulwa and Alomair, Basel and
+            Hendrycks, Dan and Wagner, David},
+  year   = {2023},
+  note   = {\url{https://arxiv.org/abs/2311.04235}. Preprint}
+}
+
+@inproceedings{tau-bench,
+  title     = {$\tau$-bench: A Benchmark for Tool-Agent-User Interaction in
+               Real-World Domains},
+  author    = {Yao, Shunyu and Shinn, Noah and Razavi, Pedram and
+               Narasimhan, Karthik},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  note      = {\url{https://arxiv.org/abs/2406.12045}}
+}
+
+@inproceedings{camel,
+  title     = {Defeating Prompt Injections by Design},
+  author    = {Debenedetti, Edoardo and Shumailov, Ilia and Fan, Tianqi and
+               Hayes, Jamie and Carlini, Nicholas and Fabian, Daniel and
+               Kern, Christoph and Shi, Chongyang and Terzis, Andreas and
+               Tram{\`e}r, Florian},
+  booktitle = {IEEE Conference on Secure and Trustworthy Machine Learning
+               (SaTML)},
+  year      = {2026},
+  note      = {\url{https://arxiv.org/abs/2503.18813}}
+}
+
+% ---------------------------------------------------------------------------
+% Documentation as a machine-readable artifact.
+% ---------------------------------------------------------------------------
+
+@article{datasheets,
+  title   = {Datasheets for Datasets},
+  author  = {Gebru, Timnit and Morgenstern, Jamie and Vecchione, Briana and
+             Vaughan, Jennifer Wortman and Wallach, Hanna and
+             Daum{\'e} III, Hal and Crawford, Kate},
+  journal = {Communications of the ACM},
+  volume  = {64},
+  number  = {12},
+  pages   = {86--92},
+  year    = {2021},
+  doi     = {10.1145/3458723}
+}
+
+@inproceedings{croissant,
+  title     = {Croissant: A Metadata Format for {ML}-Ready Datasets},
+  author    = {Akhtar, Mubashara and Benjelloun, Omar and Conforti, Costanza
+               and Foschini, Luca and Giner-Miguelez, Joan and
+               Gijsbers, Pieter and Goswami, Sujata and Jain, Nitisha and
+               Karamousadakis, Michalis and Krey, Michael and
+               Kuchnik, Michael and Lhoest, Quentin and Marcenac, Pierre and
+               Maskey, Manil and Mattson, Peter and Oala, Luis and
+               Ruyssen, Pierre and Shinde, Rajat and Simperl, Elena and
+               Thomas, Goeffry and Tykhonov, Slava and Vanschoren, Joaquin and
+               Vogler, Steffen and Wu, Carole-Jean},
+  booktitle = {Advances in Neural Information Processing Systems 37:
+               Datasets and Benchmarks Track},
+  year      = {2024},
+  note      = {\url{https://arxiv.org/abs/2403.19546}}
+}
+
+% ---------------------------------------------------------------------------
+% Benchmark and leaderboard validity.
+% ---------------------------------------------------------------------------
+
+@inproceedings{gsm-symbolic,
+  title     = {{GSM}-Symbolic: Understanding the Limitations of Mathematical
+               Reasoning in Large Language Models},
+  author    = {Mirzadeh, Iman and Alizadeh, Keivan and Shahrokhi, Hooman and
+               Tuzel, Oncel and Bengio, Samy and Farajtabar, Mehrdad},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  note      = {\url{https://arxiv.org/abs/2410.05229}. DABStep's own paper
+               cites this as the model for its template parameterisation}
+}
+
+@inproceedings{ladder,
+  title     = {The Ladder: A Reliable Leaderboard for Machine Learning
+               Competitions},
+  author    = {Blum, Avrim and Hardt, Moritz},
+  booktitle = {Proceedings of the 32nd International Conference on Machine
+               Learning (ICML)},
+  series    = {PMLR},
+  volume    = {37},
+  pages     = {1006--1014},
+  year      = {2015}
+}
+
+@inproceedings{leaderboard-illusion,
+  title     = {The Leaderboard Illusion},
+  author    = {Singh, Shivalika and Nan, Yiyang and Wang, Alex and
+               D'Souza, Daniel and Kapoor, Sayash and
+               {\"U}st{\"u}n, Ahmet and Koyejo, Sanmi and Deng, Yuntian and
+               Longpre, Shayne and Smith, Noah A. and Ermis, Beyza and
+               Fadaee, Marzieh and Hooker, Sara},
+  booktitle = {Advances in Neural Information Processing Systems 38:
+               Datasets and Benchmarks Track},
+  year      = {2025},
+  note      = {\url{https://arxiv.org/abs/2504.20879}}
+}
+
+@misc{agents-that-matter,
+  title  = {{AI} Agents That Matter},
+  author = {Kapoor, Sayash and Stroebl, Benedikt and Siegel, Zachary S. and
+            Nadgir, Nitya and Narayanan, Arvind},
+  year   = {2024},
+  note   = {\url{https://arxiv.org/abs/2407.01502}. Preprint}
+}
+
+% ---------------------------------------------------------------------------
+% Comparison points for the distinctiveness table.
+% ---------------------------------------------------------------------------
+
+@misc{semantic-paired,
+  title  = {Semantic Layers for Reliable {LLM}-Powered Data Analytics: A
+            Paired Benchmark of Accuracy and Hallucination Across Three
+            Frontier Models},
+  author = {Rumiantsau, Mikhail and Fokeev, Ilya},
+  year   = {2026},
+  note   = {\url{https://arxiv.org/abs/2604.25149}. Preprint}
+}
+
+@misc{dbt-benchmark,
+  title        = {Semantic Layer vs.\ Text-to-{SQL}: 2026 Benchmark Update},
+  author       = {Ganz, Roxi and Perigaud, Gwen},
+  howpublished = {dbt Developer Blog},
+  year         = {2026},
+  note         = {\url{https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026},
+                  7 April 2026; 11 questions $\times$ 20 runs on four models}
+}

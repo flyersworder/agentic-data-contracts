@@ -1,0 +1,107 @@
+\section{Background}
+\label{sec:background}
+
+\subsection{DABStep}
+
+DABStep~\cite{dabstep} is a data-analysis benchmark built by Adyen and Hugging
+Face around a payments warehouse: 138{,}236 transactions, a fee rule table, and
+merchant and merchant-category-code (MCC) reference data, with two documents of human-written context
+--- \texttt{manual.md} (22{,}127 characters) and a dataset README.
+
+Two properties make it the right benchmark for our question; a third is a
+limitation we return to in Section~\ref{sec:threats}.
+
+\textbf{Its difficulty is semantic, not syntactic.} The hard split does not
+require exotic SQL. It requires knowing the fee-matching rule: a \texttt{NULL}
+in a \texttt{fees} column means \emph{this rule applies to every value of that
+column}, not \emph{unknown}, and matching additionally involves list membership
+over account type, authorisation characteristics indicator (ACI) and merchant
+category code. An
+agent that reads the schema and writes idiomatic SQL gets a clean, wrong
+number, the failure a context layer claims to fix.
+
+\textbf{Golds are withheld and grading is centralised}, which raises the cost
+of the overfitting that makes many text-to-SQL results hard to
+trust~\cite{ladder,leaderboard-illusion}. It does not remove it: the sources an
+agent reads are public, and Section~\ref{sec:golds} recovers 59 hard-split
+answers from them, so withholding constrains tuning against the split without
+making the answers unavailable. Among
+text-to-SQL benchmarks, DABStep sits where Spider~\cite{spider} and
+Spider~2.0~\cite{spider2} do not: its difficulty is documentation, not schema
+scale.
+
+\textbf{But its question space is small.} DABStep expands 450 test tasks from a
+smaller set of core questions by varying merchants, schemes, months and
+thresholds~\cite{dabstep}, following GSM-Symbolic's parameterisation
+approach~\cite{gsm-symbolic}. Normalising those varying entities away
+(\texttt{analysis/templates.py}) leaves \textbf{113 distinct question shapes,
+of which 12 cover half the benchmark and 27 cover three quarters}; 73 occur
+exactly once. In our task set 294 of 332 hard tasks concern fees. We treat
+this as a first-class threat rather than a footnote (Section~\ref{sec:threats}),
+and it is central to interpreting results that use pre-computed views
+(Section~\ref{sec:related}).
+
+The benchmark's own paper reports its strongest evaluated agent, o4-mini with a
+reasoning prompt, at \textbf{14.55\% on the hard split} against 76.39\% on the
+easy one~\cite{dabstep} --- the gap that motivates the benchmark. Leaderboard
+entrants have since improved on that: published hard-split accuracies from
+credible named submissions cluster around 20--26\%, with Google's
+\texttt{simple\_baseline} at 26\%, an Adyen GPT-5.4 entry at 22.2\% and a
+Hugging Face Claude~4 Sonnet entry at 19.8\%. We use that 20--26\% band as the
+validity check on our own reimplementation of the prompt-based approach
+(Section~\ref{sec:results}).
+
+\subsection{Context layers and semantic layers}
+
+Three families of approach exist and are routinely conflated.
+
+\emph{Semantic
+layers} in the classical sense --- dbt metrics, Cube, LookML --- define metrics
+as executable artifacts, so the agent calls a metric rather than deriving it and
+correctness is inherited from the definition. \emph{Context layers} store
+natural-language documentation next to the data and retrieve it at query time;
+MotherDuck Guides~\cite{motherduck-guides} is the best-documented instance. The
+agent still writes the SQL, but writes it knowing what the columns mean.
+\emph{Data contracts} originate in governance rather than assistance: a
+declarative artifact stating what a dataset contains, who owns it and what may
+be done with it, with the Open Data Contract Standard~\cite{odcs} the emerging
+specification. MotherDuck's own primer, written after Guides shipped, draws
+the first line the same way: a semantic layer holds definitions ``written as
+logic that compiles to SQL'', a context layer ``holds everything else'', and
+the two are ``not mutually exclusive''~\cite{motherduck-primer}.
+
+The third family inherits a longer line of dataset documentation ---
+datasheets~\cite{datasheets} and, closer to our use, Croissant's shift from
+prose a human reads to metadata a tool loads~\cite{croissant}. The database
+community's framing of the wider problem is TAG~\cite{tag}: natural-language
+questions over a warehouse need more than translation to SQL.
+
+The artifact under test here is of the third kind and serves both purposes at
+once --- the same YAML supplies the semantics the agent reads and the rules the
+tool layer enforces. The distinction that matters for this paper is \emph{when
+the semantics are compiled}: a macro is compiled ahead of time by a human and
+covers the metrics somebody anticipated; a contract is compiled per query by the
+model and covers whatever question arrives. Section~\ref{sec:related} returns to
+this, because a benchmark whose questions concentrate into so few shapes is
+close to the best case for the former.
+
+\subsection{The system under test}
+
+\texttt{agentic-data-contracts} is an open-source Python library that loads a
+YAML contract and exposes the warehouse to an agent through nine governed
+tools. Two properties are load-bearing here.
+
+\textbf{The contract is the single source of both semantics and rules.} The
+same file that describes what a fee is also declares which tables are
+reachable and which operations are forbidden. The agent reads the first through
+\texttt{lookup\_domain} and \texttt{lookup\_metric}; the tool layer enforces the
+second before any statement reaches the database.
+
+\textbf{Validation is two-layer.} Every query is parsed with
+sqlglot~\cite{sqlglot} and checked statically; where a database adapter is
+available, a dry run follows. A rejected query returns a reason to the model
+rather than an error to the user.
+
+The library is not the contribution. It is the instrument, and
+the experiment is designed so that its identity does not matter: \armH{} runs
+the identical library, tools and rules with the prose removed.

@@ -1,0 +1,14 @@
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Derived sidecars of a results file, not evidence. `results/` itself is
+# deliberately NOT ignored — the tamper-evidence claim depends on result rows
+# being readable in git history — but `.snapshot` is a byte copy of a file
+# already tracked and `.lock` is a PID file. Left tracked, they make the tree
+# dirty for the NEXT sweep, whose --out is a different file and which
+# therefore does not exempt them: measured, a completed run's leftover
+# snapshot blocked the next model's sweep from starting at all.
+results/*.jsonl.snapshot
+results/*.jsonl.lock

@@ -8,3 +8,15 @@ build/
 .venv/
 *.duckdb
 *.duckdb.wal
+
+# LaTeX build artifacts (docs/paper)
+*.aux
+*.bbl
+*.blg
+*.out
+*.synctex.gz
+docs/paper/main.log
+docs/paper/main.pdf
+
+# macOS Finder metadata
+.DS_Store

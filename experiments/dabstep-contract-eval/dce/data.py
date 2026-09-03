@@ -1,0 +1,99 @@
+"""Fetch DABStep context files and build the local DuckDB the agents query."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import duckdb
+
+DATASET = "adyen/DABstep"
+
+# The leaderboard is live: `data/submissions/` and `data/task_scores/` gain files
+# continuously, so an unpinned read reconstructs a different gold set on every run.
+# The corpus grew 2198 -> 2199 submissions *during* the Task 3 gate run alone. Golds
+# that drift between the smoke run and the full sweep would score different arms
+# against different ground truth, and nothing in the results file would show it.
+# Every Hub call in this experiment therefore pins this revision; none resolves to
+# `main`. Bump it deliberately, and re-run the dev gate when you do.
+DATASET_REVISION = "a1a3187c3f52e0846886a62814ed5adfcbbcc48e"
+
+# table name -> path within the HF dataset repo
+CONTEXT_FILES: dict[str, str] = {
+    "payments": "data/context/payments.csv",
+    "fees": "data/context/fees.json",
+    "merchant_data": "data/context/merchant_data.json",
+    "acquirer_countries": "data/context/acquirer_countries.csv",
+    "merchant_category_codes": "data/context/merchant_category_codes.csv",
+}
+
+# Prompt/contract source material — never loaded into the database.
+DOC_FILES: dict[str, str] = {
+    "manual": "data/context/manual.md",
+    "payments_readme": "data/context/payments-readme.md",
+}
+
+
+def download_context(dest: Path) -> dict[str, Path]:
+    """Download context files + docs. Returns {name: local path}."""
+    from huggingface_hub import hf_hub_download
+
+    dest.mkdir(parents=True, exist_ok=True)
+    out: dict[str, Path] = {}
+    for name, repo_path in {**CONTEXT_FILES, **DOC_FILES}.items():
+        out[name] = Path(
+            hf_hub_download(
+                repo_id=DATASET,
+                filename=repo_path,
+                repo_type="dataset",
+                revision=DATASET_REVISION,
+                local_dir=dest,
+            )
+        )
+    return out
+
+
+def build_duckdb(files: dict[str, Path], db_path: Path) -> None:
+    """CREATE OR REPLACE one table per file. Idempotent by construction."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(db_path))
+    try:
+        for table, path in files.items():
+            # `read_csv_auto` alone can fail header detection on a CSV whose
+            # first column is an unnamed pandas index: the header row's blank
+            # first field doesn't type-differ enough from the data ("", 'x',
+            # 'y' vs. 0, 'x', 'y') for the sniffer to be confident, so it
+            # falls back to no-header and ingests the header as a data row
+            # (acquirer_countries.csv, merchant_category_codes.csv both hit
+            # this). Forcing header=true is correct for every CSV here,
+            # including the ones that already auto-detected correctly.
+            reader = (
+                f"read_json_auto('{path}')"
+                if path.suffix == ".json"
+                else f"read_csv('{path}', header=true, auto_detect=true)"
+            )
+            con.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM {reader}")
+    finally:
+        con.close()
+
+
+# DABStep's public split names ("default"/"dev") don't match the repo's actual
+# task-file names (data/tasks/all.jsonl, data/tasks/dev.jsonl) — verified by hand
+# by listing the pinned revision's repo files.
+_TASK_FILES: dict[str, str] = {"default": "all", "dev": "dev"}
+
+
+def load_tasks(split: str) -> list[dict]:
+    """Load the DABStep task rows. split is 'default' (450) or 'dev' (10)."""
+    import json
+
+    from huggingface_hub import hf_hub_download
+
+    filename = _TASK_FILES.get(split, split)
+    path = hf_hub_download(
+        repo_id=DATASET,
+        filename=f"data/tasks/{filename}.jsonl",
+        repo_type="dataset",
+        revision=DATASET_REVISION,
+    )
+    with open(path) as fh:
+        return [json.loads(line) for line in fh if line.strip()]

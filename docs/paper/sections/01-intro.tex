@@ -1,0 +1,119 @@
+\section{Introduction}
+\label{sec:intro}
+
+An analytics agent pointed at a warehouse it does not understand fails in a
+characteristic way. It reads the schema, writes plausible SQL, and returns a
+number that is wrong for a reason no column name records: a code whose values
+mean something specific to the business, a join whose cardinality depends on a
+convention, a \texttt{NULL} that means \emph{applies to everything} rather than
+\emph{unknown}. The query runs. The answer is confidently wrong.
+
+The industry's answer is the \emph{context layer}: curated documentation stored
+alongside the data and fetched by the agent at query time. Recent reports are
+striking. MotherDuck's ``Guides'' raise DABStep accuracy by 72 percentage
+points while cutting cost by roughly 55\%~\cite{motherduck-guides}. Similar
+claims accompany every semantic-layer and context-layer product now shipping.
+
+These results share a shape: system-with-layer against system-without-layer,
+two accuracy numbers, a large difference. That design establishes \emph{that}
+context layers work. It cannot establish \emph{which part} works. And the part matters, because
+the parts have wildly different costs. A context layer as
+deployed bundles at least three things:
+
+\begin{enumerate}
+\itemsep2pt
+\item \textbf{Semantic content} --- prose describing what the columns mean,
+      how the metrics are defined, which conventions hold.
+\item \textbf{Retrieval scaffolding} --- the tools that fetch it, the
+      instruction to fetch before writing SQL, and the narrowed table
+      surface that comes with a curated catalogue.
+\item \textbf{Pre-computed artifacts} --- views and macros that encode a
+      metric once so the agent calls it instead of deriving it.
+\end{enumerate}
+
+The three have different economics. Semantic content is written once per domain
+and tends to exist already, in a vendor manual or a data dictionary.
+Scaffolding is engineering, paid once. Pre-computed macros are paid \emph{per
+metric}, forever, and only cover metrics somebody anticipated. A practitioner
+deciding where to spend needs to know which of the three bought the 72 points.
+
+Prior work has isolated the first. BIRD withholds and supplies human-written
+evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA reports that
+database documentation doubles parser accuracy~\cite{kaggledbqa}; an ontology
+layer over an enterprise SQL schema moves GPT-4 from 16\% to
+54\%~\cite{sequeda-kg}. What none of them separates is content from the
+\emph{scaffolding that delivers it}: the tools, the retrieval instruction and
+the narrowed table surface that arrive with any curated catalogue, and that a
+with/without comparison necessarily bundles together.
+
+\subsection*{Contribution}
+
+We report a controlled ablation that separates the first two, and we are
+explicit that we do not attempt the third (Section~\ref{sec:related} explains
+why, and why that makes our absolute numbers lower and our question harder).
+
+The design turns on a fourth arm, \armH{}, which takes the same frozen
+contract the treatment arm uses and empties every field of prose (domain summaries, metric
+descriptions, the SQL expression that carries the fee formula, column and
+relationship descriptions) while leaving names, types, structure, the table
+allow-list, the forbidden-operation rules and all nine governed tools
+byte-for-byte identical. The agent still receives the instruction to look things
+up, still has the tool, and still calls it. It is simply told nothing when it
+does. Everything the deflationary reading attributes the gain to is present in
+\armH{}; only the semantics are gone.
+
+Four findings follow, and one non-finding.
+
+\textbf{The content dominates, and the scaffolding is a real but secondary
+effect} (Section~\ref{sec:ablation}). \armH{} sits level with the bare-schema
+baseline on one model, $+5.4$ points above it on another, and $+14.2$ and
+$+15.1$ on the two frontier-class models. Every model puts the content step
+well above the scaffolding step, which is what the fourth arm was built to
+test. But the stronger claim, that the scaffolding contributes nothing, is
+false. Two models supported it and an earlier version of this paper made it;
+the third model overturned it at $p{=}4{\times}10^{-7}$ against a pooled null
+of $p{=}0.29$, and a fourth, from a fourth model family, replicated the
+overturning at $p{=}9{\times}10^{-9}$. That is a caution about how far two
+models generalise.
+
+\textbf{Delivery matters as much as possession}
+(Section~\ref{sec:mechanism}). Both the contract arm and the prompt arm are
+given the governing rule; only the contract arm applies it. The difference is
+where the rule sits: reachable by one targeted lookup, or buried in a wall of
+text. Reading the SQL the agents actually submitted turns this from an
+inference into an observation (Section~\ref{sec:clauses}): on tasks needing
+all six of the contract's load-bearing clauses, the contract arm writes every
+one of them 39\%, 65\%, 55\% and 98\% of the time against the prompt arm's
+3\%, 9\%, 4\% and 4\%. On one model the prompt arm is indistinguishable from
+the bare schema on hard tasks while the contract arm is 45 points above both.
+
+\textbf{The derivation gap closes with capability; the composition gap does
+not track it} (Section~\ref{sec:derivation}). The contract compiles:
+transcribing its declared SQL expressions into two views reproduces gold on
+176 of 176 covered tasks, so on those tasks the information is provably
+sufficient and any shortfall is a failure to derive. That shortfall --- the
+\emph{derivation gap} --- is 39.2, 37.3, 26.1 and \textbf{5.1} points across
+the four models in order of bare-schema capability, while on tasks that
+compose the same semantics further it moves between 54.1 and 39.9 with no
+clean ordering. Between the flash models and the strongest one the same
+capability increment closes 87\% of the first and 19\% of the second; the
+fourth model, which lands between, gains about equally on both. This is the
+finding with the most consequence for the economics above, and we recorded
+its direction as a prediction in the public artifact repository before the
+third run executed.
+
+\textbf{Governance is measurable and nearly free}
+(Section~\ref{sec:governance}), on models that need governing. Ungoverned arms
+submitted 166 mutating statements across 26 tasks; governed arms submitted
+none and never attempted one. The number measures deterrence by the declared
+rules, not blocking by the enforcement layer behind them. On one of the two
+frontier-class models no arm attempted a write at all; on the other, an
+ungoverned arm escalated to persistent tables and corrupted the warehouse, so
+the deterrence contrast now includes a strong model that did try.
+
+The non-finding: on the 38, 30, 38 and 38 hard tasks that fall outside the domain
+the contract describes, the contract holds no detectable advantage over a
+hand-written prompt, and
+on the strongest model the bare-schema baseline leads that slice outright. The
+gain is domain-specific by construction. That is what a domain contract should
+do, and also the sharpest limit on what one benchmark can show.

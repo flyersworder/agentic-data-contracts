@@ -132,6 +132,11 @@ asyncio_mode = "auto"
 [tool.ruff]
 src = ["src"]
 target-version = "py312"
+# Vendored third-party code is a VERBATIM copy at a pinned upstream revision,
+# and its sha256 is asserted by tests/test_vendored_scorer.py. Letting the
+# formatter touch it forks it from upstream and fails that test -- which is
+# the point of the test. Never reformat; re-vendor instead.
+extend-exclude = ["experiments/dabstep-contract-eval/vendor/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

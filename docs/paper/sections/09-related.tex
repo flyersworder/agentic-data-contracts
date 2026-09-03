@@ -1,0 +1,172 @@
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Context layers, and when their semantics get compiled}
+
+MotherDuck's ``Guides'', markdown context stored in the warehouse and fetched
+through an MCP server, raise DABStep accuracy by 72 percentage
+points while cutting cost per run by 55\%, with Gemini~3 Flash answering 418 of
+419 held-out questions correctly (99.8\%) at about two cents per
+question~\cite{motherduck-guides}. A companion report reaches 98.6\% with a
+locally hosted 27B model at 4-bit quantization, falling to 96.4\% at
+3-bit~\cite{motherduck-local}.
+
+Their headline claim is the same as ours and measured the same way: adding
+curated context to an agent that lacks it produces a large accuracy gain. That
+is an independent corroboration of the \emph{direction} of our finding, at a
+far higher absolute score. Because a reader will otherwise stop at the
+difference between 99.8\% and our own best hard-split figure of 77.4\%, we
+state plainly what that difference is made of.
+
+The two approaches differ in \emph{when} a metric's definition is turned into
+executable form.
+
+\begin{center}
+\small
+\begin{tabular}{@{}L{0.29\columnwidth}L{0.21\columnwidth}L{0.29\columnwidth}@{}}
+\toprule
+ & \tabhead{Views / macros} & \tabhead{Declarative contract} \\
+\midrule
+Compiled & ahead of time, by a human & per query, by the model \\
+Covers & anticipated metrics & any question in the domain \\
+Cost & one macro per metric, maintained & one description per domain \\
+Fails when & nobody anticipated the question & the model misapplies the rule \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A second MotherDuck report makes the contribution of pre-computation unusually
+legible, because it reports a progression rather than a single
+number~\cite{motherduck-semantic}. Retrieving context fragments by vector
+search ``capped out around 88\%''. Baking the knowledge into the
+warehouse instead --- schema comments, macros, derived tables --- reached 93\%,
+which the author notes would rank first on the leaderboard. A hierarchical
+semantic layer over the raw data, authored by a large model and refined
+iteratively, reached 100\%.
+
+\textbf{The 88 $\rightarrow$ 93 $\rightarrow$ 100 progression is a measurement
+of how much of this benchmark pre-computation can absorb.} Each step moves work
+out of the agent and into an artifact prepared in advance. A large share of the
+distance between our numbers and theirs is therefore work relocated, not
+reasoning improved.
+
+We verified this on our own failures rather than inferring it. Tasks~1500 and
+1502, both of which our contract arm answered incorrectly, are answered
+\emph{exactly} by a short macro encoding the wildcard rule that our
+contract states in prose:
+
+\begin{lstlisting}[language=SQL]
+CREATE MACRO wild(col, val) AS
+  (col IS NULL OR len(col) = 0
+   OR list_contains(col, val));
+SELECT string_agg(ID::VARCHAR, ', '
+                  ORDER BY ID)
+FROM fees
+WHERE wild(account_type, 'O') AND wild(aci, 'C');
+\end{lstlisting}
+
+The agent's job collapses from \emph{derive the rule} to \emph{call the macro}.
+Section~\ref{sec:derivation} generalises this from two hand-picked tasks to the
+whole fee family, by compiling the contract's declared expressions rather than
+hand-writing a macro.
+
+\subsection{Why the benchmark flatters pre-computation}
+
+DABStep's question space is concentrated and its hard split is nearly all fee
+questions (Section~\ref{sec:background}). Pre-built views are
+maximally effective when the question space is enumerable in advance, which is exactly this benchmark's construction.
+A macro contributes nothing to a question nobody wrote it for, and the
+declarative layer measured here is the layer that must cover the
+\emph{unanticipated} question. \textbf{Our hard-split figures are therefore a
+measurement of a harder task, not a worse attempt at the same one.}
+
+Section~\ref{sec:derivation} puts a number on how much harder: the compiled
+form of our own contract answers 53\% of the hard split outright and none of
+the rest, and the tasks it cannot reach are the ones that consume a macro's
+output and reason on top of it. That is a measurement of the boundary this
+subsection would otherwise argue for qualitatively.
+
+Maintaining one macro per metric per dialect is a real and growing burden, but
+we have no data on where it crosses over against the cost of authoring domain
+prose.
+\textbf{We do not claim the contract approach scales better} --- only that the
+two degrade differently: a missing macro degrades to nothing, while a contract
+degrades to a model reasoning from a description. These are complementary
+layers, not competitors: macros
+optimise the head of the question distribution, a contract covers the tail, and
+in a system with both, the contract is what tells the agent which macro exists
+and when to call it.
+
+\subsection{Coupling, and reading a leaderboard number}
+
+Two coupling costs are documented in the sources themselves. The author of the
+100\% result is explicit that the artifact does not travel: \emph{``The recipe
+is portable [\ldots] The tuned artifact is coupled. The serving model is a
+cheap, swappable commodity right up until you swap it, at which point you're not
+changing a setting, you're re-running the loop''}~\cite{motherduck-semantic}. A
+layer refined against one model is re-tuned when the model changes; our contract
+was authored once, frozen, and run unchanged against four model families.
+Independent commentary on Guides warns of the second: \emph{``Do not hardcode
+answers to questions [\ldots] will fail the ones you have not seen, including a
+held-out test set''}, urging practitioners to measure \emph{``whether the Guide
+generalizes to new questions, not whether it clears the benchmark you tuned it
+against''}~\cite{corrdyn-guides}.
+
+We make no claim that any published result is tuned in this way, and have no
+evidence that it is. The point is structural, and our gold reconstruction
+supplies one datum: across the 2{,}199 published DABStep submissions,
+organisations submitting once achieve a median hard-split accuracy of 19.6\%,
+while those submitting 21 or more times achieve 54.2\%. That gradient is equally
+consistent with genuine iterative improvement. But on a small-template benchmark
+with a public leaderboard, a single accuracy carries little information about
+generalisation unless the submission count and the artifact's provenance are
+stated alongside it. Ours are: one sweep per model, no tuning against the task
+set, and a digest-pinned artifact frozen 35 commits before the first run.
+
+\subsection{What is distinctive here, and what was deliberately left out}
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}L{0.365\columnwidth}L{0.20\columnwidth}L{0.36\columnwidth}@{}}
+\toprule
+ & \tabhead{Prior} & \tabhead{This work} \\
+\midrule
+Comparison             & with/without & four arms \\
+Content vs tooling & bundled & \textbf{separated}, \armH{} \\
+Artifact frozen first  & undisclosed  & \textbf{yes}, digest-pinned \\
+Transcripts            & a repo link  & \textbf{6{,}416} released \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two rows we would once have claimed here belong to others. Paired testing
+across several models is not distinctive: a semantic-layer benchmark reports a
+paired comparison across three frontier models~\cite{semantic-paired}, and
+dbt's replication runs 11 questions $\times$ 20 repetitions on four
+models~\cite{dbt-benchmark} --- better within-condition variance discipline
+than our $k{=}1$ (Section~\ref{sec:threats}). Paired McNemar is likewise
+standard practice for comparing learners on one run, not a
+contribution~\cite{dietterich}.
+
+The contribution is the decomposition, not the accuracy.
+
+The obvious response to Section~\ref{sec:mechanism} is to make this library's
+metric semantics executable --- a tool that runs a declared SQL expression
+rather than describing it --- and re-run. That feature is worth building and is
+on the roadmap for independent reasons. MotherDuck's later experiment is a
+caution on how much to expect from it: an autonomously generated Malloy
+semantic layer, evaluated against a manual plus question--answer pairs,
+consumed $2.5{\times}$ the tokens of Markdown plus SQL, was less accurate
+(95\% against 100\%) and slower, and the authors conclude that the
+question--answer pairs, not the layer, are the durable
+artifact~\cite{motherduck-ai-writes}. That is a with/without comparison on
+the component we left out, and it lands where our ablation does: the prose
+did the work, and the machinery around it cost more than it returned.
+
+It was deliberately \textbf{not} built before this measurement, because it
+would be designed from knowledge of which tasks the contract arm lost. That is
+fitting to the test set, and it would spend the strongest methodological asset
+here: an artifact authored from the vendor manual alone and frozen before any
+question was read. The order is measure, ship, re-measure. This paper is the
+baseline that feature will be judged against.

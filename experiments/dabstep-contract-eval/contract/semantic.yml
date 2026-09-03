@@ -1,0 +1,470 @@
+# Semantic source for the DABStep payments contract (arm C).
+#
+# Authored from `manual.md` and `payments-readme.md` only, plus the DuckDB
+# schema (column names and types). See contract.yml's header for the freeze
+# discipline this file is held to.
+#
+# SQL is written for DuckDB, the engine the experiment runs against. Aliases
+# used throughout: p = main.payments, f = main.fees, m = main.merchant_data.
+#
+# Where a metric had to make a call the manual does not make, the description
+# says so in a sentence beginning "INTERPRETATION". Those are the places where
+# arm C's encoding is an act of reading rather than transcription, and they are
+# listed in the task report.
+
+metrics:
+  # ── Fee arithmetic (manual 5) ───────────────────────────────────────────────
+  - name: transaction_fee
+    description: >
+      The fee charged for one transaction under one fee rule. The manual states
+      it exactly: "The fee then is provided by
+      fee = fixed_amount + rate * transaction_value / 10000". `fixed_amount` is
+      in euros per transaction and `rate` is a variable rate to be multiplied by
+      the transaction value and divided by 10000. Fixed amount and transaction
+      values are given in the same currency, typically euros. The transaction
+      value is `payments.eur_amount`. Which rule applies is decided by
+      `fee_rule_matches_transaction` together with
+      `fee_rule_matches_merchant_month`.
+    sql_expression: "f.fixed_amount + f.rate * p.eur_amount / 10000"
+    source_model: main.fees
+    domains: [fees]
+
+  - name: total_transaction_fees
+    description: >
+      Total fees over a set of transactions: the per-transaction fee summed
+      after each transaction has been joined to the fee rule that matches it.
+      Use the same matching predicates as `transaction_fee`; sum only over
+      matched (transaction, rule) pairs.
+    sql_expression: "SUM(f.fixed_amount + f.rate * p.eur_amount / 10000)"
+    source_model: main.fees
+    domains: [fees]
+
+  # ── Fee-rule matching (manual 5, Notes) ─────────────────────────────────────
+  - name: fee_rule_matches_transaction
+    description: >
+      True when fee rule `f` applies to transaction `p` of merchant `m`, on
+      every field that a single transaction (and its merchant's static
+      attributes) can decide. The manual's rule is that "if a field is set to
+      null it means that it applies to all possible values of that field", so
+      each clause below is satisfied either by the field being null or by the
+      field agreeing with the transaction. Pair this with
+      `fee_rule_matches_merchant_month`, which covers the two fields
+      (monthly_volume, monthly_fraud_level) that depend on the merchant's
+      natural month rather than on the single transaction. A rule applies only
+      when both predicates hold.
+      INTERPRETATION: the list-typed fields (account_type, aci,
+      merchant_category_code) are never null in the annexed `fees` data — they
+      express "applies to all values" as an empty list — so each clause accepts
+      an empty list as the wildcard the manual describes.
+    sql_expression: >
+      (f.card_scheme IS NULL OR f.card_scheme = p.card_scheme)
+      AND (f.is_credit IS NULL OR f.is_credit = p.is_credit)
+      AND (f.aci IS NULL OR len(f.aci) = 0 OR list_contains(f.aci, p.aci))
+      AND (f.intracountry IS NULL
+           OR (f.intracountry = 1) = (p.issuing_country = p.acquirer_country))
+      AND (f.account_type IS NULL OR len(f.account_type) = 0
+           OR list_contains(f.account_type, m.account_type))
+      AND (f.merchant_category_code IS NULL OR len(f.merchant_category_code) = 0
+           OR list_contains(f.merchant_category_code, m.merchant_category_code))
+      AND (f.capture_delay IS NULL
+           OR f.capture_delay = CASE
+                WHEN m.capture_delay IN ('immediate', 'manual') THEN m.capture_delay
+                WHEN TRY_CAST(m.capture_delay AS INTEGER) < 3 THEN '<3'
+                WHEN TRY_CAST(m.capture_delay AS INTEGER) BETWEEN 3 AND 5 THEN '3-5'
+                WHEN TRY_CAST(m.capture_delay AS INTEGER) > 5 THEN '>5'
+              END)
+    source_model: main.fees
+    domains: [fees]
+
+  - name: fee_rule_matches_merchant_month
+    description: >
+      NOT RUNNABLE AS WRITTEN: `:volume` and `:fraud_ratio` are placeholders you
+      must textually substitute before executing this SQL — nothing in the
+      contract or the tools binds them, so pasting the expression unchanged into
+      `run_query` raises a prepared-statement error. Substitute `:volume` with
+      the merchant's `merchant_monthly_volume` for the month in question (a
+      number of euros, or that metric's SQL) and `:fraud_ratio` with its
+      `merchant_monthly_fraud_level` (a fraction, not a percentage).
+
+      True when fee rule `f` applies to a merchant in a given natural month, on
+      the two fields that are properties of the month rather than of a single
+      transaction: `monthly_volume` and `monthly_fraud_level`. Null in either
+      field means the rule applies to all values of it.
+
+      This is the authority on band membership. It reads the manual's "between A
+      and B" as inclusive at both ends, so a value sitting exactly on a shared
+      boundary — a volume of exactly 1,000,000, a fraud ratio of exactly 7.7% —
+      satisfies both adjacent bands and both rules match. The manual does not
+      resolve that tie, and this predicate does not have to: a rule either
+      matches or it does not, independently of every other rule. The companion
+      metrics `monthly_volume_band` and `monthly_fraud_level_band` must return a
+      single band and therefore do break the tie; where the two disagree, this
+      one is correct.
+    sql_expression: >
+      (f.monthly_volume IS NULL OR CASE f.monthly_volume
+         WHEN '<100k'   THEN :volume <  100000
+         WHEN '100k-1m' THEN :volume >= 100000   AND :volume <= 1000000
+         WHEN '1m-5m'   THEN :volume >= 1000000  AND :volume <= 5000000
+         WHEN '>5m'     THEN :volume >  5000000
+       END)
+      AND (f.monthly_fraud_level IS NULL OR CASE f.monthly_fraud_level
+         WHEN '<7.2%'     THEN 100 * :fraud_ratio <  7.2
+         WHEN '7.2%-7.7%' THEN 100 * :fraud_ratio >= 7.2 AND 100 * :fraud_ratio <= 7.7
+         WHEN '7.7%-8.3%' THEN 100 * :fraud_ratio >= 7.7 AND 100 * :fraud_ratio <= 8.3
+         WHEN '>8.3%'     THEN 100 * :fraud_ratio >  8.3
+       END)
+    source_model: main.fees
+    domains: [fees]
+
+  - name: monthly_volume_band
+    description: >
+      NOT RUNNABLE AS WRITTEN: `:volume` is a placeholder you must textually
+      substitute with the merchant's monthly volume in euros before executing
+      this SQL; nothing binds it, and running it unchanged raises a
+      prepared-statement error.
+
+      The single `fees.monthly_volume` band a merchant's monthly total volume
+      falls in. The manual defines the band format: "'100k-1m' is between
+      100.000 (100k) and 1.000.000 (1m). All volumes are specified in euros.
+      Normally merchants with higher volume are able to get cheaper fees from
+      payments processors."
+      INTERPRETATION: the manual says "between A and B" without saying which
+      band owns a value sitting exactly on a shared boundary. A CASE must return
+      one value, so this expression breaks the tie downward: exactly 1,000,000
+      yields '100k-1m' and exactly 5,000,000 yields '1m-5m'. (100,000 is not a
+      shared boundary at all — '<100k' is strict, so only '100k-1m' admits it,
+      and both this metric and the match predicate agree there.) That tie-break is this metric's, not the manual's. Fee
+      *matching* does not have to choose and does not: in
+      `fee_rule_matches_merchant_month` a boundary value satisfies both adjacent
+      bands, which is what the manual's wording licenses. Use that predicate,
+      not this label, to decide whether a rule applies. The band literals below
+      are those the annexed `fees` ruleset uses.
+    sql_expression: >
+      CASE
+        WHEN :volume <  100000  THEN '<100k'
+        WHEN :volume <= 1000000 THEN '100k-1m'
+        WHEN :volume <= 5000000 THEN '1m-5m'
+        ELSE '>5m'
+      END
+    source_model: main.fees
+    domains: [fees]
+
+  - name: monthly_fraud_level_band
+    description: >
+      NOT RUNNABLE AS WRITTEN: `:fraud_ratio` is a placeholder you must
+      textually substitute with the merchant's monthly fraud ratio — a fraction,
+      not a percentage — before executing this SQL; nothing binds it, and
+      running it unchanged raises a prepared-statement error. It is scaled by
+      100 below to compare against the percentage band.
+
+      The single `fees.monthly_fraud_level` band a merchant's monthly fraud
+      ratio falls in. The manual defines the band as a "ratio between monthly
+      total volume and monthly volume notified as fraud. For example '7.7%-8.3%'
+      means that the ratio should be between 7.7 and 8.3 percent. Generally, the
+      payment processors will become more expensive as fraud rate increases."
+      INTERPRETATION: as with `monthly_volume_band`, a CASE must return one
+      value, so this expression breaks the manual's unresolved boundary tie
+      downward — exactly 7.7% yields '7.2%-7.7%', exactly 8.3% yields
+      '7.7%-8.3%'. `fee_rule_matches_merchant_month` does not break the tie and
+      matches both adjacent bands; it is the authority on whether a rule
+      applies.
+    sql_expression: >
+      CASE
+        WHEN 100 * :fraud_ratio <  7.2 THEN '<7.2%'
+        WHEN 100 * :fraud_ratio <= 7.7 THEN '7.2%-7.7%'
+        WHEN 100 * :fraud_ratio <= 8.3 THEN '7.7%-8.3%'
+        ELSE '>8.3%'
+      END
+    source_model: main.fees
+    domains: [fees]
+
+  - name: capture_delay_band
+    description: >
+      The `fees.capture_delay` band a merchant's own capture delay falls in.
+      The manual defines capture_delay as "rule that specifies the number of
+      days in which the capture from authorization to settlement needs to
+      happen. Possible values are '3-5' (between 3 and 5 days), '>5' (more than
+      5 days is possible), '<3' (before 3 days), 'immediate', or 'manual'. The
+      faster the capture to settlement happens, the more expensive it is."
+      INTERPRETATION: `merchant_data.capture_delay` carries a number of days
+      ('1', '2', '7', ...) or the literals 'immediate'/'manual', while
+      `fees.capture_delay` carries the bands above; the mapping below is the
+      manual's own band definitions applied to a day count.
+    sql_expression: >
+      CASE
+        WHEN m.capture_delay IN ('immediate', 'manual') THEN m.capture_delay
+        WHEN TRY_CAST(m.capture_delay AS INTEGER) < 3 THEN '<3'
+        WHEN TRY_CAST(m.capture_delay AS INTEGER) BETWEEN 3 AND 5 THEN '3-5'
+        WHEN TRY_CAST(m.capture_delay AS INTEGER) > 5 THEN '>5'
+      END
+    source_model: main.merchant_data
+    domains: [fees, merchants]
+
+  # ── Natural-month aggregates (manual 5, Notes) ──────────────────────────────
+  - name: transaction_natural_month
+    description: >
+      The natural month a transaction belongs to. The manual requires that
+      "monthly volumes and rates are computed always in natural months (e.g.
+      January, February), starting always in day 1 and ending in the last
+      natural day of the month (i.e. 28 for February, 30 or 31)". `payments`
+      dates a transaction by `year` and `day_of_year`, so the calendar date is
+      reconstructed before truncating to the month; the expression below yields
+      the first day of that month.
+    sql_expression: "date_trunc('month', make_date(p.year, 1, 1) + CAST(p.day_of_year - 1 AS INTEGER))"
+    source_model: main.payments
+    domains: [fees, transactions]
+
+  - name: merchant_monthly_volume
+    description: >
+      A merchant's monthly total volume in euros — the quantity the
+      `fees.monthly_volume` band is measured against. Summed over all of that
+      merchant's transactions in one natural month.
+    sql_expression: >
+      SUM(p.eur_amount)
+      GROUP BY p.merchant,
+               date_trunc('month', make_date(p.year, 1, 1) + CAST(p.day_of_year - 1 AS INTEGER))
+    source_model: main.payments
+    domains: [fees, merchants]
+
+  - name: merchant_monthly_fraud_level
+    description: >
+      A merchant's monthly fraud level — the quantity the
+      `fees.monthly_fraud_level` band is measured against — as a fraction
+      (multiply by 100 for the percentage the band uses). The manual defines it
+      as the "ratio between monthly total volume and monthly volume notified as
+      fraud", and manual 7 restates it as "the ratio of fraudulent volume over
+      total volume", both over one natural month.
+      INTERPRETATION: "volume notified as fraud" is read as the euro volume of
+      transactions flagged by `payments.has_fraudulent_dispute`, documented in
+      the payments readme as the "indicator of fraudulent dispute from issuing
+      bank" — the only fraud signal the data carries.
+    sql_expression: >
+      SUM(p.eur_amount) FILTER (WHERE p.has_fraudulent_dispute)
+      / NULLIF(SUM(p.eur_amount), 0)
+      GROUP BY p.merchant,
+               date_trunc('month', make_date(p.year, 1, 1) + CAST(p.day_of_year - 1 AS INTEGER))
+    source_model: main.payments
+    domains: [fees, fraud]
+
+  # ── Transaction characteristics (manual 5.1.1) ──────────────────────────────
+  - name: intracountry_transaction
+    description: >
+      True when a transaction is domestic — "local acquiring", in the manual's
+      words, which "occurs when a transaction is processed through an acquirer
+      that is located in the same country as the issuer of the card". This is
+      the same condition the fee rules call `intracountry`: "True if the
+      transaction is domestic, defined by the fact that the issuer country and
+      the acquiring country are the same. False are for international
+      transactions where the issuer country and acquirer country are different
+      and typically are more expensive."
+    sql_expression: "p.issuing_country = p.acquirer_country"
+    source_model: main.payments
+    domains: [transactions, cost_optimization]
+
+  # ── KPIs (manual 7, 8.2) ────────────────────────────────────────────────────
+  - name: fraud_rate
+    description: >
+      "Fraud is defined as the ratio of fraudulent volume over total volume"
+      (manual 7), over whatever population is under analysis — unlike
+      `merchant_monthly_fraud_level`, this one carries no fixed grouping. The
+      manual lists it as a KPI to "strive for the lowest possible level"
+      (manual 8.2).
+      INTERPRETATION: fraudulent volume is the euro volume of transactions
+      flagged by `has_fraudulent_dispute`, as for
+      `merchant_monthly_fraud_level`.
+    sql_expression: >
+      SUM(p.eur_amount) FILTER (WHERE p.has_fraudulent_dispute)
+      / NULLIF(SUM(p.eur_amount), 0)
+    source_model: main.payments
+    domains: [fraud, reporting]
+
+  - name: authorization_rate
+    description: >
+      The share of transactions that were not refused. The manual lists the
+      authorization rate as a KPI — "aim for the maximum possible level to
+      maximize successful transactions and minimize rejected transactions"
+      (manual 8.2) — but never gives a formula.
+      INTERPRETATION: this is the manual's gloss (successful vs rejected)
+      applied to the only refusal signal the data carries,
+      `payments.is_refused_by_adyen`, documented in the payments readme as the
+      "Adyen refusal indicator". Counted per transaction, not weighted by
+      amount, because the manual speaks of transactions here rather than of
+      volume.
+    sql_expression: >
+      COUNT(*) FILTER (WHERE NOT p.is_refused_by_adyen) / NULLIF(COUNT(*), 0)
+    source_model: main.payments
+    domains: [reporting]
+
+  # ── Fraud prevention adoption (manual 4, 5.1.5, 7.1) ────────────────────────
+  - name: three_d_secure_share
+    description: >
+      The share of card-not-present transactions that were authenticated with
+      3-D Secure. The manual asks merchants to "implement 3D Secure, a payment
+      security protocol that adds an additional layer of authentication for
+      online transactions" (manual 7.1) and warns that "failure to use AVS or 3D
+      Secure for card-not-present transactions" is a common cause of transaction
+      downgrades (manual 5.1.5). Manual 4 makes it measurable: ACI F is "Card
+      Not Present - 3-D Secure" and ACI G is "Card Not Present - Non-3-D
+      Secure", so F over (F + G) is the adoption rate among exactly the traffic
+      the two sections are about. The denominator is deliberately F + G rather
+      than all transactions: ACIs A, B and C are card-present or tokenized flows
+      where 3-D Secure does not apply, and D and E are card-not-present flows
+      the manual's own ACI table does not classify either way.
+    sql_expression: >
+      COUNT(*) FILTER (WHERE p.aci = 'F')
+      / NULLIF(COUNT(*) FILTER (WHERE p.aci IN ('F', 'G')), 0)
+    source_model: main.payments
+    domains: [fraud, transactions, cost_optimization]
+
+  # NOT ENCODED — chargeback_rate. Manual 7.2 and 8.2 ask merchants to keep the
+  # chargeback rate low and to track it, but the manual never defines it and no
+  # column of these five tables records a chargeback. `has_fraudulent_dispute`
+  # is an issuing-bank fraud dispute, which is a different event; defining a
+  # chargeback rate on it would be inventing a fact the source documents do not
+  # state. Carried as prose on the `fraud` domain instead.
+  #
+  # NOT ENCODED — the volume pricing curve (manual 5.1.3). "The cost per unit
+  # decreases ... the pricing curve is designed to flatten out at higher
+  # volumes" is qualitative; the only quantitative form volume takes in the
+  # ruleset is the `monthly_volume` band, which `monthly_volume_band` covers.
+  #
+  # NOT ENCODED — transaction downgrades (manual 5.1.5), PIN entry attempt
+  # limits (manual 6), the AVS / CVV-check / risk-engine part of the
+  # fraud-prevention tooling (manual 7.1), staff training (manual 7.3), PCI DSS
+  # compliance and its EUR 5,000-100,000 monthly penalty (manual 7.4), and the
+  # reporting-tool inventory (manual 8). None is computable over these tables:
+  # there is no settlement timestamp, retry counter, interchange tier, PIN
+  # attempt, AVS or CVV result, risk-engine verdict, training record or
+  # compliance status anywhere in the schema. Each is carried as governed prose
+  # on the domain that owns it (`cost_optimization`, `compliance`, `fraud`,
+  # `reporting`) and is reachable through `lookup_domain`.
+  #
+  # The 3-D Secure part of manual 7.1 IS encoded, as `three_d_secure_share`
+  # above: manual 4's ACI table splits card-not-present traffic into 3-D Secure
+  # (F) and non-3-D Secure (G), which makes adoption measurable from the two
+  # source documents alone. Listing it as unencodable would have understated
+  # what a contract can carry.
+
+tables:
+  # Column documentation. `describe_table` overlays these descriptions onto the
+  # live schema, so this is where the two source documents' column-level prose
+  # lands.
+  - schema: main
+    table: payments
+    # Every description below is quoted or condensed from `payments-readme.md`.
+    # Its dataset-level sentence — payments.csv is a "synthetic dataset of
+    # payment transactions processed by the Payments Processor" — cannot live
+    # here: `TableSchema` (adapters/base.py) carries only `columns`, and this
+    # file's table parser reads only `schema`, `table` and `columns`, so a
+    # `description:` key on a table entry would be dropped without a word. It is
+    # carried in the `allowed_tables` schema-group description in contract.yml
+    # instead, which is rendered to the agent and inside the digest.
+    columns:
+      - {name: psp_reference, type: BIGINT, description: "Unique payment identifier (ID)."}
+      - {name: merchant, type: VARCHAR, description: "Merchant name (categorical), e.g. Starbucks or Netflix."}
+      - {name: card_scheme, type: VARCHAR, description: "Card scheme used (categorical): MasterCard, Visa, Amex, Other."}
+      - {name: year, type: BIGINT, description: "Payment initiation year (numeric)."}
+      - {name: hour_of_day, type: BIGINT, description: "Payment initiation hour (numeric)."}
+      - {name: minute_of_hour, type: BIGINT, description: "Payment initiation minute (numeric)."}
+      - {name: day_of_year, type: BIGINT, description: "Day of the year of payment initiation (numeric). Combine with `year` to get the calendar date — see the metric `transaction_natural_month`."}
+      - {name: is_credit, type: BOOLEAN, description: "Credit or debit card indicator. Fee rules select on it via `fees.is_credit`; credit transactions are typically more expensive."}
+      - {name: eur_amount, type: DOUBLE, description: "Payment amount in euro (numeric). This is the transaction_value in fee = fixed_amount + rate * transaction_value / 10000."}
+      - {name: ip_country, type: VARCHAR, description: "The country the shopper was in at time of transaction, determined by IP address (categorical): SE, NL, LU, IT, BE, FR, GR, ES."}
+      - {name: issuing_country, type: VARCHAR, description: "Card-issuing country (categorical): SE, NL, LU, IT, BE, FR, GR, ES. Equal to `acquirer_country` means the transaction is domestic (intracountry)."}
+      - {name: device_type, type: VARCHAR, description: "Device type used (categorical): Windows, Linux, MacOS, iOS, Android, Other."}
+      - {name: ip_address, type: VARCHAR, description: "Hashed shopper's IP (ID)."}
+      - {name: email_address, type: VARCHAR, description: "Hashed shopper's email (ID)."}
+      - {name: card_number, type: VARCHAR, description: "Hashed card number (ID)."}
+      - {name: shopper_interaction, type: VARCHAR, description: "Payment method (categorical): Ecommerce, POS. POS means an in-person or in-store transaction."}
+      - {name: card_bin, type: BIGINT, description: "Bank Identification Number (ID)."}
+      - {name: has_fraudulent_dispute, type: BOOLEAN, description: "Indicator of fraudulent dispute from issuing bank (boolean). The only fraud signal in the data; used by `fraud_rate` and `merchant_monthly_fraud_level`."}
+      - {name: is_refused_by_adyen, type: BOOLEAN, description: "Adyen refusal indicator (boolean). Used by `authorization_rate`."}
+      - {name: aci, type: VARCHAR, description: "Authorization Characteristics Indicator (categorical). A = card present non-authenticated; B = card present authenticated; C = tokenized card with mobile device; D = card not present, card on file; E = card not present, recurring bill payment; F = card not present, 3-D Secure; G = card not present, non-3-D Secure."}
+      - {name: acquirer_country, type: VARCHAR, description: "The location (country) of the acquiring bank (categorical): SE, NL, LU, IT, BE, FR, GR, ES."}
+
+  - schema: main
+    table: fees
+    # Every description below is quoted or condensed from manual 5,
+    # "Understanding Payment Processing Fees". One row = one fee rule.
+    columns:
+      - {name: ID, type: BIGINT, description: "Identifier of the fee rule within the rule fee dataset."}
+      - {name: card_scheme, type: VARCHAR, description: "Name of the card scheme or network that the fee applies to."}
+      - {name: account_type, type: "VARCHAR[]", description: "List of account types the rule applies to (R Enterprise-Retail, D Enterprise-Digital, H Enterprise-Hospitality, F Platform-Franchise, S Platform-SaaS, O Other). Empty or null means all account types."}
+      - {name: capture_delay, type: VARCHAR, description: "Days allowed between authorization and settlement: '<3' (before 3 days), '3-5' (between 3 and 5 days), '>5' (more than 5 days is possible), 'immediate', 'manual'. Faster capture to settlement is more expensive. Null means all values."}
+      - {name: monthly_fraud_level, type: VARCHAR, description: "Band for the merchant's ratio of monthly volume notified as fraud over monthly total volume, e.g. '7.7%-8.3%' means the ratio should be between 7.7 and 8.3 percent. Processors generally become more expensive as the fraud rate increases. Null means all values."}
+      - {name: monthly_volume, type: VARCHAR, description: "Band for the merchant's monthly total volume in euros, e.g. '100k-1m' is between 100,000 and 1,000,000. Higher-volume merchants normally get cheaper fees. Null means all values."}
+      - {name: merchant_category_code, type: "BIGINT[]", description: "List of merchant category codes the rule covers (manual 3), e.g. [8062, 8011, 8021]. Empty or null means all MCCs."}
+      - {name: is_credit, type: BOOLEAN, description: "True if the rule applies for credit transactions; credit is typically more expensive. Null means both credit and debit."}
+      - {name: aci, type: "VARCHAR[]", description: "List of Authorization Characteristics Indicator values the rule covers (manual 4). Empty or null means all ACIs."}
+      - {name: fixed_amount, type: DOUBLE, description: "Fixed amount of the fee in euros per transaction, for the given rule."}
+      - {name: rate, type: BIGINT, description: "Variable rate, multiplied by the transaction value and divided by 10000."}
+      - {name: intracountry, type: DOUBLE, description: "True (1) if the transaction is domestic — issuer country and acquiring country are the same. False (0) marks international transactions, which are typically more expensive. Null means both."}
+
+  - schema: main
+    table: merchant_data
+    # Neither source document describes this table. The three fields that share
+    # a name with a fee-rule field carry the manual's definition of that field;
+    # the rest is schema only, and said to be so rather than guessed at.
+    columns:
+      - {name: merchant, type: VARCHAR, description: "Merchant name; joins to `payments.merchant`."}
+      - {name: capture_delay, type: VARCHAR, description: "This merchant's capture delay, as a number of days or the literals 'immediate'/'manual'. Map it to a `fees.capture_delay` band with the metric `capture_delay_band`."}
+      - {name: acquirer, type: "VARCHAR[]", description: "Not documented in manual.md or payments-readme.md — schema only."}
+      - {name: merchant_category_code, type: BIGINT, description: "This merchant's MCC (manual 3), matched against the `fees.merchant_category_code` list."}
+      - {name: account_type, type: VARCHAR, description: "This merchant's account type (manual 2): R Enterprise-Retail, D Enterprise-Digital, H Enterprise-Hospitality, F Platform-Franchise, S Platform-SaaS, O Other. Matched against the `fees.account_type` list."}
+
+  - schema: main
+    table: merchant_category_codes
+    # The manual names `merchant_category_codes.csv` as the annex holding "a
+    # complete list of MCC" (manual 3) but documents none of its columns. Names
+    # and types below are schema, which every arm reads out of `describe_table`;
+    # what the columns *mean* is an empirical read of the data rather than
+    # something either source document states, so this contract does not claim
+    # it — the agent must look.
+    #
+    # `mcc` is VARCHAR, not an integer: five of the 769 codes carry a leading
+    # zero (0742, 0743, 0744, 0763, 0780), so treating the column as a number
+    # loses them. That is a type, not an interpretation.
+    columns:
+      - {name: column0, type: BIGINT, description: "Unnamed leading column of the annexed MCC list; not documented in manual.md or payments-readme.md."}
+      - {name: mcc, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md. Text, not an integer — some values carry a leading zero."}
+      - {name: description, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md."}
+
+  - schema: main
+    table: acquirer_countries
+    # Not mentioned anywhere in manual.md or payments-readme.md. Listed as an
+    # allowed table because it ships with the DABStep context, but the contract
+    # has nothing documented to say about it. Names and types are schema; no
+    # meaning is asserted for any of the three.
+    columns:
+      - {name: column0, type: BIGINT, description: "Unnamed leading column; not documented in manual.md or payments-readme.md."}
+      - {name: acquirer, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — schema only."}
+      - {name: country_code, type: VARCHAR, description: "Not documented in manual.md or payments-readme.md — schema only."}
+
+relationships:
+  - from: main.payments.merchant
+    to: main.merchant_data.merchant
+    type: many_to_one
+    description: >
+      A transaction's merchant characteristics — account type, merchant category
+      code and capture delay — live on `merchant_data`. Fee rules select on all
+      three (manual 5), so matching a transaction to a fee rule needs this join.
+
+  # No edge is declared from `merchant_data.merchant_category_code` into
+  # `merchant_category_codes`. The reason is simply that neither source document
+  # names a join column: the manual says only that the annex holds "a complete
+  # list of MCC" (manual 3). Declaring the edge would assert a correspondence
+  # between two columns that only reading the data establishes, and the
+  # `merchants` domain already says where the list lives. Finding the column is
+  # left to the agent, the same way arms A and B must find it.
+  #
+  # (An earlier version of this comment also leaned on the annex loading with
+  # positional column names. It no longer does — the loader was fixed and the
+  # columns are named — and the reason above is the one that always did the
+  # work.)
+  #
+  # No relationship is declared between `payments` and `fees`: a transaction is
+  # matched to a fee rule by a multi-field predicate with null-means-any
+  # semantics, not by an equality edge. See `fee_rule_matches_transaction`.
+  #
+  # None is declared for `acquirer_countries` either: neither source document
+  # mentions the table, so there is no documented basis for an edge.

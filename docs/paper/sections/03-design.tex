@@ -1,0 +1,129 @@
+\section{Experimental Design}
+\label{sec:design}
+
+\subsection{Four arms}
+
+Every arm sees the same tasks, the same warehouse, the same model, the same
+answer-format instruction and the same scorer. They differ in two dimensions:
+what tools the agent has, and what it knows (Table~\ref{tab:arms}).
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\tabhead{Arm} & \tabhead{Tools} & \tabhead{Knowledge} & \tabhead{Role} \\
+\midrule
+\armS{} & raw SQL  & none             & floor \\
+\armM{} & raw SQL  & manual in prompt & baseline \\
+\armH{} & governed & \emph{none}      & control \\
+\armC{} & governed & contract         & treatment \\
+\bottomrule
+\end{tabular}
+\caption{The four arms. \armH{} differs from \armC{} only in that its prose
+fields are empty.}
+\label{tab:arms}
+\end{table}
+
+\armS{} is the floor: three ungoverned tools (\texttt{list\_tables},
+\texttt{describe\_table}, \texttt{execute\_sql}), a 281-character system prompt,
+no documentation. It measures what the model can do from the schema alone, and
+it doubles as our operational definition of model capability.
+Section~\ref{sec:threats} records what that definition misses.
+
+\armM{} is the published approach reimplemented. DABStep's own
+\texttt{manual.md} is pasted verbatim into the system prompt, which brings it
+to 24{,}177 characters. Tools are identical to \armS{}. This arm exists to
+validate the harness against the leaderboard band, and it is the comparison a
+practitioner actually faces: the alternative to a contract is not ignorance but
+a long prompt.
+
+\armC{} is the treatment: nine governed tools, and a 2{,}475-character system
+prompt that names the domains and metrics available and instructs the agent to
+look them up before writing SQL.
+
+\armH{} is the control that makes the ablation an ablation.
+
+\subsection{The hollow control}
+\label{sec:hollow}
+
+\armC{} differs from the baselines along three dimensions at once:
+different tools, a procedural instruction, and semantic content. The first
+objection any reader raises is that the tools or the instruction might be doing
+the work. \armH{} holds both fixed and removes only the third.
+
+The move is a familiar one: strip the semantic content of a prompt component
+while holding its form fixed, and see what the form alone was
+worth~\cite{min-demonstrations}. Here the component is a whole retrieval layer.
+\armH{} is \emph{generated} from the frozen contract rather than hand-authored,
+so the only difference between the two artifacts is the one the generator
+makes, and it is auditable as a diff.
+Emptied: domain summaries and descriptions, metric descriptions, the
+\texttt{sql\_expression} field that carries the fee formula, and all column and
+relationship descriptions. Retained byte-for-byte: every name, every type, the
+structure, the table allow-list, the forbidden-operation rules, and the
+identical nine-tool surface.
+
+The agent in \armH{} therefore receives the same instruction to look things up,
+has the same tool to do it with, and calls that tool --- and is told
+\emph{``No documentation is available for this domain''}.
+
+\paragraph{The control is verified, not assumed.} A control that silently
+leaked its content would invalidate the experiment, so we test both directions.
+The test suite asserts that \textbf{no 6-gram of \texttt{manual.md} survives
+into the hollow contract, and that the real contract does share 6-grams with
+it}. The second half is what makes the first meaningful: it establishes that
+the check can fail, rather than passing vacuously.
+
+The transcripts confirm it: in run~A, \armH{} called \texttt{lookup\_domain}
+on 272 of 401 tasks and received the empty placeholder 282 times. The loop
+ran; there was nothing behind it.
+
+\paragraph{Prompt length is deliberately not held constant.} \armH{}'s prompt
+is 1{,}984 characters against \armC{}'s 2{,}475. Padding the hollow arm to
+match would
+substitute one confound for another --- text that reads as content but carries
+none, which is a different treatment, not a cleaner control. The variable under
+test is knowledge, not tokens.
+
+\subsection{Four runs, and what is held fixed within each}
+\label{sec:runs}
+
+We ran the full design four times: on \texttt{glm-5.3-flash} (run~A),
+\texttt{deepseek-v4-flash} (run~B), \texttt{gpt-5.6-sol} (run~C) and Claude
+Sonnet~5 (run~D), each pinned to a single provider endpoint with fallbacks
+disabled --- the first two at fp8 quantization --- so that quantization, price
+and throughput are fixed within a run. We call runs~A and~B the
+\emph{flash-tier} runs and runs~C and~D the \emph{frontier-class} runs; that
+is the vendors' tiering rather than a measured quantity, and
+Section~\ref{sec:threats} records where the measured axis disagrees with it.
+Runs~A--C reach their model through OpenRouter. Run~D reaches Bedrock through
+an enterprise LiteLLM gateway on Anthropic's Messages API. The gateway's
+OpenAI-compatible route was rejected because it injects no cache control and
+bills every input token fresh, at a multiple that differs by arm
+($1.86{\times}$ on \armS{} against $3.40{\times}$ on \armM{}, replaying
+run~C's rows at the same rates); that would have written a caching confound
+into the data. Run~D was executed after the three-model draft of this paper
+was written; its rows carry commit \texttt{b55c932}, the contract digest and
+the hollow digest, which is the evidence that it ran the frozen harness.
+
+The four runs are separate experiments rather than replicates: they differ in
+model, provider, and one library fix (Section~\ref{sec:harness-asym}).
+Reasoning effort is set to \texttt{medium} throughout --- on run~D as
+\texttt{anthropic\_effort=medium} with adaptive thinking, a translation of the
+same scale --- though that is a nominal setting rather than an equated one:
+under it the contract arm reasons for about 350 tokens per task on run~C and
+about 2{,}050 on run~D. Temperature is held at 0 on runs~A and~B and on
+neither of the others: run~C's model does not accept the parameter, and
+run~D's gateway rejects both \texttt{temperature} and \texttt{seed} outright,
+so run~D has neither determinism control.
+
+Everything else is fixed across all four arms \emph{within} a run: row limit
+(50 rows per result, with one small exception recorded in
+Section~\ref{sec:harness-asym}), tool-call cap (40), token budget, sampling
+temperature, reasoning effort, model, provider endpoint and quantization, task
+set, gold set, scorer, and the verbatim answer-format instruction. Identical
+temperature within a run is what the paired comparisons require; its value
+differing between runs is not. Cost, token counts, turn counts, tool calls and
+per-row database integrity are recorded for every run.

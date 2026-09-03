@@ -677,3 +677,65 @@ def test_report_says_nothing_about_ungraded_rows_when_there_are_none(tmp_path):
     _write(path, rows)
 
     assert "ungraded" not in report(path)
+
+
+def test_ungraded_rows_keep_their_cost_and_corruption(tmp_path):
+    """`_summarize` drops ungraded rows from the ACCURACY arithmetic only.
+    They are real runs: they were billed, and their working copy really was
+    checked. Dropping them from `usd_final` makes the cost line disagree with
+    `billed` for a reason the module docstring assigns to superseded
+    duplicates, and dropping them from `db_corrupted` silently deletes the
+    experiment's headline governance finding on 49 of 450 tasks.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct", usd=0.01), "db_corrupted": False},
+        {**_row("t2", PRIMARY_RIGHT_ARM, "ungraded", usd=0.05), "db_corrupted": True},
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    block = _arm_block(report(path), PRIMARY_RIGHT_ARM)
+
+    assert "db_corrupted: true=1" in block
+    assert "final=$0.06" in block
+
+
+def test_per_level_strict_accuracy_excludes_ungraded_rows(tmp_path):
+    """The level breakdown reads `arm_rows` directly rather than going
+    through `_summarize`, so it is a second denominator that has to exclude
+    them — otherwise the header prints `strict 1/1` and the level line
+    beneath it prints `strict 1/3` off the same rows.
+    """
+    rows = [
+        _row("t1", PRIMARY_RIGHT_ARM, "correct", level="easy"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded", level="easy"),
+        _row("t3", PRIMARY_RIGHT_ARM, "ungraded", level="easy"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "strict   1/1" in text
+    assert "strict   1/3" not in text
+
+
+def test_strict_mcnemar_does_not_pair_ungraded_tasks(tmp_path):
+    """STRICT pairing counts a harness failure as wrong — a real attempt that
+    produced no right answer. An ungraded task is not that: neither arm could
+    be graded on it, so pairing them inflates `n_paired` with tasks the test
+    says nothing about.
+    """
+    rows = [
+        _row("t1", PRIMARY_LEFT_ARM, "correct"),
+        _row("t1", PRIMARY_RIGHT_ARM, "correct"),
+        _row("t2", PRIMARY_LEFT_ARM, "ungraded"),
+        _row("t2", PRIMARY_RIGHT_ARM, "ungraded"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "n_paired=2" not in text
+    assert "n_paired=1" in text

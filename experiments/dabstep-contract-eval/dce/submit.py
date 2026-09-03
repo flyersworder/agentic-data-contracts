@@ -28,12 +28,28 @@ from pathlib import Path
 from dce.runner import latest_rows
 from dce.stats import ANSWER_VERDICTS, UNGRADED_VERDICTS
 
-#: Verdicts carrying an answer the model actually produced. `ungraded` is
-#: included deliberately: it means no gold existed LOCALLY to score against,
-#: which is precisely the case the leaderboard's withheld golds resolve.
-#: Everything else in `dce.stats.HARNESS_VERDICTS` is the harness failing,
-#: and its `answer` is an empty string or an exception message.
-SUBMITTABLE_VERDICTS: frozenset[str] = ANSWER_VERDICTS | UNGRADED_VERDICTS
+#: Verdicts carrying an answer the model actually produced.
+#:
+#: `ungraded` is included deliberately: it means no gold existed LOCALLY to
+#: score against, which is precisely the case the leaderboard's withheld
+#: golds resolve.
+#:
+#: `scoring_error` too, for a sharper reason. `dce.agent` sets it only when a
+#: real answer came back and OUR scorer raised comparing it to the gold --
+#: the answer is intact (a test asserts the scorer failure never overwrites
+#: it), and whether it is right is the leaderboard's call, not ours.
+#: Excluding it would also be a dead end: `--retry` accepts only `error` and
+#: `post_run_error`, and `completed_keys` treats `scoring_error` as done, so
+#: no resumed sweep would re-run the task and the file could not be built
+#: without hand-editing results JSONL.
+#:
+#: The rest of `dce.stats.HARNESS_VERDICTS` stays out: `hit_limit`, `error`,
+#: `post_run_error` and `construction_error` carry an empty answer or an
+#: exception message, never a reply. The `answer.strip()` gate below is the
+#: backstop if that ever stops being true.
+SUBMITTABLE_VERDICTS: frozenset[str] = (
+    ANSWER_VERDICTS | UNGRADED_VERDICTS | {"scoring_error"}
+)
 
 
 class SubmissionError(Exception):
@@ -92,9 +108,11 @@ def build_submission(
             f"{len(missing) + len(unusable) + len(blank)} of {len(tasks)} tasks "
             f"cannot be submitted -- "
             + "; ".join(problems)
-            + ". Re-run them (`--retry`) rather than submitting a short file: "
-            "the leaderboard scores a missing task as wrong and a submission "
-            "cannot be withdrawn."
+            + ". Fix them rather than submitting a short file -- the "
+            "leaderboard scores a missing task as wrong and a submission "
+            "cannot be withdrawn. `error`/`post_run_error` rows re-run under "
+            "`dce.runner --retry`; the rest need the task re-run into a fresh "
+            "results file, which `--results` will then merge."
         )
     return out
 

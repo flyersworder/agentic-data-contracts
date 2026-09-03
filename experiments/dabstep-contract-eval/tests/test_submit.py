@@ -193,3 +193,28 @@ def test_write_submission_leaves_no_file_behind_when_it_refuses(tmp_path):
         write_submission(out, [results], arm="contract", model=MODEL, tasks=TASKS)
 
     assert not out.exists()
+
+
+def test_build_submission_accepts_a_scoring_error_answer(tmp_path):
+    """`scoring_error` is set only when a real, non-empty answer existed and
+    OUR scorer raised on it (see `dce.agent`). The answer is intact, and
+    whether it is right is exactly what the leaderboard's withheld golds
+    decide — so it is submittable.
+
+    Excluding it would also be a dead end: `--retry` accepts only `error`
+    and `post_run_error`, and `completed_keys` treats `scoring_error` as
+    done, so no resumed sweep would ever re-run the task. The submission
+    would be unbuildable without hand-editing the results file.
+    """
+    results = _write(
+        tmp_path / "r.jsonl",
+        [
+            _row("1", "138236"),
+            _row("2", "A"),
+            _row("3", "yes", verdict="scoring_error"),
+        ],
+    )
+
+    out = build_submission([results], arm="contract", model=MODEL, tasks=TASKS)
+
+    assert out[2] == {"task_id": "3", "agent_answer": "yes"}

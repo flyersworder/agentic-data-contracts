@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 369 tests, deterministic and offline
+uv run pytest -q                     # 373 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -332,8 +332,11 @@ claim that they did not exist.
 `dce.submit` emits `{"task_id", "agent_answer"}` per line, reading through
 `latest_rows` so a retried unit contributes its final answer rather than a
 stale `error` row's empty string. It **refuses to write at all** — leaving no
-partial file behind — if any task has no row, has a harness-failure verdict,
-or has a blank answer, and names them. A submission is effectively one-shot
+partial file behind — if any task has no row, has a verdict carrying no reply
+(`hit_limit`, `error`, `post_run_error`, `construction_error`), or has a blank
+answer, and names them. `scoring_error` *is* submittable: it means a real
+answer came back and our local scorer raised on it, which is the leaderboard's
+call to make. A submission is effectively one-shot
 per agent name and the Space scores a missing task as wrong, so a short file
 is worse than no file. `--results` takes several files, so a fresh all-450
 sweep and a spliced 401 + 49 both work.

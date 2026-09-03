@@ -375,6 +375,24 @@ def _scored(rows: list[dict]) -> list[dict]:
     return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
 
 
+def _graded(rows: list[dict]) -> list[dict]:
+    """Rows that ACCURACY arithmetic may see: everything except the tasks
+    with no gold to score against.
+
+    Deliberately not the same cut as `_scored`. A harness failure stays in
+    (STRICT accuracy counts it against the arm, which is the point of the
+    STRICT view); an `ungraded` row comes out, because there is no right
+    answer it could have missed.
+
+    Every accuracy or failure-rate denominator must go through this. Cost,
+    `db_corrupted` and the instrumentation means must NOT: those rows were
+    really billed and their working copies really were checked, and
+    dropping them there would understate spend and silently delete
+    governance evidence on the 49 tasks a submission sweep adds.
+    """
+    return [row for row in rows if row.get("verdict") not in UNGRADED_VERDICTS]
+
+
 def _failure_counts(rows: list[dict]) -> dict[str, int]:
     """Count of rows by verdict, restricted to harness-outcome verdicts."""
     counts: dict[str, int] = defaultdict(int)
@@ -418,19 +436,22 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     that is not entirely arm C, so a mixed or ungoverned slice reports
     nothing rather than a structural zero.
     """
-    # BEFORE any arithmetic. `strict_n` is `len(rows)`, so an ungraded row
-    # left in `rows` counts against STRICT accuracy exactly as a wrong
-    # answer would, and dilutes `failure_rate` -- which is the denominator
-    # HARNESS_FAILURE_RATE_THRESHOLD is compared against. Both would read as
-    # a quieter, better-behaved run than the file actually describes.
-    ungraded_n = sum(row.get("verdict") in UNGRADED_VERDICTS for row in rows)
-    rows = [row for row in rows if row.get("verdict") not in UNGRADED_VERDICTS]
-    scored_rows = _scored(rows)
+    # `graded_rows` for the accuracy block, the FULL slice for everything
+    # else. `strict_n` was `len(rows)`, so an ungraded row counted against
+    # STRICT accuracy exactly as a wrong answer would, and diluted
+    # `failure_rate` -- the denominator HARNESS_FAILURE_RATE_THRESHOLD is
+    # compared against -- so both read as a quieter run than the file
+    # describes. Filtering `rows` outright instead was its own bug: it also
+    # took those rows out of `usd_final`, `_corruption_counts` and
+    # `_instrumentation`, where they belong (see `_graded`).
+    graded_rows = _graded(rows)
+    ungraded_n = len(rows) - len(graded_rows)
+    scored_rows = _scored(graded_rows)
     scored_ok = sum(row.get("verdict") == "correct" for row in scored_rows)
     scored_n = len(scored_rows)
-    strict_ok = sum(row.get("verdict") == "correct" for row in rows)
-    strict_n = len(rows)
-    failures = _failure_counts(rows)
+    strict_ok = sum(row.get("verdict") == "correct" for row in graded_rows)
+    strict_n = len(graded_rows)
+    failures = _failure_counts(graded_rows)
     failure_rate = sum(failures.values()) / strict_n if strict_n else 0.0
     return {
         "scored_ok": scored_ok,
@@ -571,11 +592,18 @@ def _scored_bools(rows: list[dict], arm: str) -> dict[str, bool]:
 def _strict_bools(rows: list[dict], arm: str) -> dict[str, bool]:
     """task_id -> correct, for the STRICT McNemar view: every task this arm
     attempted is present, with a harness failure counted as wrong.
+
+    `ungraded` is the one verdict excluded. A harness failure is a real
+    attempt that produced no right answer, which is what STRICT is for; a
+    task with no gold is not an attempt that failed. Pairing them would add
+    concordant false/false pairs — harmless to `p_value`, which uses only
+    discordant pairs, but `n_paired` would claim a comparison over tasks
+    neither arm could be graded on.
     """
     return {
         row.get("task_id", "unknown"): row.get("verdict") == "correct"
         for row in rows
-        if row.get("arm") == arm
+        if row.get("arm") == arm and row.get("verdict") not in UNGRADED_VERDICTS
     }
 
 
@@ -748,8 +776,13 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
             ]
             lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
 
-            scored_by_level = accuracy_by(_scored(arm_rows), "level")
-            strict_by_level = accuracy_by(arm_rows, "level")
+            # `_graded` here too: this breakdown does not go through
+            # `_summarize`, so it is a second STRICT denominator. Without it
+            # the header line prints `strict 1/1` and the level line right
+            # beneath prints `strict 1/3` off the same rows.
+            graded_arm_rows = _graded(arm_rows)
+            scored_by_level = accuracy_by(_scored(graded_arm_rows), "level")
+            strict_by_level = accuracy_by(graded_arm_rows, "level")
             for level in sorted(set(scored_by_level) | set(strict_by_level)):
                 s_ok, s_n = scored_by_level.get(level, (0, 0))
                 t_ok, t_n = strict_by_level.get(level, (0, 0))

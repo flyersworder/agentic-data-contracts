@@ -17,3 +17,6 @@ build/
 *.synctex.gz
 docs/paper/main.log
 docs/paper/main.pdf
+
+# macOS Finder metadata
+.DS_Store

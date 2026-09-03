@@ -41,6 +41,8 @@ RESULTS = HERE.parents[2] / "experiments" / "dabstep-contract-eval" / "results"
 RUNS = {
     "glm-5.3-flash": RESULTS / "glm-full.jsonl",
     "deepseek-v4-flash": RESULTS / "dsflash-full.jsonl",
+    # Order is bare-schema capability, which fig_interaction plots along x.
+    "claude-sonnet-5": RESULTS / "sonnet5-full.jsonl",
     "gpt-5.6-sol": RESULTS / "sol-full.jsonl",
 }
 ARMS = ("schema_only", "manual_prompt", "contract_hollow", "contract")
@@ -59,8 +61,18 @@ LABEL = {
     "contract_hollow": "contract_hollow",
     "schema_only": "schema_only",
 }
-MARKER = {"glm-5.3-flash": "o", "deepseek-v4-flash": "s", "gpt-5.6-sol": "^"}
-LINESTYLE = {"glm-5.3-flash": "-", "deepseek-v4-flash": "--", "gpt-5.6-sol": ":"}
+MARKER = {
+    "glm-5.3-flash": "o",
+    "deepseek-v4-flash": "s",
+    "claude-sonnet-5": "D",
+    "gpt-5.6-sol": "^",
+}
+LINESTYLE = {
+    "glm-5.3-flash": "-",
+    "deepseek-v4-flash": "--",
+    "claude-sonnet-5": "-.",
+    "gpt-5.6-sol": ":",
+}
 
 INK = "#0b0b0b"
 INK_MUTED = "#52514e"
@@ -81,6 +93,10 @@ EXPECTED = {
     ("gpt-5.6-sol", "manual_prompt"): (167, 332),
     ("gpt-5.6-sol", "contract_hollow"): (170, 332),
     ("gpt-5.6-sol", "contract"): (257, 332),
+    ("claude-sonnet-5", "schema_only"): (76, 332),
+    ("claude-sonnet-5", "manual_prompt"): (79, 332),
+    ("claude-sonnet-5", "contract_hollow"): (126, 332),
+    ("claude-sonnet-5", "contract"): (227, 332),
 }
 
 
@@ -179,7 +195,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
     ax.set_yticks(list(ys))
     ax.set_yticklabels(order, fontsize=7.5)
     ax.set_ylim(-0.55, len(order) - 0.35)
-    ax.set_xlim(0, 78)
+    ax.set_xlim(0, 84)
     ax.set_xlabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
     ax.grid(axis="x", color=GRID, lw=0.5)
     style_axes(ax)
@@ -191,9 +207,12 @@ def fig_ladder(acc: dict, out: Path) -> None:
         k, n = acc[model][arm]
         return k / n * 100
 
+    # y positions chosen so the text sits right of every connecting line at
+    # that height: at y=1.35 the rightmost line (sol's) is at x=60, and at
+    # y=0.5 it is at x=44; the text spans roughly x=62 to 83.
     steps = [
         (0.5, "schema_only", "contract_hollow", "+ tools, procedure", INK_MUTED),
-        (1.5, "contract_hollow", "contract", "+ contract prose", INK),
+        (1.35, "contract_hollow", "contract", "+ contract prose", INK),
     ]
     for y, lo_arm, hi_arm, what, ink in steps:
         # min and max of ALL runs, not deltas[0]/deltas[1]. With two runs
@@ -205,7 +224,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
         span = f"{lo:+.1f} pp" if abs(hi - lo) < 0.6 else f"{lo:+.1f} to {hi:+.1f} pp"
         ax.annotate(
             f"{what}\n{span}",
-            xy=(62, y),
+            xy=(83.5, y),
             ha="right",
             va="center",
             fontsize=6.3,
@@ -227,11 +246,11 @@ def fig_ladder(acc: dict, out: Path) -> None:
             )
             for m in RUNS
         ],
-        loc="lower right",
+        loc="upper left",
         fontsize=6.3,
         frameon=False,
         handlelength=2.2,
-        bbox_to_anchor=(1.0, -0.04),
+        bbox_to_anchor=(-0.01, 1.02),
     )
     fig.tight_layout(pad=0.3)
     fig.savefig(out, format="pdf", bbox_inches="tight")
@@ -256,15 +275,15 @@ def fig_cost(acc: dict, cost: dict, out: Path) -> None:
             )
     ax.set_xlabel("cost of the run (USD)", fontsize=7.5, color=INK_MUTED)
     ax.set_ylabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
-    # Log scale, and wide enough for run C. The three runs' costs span
-    # $0.67 to $22.09 -- a 33x range that a linear axis cannot show without
+    # Log scale, and wide enough for runs C and D. The four runs' costs span
+    # $0.67 to $46.08 -- a 69x range that a linear axis cannot show without
     # collapsing runs A and B onto the origin. The previous limits (0.4, 2.05)
     # silently placed all four run-C points off-canvas while the legend went
-    # on advertising the model.
+    # on advertising the model; (0.55, 30) would have done the same to run D.
     ax.set_xscale("log")
-    ax.set_xlim(0.55, 30)
+    ax.set_xlim(0.55, 60)
     ax.set_ylim(5, 85)
-    ax.set_xticks([0.6, 1, 2, 5, 10, 20])
+    ax.set_xticks([0.6, 1, 2, 5, 10, 20, 50])
     ax.get_xaxis().set_major_formatter(
         matplotlib.ticker.FuncFormatter(lambda v, _: f"${v:g}")
     )
@@ -282,29 +301,30 @@ def fig_cost(acc: dict, cost: dict, out: Path) -> None:
     # good; with two encodings on the plot that is a real ask.
     ax.annotate(
         "cheaper and more accurate",
-        xy=(0.52, 62),
+        xy=(0.58, 65),
         fontsize=6,
         color=INK_MUTED,
         style="italic",
     )
     ax.annotate(
         "",
-        xy=(0.50, 58.5),
+        xy=(0.58, 61.5),
         xytext=(0.95, 47),
         arrowprops=dict(arrowstyle="->", color=GRID, lw=0.9),
     )
-    # Upper-right is the only region with no marks in it; lower-left put the
-    # legend text underneath the glm manual_prompt point.
+    # The band between $2 and $10 is the only region with no marks in it:
+    # runs A and B sit left of it and runs C and D right of it. Upper-right
+    # would now cover sol's and sonnet 5's contract points.
     ax.legend(
         handles=handles,
-        loc="upper right",
+        loc="upper left",
         fontsize=5.8,
         frameon=False,
         ncol=2,
         columnspacing=0.9,
         handletextpad=0.35,
         labelspacing=0.35,
-        bbox_to_anchor=(1.02, 1.03),
+        bbox_to_anchor=(0.17, 1.03),
     )
     fig.tight_layout(pad=0.3)
     fig.savefig(out, format="pdf", bbox_inches="tight")
@@ -315,8 +335,9 @@ def fig_interaction(acc: dict, out: Path) -> None:
     """Accuracy against base-model capability, one line per arm.
 
     The x axis is the bare-schema arm's own accuracy: our operational
-    definition of what the model can do unaided. Three points per line, and
-    the third is what breaks the apparent convergence of the first two.
+    definition of what the model can do unaided. Four points per line: the
+    third breaks the apparent convergence of the first two, and the fourth
+    (claude-sonnet-5, x=22.9, beside deepseek's 22.6) reverses it.
     """
     fig, ax = plt.subplots(figsize=(3.3, 2.3))
     xs = [acc[m]["schema_only"][0] / acc[m]["schema_only"][1] * 100 for m in RUNS]
@@ -348,12 +369,12 @@ def fig_interaction(acc: dict, out: Path) -> None:
     ax.plot(lim, lim, ":", color=GRID, lw=0.9, zorder=1)
     ax.annotate(
         "y = x: no gain over a bare schema",
-        xy=(29.6, 29.4),
+        xy=(40.5, 36.8),
         fontsize=5.8,
         color=INK_MUTED,
         rotation=27,
         ha="right",
-        va="bottom",
+        va="top",
     )
 
     # Wide enough for run C: its schema_only x is 37.0 and its contract y is
@@ -370,9 +391,23 @@ def fig_interaction(acc: dict, out: Path) -> None:
     ax.set_ylabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
     ax.grid(color=GRID, lw=0.5)
     style_axes(ax)
+    # deepseek (22.6) and sonnet 5 (22.9) share an x to within 0.3 points, so
+    # their labels are pushed apart and placed at different heights.
+    label_pos = {
+        "deepseek-v4-flash": (-3, 60.0, "right"),
+        "claude-sonnet-5": (3, 79.5, "left"),
+    }
     for x, m in zip(xs, RUNS):
+        dx, y, ha = label_pos.get(m, (0, 63.4, "center"))
         ax.annotate(
-            m, xy=(x, 63.4), fontsize=5.8, color=INK_MUTED, ha="center", va="bottom"
+            m,
+            xy=(x, y),
+            xytext=(dx, 0),
+            textcoords="offset points",
+            fontsize=5.8,
+            color=INK_MUTED,
+            ha=ha,
+            va="bottom",
         )
         ax.axvline(x, color=GRID, lw=0.5, ls=":", zorder=0)
     fig.tight_layout(pad=0.3)

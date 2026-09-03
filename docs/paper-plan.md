@@ -420,6 +420,9 @@ like it was patching.
 
 ## Run D: Claude Sonnet 5, and how it enters the paper (2026-09-03)
 
+**Status: folded into the paper on 2026-09-03** — every section, all three
+figures, `make check` clean at 20 pages. The list below is what was done.
+
 A fourth full sweep landed via PR #92: `claudesonnet5`, 401 tasks x 4 arms,
 over an enterprise LiteLLM gateway fronting Bedrock EU, $164.75, zero harness
 failures. `FINDINGS.md` carries it in full as run D. This section records the

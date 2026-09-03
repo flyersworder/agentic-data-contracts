@@ -66,14 +66,14 @@ Four findings follow, and one non-finding.
 
 \textbf{The content dominates, and the scaffolding is a real but secondary
 effect} (Section~\ref{sec:ablation}). \armH{} sits level with the bare-schema
-baseline on one model, $+5.4$ points above it on another and $+14.2$ on the
-third. Every model puts the
-content step well above the scaffolding step, which is what the fourth arm was
-built to test. But the stronger claim, that the scaffolding contributes
-nothing, is false: two models supported it, an earlier version of this paper
-made it, and the third model overturns it at $p{=}4{\times}10^{-7}$ against a
-pooled null of $p{=}0.29$. That is a caution about how far two models
-generalise.
+baseline on one model, $+5.4$ points above it on another, and $+14.2$ and
+$+15.1$ on the two strongest. Every model puts the content step well above the
+scaffolding step, which is what the fourth arm was built to test. But the
+stronger claim, that the scaffolding contributes nothing, is false: two models
+supported it, an earlier version of this paper made it, the third model
+overturned it at $p{=}4{\times}10^{-7}$ against a pooled null of $p{=}0.29$,
+and a fourth, from a third model family, replicated the overturning at
+$p{=}9{\times}10^{-9}$. That is a caution about how far two models generalise.
 
 \textbf{Delivery matters as much as possession}
 (Section~\ref{sec:mechanism}). Both the contract arm and the prompt arm are
@@ -82,30 +82,35 @@ where the rule sits: reachable by one targeted lookup, or buried in a wall of
 text. Reading the SQL the agents actually submitted turns this from an
 inference into an observation (Section~\ref{sec:clauses}): on tasks needing
 all six of the contract's load-bearing clauses, the contract arm writes every
-one of them 39\%, 65\% and 98\% of the time against the prompt arm's 3\%, 9\%
-and 4\%.
+one of them 39\%, 65\%, 55\% and 98\% of the time against the prompt arm's
+3\%, 9\%, 4\% and 4\%. On one model the prompt arm is indistinguishable from
+the bare schema on hard tasks while the contract arm is 45 points above both.
 
-\textbf{Capability arrives unevenly across the two kinds of task}
-(Section~\ref{sec:derivation}). The contract compiles: transcribing its
-declared SQL expressions into two views reproduces gold on 176 of 176 covered
-tasks, so on those tasks the information is provably sufficient and any
-shortfall is a failure to derive. That shortfall --- the \emph{derivation gap}
---- is 39.2, 37.3 and \textbf{5.1} points across the three models, while on
-tasks that compose the same semantics further it moves only from 54.1 to 43.9.
-The same capability increment closes 87\% of the first and 19\% of the second.
-This is the finding with the most consequence for the economics above, and we
-recorded it as a prediction in the public artifact repository before the third
-run executed.
+\textbf{The derivation gap closes with capability; the composition gap does
+not track it} (Section~\ref{sec:derivation}). The contract compiles:
+transcribing its declared SQL expressions into two views reproduces gold on
+176 of 176 covered tasks, so on those tasks the information is provably
+sufficient and any shortfall is a failure to derive. That shortfall --- the
+\emph{derivation gap} --- is 39.2, 37.3, 26.1 and \textbf{5.1} points across
+the four models in order of bare-schema capability, while on tasks that
+compose the same semantics further it moves between 54.1 and 39.9 with no
+clean ordering. Between the flash models and the strongest one the same
+capability increment closes 87\% of the first and 19\% of the second; the
+fourth model, which lands between, gains about equally on both. This is the
+finding with the most consequence for the economics above, and we recorded
+its direction as a prediction in the public artifact repository before the
+third run executed.
 
 \textbf{Governance is measurable and nearly free}
 (Section~\ref{sec:governance}), on models that need governing. Ungoverned arms
-submitted 144 mutating statements across 24 tasks; governed arms submitted
+submitted 166 mutating statements across 26 tasks; governed arms submitted
 none, and never attempted; the number measures deterrence by the declared
-rules, not blocking by the enforcement layer behind them. On the strongest model no arm attempted a write at
-all, governed or not: the hazard disappeared before the mechanism could be
-tested on it.
+rules, not blocking by the enforcement layer behind them. On one of the two
+strongest models no arm attempted a write at all; on the other, an ungoverned
+arm escalated to persistent tables and corrupted the warehouse, so the
+contrast now has a frontier-class model on both sides of it.
 
-The non-finding: on the 38, 30 and 38 hard tasks that fall outside the domain
+The non-finding: on the 38, 30, 38 and 38 hard tasks that fall outside the domain
 the contract describes, the contract holds no advantage over a hand-written
 prompt, and
 on the strongest model the bare-schema baseline leads that slice outright. The

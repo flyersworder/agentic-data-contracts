@@ -80,7 +80,10 @@ must decide, per column, whether a \texttt{NULL} widens the match.
 on 331 of 401 tasks in \armC{}; the 70 that skip it are \emph{easier for every
 arm} (\armS{} scores 41\% there against 19\% elsewhere), and 26 of the 33
 losses occur on tasks where the lookup \emph{was} performed. The agent fetches
-the rule and misapplies it.
+the rule and misapplies it. Run~D repeats the pattern: \armC{} loses 42 tasks
+(28 hard), \texttt{lookup\_domain} is called on 335 of 401, and the 14 easy
+losses are the easy-split interaction of Section~\ref{sec:results} rather
+than a fee-semantics failure.
 
 That diagnosis points at a specific remedy, and points away from another.
 Hoisting rule bodies into the resident prompt would not obviously help, since
@@ -112,14 +115,14 @@ it copied the contract's phrasing.
 \centering
 \footnotesize
 \setlength{\tabcolsep}{5pt}
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-\tabhead{Wrote all six clauses} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} \\
+\tabhead{Wrote all six clauses} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} & \tabhead{Run D} \\
 \midrule
-\armS{} & 7\% & 4\% & 8\% \\
-\armH{} & 14\% & 4\% & 8\% \\
-\armM{} & 3\% & 9\% & 4\% \\
-\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{98\%} \\
+\armS{} & 7\% & 4\% & 8\% & 3\% \\
+\armH{} & 14\% & 4\% & 8\% & 4\% \\
+\armM{} & 3\% & 9\% & 4\% & 4\% \\
+\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{98\%} & \textbf{55\%} \\
 \bottomrule
 \end{tabular}
 \caption{Share of the 97 tasks requiring all six of the contract's
@@ -129,13 +132,16 @@ prompt.}
 \label{tab:clauses}
 \end{table}
 
-\armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$ and
-$2{\times}10^{-47}$ (Fisher exact). \armM{} holds the same knowledge, as prose,
+\armC{} against \armM{} is $p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$,
+$2{\times}10^{-47}$ and $9{\times}10^{-16}$ (Fisher exact). \armM{} holds the same knowledge, as prose,
 in its system prompt.
 
 \textbf{Note what does not move.} \armM{} writes no more of the contract's
-clauses on a frontier model than on a weak one (3\% to 4\%), while \armC{} goes
-to near-total. Capability does not, on its own, make a model extract structure
+clauses on a frontier model than on a weak one (3\%, 9\%, 4\%, 4\%), while
+\armC{} reaches 55\% and 98\% on the two strongest models. Run~D is the
+extreme case: its \armM{} writes all six clauses on 4\% of the tasks that need
+them and scores no better than a bare schema on the hard split; its \armC{}
+writes them on 55\% and scores 45 points higher. Capability does not, on its own, make a model extract structure
 from prose; it makes a model much better at \emph{using} structure it is
 handed. That asymmetry is the same one the derivation gap shows
 (Section~\ref{sec:derivation}), measured on behaviour instead of outcomes.

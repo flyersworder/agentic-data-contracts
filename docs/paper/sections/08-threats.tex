@@ -23,6 +23,8 @@ B & fee (196)     & 23.0\% & 22.4\% & 44.9\% & \textbf{61.2\%} \\
 B & non-fee (30)  & 6 & 7 & 9 & 8 \\
 C & fee (294)     & 37.1\% & 53.4\% & 53.4\% & \textbf{83.7\%} \\
 C & non-fee (38)  & \textbf{14} & 13 & 10 & 11 \\
+D & fee (294)     & 22.4\% & 40.1\% & 24.1\% & \textbf{73.5\%} \\
+D & non-fee (38)  & 10 & 8 & 8 & \textbf{11} \\
 \bottomrule
 \end{tabular}
 \caption{Hard-task accuracy split by whether the question concerns the domain
@@ -35,12 +37,12 @@ the result states as: \textbf{a contract carrying a domain's semantics produces
 a large gain on questions in that domain.}
 
 \textbf{On the non-fee bucket there is no contract advantage on any model} ---
-against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C. At 38, 30
-and 38 tasks these are far too small to be a negative result, and equally
-unable to support a general claim. On run~C the ordering inverts outright:
+against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C, 11 to 8
+in run~D. At 38, 30, 38 and 38 tasks these are far too small to be a negative
+result, and equally unable to support a general claim. On run~C the ordering inverts outright:
 \armS{} leads that slice at 14 of 38 while \armC{} takes 11 --- the only slice
-anywhere in the three runs where the bare baseline beats the contract. All
-three are consistent with the effect being domain-specific by construction:
+anywhere in the four runs where the bare baseline beats the contract. All
+four are consistent with the effect being domain-specific by construction:
 outside the domain the contract describes it is inert, and a frontier model
 does not rescue it. That is the expected behaviour of a domain contract, and it
 is why this benchmark cannot answer the general question.
@@ -85,19 +87,19 @@ resolution of what it leaves open. Separating them needs a fifth arm carrying
 the contract with its \texttt{INTERPRETATION} clauses stripped, which we did
 not run.
 
-\subsection{\texorpdfstring{Statistical power: $k{=}1$, and eighteen
-uncorrected tests}{Statistical power: k=1, and eighteen uncorrected tests}}
+\subsection{\texorpdfstring{Statistical power: $k{=}1$, and twenty-four
+uncorrected tests}{Statistical power: k=1, and twenty-four uncorrected tests}}
 
 No run repeats. One task was observed flipping verdict between two identical
-runs during development, so per-task verdicts are not stable. With 86--172
+runs during development, so per-task verdicts are not stable. With 86--182
 discordant pairs the headline comparisons are not at risk, but \textbf{nothing
-in this paper estimates within-condition variance}: our three runs are
-different models, not replicates. This is the largest remaining gap, and run~C
-needs it most, because \texttt{gpt-5.6-sol} does not accept a temperature
-parameter and therefore ran at the provider's default rather than at 0 like the
-other two.
+in this paper estimates within-condition variance}: our four runs are
+different models, not replicates. This is the largest remaining gap, and
+runs~C and~D need it most: \texttt{gpt-5.6-sol} does not accept a temperature
+parameter, and run~D's gateway rejects both \texttt{temperature} and
+\texttt{seed}, so neither ran at 0 like the first two.
 
-Table~\ref{tab:mcnemar} reports 18 pairwise comparisons and we correct none of
+Table~\ref{tab:mcnemar} reports 24 pairwise comparisons and we correct none of
 them. The three vs-\armC{} contrasts survive any correction at these
 $p$-values; the \armS{}-vs-\armH{} row, which carries the ablation, does not
 have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
@@ -115,8 +117,9 @@ training data, and we ran no contamination probe --- no canary strings, no
 perturbed restatements of the questions, no comparison against a
 post-cutoff-held-out set.
 
-This bears asymmetrically on the capability claims. Our three models are
-ordered by capability, but they are also ordered by release date, so
+This bears asymmetrically on the capability claims. Our four models are
+ordered by capability, and the two strongest are also the two most recently
+released, so
 ``stronger model'' and ``more recent training data'' are collinear across
 every comparison in Section~\ref{sec:derivation}. A memorising model would
 show exactly what we report: high accuracy on the \emph{macro} bucket, whose
@@ -128,20 +131,30 @@ should not care which context the agent was handed. But that argument is an
 inference, not a measurement, and a contamination probe would settle what it
 only makes plausible.
 
-\subsection{One frontier point, and a trend that already broke once}
+\subsection{Two frontier-class points that disagree on size, and a trend that
+already broke once}
 
-Every capability claim in this paper rests on a single strong model. We have
-direct evidence for how little that supports: two claims written against
-runs~A and~B did not survive run~C (Section~\ref{sec:reversals}).
-\textbf{Readers should apply the same
-discount to the derivation-gap result} (Section~\ref{sec:derivation}), which is
-a three-point curve with one frontier point, however sharp the collapse from
-39.2 to 5.1 looks. The literature does not settle the direction either. Some
+The capability claims in this paper rest on two strong models, and we have
+direct evidence for how little one supported: two claims written against
+runs~A and~B did not survive run~C (Section~\ref{sec:reversals}), and a third,
+written against runs~A--C, did not survive run~D. \textbf{Readers should apply
+the same discount to the derivation-gap result} (Section~\ref{sec:derivation}):
+the second strong model confirms the direction of the collapse (26.1 points,
+between the flash models' ${\approx}38$ and run~C's 5.1) and not its size, and
+the two strong models disagree by 21 points on the \emph{macro} bucket and by
+4 in the other direction on \emph{derived}. Capability is also not one number
+here. Sonnet~5 ties \texttt{deepseek-v4-flash} on the bare-schema arm we use
+as the capability axis and sits 12 points above it with the contract; the two
+orderings agree on every model's rank but not on the spacing, and every
+``ordered by capability'' statement in this paper depends on which arm is
+doing the ordering. The literature does not settle the direction either. Some
 prompt scaffolding does lose value as models
 improve~\cite{prompt-engineering-advanced}; but a pre-registered study across
 five frontier models found the opposite on GAIA, with the most capable model
-gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Run~C also differs from the others in provider and model
-family, so any run-C contrast confounds capability with both.
+gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Runs~C
+and~D also differ from the others in provider and model family, so any
+contrast between the two strong runs and the two weak ones confounds
+capability with both.
 
 \subsection{Harness asymmetries}
 \label{sec:harness-asym}
@@ -178,9 +191,9 @@ symmetrically: the cap reached the governed arms' \texttt{run\_query} but not
 their \texttt{preview\_table}, which the library clamps at 100 rows of its own
 accord. A governed arm could therefore see 100 rows from a preview where an
 ungoverned arm saw 50 from \texttt{execute\_sql}. That happened on
-\textbf{31 preview calls} across all three runs, against many thousands of
-tool calls: small, but in the treatment's favour. The harness is fixed for
-future runs; the reported runs are as they ran.
+\textbf{31 preview calls} across runs~A--C, against many thousands of tool
+calls: small, but in the treatment's favour. Run~D ran with the cap in place
+(484 preview calls, none over 50 rows); runs~A--C are as they ran.
 
 \paragraph{The forced-answer policy.} When an agent exhausts its output budget the harness forces a final answer
 instead of discarding the run. In run~A that produced one additional correct
@@ -188,8 +201,8 @@ answer out of 59, nearly worthless for accuracy, but it eliminated unscoreable
 rows --- and those rows were 41 \armS{}, 18 \armM{} and \textbf{zero} in either
 governed arm. Dropping them would have inflated the two baselines by silently
 discarding their hardest runs. Run~B repeats the pattern (49, 38, 15 and zero
-on the complete-case set; 55, 42 and 15 before it), and run~C forces 8 answers
-in \armH{} and none elsewhere. \armC{} is the only arm that never exhausted its
-budget on any run. The policy therefore works against the treatment, and we
+on the complete-case set; 55, 42 and 15 before it), run~C forces 8 answers in
+\armH{} and none elsewhere, and run~D forces 43, 32, 27 and zero. \armC{} is
+the only arm that never exhausted its budget on any run. The policy therefore works against the treatment, and we
 report scored and strict accuracy for every arm throughout
 (Section~\ref{sec:protocol}).

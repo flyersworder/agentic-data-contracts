@@ -10,7 +10,7 @@ make figures  # figures only
 make check    # fail on overfull boxes or unresolved refs
 ```
 
-19 pages with `article`, references included. Requires only a basic TeX Live
+20 pages with `article`, references included. Requires only a basic TeX Live
 install; `multirow` and `balance` were dropped rather than added as
 dependencies.
 

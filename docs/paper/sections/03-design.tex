@@ -30,6 +30,7 @@ fields are empty.}
 \texttt{describe\_table}, \texttt{execute\_sql}), a 281-character system prompt,
 no documentation. It measures what the model can do from the schema alone, and
 it doubles as our operational definition of model capability.
+Section~\ref{sec:threats} records what that definition misses.
 
 \armM{} is the published approach reimplemented. DABStep's own
 \texttt{manual.md} is pasted verbatim into the system prompt, which brings it
@@ -85,19 +86,28 @@ substitute one confound for another --- text that reads as content but carries
 none, which is a different treatment, not a cleaner control. The variable under
 test is knowledge, not tokens.
 
-\subsection{Three runs, and what is held fixed within each}
+\subsection{Four runs, and what is held fixed within each}
 \label{sec:runs}
 
-We ran the full design three times: on \texttt{glm-5.3-flash} (run~A),
-\texttt{deepseek-v4-flash} (run~B) and \texttt{gpt-5.6-sol} (run~C), each
-pinned to a single provider endpoint with fallbacks disabled --- the first two
-at fp8 quantization --- so that quantization, price and throughput are fixed
-within a run. The three runs are separate experiments rather than replicates:
-they differ in model, provider, and one library fix
-(Section~\ref{sec:harness-asym}). Reasoning effort is set to \texttt{medium}
-throughout, though that is a nominal setting rather than an equated one, and
-temperature is held at 0 on runs~A and~B but not on run~C, whose model does not
-accept the parameter.
+We ran the full design four times: on \texttt{glm-5.3-flash} (run~A),
+\texttt{deepseek-v4-flash} (run~B), \texttt{gpt-5.6-sol} (run~C) and Claude
+Sonnet~5 (run~D), each pinned to a single provider endpoint with fallbacks
+disabled --- the first two at fp8 quantization --- so that quantization, price
+and throughput are fixed within a run. Runs~A--C reach their model through
+OpenRouter. Run~D reaches Bedrock through an enterprise LiteLLM gateway on
+Anthropic's Messages API, a route chosen because the gateway's
+OpenAI-compatible route injects no cache control and bills every input token
+fresh at a multiple that differs by arm ($1.86{\times}$ on \armS{} against
+$3.40{\times}$ on \armM{}, replaying run~C's rows at the same rates), which
+would have written a caching confound into the data. The four runs are
+separate experiments rather than replicates: they differ in model, provider,
+and one library fix (Section~\ref{sec:harness-asym}). Reasoning effort is set
+to \texttt{medium} throughout --- on run~D as \texttt{anthropic\_effort=medium}
+with adaptive thinking, a translation of the same scale --- though that is a
+nominal setting rather than an equated one. Temperature is held at 0 on
+runs~A and~B and on neither of the others: run~C's model does not accept the
+parameter, and run~D's gateway rejects both \texttt{temperature} and
+\texttt{seed} outright, so run~D has neither determinism control.
 
 Everything else is fixed across all four arms \emph{within} a run: row limit
 (50 rows per result, with one small exception recorded in

@@ -20,6 +20,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 - **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
 - **Framework-agnostic** — plain-function tools for the Claude Agent SDK, LangChain/deepagents, Pydantic AI, or no framework at all.
 - **Bring your own semantics** — read metrics from dbt, Cube, Apache Ossie, or inline YAML.
+- **Measured, not asserted** — a four-arm ablation on [DABStep](https://huggingface.co/datasets/adyen/DABstep) separates what the contract *knows* from how it is *delivered*, across four model families. [Results below.](#measured-not-asserted)
 
 ### Without a contract vs. with one
 

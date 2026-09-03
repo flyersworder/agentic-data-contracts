@@ -32,9 +32,9 @@ to promote one or two more; `make check` will say which.
 
 ## What is not finished
 
-- **`motherduck-semantic` has no publication date.** The post carries no
-  byline or date on the page; it is cited with an access date. Worth one more
-  attempt before submission.
+- **`motherduck-semantic` is dated from page metadata.** The page shows no
+  byline or date, but its `datePublished` metadata says 8 June 2026, and the
+  bib entry says so.
 - **arXiv abstract field.** `abstract.txt` is the plain-text abstract for
   the submission form (about 1,750 characters, under arXiv's 1,920 cap);
   regenerate it if `sections/00-abstract.tex` changes.

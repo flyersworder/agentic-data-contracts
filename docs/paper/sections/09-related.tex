@@ -154,7 +154,15 @@ The contribution is the decomposition, not the accuracy.
 The obvious response to Section~\ref{sec:mechanism} is to make this library's
 metric semantics executable --- a tool that runs a declared SQL expression
 rather than describing it --- and re-run. That feature is worth building and is
-on the roadmap for independent reasons.
+on the roadmap for independent reasons. MotherDuck's later experiment is a
+caution on how much to expect from it: an autonomously generated Malloy
+semantic layer, evaluated against a manual plus question--answer pairs,
+consumed $2.5{\times}$ the tokens of Markdown plus SQL, was less accurate
+(95\% against 100\%) and slower, and the authors conclude that the
+question--answer pairs, not the layer, are the durable
+artifact~\cite{motherduck-ai-writes}. That is a with/without comparison on
+the component we left out, and it lands where our ablation does: the prose
+did the work, and the machinery around it cost more than it returned.
 
 It was deliberately \textbf{not} built before this measurement, because it
 would be designed from knowledge of which tasks the contract arm lost. That is

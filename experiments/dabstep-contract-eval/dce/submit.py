@@ -56,6 +56,68 @@ class SubmissionError(Exception):
     """The rows cannot produce a complete, submittable file."""
 
 
+#: Provenance fields stamped on every result row. A splice that disagrees on
+#: `contract_digest` is two different agents and is refused outright: the
+#: contract IS the treatment, so a mid-splice edit means the per-task verdicts
+#: the submission buys no longer describe the arm the paper reports.
+#:
+#: `commit_sha` and `scorer` are reported, not refused. A splice spans two
+#: commits BY CONSTRUCTION -- the 49 ungolded tasks can only run once the code
+#: admitting them is committed -- so refusing on it would ban the documented
+#: flow.
+FATAL_PROVENANCE: tuple[str, ...] = ("contract_digest",)
+REPORTED_PROVENANCE: tuple[str, ...] = ("commit_sha", "scorer", "golds_hash")
+
+
+def _select(results: list[Path], *, arm: str, model: str) -> dict[str, dict]:
+    """task_id -> the row to submit, across every results file.
+
+    Later files win on a shared key, matching `latest_rows`' within-file
+    rule. One function so `provenance` and `build_submission` can never
+    disagree about which rows are in play.
+    """
+    by_task: dict[str, dict] = {}
+    for path in results:
+        for row in latest_rows(path):
+            if row.get("arm") == arm and row.get("model") == model:
+                by_task[row["task_id"]] = row
+    return by_task
+
+
+def _distinct(rows, field: str) -> list[str]:
+    return sorted({str(row[field]) for row in rows if row.get(field) is not None})
+
+
+def _assert_one_agent(rows) -> None:
+    """Refuse a submission assembled from two different contracts."""
+    rows = list(rows)
+    for field in FATAL_PROVENANCE:
+        values = _distinct(rows, field)
+        if len(values) > 1:
+            raise SubmissionError(
+                f"the selected rows disagree on {field}: {', '.join(values)}. "
+                "That is two different agents in one submission -- the "
+                "per-task verdicts it buys would not describe either arm. "
+                "Re-run the whole task set against one contract."
+            )
+
+
+def provenance(results: list[Path], *, arm: str, model: str) -> dict[str, list[str]]:
+    """Provenance fields the selected rows DISAGREE on, field -> values.
+
+    Empty when the rows are homogeneous. A divergence here is allowed but
+    must be visible: the operator is about to spend a one-shot, unwithdrawable
+    submission on it.
+    """
+    rows = list(_select(results, arm=arm, model=model).values())
+    diverged: dict[str, list[str]] = {}
+    for field in REPORTED_PROVENANCE:
+        values = _distinct(rows, field)
+        if len(values) > 1:
+            diverged[field] = values
+    return diverged
+
+
 def build_submission(
     results: list[Path], *, arm: str, model: str, tasks: list[dict]
 ) -> list[dict]:
@@ -70,11 +132,8 @@ def build_submission(
     no row, a row that is a harness failure rather than an answer, or a row
     whose answer is blank.
     """
-    by_task: dict[str, dict] = {}
-    for path in results:
-        for row in latest_rows(path):
-            if row.get("arm") == arm and row.get("model") == model:
-                by_task[row["task_id"]] = row
+    by_task = _select(results, arm=arm, model=model)
+    _assert_one_agent(by_task.values())
 
     out: list[dict] = []
     missing: list[str] = []
@@ -174,6 +233,10 @@ def main() -> None:
         )
     except SubmissionError as exc:
         raise SystemExit(str(exc)) from exc
+    for field, values in provenance(
+        args.results, arm=args.arm, model=args.model
+    ).items():
+        print(f"note: spliced rows disagree on {field}: {', '.join(values)}")
     print(f"wrote {n} answers to {args.out} ({args.arm} on {args.model})")
 
 

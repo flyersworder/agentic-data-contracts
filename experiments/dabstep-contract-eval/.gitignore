@@ -12,3 +12,11 @@ __pycache__/
 # snapshot blocked the next model's sweep from starting at all.
 results/*.jsonl.snapshot
 results/*.jsonl.lock
+
+# A built submission file. Not ignored, it makes the tree dirty for the NEXT
+# runner invocation -- `assert_clean_tree` exempts only that sweep's own
+# `--out` and its sidecars -- which blocks a truncation resume
+# (`deploy/supervise.sh` retries automatically on exit 2), a `--retry` pass,
+# or another model's sweep. The same failure `.snapshot` above records.
+# Nothing is lost: a submission is derived from tracked results rows.
+submission*.jsonl

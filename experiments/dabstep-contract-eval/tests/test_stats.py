@@ -827,3 +827,24 @@ def test_stale_scorer_warning_ignores_rows_that_were_never_graded(tmp_path):
 
     assert "1 row(s)" in text
     assert "2 row(s)" not in text
+
+
+def test_strict_mcnemar_drops_an_ungolded_task_that_failed_the_harness(tmp_path):
+    """`_strict_bools` made the verdict-keyed cut `_is_ungolded` exists to
+    replace. An ungolded task that trips a cap on one arm and errors on the
+    other keeps its harness verdicts, so a verdict cut pairs it — and the
+    report then prints `strict 1/1` per arm above an `n_paired=2` line.
+    """
+    rows = [
+        {**_row("t1", PRIMARY_LEFT_ARM, "correct"), "gold": "a"},
+        {**_row("t1", PRIMARY_RIGHT_ARM, "correct"), "gold": "a"},
+        _ungolded("u1", PRIMARY_LEFT_ARM, "hit_limit"),
+        _ungolded("u1", PRIMARY_RIGHT_ARM, "error"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    assert "n_paired=2" not in text
+    assert "n_paired=1" in text

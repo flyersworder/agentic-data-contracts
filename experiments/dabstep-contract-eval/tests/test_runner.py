@@ -2681,3 +2681,31 @@ def test_sweep_hands_run_task_none_not_empty_string_for_an_ungolded_task(
     )
 
     assert seen == {"1": "a", "2": None}
+
+
+def test_the_default_submission_file_does_not_dirty_the_tree(tmp_path: Path):
+    """`assert_clean_tree` refuses to start a scored sweep on any dirty line
+    from `git status --porcelain`, exempting only the sweep's own `--out` and
+    its two sidecars. `dce.submit`'s default `--out submission.jsonl` is
+    neither, so an un-ignored submission file blocks the NEXT runner
+    invocation entirely — a `--max-spend` truncation resume (which
+    `deploy/supervise.sh` does automatically on exit 2), a `--retry` pass, or
+    another model's sweep.
+
+    This is the same failure `.gitignore` already records having measured for
+    leftover `.snapshot` files.
+    """
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[3]
+    target = "experiments/dabstep-contract-eval/submission.jsonl"
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", target],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, (
+        f"{target} is not gitignored, so building a submission leaves the "
+        "tree dirty and assert_clean_tree blocks the next sweep"
+    )

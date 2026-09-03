@@ -250,3 +250,64 @@ def test_write_submission_refuses_to_write_an_empty_submission(tmp_path):
         write_submission(out, [results], arm="contract", model=MODEL, tasks=[])
 
     assert not out.exists()
+
+
+def test_build_submission_refuses_rows_from_two_different_contracts(tmp_path):
+    """The splice runs the 401 and the 49 at different times. If the contract
+    was edited in between, the submission is a mixture of two agents and the
+    per-task verdicts it buys no longer describe the paper's arm. The digest
+    is on every row; nothing was checking it.
+    """
+    a = _write(
+        tmp_path / "a.jsonl",
+        [
+            {**_row("1", "138236"), "contract_digest": "sha256:aaa"},
+            {**_row("2", "A"), "contract_digest": "sha256:aaa"},
+        ],
+    )
+    b = _write(
+        tmp_path / "b.jsonl", [{**_row("3", "yes"), "contract_digest": "sha256:bbb"}]
+    )
+
+    with pytest.raises(SubmissionError, match="contract_digest"):
+        build_submission([a, b], arm="contract", model=MODEL, tasks=TASKS)
+
+
+def test_build_submission_allows_a_splice_across_two_commits(tmp_path):
+    """`commit_sha` MUST be allowed to differ: the 49 ungolded tasks can only
+    run after the code admitting them is committed, so every splice spans two
+    commits by construction. Refusing here would ban the documented flow.
+    """
+    a = _write(
+        tmp_path / "a.jsonl",
+        [
+            {**_row("1", "138236"), "commit_sha": "aaa"},
+            {**_row("2", "A"), "commit_sha": "aaa"},
+        ],
+    )
+    b = _write(tmp_path / "b.jsonl", [{**_row("3", "yes"), "commit_sha": "bbb"}])
+
+    out = build_submission([a, b], arm="contract", model=MODEL, tasks=TASKS)
+
+    assert [r["task_id"] for r in out] == ["1", "2", "3"]
+
+
+def test_provenance_names_every_field_the_spliced_rows_disagree_on(tmp_path):
+    """A divergence that is allowed still has to be VISIBLE — the operator is
+    about to spend a one-shot submission on it.
+    """
+    from dce.submit import provenance
+
+    a = _write(
+        tmp_path / "a.jsonl",
+        [{**_row("1", "138236"), "commit_sha": "aaa", "scorer": "official"}],
+    )
+    b = _write(
+        tmp_path / "b.jsonl",
+        [{**_row("3", "yes"), "commit_sha": "bbb", "scorer": "official"}],
+    )
+
+    diverged = provenance([a, b], arm="contract", model=MODEL)
+
+    assert diverged["commit_sha"] == ["aaa", "bbb"]
+    assert "scorer" not in diverged

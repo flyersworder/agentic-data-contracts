@@ -37,8 +37,9 @@ than one:
 
   * SCORED accuracy: `correct` / (`correct` + `incorrect`) -- harness
     failures dropped from both halves of the fraction entirely.
-  * STRICT accuracy: `correct` / all rows -- harness failures counted as
-    wrong.
+  * STRICT accuracy: `correct` / all GRADED rows -- harness failures counted
+    as wrong. Rows for a task with no gold are not graded rows; see
+    `_is_ungolded`.
 
 Excluding harness failures (SCORED) flatters whichever arm fails most;
 counting them as wrong (STRICT) instead punishes that arm for what may be
@@ -633,17 +634,23 @@ def _strict_bools(rows: list[dict], arm: str) -> dict[str, bool]:
     """task_id -> correct, for the STRICT McNemar view: every task this arm
     attempted is present, with a harness failure counted as wrong.
 
-    `ungraded` is the one verdict excluded. A harness failure is a real
-    attempt that produced no right answer, which is what STRICT is for; a
-    task with no gold is not an attempt that failed. Pairing them would add
-    concordant false/false pairs — harmless to `p_value`, which uses only
-    discordant pairs, but `n_paired` would claim a comparison over tasks
-    neither arm could be graded on.
+    Ungolded tasks are the one exclusion, and the cut is `_is_ungolded` --
+    the SAME cut `_summarize` makes, keyed on the missing gold rather than on
+    the verdict. Keying it on `verdict in UNGRADED_VERDICTS` (as this did)
+    kept every ungolded task whose run tripped a cap or errored, so the two
+    denominators in one report disagreed: `strict 1/1` per arm above an
+    `n_paired=2` line.
+
+    A harness failure on a GOLDED task is a real attempt that produced no
+    right answer, which is what STRICT is for; a task with no gold is not an
+    attempt that failed. Pairing them adds concordant false/false pairs --
+    harmless to `p_value`, which reads only discordant pairs, but `n_paired`
+    would claim a comparison over tasks neither arm could be graded on.
     """
     return {
         row.get("task_id", "unknown"): row.get("verdict") == "correct"
         for row in rows
-        if row.get("arm") == arm and row.get("verdict") not in UNGRADED_VERDICTS
+        if row.get("arm") == arm and not _is_ungolded(row)
     }
 
 

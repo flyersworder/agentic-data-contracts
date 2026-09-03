@@ -20,7 +20,7 @@ rows and exit 2.
 ```bash
 cd experiments/dabstep-contract-eval
 uv sync
-uv run pytest -q                     # 379 tests, deterministic and offline
+uv run pytest -q                     # 384 tests, deterministic and offline
 uv run python -m dce.prepare         # downloads DABStep, builds the DuckDB, reconstructs golds
 ```
 
@@ -345,7 +345,10 @@ per agent name and the Space scores a missing task as wrong, so a short file
 is worse than no file. `--results` takes several files, so a fresh all-450
 sweep and a spliced 401 + 49 both work. `--out` may not name one of the
 `--results` files, and an empty submission is refused rather than written as a
-blank line.
+blank line. Spliced rows are checked for provenance: a disagreement on
+`contract_digest` is refused outright (two contracts is two agents), while
+`commit_sha`, `scorer` and `golds_hash` differences are printed — a splice
+spans two commits by construction, so refusing on that would ban this flow.
 
 Uploading is manual and deliberately not automated here: the Space wants a
 browser and metadata (agent name, model family, whether the code is open) that

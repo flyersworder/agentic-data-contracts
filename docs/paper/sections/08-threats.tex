@@ -148,51 +148,63 @@ The sharper question is whether the leniency is arm-neutral. If it is, it
 moves levels and not contrasts. That is checkable without a second submission.
 Every one of the 19 failed exact string match against the reconstructed gold
 and was rescued by the scorer's tolerance, so exact-match failure among
-locally-correct rows upper-bounds an arm's exposure. Calibrated on the
-submitted file the flag has perfect recall --- all 19 are flagged --- at 40
-flags in total, so it over-counts by about $2\times$.
+locally-correct rows upper-bounds an arm's exposure
+(\texttt{analysis/leniency.py}; exact match strips whitespace and Markdown
+bold and nothing else, deliberately not the benchmark normaliser, which is
+the tolerance being measured). On the hard split, where all 19 disagreements
+lie, the flag has perfect recall at 33 flags, so a flag converts to a real
+error at $19/33 = 0.576$.
 
 \begin{table}[htbp]
 \centering
 \caption{Exposure to scorer leniency across runs~A--D: the share of each arm's
 correct hard-split answers that required more than exact match against the
-reconstructed gold. An upper bound; lower is less exposed.}
+reconstructed gold, and the accuracy that follows from correcting it. Arm
+names abbreviated; an upper bound.}
 \label{tab:leniency}
-\small
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{@{}lrrrr@{}}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
-\tabhead{Arm} & \tabhead{A} & \tabhead{B} & \tabhead{C} & \tabhead{D} \\
+& \multicolumn{2}{c}{Run A} & \multicolumn{2}{c}{Run B}
+& \multicolumn{2}{c}{Run C} & \multicolumn{2}{c}{Run D} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+\tabhead{Arm} & exp. & corr. & exp. & corr. & exp. & corr. & exp. & corr. \\
 \midrule
-\armC{} & \textbf{15.8\%} & \textbf{17.1\%} & \textbf{10.5\%} & \textbf{10.6\%} \\
-\armH{} & 26.6\% & 21.6\% & 14.7\% & 14.3\% \\
-\armM{} & 19.7\% & 23.7\% & 13.8\% & 40.5\% \\
-\armS{} & 37.0\% & 31.4\% & 10.6\% & 36.8\% \\
+\textsc{contract} & \textbf{15.8} & 50.1 & \textbf{17.2} & 51.0 & \textbf{10.5} & 72.7 & \textbf{10.6} & 64.2 \\
+\textsc{hollow} & 26.6 & 16.3 & 21.6 & 19.8 & 14.7 & 46.9 & 14.3 & 34.8 \\
+\textsc{manual} & 19.7 & 20.3 & 23.7 & 37.1 & 13.8 & 46.3 & 40.5 & 18.2 \\
+\textsc{schema} & 37.0 & 10.9 & 31.4 & 18.5 & 10.6 & 34.8 & 36.8 & 18.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\armC{} is the \emph{least} exposed arm on all four models and \armS{} the
-most on three, which is the same mechanism the rest of the paper reports
-surfacing in the grading rather than the SQL: the contract states an answer
-format and the arms without it improvise one. The leniency is therefore
-conservative for the headline. Applying the submitted file's observed
-conversion rate (19 of 40 flags were real errors) to run~A's hard split gives
-\armC{} 51.0\%, \armM{} 20.7\%, \armH{} 16.8\% and \armS{} 11.4\%: every arm
-falls 2--4 points and every gap narrows by 1.5--2~pp out of 32--41.
+\armC{} is the \emph{least} exposed arm on all four models, which is the same
+mechanism the rest of the paper reports surfacing in the grading rather than
+the SQL: the contract states an answer format and the arms without it
+improvise one. It does not follow that the correction is conservative for the
+headline. \armC{} has far more correct answers to lose, so on three of four
+runs it gives up the most \emph{points} --- on run~A, 5.0 against
+\armS{}'s 3.0. Across the twelve \armC{}-versus-baseline contrasts the gap
+narrows on nine and widens on three, by $-2.8$ to $+1.4$~pp against raw gaps
+of 13.7--45.5~pp. It widens exactly where the baseline is the heavily exposed
+one: run~D's \armM{} sits at 40.5\% exposure, and correcting both sides moves
+that contrast from 44.6 to 46.0~pp. The honest summary is not that the
+leniency favours either side, but that its effect on every contrast is under
+3~pp and no conclusion here turns on 3~pp.
 
-Two caveats on that correction. It assumes a conversion rate measured on one
+Three caveats on the correction. It assumes a conversion rate measured on one
 arm and one model transfers to the others --- exactly the assumption the
-submission existed to remove --- and the flag is an upper bound, so the true
-corrections are smaller. It is a sensitivity analysis, not a measurement, and
-the experiment that would settle it is a second submission under a second arm
-name. We decline it for the reason we make of submission counts in
-Section~\ref{sec:related}: a system's leaderboard count is itself evidence a
-reader weighs, and we would rather keep ours at one than buy a tighter
-calibration with it.
-One external check does support it: the corrected 51.0\% sits alongside the
-51.9\% the leaderboard returned on the near-replicate, reached from the
-opposite direction.
+submission existed to remove. The flag is an upper bound, so the true
+corrections are smaller. And it is not independent of the leaderboard result:
+the corrected run-A figure is produced by a rate measured on the very
+submission that returned 51.9\%, on a different task set besides (332 against
+378; officially, the shared 332 score 52.4\%). It is a sensitivity analysis,
+not a measurement, and the experiment that would settle it is a second
+submission under a second arm name. We decline it for the reason we make of
+submission counts in Section~\ref{sec:related}: a system's leaderboard count
+is itself evidence a reader weighs, and we would rather keep ours at one than
+buy a tighter calibration with it.
 
 \subsection{Contamination}
 

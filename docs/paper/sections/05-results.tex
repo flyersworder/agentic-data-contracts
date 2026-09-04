@@ -130,12 +130,17 @@ leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
 
 That check is looser than it looks, and in a direction that favours us. Our
 side of it is 332 hard tasks graded against reconstructed golds; the band is
-378 hard tasks graded officially. The leaderboard submission
-(Section~\ref{sec:golds}) puts a number on the difference: our grading runs
-about $5.7$~pp high on the hard split. \armM{} at a corrected ${\approx}20.7\%$
-still sits inside the band, so the check survives --- but it is a check
-against a band, not a matched comparison, and Section~\ref{sec:threats-golds}
-should be read with it.
+378 hard tasks graded officially, and the leaderboard submission
+(Section~\ref{sec:golds}) shows our grading runs about $5.7$~pp high on the
+hard split for the one arm it could measure. Correcting \armM{} by its own
+measured exposure rather than by that headline number
+(Section~\ref{sec:threats-golds}) gives $20.3\%$ on run~A, still inside the
+band. Run~D does not survive the same treatment: \armM{} is the single most
+exposed cell in Table~\ref{tab:leniency} at 40.5\%, and correcting it moves
+Sonnet~5 from 23.8\% to $18.2\%$, just below the 19.8\% comparator. We report
+the check as passing on run~A and as \emph{not} passing on run~D under
+correction. It is in any case a check against a band rather than a matched
+comparison, and Section~\ref{sec:threats-golds} should be read with it.
 
 The easy split gives a second, negative check. \armC{} is not the best arm on
 easy tasks in any of the four runs: \armM{} leads on all four (73.9\%,

@@ -167,9 +167,11 @@ the rest are writing.
    and it did not come back clean: 95.3% agreement on 401 tasks, but the 19
    disagreements are **one-sided** — lenient here, wrong officially, all
    answer formatting, all hard split, **+5.7 pp**. The exclusion of 49 tasks
-   *is* unbiased (52.4% kept vs 47.8% dropped, official). A proxy shows the
-   leniency favours the baselines, so correcting it narrows the gaps by
-   1.5–2 pp out of 32–41. Written up in `FINDINGS.md` and in the paper
+   *is* unbiased (52.4% kept vs 47.8% dropped, official). A proxy
+   (`analysis/leniency.py`) shows the contract arm is the least *exposed* on
+   all four models but has the most correct answers to lose, so correcting it
+   moves the twelve arm contrasts by −2.8 to +1.4 pp — not conservative for
+   the headline, but small. Written up in `FINDINGS.md` and in the paper
    (§protocol *External validation*, §threats *Reconstructed golds are
    lenient*).
 5. **Run B's 29% truncation.** Report in full: near-uniform across arms

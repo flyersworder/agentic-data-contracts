@@ -1369,7 +1369,9 @@ reconstructed itself.
 Adyen's per-task verdicts are committed verbatim at
 `results/glm-all450-official-scores.jsonl` (450 rows, re-downloadable from
 `adyen/DABstep` at `data/task_scores/`), so every figure below is
-recomputable from this repository.
+recomputable from this repository. The exposure and correction tables come
+from `analysis/leniency.py`, which fixes the exact-match definition they
+depend on.
 
 Two things it settles, and one it does not.
 
@@ -1386,10 +1388,10 @@ answer correct where Adyen's does not, and **not one goes the other way**.
 Easy is exact — 49/69 under both graders. Hard is 193/332 here against
 174/332 official: **+5.7 pp**.
 
-The 19 are answer *formatting*, not reasoning, in two clusters. Eleven are
+The 19 are answer *formatting*, not reasoning, in two clusters. Ten are
 numeric answers emitted at full float precision where the task asks for a
 rounded value (`42.89798400000003` against a reconstructed gold of `42.9`).
-Eight are answers of the form `D:305.25` where the reconstructed gold is the
+Nine are answers of the form `D:305.25` where the reconstructed gold is the
 bare letter `D`. In both clusters the reconstructed gold is the plurality
 *string* and the vendored scorer accepted the agent's longer form against it;
 the official gold and scorer do not.
@@ -1398,7 +1400,7 @@ That is a defect in this experiment's absolute numbers, and it should be read
 into every accuracy in this document: **on the one arm and model where the
 check exists, the hard-split figure is ~6 points optimistic.**
 
-### Is the leniency arm-neutral? It is not — it favours the baselines
+### Is the leniency arm-neutral? Not quite, and not in one direction
 
 The obvious worry is that a scorer rewarding verbose, unrounded answers
 rewards some arms more than others, in which case the contrasts move too and
@@ -1406,50 +1408,70 @@ not just the levels. That is checkable without a second submission. Every
 disagreement above failed *exact string match* against the reconstructed gold
 and was rescued by the scorer's tolerance, so **exact-match failure among
 locally-correct rows** is a measurable upper bound on an arm's exposure to
-the leniency. Calibrated on the submitted file, the flag has perfect recall —
-all 19 official disagreements are flagged — at 40 flags total, so it
-over-counts by about 2×.
+the leniency. `analysis/leniency.py` computes it; exact match there means
+whitespace and Markdown bold stripped and nothing else, deliberately *not*
+the `answer_normalized` field, since that applies the benchmark normaliser
+which is the tolerance under measurement.
+
+Calibrated on the submitted file's **hard split** — the only split the 19
+disagreements live on — the flag has perfect recall at 33 flags, so a flag
+converts to a real error at **19/33 = 0.576**. (Both splits together give 40
+flags at 0.475, but the easy split contributes 7 flags and no errors, so that
+rate is not like-for-like with a hard-split correction.)
 
 Exposure, hard split, share of each arm's correct answers that needed more
 than exact match:
 
 | arm | run A glm | run B deepseek | run C sol | run D Sonnet 5 |
 |---|---:|---:|---:|---:|
-| **contract** | **15.8%** | **17.1%** | **10.5%** | **10.6%** |
+| **contract** | **15.8%** | **17.2%** | **10.5%** | **10.6%** |
 | `contract_hollow` | 26.6% | 21.6% | 14.7% | 14.3% |
 | `manual_prompt` | 19.7% | 23.7% | 13.8% | 40.5% |
 | `schema_only` | 37.0% | 31.4% | 10.6% | 36.8% |
 
-**The contract arm is the least exposed arm on all four models**, and
-`schema_only` is the most on three of them. The contract instructs a format
-and the arms without it improvise one, which is the same mechanism the rest
-of this document reports, showing up in the grading rather than in the SQL.
-So the leniency is a *conservative* error for the headline: removing it
-lowers every arm, and lowers the baselines proportionally more.
+**The contract arm is the least exposed arm on all four models**, and it is
+less exposed than `manual_prompt` on all four. `schema_only` is the most
+exposed arm on runs A and B only — on run C it is second-*lowest* (10.6%
+against `contract_hollow`'s 14.7%) and on run D `manual_prompt` leads it. The
+contract states an answer format and the arms without it improvise one, which
+is the same mechanism the rest of this document reports, showing up in the
+grading rather than in the SQL.
 
-Applying the submitted file's observed conversion rate (19 of 40 flags were
-real errors) uniformly to run A's hard split:
+**A lower exposure rate is not a smaller correction.** The contract arm has
+far more correct answers to lose, so on three of four runs it gives up the
+most *points*. Applying the 0.576 conversion:
 
-| arm | as reported | leniency-corrected |
-|---|---:|---:|
-| **contract** | 55.1% | **51.0%** |
-| `manual_prompt` | 22.9% | 20.7% |
-| `contract_hollow` | 19.3% | 16.8% |
-| `schema_only` | 13.9% | 11.4% |
+| arm | A raw → corr. | B raw → corr. | C raw → corr. | D raw → corr. |
+|---|---:|---:|---:|---:|
+| **contract** | 55.1 → **50.1** | 56.6 → **51.0** | 77.4 → **72.7** | 68.4 → **64.2** |
+| `contract_hollow` | 19.3 → 16.3 | 22.6 → 19.8 | 51.2 → 46.9 | 38.0 → 34.8 |
+| `manual_prompt` | 22.9 → 20.3 | 42.9 → 37.1 | 50.3 → 46.3 | 23.8 → 18.2 |
+| `schema_only` | 13.9 → 10.9 | 22.6 → 18.5 | 37.0 → 34.8 | 22.9 → 18.0 |
 
-Every arm falls 2–4 points and every gap narrows by 1.5–2 pp out of 32–41 —
-`contract` − `schema_only` goes 41.3 → 39.5, `contract` − `manual_prompt`
-32.2 → 30.2, `contract` − `contract_hollow` 35.8 → 34.1. No conclusion in
-this document turns on 2 pp.
+Every arm falls 2–6 points. Across the twelve `contract`-vs-baseline
+contrasts the gap **narrows on nine and widens on three**, by −2.8 to
++1.4 pp against raw gaps of 13.7–45.5 pp. It narrows most where the contract
+arm's lead is built on many correct answers (run A, `contract` −
+`contract_hollow`: 35.8 → 33.8) and widens where the baseline is the heavily
+exposed one (run D, `contract` − `manual_prompt`: 44.6 → 46.0, since
+`manual_prompt` is at 40.5% exposure there).
 
-Two things to hold against that correction. It assumes a conversion rate
-measured on one arm and model transfers to the others, which is exactly the
-kind of assumption the submission existed to remove; and the flag is an upper
-bound, so the true corrections are smaller than the table's. It is a
-sensitivity analysis, not a measurement. It does have one external check: the
-corrected contract figure, 51.0% hard, sits alongside the official 51.9% the
-leaderboard returned on the near-replicate — arrived at from opposite
-directions.
+So the leniency is **not** a conservative error for the headline, which is
+what a first look at the exposure column suggests: on run A it costs the
+contract arm 5.0 points and `schema_only` 3.0. What can be said is that the
+effect on every contrast is under 3 pp in either direction, and no conclusion
+in this document turns on 3 pp.
+
+Three caveats on that correction. It assumes a conversion rate measured on
+one arm and one model transfers to the others, which is exactly the kind of
+assumption the submission existed to remove. The flag is an upper bound, so
+the true corrections are smaller than the table's. And it is **not** an
+independent check on the leaderboard result: the corrected run-A contract
+figure (50.1%) is produced by a rate measured on the very submission that
+returned 51.9%, so the two are not arrived at independently — and they are
+computed on different task sets besides (332 against 378; the official figure
+restricted to the shared 332 is 52.4%). It is a sensitivity analysis, not a
+measurement.
 
 The contrasts stay paired and same-task and their directions are not in
 doubt; their magnitudes now carry this alongside the flip rate above.
@@ -1460,10 +1482,10 @@ named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4 22.2%, HF Claude
 4 Sonnet 19.8%) and against this experiment's own `manual_prompt`
 reimplementation at 22.9% on the same model. But only the contract arm was
 submitted: 51.9% is Adyen-graded and 22.9% is self-graded, so the two sides
-of that gap are not measured the same way. The exposure analysis above says
-the correction would *widen* that gap rather than close it, since
-`manual_prompt` is the more exposed arm on three of four models — but that is
-an inference from a proxy, not a second official grading. **Submitting a
+of that gap are not measured the same way. `manual_prompt` is the more
+exposed arm than `contract` on all four models, so correcting both sides
+widens that particular gap on runs B and D and narrows it on A and C — but
+that is an inference from a proxy, not a second official grading. **Submitting a
 second arm is the experiment that would close this**, and it has not been
 run: `docs/paper-plan.md` commits to one arm only, on the grounds that
 submitting several under different names reads as leaderboard-stuffing.
@@ -1511,9 +1533,11 @@ submitting several under different names reads as leaderboard-stuffing.
   officially, none the reverse, all of them answer formatting, all on the
   hard split (+5.7 pp). Every hard-split accuracy in this document should be
   read with that on it. What stays open is whether the leniency is
-  arm-neutral. A proxy says it is not, and that it favours the *baselines* —
-  the contract arm is the least exposed on all four models — so correcting it
-  narrows the headline gaps by only 1.5–2 pp out of 32–41. But only the
+  arm-neutral. A proxy (`analysis/leniency.py`) says it is not: the contract
+  arm is the least *exposed* on all four models, but it also has the most
+  correct answers to lose, so correcting it moves the twelve arm contrasts
+  by −2.8 to +1.4 pp — narrowing nine and widening three, against raw gaps
+  of 13.7–45.5 pp. Not conservative for the headline, but small. Only the
   contract arm was submitted, so that gap still has Adyen's grading on one
   side and ours on the other. See
   [the leaderboard submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).

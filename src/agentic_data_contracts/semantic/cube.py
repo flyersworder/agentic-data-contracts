@@ -48,7 +48,9 @@ class CubeSource:
         for cube in cubes:
             sql_table = cube.get("sql_table", "")
 
-            for measure in cube.get("measures", []):
+            # `or []`: a Cube schema is hand-authored YAML, so a bare
+            # `measures:` header is the same "present but empty" shape.
+            for measure in cube.get("measures") or []:
                 meta = measure.get("meta") or {}
                 tier_raw = meta.get("tier", [])
                 tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
@@ -79,7 +81,7 @@ class CubeSource:
                         type=as_text(c.get("type")),
                         description=as_text(c.get("description")),
                     )
-                    for c in cube.get("columns", [])
+                    for c in cube.get("columns") or []
                 ]
                 self._tables[sql_table] = TableSchema(
                     columns=columns,

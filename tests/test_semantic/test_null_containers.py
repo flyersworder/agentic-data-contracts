@@ -116,3 +116,17 @@ def test_the_error_names_where_the_blank_is() -> None:
 
 def test_a_named_metric_still_loads() -> None:
     assert _load("metrics:\n  - name: revenue\n").get_metrics()[0].name == "revenue"
+
+
+# ── Cube schemas are hand-authored YAML, so they carry the same shape ───────
+
+
+@pytest.mark.parametrize("bare", ["measures", "columns"])
+def test_a_bare_cube_container_loads_as_empty(tmp_path, bare: str) -> None:  # noqa: ANN001
+    from agentic_data_contracts.semantic.cube import CubeSource
+
+    schema = tmp_path / "cube.yml"
+    schema.write_text(f"cubes:\n  - name: O\n    sql_table: a.orders\n    {bare}:\n")
+    src = CubeSource(schema)
+    assert src.get_table_schemas()["a.orders"].columns == []
+    assert src.get_metrics() == []

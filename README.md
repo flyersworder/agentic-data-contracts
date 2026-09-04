@@ -697,13 +697,20 @@ an **Ossie** dataset's, and a **Cube** cube's. It is omitted from a contract's
 canonical bytes when empty.
 
 That last point has a consequence worth reading before you upgrade to 0.50.0.
-A **YAML**-source contract that declares no table description keeps a
-byte-identical digest. A **dbt**, **Ossie**, or **Cube**-source contract does
-not, if its models/datasets/cubes carry descriptions — because the source now
-carries a description it previously discarded, the frozen bytes genuinely gain
-content, and `contract_digest` moves with it. That is the correct behaviour for
-a content address, but a published attestation over such a contract needs
-re-pinning.
+A contract keeps a byte-identical digest only if **no** table description
+reaches it from anywhere. It gains content, and `contract_digest` moves, if
+either:
+
+- its **dbt** models, **Ossie** datasets, or **Cube** cubes carry descriptions —
+  the source now carries one it previously discarded; or
+- its **YAML** source already had `description:` on a `tables:` entry. That key
+  was silently dropped before 0.50.0 (the defect in #89), so writing it was
+  natural and had no effect; it is now read, rendered, and frozen.
+
+Moving is the correct behaviour for a content address — the contract genuinely
+says more to the agent than it did. But a published ARD attestation over such a
+contract needs re-pinning, and the second group above are the authors least
+likely to expect it.
 
 `tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names. For Ossie, they live in the model's `custom_extensions` block (see [Apache Ossie](#apache-ossie) below).
 
@@ -1360,6 +1367,12 @@ and move every published digest. The per-entry vocabularies are exported as
 `DRILL_BY_KEYS`, `RELATIONSHIP_KEYS`, `METRIC_IMPACT_KEYS`, and
 `DECOMPOSITION_CONVENTION_KEYS` (the one interpreted section that is a mapping
 rather than a list of entries).
+
+`nullable` is deliberately **not** part of the column vocabulary, even though
+`Column` has the field and `describe_table` emits it. The overlay carries only
+descriptions and the field is not serialized, so reading it would store a value
+that never reaches a prompt or a digest — the silent drop this release exists to
+remove. Column nullability comes from the adapter, which is the side that knows.
 
 Note that `expected_extras` whitelists *top-level sections only* — naming
 `summary` there does not excuse a `summary:` key on a table entry. Declaring

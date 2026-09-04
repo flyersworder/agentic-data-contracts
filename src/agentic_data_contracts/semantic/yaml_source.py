@@ -47,6 +47,13 @@ SEMANTIC_KEYS = frozenset(
 #: The YAML spellings, not the dataclass field names -- ``from``/``to`` here,
 #: ``from_``/``from_metric`` on :class:`Relationship` and :class:`MetricImpact`.
 TABLE_KEYS = frozenset({"schema", "table", "description", "columns"})
+#: Deliberately without ``nullable``. :class:`Column` has the field and
+#: ``describe_table`` emits it, so writing it here is a reasonable thing to try
+#: -- but the overlay carries only descriptions and ``dump_semantic_source``
+#: does not serialize it, so reading it would store a value that is never
+#: rendered, never frozen and never used. That is precisely the silent drop #89
+#: exists to eliminate, so the key is refused with a message instead. Column
+#: nullability comes from the adapter, which is the side that knows.
 COLUMN_KEYS = frozenset({"name", "type", "description"})
 METRIC_KEYS = frozenset(
     {
@@ -180,6 +187,37 @@ def _check_entry_keys(
     )
 
 
+def _entry_list(value: Any, *, where: str) -> list[dict[str, Any]]:
+    """Read a list-of-mappings section, or say precisely why it is not one.
+
+    Shared by the key guard and the parse loop so the two cannot disagree about
+    what counts as a section -- the disagreement that let a bare ``metrics:``
+    pass the guard (which already tolerated it) and crash the loop two lines
+    later with a ``TypeError`` naming library internals.
+
+    ``None`` is an empty section: a bare ``metrics:`` header is the commonest
+    way YAML says "present but empty", and it is not an error. Anything else
+    non-list, or any entry that is not a mapping, is a document the parser
+    cannot read, and it is named rather than indexed into.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(
+            f"{where} must be a list of entries, got {type(value).__name__}."
+            " A section written as a mapping keyed by name, or as a single"
+            " value, is not the shape this parser reads."
+        )
+    for i, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{i}] must be a mapping, got"
+                f" {type(entry).__name__} ({entry!r}). A list of bare names is"
+                " not the shape this parser reads."
+            )
+    return value
+
+
 def _check_nested_keys(
     raw: dict[str, Any],
     expected_extras: Collection[str] | None,
@@ -197,53 +235,46 @@ def _check_nested_keys(
     """
     strict = expected_extras is not None
 
-    def _entries(value: Any) -> list[Any]:
-        return value if isinstance(value, list) else []
+    def _entries(value: Any, where: str) -> list[dict[str, Any]]:
+        return _entry_list(value, where=where)
 
-    for i, m in enumerate(_entries(raw.get("metrics"))):
-        if not isinstance(m, dict):
-            continue
+    for i, m in enumerate(_entries(raw.get("metrics"), "metrics")):
         label = f"metrics[{i}] ({m.get('name', '?')})"
         _check_entry_keys(m, METRIC_KEYS, where=label, strict=strict)
-        for j, d in enumerate(_entries(m.get("decompositions"))):
-            if isinstance(d, dict):
-                _check_entry_keys(
-                    d,
-                    DECOMPOSITION_KEYS,
-                    where=f"{label} decompositions[{j}]",
-                    strict=strict,
-                )
-        for j, dd in enumerate(_entries(m.get("drill_by"))):
-            if isinstance(dd, dict):
-                _check_entry_keys(
-                    dd, DRILL_BY_KEYS, where=f"{label} drill_by[{j}]", strict=strict
-                )
+        for j, d in enumerate(
+            _entries(m.get("decompositions"), f"{label} decompositions")
+        ):
+            _check_entry_keys(
+                d,
+                DECOMPOSITION_KEYS,
+                where=f"{label} decompositions[{j}]",
+                strict=strict,
+            )
+        for j, dd in enumerate(_entries(m.get("drill_by"), f"{label} drill_by")):
+            _check_entry_keys(
+                dd, DRILL_BY_KEYS, where=f"{label} drill_by[{j}]", strict=strict
+            )
 
-    for i, t in enumerate(_entries(raw.get("tables"))):
-        if not isinstance(t, dict):
-            continue
+    for i, t in enumerate(_entries(raw.get("tables"), "tables")):
         label = f"tables[{i}] ({t.get('schema', '?')}.{t.get('table', '?')})"
         _check_entry_keys(t, TABLE_KEYS, where=label, strict=strict)
-        for j, c in enumerate(_entries(t.get("columns"))):
-            if isinstance(c, dict):
-                _check_entry_keys(
-                    c,
-                    COLUMN_KEYS,
-                    where=f"{label} columns[{j}] ({c.get('name', '?')})",
-                    strict=strict,
-                )
-
-    for i, r in enumerate(_entries(raw.get("relationships"))):
-        if isinstance(r, dict):
+        for j, c in enumerate(_entries(t.get("columns"), f"{label} columns")):
             _check_entry_keys(
-                r, RELATIONSHIP_KEYS, where=f"relationships[{i}]", strict=strict
+                c,
+                COLUMN_KEYS,
+                where=f"{label} columns[{j}] ({c.get('name', '?')})",
+                strict=strict,
             )
 
-    for i, impact in enumerate(_entries(raw.get("metric_impacts"))):
-        if isinstance(impact, dict):
-            _check_entry_keys(
-                impact, METRIC_IMPACT_KEYS, where=f"metric_impacts[{i}]", strict=strict
-            )
+    for i, r in enumerate(_entries(raw.get("relationships"), "relationships")):
+        _check_entry_keys(
+            r, RELATIONSHIP_KEYS, where=f"relationships[{i}]", strict=strict
+        )
+
+    for i, impact in enumerate(_entries(raw.get("metric_impacts"), "metric_impacts")):
+        _check_entry_keys(
+            impact, METRIC_IMPACT_KEYS, where=f"metric_impacts[{i}]", strict=strict
+        )
 
     convention = raw.get("decomposition_convention")
     if isinstance(convention, dict):
@@ -303,9 +334,9 @@ class YamlSource:
         # and the nested guard is already defensive about exactly this shape,
         # so without it the guard passes and this loop dies two lines later.
         for m in raw.get("metrics") or []:
-            tier_raw = m.get("tier", [])
+            tier_raw = m.get("tier") or []
             tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
-            domains_raw = m.get("domains", [])
+            domains_raw = m.get("domains") or []
             domains = (
                 [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
             )
@@ -328,8 +359,11 @@ class YamlSource:
                     last_reviewed=parse_review_date(m.get("last_reviewed")),
                     decompositions=[
                         Decomposition(
-                            operator=as_text(d["operator"]),
-                            operands=list(d.get("operands", [])),
+                            operator=require_text(
+                                d.get("operator"),
+                                where="metrics[] decompositions[] operator",
+                            ),
+                            operands=list(d.get("operands") or []),
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
                         )
@@ -337,8 +371,17 @@ class YamlSource:
                     ],
                     drill_by=[
                         DrillDimension(
-                            dimension=as_text(dd["dimension"]),
-                            column=as_text(dd["column"]),
+                            # `require_text`, not `as_text`: a blank dimension
+                            # renders into `lookup_metric` as `{"dimension": ""}`
+                            # and `validate_drill_by` checks only `column`, so
+                            # nothing downstream would ever catch it.
+                            dimension=require_text(
+                                dd.get("dimension"),
+                                where="metrics[] drill_by[] dimension",
+                            ),
+                            column=require_text(
+                                dd.get("column"), where="metrics[] drill_by[] column"
+                            ),
                         )
                         for dd in m.get("drill_by") or []
                     ],
@@ -346,7 +389,10 @@ class YamlSource:
             )
         self._tables: dict[str, TableSchema] = {}
         for t in raw.get("tables") or []:
-            key = f"{t['schema']}.{t['table']}"
+            key = (
+                f"{require_text(t.get('schema'), where='tables[] schema')}"
+                f".{require_text(t.get('table'), where='tables[] table')}"
+            )
             self._tables[key] = TableSchema(
                 columns=[
                     Column(

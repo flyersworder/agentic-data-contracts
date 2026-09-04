@@ -525,16 +525,22 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
     tables: list[dict[str, Any]] = []
     for key, ts in source.get_table_schemas().items():
         schema_name, _, table_name = key.partition(".")
-        tables.append(
-            {
-                "schema": schema_name,
-                "table": table_name,
-                "columns": [
-                    {"name": c.name, "type": c.type, "description": c.description}
-                    for c in ts.columns
-                ],
-            }
-        )
+        entry: dict[str, Any] = {
+            "schema": schema_name,
+            "table": table_name,
+            "columns": [
+                {"name": c.name, "type": c.type, "description": c.description}
+                for c in ts.columns
+            ],
+        }
+        # Omitted when empty, for the reason spelled out on `_dump_metric`'s
+        # `decompositions`: `contract_canonical_bytes` dumps with no
+        # `exclude_none`, so an always-present key moves every published
+        # digest. A contract declaring no table descriptions keeps
+        # byte-identical canonical bytes across the release that added them.
+        if ts.description:
+            entry["description"] = ts.description
+        tables.append(entry)
 
     payload: dict[str, Any] = {
         "tables": tables,

@@ -35,6 +35,37 @@ def test_top_level_imports() -> None:
     }
 
 
+def test_nested_key_sets_are_top_level_too() -> None:
+    """Parity with `SEMANTIC_KEYS` (#89).
+
+    A consumer asserting against the interpreted vocabulary should not reach
+    into a submodule for six of the seven sets while the seventh is top-level.
+    """
+    from agentic_data_contracts import (
+        COLUMN_KEYS,
+        DECOMPOSITION_KEYS,
+        DRILL_BY_KEYS,
+        METRIC_IMPACT_KEYS,
+        METRIC_KEYS,
+        RELATIONSHIP_KEYS,
+        TABLE_KEYS,
+    )
+
+    assert TABLE_KEYS == {"schema", "table", "description", "columns"}
+    assert COLUMN_KEYS == {"name", "type", "description"}
+    # The YAML spellings, not the dataclass field names.
+    assert {"from", "to"} <= RELATIONSHIP_KEYS
+    assert {"from", "to"} <= METRIC_IMPACT_KEYS
+    assert "drill_by" in METRIC_KEYS
+    assert DECOMPOSITION_KEYS == {
+        "operator",
+        "operands",
+        "convention",
+        "convention_operand",
+    }
+    assert DRILL_BY_KEYS == {"dimension", "column"}
+
+
 def test_claude_prompt_renderer_is_gone() -> None:
     """v0.39.0 renamed it with no alias — a stale import must fail loudly."""
     import agentic_data_contracts

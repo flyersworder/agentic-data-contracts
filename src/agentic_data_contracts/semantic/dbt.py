@@ -82,7 +82,12 @@ class DbtSource:
                 )
                 for col in node.get("columns", {}).values()
             ]
-            tables[key] = TableSchema(columns=columns)
+            tables[key] = TableSchema(
+                columns=columns,
+                # dbt models carry a description in the same manifest node the
+                # column descriptions come from; it was read for columns only.
+                description=node.get("description", ""),
+            )
         return tables
 
     def _parse_relationships(self, nodes: dict[str, Any]) -> list[Relationship]:

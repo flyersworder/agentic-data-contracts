@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.0] - 2026-09-04
+
+### Fixed
+
+- **Unknown keys inside a semantic YAML's list entries are no longer dropped in silence** (#89). #60 established the rule at the top level of a semantic YAML: a key the parser does not interpret is named in a warning, and becomes a load-time error once the consumer declares `expected_extras`. One level down the same shape survived — keys on a `tables:` entry, a `columns:` entry, a `metrics:` entry were read by direct access over a fixed set and everything else fell on the floor, with no error, no warning, and **no signal even under `expected_extras: []`**, the setting whose documented purpose is to fail the build on a typo.
+
+  The root cause is worth naming, because it explains why the fix took the shape it did: the interpreted key set existed only as the literal strings in a constructor call. A guard cannot be written against a set that is not materialised. Each nested vocabulary is now a named frozenset — `TABLE_KEYS`, `COLUMN_KEYS`, `METRIC_KEYS`, `DECOMPOSITION_KEYS`, `DRILL_BY_KEYS`, `RELATIONSHIP_KEYS`, `METRIC_IMPACT_KEYS` — exported at the top level beside `SEMANTIC_KEYS` and for the same reason, and checked before parsing so a strict-mode document fails on its typo rather than on whatever the typo caused downstream.
+
+  **A nested unknown key is diagnosed but not carried**, which is the one place the nested rule departs from the top-level one. A top-level key is plausibly a section the consumer authored, so it survives into `get_extras()` and can reach a prompt; a key inside a `columns:` entry has no addressable home on `Column`, so carrying it would mean inventing a nested-extras shape that widens the dump format and moves every published digest. The warning says so explicitly rather than leaving the consumer to infer it.
+
+  **`expected_extras` does not excuse a nested key.** It whitelists *top-level sections*: naming `summary` there says "I authored a top-level `summary:` section", which is no statement at all about a `summary:` key inside a table entry. Its role here is only the mode switch — declaring it at all means "fail my build on a key you do not read", and that promise now holds at every depth.
+
+  **Upgrade note.** `metrics:` is the entry most likely to carry keys in the wild; someone porting a dbt `schema.yml` will paste `meta:`, `tags:`, or `config:` onto a metric. Under the default that is a warning naming the remedy. Under `expected_extras` it is a load-time failure on upgrade — intended, and the whole point of strict mode, but the line to read before bumping. All 26 semantic and contract YAML files in this repository, `examples/` and `experiments/` included, were scanned before the change: zero nested unknown keys.
+
+### Added
+
+- **`TableSchema` carries a table-level `description`** (#89). `Column` had one and `AllowedTable` had one for a *schema group* — a schema name plus the tables under it, collectively — so the granularities on offer were "this whole schema" and "this one column", with the table itself skipped. For a contract whose job is to tell an agent what a table means before it writes SQL, that was the missing middle: "`payments` is one row per authorisation attempt, not per settled transaction" had nowhere to live.
+
+  Read from a YAML source's `tables[].description`, and populated from the description **dbt** and **Ossie** sources already held and discarded — a dbt model's `description` and an Ossie dataset's are the same fact under another name. Rendered by `describe_table` ahead of the column list, which is the only path a semantic source's table schemas reach an agent at all; a semantic-source description wins over an adapter's, the same precedence the column overlay already uses.
+
+  `description` is appended after `columns` on the dataclass, so every pre-existing positional `TableSchema([...])` keeps binding to the field it always did — the rule already recorded on `Attempt.final_rows`. It is **omitted from `dump_semantic_source` when empty**, following `_dump_metric`'s stated reason: `contract_canonical_bytes` dumps with no `exclude_none`, so an always-present key would move every published digest. Verified against a real frozen artifact rather than asserted — the DABStep experiment's pinned `sha256:e438ecf7…` and hollow `sha256:c46a767d…` both recompute unchanged on this release.
+
 ## [0.49.0] - 2026-08-29
 
 ### Fixed

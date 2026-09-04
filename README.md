@@ -677,6 +677,7 @@ metrics:
 tables:
   - schema: analytics
     table: orders
+    description: "One row per order, not per shipped item."  # optional
     columns:
       - name: id
         type: INTEGER
@@ -685,6 +686,16 @@ tables:
       - name: tenant_id
         type: VARCHAR
 ```
+
+**Table descriptions (optional).** A table's `description` is the granularity
+between `allowed_tables`' schema-group description (a schema and everything
+under it) and a column's own — what the *table* means, which an agent needs
+before it writes SQL over it: "`orders` is one row per authorisation attempt,
+not per settled transaction." It is rendered by `describe_table` ahead of the
+column list, and read from a **YAML** source, a **dbt** model's `description`,
+and an **Ossie** dataset's. It is omitted from a contract's canonical bytes when
+empty, so adding the field does not move the digest of a contract that declares
+none.
 
 `tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names. For Ossie, they live in the model's `custom_extensions` block (see [Apache Ossie](#apache-ossie) below).
 
@@ -1328,6 +1339,22 @@ Without `expected_extras`, uninterpreted keys are logged at WARNING and carried
 anyway, so no existing contract stops loading. Pass a collection to turn a typo —
 `relationship:` for `relationships:` — into a load-time error instead of a
 silently deleted section.
+
+The same rule holds **inside** each list entry, with one deliberate asymmetry: a
+key the parser does not read on a `tables:`, `columns:`, `metrics:`,
+`decompositions:`, `drill_by:`, `relationships:`, or `metric_impacts:` entry is
+warned about by default and raises under `expected_extras`, but is **not**
+carried. A top-level key is plausibly a section you authored; a key inside a
+`columns:` entry has no addressable home on `Column`, so it is diagnosed and
+dropped rather than given a nested-extras shape that would widen the dump format
+and move every published digest. The per-entry vocabularies are exported as
+`TABLE_KEYS`, `COLUMN_KEYS`, `METRIC_KEYS`, `DECOMPOSITION_KEYS`,
+`DRILL_BY_KEYS`, `RELATIONSHIP_KEYS`, and `METRIC_IMPACT_KEYS`.
+
+Note that `expected_extras` whitelists *top-level sections only* — naming
+`summary` there does not excuse a `summary:` key on a table entry. Declaring
+`expected_extras` at all means "fail my build on a key you do not read", and
+that promise now holds at every depth.
 
 When the contract loads the source for you (`DataContract.from_yaml` →
 `load_semantic_source()`), declare the sections in the contract instead — there

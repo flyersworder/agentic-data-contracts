@@ -36,6 +36,52 @@ SEMANTIC_KEYS = frozenset(
     {"metrics", "tables", "relationships", "metric_impacts", "decomposition_convention"}
 )
 
+#: Keys interpreted *inside* each kind of list entry. Exported for the same
+#: reason as ``SEMANTIC_KEYS``, and materialised as named sets for a second
+#: reason: a guard cannot be written against a key set that exists only as the
+#: literal strings in a constructor call, which is why unknown keys survived one
+#: level down long after #60 caught them at the top (#89).
+#:
+#: The YAML spellings, not the dataclass field names -- ``from``/``to`` here,
+#: ``from_``/``from_metric`` on :class:`Relationship` and :class:`MetricImpact`.
+TABLE_KEYS = frozenset({"schema", "table", "description", "columns"})
+COLUMN_KEYS = frozenset({"name", "type", "description"})
+METRIC_KEYS = frozenset(
+    {
+        "name",
+        "description",
+        "sql_expression",
+        "source_model",
+        "filters",
+        "domains",
+        "tier",
+        "indicator_kind",
+        "business_owner",
+        "operational_owner",
+        "last_reviewed",
+        "decompositions",
+        "drill_by",
+    }
+)
+DECOMPOSITION_KEYS = frozenset(
+    {"operator", "operands", "convention", "convention_operand"}
+)
+DRILL_BY_KEYS = frozenset({"dimension", "column"})
+RELATIONSHIP_KEYS = frozenset(
+    {"from", "to", "type", "description", "required_filter", "preferred"}
+)
+METRIC_IMPACT_KEYS = frozenset(
+    {
+        "from",
+        "to",
+        "direction",
+        "confidence",
+        "evidence",
+        "description",
+        "last_reviewed",
+    }
+)
+
 
 def _apply_extras_policy(
     extras: dict[str, Any],
@@ -78,6 +124,109 @@ def _apply_extras_policy(
         )
 
 
+def _check_entry_keys(
+    entry: dict[str, Any],
+    known: Collection[str],
+    *,
+    where: str,
+    strict: bool,
+) -> None:
+    """Warn about, or reject, keys inside one list entry that are not read.
+
+    The nested counterpart of :func:`_apply_extras_policy`, with one deliberate
+    asymmetry: an unknown nested key is **diagnosed but not carried**. A
+    top-level key is plausibly a consumer's own section, so it survives into
+    ``get_extras()`` and can reach a prompt; a key inside a ``columns:`` entry
+    has no addressable home on :class:`Column`, so carrying it would mean
+    inventing a nested-extras shape that widens the dump format and moves every
+    published ``contract_digest``. Say so, drop it.
+    """
+    unknown = sorted(set(entry) - set(known))
+    if not unknown:
+        return
+    if strict:
+        raise ValueError(
+            f"YamlSource: unexpected keys {unknown} in {where}; interpreted keys"
+            f" here are {sorted(known)}. Nested keys are not carried as extras,"
+            " so this content would be dropped."
+        )
+    logger.warning(
+        "YamlSource: keys not interpreted in %s: %s (interpreted keys here: %s)."
+        " Unlike a top-level section these are NOT carried -- they are dropped,"
+        " and reach neither a prompt nor contract_digest(). If one is a typo,"
+        " that content is not being read at all.",
+        where,
+        unknown,
+        sorted(known),
+    )
+
+
+def _check_nested_keys(
+    raw: dict[str, Any],
+    expected_extras: Collection[str] | None,
+) -> None:
+    """Apply :func:`_check_entry_keys` to every list entry the parser reads.
+
+    ``expected_extras`` names *top-level sections* the consumer authored, which
+    says nothing about a key inside a table entry -- so it does not excuse one.
+    Its role here is only the mode switch #60 gave it: declaring it at all means
+    "fail my build on a key you do not read", and that promise now holds at
+    every depth.
+
+    Runs before parsing so a strict-mode document fails on its typo rather than
+    on whatever the typo caused downstream.
+    """
+    strict = expected_extras is not None
+
+    def _entries(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
+    for i, m in enumerate(_entries(raw.get("metrics"))):
+        if not isinstance(m, dict):
+            continue
+        label = f"metrics[{i}] ({m.get('name', '?')})"
+        _check_entry_keys(m, METRIC_KEYS, where=label, strict=strict)
+        for j, d in enumerate(_entries(m.get("decompositions"))):
+            if isinstance(d, dict):
+                _check_entry_keys(
+                    d,
+                    DECOMPOSITION_KEYS,
+                    where=f"{label} decompositions[{j}]",
+                    strict=strict,
+                )
+        for j, dd in enumerate(_entries(m.get("drill_by"))):
+            if isinstance(dd, dict):
+                _check_entry_keys(
+                    dd, DRILL_BY_KEYS, where=f"{label} drill_by[{j}]", strict=strict
+                )
+
+    for i, t in enumerate(_entries(raw.get("tables"))):
+        if not isinstance(t, dict):
+            continue
+        label = f"tables[{i}] ({t.get('schema', '?')}.{t.get('table', '?')})"
+        _check_entry_keys(t, TABLE_KEYS, where=label, strict=strict)
+        for j, c in enumerate(_entries(t.get("columns"))):
+            if isinstance(c, dict):
+                _check_entry_keys(
+                    c,
+                    COLUMN_KEYS,
+                    where=f"{label} columns[{j}] ({c.get('name', '?')})",
+                    strict=strict,
+                )
+
+    for i, r in enumerate(_entries(raw.get("relationships"))):
+        if isinstance(r, dict):
+            _check_entry_keys(
+                r, RELATIONSHIP_KEYS, where=f"relationships[{i}]", strict=strict
+            )
+
+    for i, impact in enumerate(_entries(raw.get("metric_impacts"))):
+        if isinstance(impact, dict):
+            _check_entry_keys(
+                impact, METRIC_IMPACT_KEYS, where=f"metric_impacts[{i}]", strict=strict
+            )
+
+
 class YamlSource:
     """Loads metric and table definitions from a YAML file."""
 
@@ -116,6 +265,7 @@ class YamlSource:
     ) -> None:
         extras = {k: v for k, v in raw.items() if k not in SEMANTIC_KEYS}
         _apply_extras_policy(extras, expected_extras)
+        _check_nested_keys(raw, expected_extras)
         self._extras: dict[str, Any] = jsonify_extras(extras, source="YamlSource")
         default_convention = _parse_convention_default(
             raw.get("decomposition_convention")
@@ -167,7 +317,8 @@ class YamlSource:
                         description=c.get("description", ""),
                     )
                     for c in t.get("columns", [])
-                ]
+                ],
+                description=t.get("description", ""),
             )
         self._relationships = [
             Relationship(

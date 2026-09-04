@@ -252,7 +252,10 @@ class OssieSource:
                     )
                     for f in dataset.get("fields", []) or []
                     if f.get("name")
-                ]
+                ],
+                # Beside the `fields` already read. An Ossie dataset's own
+                # description is the table-level gloss #89 had nowhere to put.
+                description=dataset.get("description", "") or "",
             )
 
         self._load_relationships(model, model_name, name_to_table, keys_by_dataset)

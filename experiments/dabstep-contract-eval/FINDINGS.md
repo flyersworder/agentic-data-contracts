@@ -21,8 +21,12 @@ run C at `04bee43`; run D at `b55c932`.
 
 A fifth file, `results/glm-all450.jsonl`, is **not** a fifth arm-comparison
 run and is absent from every table above: it is the contract arm alone over
-all 450 tasks, built for the leaderboard submission. It doubles as this
-experiment's only near-replicate — see [Run E](#run-e-a-near-replicate-and-the-flip-rate-at-temperature-0).
+all 450 tasks, built for the leaderboard submission — where it was
+submitted on 2026-09-04 and scored **51.9% hard / 70.8% easy / 54.9%
+overall** against the official golds (see [the leaderboard
+submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds)).
+It doubles as this experiment's only near-replicate — see [Run
+E](#run-e-a-near-replicate-and-the-flip-rate-at-temperature-0).
 
 Temperature is held at 0 on runs A and B. **Runs C and D do not hold it**:
 `gpt-5.6-sol` reports `supports_temperature=False`, so the sampling parameter
@@ -1345,6 +1349,125 @@ One incidental correction: task 1480, named below as the one task observed
 flipping between identical runs during development, is `incorrect` in both
 runs here. It is an example of the phenomenon, not a uniquely unstable task.
 
+## The leaderboard submission: an external check on the reconstructed golds
+
+`results/glm-all450.jsonl` was submitted to the DABStep leaderboard on
+**2026-09-04** as `agentic-data-contracts` (organisation `flyersworder`,
+model family `GLM-5.3-Flash`), landing as
+`data/submissions/v1__flyersworder-agentic-data-contracts__04-09-2026.jsonl`
+in the `adyen/DABstep` dataset. Adyen's scorer graded all 450 answers against
+the **official** golds and returned per-task scores. That is the first
+external grading of answers this document otherwise grades with golds it
+reconstructed itself.
+
+| split | n | correct | accuracy |
+|---|---:|---:|---:|
+| hard | 378 | 196 | **51.9%** |
+| easy | 72 | 51 | **70.8%** |
+| all | 450 | 247 | **54.9%** |
+
+Adyen's per-task verdicts are committed verbatim at
+`results/glm-all450-official-scores.jsonl` (450 rows, re-downloadable from
+`adyen/DABstep` at `data/task_scores/`), so every figure below is
+recomputable from this repository.
+
+Two things it settles, and one it does not.
+
+**Dropping 49 tasks did not bias the sample.** Under the official scorer the
+332 hard tasks this document keeps score 52.4% and the 46 it drops score
+47.8% — a 4.6 pp gap at n=46. The plurality-consensus filter dropped tasks
+whose golds could not be agreed on, not tasks the model finds hard. The
+401-task subset is a fair stand-in for the 450.
+
+**Reconstructed golds inflate accuracy — one-sidedly, and only on hard
+tasks.** On the 401 shared tasks the two graders agree on **382 (95.3%)**.
+All 19 disagreements run the same direction: this document's scoring calls an
+answer correct where Adyen's does not, and **not one goes the other way**.
+Easy is exact — 49/69 under both graders. Hard is 193/332 here against
+174/332 official: **+5.7 pp**.
+
+The 19 are answer *formatting*, not reasoning, in two clusters. Eleven are
+numeric answers emitted at full float precision where the task asks for a
+rounded value (`42.89798400000003` against a reconstructed gold of `42.9`).
+Eight are answers of the form `D:305.25` where the reconstructed gold is the
+bare letter `D`. In both clusters the reconstructed gold is the plurality
+*string* and the vendored scorer accepted the agent's longer form against it;
+the official gold and scorer do not.
+
+That is a defect in this experiment's absolute numbers, and it should be read
+into every accuracy in this document: **on the one arm and model where the
+check exists, the hard-split figure is ~6 points optimistic.**
+
+### Is the leniency arm-neutral? It is not — it favours the baselines
+
+The obvious worry is that a scorer rewarding verbose, unrounded answers
+rewards some arms more than others, in which case the contrasts move too and
+not just the levels. That is checkable without a second submission. Every
+disagreement above failed *exact string match* against the reconstructed gold
+and was rescued by the scorer's tolerance, so **exact-match failure among
+locally-correct rows** is a measurable upper bound on an arm's exposure to
+the leniency. Calibrated on the submitted file, the flag has perfect recall —
+all 19 official disagreements are flagged — at 40 flags total, so it
+over-counts by about 2×.
+
+Exposure, hard split, share of each arm's correct answers that needed more
+than exact match:
+
+| arm | run A glm | run B deepseek | run C sol | run D Sonnet 5 |
+|---|---:|---:|---:|---:|
+| **contract** | **15.8%** | **17.1%** | **10.5%** | **10.6%** |
+| `contract_hollow` | 26.6% | 21.6% | 14.7% | 14.3% |
+| `manual_prompt` | 19.7% | 23.7% | 13.8% | 40.5% |
+| `schema_only` | 37.0% | 31.4% | 10.6% | 36.8% |
+
+**The contract arm is the least exposed arm on all four models**, and
+`schema_only` is the most on three of them. The contract instructs a format
+and the arms without it improvise one, which is the same mechanism the rest
+of this document reports, showing up in the grading rather than in the SQL.
+So the leniency is a *conservative* error for the headline: removing it
+lowers every arm, and lowers the baselines proportionally more.
+
+Applying the submitted file's observed conversion rate (19 of 40 flags were
+real errors) uniformly to run A's hard split:
+
+| arm | as reported | leniency-corrected |
+|---|---:|---:|
+| **contract** | 55.1% | **51.0%** |
+| `manual_prompt` | 22.9% | 20.7% |
+| `contract_hollow` | 19.3% | 16.8% |
+| `schema_only` | 13.9% | 11.4% |
+
+Every arm falls 2–4 points and every gap narrows by 1.5–2 pp out of 32–41 —
+`contract` − `schema_only` goes 41.3 → 39.5, `contract` − `manual_prompt`
+32.2 → 30.2, `contract` − `contract_hollow` 35.8 → 34.1. No conclusion in
+this document turns on 2 pp.
+
+Two things to hold against that correction. It assumes a conversion rate
+measured on one arm and model transfers to the others, which is exactly the
+kind of assumption the submission existed to remove; and the flag is an upper
+bound, so the true corrections are smaller than the table's. It is a
+sensitivity analysis, not a measurement. It does have one external check: the
+corrected contract figure, 51.0% hard, sits alongside the official 51.9% the
+leaderboard returned on the near-replicate — arrived at from opposite
+directions.
+
+The contrasts stay paired and same-task and their directions are not in
+doubt; their magnitudes now carry this alongside the flip rate above.
+
+**What it does not settle is the comparison itself.** 51.9% official hard,
+from a flash-tier model, sits against a published band of ~20–26% for the
+named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4 22.2%, HF Claude
+4 Sonnet 19.8%) and against this experiment's own `manual_prompt`
+reimplementation at 22.9% on the same model. But only the contract arm was
+submitted: 51.9% is Adyen-graded and 22.9% is self-graded, so the two sides
+of that gap are not measured the same way. The exposure analysis above says
+the correction would *widen* that gap rather than close it, since
+`manual_prompt` is the more exposed arm on three of four models — but that is
+an inference from a proxy, not a second official grading. **Submitting a
+second arm is the experiment that would close this**, and it has not been
+run: `docs/paper-plan.md` commits to one arm only, on the grounds that
+submitting several under different names reads as leaderboard-stuffing.
+
 ## What these runs do not show
 
 - **The pre-registered primary comparison was never run.** It names
@@ -1378,10 +1501,22 @@ runs here. It is an example of the phenomenon, not a uniquely unstable task.
   Operational findings), but its confidence intervals are ~20% wider than run
   A's and its absolute accuracies are marginally optimistic. The 122 missing
   tasks are re-runnable, on a different provider than the file's other 279.
-- **Reconstructed golds, not official ones.** 401/450 tasks by plurality
-  consensus at threshold 0.75, with 5 verified-wrong golds excluded. Close
-  enough to compare against the leaderboard band; not a leaderboard
-  submission, which would need all 450.
+- **Reconstructed golds, not official ones — and they run ~6 points
+  optimistic.** 401/450 tasks by plurality consensus at threshold 0.75, with
+  5 verified-wrong golds excluded. The leaderboard submission graded the same
+  answers against the official golds and settled two of the three open
+  questions here: dropping 49 tasks did **not** bias the sample (52.4% kept
+  vs 47.8% dropped, official, hard), but the reconstructed golds are
+  **one-sidedly lenient** — 19 of 401 tasks called correct here are wrong
+  officially, none the reverse, all of them answer formatting, all on the
+  hard split (+5.7 pp). Every hard-split accuracy in this document should be
+  read with that on it. What stays open is whether the leniency is
+  arm-neutral. A proxy says it is not, and that it favours the *baselines* —
+  the contract arm is the least exposed on all four models — so correcting it
+  narrows the headline gaps by only 1.5–2 pp out of 32–41. But only the
+  contract arm was submitted, so that gap still has Adyen's grading on one
+  side and ours on the other. See
+  [the leaderboard submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
 - **k=1 on all four runs, with one near-replicate.** The four sweeps are
   different models, not repeats, so none of them estimates within-condition
   variance. Run E (above) supplies the only estimate there is, on glm:

@@ -95,9 +95,9 @@ uncorrected tests}{Statistical power: k=1, and 24 uncorrected tests}}
 None of the four runs repeats, so none of them estimates within-condition
 variance: they are different models, not replicates. One near-replicate
 exists. A single-arm sweep of \armC{} over all 450 tasks, run on
-\texttt{glm-5.3-flash} for a leaderboard submission, shares 401 tasks with
-run~A's \armC{} and differs from it only by a validator fix that run~A
-predates. Paired, the two agree on accuracy --- 60.3\% against 57.9\%,
+\texttt{glm-5.3-flash} and submitted to the leaderboard
+(Section~\ref{sec:golds}), shares 401 tasks with run~A's \armC{} and differs
+from it only by a validator fix that run~A predates. Paired, the two agree on accuracy --- 60.3\% against 57.9\%,
 exact McNemar $p{=}0.35$ --- and \textbf{disagree on 94 of 401 tasks, a
 23.4\% flip rate}, at temperature 0 on a pinned endpoint. On the hard split
 it is 25.9\%; on the easy split both runs score exactly 49/69 while
@@ -130,6 +130,69 @@ $p$-values; the \armS{}-vs-\armH{} row, which carries the ablation, does not
 have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
 mind. Underpowered comparisons are the norm in this literature rather than the
 exception~\cite{little-power}.
+
+\subsection{Reconstructed golds are lenient, and the absolute numbers
+inherit it}\label{sec:threats-golds}
+
+Every accuracy in this paper is measured against golds we reconstructed
+(Section~\ref{sec:golds}), and the leaderboard submission described there
+shows they are one-sidedly permissive: on the 401 shared tasks, 19 answers
+graded correct here are wrong officially and none go the other way,
+\textbf{$+5.7$~pp on the hard split}. Read every absolute hard-split figure in
+this paper as roughly that optimistic. It also means the paper's numbers are
+not directly comparable to a leaderboard number, including the 20--26\% band
+we use as a validity check in Section~\ref{sec:results}: that comparison puts
+official grading on one side and ours on the other.
+
+The sharper question is whether the leniency is arm-neutral. If it is, it
+moves levels and not contrasts. That is checkable without a second submission.
+Every one of the 19 failed exact string match against the reconstructed gold
+and was rescued by the scorer's tolerance, so exact-match failure among
+locally-correct rows upper-bounds an arm's exposure. Calibrated on the
+submitted file the flag has perfect recall --- all 19 are flagged --- at 40
+flags in total, so it over-counts by about $2\times$.
+
+\begin{table}[htbp]
+\centering
+\caption{Exposure to scorer leniency across runs~A--D: the share of each arm's
+correct hard-split answers that required more than exact match against the
+reconstructed gold. An upper bound; lower is less exposed.}
+\label{tab:leniency}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Arm} & \tabhead{A} & \tabhead{B} & \tabhead{C} & \tabhead{D} \\
+\midrule
+\armC{} & \textbf{15.8\%} & \textbf{17.1\%} & \textbf{10.5\%} & \textbf{10.6\%} \\
+\armH{} & 26.6\% & 21.6\% & 14.7\% & 14.3\% \\
+\armM{} & 19.7\% & 23.7\% & 13.8\% & 40.5\% \\
+\armS{} & 37.0\% & 31.4\% & 10.6\% & 36.8\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\armC{} is the \emph{least} exposed arm on all four models and \armS{} the
+most on three, which is the same mechanism the rest of the paper reports
+surfacing in the grading rather than the SQL: the contract states an answer
+format and the arms without it improvise one. The leniency is therefore
+conservative for the headline. Applying the submitted file's observed
+conversion rate (19 of 40 flags were real errors) to run~A's hard split gives
+\armC{} 51.0\%, \armM{} 20.7\%, \armH{} 16.8\% and \armS{} 11.4\%: every arm
+falls 2--4 points and every gap narrows by 1.5--2~pp out of 32--41.
+
+Two caveats on that correction. It assumes a conversion rate measured on one
+arm and one model transfers to the others --- exactly the assumption the
+submission existed to remove --- and the flag is an upper bound, so the true
+corrections are smaller. It is a sensitivity analysis, not a measurement, and
+the experiment that would settle it is a second submission under a second arm
+name. We decline it for the reason we make of submission counts in
+Section~\ref{sec:related}: a system's leaderboard count is itself evidence a
+reader weighs, and we would rather keep ours at one than buy a tighter
+calibration with it.
+One external check does support it: the corrected 51.0\% sits alongside the
+51.9\% the leaderboard returned on the near-replicate, reached from the
+opposite direction.
 
 \subsection{Contamination}
 
@@ -199,8 +262,10 @@ replaying the 160 distinct rejected queries showed 79 were falsely rejected. A r
 complied with, and the transcripts show the agent guessing at unrelated clauses
 before finding a formulation that passed.
 
-This handicapped both contract arms and neither baseline, so run~A's 55.1\% is a
-floor rather than a ceiling. Run~B ran with the fix, and the contract arm's
+This handicapped both contract arms and neither baseline, so on this axis
+run~A's 55.1\% is a floor rather than a ceiling. It is not a floor overall:
+Section~\ref{sec:threats-golds} identifies a second asymmetry pushing the
+other way, and the two are not netted here. Run~B ran with the fix, and the contract arm's
 total count of queries rejected by the validator (218 on run~A, the 161
 above among them) falls to 29, confirming the diagnosis. The defect's direction is known; its magnitude
 is not separable from the model change, and we do not attempt to estimate it.

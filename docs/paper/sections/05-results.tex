@@ -128,6 +128,15 @@ is a statement about those models rather than about the harness. Run~D
 supplies the check on a second model family: 23.8\% for Sonnet~5, against the
 leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
 
+That check is looser than it looks, and in a direction that favours us. Our
+side of it is 332 hard tasks graded against reconstructed golds; the band is
+378 hard tasks graded officially. The leaderboard submission
+(Section~\ref{sec:golds}) puts a number on the difference: our grading runs
+about $5.7$~pp high on the hard split. \armM{} at a corrected ${\approx}20.7\%$
+still sits inside the band, so the check survives --- but it is a check
+against a band, not a matched comparison, and Section~\ref{sec:threats-golds}
+should be read with it.
+
 The easy split gives a second, negative check. \armC{} is not the best arm on
 easy tasks in any of the four runs: \armM{} leads on all four (73.9\%,
 90.6\%, 94.2\%, 89.9\% against \armC{}'s 71.0\%, 81.1\%, 85.5\%, 75.4\%). The

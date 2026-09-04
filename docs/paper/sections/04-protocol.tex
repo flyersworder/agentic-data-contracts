@@ -69,11 +69,32 @@ directly from DuckDB using the
 matching rule documented in \texttt{manual.md}. \textbf{All 59 reconstructed
 golds reproduce exactly.}
 
-\paragraph{Planned external validation.} A leaderboard submission would convert
-this argument into a measurement: because submissions publish per-task official
-verdicts, submitting our answers would return an official judgement on the exact
-answers we scored against reconstructed golds, yielding a measured agreement
-rate. We report this as planned work rather than claiming it.
+\paragraph{External validation.}\label{par:external} Consensus is an argument;
+a leaderboard submission converts it into a measurement, because every
+submission returns per-task official verdicts on the exact answers we scored
+against reconstructed golds. We ran that check. A single-arm sweep of \armC{}
+over all 450 tasks on \texttt{glm-5.3-flash} was submitted, and scored
+\textbf{51.9\% hard, 70.8\% easy, 54.9\% overall} against the withheld golds.
+Two results follow, one reassuring and one not.
+
+The excluded tasks are not a biased sample. Officially, the 332 hard tasks we
+keep score 52.4\% and the 46 hard tasks we drop score 47.8\%: the
+consensus threshold filters on gold agreement, not on task difficulty, and the
+401-task subset stands in fairly for the 450.
+
+The reconstructed golds are \emph{lenient}, one-sidedly, and only on hard
+tasks. Across the 401 shared tasks the two gradings agree on \textbf{382
+(95.3\%)}. All 19 disagreements run the same way --- correct under our
+grading, wrong under the official one --- and \textbf{none run the other
+way}. Easy is exact (49/69 under both); hard is 193/332 against 174/332
+official, \textbf{$+5.7$~pp}. The 19 are answer formatting rather than
+reasoning: eleven numeric answers emitted at full float precision against a
+rounded gold (\texttt{42.89798400000003} for \texttt{42.9}), and eight of the
+form \texttt{D:305.25} against a bare-letter gold. In both, the reconstructed
+gold is the plurality \emph{string} and the vendored scorer's tolerance
+rescues the agent's longer form against it. Section~\ref{sec:threats-golds}
+bounds what this does to the results; briefly, it lowers every arm and lowers
+the baselines most.
 
 \subsection{Grading and statistics}
 

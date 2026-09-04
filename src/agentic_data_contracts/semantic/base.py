@@ -464,6 +464,28 @@ class ExtensibleSemanticSource(Protocol):
     def get_extras(self) -> dict[str, Any]: ...
 
 
+def as_text(value: Any, default: str = "") -> str:
+    """Coerce a source document's value into the ``str`` its field is annotated.
+
+    ``.get(key, default)`` defends against a key's *absence*, and the hazard is a
+    key present with no value: a bare ``description:`` in YAML, an explicit
+    ``"description": null`` in a dbt manifest. Both load as ``None`` and land in
+    a field annotated ``str``, so a consumer calling ``.strip()`` on public API
+    gets an ``AttributeError`` from data that parsed without complaint.
+
+    Non-string scalars are coerced rather than passed through: a YAML
+    ``description: 2024`` puts an ``int`` in the same ``str`` field, which is the
+    same violation with a different shape.
+
+    Fields annotated ``str | None`` -- ``convention``, ``required_filter``,
+    ``indicator_kind``, the owners -- deliberately do **not** go through here.
+    There ``None`` is a meaningful value, not a malformed one.
+    """
+    if value is None:
+        return default
+    return value if isinstance(value, str) else str(value)
+
+
 def _iso(d: date | None) -> str | None:
     """ISO-format a date, passing ``None`` through."""
     return d.isoformat() if d is not None else None

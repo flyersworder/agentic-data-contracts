@@ -13,6 +13,7 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    as_text,
     build_relationship_index,
     fuzzy_search_metrics,
 )
@@ -56,9 +57,9 @@ class CubeSource:
                 )
                 self._metrics.append(
                     MetricDefinition(
-                        name=measure["name"],
-                        description=measure.get("description", ""),
-                        sql_expression=measure.get("sql", ""),
+                        name=as_text(measure["name"]),
+                        description=as_text(measure.get("description")),
+                        sql_expression=as_text(measure.get("sql")),
                         source_model=sql_table,
                         domains=domains,
                         tier=tier,
@@ -69,9 +70,9 @@ class CubeSource:
             if sql_table and "." in sql_table:
                 columns = [
                     Column(
-                        name=c["name"],
-                        type=c.get("type", ""),
-                        description=c.get("description", ""),
+                        name=as_text(c["name"]),
+                        type=as_text(c.get("type")),
+                        description=as_text(c.get("description")),
                     )
                     for c in cube.get("columns", [])
                 ]
@@ -79,7 +80,7 @@ class CubeSource:
                     columns=columns,
                     # A cube's own description is the table-level gloss, the
                     # same fact dbt models and Ossie datasets carry.
-                    description=cube.get("description") or "",
+                    description=as_text(cube.get("description")),
                 )
 
         self._relationships = self._parse_relationships(cubes)
@@ -158,7 +159,7 @@ class CubeSource:
                         from_=f"{cube_table}.{cube_col}",
                         to=f"{other_table}.{other_col}",
                         type=canonical_type,
-                        description=join.get("description", ""),
+                        description=as_text(join.get("description")),
                         required_filter=meta.get("required_filter"),
                         preferred=bool(meta.get("preferred", False)),
                     )

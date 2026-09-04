@@ -18,6 +18,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     _apply_convention_default,
     _parse_convention_default,
+    as_text,
     build_relationship_index,
     fuzzy_search_metrics,
     jsonify_extras,
@@ -306,10 +307,10 @@ class YamlSource:
             )
             self._metrics.append(
                 MetricDefinition(
-                    name=m["name"],
-                    description=m.get("description", ""),
-                    sql_expression=m.get("sql_expression", ""),
-                    source_model=m.get("source_model", ""),
+                    name=as_text(m["name"]),
+                    description=as_text(m.get("description")),
+                    sql_expression=as_text(m.get("sql_expression")),
+                    source_model=as_text(m.get("source_model")),
                     filters=m.get("filters", []),
                     domains=domains,
                     tier=tier,
@@ -319,7 +320,7 @@ class YamlSource:
                     last_reviewed=parse_review_date(m.get("last_reviewed")),
                     decompositions=[
                         Decomposition(
-                            operator=d["operator"],
+                            operator=as_text(d["operator"]),
                             operands=list(d.get("operands", [])),
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
@@ -327,7 +328,10 @@ class YamlSource:
                         for d in m.get("decompositions", [])
                     ],
                     drill_by=[
-                        DrillDimension(dimension=dd["dimension"], column=dd["column"])
+                        DrillDimension(
+                            dimension=as_text(dd["dimension"]),
+                            column=as_text(dd["column"]),
+                        )
                         for dd in m.get("drill_by", [])
                     ],
                 )
@@ -338,22 +342,22 @@ class YamlSource:
             self._tables[key] = TableSchema(
                 columns=[
                     Column(
-                        name=c["name"],
-                        type=c.get("type", ""),
-                        description=c.get("description", ""),
+                        name=as_text(c["name"]),
+                        type=as_text(c.get("type")),
+                        description=as_text(c.get("description")),
                     )
                     for c in t.get("columns", [])
                 ],
                 # `or ""` because a bare `description:` key loads as None,
                 # and the field is annotated `str` and is public API.
-                description=t.get("description") or "",
+                description=as_text(t.get("description")),
             )
         self._relationships = [
             Relationship(
-                from_=r["from"],
-                to=r["to"],
-                type=r.get("type", "many_to_one"),
-                description=r.get("description", ""),
+                from_=as_text(r["from"]),
+                to=as_text(r["to"]),
+                type=as_text(r.get("type"), "many_to_one"),
+                description=as_text(r.get("description")),
                 required_filter=r.get("required_filter"),
                 preferred=r.get("preferred", False),
             )
@@ -362,12 +366,12 @@ class YamlSource:
         self._rel_index = build_relationship_index(self._relationships)
         self._metric_impacts = [
             MetricImpact(
-                from_metric=i["from"],
-                to_metric=i["to"],
-                direction=i.get("direction", "positive"),
-                confidence=i.get("confidence", "hypothesized"),
-                evidence=i.get("evidence", ""),
-                description=i.get("description", ""),
+                from_metric=as_text(i["from"]),
+                to_metric=as_text(i["to"]),
+                direction=as_text(i.get("direction"), "positive"),
+                confidence=as_text(i.get("confidence"), "hypothesized"),
+                evidence=as_text(i.get("evidence")),
+                description=as_text(i.get("description")),
                 last_reviewed=parse_review_date(i.get("last_reviewed")),
             )
             for i in raw.get("metric_impacts", [])

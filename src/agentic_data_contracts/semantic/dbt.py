@@ -11,6 +11,7 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    as_text,
     build_relationship_index,
     fuzzy_search_metrics,
 )
@@ -34,14 +35,14 @@ class DbtSource:
             type_params = metric.get("type_params", {})
             measure = type_params.get("measure", {})
             if isinstance(measure, dict):
-                sql_expr = measure.get("expr", "")
+                sql_expr = as_text(measure.get("expr"))
 
             filters: list[str] = []
             for f in metric.get("filters", []):
                 if isinstance(f, dict):
-                    field = f.get("field", "")
-                    op = f.get("operator", "")
-                    val = f.get("value", "")
+                    field = as_text(f.get("field"))
+                    op = as_text(f.get("operator"))
+                    val = as_text(f.get("value"))
                     filters.append(f"{field} {op} {val}")
 
             meta = metric.get("meta") or {}
@@ -54,10 +55,10 @@ class DbtSource:
 
             result.append(
                 MetricDefinition(
-                    name=metric["name"],
-                    description=metric.get("description", ""),
+                    name=as_text(metric["name"]),
+                    description=as_text(metric.get("description")),
                     sql_expression=sql_expr,
-                    source_model=metric.get("model", ""),
+                    source_model=as_text(metric.get("model")),
                     filters=filters,
                     domains=domains,
                     tier=tier,
@@ -76,9 +77,9 @@ class DbtSource:
             key = f"{schema_name}.{table_name}"
             columns = [
                 Column(
-                    name=col["name"],
-                    type=col.get("data_type", ""),
-                    description=col.get("description", ""),
+                    name=as_text(col["name"]),
+                    type=as_text(col.get("data_type")),
+                    description=as_text(col.get("description")),
                 )
                 for col in node.get("columns", {}).values()
             ]
@@ -88,7 +89,7 @@ class DbtSource:
                 # column descriptions come from; it was read for columns only.
                 # `or ""` for the same reason as Ossie: a node may carry an
                 # explicit null, and the field is annotated `str`.
-                description=node.get("description") or "",
+                description=as_text(node.get("description")),
             )
         return tables
 
@@ -149,8 +150,8 @@ class DbtSource:
                 Relationship(
                     from_=f"{owner_table}.{column_name}",
                     to=f"{ref_table}.{field}",
-                    type=meta.get("relationship_type", "many_to_one"),
-                    description=node.get("description", ""),
+                    type=as_text(meta.get("relationship_type"), "many_to_one"),
+                    description=as_text(node.get("description")),
                     required_filter=meta.get("required_filter"),
                     preferred=bool(meta.get("preferred", False)),
                 )

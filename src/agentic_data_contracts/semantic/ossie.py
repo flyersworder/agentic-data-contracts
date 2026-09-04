@@ -48,6 +48,7 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     _apply_convention_default,
     _parse_convention_default,
+    as_text,
     build_relationship_index,
     fuzzy_search_metrics,
     jsonify_extras,
@@ -247,15 +248,15 @@ class OssieSource:
                 columns=[
                     Column(
                         name=f["name"],
-                        type=f.get("datatype", ""),
-                        description=f.get("description", ""),
+                        type=as_text(f.get("datatype")),
+                        description=as_text(f.get("description")),
                     )
                     for f in dataset.get("fields", []) or []
                     if f.get("name")
                 ],
                 # Beside the `fields` already read. An Ossie dataset's own
                 # description is the table-level gloss #89 had nowhere to put.
-                description=dataset.get("description", "") or "",
+                description=as_text(dataset.get("description")),
             )
 
         self._load_relationships(model, model_name, name_to_table, keys_by_dataset)
@@ -373,9 +374,9 @@ class OssieSource:
             self._metrics.append(
                 MetricDefinition(
                     name=name,
-                    description=metric.get("description", ""),
+                    description=as_text(metric.get("description")),
                     sql_expression=self._pick_expression(metric),
-                    source_model=extra.get("source_model", ""),
+                    source_model=as_text(extra.get("source_model")),
                     filters=_as_list(extra.get("filters")),
                     domains=_as_list(extra.get("domains")),
                     tier=_as_list(extra.get("tier")),
@@ -407,8 +408,8 @@ class OssieSource:
                     to_metric=impact["to"],
                     direction=impact.get("direction", "positive"),
                     confidence=impact.get("confidence", "hypothesized"),
-                    evidence=impact.get("evidence", ""),
-                    description=impact.get("description", ""),
+                    evidence=as_text(impact.get("evidence")),
+                    description=as_text(impact.get("description")),
                     last_reviewed=parse_review_date(impact.get("last_reviewed")),
                 )
             )

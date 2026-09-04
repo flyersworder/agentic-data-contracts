@@ -162,12 +162,18 @@ the rest are writing.
    different models, not replicates, so nothing so far estimates
    within-condition variance. ~20 tasks x 3 repeats on the contract arm; a few
    dollars.
-4. **Gold reconstruction needs its own subsection**, not a footnote. The
-   defence is strong — only answers DABStep's own grader marked correct enter
-   the vote, and 59/59 of the largest template family reproduce from the
-   database independently — but it has to be argued, since golds are the one
-   thing a reader cannot check for themselves. **A leaderboard submission
-   would convert this from an argument into a measurement** — see below.
+4. ~~**Gold reconstruction needs its own subsection**~~ **done, and the
+   submission was made (2026-09-04).** The measurement replaced the argument
+   and it did not come back clean: 95.3% agreement on 401 tasks, but the 19
+   disagreements are **one-sided** — lenient here, wrong officially, all
+   answer formatting, all hard split, **+5.7 pp**. The exclusion of 49 tasks
+   *is* unbiased (52.4% kept vs 47.8% dropped, official). A proxy
+   (`analysis/leniency.py`) shows the contract arm is the least *exposed* on
+   all four models but has the most correct answers to lose, so correcting it
+   moves the twelve arm contrasts by −2.8 to +1.4 pp — not conservative for
+   the headline, but small. Written up in `FINDINGS.md` and in the paper
+   (§protocol *External validation*, §threats *Reconstructed golds are
+   lenient*).
 5. **Run B's 29% truncation.** Report in full: near-uniform across arms
    (28-30%), 114 of 122 lost tasks lost all four arms together, complete-case
    and per-arm figures agree within a point. It costs power, not validity.
@@ -409,8 +415,9 @@ Conditions, since it is public and effectively one-shot per agent name:
    that must happen before submission
 5. k>1 probe (gap 3)
 6. Fold both into section 5; arXiv preprint
-7. All-450 contract-arm run + leaderboard submission (gap 4), on the user's
-   go-ahead
+7. ~~All-450 contract-arm run + leaderboard submission (gap 4)~~ **done
+   2026-09-04** — submitted as `agentic-data-contracts`/`flyersworder`,
+   scored 51.9% hard / 70.8% easy / 54.9% overall
 8. Submit to PVLDB EA&B
 
 Drafting and the pro sweep are independent and should run concurrently. Do

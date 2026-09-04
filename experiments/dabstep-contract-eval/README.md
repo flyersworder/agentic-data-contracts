@@ -361,6 +361,25 @@ should be entered by a person. Read `docs/paper-plan.md`'s *leaderboard
 submission* section first — it records the conditions the submission is
 committed to, including submitting one arm only.
 
+### The submission that was made
+
+Submitted **2026-09-04** as agent `agentic-data-contracts`, organisation
+`flyersworder`, model family `GLM-5.3-Flash`, from
+`results/glm-all450.jsonl` (contract arm, `z-ai/glm-5.3-flash`, all 450
+tasks). It landed in the `adyen/DABstep` dataset as
+`data/submissions/v1__flyersworder-agentic-data-contracts__04-09-2026.jsonl`,
+with per-task results alongside it under `data/task_scores/`.
+
+| split | n | correct | accuracy |
+|---|---:|---:|---:|
+| hard | 378 | 196 | 51.9% |
+| easy | 72 | 51 | 70.8% |
+| all | 450 | 247 | 54.9% |
+
+Those per-task scores are also the only external check on this experiment's
+reconstructed golds, and they found a real one-sided bias in them. See
+[`FINDINGS.md`](FINDINGS.md#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
+
 ## Accepted gaps
 
 Known, deliberate, and disclosed rather than fixed:

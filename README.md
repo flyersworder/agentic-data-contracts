@@ -20,7 +20,7 @@ You teach agents your business domains, metrics, and governance rules upfront �
 - **Per-caller row/column security** — allow/deny tables and filter values by principal, for multi-user bots.
 - **Framework-agnostic** — plain-function tools for the Claude Agent SDK, LangChain/deepagents, Pydantic AI, or no framework at all.
 - **Bring your own semantics** — read metrics from dbt, Cube, Apache Ossie, or inline YAML.
-- **Measured, not asserted** — a four-arm ablation on [DABStep](https://huggingface.co/datasets/adyen/DABstep) separates what the contract *knows* from how it is *delivered*, across four model families. [Results below.](#measured-not-asserted)
+- **Measured, not asserted** — a four-arm ablation on [DABStep](https://huggingface.co/datasets/adyen/DABstep) separates what the contract *knows* from how it is *delivered*, across four model families, with the contract arm externally scored on the public leaderboard. [Results below.](#measured-not-asserted)
 
 ### Without a contract vs. with one
 
@@ -45,8 +45,9 @@ That table is the claim; [`experiments/dabstep-contract-eval/`](experiments/dabs
 - **The gain is the content, not the scaffolding.** `contract_hollow` runs identical tooling with the domain knowledge removed — that is what separates the two, and the content term dominates on every model tested.
 - **Governance held.** Across the ungoverned arms the models submitted 166 mutating SQL statements on 26 tasks. Both governed arms submitted zero.
 - The contract was written from the vendor's manual alone and **frozen, digest-pinned, before any benchmark question was read.**
+- **Externally scored.** The contract arm answered all 450 tasks and was submitted to the [DABStep leaderboard](https://huggingface.co/spaces/adyen/DABstep), where Adyen graded it against the official golds: **51.9% on the hard split** for `glm-5.3-flash` — against a published band of ~20–26% hard for manual-in-prompt baselines running stronger models.
 
-Scope, stated plainly: the effect concentrates in the domain-specific task bucket (the non-fee bucket shows no contract advantage on any model), golds are reconstructed for 401 of 450 tasks, and this is one benchmark at k=1. Full results, every caveat, and all 6,416 transcripts: **[`FINDINGS.md`](experiments/dabstep-contract-eval/FINDINGS.md)**.
+Scope, stated plainly: the effect concentrates in the domain-specific task bucket (the non-fee bucket shows no contract advantage on any model), the table's golds are reconstructed for 401 of 450 tasks and the leaderboard check shows that scoring runs ~6 points optimistic on hard tasks (one-sidedly; correcting for it moves the arm gaps by under 3 points, in both directions), only the contract arm was submitted so the gap above is not graded the same way on both sides, and this is one benchmark at k=1 — where a replicate finds 23% of task verdicts flip at temperature 0. Full results, every caveat, and all 6,416 transcripts: **[`FINDINGS.md`](experiments/dabstep-contract-eval/FINDINGS.md)**.
 
 **Works with:** any Python agent framework — first-class helpers for the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), [LangChain](https://github.com/langchain-ai/langchain) / [deepagents](https://github.com/langchain-ai/deepagents), and [Pydantic AI](https://github.com/pydantic/pydantic-ai), plus a framework-free path (the tools are plain async functions). Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 

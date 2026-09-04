@@ -78,6 +78,12 @@ def _mutated(path: tuple[Any, ...], how: str) -> dict[str, Any]:
 _PATHS = _paths(_FULL_DOCUMENT)
 _NULLABLE = [p for p in _PATHS if not isinstance(p[-1], int)]
 _ENTRIES = [p for p in _PATHS if isinstance(p[-1], int)]
+#: Key paths holding a *list*. Round 5 found the gate blind here: replacing a
+#: list ENTRY was generated, but replacing the list ITSELF with a scalar was
+#: not -- so `tier: 1` and `filters: "region = 'US'"` were never tried, and both
+#: were broken. `tier: []` in the document has no index paths to mutate, which
+#: is exactly why the hole was invisible.
+_LIST_VALUED = [p for p in _NULLABLE if isinstance(_at(_FULL_DOCUMENT, p), list)]
 
 
 def _assert_locatable(doc: dict[str, Any], label: str) -> None:
@@ -97,6 +103,7 @@ def test_the_document_yields_enough_variants_to_be_a_real_gate() -> None:
     """Guards the generator itself: an empty path list would pass everything."""
     assert len(_NULLABLE) > 40, len(_NULLABLE)
     assert len(_ENTRIES) > 5, len(_ENTRIES)
+    assert len(_LIST_VALUED) > 5, len(_LIST_VALUED)
 
 
 @pytest.mark.parametrize("path", _NULLABLE, ids=lambda p: ".".join(map(str, p)))
@@ -117,6 +124,38 @@ def test_a_scalar_where_a_mapping_belongs_fails_locatably(
 ) -> None:
     """`metrics:\\n  - revenue` -- a list of names where mappings were meant."""
     _assert_locatable(_mutated(path, "scalar"), f"scalar at {path}")
+
+
+@pytest.mark.parametrize("path", _LIST_VALUED, ids=lambda p: ".".join(map(str, p)))
+@pytest.mark.parametrize("scalar", ["one-value", 7], ids=["str", "int"])
+def test_a_scalar_where_a_list_belongs_fails_locatably(
+    path: tuple[Any, ...], scalar: Any
+) -> None:
+    """`tier: gold` and `tier: 1` -- a bare value where a sequence was meant.
+
+    A string is the shape the parser is documented to *accept* for `tier` and
+    `domains`; an int is a plain authoring slip. Neither may reach the caller as
+    a `TypeError`, and neither may be silently exploded into characters.
+    """
+    doc = copy.deepcopy(_FULL_DOCUMENT)
+    parent = _at(doc, path[:-1]) if len(path) > 1 else doc
+    parent[path[-1]] = scalar
+    _assert_locatable(doc, f"scalar {scalar!r} at {path}")
+
+
+def test_a_string_list_key_is_never_exploded_into_characters() -> None:
+    """The regression this mutation was added to catch.
+
+    `list("region = 'US'")` yields thirteen single characters, which render to
+    the agent as thirteen bogus filters and freeze into `contract_digest`.
+    `ossie.py`'s `_as_list` carries a docstring warning about precisely this.
+    """
+    src = YamlSource.from_raw(
+        {"metrics": [{"name": "r", "filters": "region = 'US'", "tier": "gold"}]}
+    )
+    metric = src.get_metrics()[0]
+    assert metric.filters == ["region = 'US'"]
+    assert metric.tier == ["gold"]
 
 
 def test_a_section_authored_as_a_mapping_fails_locatably() -> None:

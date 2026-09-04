@@ -18,8 +18,10 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     _apply_convention_default,
     _parse_convention_default,
+    as_list,
     as_text,
     build_relationship_index,
+    entry_list,
     fuzzy_search_metrics,
     jsonify_extras,
     parse_review_date,
@@ -187,37 +189,6 @@ def _check_entry_keys(
     )
 
 
-def _entry_list(value: Any, *, where: str) -> list[dict[str, Any]]:
-    """Read a list-of-mappings section, or say precisely why it is not one.
-
-    Shared by the key guard and the parse loop so the two cannot disagree about
-    what counts as a section -- the disagreement that let a bare ``metrics:``
-    pass the guard (which already tolerated it) and crash the loop two lines
-    later with a ``TypeError`` naming library internals.
-
-    ``None`` is an empty section: a bare ``metrics:`` header is the commonest
-    way YAML says "present but empty", and it is not an error. Anything else
-    non-list, or any entry that is not a mapping, is a document the parser
-    cannot read, and it is named rather than indexed into.
-    """
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ValueError(
-            f"{where} must be a list of entries, got {type(value).__name__}."
-            " A section written as a mapping keyed by name, or as a single"
-            " value, is not the shape this parser reads."
-        )
-    for i, entry in enumerate(value):
-        if not isinstance(entry, dict):
-            raise ValueError(
-                f"{where}[{i}] must be a mapping, got"
-                f" {type(entry).__name__} ({entry!r}). A list of bare names is"
-                " not the shape this parser reads."
-            )
-    return value
-
-
 def _check_nested_keys(
     raw: dict[str, Any],
     expected_extras: Collection[str] | None,
@@ -236,7 +207,7 @@ def _check_nested_keys(
     strict = expected_extras is not None
 
     def _entries(value: Any, where: str) -> list[dict[str, Any]]:
-        return _entry_list(value, where=where)
+        return entry_list(value, where=where)
 
     for i, m in enumerate(_entries(raw.get("metrics"), "metrics")):
         label = f"metrics[{i}] ({m.get('name', '?')})"
@@ -322,6 +293,12 @@ class YamlSource:
         *,
         expected_extras: Collection[str] | None = None,
     ) -> None:
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "A semantic source document must be a mapping of sections, got"
+                f" {type(raw).__name__}. Expected top-level keys among"
+                f" {sorted(SEMANTIC_KEYS)}."
+            )
         extras = {k: v for k, v in raw.items() if k not in SEMANTIC_KEYS}
         _apply_extras_policy(extras, expected_extras)
         _check_nested_keys(raw, expected_extras)
@@ -334,23 +311,18 @@ class YamlSource:
         # and the nested guard is already defensive about exactly this shape,
         # so without it the guard passes and this loop dies two lines later.
         for m in raw.get("metrics") or []:
-            tier_raw = m.get("tier") or []
-            tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
-            domains_raw = m.get("domains") or []
-            domains = (
-                [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
-            )
+            tier = as_list(m.get("tier"))
+            domains = as_list(m.get("domains"))
             self._metrics.append(
                 MetricDefinition(
                     name=require_text(m.get("name"), where="metrics[] name"),
                     description=as_text(m.get("description")),
                     sql_expression=as_text(m.get("sql_expression")),
                     source_model=as_text(m.get("source_model")),
-                    # `or []`: unlike `domains`/`tier` below, a null here
-                    # was carried into the metric and only surfaced later, as a
-                    # TypeError inside `dump_semantic_source` — a crashed freeze
-                    # far from the malformed key that caused it.
-                    filters=list(m.get("filters") or []),
+                    # `as_list`, not `list(... or [])`: the latter turned a
+                    # single authored filter string into one bogus filter per
+                    # character, and froze them into `contract_digest`.
+                    filters=as_list(m.get("filters")),
                     domains=domains,
                     tier=tier,
                     indicator_kind=m.get("indicator_kind"),
@@ -363,7 +335,7 @@ class YamlSource:
                                 d.get("operator"),
                                 where="metrics[] decompositions[] operator",
                             ),
-                            operands=list(d.get("operands") or []),
+                            operands=as_list(d.get("operands")),
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
                         )
@@ -413,7 +385,11 @@ class YamlSource:
                 type=as_text(r.get("type"), "many_to_one"),
                 description=as_text(r.get("description")),
                 required_filter=r.get("required_filter"),
-                preferred=r.get("preferred", False),
+                # A bare `preferred:` put None in a bool-annotated field and
+                # dumped as `"preferred": null` into the frozen contract. It is
+                # falsy, so nothing crashed and the property gate stayed green —
+                # which is exactly why it survived four rounds.
+                preferred=bool(r.get("preferred") or False),
             )
             for r in raw.get("relationships") or []
         ]

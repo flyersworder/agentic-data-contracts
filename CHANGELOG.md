@@ -26,7 +26,9 @@ All notable changes to this project will be documented in this file.
 
   The test derives its variants — every key nulled, every key deleted, every list entry replaced by a scalar — from the same full-vocabulary document that is asserted equal to the exported key frozensets. The two interlock: a key added to a parser must join its frozenset, which puts it in the document, which generates malformed variants automatically. Neither test needs editing as the vocabulary grows, so the gate cannot decay into covering less than the parser reads.
 
-  One reader, `_entry_list`, is now shared by the key guard and the parse loop, since the disagreement between them was the bug: the guard already tolerated a bare `metrics:` and the loop two lines later did not.
+  The property is now held for **all four sources**, not just `YamlSource`. Covering one of four parsers left three unswept, and hand-patching those three is what the earlier rounds had already shown does not converge — so the same generator runs against a full-vocabulary document per source, loaded through each source's real constructor. Four shared readers (`entry_list`, `entry_mapping`, `as_mapping`, `as_list`) mean the four parsers now agree on what a section, a keyed collection, a block, and a list-of-strings are; the disagreement between two of them was the original bug, since the key guard already tolerated a bare `metrics:` and the parse loop two lines later did not.
+
+  **A regression caught by the upgraded gate, worth naming.** The first cut of the `filters` fix used `list(m.get("filters") or [])`, which turns an authored `filters: "region = 'US'"` into thirteen single-character filters — rendered to the agent and frozen into `contract_digest`. `OssieSource` had carried a `_as_list` helper against exactly this, with a docstring warning that `list("gold")` yields `['g','o','l','d']`; it is now `as_list` in `semantic/base.py` and used by every source. The gate had been blind to it because it replaced list *entries* but never a list *itself*, and `tier: []` in the reference document has no entries to replace.
 
 ### Changed
 

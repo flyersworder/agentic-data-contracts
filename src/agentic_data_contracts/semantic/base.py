@@ -486,6 +486,89 @@ def as_text(value: Any, default: str = "") -> str:
     return value if isinstance(value, str) else str(value)
 
 
+def entry_list(value: Any, *, where: str) -> list[dict[str, Any]]:
+    """Read a list-of-mappings section, or say precisely why it is not one.
+
+    Shared by the key guard and the parse loop so the two cannot disagree about
+    what counts as a section -- the disagreement that let a bare ``metrics:``
+    pass the guard (which already tolerated it) and crash the loop two lines
+    later with a ``TypeError`` naming library internals.
+
+    ``None`` is an empty section: a bare ``metrics:`` header is the commonest
+    way YAML says "present but empty", and it is not an error. Anything else
+    non-list, or any entry that is not a mapping, is a document the parser
+    cannot read, and it is named rather than indexed into.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(
+            f"{where} must be a list of entries, got {type(value).__name__}."
+            " A section written as a mapping keyed by name, or as a single"
+            " value, is not the shape this parser reads."
+        )
+    for i, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{i}] must be a mapping, got"
+                f" {type(entry).__name__} ({entry!r}). A list of bare names is"
+                " not the shape this parser reads."
+            )
+    return value
+
+
+def as_mapping(value: Any, *, where: str) -> dict[str, Any]:
+    """Read a mapping-valued key, or say precisely why it is not one.
+
+    The sibling of :func:`entry_list` for the blocks that are mappings rather
+    than lists -- ``meta``, ``type_params``, a dbt node. ``None`` is an empty
+    mapping, since a bare ``meta:`` header means "nothing here".
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"{where} must be a mapping, got {type(value).__name__} ({value!r})."
+        )
+    return value
+
+
+def entry_mapping(value: Any, *, where: str) -> dict[str, dict[str, Any]]:
+    """Read a mapping whose *values* are all mappings — dbt's ``nodes``.
+
+    A manifest keyed by node id, an Ossie vendor block keyed by metric name: the
+    keys are identifiers and every value must be an entry the parser can read.
+    """
+    outer = as_mapping(value, where=where)
+    for key, entry in outer.items():
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{key!r}] must be a mapping, got"
+                f" {type(entry).__name__} ({entry!r})."
+            )
+    return outer
+
+
+def as_list(value: Any) -> list[str]:
+    """Read a ``list[str]`` field, tolerating the two shapes authors write.
+
+    Promoted from ``OssieSource._as_list``, whose docstring already carried the
+    warning this helper exists for: ``list("gold")`` silently yields
+    ``['g', 'o', 'l', 'd']``, and those characters go on to drive tier policy,
+    domain filtering, and the frozen bytes of ``contract_digest``. A bare
+    ``tier: gold`` is documented-acceptable authoring, and a scalar ``tier: 1``
+    is a plain slip; neither may explode, and neither may surface as a
+    ``TypeError`` from inside a comprehension.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [as_text(v) for v in value]
+    return [as_text(value)]
+
+
 def require_text(value: Any, *, where: str) -> str:
     """Read an *identity* field, refusing a blank one.
 

@@ -210,7 +210,10 @@ tools = create_tools(dc, adapter=adapter, caller_principal="alice@co.com")
 
 # Webex bot (multiple users per bot instance, identity per message)
 import contextvars
-current_sender: contextvars.ContextVar[str | None] = contextvars.ContextVar("sender", default=None)
+
+current_sender: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "sender", default=None
+)
 tools = create_tools(dc, adapter=adapter, caller_principal=lambda: current_sender.get())
 # Handler sets current_sender before invoking the agent for each message.
 ```
@@ -277,12 +280,14 @@ options = ClaudeAgentOptions(
     **dc.to_sdk_config(),  # token_budget → task_budget, max_retries → max_turns
 )
 
+
 async def run(prompt: str) -> None:
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
             for block in message.content:
                 if isinstance(block, TextBlock):
                     print(block.text)
+
 
 asyncio.run(run("What was total revenue by region in Q1 2025?"))
 ```
@@ -300,19 +305,27 @@ server = create_sdk_mcp_server(dc, adapter=adapter)
 
 opts_kwargs = {
     "model": "claude-sonnet-4-6",
-    "mcp_servers": {"dc": server},                  # the ONLY data path
+    "mcp_servers": {"dc": server},  # the ONLY data path
     "allowed_tools": [f"mcp__dc__{t.name}" for t in tools],
 }
 
 # Feature-detect SDK support, then overlay the plugin's skills.
 fields = {f.name for f in dataclasses.fields(ClaudeAgentOptions)}
 if {"plugins", "skills", "strict_mcp_config"} <= fields:
-    opts_kwargs["plugins"] = [{"type": "local", "path": "/path/to/knowledge-work-plugins/data"}]
-    opts_kwargs["skills"] = ["validate-data", "statistical-analysis", "explore-data", "sql-queries"]
-    opts_kwargs["strict_mcp_config"] = True         # ← ignore the plugin's warehouse .mcp.json
-    opts_kwargs["system_prompt"] = {                # skills need the claude_code harness
-        "type": "preset", "preset": "claude_code",
-        "append": dc.to_system_prompt(),            # your governance, appended
+    opts_kwargs["plugins"] = [
+        {"type": "local", "path": "/path/to/knowledge-work-plugins/data"}
+    ]
+    opts_kwargs["skills"] = [
+        "validate-data",
+        "statistical-analysis",
+        "explore-data",
+        "sql-queries",
+    ]
+    opts_kwargs["strict_mcp_config"] = True  # ← ignore the plugin's warehouse .mcp.json
+    opts_kwargs["system_prompt"] = {  # skills need the claude_code harness
+        "type": "preset",
+        "preset": "claude_code",
+        "append": dc.to_system_prompt(),  # your governance, appended
     }
 
 options = ClaudeAgentOptions(**opts_kwargs)
@@ -420,6 +433,7 @@ Pydantic AI enforce the token budget per model request — see
 ```python
 import asyncio
 
+
 async def demo() -> None:
     # Inspect a query without executing. Response is structured JSON.
     inspect = next(t for t in tools if t.name == "inspect_query")
@@ -436,6 +450,7 @@ async def demo() -> None:
     # {"valid": false,
     #  "violations": ["SELECT * is not allowed — specify explicit columns", ...],
     #  "warnings": [], ...}
+
 
 asyncio.run(demo())
 ```
@@ -895,11 +910,13 @@ The agent can quote this verbatim in its answer — structured enough to reason 
 `trace_metric_impacts` walks the graph via BFS:
 
 ```python
-await trace.callable({
-    "metric_name": "total_revenue",
-    "direction": "upstream",     # upstream = drivers, downstream = affected
-    "max_depth": 2,
-})
+await trace.callable(
+    {
+        "metric_name": "total_revenue",
+        "direction": "upstream",  # upstream = drivers, downstream = affected
+        "max_depth": 2,
+    }
+)
 # Returns: {"edges": [{"depth": 1, "from": "active_customers", "to": "total_revenue",
 #                       "direction": "positive", "confidence": "verified",
 #                       "evidence": "A/B test exp-042..."}]}
@@ -966,11 +983,13 @@ to the agent.
 Decomposition operands become identity edges in the same graph as impacts, so `trace_metric_impacts` walks both. Its `kinds` argument selects which — `identity` (arithmetic), `influence` (causal), or `all` (default) — and every returned edge is tagged with its `kind`:
 
 ```python
-await trace.callable({
-    "metric_name": "total_revenue",
-    "direction": "upstream",       # operands drive their parent
-    "kinds": "identity",           # walk the arithmetic skeleton first
-})
+await trace.callable(
+    {
+        "metric_name": "total_revenue",
+        "direction": "upstream",  # operands drive their parent
+        "kinds": "identity",  # walk the arithmetic skeleton first
+    }
+)
 # Returns edges like: {"depth": 1, "from": "arpu", "to": "total_revenue",
 #                      "kind": "identity", "operator": "product",
 #                      "convention": "split_evenly"}
@@ -993,11 +1012,15 @@ from agentic_data_contracts import DataContract
 from agentic_data_contracts.validation import VerifiedExample, validate_examples
 
 contract = DataContract.from_yaml("contract.yml")
-examples = [VerifiedExample.from_dict(row) for row in load_your_yaml()]  # you own the load step
+examples = [
+    VerifiedExample.from_dict(row) for row in load_your_yaml()
+]  # you own the load step
 
-report = validate_examples(examples, contract, explain_adapter=adapter)  # adapter → live EXPLAIN
+report = validate_examples(
+    examples, contract, explain_adapter=adapter
+)  # adapter → live EXPLAIN
 if not report.ok:
-    print(report.summary())   # markdown, ready to post as an MR comment
+    print(report.summary())  # markdown, ready to post as an MR comment
     # in CI: sys.exit(1)
 ```
 
@@ -1026,7 +1049,9 @@ It confirms an example is still *allowed, well-formed, and plannable against the
 from agentic_data_contracts.validation import check_example_answers
 
 report = validate_examples(examples, contract, explain_adapter=adapter)
-answers = check_example_answers(report, adapter=adapter)  # a DIFFERENT adapter type — see below
+answers = check_example_answers(
+    report, adapter=adapter
+)  # a DIFFERENT adapter type — see below
 
 if not (report.ok and answers.ok):
     print(report.summary())
@@ -1085,8 +1110,8 @@ result = attribute_change(
     before={"volume": 10_000, "rate": 0.35},
     after={"volume": 15_000, "rate": 0.45},
 )
-result.contributions   # {"volume": 1750.0, "rate": 1500.0} under fold_into: rate
-result.interaction     # 500.0 — the raw residual, so the placement is auditable
+result.contributions  # {"volume": 1750.0, "rate": 1500.0} under fold_into: rate
+result.interaction  # 500.0 — the raw residual, so the placement is auditable
 ```
 
 Its sibling `check_attribution(...)` scores a *reported* breakdown against the
@@ -1113,8 +1138,12 @@ from agentic_data_contracts.validation import (
     evaluate_conformance,
 )
 
-examples = [VerifiedExample.from_dict(row) for row in load_your_yaml()]  # you own the load step
-corpus = [ex for ex in examples if ex.question]  # a row with no question cannot be evaluated
+examples = [
+    VerifiedExample.from_dict(row) for row in load_your_yaml()
+]  # you own the load step
+corpus = [
+    ex for ex in examples if ex.question
+]  # a row with no question cannot be evaluated
 
 attempts = []
 for example in corpus:
@@ -1132,12 +1161,14 @@ for example in corpus:
         )
     }
 
-    final_text = await your_agent_loop(example.question, tools)   # your agent, your framework
+    final_text = await your_agent_loop(
+        example.question, tools
+    )  # your agent, your framework
 
     attempts.append(Attempt.from_session(example, session, final_text=final_text))
 
-report = evaluate_conformance(attempts)   # pure: no network, no database, no model
-print(report.summary())                   # markdown, ready to post as a PR comment
+report = evaluate_conformance(attempts)  # pure: no network, no database, no model
+print(report.summary())  # markdown, ready to post as a PR comment
 ```
 
 `evaluate_conformance` itself is pure and synchronous — it scores recorded `Attempt`s and nothing else. Everything expensive and nondeterministic happens in *your* loop, above the call, which is what makes the verdict logic testable without a model and reproducible from a saved run. `Attempt.from_session` also carries off `session.cost_usd` and the recorder's own elapsed time, so a run can be costed. A runnable end-to-end demo with a scripted stand-in agent (no API key, no network) is [`examples/revenue_agent/evaluate_conformance.py`](examples/revenue_agent/evaluate_conformance.py).
@@ -1148,7 +1179,8 @@ print(report.summary())                   # markdown, ready to post as a PR comm
 
 ```python
 attempt = Attempt.from_session(
-    example, session,
+    example,
+    session,
     final_rows=[["Europe", 7200.00], ["North America", 2700.00]],
     final_columns=["region", "revenue"],
 )
@@ -1217,10 +1249,12 @@ For other models (GPT-4, Gemini, Llama), implement the `PromptRenderer` protocol
 ```python
 from agentic_data_contracts import PromptRenderer, DataContract
 
+
 class MarkdownRenderer:
     def render(self, contract, semantic_source=None):
         tables = "\n".join(f"- {t}" for t in contract.allowed_table_names())
         return f"## {contract.name}\n\nAllowed tables:\n{tables}"
+
 
 dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt(renderer=MarkdownRenderer()))
@@ -1240,7 +1274,9 @@ Both are constructor parameters, and `None` disables degradation entirely:
 
 ```python
 # Render every join key inline, however many there are.
-dc.to_system_prompt(source, renderer=XmlPromptRenderer(relationship_detail_threshold=None))
+dc.to_system_prompt(
+    source, renderer=XmlPromptRenderer(relationship_detail_threshold=None)
+)
 ```
 
 The suppressed content is not small — on a 52-relationship contract the join
@@ -1280,7 +1316,7 @@ join_paths:
 ```python
 source = YamlSource(
     "semantic.yml",
-    expected_extras={"column_hints", "join_paths"},   # anything else raises
+    expected_extras={"column_hints", "join_paths"},  # anything else raises
 )
 prompt = contract.to_system_prompt(
     source,
@@ -1390,8 +1426,9 @@ against one while reporting `tokens_remaining` from the other:
 from agentic_data_contracts.core.session import ContractSession
 
 session = ContractSession(dc)
-tools = create_langchain_tools(dc, adapter=adapter, session=session,
-                               apply_middleware=False)
+tools = create_langchain_tools(
+    dc, adapter=adapter, session=session, apply_middleware=False
+)
 middleware = ContractMiddleware(dc, adapter=adapter, session=session)
 ```
 
@@ -1417,7 +1454,7 @@ from agentic_data_contracts import contract_run_kwargs
 result = await agent.run(
     prompt,
     deps=ContractDeps(session=session),
-    **contract_run_kwargs(dc, session),   # -> usage= and usage_limits=
+    **contract_run_kwargs(dc, session),  # -> usage= and usage_limits=
 )
 ```
 

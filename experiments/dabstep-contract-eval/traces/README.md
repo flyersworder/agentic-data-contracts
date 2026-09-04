@@ -26,6 +26,7 @@ say in the text why that trace is being shown.
 
 ```python
 from dce.trace import read_trace
+
 for message in read_trace("traces/smoke12/1480__contract__z-ai-glm-5.3-flash.json.gz"):
     for part in message["parts"]:
         if part["part_kind"] == "tool-call":

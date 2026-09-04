@@ -158,7 +158,7 @@ class CubeSource:
                 if other_table is None:
                     continue
 
-                meta = join.get("meta") or {}
+                meta = as_mapping(join.get("meta"), where="cube join meta")
                 rel_field = (join.get("relationship") or "many_to_one").lower()
                 # `.get(k, fallback)` returned None for an explicit
                 # `relationship_type:` — the default only fires on absence.

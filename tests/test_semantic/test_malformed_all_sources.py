@@ -60,9 +60,14 @@ _CUBE: dict[str, Any] = {
             "joins": [
                 {
                     "name": "Customers",
-                    "sql": "${Orders}.customer_id = ${Customers}.id",
+                    "sql": "{Orders}.customer_id = {Customers}.id",
                     "relationship": "many_to_one",
                     "description": "Order to customer.",
+                    "meta": {
+                        "relationship_type": "many_to_one",
+                        "required_filter": None,
+                        "preferred": True,
+                    },
                 }
             ],
         },
@@ -134,11 +139,25 @@ _OSSIE: dict[str, Any] = {
                     "fields": [
                         {"name": "id", "datatype": "INTEGER", "description": "Id."},
                         {"name": "region", "datatype": "VARCHAR"},
+                        {"name": "customer_id", "datatype": "INTEGER"},
                     ],
-                }
+                },
+                {
+                    "name": "customers",
+                    "source": "analytics.customers",
+                    "primary_key": ["id"],
+                    "fields": [{"name": "id", "datatype": "INTEGER"}],
+                },
             ],
             "relationships": [
-                {"name": "r", "from": "orders", "to": "orders", "type": "many_to_one"}
+                {
+                    "name": "orders_to_customers",
+                    "from": "orders",
+                    "to": "customers",
+                    "from_columns": ["customer_id"],
+                    "to_columns": ["id"],
+                    "description": "Order to customer.",
+                }
             ],
             "custom_extensions": [
                 {
@@ -151,7 +170,21 @@ _OSSIE: dict[str, Any] = {
                                 "domains": ["revenue"],
                                 "tier": ["north_star"],
                                 "indicator_kind": "lagging",
-                            }
+                                "business_owner": "revenue-platform",
+                                "operational_owner": "data-eng",
+                                "last_reviewed": "2026-05-15",
+                                "decompositions": [
+                                    {"operator": "sum", "operands": ["a", "b"]}
+                                ],
+                                "drill_by": [
+                                    {
+                                        "dimension": "region",
+                                        "column": "analytics.orders.region",
+                                    }
+                                ],
+                            },
+                            "a": {"source_model": "analytics.orders"},
+                            "b": {"source_model": "analytics.orders"},
                         },
                         "metric_impacts": [
                             {
@@ -174,7 +207,9 @@ _OSSIE: dict[str, Any] = {
                             {"dialect": "duckdb", "expression": "SUM(a)"},
                         ]
                     },
-                }
+                },
+                {"name": "a", "expression": {"dialects": []}},
+                {"name": "b", "expression": {"dialects": []}},
             ],
         }
     ]
@@ -249,3 +284,38 @@ def test_the_baseline_document_loads(tmp_path: Path, source: str) -> None:
 
 def test_enough_cases_to_be_a_real_gate() -> None:
     assert len(_CASES) > 150, len(_CASES)
+
+
+@pytest.mark.parametrize("source", sorted(_SOURCES))
+def test_the_baseline_reaches_every_parser_output(tmp_path: Path, source: str) -> None:
+    """A section nothing parses makes every mutation of it a no-op.
+
+    Round 6 found the Cube join written as ``${Orders}.col``, which
+    ``_JOIN_EQ_RE`` never matches, so the relationship body was unreachable by
+    the entire generator while the file claimed to gate it. `YamlSource`'s
+    document is anchored to the exported frozensets; these three have no such
+    anchor, so this is the equivalent interlock.
+    """
+    base, _, filename = _SOURCES[source]
+    path = tmp_path / filename
+    if source == "dbt":
+        path.write_text(json.dumps(base))
+        src: Any = DbtSource(path)
+    else:
+        path.write_text(yaml.safe_dump(base))
+        src = CubeSource(path) if source == "cube" else OssieSource(path)
+    assert src.get_metrics(), f"{source}: baseline parses no metric"
+    assert src.get_table_schemas(), f"{source}: baseline parses no table"
+    assert src.get_relationships(), f"{source}: baseline parses no relationship"
+
+
+def test_the_ossie_baseline_reaches_the_vendor_overlay(tmp_path: Path) -> None:
+    """Decompositions, drill_by and impacts all live behind the vendor block."""
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump(_OSSIE))
+    src = OssieSource(path)
+    revenue = src.get_metric("revenue")
+    assert revenue is not None
+    assert revenue.decompositions, "overlay decompositions unreachable"
+    assert revenue.drill_by, "overlay drill_by unreachable"
+    assert src.get_metric_impacts(), "overlay metric_impacts unreachable"

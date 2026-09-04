@@ -517,6 +517,25 @@ def entry_list(value: Any, *, where: str) -> list[dict[str, Any]]:
     return value
 
 
+def dict_entries(value: Any) -> list[dict[str, Any]]:
+    """Every mapping in a list-valued key, skipping whatever else is there.
+
+    The *tolerant* sibling of :func:`entry_list`, and the distinction tracks who
+    wrote the document. A semantic YAML, a Cube schema and an Ossie model are
+    authored by hand, so a mis-shaped entry is a mistake worth failing the build
+    over. A dbt ``manifest.json`` is generated, its shape varies by dbt version,
+    and its author cannot edit it -- so one odd entry degrades to a skip rather
+    than killing every metric in the project.
+
+    Never raises: a non-list is an empty list, and a non-mapping entry is
+    dropped. Both cases were the pre-existing behaviour of ``DbtSource``'s own
+    ``isinstance`` guards.
+    """
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
 def as_mapping(value: Any, *, where: str) -> dict[str, Any]:
     """Read a mapping-valued key, or say precisely why it is not one.
 

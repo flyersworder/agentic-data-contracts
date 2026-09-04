@@ -404,7 +404,10 @@ class OssieSource:
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
                         )
-                        for d in extra.get("decompositions") or []
+                        for d in entry_list(
+                            extra.get("decompositions"),
+                            where=f"{name} decompositions",
+                        )
                     ],
                     drill_by=[
                         DrillDimension(
@@ -415,7 +418,9 @@ class OssieSource:
                                 dd.get("column"), where="Ossie drill_by[] column"
                             ),
                         )
-                        for dd in extra.get("drill_by") or []
+                        for dd in entry_list(
+                            extra.get("drill_by"), where=f"{name} drill_by"
+                        )
                     ],
                 )
             )

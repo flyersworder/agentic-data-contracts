@@ -15,7 +15,7 @@ from agentic_data_contracts.semantic.base import (
     as_mapping,
     as_text,
     build_relationship_index,
-    entry_list,
+    dict_entries,
     entry_mapping,
     fuzzy_search_metrics,
     require_text,
@@ -49,19 +49,20 @@ class DbtSource:
             type_params = as_mapping(
                 metric.get("type_params"), where="dbt metric type_params"
             )
-            measure = as_mapping(
-                type_params.get("measure"), where="dbt metric type_params.measure"
-            )
+            # Tolerated, not rejected: a manifest is generated, and one
+            # metric with an odd `measure` must not fail every other metric in
+            # the project. This `isinstance` was the original author's decision;
+            # `as_mapping` had silently overridden it.
+            measure = type_params.get("measure")
             if isinstance(measure, dict):
                 sql_expr = as_text(measure.get("expr"))
 
             filters: list[str] = []
-            for f in entry_list(metric.get("filters"), where="dbt metric filters"):
-                if isinstance(f, dict):
-                    field = as_text(f.get("field"))
-                    op = as_text(f.get("operator"))
-                    val = as_text(f.get("value"))
-                    filters.append(f"{field} {op} {val}")
+            for f in dict_entries(metric.get("filters")):
+                field = as_text(f.get("field"))
+                op = as_text(f.get("operator"))
+                val = as_text(f.get("value"))
+                filters.append(f"{field} {op} {val}")
 
             meta = as_mapping(metric.get("meta"), where="dbt metric meta")
             tier = as_list(meta.get("tier"))

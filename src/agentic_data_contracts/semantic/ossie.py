@@ -53,6 +53,7 @@ from agentic_data_contracts.semantic.base import (
     fuzzy_search_metrics,
     jsonify_extras,
     parse_review_date,
+    require_text,
     validate_decompositions,
     validate_drill_by,
 )
@@ -247,7 +248,9 @@ class OssieSource:
             self._tables[key] = TableSchema(
                 columns=[
                     Column(
-                        name=f["name"],
+                        name=require_text(
+                            f.get("name"), where=f"Ossie dataset {key} field name"
+                        ),
                         type=as_text(f.get("datatype")),
                         description=as_text(f.get("description")),
                     )
@@ -386,7 +389,10 @@ class OssieSource:
                     last_reviewed=parse_review_date(extra.get("last_reviewed")),
                     decompositions=[
                         Decomposition(
-                            operator=d["operator"],
+                            operator=require_text(
+                                d.get("operator"),
+                                where="Ossie decompositions[] operator",
+                            ),
                             operands=list(d.get("operands", [])),
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
@@ -394,7 +400,14 @@ class OssieSource:
                         for d in extra.get("decompositions", [])
                     ],
                     drill_by=[
-                        DrillDimension(dimension=dd["dimension"], column=dd["column"])
+                        DrillDimension(
+                            dimension=require_text(
+                                dd.get("dimension"), where="Ossie drill_by[] dimension"
+                            ),
+                            column=require_text(
+                                dd.get("column"), where="Ossie drill_by[] column"
+                            ),
+                        )
                         for dd in extra.get("drill_by", [])
                     ],
                 )
@@ -404,10 +417,14 @@ class OssieSource:
         for impact in impacts:
             self._metric_impacts.append(
                 MetricImpact(
-                    from_metric=impact["from"],
-                    to_metric=impact["to"],
-                    direction=impact.get("direction", "positive"),
-                    confidence=impact.get("confidence", "hypothesized"),
+                    from_metric=require_text(
+                        impact.get("from"), where="Ossie metric_impacts[] from"
+                    ),
+                    to_metric=require_text(
+                        impact.get("to"), where="Ossie metric_impacts[] to"
+                    ),
+                    direction=as_text(impact.get("direction"), "positive"),
+                    confidence=as_text(impact.get("confidence"), "hypothesized"),
                     evidence=as_text(impact.get("evidence")),
                     description=as_text(impact.get("description")),
                     last_reviewed=parse_review_date(impact.get("last_reviewed")),

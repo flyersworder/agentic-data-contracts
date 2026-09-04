@@ -235,3 +235,52 @@ def test_ossie_field_text_is_a_string(tmp_path: Path) -> None:
     assert table.description == ""
     assert table.columns[0].type == ""
     assert table.columns[0].description == ""
+
+
+def test_ossie_metric_impact_text_fields_are_strings(tmp_path: Path) -> None:
+    """The CHANGELOG claimed "all four sources"; Ossie's impacts were missed.
+
+    A null ``direction:`` reached `_format_impact_edge` and rendered
+    "None impact on X (None)" into the agent's context -- exactly what the
+    YamlSource fix was added to prevent.
+    """
+    model = _write(
+        tmp_path / "ossie.yml",
+        {
+            "semantic_model": [
+                {
+                    "name": "retail",
+                    "datasets": [
+                        {
+                            "name": "orders",
+                            "source": "analytics.orders",
+                            "fields": [{"name": "id", "datatype": "INT"}],
+                        }
+                    ],
+                    "custom_extensions": [
+                        {
+                            "vendor_name": "AGENTIC_DATA_CONTRACTS",
+                            "data": {
+                                "metric_impacts": [
+                                    {
+                                        "from": "a",
+                                        "to": "b",
+                                        "direction": None,
+                                        "confidence": None,
+                                        "evidence": None,
+                                        "description": None,
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    impacts = OssieSource(model).get_metric_impacts()
+    assert impacts, "no impact parsed — fixture shape is wrong, not the code"
+    assert impacts[0].direction == "positive"
+    assert impacts[0].confidence == "hypothesized"
+    assert impacts[0].evidence == ""
+    assert impacts[0].description == ""

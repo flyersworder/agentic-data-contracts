@@ -14,6 +14,7 @@ from agentic_data_contracts.semantic.base import (
     as_text,
     build_relationship_index,
     fuzzy_search_metrics,
+    require_text,
 )
 
 
@@ -55,7 +56,7 @@ class DbtSource:
 
             result.append(
                 MetricDefinition(
-                    name=as_text(metric["name"]),
+                    name=require_text(metric.get("name"), where="dbt metric name"),
                     description=as_text(metric.get("description")),
                     sql_expression=sql_expr,
                     source_model=as_text(metric.get("model")),
@@ -77,7 +78,9 @@ class DbtSource:
             key = f"{schema_name}.{table_name}"
             columns = [
                 Column(
-                    name=as_text(col["name"]),
+                    name=require_text(
+                        col.get("name"), where=f"dbt model {key} column name"
+                    ),
                     type=as_text(col.get("data_type")),
                     description=as_text(col.get("description")),
                 )
@@ -87,8 +90,6 @@ class DbtSource:
                 columns=columns,
                 # dbt models carry a description in the same manifest node the
                 # column descriptions come from; it was read for columns only.
-                # `or ""` for the same reason as Ossie: a node may carry an
-                # explicit null, and the field is annotated `str`.
                 description=as_text(node.get("description")),
             )
         return tables

@@ -554,7 +554,12 @@ def create_tools(
                     # Same precedence as the column overlay: the semantic source
                     # is the canonical agent-facing documentation, and an adapter
                     # value (a warehouse table comment) fills in behind it.
-                    table_desc = sem_ts.description or table_desc
+                    # `getattr` for the same reason as the adapter's above --
+                    # `SemanticSource` is a structural protocol too, and
+                    # `get_table_schema` is part of it, so a third-party source
+                    # returning its own schema-shaped object was legal while this
+                    # tool read only `.columns`.
+                    table_desc = getattr(sem_ts, "description", "") or table_desc
             cols: list[dict[str, Any]] = []
             for c in ts.columns:
                 col: dict[str, Any] = {

@@ -16,6 +16,7 @@ from agentic_data_contracts.semantic.base import (
     as_text,
     build_relationship_index,
     fuzzy_search_metrics,
+    require_text,
 )
 
 # Maps Cube's `relationship` enum (camelCase v1 + snake_case v2 aliases) to
@@ -57,7 +58,9 @@ class CubeSource:
                 )
                 self._metrics.append(
                     MetricDefinition(
-                        name=as_text(measure["name"]),
+                        name=require_text(
+                            measure.get("name"), where="cube measure name"
+                        ),
                         description=as_text(measure.get("description")),
                         sql_expression=as_text(measure.get("sql")),
                         source_model=sql_table,
@@ -70,7 +73,9 @@ class CubeSource:
             if sql_table and "." in sql_table:
                 columns = [
                     Column(
-                        name=as_text(c["name"]),
+                        name=require_text(
+                            c.get("name"), where=f"cube {sql_table} column name"
+                        ),
                         type=as_text(c.get("type")),
                         description=as_text(c.get("description")),
                     )

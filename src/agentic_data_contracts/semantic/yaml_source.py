@@ -23,6 +23,7 @@ from agentic_data_contracts.semantic.base import (
     fuzzy_search_metrics,
     jsonify_extras,
     parse_review_date,
+    require_text,
     validate_decompositions,
     validate_drill_by,
 )
@@ -298,7 +299,10 @@ class YamlSource:
             raw.get("decomposition_convention")
         )
         self._metrics = []
-        for m in raw.get("metrics", []):
+        # `or []` at every section: a bare `metrics:` header loads as None,
+        # and the nested guard is already defensive about exactly this shape,
+        # so without it the guard passes and this loop dies two lines later.
+        for m in raw.get("metrics") or []:
             tier_raw = m.get("tier", [])
             tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
             domains_raw = m.get("domains", [])
@@ -307,11 +311,15 @@ class YamlSource:
             )
             self._metrics.append(
                 MetricDefinition(
-                    name=as_text(m["name"]),
+                    name=require_text(m.get("name"), where="metrics[] name"),
                     description=as_text(m.get("description")),
                     sql_expression=as_text(m.get("sql_expression")),
                     source_model=as_text(m.get("source_model")),
-                    filters=m.get("filters", []),
+                    # `or []`: unlike `domains`/`tier` below, a null here
+                    # was carried into the metric and only surfaced later, as a
+                    # TypeError inside `dump_semantic_source` — a crashed freeze
+                    # far from the malformed key that caused it.
+                    filters=list(m.get("filters") or []),
                     domains=domains,
                     tier=tier,
                     indicator_kind=m.get("indicator_kind"),
@@ -325,56 +333,56 @@ class YamlSource:
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
                         )
-                        for d in m.get("decompositions", [])
+                        for d in m.get("decompositions") or []
                     ],
                     drill_by=[
                         DrillDimension(
                             dimension=as_text(dd["dimension"]),
                             column=as_text(dd["column"]),
                         )
-                        for dd in m.get("drill_by", [])
+                        for dd in m.get("drill_by") or []
                     ],
                 )
             )
         self._tables: dict[str, TableSchema] = {}
-        for t in raw.get("tables", []):
+        for t in raw.get("tables") or []:
             key = f"{t['schema']}.{t['table']}"
             self._tables[key] = TableSchema(
                 columns=[
                     Column(
-                        name=as_text(c["name"]),
+                        name=require_text(
+                            c.get("name"), where=f"tables[] {key} columns[] name"
+                        ),
                         type=as_text(c.get("type")),
                         description=as_text(c.get("description")),
                     )
-                    for c in t.get("columns", [])
+                    for c in t.get("columns") or []
                 ],
-                # `or ""` because a bare `description:` key loads as None,
-                # and the field is annotated `str` and is public API.
                 description=as_text(t.get("description")),
             )
         self._relationships = [
             Relationship(
-                from_=as_text(r["from"]),
-                to=as_text(r["to"]),
+                from_=require_text(r.get("from"), where="relationships[] from"),
+                to=require_text(r.get("to"), where="relationships[] to"),
                 type=as_text(r.get("type"), "many_to_one"),
                 description=as_text(r.get("description")),
                 required_filter=r.get("required_filter"),
                 preferred=r.get("preferred", False),
             )
-            for r in raw.get("relationships", [])
+            for r in raw.get("relationships") or []
         ]
         self._rel_index = build_relationship_index(self._relationships)
         self._metric_impacts = [
             MetricImpact(
-                from_metric=as_text(i["from"]),
-                to_metric=as_text(i["to"]),
+                from_metric=require_text(i.get("from"), where="metric_impacts[] from"),
+                to_metric=require_text(i.get("to"), where="metric_impacts[] to"),
                 direction=as_text(i.get("direction"), "positive"),
                 confidence=as_text(i.get("confidence"), "hypothesized"),
                 evidence=as_text(i.get("evidence")),
                 description=as_text(i.get("description")),
                 last_reviewed=parse_review_date(i.get("last_reviewed")),
             )
-            for i in raw.get("metric_impacts", [])
+            for i in raw.get("metric_impacts") or []
         ]
         _apply_convention_default(self._metrics, default_convention)
         validate_decompositions(self._metrics)

@@ -486,6 +486,28 @@ def as_text(value: Any, default: str = "") -> str:
     return value if isinstance(value, str) else str(value)
 
 
+def require_text(value: Any, *, where: str) -> str:
+    """Read an *identity* field, refusing a blank one.
+
+    The counterpart to :func:`as_text`, and the distinction is the point. A null
+    ``description:`` coerced to ``""`` costs a sentence. A null ``name:`` coerced
+    to ``""`` produces a metric that loads clean, renders into the prompt, and is
+    unfindable by any name a caller would use — the silent-drop shape #89 exists
+    to eliminate, reintroduced by the fix for it.
+
+    Applies to what a thing *is called* or *points at*: a metric or column name,
+    a relationship or impact endpoint. *where* names the offending entry, since a
+    parser error a consumer cannot locate is barely better than silence.
+    """
+    text = as_text(value).strip()
+    if not text:
+        raise ValueError(
+            f"{where} must name a non-empty value, got {value!r}. An identity"
+            " that is blank cannot be looked up, referenced, or rendered."
+        )
+    return text
+
+
 def _iso(d: date | None) -> str | None:
     """ISO-format a date, passing ``None`` through."""
     return d.isoformat() if d is not None else None

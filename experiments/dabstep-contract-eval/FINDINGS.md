@@ -236,6 +236,19 @@ leaderboard measures. Run D supplies the same check on a second model family:
 Sonnet 5 with the manual in its prompt lands at **23.8%** hard, against the
 leaderboard's 19.8% for Claude 4 Sonnet under the same approach.
 
+The gold audit tightens that second check rather than loosening it. Our 23.8%
+is graded against reconstructed golds and their 19.8% officially, and Sonnet
+5's `manual_prompt` is the most leniency-exposed cell anywhere in these runs
+(40.5%, see [Is the leniency
+arm-neutral?](#is-the-leniency-arm-neutral-not-quite-and-not-in-one-direction)).
+Correcting it gives **18.2%** — moving us from 4.0 pp above the comparator to
+1.6 pp below it, with both sides then graded on something closer to the same
+footing. Part of the original overshoot was our own leniency. That 40.5% also
+makes this the least safe extrapolation in the analysis, applying a rate
+measured on glm's contract arm to the arm and model furthest from it; read
+18.2% as a direction, not a second measurement. Run A's corrected
+`manual_prompt`, 20.3%, stays inside the 20–26% band.
+
 On deepseek the same arm reaches **42.9%**, well above the published band.
 That is a statement about the model, not the harness: `deepseek-v4-flash` is
 simply stronger at this benchmark than the named baselines, and its

@@ -504,6 +504,7 @@ The checker does not implement the `Checker` protocol. It exposes `check_joins(a
 class ExplainAdapter(Protocol):
     def explain(self, sql: str) -> ExplainResult: ...
 
+
 # ExplainResult:
 #   estimated_cost_usd: float | None
 #   estimated_rows: int | None
@@ -767,11 +768,13 @@ options = ClaudeAgentOptions(
 ```python
 from agentic_data_contracts import contract_middleware
 
+
 @contract_middleware(contract, adapter=adapter)
 async def my_custom_query_tool(args: dict) -> dict:
     """Existing query tool with custom logic."""
     result = await my_database.execute(args["sql"])
     return {"content": [{"type": "text", "text": str(result)}]}
+
 
 # Middleware: intercept sql → validate → block/warn → call wrapped → track session
 # Returns a @tool-decorated async function compatible with create_sdk_mcp_server()
@@ -901,6 +904,7 @@ class DatabaseAdapter(Protocol):
     @property
     def dialect(self) -> str: ...  # "bigquery", "snowflake", "postgres", "duckdb"
 
+
 class SqlNormalizer(Protocol):
     def normalize_sql(self, sql: str) -> str: ...
 ```
@@ -970,6 +974,7 @@ contract_obj = compile_to_contract(data_contract)
 ```python
 try:
     from agent_contracts import Contract
+
     AGENT_CONTRACTS_AVAILABLE = True
 except ImportError:
     AGENT_CONTRACTS_AVAILABLE = False
@@ -1088,8 +1093,11 @@ import asyncio
 from agentic_data_contracts import DataContract, create_tools
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from claude_agent_sdk import (
-    query, ClaudeAgentOptions, create_sdk_mcp_server,
-    AssistantMessage, TextBlock,
+    query,
+    ClaudeAgentOptions,
+    create_sdk_mcp_server,
+    AssistantMessage,
+    TextBlock,
 )
 
 dc = DataContract.from_yaml("contract.yml")
@@ -1097,9 +1105,7 @@ adapter = DuckDBAdapter("sample_data.duckdb")
 
 # Create contract-aware tools and bundle into MCP server
 sdk_tools = create_tools(dc, adapter=adapter)
-server = create_sdk_mcp_server(
-    name="data-contracts", version="1.0.0", tools=sdk_tools
-)
+server = create_sdk_mcp_server(name="data-contracts", version="1.0.0", tools=sdk_tools)
 
 # User's own system prompt + contract rules appended
 user_prompt = """You are a revenue analytics assistant for Acme Corp.
@@ -1112,6 +1118,7 @@ options = ClaudeAgentOptions(
     allowed_tools=[f"mcp__dc__{t.name}" for t in sdk_tools],
 )
 
+
 async def main():
     async for message in query(
         prompt="What was total revenue by region in Q1 2025?",
@@ -1121,6 +1128,7 @@ async def main():
             for block in message.content:
                 if isinstance(block, TextBlock):
                     print(block.text)
+
 
 asyncio.run(main())
 ```

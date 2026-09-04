@@ -78,12 +78,18 @@ All notable changes to this project will be documented in this file.
 
   ```python
   attempts = []
-  for example in corpus:                      # rows carrying a `question`
+  for example in corpus:  # rows carrying a `question`
       session = ContractSession(contract, recorder=ToolRecorder())
-      tools = {t.name: t.callable for t in create_tools(contract, adapter=adapter,
-                                                        semantic_source=semantic,
-                                                        session=session,
-                                                        caller_principal=example.principal)}
+      tools = {
+          t.name: t.callable
+          for t in create_tools(
+              contract,
+              adapter=adapter,
+              semantic_source=semantic,
+              session=session,
+              caller_principal=example.principal,
+          )
+      }
       final_text = await your_agent_loop(example.question, tools)
       attempts.append(Attempt.from_session(example, session, final_text=final_text))
 

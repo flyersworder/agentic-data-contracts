@@ -138,7 +138,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class ModelSpec:
     id: str
-    price_in: float   # USD per 1M input tokens
+    price_in: float  # USD per 1M input tokens
     price_out: float  # USD per 1M output tokens
     role: str
 
@@ -1196,7 +1196,12 @@ import pytest
 
 from dce.agent import build_result_row, run_task
 
-TASK = {"task_id": "7", "question": "What is X?", "guidelines": "Answer with a number.", "level": "hard"}
+TASK = {
+    "task_id": "7",
+    "question": "What is X?",
+    "guidelines": "Answer with a number.",
+    "level": "hard",
+}
 
 
 def test_result_row_carries_full_provenance():
@@ -1214,9 +1219,21 @@ def test_result_row_carries_full_provenance():
         inspect_rejections=1,
     )
     for field in (
-        "task_id", "level", "arm", "model", "answer", "gold", "verdict",
-        "input_tokens", "output_tokens", "cached_tokens", "usd",
-        "tool_calls", "inspect_rejections", "contract_digest", "commit_sha",
+        "task_id",
+        "level",
+        "arm",
+        "model",
+        "answer",
+        "gold",
+        "verdict",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "usd",
+        "tool_calls",
+        "inspect_rejections",
+        "contract_digest",
+        "commit_sha",
         "adc_version",
     ):
         assert field in row, field
@@ -1224,9 +1241,17 @@ def test_result_row_carries_full_provenance():
 
 def test_result_row_prices_from_the_pinned_table():
     row = build_result_row(
-        task=TASK, arm="contract", model="deepseek/deepseek-v4-pro-0813",
-        answer="x", gold="y", verdict="incorrect",
-        in_tok=1_000_000, out_tok=0, cached_tok=0, tool_calls=[], inspect_rejections=0,
+        task=TASK,
+        arm="contract",
+        model="deepseek/deepseek-v4-pro-0813",
+        answer="x",
+        gold="y",
+        verdict="incorrect",
+        in_tok=1_000_000,
+        out_tok=0,
+        cached_tok=0,
+        tool_calls=[],
+        inspect_rejections=0,
     )
     assert row["usd"] == pytest.approx(0.66)
 
@@ -1239,8 +1264,12 @@ def test_run_task_records_a_cap_trip_as_hit_limit_not_incorrect(tmp_path: Path):
             raise UsageLimitExceeded("tool call limit")
 
     row = run_task(
-        TASK, "schema_only", "z-ai/glm-5.3-flash", tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"}, gold="0.12",
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
         agent_factory=lambda **_: Exploded(),
     )
     # A cap trip is a harness artifact. Scoring it as a wrong answer would let
@@ -1282,8 +1311,12 @@ def test_run_task_scores_the_final_message(tmp_path: Path):
             return _fake_result("0.12")
 
     row = run_task(
-        TASK, "schema_only", "z-ai/glm-5.3-flash", tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"}, gold="0.12",
+        TASK,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "correct"
@@ -1300,12 +1333,19 @@ def test_run_task_records_the_tool_call_sequence(tmp_path: Path):
             )
 
     row = run_task(
-        TASK, "contract", "z-ai/glm-5.3-flash", tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"}, gold="0.12",
+        TASK,
+        "contract",
+        "z-ai/glm-5.3-flash",
+        tmp_path / "x.duckdb",
+        {"manual": "m", "payments_readme": "r"},
+        gold="0.12",
         agent_factory=lambda **_: Fake(),
     )
     assert row["tool_calls"] == [
-        "lookup_domain", "lookup_metric", "inspect_query", "run_query"
+        "lookup_domain",
+        "lookup_metric",
+        "inspect_query",
+        "run_query",
     ]
 ```
 
@@ -1362,8 +1402,18 @@ def _commit_sha() -> str:
 
 
 def build_result_row(
-    *, task, arm, model, answer, gold, verdict, in_tok, out_tok, cached_tok,
-    tool_calls, inspect_rejections,
+    *,
+    task,
+    arm,
+    model,
+    answer,
+    gold,
+    verdict,
+    in_tok,
+    out_tok,
+    cached_tok,
+    tool_calls,
+    inspect_rejections,
 ) -> dict:
     return {
         "task_id": task["task_id"],
@@ -1463,8 +1513,16 @@ def run_task(
     setup.close()
 
     return build_result_row(
-        task=task, arm=arm, model=model, answer=answer, gold=gold, verdict=verdict,
-        in_tok=in_tok, out_tok=out_tok, cached_tok=cached, tool_calls=tool_calls,
+        task=task,
+        arm=arm,
+        model=model,
+        answer=answer,
+        gold=gold,
+        verdict=verdict,
+        in_tok=in_tok,
+        out_tok=out_tok,
+        cached_tok=cached,
+        tool_calls=tool_calls,
         inspect_rejections=rejections,
     )
 ```
@@ -1531,15 +1589,28 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
 
     def fake_run(task, arm, model, *a, **k):
         calls.append(arm)
-        return {"task_id": task["task_id"], "arm": arm, "model": model,
-                "usd": 0.40, "verdict": "correct"}
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.40,
+            "verdict": "correct",
+        }
 
-    tasks = [{"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
-             for i in range(10)]
+    tasks = [
+        {"task_id": str(i), "question": "q", "guidelines": "g", "level": "hard"}
+        for i in range(10)
+    ]
     spent = sweep(
-        tasks, ("schema_only",), ("z-ai/glm-5.3-flash",), {"1": "g"},
-        out=tmp_path / "r.jsonl", db_path=tmp_path / "d", docs={},
-        max_spend=1.00, run_task_fn=fake_run,
+        tasks,
+        ("schema_only",),
+        ("z-ai/glm-5.3-flash",),
+        {"1": "g"},
+        out=tmp_path / "r.jsonl",
+        db_path=tmp_path / "d",
+        docs={},
+        max_spend=1.00,
+        run_task_fn=fake_run,
     )
     # Three calls cost 1.20, which overruns; the guard must stop at two.
     assert len(calls) == 2
@@ -1550,11 +1621,25 @@ def test_sweep_appends_rows_that_can_be_resumed(tmp_path: Path):
     out = tmp_path / "r.jsonl"
 
     def fake_run(task, arm, model, *a, **k):
-        return {"task_id": task["task_id"], "arm": arm, "model": model,
-                "usd": 0.01, "verdict": "correct"}
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.01,
+            "verdict": "correct",
+        }
 
-    sweep(TASKS, ("contract",), ("m",), {"1": "g"}, out=out,
-          db_path=tmp_path / "d", docs={}, max_spend=1.0, run_task_fn=fake_run)
+    sweep(
+        TASKS,
+        ("contract",),
+        ("m",),
+        {"1": "g"},
+        out=out,
+        db_path=tmp_path / "d",
+        docs={},
+        max_spend=1.0,
+        run_task_fn=fake_run,
+    )
     assert completed_keys(out) == {("1", "contract", "m")}
 ```
 
@@ -1604,8 +1689,17 @@ def pending(tasks, arms, models, done) -> list[tuple[str, str, str]]:
 
 
 def sweep(
-    tasks, arms, models, golds, *, out: Path, db_path: Path, docs,
-    max_spend: float, run_task_fn=run_task, per_task_usd: float = 0.25,
+    tasks,
+    arms,
+    models,
+    golds,
+    *,
+    out: Path,
+    db_path: Path,
+    docs,
+    max_spend: float,
+    run_task_fn=run_task,
+    per_task_usd: float = 0.25,
 ) -> float:
     # The ungoverned arms can genuinely write: dropping read_only was required to
     # avoid a DuckDB connection-config conflict with the governed adapter, so
@@ -1628,7 +1722,12 @@ def sweep(
             if task_id not in golds:
                 continue
             row = run_task_fn(
-                by_id[task_id], arm, model, db_path, docs, golds[task_id],
+                by_id[task_id],
+                arm,
+                model,
+                db_path,
+                docs,
+                golds[task_id],
                 per_task_usd=per_task_usd,
             )
             # run_task closes the arm, so the working copy has no live
@@ -1669,8 +1768,14 @@ def main() -> None:
     }
 
     spent = sweep(
-        tasks, tuple(args.arms), tuple(args.models), golds,
-        out=args.out, db_path=args.db, docs=docs, max_spend=args.max_spend,
+        tasks,
+        tuple(args.arms),
+        tuple(args.models),
+        golds,
+        out=args.out,
+        db_path=args.db,
+        docs=docs,
+        max_spend=args.max_spend,
     )
     print(f"spent ${spent:.2f}")
 
@@ -1708,9 +1813,7 @@ def assert_clean_tree() -> None:
     so an uncommitted change makes every row's commit_sha a lie — and nothing in
     the results would show it.
     """
-    dirty = subprocess.check_output(
-        ["git", "status", "--porcelain"], text=True
-    ).strip()
+    dirty = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
     if dirty:
         raise SystemExit(
             "refusing to run a scored sweep with a dirty working tree; "
@@ -1769,7 +1872,7 @@ def test_mcnemar_reports_discordant_pairs():
     a = {"1": True, "2": False, "3": True, "4": False}
     b = {"1": True, "2": True, "3": True, "4": True}
     result = mcnemar(a, b)
-    assert result["b_only"] == 2   # b right where a wrong
+    assert result["b_only"] == 2  # b right where a wrong
     assert result["a_only"] == 0
     assert result["discordant"] == 2
 

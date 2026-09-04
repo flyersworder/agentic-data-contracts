@@ -693,9 +693,17 @@ under it) and a column's own — what the *table* means, which an agent needs
 before it writes SQL over it: "`orders` is one row per authorisation attempt,
 not per settled transaction." It is rendered by `describe_table` ahead of the
 column list, and read from a **YAML** source, a **dbt** model's `description`,
-and an **Ossie** dataset's. It is omitted from a contract's canonical bytes when
-empty, so adding the field does not move the digest of a contract that declares
-none.
+an **Ossie** dataset's, and a **Cube** cube's. It is omitted from a contract's
+canonical bytes when empty.
+
+That last point has a consequence worth reading before you upgrade to 0.50.0.
+A **YAML**-source contract that declares no table description keeps a
+byte-identical digest. A **dbt**, **Ossie**, or **Cube**-source contract does
+not, if its models/datasets/cubes carry descriptions — because the source now
+carries a description it previously discarded, the frozen bytes genuinely gain
+content, and `contract_digest` moves with it. That is the correct behaviour for
+a content address, but a published attestation over such a contract needs
+re-pinning.
 
 `tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names. For Ossie, they live in the model's `custom_extensions` block (see [Apache Ossie](#apache-ossie) below).
 
@@ -1349,7 +1357,9 @@ carried. A top-level key is plausibly a section you authored; a key inside a
 dropped rather than given a nested-extras shape that would widen the dump format
 and move every published digest. The per-entry vocabularies are exported as
 `TABLE_KEYS`, `COLUMN_KEYS`, `METRIC_KEYS`, `DECOMPOSITION_KEYS`,
-`DRILL_BY_KEYS`, `RELATIONSHIP_KEYS`, and `METRIC_IMPACT_KEYS`.
+`DRILL_BY_KEYS`, `RELATIONSHIP_KEYS`, `METRIC_IMPACT_KEYS`, and
+`DECOMPOSITION_CONVENTION_KEYS` (the one interpreted section that is a mapping
+rather than a list of entries).
 
 Note that `expected_extras` whitelists *top-level sections only* — naming
 `summary` there does not excuse a `summary:` key on a table entry. Declaring

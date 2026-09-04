@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
   **`expected_extras` does not excuse a nested key.** It whitelists *top-level sections*: naming `summary` there says "I authored a top-level `summary:` section", which is no statement at all about a `summary:` key inside a table entry. Its role here is only the mode switch — declaring it at all means "fail my build on a key you do not read", and that promise now holds at every depth.
 
+  Two hazards the first cut of this guard introduced, both fixed here: a document with two unknown keys of *different types* in one entry (`yaml.safe_load` resolves a bare `2024:` to an `int` and `on:` to a `bool`) sorted a heterogeneous set and died with an opaque `TypeError` from inside the diagnostic — turning a silent drop into a crash, which is worse than the defect being reported. And `decomposition_convention` is a *mapping*, not a list of entries, so a walk over the list-valued sections could not reach it; `DECOMPOSITION_CONVENTION_KEYS` closes it, which is what makes "at every depth" true rather than nearly true.
+
   **Upgrade note.** `metrics:` is the entry most likely to carry keys in the wild; someone porting a dbt `schema.yml` will paste `meta:`, `tags:`, or `config:` onto a metric. Under the default that is a warning naming the remedy. Under `expected_extras` it is a load-time failure on upgrade — intended, and the whole point of strict mode, but the line to read before bumping. All 26 semantic and contract YAML files in this repository, `examples/` and `experiments/` included, were scanned before the change: zero nested unknown keys.
 
 ### Added
@@ -22,7 +24,11 @@ All notable changes to this project will be documented in this file.
 
   Read from a YAML source's `tables[].description`, and populated from the description **dbt** and **Ossie** sources already held and discarded — a dbt model's `description` and an Ossie dataset's are the same fact under another name. Rendered by `describe_table` ahead of the column list, which is the only path a semantic source's table schemas reach an agent at all; a semantic-source description wins over an adapter's, the same precedence the column overlay already uses.
 
-  `description` is appended after `columns` on the dataclass, so every pre-existing positional `TableSchema([...])` keeps binding to the field it always did — the rule already recorded on `Attempt.final_rows`. It is **omitted from `dump_semantic_source` when empty**, following `_dump_metric`'s stated reason: `contract_canonical_bytes` dumps with no `exclude_none`, so an always-present key would move every published digest. Verified against a real frozen artifact rather than asserted — the DABStep experiment's pinned `sha256:e438ecf7…` and hollow `sha256:c46a767d…` both recompute unchanged on this release.
+  `description` is appended after `columns` on the dataclass, so every pre-existing positional `TableSchema([...])` keeps binding to the field it always did — the rule already recorded on `Attempt.final_rows`. Read through `getattr` in `describe_table`, since `DatabaseAdapter` is a structural protocol and an external adapter returning its own schema-shaped object satisfied that tool while it read only `.columns`.
+
+  It is **omitted from `dump_semantic_source` when empty**, following `_dump_metric`'s stated reason: `contract_canonical_bytes` dumps with no `exclude_none`, so an always-present key would move every published digest. A **YAML**-source contract that declares no table description therefore keeps byte-identical canonical bytes — verified against a real frozen artifact rather than asserted, as the DABStep experiment's pinned `sha256:e438ecf7…` and hollow `sha256:c46a767d…` both recompute unchanged on this release.
+
+  **`contract_digest` does move for a dbt-, Ossie-, or Cube-source contract whose models carry descriptions.** Nothing is being dropped or reordered: the source now carries a description it previously discarded, so the frozen bytes genuinely gain content and the content address follows. That is correct for a content address and is the point of one, but a published ARD attestation over such a contract needs re-pinning on this bump. The DABStep artifact could not have caught this — it is a YAML source with no table descriptions.
 
 ## [0.49.0] - 2026-08-29
 

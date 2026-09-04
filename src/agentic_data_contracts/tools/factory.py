@@ -540,7 +540,11 @@ def create_tools(
             # comments) fill in where the semantic source has no entry. Columns
             # with no description anywhere omit the field to keep responses tight.
             sem_descs: dict[str, str] = {}
-            table_desc = ts.description
+            # `getattr` because `DatabaseAdapter` is a structural protocol: an
+            # external adapter returning its own schema-shaped object satisfied
+            # this tool while it read only `.columns`, and a minor bump should
+            # not raise AttributeError out of an agent's turn.
+            table_desc = getattr(ts, "description", "") or ""
             if semantic_source is not None:
                 sem_ts = semantic_source.get_table_schema(schema_name, table_name)
                 if sem_ts is not None:

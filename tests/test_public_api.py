@@ -43,6 +43,7 @@ def test_nested_key_sets_are_top_level_too() -> None:
     """
     from agentic_data_contracts import (
         COLUMN_KEYS,
+        DECOMPOSITION_CONVENTION_KEYS,
         DECOMPOSITION_KEYS,
         DRILL_BY_KEYS,
         METRIC_IMPACT_KEYS,
@@ -64,6 +65,8 @@ def test_nested_key_sets_are_top_level_too() -> None:
         "convention_operand",
     }
     assert DRILL_BY_KEYS == {"dimension", "column"}
+    # The one interpreted section that is a mapping, not a list.
+    assert DECOMPOSITION_CONVENTION_KEYS == {"convention"}
 
 
 def test_claude_prompt_renderer_is_gone() -> None:

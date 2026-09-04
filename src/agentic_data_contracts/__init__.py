@@ -22,6 +22,7 @@ from agentic_data_contracts.semantic.base import (
 )
 from agentic_data_contracts.semantic.yaml_source import (
     COLUMN_KEYS,
+    DECOMPOSITION_CONVENTION_KEYS,
     DECOMPOSITION_KEYS,
     DRILL_BY_KEYS,
     METRIC_IMPACT_KEYS,
@@ -72,6 +73,7 @@ except ImportError:  # pragma: no cover — exercised only without the extra
 
 __all__ = [
     "COLUMN_KEYS",
+    "DECOMPOSITION_CONVENTION_KEYS",
     "DECOMPOSITION_KEYS",
     "DRILL_BY_KEYS",
     "METRIC_IMPACT_KEYS",

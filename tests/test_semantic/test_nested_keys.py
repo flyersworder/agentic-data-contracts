@@ -19,14 +19,20 @@ digest. Diagnose, don't carry.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pytest
+import yaml
 
 from agentic_data_contracts.semantic.yaml_source import (
     COLUMN_KEYS,
+    DECOMPOSITION_CONVENTION_KEYS,
+    DECOMPOSITION_KEYS,
+    DRILL_BY_KEYS,
     METRIC_IMPACT_KEYS,
     METRIC_KEYS,
     RELATIONSHIP_KEYS,
+    SEMANTIC_KEYS,
     TABLE_KEYS,
     YamlSource,
 )
@@ -232,74 +238,200 @@ def test_relationship_and_impact_key_sets_include_their_yaml_spellings() -> None
 # ── The guard must not fire on the vocabulary it interprets ─────────────────
 
 
-def test_every_interpreted_key_loads_without_a_warning(caplog) -> None:  # noqa: ANN001
-    """A full-vocabulary document is silent -- the guard's false-positive test.
+#: A document using every interpreted key. Asserted key-for-key against the
+#: exported frozensets below, which is what makes the silence test meaningful:
+#: a key added to a parser without being added to its key set fails there
+#: rather than going quietly untested -- the exact regression #89 was.
+_FULL_DOCUMENT: dict[str, Any] = {
+    "tables": [
+        {
+            "schema": "main",
+            "table": "payments",
+            "description": "One row per authorisation attempt.",
+            "columns": [{"name": "region", "type": "VARCHAR", "description": "d"}],
+        }
+    ],
+    "metrics": [
+        {
+            "name": "revenue",
+            "description": "d",
+            "sql_expression": "SUM(x)",
+            "source_model": "main.payments",
+            "filters": [],
+            "domains": [],
+            "tier": [],
+            "indicator_kind": None,
+            "business_owner": None,
+            "operational_owner": None,
+            "last_reviewed": None,
+            "decompositions": [
+                {
+                    "operator": "product",
+                    "operands": ["a", "b"],
+                    "convention": "split_evenly",
+                    "convention_operand": None,
+                }
+            ],
+            "drill_by": [{"dimension": "region", "column": "main.payments.region"}],
+        },
+        # Leaf operands, so the decomposition above resolves. Their sparser key
+        # sets are a subset of METRIC_KEYS, so they raise nothing; only
+        # `metrics[0]` is asserted equal to the full vocabulary.
+        {"name": "a", "sql_expression": "SUM(a)"},
+        {"name": "b", "sql_expression": "SUM(b)"},
+    ],
+    "relationships": [
+        {
+            "from": "main.payments.region",
+            "to": "main.regions.id",
+            "type": "many_to_one",
+            "description": "d",
+            "required_filter": None,
+            "preferred": False,
+        }
+    ],
+    "metric_impacts": [
+        {
+            "from": "revenue",
+            "to": "revenue",
+            "direction": "positive",
+            "confidence": "hypothesized",
+            "evidence": "e",
+            "description": "d",
+            "last_reviewed": None,
+        }
+    ],
+    "decomposition_convention": {"convention": "split_evenly"},
+}
 
-    Built from the exported key sets rather than a handwritten literal, so a
-    key added to the parser without being added here fails loudly instead of
-    going untested.
+
+def test_the_full_document_uses_every_interpreted_key() -> None:
+    """Makes the silence test below a real guard rather than a claim.
+
+    Each assertion is equality, not membership: a key added to a parser (and so
+    to its frozenset) without being added to the document fails here, and the
+    silence test can never go stale by covering less than the vocabulary.
+    """
+    metric = _FULL_DOCUMENT["metrics"][0]
+    table = _FULL_DOCUMENT["tables"][0]
+    assert set(table) == TABLE_KEYS
+    assert set(table["columns"][0]) == COLUMN_KEYS
+    assert set(metric) == METRIC_KEYS
+    assert set(metric["decompositions"][0]) == DECOMPOSITION_KEYS
+    assert set(metric["drill_by"][0]) == DRILL_BY_KEYS
+    assert set(_FULL_DOCUMENT["relationships"][0]) == RELATIONSHIP_KEYS
+    assert set(_FULL_DOCUMENT["metric_impacts"][0]) == METRIC_IMPACT_KEYS
+    assert (
+        set(_FULL_DOCUMENT["decomposition_convention"]) == DECOMPOSITION_CONVENTION_KEYS
+    )
+    # And the document's own top level is exactly the interpreted sections.
+    assert set(_FULL_DOCUMENT) == SEMANTIC_KEYS
+
+
+def test_every_interpreted_key_loads_without_a_warning(caplog) -> None:  # noqa: ANN001
+    """A full-vocabulary document is silent -- the guard's false-positive test."""
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        YamlSource.from_raw(_FULL_DOCUMENT, expected_extras=[])
+    assert caplog.records == []
+
+
+# ── Keys YAML does not resolve to strings ───────────────────────────────────
+
+
+def test_mixed_type_unknown_keys_are_reported_not_crashed(caplog) -> None:  # noqa: ANN001
+    """``yaml.safe_load`` resolves bare ``2024:`` to an int, ``on:`` to a bool.
+
+    Two unknown keys of different types in one entry made the diagnostic sort a
+    heterogeneous set and die with an opaque ``TypeError`` -- turning a silent
+    drop into a crash, which is worse than the defect #89 set out to fix. One
+    such key never tripped it, since a single-element sort compares nothing.
     """
     with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
         YamlSource.from_raw(
             {
+                "metrics": [],
                 "tables": [
                     {
                         "schema": "main",
-                        "table": "payments",
-                        "description": "One row per authorisation attempt.",
-                        "columns": [
-                            {"name": "region", "type": "VARCHAR", "description": "d"}
-                        ],
+                        "table": "t",
+                        "columns": [{"name": "x", 2024: "backfilled", "note": "n"}],
                     }
                 ],
-                "metrics": [
-                    {
-                        "name": "revenue",
-                        "description": "d",
-                        "sql_expression": "SUM(x)",
-                        "source_model": "main.payments",
-                        "filters": [],
-                        "domains": [],
-                        "tier": [],
-                        "indicator_kind": None,
-                        "business_owner": None,
-                        "operational_owner": None,
-                        "last_reviewed": None,
-                        "decompositions": [],
-                        "drill_by": [
-                            {"dimension": "region", "column": "main.payments.region"}
-                        ],
-                    }
-                ],
-                "relationships": [
-                    {
-                        "from": "main.payments.region",
-                        "to": "main.regions.id",
-                        "type": "many_to_one",
-                        "description": "d",
-                        "required_filter": None,
-                        "preferred": False,
-                    }
-                ],
-                "metric_impacts": [
-                    {
-                        "from": "revenue",
-                        "to": "revenue",
-                        "direction": "positive",
-                        "confidence": "hypothesized",
-                        "evidence": "e",
-                        "description": "d",
-                        "last_reviewed": None,
-                    }
-                ],
+            }
+        )
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "2024" in joined
+    assert "note" in joined
+
+
+def test_mixed_type_unknown_keys_still_raise_under_expected_extras() -> None:
+    with pytest.raises(ValueError, match="2024"):
+        YamlSource.from_raw(
+            {
+                "metrics": [],
+                "tables": [{"schema": "main", "table": "t", 2024: "x", "note": "n"}],
             },
             expected_extras=[],
         )
+
+
+def test_mixed_type_unknown_keys_at_the_top_level_do_not_crash(caplog) -> None:  # noqa: ANN001
+    """The same hazard in `_apply_extras_policy`, which has the same shape.
+
+    Loaded through ``yaml.safe_load`` rather than written as a dict literal
+    because that is the only way the key arises: ``from_raw`` is annotated
+    ``dict[str, Any]``, and an unquoted ``2024:`` in a real file is precisely
+    the case the annotation does not describe.
+    """
+    raw = yaml.safe_load("metrics: []\n2024: x\nwidget_hints: []\n")
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        YamlSource.from_raw(raw)
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "2024" in joined
+
+
+# ── decomposition_convention: a mapping, not a list ─────────────────────────
+
+
+def test_unknown_key_in_decomposition_convention_warns(caplog) -> None:  # noqa: ANN001
+    """The one interpreted section the list-walk could not reach.
+
+    `_parse_convention_default` reads exactly one key from it, so a second was
+    dropped in the way #89 complains about -- and a claim that the rule holds
+    "at every depth" was not quite true while it was.
+    """
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        YamlSource.from_raw(
+            {
+                "metrics": [],
+                "decomposition_convention": {
+                    "convention": "split_evenly",
+                    "fold_into": "revenue",
+                },
+            }
+        )
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "fold_into" in joined
+
+
+def test_unknown_key_in_decomposition_convention_raises_under_expected_extras() -> None:
+    with pytest.raises(ValueError, match="typo_key"):
+        YamlSource.from_raw(
+            {
+                "metrics": [],
+                "decomposition_convention": {
+                    "convention": "split_evenly",
+                    "typo_key": 1,
+                },
+            },
+            expected_extras=[],
+        )
+
+
+def test_a_valid_convention_block_is_silent(caplog) -> None:  # noqa: ANN001
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        YamlSource.from_raw(
+            {"metrics": [], "decomposition_convention": {"convention": "split_evenly"}},
+            expected_extras=[],
+        )
     assert caplog.records == []
-
-
-def test_metric_keys_covers_every_key_the_full_document_uses() -> None:
-    """Guards the test above from silently under-covering the vocabulary."""
-    assert "business_owner" in METRIC_KEYS
-    assert "decompositions" in METRIC_KEYS
-    assert "drill_by" in METRIC_KEYS

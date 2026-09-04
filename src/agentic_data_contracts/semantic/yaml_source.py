@@ -67,6 +67,11 @@ DECOMPOSITION_KEYS = frozenset(
     {"operator", "operands", "convention", "convention_operand"}
 )
 DRILL_BY_KEYS = frozenset({"dimension", "column"})
+#: ``decomposition_convention`` is a *mapping*, not a list of entries, and
+#: ``_parse_convention_default`` reads exactly one key from it -- so a second key
+#: was dropped the way #89 complains about, and it is the one section a walk over
+#: the list-valued sections cannot reach.
+DECOMPOSITION_CONVENTION_KEYS = frozenset({"convention"})
 RELATIONSHIP_KEYS = frozenset(
     {"from", "to", "type", "description", "required_filter", "preferred"}
 )
@@ -81,6 +86,18 @@ METRIC_IMPACT_KEYS = frozenset(
         "last_reviewed",
     }
 )
+
+
+def _sorted_keys(keys: Collection[Any]) -> list[Any]:
+    """Order a key set for display without assuming the keys are strings.
+
+    ``yaml.safe_load`` resolves an unquoted ``2024:`` to an ``int`` and ``on:``
+    to a ``bool``, so a document can hand us a heterogeneous key set. Sorting it
+    directly raises ``TypeError`` from inside the diagnostic — turning a silent
+    drop into a crash, which is worse than the defect the diagnostic exists to
+    report.
+    """
+    return sorted(keys, key=str)
 
 
 def _apply_extras_policy(
@@ -111,11 +128,11 @@ def _apply_extras_policy(
             " get_extras(), but reach a prompt only if named in"
             " XmlPromptRenderer(extra_sections=...). If one of these is a typo,"
             " that section is not being read at all.",
-            sorted(extras),
+            _sorted_keys(extras),
             sorted(SEMANTIC_KEYS),
         )
         return
-    unexpected = sorted(set(extras) - set(expected_extras))
+    unexpected = _sorted_keys(set(extras) - set(expected_extras))
     if unexpected:
         raise ValueError(
             f"YamlSource: unexpected top-level keys {unexpected}; declared"
@@ -141,7 +158,7 @@ def _check_entry_keys(
     inventing a nested-extras shape that widens the dump format and moves every
     published ``contract_digest``. Say so, drop it.
     """
-    unknown = sorted(set(entry) - set(known))
+    unknown = _sorted_keys(set(entry) - set(known))
     if not unknown:
         return
     if strict:
@@ -225,6 +242,15 @@ def _check_nested_keys(
             _check_entry_keys(
                 impact, METRIC_IMPACT_KEYS, where=f"metric_impacts[{i}]", strict=strict
             )
+
+    convention = raw.get("decomposition_convention")
+    if isinstance(convention, dict):
+        _check_entry_keys(
+            convention,
+            DECOMPOSITION_CONVENTION_KEYS,
+            where="decomposition_convention",
+            strict=strict,
+        )
 
 
 class YamlSource:
@@ -318,7 +344,9 @@ class YamlSource:
                     )
                     for c in t.get("columns", [])
                 ],
-                description=t.get("description", ""),
+                # `or ""` because a bare `description:` key loads as None,
+                # and the field is annotated `str` and is public API.
+                description=t.get("description") or "",
             )
         self._relationships = [
             Relationship(

@@ -1,6 +1,7 @@
 cubes:
   - name: Orders
     sql_table: analytics.orders
+    description: "One row per order, not per shipped item."
     measures:
       - name: total_revenue
         sql: "SUM(amount)"

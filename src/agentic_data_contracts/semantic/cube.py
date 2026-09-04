@@ -75,7 +75,12 @@ class CubeSource:
                     )
                     for c in cube.get("columns", [])
                 ]
-                self._tables[sql_table] = TableSchema(columns=columns)
+                self._tables[sql_table] = TableSchema(
+                    columns=columns,
+                    # A cube's own description is the table-level gloss, the
+                    # same fact dbt models and Ossie datasets carry.
+                    description=cube.get("description") or "",
+                )
 
         self._relationships = self._parse_relationships(cubes)
         self._rel_index = build_relationship_index(self._relationships)

@@ -86,7 +86,9 @@ class DbtSource:
                 columns=columns,
                 # dbt models carry a description in the same manifest node the
                 # column descriptions come from; it was read for columns only.
-                description=node.get("description", ""),
+                # `or ""` for the same reason as Ossie: a node may carry an
+                # explicit null, and the field is annotated `str`.
+                description=node.get("description") or "",
             )
         return tables
 

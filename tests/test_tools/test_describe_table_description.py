@@ -103,3 +103,46 @@ async def test_column_descriptions_are_unaffected(
     )
     columns = _payload(result)["columns"]
     assert next(c for c in columns if c["name"] == "id")["description"] == "Order id."
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_returning_a_duck_typed_schema_still_works(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """`DatabaseAdapter` is a structural protocol, so third-party adapters exist
+    that return their own schema-shaped object rather than our `TableSchema`.
+
+    Before the table description was added, `describe_table` touched only
+    `.columns` on that return value, so such an adapter worked. Reading
+    `.description` off it unconditionally would raise `AttributeError` out of
+    the tool at agent runtime -- a working integration broken on a minor bump.
+    """
+
+    class _ForeignSchema:
+        def __init__(self, columns: list[Any]) -> None:
+            self.columns = columns
+
+    class _ForeignAdapter:
+        dialect = "duckdb"
+
+        def describe_table(self, schema: str, table: str) -> Any:
+            return _ForeignSchema(adapter.describe_table(schema, table).columns)
+
+        def execute(self, sql: str) -> Any:
+            return adapter.execute(sql)
+
+        def explain(self, sql: str) -> Any:
+            return adapter.explain(sql)
+
+        def list_tables(self, schema: str) -> list[str]:
+            return adapter.list_tables(schema)
+
+    tools = create_tools(
+        contract,
+        adapter=_ForeignAdapter(),  # type: ignore[arg-type]
+        semantic_source=_source(described=True),
+    )
+    result = await _tool(tools, "describe_table").callable(
+        {"schema": "analytics", "table": "orders"}
+    )
+    assert _payload(result)["description"] == _DESC

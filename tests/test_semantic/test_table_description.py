@@ -132,3 +132,62 @@ def test_ossie_source_carries_a_dataset_description(fixtures_dir) -> None:  # no
         ts.description for ts in src.get_table_schemas().values() if ts.description
     ]
     assert described, "no Ossie dataset description reached TableSchema"
+
+
+def test_cube_source_carries_a_cube_description(fixtures_dir) -> None:  # noqa: ANN001
+    """A Cube cube's ``description`` is the same fact again.
+
+    Left out of the first pass, which made a Cube-backed contract the one
+    source with an empty table description where dbt and Ossie populate one.
+    """
+    from agentic_data_contracts.semantic.cube import CubeSource
+
+    src = CubeSource(fixtures_dir / "sample_cube_schema.yml")
+    described = [
+        ts.description for ts in src.get_table_schemas().values() if ts.description
+    ]
+    assert described, "no Cube description reached TableSchema"
+
+
+# ── A null description is not a string ──────────────────────────────────────
+
+
+def test_a_bare_description_key_in_yaml_becomes_the_empty_string() -> None:
+    """``description:`` with no value loads as ``None``, not ``""``.
+
+    The field is annotated ``str`` and is public API; a consumer calling
+    ``.strip()`` on it would get an ``AttributeError``.
+    """
+    src = YamlSource.from_raw(
+        {
+            "metrics": [],
+            "tables": [{"schema": "m", "table": "t", "description": None}],
+        }
+    )
+    assert src.get_table_schemas()["m.t"].description == ""
+
+
+def test_a_null_dbt_model_description_becomes_the_empty_string(tmp_path) -> None:  # noqa: ANN001
+    import json
+
+    from agentic_data_contracts.semantic.dbt import DbtSource
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "nodes": {
+                    "model.p.orders": {
+                        "resource_type": "model",
+                        "schema": "analytics",
+                        "name": "orders",
+                        "description": None,
+                        "columns": {},
+                    }
+                },
+                "metrics": {},
+            }
+        )
+    )
+    src = DbtSource(manifest)
+    assert src.get_table_schemas()["analytics.orders"].description == ""

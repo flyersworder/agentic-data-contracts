@@ -1459,14 +1459,30 @@ penetration across 1,000+ managers, 16k conversations, 4.32/5 satisfaction) say
 the system is used, not that the governance is what makes it right. It is
 corroboration of direction and mechanism, and it is not evidence of effect size.
 
-**One thing they measure that this document does not.** They score *DSL
-accuracy* and *answer accuracy* separately, and report a revision where DSL
-accuracy stayed at 93.2% while answer accuracy reached 100% (44/44) — their
-point being that agreement on the generated query says nothing about whether
-the answer is right. Every accuracy here is answer-level. Given that the 19
-grader disagreements above turned out to be wrong *values* behind
-normal-looking answers, a query-level check alongside the answer-level one is
-precisely the instrument this experiment lacked.
+**One thing they measure that this document does not — and its lesson is the
+opposite of the obvious one.** They score *DSL accuracy* and *answer accuracy*
+separately, and report a revision where DSL accuracy stayed at 93.2% while
+answer accuracy reached 100% (44/44). Read carelessly that argues for adding a
+query-level check here, since every accuracy in this document is answer-level.
+It does not. Their point is that agreement on the generated query says nothing
+about whether the answer is right — the query-level metric was the *less*
+informative of their two, and it is the one that moved least.
+
+The same holds here, twice over. This document already has a query-level
+instrument — `analysis/clauses.py`, which measures whether the required
+clauses reach the SQL — and [within an arm it is
+null](#does-the-contracts-vocabulary-reach-the-sql-a-behavioural-check).
+And it would not have caught the 19: the scorer normalises precision by
+rounding both sides to `min(dec_places)`, so a reporting slip cannot fail it,
+which means those answers were wrong *derivations*, not wrong transcriptions
+of a right query.
+
+What Xiaomi has that this experiment cannot get is narrower than "a query-level
+check": a **reference query per case**. DABStep ships answers and no reference
+queries, and authoring 401 of them now — after seeing which tasks failed —
+would be the same test-set fitting refused under [The deliberate
+non-response](#the-deliberate-non-response). The gap is real and it is closed
+by the benchmark's design, not by an instrument we declined to build.
 
 *Availability, stated because a reader will hit it.* The article is
 WeChat-only, has no English version, and is served behind a verification wall

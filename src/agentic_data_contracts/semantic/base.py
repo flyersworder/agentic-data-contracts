@@ -464,6 +464,152 @@ class ExtensibleSemanticSource(Protocol):
     def get_extras(self) -> dict[str, Any]: ...
 
 
+def as_text(value: Any, default: str = "") -> str:
+    """Coerce a source document's value into the ``str`` its field is annotated.
+
+    ``.get(key, default)`` defends against a key's *absence*, and the hazard is a
+    key present with no value: a bare ``description:`` in YAML, an explicit
+    ``"description": null`` in a dbt manifest. Both load as ``None`` and land in
+    a field annotated ``str``, so a consumer calling ``.strip()`` on public API
+    gets an ``AttributeError`` from data that parsed without complaint.
+
+    Non-string scalars are coerced rather than passed through: a YAML
+    ``description: 2024`` puts an ``int`` in the same ``str`` field, which is the
+    same violation with a different shape.
+
+    Fields annotated ``str | None`` -- ``convention``, ``required_filter``,
+    ``indicator_kind``, the owners -- deliberately do **not** go through here.
+    There ``None`` is a meaningful value, not a malformed one.
+    """
+    if value is None:
+        return default
+    return value if isinstance(value, str) else str(value)
+
+
+def entry_list(value: Any, *, where: str) -> list[dict[str, Any]]:
+    """Read a list-of-mappings section, or say precisely why it is not one.
+
+    Shared by the key guard and the parse loop so the two cannot disagree about
+    what counts as a section -- the disagreement that let a bare ``metrics:``
+    pass the guard (which already tolerated it) and crash the loop two lines
+    later with a ``TypeError`` naming library internals.
+
+    ``None`` is an empty section: a bare ``metrics:`` header is the commonest
+    way YAML says "present but empty", and it is not an error. Anything else
+    non-list, or any entry that is not a mapping, is a document the parser
+    cannot read, and it is named rather than indexed into.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(
+            f"{where} must be a list of entries, got {type(value).__name__}."
+            " A section written as a mapping keyed by name, or as a single"
+            " value, is not the shape this parser reads."
+        )
+    for i, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{i}] must be a mapping, got"
+                f" {type(entry).__name__} ({entry!r}). A list of bare names is"
+                " not the shape this parser reads."
+            )
+    return value
+
+
+def dict_entries(value: Any) -> list[dict[str, Any]]:
+    """Every mapping in a list-valued key, skipping whatever else is there.
+
+    The *tolerant* sibling of :func:`entry_list`, and the distinction tracks who
+    wrote the document. A semantic YAML, a Cube schema and an Ossie model are
+    authored by hand, so a mis-shaped entry is a mistake worth failing the build
+    over. A dbt ``manifest.json`` is generated, its shape varies by dbt version,
+    and its author cannot edit it -- so one odd entry degrades to a skip rather
+    than killing every metric in the project.
+
+    Never raises: a non-list is an empty list, and a non-mapping entry is
+    dropped. Both cases were the pre-existing behaviour of ``DbtSource``'s own
+    ``isinstance`` guards.
+    """
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def as_mapping(value: Any, *, where: str) -> dict[str, Any]:
+    """Read a mapping-valued key, or say precisely why it is not one.
+
+    The sibling of :func:`entry_list` for the blocks that are mappings rather
+    than lists -- ``meta``, ``type_params``, a dbt node. ``None`` is an empty
+    mapping, since a bare ``meta:`` header means "nothing here".
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"{where} must be a mapping, got {type(value).__name__} ({value!r})."
+        )
+    return value
+
+
+def entry_mapping(value: Any, *, where: str) -> dict[str, dict[str, Any]]:
+    """Read a mapping whose *values* are all mappings — dbt's ``nodes``.
+
+    A manifest keyed by node id, an Ossie vendor block keyed by metric name: the
+    keys are identifiers and every value must be an entry the parser can read.
+    """
+    outer = as_mapping(value, where=where)
+    for key, entry in outer.items():
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{key!r}] must be a mapping, got"
+                f" {type(entry).__name__} ({entry!r})."
+            )
+    return outer
+
+
+def as_list(value: Any) -> list[str]:
+    """Read a ``list[str]`` field, tolerating the two shapes authors write.
+
+    Promoted from ``OssieSource._as_list``, whose docstring already carried the
+    warning this helper exists for: ``list("gold")`` silently yields
+    ``['g', 'o', 'l', 'd']``, and those characters go on to drive tier policy,
+    domain filtering, and the frozen bytes of ``contract_digest``. A bare
+    ``tier: gold`` is documented-acceptable authoring, and a scalar ``tier: 1``
+    is a plain slip; neither may explode, and neither may surface as a
+    ``TypeError`` from inside a comprehension.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [as_text(v) for v in value]
+    return [as_text(value)]
+
+
+def require_text(value: Any, *, where: str) -> str:
+    """Read an *identity* field, refusing a blank one.
+
+    The counterpart to :func:`as_text`, and the distinction is the point. A null
+    ``description:`` coerced to ``""`` costs a sentence. A null ``name:`` coerced
+    to ``""`` produces a metric that loads clean, renders into the prompt, and is
+    unfindable by any name a caller would use — the silent-drop shape #89 exists
+    to eliminate, reintroduced by the fix for it.
+
+    Applies to what a thing *is called* or *points at*: a metric or column name,
+    a relationship or impact endpoint. *where* names the offending entry, since a
+    parser error a consumer cannot locate is barely better than silence.
+    """
+    text = as_text(value).strip()
+    if not text:
+        raise ValueError(
+            f"{where} must name a non-empty value, got {value!r}. An identity"
+            " that is blank cannot be looked up, referenced, or rendered."
+        )
+    return text
+
+
 def _iso(d: date | None) -> str | None:
     """ISO-format a date, passing ``None`` through."""
     return d.isoformat() if d is not None else None
@@ -525,16 +671,22 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
     tables: list[dict[str, Any]] = []
     for key, ts in source.get_table_schemas().items():
         schema_name, _, table_name = key.partition(".")
-        tables.append(
-            {
-                "schema": schema_name,
-                "table": table_name,
-                "columns": [
-                    {"name": c.name, "type": c.type, "description": c.description}
-                    for c in ts.columns
-                ],
-            }
-        )
+        entry: dict[str, Any] = {
+            "schema": schema_name,
+            "table": table_name,
+            "columns": [
+                {"name": c.name, "type": c.type, "description": c.description}
+                for c in ts.columns
+            ],
+        }
+        # Omitted when empty, for the reason spelled out on `_dump_metric`'s
+        # `decompositions`: `contract_canonical_bytes` dumps with no
+        # `exclude_none`, so an always-present key moves every published
+        # digest. A contract declaring no table descriptions keeps
+        # byte-identical canonical bytes across the release that added them.
+        if ts.description:
+            entry["description"] = ts.description
+        tables.append(entry)
 
     payload: dict[str, Any] = {
         "tables": tables,

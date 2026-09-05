@@ -20,7 +20,17 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     SemanticSource,
 )
-from agentic_data_contracts.semantic.yaml_source import SEMANTIC_KEYS
+from agentic_data_contracts.semantic.yaml_source import (
+    COLUMN_KEYS,
+    DECOMPOSITION_CONVENTION_KEYS,
+    DECOMPOSITION_KEYS,
+    DRILL_BY_KEYS,
+    METRIC_IMPACT_KEYS,
+    METRIC_KEYS,
+    RELATIONSHIP_KEYS,
+    SEMANTIC_KEYS,
+    TABLE_KEYS,
+)
 from agentic_data_contracts.tools.factory import RowFormat, create_tools
 from agentic_data_contracts.tools.middleware import contract_middleware
 from agentic_data_contracts.tools.sdk import create_sdk_mcp_server
@@ -62,7 +72,15 @@ except ImportError:  # pragma: no cover — exercised only without the extra
     create_pydantic_ai_toolset = None
 
 __all__ = [
+    "COLUMN_KEYS",
+    "DECOMPOSITION_CONVENTION_KEYS",
+    "DECOMPOSITION_KEYS",
+    "DRILL_BY_KEYS",
+    "METRIC_IMPACT_KEYS",
+    "METRIC_KEYS",
+    "RELATIONSHIP_KEYS",
     "SEMANTIC_KEYS",
+    "TABLE_KEYS",
     "ContractDeps",
     "ContractMiddleware",
     "DataContract",

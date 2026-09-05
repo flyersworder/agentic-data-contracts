@@ -11,8 +11,14 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    as_list,
+    as_mapping,
+    as_text,
     build_relationship_index,
+    dict_entries,
+    entry_mapping,
     fuzzy_search_metrics,
+    require_text,
 )
 
 
@@ -21,8 +27,17 @@ class DbtSource:
 
     def __init__(self, path: str | Path) -> None:
         raw = json.loads(Path(path).read_text())
-        nodes = raw.get("nodes", {})
-        self._metrics = self._parse_metrics(raw.get("metrics", {}))
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"A dbt manifest must be a JSON object, got {type(raw).__name__}."
+            )
+        # Every node and metric must itself be an object: a manifest is keyed by
+        # node id, and a scalar under one of those keys is a document this
+        # parser cannot read — named here rather than indexed into downstream.
+        nodes = entry_mapping(raw.get("nodes"), where="manifest nodes")
+        self._metrics = self._parse_metrics(
+            entry_mapping(raw.get("metrics"), where="manifest metrics")
+        )
         self._tables = self._parse_models(nodes)
         self._relationships = self._parse_relationships(nodes)
         self._rel_index = build_relationship_index(self._relationships)
@@ -31,33 +46,34 @@ class DbtSource:
         result: list[MetricDefinition] = []
         for metric in metrics.values():
             sql_expr = ""
-            type_params = metric.get("type_params", {})
-            measure = type_params.get("measure", {})
+            type_params = as_mapping(
+                metric.get("type_params"), where="dbt metric type_params"
+            )
+            # Tolerated, not rejected: a manifest is generated, and one
+            # metric with an odd `measure` must not fail every other metric in
+            # the project. This `isinstance` was the original author's decision;
+            # `as_mapping` had silently overridden it.
+            measure = type_params.get("measure")
             if isinstance(measure, dict):
-                sql_expr = measure.get("expr", "")
+                sql_expr = as_text(measure.get("expr"))
 
             filters: list[str] = []
-            for f in metric.get("filters", []):
-                if isinstance(f, dict):
-                    field = f.get("field", "")
-                    op = f.get("operator", "")
-                    val = f.get("value", "")
-                    filters.append(f"{field} {op} {val}")
+            for f in dict_entries(metric.get("filters")):
+                field = as_text(f.get("field"))
+                op = as_text(f.get("operator"))
+                val = as_text(f.get("value"))
+                filters.append(f"{field} {op} {val}")
 
-            meta = metric.get("meta") or {}
-            tier_raw = meta.get("tier", [])
-            tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
-            domains_raw = meta.get("domains", [])
-            domains = (
-                [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
-            )
+            meta = as_mapping(metric.get("meta"), where="dbt metric meta")
+            tier = as_list(meta.get("tier"))
+            domains = as_list(meta.get("domains"))
 
             result.append(
                 MetricDefinition(
-                    name=metric["name"],
-                    description=metric.get("description", ""),
+                    name=require_text(metric.get("name"), where="dbt metric name"),
+                    description=as_text(metric.get("description")),
                     sql_expression=sql_expr,
-                    source_model=metric.get("model", ""),
+                    source_model=as_text(metric.get("model")),
                     filters=filters,
                     domains=domains,
                     tier=tier,
@@ -76,13 +92,22 @@ class DbtSource:
             key = f"{schema_name}.{table_name}"
             columns = [
                 Column(
-                    name=col["name"],
-                    type=col.get("data_type", ""),
-                    description=col.get("description", ""),
+                    name=require_text(
+                        col.get("name"), where=f"dbt model {key} column name"
+                    ),
+                    type=as_text(col.get("data_type")),
+                    description=as_text(col.get("description")),
                 )
-                for col in node.get("columns", {}).values()
+                for col in entry_mapping(
+                    node.get("columns"), where=f"dbt model {key} columns"
+                ).values()
             ]
-            tables[key] = TableSchema(columns=columns)
+            tables[key] = TableSchema(
+                columns=columns,
+                # dbt models carry a description in the same manifest node the
+                # column descriptions come from; it was read for columns only.
+                description=as_text(node.get("description")),
+            )
         return tables
 
     def _parse_relationships(self, nodes: dict[str, Any]) -> list[Relationship]:
@@ -108,11 +133,11 @@ class DbtSource:
         for node in nodes.values():
             if node.get("resource_type") != "test":
                 continue
-            tm = node.get("test_metadata") or {}
+            tm = as_mapping(node.get("test_metadata"), where="dbt test_metadata")
             if tm.get("name") != "relationships":
                 continue
 
-            kwargs = tm.get("kwargs") or {}
+            kwargs = as_mapping(tm.get("kwargs"), where="dbt test kwargs")
             column_name = kwargs.get("column_name")
             field = kwargs.get("field")
             if not column_name or not field:
@@ -123,7 +148,10 @@ class DbtSource:
             if owner is None:
                 continue
 
-            depends = (node.get("depends_on") or {}).get("nodes") or []
+            depends = (
+                as_mapping(node.get("depends_on"), where="dbt depends_on").get("nodes")
+                or []
+            )
             other_ids = [n for n in depends if n != owner_id]
             if other_ids:
                 referenced = nodes.get(other_ids[0])
@@ -136,14 +164,14 @@ class DbtSource:
 
             owner_table = f"{owner.get('schema', '')}.{owner.get('name', '')}"
             ref_table = f"{referenced.get('schema', '')}.{referenced.get('name', '')}"
-            meta = node.get("meta") or {}
+            meta = as_mapping(node.get("meta"), where="dbt test meta")
 
             relationships.append(
                 Relationship(
                     from_=f"{owner_table}.{column_name}",
                     to=f"{ref_table}.{field}",
-                    type=meta.get("relationship_type", "many_to_one"),
-                    description=node.get("description", ""),
+                    type=as_text(meta.get("relationship_type"), "many_to_one"),
+                    description=as_text(node.get("description")),
                     required_filter=meta.get("required_filter"),
                     preferred=bool(meta.get("preferred", False)),
                 )

@@ -540,12 +540,26 @@ def create_tools(
             # comments) fill in where the semantic source has no entry. Columns
             # with no description anywhere omit the field to keep responses tight.
             sem_descs: dict[str, str] = {}
+            # `getattr` because `DatabaseAdapter` is a structural protocol: an
+            # external adapter returning its own schema-shaped object satisfied
+            # this tool while it read only `.columns`, and a minor bump should
+            # not raise AttributeError out of an agent's turn.
+            table_desc = getattr(ts, "description", "") or ""
             if semantic_source is not None:
                 sem_ts = semantic_source.get_table_schema(schema_name, table_name)
                 if sem_ts is not None:
                     sem_descs = {
                         c.name: c.description for c in sem_ts.columns if c.description
                     }
+                    # Same precedence as the column overlay: the semantic source
+                    # is the canonical agent-facing documentation, and an adapter
+                    # value (a warehouse table comment) fills in behind it.
+                    # `getattr` for the same reason as the adapter's above --
+                    # `SemanticSource` is a structural protocol too, and
+                    # `get_table_schema` is part of it, so a third-party source
+                    # returning its own schema-shaped object was legal while this
+                    # tool read only `.columns`.
+                    table_desc = getattr(sem_ts, "description", "") or table_desc
             cols: list[dict[str, Any]] = []
             for c in ts.columns:
                 col: dict[str, Any] = {
@@ -557,11 +571,17 @@ def create_tools(
                 if desc:
                     col["description"] = desc
                 cols.append(col)
-            response = _text_response(
-                json.dumps(
-                    {"schema": schema_name, "table": table_name, "columns": cols}
-                )
-            )
+            payload: dict[str, Any] = {
+                "schema": schema_name,
+                "table": table_name,
+            }
+            # Omitted when absent, like the per-column `description` above:
+            # what a table *means* belongs ahead of its column list, and an
+            # empty key would spend an agent's context saying nothing.
+            if table_desc:
+                payload["description"] = table_desc
+            payload["columns"] = cols
+            response = _text_response(json.dumps(payload))
             _record("ok")
             return response
         except Exception as e:

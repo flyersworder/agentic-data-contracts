@@ -19,6 +19,16 @@ class Column:
 @dataclass
 class TableSchema:
     columns: list[Column] = field(default_factory=list)
+    # Appended rather than placed before `columns`, so every pre-existing
+    # positional construction -- `TableSchema([...])` -- keeps binding to the
+    # field it always did. This dataclass is public API and not `kw_only`.
+    # Same rule as `Attempt.final_rows` in validation/conformance.py.
+    #
+    # The granularity between `AllowedTable.description` (a schema *group*) and
+    # `Column.description` (one column): what the table means, which is what an
+    # agent needs before it writes SQL over it. Semantic sources populate it
+    # where their format carries one; a `DatabaseAdapter` may leave it empty.
+    description: str = ""
 
 
 @dataclass

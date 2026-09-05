@@ -13,8 +13,13 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    as_list,
+    as_mapping,
+    as_text,
     build_relationship_index,
+    entry_list,
     fuzzy_search_metrics,
+    require_text,
 )
 
 # Maps Cube's `relationship` enum (camelCase v1 + snake_case v2 aliases) to
@@ -41,24 +46,26 @@ class CubeSource:
         raw = yaml.safe_load(Path(path).read_text())
         self._metrics: list[MetricDefinition] = []
         self._tables: dict[str, TableSchema] = {}
-        cubes = raw.get("cubes", []) or []
+        cubes = entry_list(raw.get("cubes"), where="cubes")
 
         for cube in cubes:
-            sql_table = cube.get("sql_table", "")
+            sql_table = as_text(cube.get("sql_table"))
 
-            for measure in cube.get("measures", []):
-                meta = measure.get("meta") or {}
-                tier_raw = meta.get("tier", [])
-                tier = [tier_raw] if isinstance(tier_raw, str) else list(tier_raw)
-                domains_raw = meta.get("domains", [])
-                domains = (
-                    [domains_raw] if isinstance(domains_raw, str) else list(domains_raw)
-                )
+            # A Cube schema is hand-authored YAML, so a bare `measures:`
+            # header is the same "present but empty" shape.
+            for measure in entry_list(
+                cube.get("measures"), where=f"cube {cube.get('name', '?')} measures"
+            ):
+                meta = as_mapping(measure.get("meta"), where="measure meta")
+                tier = as_list(meta.get("tier"))
+                domains = as_list(meta.get("domains"))
                 self._metrics.append(
                     MetricDefinition(
-                        name=measure["name"],
-                        description=measure.get("description", ""),
-                        sql_expression=measure.get("sql", ""),
+                        name=require_text(
+                            measure.get("name"), where="cube measure name"
+                        ),
+                        description=as_text(measure.get("description")),
+                        sql_expression=as_text(measure.get("sql")),
                         source_model=sql_table,
                         domains=domains,
                         tier=tier,
@@ -69,13 +76,23 @@ class CubeSource:
             if sql_table and "." in sql_table:
                 columns = [
                     Column(
-                        name=c["name"],
-                        type=c.get("type", ""),
-                        description=c.get("description", ""),
+                        name=require_text(
+                            c.get("name"), where=f"cube {sql_table} column name"
+                        ),
+                        type=as_text(c.get("type")),
+                        description=as_text(c.get("description")),
                     )
-                    for c in cube.get("columns", [])
+                    for c in entry_list(
+                        cube.get("columns"),
+                        where=f"cube {cube.get('name', '?')} columns",
+                    )
                 ]
-                self._tables[sql_table] = TableSchema(columns=columns)
+                self._tables[sql_table] = TableSchema(
+                    columns=columns,
+                    # A cube's own description is the table-level gloss, the
+                    # same fact dbt models and Ossie datasets carry.
+                    description=as_text(cube.get("description")),
+                )
 
         self._relationships = self._parse_relationships(cubes)
         self._rel_index = build_relationship_index(self._relationships)
@@ -108,9 +125,9 @@ class CubeSource:
         no `sql_table`, are skipped silently.
         """
         name_to_table: dict[str, str] = {}
-        for cube in cubes:
+        for cube in entry_list(cubes, where="cubes"):
             name = cube.get("name")
-            sql_table = cube.get("sql_table", "")
+            sql_table = as_text(cube.get("sql_table"))
             if name and sql_table and "." in sql_table:
                 name_to_table[name] = sql_table
 
@@ -119,8 +136,8 @@ class CubeSource:
             cube_name = cube.get("name")
             if cube_name not in name_to_table:
                 continue
-            for join in cube.get("joins", []) or []:
-                sql = join.get("sql", "")
+            for join in entry_list(cube.get("joins"), where=f"cube {cube_name} joins"):
+                sql = as_text(join.get("sql"))
                 m = _JOIN_EQ_RE.search(sql)
                 if not m:
                     continue
@@ -141,10 +158,12 @@ class CubeSource:
                 if other_table is None:
                     continue
 
-                meta = join.get("meta") or {}
+                meta = as_mapping(join.get("meta"), where="cube join meta")
                 rel_field = (join.get("relationship") or "many_to_one").lower()
-                canonical_type = meta.get(
-                    "relationship_type",
+                # `.get(k, fallback)` returned None for an explicit
+                # `relationship_type:` — the default only fires on absence.
+                canonical_type = as_text(
+                    meta.get("relationship_type"),
                     _CUBE_RELATIONSHIP_TYPES.get(rel_field, "many_to_one"),
                 )
 
@@ -153,7 +172,7 @@ class CubeSource:
                         from_=f"{cube_table}.{cube_col}",
                         to=f"{other_table}.{other_col}",
                         type=canonical_type,
-                        description=join.get("description", ""),
+                        description=as_text(join.get("description")),
                         required_filter=meta.get("required_filter"),
                         preferred=bool(meta.get("preferred", False)),
                     )

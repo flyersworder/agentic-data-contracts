@@ -48,10 +48,15 @@ from agentic_data_contracts.semantic.base import (
     Relationship,
     _apply_convention_default,
     _parse_convention_default,
+    as_list,
+    as_text,
     build_relationship_index,
+    entry_list,
+    entry_mapping,
     fuzzy_search_metrics,
     jsonify_extras,
     parse_review_date,
+    require_text,
     validate_decompositions,
     validate_drill_by,
 )
@@ -91,21 +96,6 @@ def _normalize_ai_context(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return dict(value)
     return None
-
-
-def _as_list(value: Any) -> list[str]:
-    """Promote a bare string to a one-element list.
-
-    ``YamlSource`` deliberately accepts ``tier: gold`` alongside
-    ``tier: [gold]``; the same authoring slip inside an Ossie vendor block has
-    to behave identically. ``list("gold")`` would silently yield
-    ``['g', 'o', 'l', 'd']`` and then drive tier policy and domain filtering.
-    """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value]
-    return list(value)
 
 
 def _looks_like_query(source: str) -> bool:
@@ -181,7 +171,12 @@ class OssieSource:
         self._ai_context: dict[str, dict[str, dict[str, Any]]] = {}
         self._foreign_extensions: dict[str, dict[str, Any]] = {}
 
-        for model in raw.get("semantic_model", []) or []:
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "An Ossie model file must be a mapping with a `semantic_model`"
+                f" key, got {type(raw).__name__}."
+            )
+        for model in entry_list(raw.get("semantic_model"), where="semantic_model"):
             self._load_model(model)
 
         self._rel_index = build_relationship_index(self._relationships)
@@ -203,14 +198,16 @@ class OssieSource:
         name_to_table: dict[str, str] = {}
         keys_by_dataset: dict[str, list[tuple[str, ...]]] = {}
 
-        for dataset in model.get("datasets", []) or []:
+        for dataset in entry_list(
+            model.get("datasets"), where=f"{model_name} datasets"
+        ):
             name = dataset.get("name")
             if not name:
                 continue
             self._record_ai_context(model_name, "datasets", name, dataset)
             keys_by_dataset[name] = self._unique_key_sets(dataset)
 
-            for f in dataset.get("fields", []) or []:
+            for f in entry_list(dataset.get("fields"), where="dataset fields"):
                 self._record_ai_context(
                     model_name, "fields", f"{name}.{f.get('name', '')}", f
                 )
@@ -246,13 +243,20 @@ class OssieSource:
             self._tables[key] = TableSchema(
                 columns=[
                     Column(
-                        name=f["name"],
-                        type=f.get("datatype", ""),
-                        description=f.get("description", ""),
+                        name=require_text(
+                            f.get("name"), where=f"Ossie dataset {key} field name"
+                        ),
+                        type=as_text(f.get("datatype")),
+                        description=as_text(f.get("description")),
                     )
-                    for f in dataset.get("fields", []) or []
+                    for f in entry_list(
+                        dataset.get("fields"), where=f"dataset {key} fields"
+                    )
                     if f.get("name")
-                ]
+                ],
+                # Beside the `fields` already read. An Ossie dataset's own
+                # description is the table-level gloss #89 had nowhere to put.
+                description=as_text(dataset.get("description")),
             )
 
         self._load_relationships(model, model_name, name_to_table, keys_by_dataset)
@@ -262,12 +266,20 @@ class OssieSource:
         # default to the whole list would stamp one model's house convention
         # onto another's. Ossie namespaces entities per model; so does this.
         first_metric = len(self._metrics)
-        self._load_metrics(model, model_name, overlay.get("metrics", {}))
+        self._load_metrics(
+            model,
+            model_name,
+            entry_mapping(overlay.get("metrics"), where="vendor block metrics"),
+        )
         _apply_convention_default(
             self._metrics[first_metric:],
             _parse_convention_default(overlay.get("decomposition_convention")),
         )
-        self._load_metric_impacts(overlay.get("metric_impacts", []))
+        self._load_metric_impacts(
+            entry_list(
+                overlay.get("metric_impacts"), where="vendor block metric_impacts"
+            )
+        )
 
     @staticmethod
     def _unique_key_sets(dataset: dict[str, Any]) -> list[tuple[str, ...]]:
@@ -314,7 +326,9 @@ class OssieSource:
         silent correctness bug in any path the join planner walks. Skipping
         loudly is the honest failure, matching ``CubeSource``.
         """
-        for rel in model.get("relationships", []) or []:
+        for rel in entry_list(
+            model.get("relationships"), where=f"{model_name} relationships"
+        ):
             rel_name = rel.get("name", "<unnamed>")
             from_cols = rel.get("from_columns") or []
             to_cols = rel.get("to_columns") or []
@@ -361,7 +375,7 @@ class OssieSource:
     def _load_metrics(
         self, model: dict[str, Any], model_name: str, overlay: dict[str, Any]
     ) -> None:
-        for metric in model.get("metrics", []) or []:
+        for metric in entry_list(model.get("metrics"), where=f"{model_name} metrics"):
             name = metric.get("name")
             if not name:
                 continue
@@ -369,29 +383,44 @@ class OssieSource:
             extra = overlay.get(name, {})
             self._metrics.append(
                 MetricDefinition(
-                    name=name,
-                    description=metric.get("description", ""),
+                    name=require_text(name, where="Ossie metric name"),
+                    description=as_text(metric.get("description")),
                     sql_expression=self._pick_expression(metric),
-                    source_model=extra.get("source_model", ""),
-                    filters=_as_list(extra.get("filters")),
-                    domains=_as_list(extra.get("domains")),
-                    tier=_as_list(extra.get("tier")),
+                    source_model=as_text(extra.get("source_model")),
+                    filters=as_list(extra.get("filters")),
+                    domains=as_list(extra.get("domains")),
+                    tier=as_list(extra.get("tier")),
                     indicator_kind=extra.get("indicator_kind"),
                     business_owner=extra.get("business_owner"),
                     operational_owner=extra.get("operational_owner"),
                     last_reviewed=parse_review_date(extra.get("last_reviewed")),
                     decompositions=[
                         Decomposition(
-                            operator=d["operator"],
-                            operands=list(d.get("operands", [])),
+                            operator=require_text(
+                                d.get("operator"),
+                                where="Ossie decompositions[] operator",
+                            ),
+                            operands=as_list(d.get("operands")),
                             convention=d.get("convention"),
                             convention_operand=d.get("convention_operand"),
                         )
-                        for d in extra.get("decompositions", [])
+                        for d in entry_list(
+                            extra.get("decompositions"),
+                            where=f"{name} decompositions",
+                        )
                     ],
                     drill_by=[
-                        DrillDimension(dimension=dd["dimension"], column=dd["column"])
-                        for dd in extra.get("drill_by", [])
+                        DrillDimension(
+                            dimension=require_text(
+                                dd.get("dimension"), where="Ossie drill_by[] dimension"
+                            ),
+                            column=require_text(
+                                dd.get("column"), where="Ossie drill_by[] column"
+                            ),
+                        )
+                        for dd in entry_list(
+                            extra.get("drill_by"), where=f"{name} drill_by"
+                        )
                     ],
                 )
             )
@@ -400,12 +429,16 @@ class OssieSource:
         for impact in impacts:
             self._metric_impacts.append(
                 MetricImpact(
-                    from_metric=impact["from"],
-                    to_metric=impact["to"],
-                    direction=impact.get("direction", "positive"),
-                    confidence=impact.get("confidence", "hypothesized"),
-                    evidence=impact.get("evidence", ""),
-                    description=impact.get("description", ""),
+                    from_metric=require_text(
+                        impact.get("from"), where="Ossie metric_impacts[] from"
+                    ),
+                    to_metric=require_text(
+                        impact.get("to"), where="Ossie metric_impacts[] to"
+                    ),
+                    direction=as_text(impact.get("direction"), "positive"),
+                    confidence=as_text(impact.get("confidence"), "hypothesized"),
+                    evidence=as_text(impact.get("evidence")),
+                    description=as_text(impact.get("description")),
                     last_reviewed=parse_review_date(impact.get("last_reviewed")),
                 )
             )
@@ -419,16 +452,23 @@ class OssieSource:
         the last step chosen so a model written only in a vendor dialect
         still yields an expression instead of a silent empty string.
         """
-        dialects = (entity.get("expression") or {}).get("dialects") or []
+        expression = entity.get("expression")
+        # `expression` authored as a bare list — a plausible slip, since its
+        # payload is a list — reached `.get` on a list and raised AttributeError
+        # rather than a located ValueError.
+        raw_dialects = (
+            expression.get("dialects") if isinstance(expression, dict) else None
+        )
+        dialects = [d for d in (raw_dialects or []) if isinstance(d, dict)]
         by_dialect = {
-            d.get("dialect"): d.get("expression", "")
+            d.get("dialect"): as_text(d.get("expression"))
             for d in dialects
             if d.get("dialect")
         }
         for preferred in self._dialect_preference:
             if preferred in by_dialect:
                 return by_dialect[preferred]
-        return dialects[0].get("expression", "") if dialects else ""
+        return as_text(dialects[0].get("expression")) if dialects else ""
 
     # -- extensions -------------------------------------------------------
 
@@ -446,7 +486,9 @@ class OssieSource:
         "not valid JSON" warning pointing at a non-problem.
         """
         ours: dict[str, Any] = {}
-        for extension in model.get("custom_extensions", []) or []:
+        for extension in entry_list(
+            model.get("custom_extensions"), where=f"{model_name} custom_extensions"
+        ):
             vendor = extension.get("vendor_name")
             if not vendor:
                 continue

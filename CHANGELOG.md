@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.51.0] - 2026-09-05
+
+### Added
+
+- **`check_schema_drift` — the contract's declarations, checked against the warehouse** (#90). A semantic source could declare a column that does not exist and nothing reported it: not at load, not at `describe_table`, not anywhere. The declaration lives inside `contract_digest`, so a contract stayed "frozen" around a column the warehouse had renamed while every gate stayed green — the declarations had not changed, the *world* had. That is the failure a data contract exists to prevent, and the library had both sides in hand.
+
+  `check_schema_drift(contract, adapter, semantic_source)` walks every table the contract allows and, where the semantic source declares them, every column of those tables. It reports four kinds: `missing_schema`, `missing_table`, `missing_column`, and `case_mismatch`. The last is its own kind rather than a `missing_column` because the description overlay in `describe_table` is an exact-match dict lookup — a column declared `MCC` where the warehouse says `mcc` really does fail to receive its authored description, but calling it absent sends the reader hunting for a column that is right there.
+
+  **Gate on `report.ok`, not `report.has_drift`.** An unresolved `*` wildcard, or an adapter that raised, lands in `report.unchecked`, and `ok` is False whenever anything is there. A connection failure is no evidence that a table is missing — reporting it as drift would send someone to fix a contract that is correct — and it is emphatically not a pass. `tables_checked` and `columns_checked` are on the report for the same reason: a run that checked nothing must not read like a run that found nothing.
+
+  **The check never resolves a wildcard for you.** `resolve_tables()` rewrites `allowed_tables[].tables` in place, and those bytes are inside the canonical form `contract_digest` hashes. A preflight that quietly re-pinned the artifact it was auditing would be worse than the defect it reports, so an unresolved wildcard is declined rather than silently expanded.
+
+  **Scope is the contract's allow-list**, not everything the semantic source describes: a dbt manifest carries every model in a project, and walking all of them would mean hundreds of warehouse round-trips to report drift in tables the agent may not query anyway. Undeclared *live* columns are never reported — the overlay is a left join by design, and flagging every undocumented column would drown the finding that matters. Type mismatches (declared `BIGINT`, live `VARCHAR`) are the same class of drift and are deliberately not covered yet; names first.
+
+  **Omitting `semantic_source` loads the contract's own**, exactly as `create_tools` does. Every other entry point already had that fallback; without it here, a contract carrying an inline frozen snapshot — the shape a digest-pinned contract takes — checked the obvious CI way would compare zero columns and report a clean bill of health. A source the contract names but that cannot be loaded lands in `unchecked` rather than passing.
+
+  **Table and schema names are matched case-insensitively; only columns report a `case_mismatch`.** A catalog that returns unquoted identifiers upper-cased (Snowflake) would otherwise make a wholly correct lower-case contract fail CI with every table reported missing, and no columns checked behind the wrong diagnosis. The asymmetry is deliberate: a column's authored description reaches the agent through an exact-match lookup, so a case difference there is a live defect, while every path that uses a table name hands it to the adapter, which resolves it at the database.
+
+  **A semantic source whose table keys overlap the allow-list not at all is flagged once.** Per table this is indistinguishable from a table the source simply does not describe — and a source covering 3 of 10 allowed tables is the normal case, so flagging the other 7 would make the gate useless. Zero overlap is a systematic mismatch instead: a third-party source keying `project.dataset.table`, or a schema spelled differently on the two sides. One check over the whole output, so it cannot fire per table.
+
+  **Table names are matched case-insensitively on both sides of the comparison.** The per-table declaration lookup and the key-convention guard have to fold the same way; when only the guard folded, a source keyed `MAIN.ORDERS` against a contract allowing `main.orders` satisfied the guard *and* missed every lookup — zero columns compared, nothing unchecked, `ok` True. The guard silenced the defect it was added to catch.
+
+  **A live table that reports no columns is `unchecked`, not one `missing_column` per declaration.** A table `list_tables` names but `describe_table` cannot introspect — an opaque view, a permissions-restricted table — would otherwise turn every declaration into a finding telling the author to delete correct declarations. Nothing was compared, so there is no evidence the declarations are wrong.
+
+  **A declaration is never dropped in silence, and that is held as a property rather than per-site.** Three review rounds each found the same class — the check reporting clean while having compared nothing — twice inside the previous round's own fix. So the guarantee is stated as a conservation law and tested as one: *a report is `ok` only if it compared every column the semantic source declares for a table the contract allows; anything it could not compare lands in `drifts` or `unchecked`.* Variants are generated across how the contract spells a table, how the source spells it, how the catalog answers, where the declarations come from, and how the source and contract are shaped. Each fix was then reverted in turn to confirm the gate goes red — the exercise that revealed the matrix was blind to the contract-source path and to every source-shape defect.
+
+  Cases the law covers that the first cut did not: a source key lost to a case collision (reachable through `OssieSource`, which drops the database qualifier and warns only on an *exact* collision), a source that parses lazily and raises on read, and an empty allow-list, which used to short-circuit the zero-overlap guard so the same zero comparisons that hard-failed with a populated allow-list came back clean with an empty one.
+
+  **The case-retry reaches the adapters it names.** A catalog that *raises* for a schema it does not know — BigQuery, Snowflake — is how those warehouses answer a wrong-cased name, so re-raising the declared spelling's failure immediately made the retry dead for exactly the adapters that motivated it. Every spelling is tried; the declared one's failure is reported only when none succeeded, which still keeps an existing-but-empty schema (it answers with no rows and no exception) out of the connection-failure channel. An unresolved wildcard is also exempt from the zero-overlap guard, which reads *resolved* names and so fabricated a key-convention mismatch beside the true wildcard finding — a report that names a problem the reader does not have costs more than one that names nothing.
+
+  Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
+
+### Fixed
+
+- **`describe_table` now says when the documentation it just served is stale** (#90). The sharp part of the issue was that this one function already held both sides and did not compare them. It overlays authored descriptions by iterating the *adapter's* columns and looking each one up in the semantic source — a left join. An adapter column with no declaration is fine and intended; a declared column with no adapter column simply never matched, and fell out with no signal.
+
+  The response now carries a `note` naming the declared columns the live table does not have, and separately any that differ only in case. A `note` rather than an error: the live column list is still correct and the table description still applies, and failing the call would cost the agent a usable answer over a documentation defect. Two details that matter more than they look:
+
+  - The reconciliation reads **every declared column name, not the overlay dict**, which holds only columns carrying a description. A declared column with no description is just as absent from the warehouse and just as stale a claim about the schema.
+  - A table that does not exist comes back from most adapters as an *empty schema* rather than an error, so the naive diff turns one missing table into one finding per declared column. That case says the table reported no columns at all, and the general listing is capped at eight names with the true count always stated — truncating in silence would be the same defect one layer along.
+
 ## [0.50.0] - 2026-09-04
 
 ### Fixed
@@ -33,6 +74,10 @@ All notable changes to this project will be documented in this file.
   **A regression caught by the upgraded gate, worth naming.** The first cut of the `filters` fix used `list(m.get("filters") or [])`, which turns an authored `filters: "region = 'US'"` into thirteen single-character filters — rendered to the agent and frozen into `contract_digest`. `OssieSource` had carried a `_as_list` helper against exactly this, with a docstring warning that `list("gold")` yields `['g','o','l','d']`; it is now `as_list` in `semantic/base.py` and used by every source. The gate had been blind to it because it replaced list *entries* but never a list *itself*, and `tier: []` in the reference document has no entries to replace.
 
 ### Changed
+
+- **`revenue_agent` now declares its tables, and ships a schema-drift preflight.** The examples are executable documentation gated by CI, and neither shipped feature appeared in them: no example declared a `tables:` section at all, so `describe_table` rendered bare columns and `check_schema_drift` compared **zero columns** across all three. `examples/revenue_agent/semantic.yml` now carries per-table and per-column descriptions — 14 columns the preflight actually checks — and `check_drift.py` joins `verify_examples.py` and `evaluate_conformance.py` as the third validation verb, printing the clean report, then the same check against two deliberately stale declarations, then the `note` an agent would receive. Its output is golden-diffed rather than grepped, for the reason the `examples` job already gives: a report that quietly stops naming a finding keeps every marker satisfied.
+
+  The phantom columns it injects are `revenue` and `order_date` — the two names the example's hand-written `column_hints` section warns about, one of them carrying "Verified against the warehouse on 2026-05-15". That claim is exactly what this check makes automatic.
 
 - **A blank identity is now refused at load.** New `require_text`, the counterpart to `as_text`, applies to what a thing is *called* or *points at*: a metric or column name, a relationship or metric-impact endpoint, a decomposition operator, a drill dimension. A null `name:` coerced to `""` produced a metric that loaded clean, rendered into the prompt, and was unfindable by any name a caller would use — the silent-drop shape #89 exists to eliminate, reintroduced by the fix for it. The error names the offending entry, since a parser error a consumer cannot locate is barely better than silence.
 

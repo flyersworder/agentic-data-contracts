@@ -1,0 +1,12 @@
+=== Contract vs. live schema ===
+Checked 3 tables (14 columns): 0 drifted, 0 unchecked.
+ok: True
+
+=== The same check, against a stale declaration ===
+Checked 3 tables (16 columns): 2 drifted, 0 unchecked.
+  drift: analytics.orders: declared column 'order_date' does not exist
+  drift: analytics.orders: declared column 'revenue' does not exist
+ok: False
+
+=== What the agent sees (describe_table note) ===
+The semantic source declares 2 column(s) this table does not have: revenue, order_date. Its documentation is stale — trust the column list above, not the declaration.

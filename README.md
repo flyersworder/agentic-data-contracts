@@ -64,6 +64,7 @@ Scope, stated plainly: the effect concentrates in the domain-specific task bucke
 - [Semantic Sources](#semantic-sources)
 - [Table Relationships](#table-relationships)
 - [Metric Impacts](#metric-impacts) (incl. [decomposition & drill dimensions](#metric-decomposition-and-drill-dimensions))
+- [Checking declarations against the live schema](#checking-declarations-against-the-live-schema)
 - [Custom Prompt Rendering](#custom-prompt-rendering)
 - [Consumer-authored sections (extras)](#consumer-authored-sections-extras)
 - [Scaling to Large Organizations](#scaling-to-large-organizations)
@@ -1029,6 +1030,49 @@ rather than returning a bare `[]`.
 
 Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction and a variance-diagnosis tool are deferred.
 
+## Checking declarations against the live schema
+
+A contract can declare a column that does not exist. The declaration sits inside `contract_digest`, so the contract stays "frozen" around a column the warehouse renamed — and every gate stays green, because the declarations did not change. The *world* did. `check_schema_drift` is the preflight that notices:
+
+```python
+from agentic_data_contracts import DataContract
+from agentic_data_contracts.validation import check_schema_drift
+
+report = check_schema_drift(contract, adapter)  # or pass an explicit source
+if not report.ok:
+    print(report.summary())
+    # in CI: sys.exit(1)
+```
+
+```text
+Checked 5 tables (46 columns): 2 drifted, 0 unchecked.
+  drift: main.merchant_category_codes: declared column 'column1' does not exist
+  drift: main.merchant_category_codes: declared column 'column2' does not exist
+```
+
+It walks every table the contract allows and — where the semantic source declares them — every column of those tables, reporting four kinds: `missing_schema`, `missing_table`, `missing_column`, and `case_mismatch` (a declaration matching a live column only case-insensitively, which matters because the description overlay is an exact-match lookup, so the authored text silently fails to reach a column that is right there).
+
+Four things worth knowing before you wire it into CI:
+
+- **The source argument is an override, not the only way in.** Omit it and the contract's own declared source is loaded, exactly as `create_tools` does. A contract carrying an inline frozen snapshot, checked the obvious way, would otherwise compare no columns at all and report a clean bill of health.
+
+- **Gate on `report.ok`, not `report.has_drift`.** A declaration the check could not reach a verdict on — an unresolved `*` wildcard, or an adapter that raised — lands in `report.unchecked`, and `ok` is False whenever anything is there. A connection failure is no evidence a table is missing, and it is not a pass either. `tables_checked` / `columns_checked` are reported for the same reason: a run that checked nothing must not read like a run that found nothing.
+- **It never resolves a wildcard for you.** `resolve_tables()` rewrites `allowed_tables[].tables` in place, and those bytes are inside the canonical form `contract_digest` hashes. A preflight that quietly re-pinned the artifact it was auditing would be worse than the defect. Resolve first, on a copy, and accept the digest movement knowingly.
+- **The allow-list is the scope.** Columns are checked for tables the contract allows, not every table the semantic source describes — a dbt manifest carries every model in the project, and walking all of them means hundreds of warehouse round-trips to report drift in tables the agent may not query anyway.
+
+Table and schema names are matched case-insensitively; only *columns* report a `case_mismatch`. A catalog that returns unquoted identifiers upper-cased (Snowflake) would otherwise make a wholly correct lower-case contract fail CI with every table "missing" — and unlike a column, whose overlay is an exact-match lookup, a table-name case difference breaks nothing, because every other path hands the name to the adapter to resolve.
+
+Undeclared *live* columns are never reported: the description overlay is a left join by design, and flagging every undocumented column would drown the finding that matters. Type mismatches (declared `BIGINT`, live `VARCHAR`) are the same class of drift and are not covered yet — names first.
+
+`describe_table` carries the agent-facing half of the same reconciliation. It already held the declarations and the live schema in one scope, so a declared column with no live counterpart now produces a `note` rather than falling out in silence:
+
+```json
+{"schema": "main", "table": "merchant_category_codes", "columns": [...],
+ "note": "The semantic source declares 2 column(s) this table does not have: column1, column2. Its documentation is stale — trust the column list above, not the declaration."}
+```
+
+A note, not an error: the live column list is still correct and still worth having, and failing the call would cost the agent a usable answer over a documentation defect.
+
 ## Validating a verified-examples corpus
 
 If you keep a corpus of known-good `question → SQL` examples — the kind an analytics agent accumulates from real sessions and promotes through review — `validate_examples` re-checks each example's SQL against a contract using the *same* two-layer `Validator` that gates live queries. The corpus stays entirely yours (your repo, your format, your review flow); the library never stores, loads, or executes it — it contributes exactly one verb, *validate*.
@@ -1591,7 +1635,7 @@ uv run python examples/ops_agent/agent.py     "What's our MTTR by severity this 
 
 Each example directory contains four files:
 - `contract.yml` — governance rules, allowed tables, resource limits
-- `semantic.yml` — metrics, relationships, metric impacts
+- `semantic.yml` — metrics, relationships, metric impacts (and, in `revenue_agent`, `tables:` with per-table and per-column descriptions)
 - `setup_db.py` — sample DuckDB data (auto-created on first run)
 - `agent.py` — runnable demo with a Claude Agent SDK path plus a fallback that exercises the tools directly
 
@@ -1600,6 +1644,14 @@ Each example directory contains four files:
 ```bash
 uv run python examples/revenue_agent/verify_examples.py
 ```
+
+…and a **schema-drift preflight** — `check_drift.py`, which reconciles the contract's declared tables and columns against the live warehouse ([above](#checking-declarations-against-the-live-schema)). It prints the clean report, then the same check against two deliberately stale declarations, then the `note` an agent would receive — because a check you have never watched fail tells you nothing:
+
+```bash
+uv run python examples/revenue_agent/check_drift.py
+```
+
+The three validation verbs answer different questions, and the third fills a gap the first two cannot see: a live `EXPLAIN` catches a renamed column the moment some SQL references it, while a column that is *declared and never queried* goes stale in silence.
 
 Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
 

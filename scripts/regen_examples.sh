@@ -26,3 +26,13 @@ for d in revenue_agent growth_agent ops_agent; do
     > "examples/$d/expected_output.txt"
   echo "regenerated examples/$d/expected_output.txt"
 done
+
+# check_drift.py is diffed the same way rather than grepped. Its output is a
+# report, and a report that quietly stops naming a finding is exactly what a
+# marker grep cannot see -- the same reasoning as above, and the same O(1)
+# maintenance: a new drift kind is covered the moment this file is regenerated.
+# It exits non-zero when the contract drifts, and the clean contract must not,
+# so no `|| true` here: a failure is a real one.
+uv run python examples/revenue_agent/check_drift.py \
+  > examples/revenue_agent/expected_drift_output.txt
+echo "regenerated examples/revenue_agent/expected_drift_output.txt"

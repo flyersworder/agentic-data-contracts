@@ -208,3 +208,18 @@ def test_conformance_names_are_exported() -> None:
     ]:
         assert hasattr(validation, name), name
         assert name in validation.__all__, name
+
+
+def test_schema_drift_names_are_exported() -> None:
+    """The drift preflight is meant to be imported in CI, so it must be reachable
+    from `agentic_data_contracts.validation` and not only from its own module."""
+    from agentic_data_contracts import validation
+
+    for name in [
+        "SchemaDrift",
+        "SchemaDriftReport",
+        "UncheckedTable",
+        "check_schema_drift",
+    ]:
+        assert hasattr(validation, name), name
+        assert name in validation.__all__, name

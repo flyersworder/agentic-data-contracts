@@ -254,7 +254,8 @@ jobs:
 
   publish:
     needs: [lint, test, examples, security]
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_publish == 'true')
+    # Data-only releases (e.g. `dabstep-eval-*`) must not publish the package.
+    if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_publish == 'true')
     runs-on: ubuntu-latest
     permissions:
       id-token: write

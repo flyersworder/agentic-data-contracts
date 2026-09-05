@@ -345,9 +345,10 @@ describes, it is inert, and a frontier model does not rescue it. That is the
 expected behaviour of a domain contract, and it is also precisely why this
 benchmark cannot answer the general question.
 
-A 30-task sub-bucket inside the fee bucket — "most expensive MCC (10 tasks)
+A 30-task family inside the *non-fee* bucket (30 of its 38 tasks; it needs
+the fee rules without naming fees) — "most expensive MCC (10 tasks)
 or ACI (20 tasks) for a transaction of N euros" — scores 0–3 of 30 for *every*
-arm on runs A, B and D (run D: schema 2, hollow 1, contract 1, manual 3; run B
+arm on runs A, B and D (run D: schema 2, hollow 1, contract 3, manual 1; run B
 on its 23 surviving tasks: 0 for schema and hollow). Run C partially solves it
 (8 / 5 / 4 / 2 for schema / hollow / contract / manual), a second slice where
 the bare baseline leads. A template no arm solves is a property

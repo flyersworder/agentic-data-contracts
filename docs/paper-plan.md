@@ -145,7 +145,7 @@ nothing.
 | 6 Mechanism | task 1278 traced end to end; both baselines produce the identical wrong number | **`FINDINGS.md`** |
 | 6b Governance | 144 mutating statements vs 0, deterrence not interception, the task-68 escalation | **`FINDINGS.md`** |
 | 7 Threats to validity | one benchmark / 26 templates, reconstructed golds, k=1, run B's 29% truncation, self-attested provenance | **`FINDINGS.md`** |
-| 8 Related work | MotherDuck Guides; the validated leaderboard's top two (NVIDIA KGMON, OceanBase DataPilot) and their gold-supervised learning loops; the negative result that their *unsupervised* group-consistency half yields ~1.1x here and catches 0 of the 19 official overturns; why their 88–100% and our 55.1% measure different things | **`FINDINGS.md`** |
+| 8 Related work | MotherDuck Guides; the validated leaderboard's top two (NVIDIA KGMON, OceanBase DataPilot) and their gold-supervised learning loops; the negative result that their *unsupervised* group-consistency half yields ~1.1x here and catches 0 of the 19 official overturns; why their 88–100% and our 55.1% measure different things; Xiaomi retail's Text-to-Metrics deployment as the one source that ran the ungoverned arm in production first (corroborates direction and mechanism, not effect size) | **`FINDINGS.md`** |
 | 9 Artifacts | harness, frozen contract, 3,208 transcripts, results JSONL | **in repo** |
 
 Most of sections 3–8 already exist in `experiments/dabstep-contract-eval/FINDINGS.md`.

@@ -1409,6 +1409,74 @@ the evidence available, the gap to the top of the leaderboard is bought with
 gold supervision, and there is no gold-free discount on it that this
 experiment has been able to find.
 
+### A deployment that ran the ungoverned arm first, and said what it cost
+
+Everything above is a benchmark result. 小米技术 (Xiaomi Tech) published a
+deployment report — 《从模型能力到业务可用：小米零售 AI 问数实践》, 2026-08-17,
+on WeChat — describing the same progression in production, for ~1,000
+first-line store managers in Xiaomi's China retail business. It is the only
+source found here that ran the ungoverned configuration in front of real users
+before replacing it, and reported what that cost.
+
+Their opening failure is this experiment's `schema_only` arm, in the field: a
+manager asks how much the store sold yesterday, the model sums the
+payment-amount column, and
+
+> 「SQL 语法完全正确，却漏掉了取消、退款、退货等关键过滤条件，结果比业务标准口径高出近 10%。」
+>
+> *the SQL is syntactically perfectly correct, but it omits the key filters for
+> cancellations, refunds and returns, and the result comes out nearly 10% above
+> the business's standard definition.*
+
+They decompose it exactly as the counterfactual analysis above does — field
+ambiguity (a dozen money-shaped columns, none of them canonically "revenue"),
+missing status filters, and cross-table refund/return joins the model guesses
+at. They then add retrieval, and report that it does not fix it:
+
+> 「RAG 并不是一条独立路线，而是对 Text-to-SQL 的增强……根源仍在于 Text-to-SQL"现场推理 schema"这一确定性的缺失。」
+>
+> *RAG is not an independent path but an augmentation of Text-to-SQL … the root
+> cause is still the missing determinism of Text-to-SQL reasoning about the
+> schema on the spot.*
+
+That is this document's `manual_prompt` arm and its result, argued from
+production rather than from a benchmark. Their replacement, *Text-to-Metrics*,
+governs the metric definitions ahead of time and leaves the model to recognise
+intent and fill parameters — and several of its mechanisms are this library's:
+an alias whitelist so only registered metrics and dimensions can execute,
+permission scope injected at query-construction time rather than decided by the
+model, semantic partitions over eight business domains with a load cap of three
+and a clarifying question beyond it, and a zero-result rule that treats an empty
+result as a valid business conclusion and forbids retrying under changed dates.
+Their retrospective's first line is the thesis: 「用确定性换可靠性」 — *trade
+determinism for reliability*.
+
+**What it is not is a controlled comparison.** The headline number — metric
+selection on "达成率" (achievement rate) queries rising from about 65% to nearly
+98% — is one metric family, self-reported, against no held-out set, and the
+before and after differ in more than one variable. Deployment figures (88.8%
+penetration across 1,000+ managers, 16k conversations, 4.32/5 satisfaction) say
+the system is used, not that the governance is what makes it right. It is
+corroboration of direction and mechanism, and it is not evidence of effect size.
+
+**One thing they measure that this document does not.** They score *DSL
+accuracy* and *answer accuracy* separately, and report a revision where DSL
+accuracy stayed at 93.2% while answer accuracy reached 100% (44/44) — their
+point being that agreement on the generated query says nothing about whether
+the answer is right. Every accuracy here is answer-level. Given that the 19
+grader disagreements above turned out to be wrong *values* behind
+normal-looking answers, a query-level check alongside the answer-level one is
+precisely the instrument this experiment lacked.
+
+*Availability, stated because a reader will hit it.* The article is
+WeChat-only, has no English version, and is served behind a verification wall
+that refuses plain HTTP clients (`环境异常`); it was read here through a real
+browser. Submission to the Wayback Machine on 2026-09-05 captured the CAPTCHA
+page rather than the article and archive.today refused the request, so no
+durable archive link exists. The 原文 is quoted alongside each translation
+above for that reason: the claims should be checkable from the quotes even
+where the link is not.
+
 ### What is unique here
 
 MotherDuck's comparison is Guides vs no-Guides and NVIDIA's is artifact vs

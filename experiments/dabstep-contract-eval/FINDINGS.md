@@ -1498,6 +1498,35 @@ term on every model** — by 1.8× and 2.0× on the two models where the
 scaffolding term is large, and unboundedly on the other two. That decomposition is the
 contribution; the accuracy number is not.
 
+### Four artifacts, and only one of them can be published
+
+The row above that only this experiment ticks is not really about discipline.
+Look at what each group's artifact *is*, and the publication status follows
+from it:
+
+| | the artifact | published? |
+|---|---|---|
+| MotherDuck | a Guide refined iteratively against one serving model | no — and its author writes that *"the tuned artifact is coupled"* |
+| NVIDIA KGMON | a `helper.py` distilled from DABStep tasks, plus few-shots and prompt-injected pitfalls | no — the NeMo Agent Toolkit and its 12 community examples are open, and neither repo contains a `dabstep` or `helper.py` match |
+| OceanBase DataPilot | versioned SOPs and code templates promoted by benchmarking against golden answers | no — the leaderboard's "Repo URL" for it is a blog post |
+| Xiaomi retail | governed metric definitions — three rival "达成率" formulas, aliases, 8 domain partitions | no — nothing across the 81 repos under `github.com/XiaoMi`, and the asset *is* their revenue definitions |
+| **this experiment** | **a YAML contract authored from the vendor manual** | **yes — in this repository, digest-pinned** |
+
+Two different reasons, one consequence. NVIDIA's, OceanBase's and MotherDuck's
+artifacts are fused to the *test set* — publishing them would publish a fit,
+and re-using them elsewhere means re-running the loop. Xiaomi's is fused to the
+*business* — theirs encodes what Xiaomi means by revenue, which is not theirs
+to give away and would mean nothing to anyone else. Either way the artifact
+cannot travel, and a reader cannot check it.
+
+A contract written from a vendor manual has neither coupling, which is why it
+can be frozen before the questions are read, hashed, committed, and run
+unchanged against four model families. That is a property of the *kind* of
+object, not of how careful we were — and it is the concrete sense in which a
+data contract is a different thing from a semantic layer, a helper library, or
+a Guide. The cost of that property is the accuracy gap this document reports
+and does not explain away.
+
 ### The deliberate non-response
 
 The obvious reaction is to make this library's metric semantics executable —

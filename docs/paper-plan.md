@@ -193,6 +193,16 @@ the rest are writing.
    the headline, but small. Written up in `FINDINGS.md` and in the paper
    (§protocol *External validation*, §threats *Reconstructed golds are
    lenient*).
+4b. **Related work closes on publishability, not on accuracy.** All four
+   comparable artifacts are unpublished, for two reasons: MotherDuck's,
+   NVIDIA's and OceanBase's are fused to the test set, Xiaomi's to its own
+   revenue definitions. Ours is in the repo with a digest because a contract
+   written from a vendor manual has neither coupling. Make this the closing
+   move of §8 — it is the sense in which a data contract is a different object
+   than a semantic layer, and it costs us the accuracy gap rather than
+   excusing it. Verified, not assumed: the NeMo Agent Toolkit and its examples
+   repo have no `dabstep`/`helper.py`; DataPilot's leaderboard "Repo URL" is a
+   blog post; none of the 81 `github.com/XiaoMi` repos covers this work.
 5. **Run B's 29% truncation.** Report in full: near-uniform across arms
    (28-30%), 114 of 122 lost tasks lost all four arms together, complete-case
    and per-arm figures agree within a point. It costs power, not validity.

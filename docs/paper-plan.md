@@ -172,11 +172,10 @@ the rest are writing.
    effect survives on frontier models. Gap 1's run answers this too, which is
    why it is worth the money. A cross-family arm (not another Chinese
    open-weight family) would additionally kill "it's an open-model quirk".
-3. **k>1.** No variance estimate on either run, and one task (1480) was
-   observed flipping verdict between identical runs. The two runs are
-   different models, not replicates, so nothing so far estimates
-   within-condition variance. ~20 tasks x 3 repeats on the contract arm; a few
-   dollars.
+3. **k>1.** ~~~20 tasks x 3 repeats on the contract arm~~ Superseded: the
+   near-replicate (run E) put the flip rate at 23.4% of verdicts at
+   temperature 0, so a 20-task probe would say nothing. Full-design repeats
+   are costed in [PVLDB timing and what remains](#pvldb-timing-and-what-remains-2026-09-05).
 4. ~~**Gold reconstruction needs its own subsection**~~ **done, and the
    submission was made (2026-09-04).** The measurement replaced the argument
    and it did not come back clean: 95.3% agreement on 401 tasks, but the 19
@@ -225,6 +224,67 @@ the rest are writing.
    inspect-rejection count falls 218 -> 29. Report run A as a floor. The
    defect's direction is confirmed, its magnitude is tangled with the model
    change.
+
+## PVLDB timing and what remains (2026-09-05)
+
+The arXiv preprint is ready on `main` as of #104 and the
+`dabstep-eval-2026-09` release. PVLDB Volume 20 (VLDB 2027, Athens) takes
+submissions on a rolling monthly cycle, verified from
+[vldb.org/2027/submission-guidelines.html](https://www.vldb.org/2027/submission-guidelines.html):
+
+| | |
+|---|---|
+| **Paper deadline** | 1st of every month, 5 PM Pacific; CMT opens on the 20th of the prior month |
+| **Abstract** | mandatory, by the 25th of the prior month |
+| **Last cycle** | 2027-03-01; **2027-06-01** is the last revision date to present at VLDB 2027, later rolls to 2028 |
+| **Reviews** | around the 15th of the following month; revisions get up to 2.5 months |
+| **EA&B limits** | 12 content pages + unlimited references, acmart `sigconf`, single-blind (name on page 1) |
+| **EA&B artifact rule** | "all experimental data and related software must be available, no excuses" |
+| **Target** | **2026-11-01 cycle**, abstract by **2026-10-25**. Nothing is gained by rushing October 1 |
+
+What remains, ranked by what a reviewer would reject over. Costs are from the
+recorded `usd` of the four sweeps: A $3.27, B $6.32, C $72.36, D $164.75.
+
+1. **Repeat runs, flash tier at k=3.** The paper names k=1 as its largest
+   gap in both Threats and Future Work, and the 23.4% flip rate makes every
+   point estimate that is not a McNemar contrast (cost ordering, the
+   `derived`-bucket ordering, Sonnet 5 leading `derived`) an unmeasured
+   quantity. Decided 2026-09-05: repeat only where temperature is pinned,
+   which is the only place a within-model variance estimate is clean.
+
+   | model | runs to add | why that many | cost |
+   |---|---|---|---|
+   | glm-5.3-flash | 2 full four-arm | run A is pre-fix validator; run E has only `contract` and `manual_prompt`, so the ablation row (p=0.058) has no clean replicate yet | ~$7 |
+   | deepseek-v4-flash | 3 full four-arm | run B is truncated to 279 tasks; the harness now retries 429, so the first repeat replaces it outright | ~$19 |
+   | gpt-5.6-sol | 1, `contract` arm only | the 5.1-point derivation gap (94.9% on `macro`) is the one frontier number carrying an economic claim, and it is not a contrast, so it needs no other arm | ~$21 |
+   | Claude Sonnet 5 | none | every run D claim is a paired contrast or already hedged; $165 buys the least | 0 |
+
+   Total about **$47**. Same commit, same pinned endpoints. Report per-model
+   mean and range (k=3 supports a range, not a standard error; say so),
+   McNemar per repeat and pooled, and the flip rate as a measurement instead
+   of an upper bound. Keep run A in the paper as the pre-fix run. State as a
+   limit that the variance estimate does not transfer to the frontier tier.
+
+2. **The fifth arm.** Threats admits the contract's margin bundles delivery
+   of what the manual states with resolution of what it leaves open, and
+   names the arm that separates them: the contract with its seven
+   `INTERPRETATION` clauses stripped. About $2 on the two flash models, ~$40
+   on Sonnet 5. Do it if the repeats leave time; the paper survives without
+   it because it says so.
+3. **acmart and the cut to 12 pages.** 23 pages under `article` today. The
+   class switch is one line (README); the page cut is the real writing work
+   and should follow the repeats so numbers are written once.
+4. **Zenodo DOI.** Connect the repo to Zenodo so future releases archive
+   automatically, and upload the `dabstep-eval-2026-09` assets by hand for
+   this one; cite the DOI in Artifact Availability. A GitHub release
+   satisfies arXiv, not the EA&B artifact rule's spirit.
+5. **Benjamini-Hochberg column** on the 24-test McNemar table. Trivial, and
+   pre-empts the multiplicity remark Threats currently makes in prose.
+
+Not doing, and why: a contamination probe (the paper argues the point from
+the arm contrast and says so); the executable metric layer (deferred by
+design, see *What is distinctive here*); a second benchmark (none has
+DABStep's documentation-bound difficulty).
 
 ## The pro sweep: design
 

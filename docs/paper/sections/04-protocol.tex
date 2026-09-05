@@ -76,7 +76,9 @@ against reconstructed golds. We ran that check on \emph{both} arms of the
 headline contrast. Sweeps of \armC{} and \armM{} over all 450 tasks on
 \texttt{glm-5.3-flash} --- same commit, same pinned provider endpoint, same
 harness, one variable --- were submitted and graded against the withheld
-golds:
+golds. (The \armM{} sweep was interrupted and resumed; three hard tasks it
+stamped \texttt{db\_corrupted} were re-run serially and merged, changing no
+verdict. See \texttt{deploy/README.md}.)
 
 \begin{center}
 \small
@@ -93,13 +95,15 @@ all  & 450 & 54.9\% & 27.8\% & $+27.1$~pp \\
 
 \noindent Paired McNemar on the hard split gives 137 tasks \armC{} alone
 answers correctly against 12 for \armM{}, exact two-sided $p = 4.9\times
-10^{-28}$. \textbf{The paper's headline contrast is therefore graded by the
-benchmark's own withheld golds, not by ours}, and the easy-split reversal ---
-the effect living entirely in the hard tasks --- is confirmed externally too.
-\armM{}'s 18.8\% sits just below the published 20--26\% band for named
-manual-in-prompt baselines, closest to the lowest of them (19.8\% for
-Claude~4 Sonnet); it is the same reimplementation, graded the same way as
-those entries rather than by us. Three further results follow.
+10^{-28}$. \textbf{On this model the paper's headline contrast is therefore graded by
+the benchmark's own withheld golds, not by ours}; the other three models
+remain self-graded, and Section~\ref{sec:threats-golds} says what that
+leaves exposed. The easy-split reversal --- the effect living entirely in the
+hard tasks --- is confirmed externally too.
+\armM{}'s 18.8\% sits just below the cluster of named manual-in-prompt
+baselines --- 1.0~pp under its lowest member, Claude~4 Sonnet at 19.8\% ---
+and is the same reimplementation, graded the way those entries were rather
+than by us. Three further results follow.
 
 The excluded tasks are not a biased sample. Officially, the 332 hard tasks we
 keep score 52.4\% and the 46 hard tasks we drop score 47.8\%: the

@@ -118,13 +118,16 @@ inference model driving a helper library distilled offline by a heavyweight
 one, built by \emph{``validating them against ground truth answers''} and by
 testing candidate functions \emph{``against the ground truth of multiple
 interconnected tasks''}, with pitfalls extracted \emph{``from the test
-data''} and injected into the inference prompt~\cite{nvidia-kgmon}. The second, at 87.57\%, is
-titled \emph{Beyond Fine-tuning: Solving DABstep's Hard Mode with Versioned
-Assets} and is reported to promote competing logic branches by benchmarking
-them against golden answers~\cite{oceanbase-datapilot}; we could not retrieve
-that post in full, so we source the mechanism second-hand and the scores ---
-which the first system's own results table corroborates --- directly. Nothing in the benchmark forbids
-this --- the dev split is labelled --- but it means those numbers answer a
+data''} and injected into the inference prompt~\cite{nvidia-kgmon}. The
+second, at 87.57\%, publishes under the title \emph{Beyond Fine-tuning:
+Solving DABstep's Hard Mode with Versioned
+Assets}~\cite{oceanbase-datapilot}. We could not retrieve that post in full
+and therefore make no claim about its mechanism; its scores we take from the
+leaderboard and from the first system's own results table.
+
+Nothing in the benchmark forbids using its labelled dev split this way, and we
+allege no violation; where the first system says ``the test data'' we read its
+own loose usage rather than an admission. Either way such numbers answer a
 different question from ours: how much of a labelled, enumerable question space
 can be compiled away in advance. Our contract was authored from the vendor
 manual alone and frozen before any question was read, which is why it can be
@@ -140,7 +143,8 @@ with a public leaderboard, a single accuracy carries little information about
 generalisation unless the submission count and the artifact's provenance are
 stated alongside it. Ours are: one sweep per model, no tuning against the task
 set, a digest-pinned artifact frozen 35 commits before the first run, and
-\textbf{two} leaderboard submissions --- one per arm of the headline contrast,
+\textbf{two} leaderboard submissions --- one per arm of the headline contrast
+on one of the four models,
 both made after the runs were complete, neither followed by a change to the
 artifact. They exist to move that contrast onto official grading
 (Section~\ref{sec:golds}, \emph{External validation}) and to audit our own golds

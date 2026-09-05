@@ -112,8 +112,23 @@ held-out test set''}, urging practitioners to measure \emph{``whether the Guide
 generalizes to new questions, not whether it clears the benchmark you tuned it
 against''}~\cite{corrdyn-guides}.
 
-We make no claim that any published result is tuned in this way, and have no
-evidence that it is. The point is structural, and our gold reconstruction
+The two systems atop DABStep's validated leaderboard make the point concrete,
+and disclose it themselves. The first reports 89.95\% hard with a lightweight
+inference model driving a helper library distilled offline by a heavyweight
+one, built by \emph{``validating them against ground truth answers''} and by
+testing candidate functions \emph{``against the ground truth of multiple
+interconnected tasks''}, with pitfalls extracted \emph{``from the test
+data''} and injected into the inference prompt~\cite{nvidia-kgmon}. The second,
+at 87.57\%, promotes competing logic branches by benchmarking them against
+golden answers~\cite{oceanbase-datapilot}. Nothing in the benchmark forbids
+this --- the dev split is labelled --- but it means those numbers answer a
+different question from ours: how much of a labelled, enumerable question space
+can be compiled away in advance. Our contract was authored from the vendor
+manual alone and frozen before any question was read, which is why it can be
+published and rerun; theirs, like the Guide above, cannot travel.
+
+We make no claim that any \emph{undisclosed} tuning has occurred. The point is
+structural, and our gold reconstruction
 supplies one datum: across the 2{,}199 published DABStep submissions,
 organisations submitting once achieve a median hard-split accuracy of 19.6\%,
 while those submitting 21 or more times achieve 54.2\%. That gradient is equally
@@ -122,8 +137,13 @@ with a public leaderboard, a single accuracy carries little information about
 generalisation unless the submission count and the artifact's provenance are
 stated alongside it. Ours are: one sweep per model, no tuning against the task
 set, a digest-pinned artifact frozen 35 commits before the first run, and
-\textbf{one} leaderboard submission, made after the runs were complete and
-used to audit our own golds (Section~\ref{sec:golds}) rather than to place.
+\textbf{two} leaderboard submissions --- one per arm of the headline contrast,
+both made after the runs were complete, neither followed by a change to the
+artifact. They exist to move that contrast onto official grading
+(Section~\ref{par:external}) and to audit our own golds
+(Section~\ref{sec:golds}), not to place: the second went up as an explicitly
+named baseline control, after validation had closed, so no ranking claim was
+available to buy.
 
 \subsection{What is distinctive here, and what was deliberately left out}
 

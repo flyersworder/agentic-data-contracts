@@ -139,10 +139,15 @@ Every accuracy in this paper is measured against golds we reconstructed
 shows they are one-sidedly permissive: on the 401 shared tasks, 19 answers
 graded correct here are wrong officially and none go the other way,
 \textbf{$+5.7$~pp on the hard split}. Read every absolute hard-split figure in
-this paper as roughly that optimistic. It also means the paper's numbers are
-not directly comparable to a leaderboard number, including the 20--26\% band
-we use as a validity check in Section~\ref{sec:results}: that comparison puts
-official grading on one side and ours on the other.
+this paper as roughly that optimistic.
+
+This threat does \emph{not} reach the headline contrast. Both \armC{} and
+\armM{} were submitted, so that comparison ($51.9\%$ against $18.8\%$ hard,
+$p = 4.9\times10^{-28}$; Section~\ref{par:external}) has official grading on
+both sides. What remains exposed is every absolute number for the other two
+arms and the other three models, and the 20--26\% band we use as a validity
+check in Section~\ref{sec:results} where it is quoted against a self-graded
+figure.
 
 The sharper question is whether the leniency is arm-neutral. If it is, it
 moves levels and not contrasts. That is checkable without a second submission.
@@ -193,18 +198,17 @@ that contrast from 44.6 to 46.0~pp. The honest summary is not that the
 leniency favours either side, but that its effect on every contrast is under
 3~pp and no conclusion here turns on 3~pp.
 
-Three caveats on the correction. It assumes a conversion rate measured on one
-arm and one model transfers to the others --- exactly the assumption the
-submission existed to remove. The flag is an upper bound, so the true
-corrections are smaller. And it is not independent of the leaderboard result:
-the corrected run-A figure is produced by a rate measured on the very
-submission that returned 51.9\%, on a different task set besides (332 against
-378; officially, the shared 332 score 52.4\%). It is a sensitivity analysis,
-not a measurement, and the experiment that would settle it is a second
-submission under a second arm name. We decline it for the reason we make of
-submission counts in Section~\ref{sec:related}: a system's leaderboard count
-is itself evidence a reader weighs, and we would rather keep ours at one than
-buy a tighter calibration with it.
+The correction's load-bearing weakness was that it applies a conversion rate
+calibrated on one arm to the others. The second submission tests exactly that.
+Calibrating on \armC{} as before and applying the resulting rate blind to
+\armM{} predicts a $3.1$~pp reconstructed-gold bias against a measured
+$3.0$~pp. The transfer assumption holds to $0.1$~pp on the one cross-arm case
+available, which turns the correction from a sensitivity analysis into a
+calibrated one --- and it is still the only instrument bounding the fourteen
+of sixteen arm~$\times$~model cells we do not submit. Two limits survive: the
+flag is an upper bound, so true corrections are at or below the table's, and
+transfer across \emph{models} remains untested, which is where the estimator
+does most of its work.
 
 \subsection{Contamination}
 

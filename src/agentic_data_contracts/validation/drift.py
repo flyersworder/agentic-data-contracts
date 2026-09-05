@@ -201,7 +201,7 @@ def _declared_tables(
 
 def _declared_columns(
     source: SemanticSource | None,
-) -> tuple[dict[str, list[str]], list[str]]:
+) -> tuple[dict[str, list[str]], list[str], list[str]]:
     """Declared column names per ``schema.table``, in declaration order.
 
     Reads through ``getattr`` because ``SemanticSource`` is a structural
@@ -209,9 +209,10 @@ def _declared_columns(
     only ``.columns`` and ``.name`` are things the protocol actually promises.
     """
     if source is None:
-        return {}, []
+        return {}, [], []
     declared: dict[str, list[str]] = {}
     original: list[str] = []
+    collided: list[str] = []
     for key, table_schema in source.get_table_schemas().items():
         names = [
             name
@@ -225,9 +226,18 @@ def _declared_columns(
             # `MAIN.ORDERS` against a contract allowing `main.orders` satisfied
             # the guard *and* missed every lookup -- zero columns compared, `ok`
             # True. The guard silenced the very thing it was added to catch.
-            declared.setdefault(key.casefold(), names)
+            if key.casefold() in declared:
+                # Folding the lookup made the first spelling win; without this
+                # the loser vanishes, one whole table's declarations go
+                # uncompared, and the report says clean -- the conservation law
+                # broken by the fix that was meant to uphold it. `OssieSource`
+                # reaches this shape: it drops the database qualifier when
+                # building keys and warns only on an *exact* collision.
+                collided.append(key)
+                continue
+            declared[key.casefold()] = names
             original.append(key)
-    return declared, original
+    return declared, original, collided
 
 
 def _live_tables(
@@ -309,7 +319,36 @@ def check_schema_drift(
                     ),
                 )
             )
-    declared_columns, declared_keys = _declared_columns(semantic_source)
+    try:
+        declared_columns, declared_keys, collided = _declared_columns(semantic_source)
+    except Exception as exc:  # noqa: BLE001 - a source that reads lazily may fail
+        # Every other failure here becomes an `UncheckedTable`; a source raising
+        # on read must not be the one that crashes the preflight instead.
+        # `SemanticSource` is a structural protocol, so a third-party source
+        # that parses lazily is a supported shape.
+        declared_columns, declared_keys, collided = {}, [], []
+        unchecked.append(
+            UncheckedTable(
+                schema="",
+                table="",
+                reason=(
+                    "reading the semantic source failed, so no column was"
+                    f" checked — {type(exc).__name__}: {exc}"
+                ),
+            )
+        )
+    unchecked += [
+        UncheckedTable(
+            schema="",
+            table="",
+            reason=(
+                f"the semantic source declares {key!r} and another key differing"
+                " only in case; table lookup folds case, so only one of them"
+                " could be checked"
+            ),
+        )
+        for key in collided
+    ]
     drifts: list[SchemaDrift] = []
     tables_checked = 0
     columns_checked = 0
@@ -446,7 +485,7 @@ def _key_convention_mismatch(
         for schema_name, tables in by_schema.items()
         for table in tables
     }
-    if not allowed or any(key in allowed for key in declared_columns):
+    if any(key in allowed for key in declared_columns):
         return []
     # The source's own spelling, not the folded key -- a reader comparing
     # conventions must see what they actually wrote.
@@ -457,8 +496,10 @@ def _key_convention_mismatch(
             table="",
             reason=(
                 f"the semantic source describes {len(declared_columns)} table(s),"
-                f" none of them in the contract's allow-list (e.g. {sample!r}), so"
-                " no column was checked — the two may key tables differently"
+                f" all outside the contract's allow-list (e.g. {sample!r}), so no"
+                " column was checked — either the two key tables differently, or"
+                " the source genuinely documents tables this contract does not"
+                " allow"
             ),
         )
     ]

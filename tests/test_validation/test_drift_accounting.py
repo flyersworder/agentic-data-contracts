@@ -30,27 +30,34 @@ is precisely the defect this module was written to eliminate, reappearing one
 level up in the thing that reports it.
 
 **Verified by mutation, not asserted.** A green gate proves nothing until you
-have watched it go red. Each fix from both review rounds was reverted in turn
-and this file re-run:
+have watched it go red. Every fix from all three review rounds was reverted in
+turn and this file re-run:
 
 ===================================  ===========================
 reverted fix                         variants failing
 ===================================  ===========================
-casefolded declaration lookup        60
 contract's own source loaded         96
+casefolded declaration lookup        60
 table name matched case-folded       48
 schema case-retry                    40
+colliding source keys recorded       1
+source read wrapped                  2
+empty allow-list not short-circuit   2
 empty-live-columns guard             1
 ===================================  ===========================
 
-The first run of that exercise is why `_PROVENANCE` exists: with the matrix
+Two of those rows exist only because the exercise was run. With the matrix
 passing an explicit source every time, reverting the contract-source fallback
-left **all 100 variants green**. A gate cannot cover a path it never walks, and
-the only way to find that out is to break the code on purpose.
+left **all 100 variants green**; that is why `_PROVENANCE` exists. With only
+spelling axes, all three of round 3's findings scored **0** -- caught by
+targeted tests, which is how the previous rounds' defects were caught too, and
+is precisely the coverage that did not converge. That is why `_SHAPES` and
+`_CONTRACT_SHAPES` exist.
 
-The empty-live-columns row is held by `TestAdapterDegradation` below rather
-than by the matrix, which is why it scores 1 — the matrix varies spellings, and
-that defect is reached by varying the *adapter* instead.
+Scope: this file gates `check_schema_drift`. The `describe_table` note is the
+other half of the same fix and is held by `tests/test_tools/
+test_describe_table_drift.py` -- including the case-folded table lookup the two
+halves must agree on, which they did not until round 3 found it.
 """
 
 from __future__ import annotations
@@ -312,6 +319,108 @@ def test_a_declaration_is_never_dropped_in_silence(
         assert report.columns_checked == 0, report.summary()
     else:
         assert report.ok and report.columns_checked == _DECLARED, report.summary()
+
+
+class _Colliding(_Source):
+    """Two keys differing only in case. Folding the lookup makes one win."""
+
+    def get_table_schemas(self) -> dict[str, Any]:
+        return {
+            self._key.lower(): TableSchema(columns=[Column(self._columns[0], "")]),
+            self._key.upper(): TableSchema(columns=[Column(self._columns[-1], "")]),
+        }
+
+
+class _Raising(_Source):
+    """A source that parses lazily and fails on read."""
+
+    def get_table_schemas(self) -> dict[str, Any]:
+        raise RuntimeError("manifest corrupt")
+
+
+class _Disjoint(_Source):
+    """Keys shaped so that nothing the contract allows can ever match."""
+
+    def get_table_schemas(self) -> dict[str, Any]:
+        return {
+            f"proj:{self._key}": TableSchema(
+                columns=[Column(c, "") for c in self._columns]
+            )
+        }
+
+
+#: How the *source* may be shaped, independent of how anything is spelled. Only
+#: `plain` can legitimately produce a clean report; each of the others leaves
+#: declarations uncompared, and the law says that must never read as `ok`.
+#:
+#: This axis exists because the mutation exercise scored 0 for all three on the
+#: four-axis matrix above -- they were caught only by targeted tests, which is
+#: how the previous two rounds' defects were caught too, and is exactly the
+#: coverage that did not converge.
+_SHAPES: dict[str, tuple[type[_Source], bool]] = {
+    "plain": (_Source, True),
+    "colliding": (_Colliding, False),
+    "raising": (_Raising, False),
+    "disjoint": (_Disjoint, False),
+}
+
+
+def _empty_allow_list() -> DataContract:
+    """A contract allowing nothing, with a source that declares plenty.
+
+    Its own axis because the zero-overlap guard reads the allow-list, and an
+    empty one used to short-circuit it -- so the same zero comparisons that
+    hard-failed with a populated allow-list came back clean with an empty one.
+    Nothing distinguishes those two for a reader.
+    """
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: no-tables
+semantic:
+  allowed_tables: []
+"""
+    )
+
+
+#: How the *contract* may be shaped. Only a contract that names tables can
+#: produce a clean report against a source that describes them.
+_CONTRACT_SHAPES: dict[str, tuple[Any, bool]] = {
+    "normal": (lambda: _contract("main", "orders"), True),
+    "empty_allow_list": (_empty_allow_list, False),
+}
+
+
+@pytest.mark.parametrize("contract_shape", list(_CONTRACT_SHAPES), ids=lambda s: s)
+@pytest.mark.parametrize("shape", list(_SHAPES), ids=lambda s: s)
+def test_only_a_fully_compared_source_can_report_clean(
+    duckdb: DuckDBAdapter, shape: str, contract_shape: str
+) -> None:
+    """The conservation law over source and contract *shape*, not spelling.
+
+    Every column declared here really exists, so there is no drift to find. The
+    question is whether a run that could not compare everything is allowed to
+    come back `ok` — and it never is. When it is not `ok`, the report must say
+    why rather than merely failing.
+    """
+    source_factory, source_ok = _SHAPES[shape]
+    contract_factory, contract_ok = _CONTRACT_SHAPES[contract_shape]
+    report = check_schema_drift(
+        contract_factory(),
+        _Catalog(duckdb, "asis"),
+        source_factory("main.orders", ["id", "amount"]),
+    )
+    assert report.ok is (source_ok and contract_ok), report.summary()
+    if not report.ok:
+        assert report.unchecked, report.summary()
+        assert all(u.reason for u in report.unchecked), report.summary()
+
+
+def test_every_shape_is_exercised() -> None:
+    """Guards the axes: a dict trimmed to the passing case is vacuous."""
+    assert len(_SHAPES) >= 4
+    assert sum(1 for _, ok in _SHAPES.values() if not ok) >= 3
+    assert sum(1 for _, ok in _CONTRACT_SHAPES.values() if not ok) >= 1
 
 
 class TestAdapterDegradation:

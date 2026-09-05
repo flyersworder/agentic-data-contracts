@@ -879,3 +879,100 @@ class TestSchemaRetryDiagnosis:
         )
         assert not report.has_drift
         assert "connection refused" in report.unchecked[0].reason
+
+
+class TestCollidingSourceKeys:
+    def test_a_key_lost_to_a_case_collision_is_unchecked_not_silent(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: folding the lookup introduced a way to drop a key.
+
+        `setdefault(key.casefold(), ...)` makes the first spelling win and the
+        loser vanish — one whole table's declarations never compared, and the
+        report clean. Reachable: `OssieSource` drops the database qualifier when
+        building keys and warns only on an *exact* collision, so
+        `db1.main.orders` and `db2.MAIN.ORDERS` both register.
+
+        The fix for round 2's finding created this one, which is the same
+        pattern a third time: a guard that introduces the gap it closes.
+        """
+
+        class _Colliding(_StubSource):
+            def get_table_schemas(self) -> dict[str, Any]:
+                return {
+                    "main.orders": TableSchema(columns=[Column("id", "")]),
+                    "MAIN.ORDERS": TableSchema(columns=[Column("amount", "")]),
+                }
+
+        report = check_schema_drift(_contract("[orders]"), adapter, _Colliding())
+        assert not report.ok
+        assert not report.has_drift
+        assert any("MAIN.ORDERS" in u.reason for u in report.unchecked)
+
+
+class TestSourceThatRaises:
+    def test_a_source_raising_on_read_is_unchecked_not_a_crash(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the try wrapped the *load*, not the *read*.
+
+        Every other failure mode here becomes an `UncheckedTable` — the adapter
+        raising, the contract's source failing to load, a table that cannot be
+        introspected. A source whose `get_table_schemas()` raises escaped and
+        crashed the preflight instead. `SemanticSource` is a structural protocol
+        by design, so a third-party source reading lazily is a supported shape.
+        """
+
+        class _Corrupt(_StubSource):
+            def get_table_schemas(self) -> dict[str, Any]:
+                raise RuntimeError("manifest corrupt")
+
+        report = check_schema_drift(_contract("[orders]"), adapter, _Corrupt())
+        assert not report.ok
+        assert any("manifest corrupt" in u.reason for u in report.unchecked)
+
+
+class TestDisjointAllowList:
+    def test_an_empty_allow_list_with_declarations_is_not_a_pass(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the two directions of the same situation disagreed.
+
+        A source describing tables none of which are allowed was a hard fail —
+        unless the allow-list was *empty*, where `if not allowed` short-circuited
+        the guard and the same zero comparisons became a clean pass. Nothing
+        distinguishes those cases for a reader, so they must not differ.
+        """
+        empty = DataContract.from_yaml_string(
+            """
+version: "1.0"
+name: no-tables
+semantic:
+  allowed_tables: []
+"""
+        )
+        source = _source(
+            [{"schema": "main", "table": "orders", "columns": [{"name": "phantom"}]}]
+        )
+        report = check_schema_drift(empty, adapter, source)
+        assert not report.ok
+        assert report.columns_checked == 0
+
+    def test_the_reason_does_not_assert_a_cause_it_cannot_know(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """A contract allowing tables documented by warehouse comments, whose
+        source documents a different schema entirely, is a legitimate config
+        with no defect. The check cannot tell it apart from a key-convention
+        mismatch, so the message must name both readings rather than send the
+        reader after the wrong one."""
+        contract = _contract("[events]", schema="raw")
+        adapter.connection.execute(
+            "CREATE SCHEMA IF NOT EXISTS raw; CREATE TABLE raw.events (id INTEGER)"
+        )
+        source = _source(
+            [{"schema": "main", "table": "orders", "columns": [{"name": "id"}]}]
+        )
+        reason = check_schema_drift(contract, adapter, source).unchecked[0].reason
+        assert "outside the contract's allow-list" in reason
+        assert "key tables differently" in reason

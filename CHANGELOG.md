@@ -26,6 +26,10 @@ All notable changes to this project will be documented in this file.
 
   **A live table that reports no columns is `unchecked`, not one `missing_column` per declaration.** A table `list_tables` names but `describe_table` cannot introspect — an opaque view, a permissions-restricted table — would otherwise turn every declaration into a finding telling the author to delete correct declarations. Nothing was compared, so there is no evidence the declarations are wrong.
 
+  **A declaration is never dropped in silence, and that is held as a property rather than per-site.** Three review rounds each found the same class — the check reporting clean while having compared nothing — twice inside the previous round's own fix. So the guarantee is stated as a conservation law and tested as one: *a report is `ok` only if it compared every column the semantic source declares for a table the contract allows; anything it could not compare lands in `drifts` or `unchecked`.* Variants are generated across how the contract spells a table, how the source spells it, how the catalog answers, where the declarations come from, and how the source and contract are shaped. Each fix was then reverted in turn to confirm the gate goes red — the exercise that revealed the matrix was blind to the contract-source path and to every source-shape defect.
+
+  Cases the law covers that the first cut did not: a source key lost to a case collision (reachable through `OssieSource`, which drops the database qualifier and warns only on an *exact* collision), a source that parses lazily and raises on read, and an empty allow-list, which used to short-circuit the zero-overlap guard so the same zero comparisons that hard-failed with a populated allow-list came back clean with an empty one.
+
   Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
 
 ### Fixed

@@ -86,6 +86,29 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
+def _semantic_table(source: SemanticSource, schema: str, table: str) -> Any:
+    """The source's schema for one table, tolerating a case-only key difference.
+
+    Every bundled source implements ``get_table_schema`` as an exact-match dict
+    get on ``f"{schema}.{table}"``. ``check_schema_drift`` folds case for the
+    same lookup, so without this the two halves of one fix disagree in exactly
+    the case they were hardened for: a source keyed ``MAIN.ORDERS`` against a
+    contract allowing ``main.orders`` has its phantom column reported in CI and
+    silently ignored in the agent's turn -- no note, and no descriptions either.
+
+    The fallback only runs when the exact lookup misses, so the common path
+    costs nothing, and `get_table_schemas()` is only walked on that miss.
+    """
+    found = source.get_table_schema(schema, table)
+    if found is not None:
+        return found
+    wanted = f"{schema}.{table}".casefold()
+    for key, table_schema in source.get_table_schemas().items():
+        if key.casefold() == wanted:
+            return table_schema
+    return None
+
+
 #: How many stale column names a note will spell out before summarising. A
 #: table renamed wholesale would otherwise put every declared column into an
 #: agent's context; the count is always stated, so the truncation is not itself
@@ -623,7 +646,7 @@ def create_tools(
             # not raise AttributeError out of an agent's turn.
             table_desc = getattr(ts, "description", "") or ""
             if semantic_source is not None:
-                sem_ts = semantic_source.get_table_schema(schema_name, table_name)
+                sem_ts = _semantic_table(semantic_source, schema_name, table_name)
                 if sem_ts is not None:
                     sem_cols = getattr(sem_ts, "columns", None) or []
                     sem_col_names = [

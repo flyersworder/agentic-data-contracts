@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -42,6 +43,34 @@ def adapter() -> DuckDBAdapter:
         """
     )
     return db
+
+
+class _StubSource:
+    """The rest of `SemanticSource`, so a test double can be a real one."""
+
+    def get_table_schemas(self) -> dict[str, Any]:
+        return {}
+
+    def get_table_schema(self, schema: str, table: str) -> Any:
+        return self.get_table_schemas().get(f"{schema}.{table}")
+
+    def get_metrics(self) -> list[Any]:
+        return []
+
+    def get_metric(self, name: str) -> Any:
+        return None
+
+    def search_metrics(self, query: str) -> list[Any]:
+        return []
+
+    def get_relationships(self) -> list[Any]:
+        return []
+
+    def get_relationships_for_table(self, table: str) -> list[Any]:
+        return []
+
+    def get_metric_impacts(self) -> list[Any]:
+        return []
 
 
 def _tool(tools: list[ToolDef], name: str) -> ToolDef:
@@ -264,3 +293,36 @@ async def test_a_duck_typed_semantic_source_is_tolerated(
 
     payload = await _describe(contract, adapter, _ForeignSource())
     assert "column1" in payload["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_source_keyed_in_another_case_still_reaches_the_table(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """Review finding: the two halves of this fix disagreed on the case they
+    spent two commits agreeing on.
+
+    `check_schema_drift` casefolds its table lookup; `describe_table` reaches
+    declarations through `get_table_schema`, which every source implements as an
+    exact-match dict get. So a source keyed `ANALYTICS.ORDERS` against a
+    contract allowing `analytics.orders` had its phantom column reported in CI
+    and silently ignored in the agent's turn — no note, and no descriptions
+    either, which is the pre-existing overlay miss this note inherited.
+    """
+
+    class _Shouting(_StubSource):
+        def get_table_schemas(self) -> dict[str, Any]:
+            return {
+                "ANALYTICS.ORDERS": TableSchema(
+                    columns=[
+                        Column("id", "", "the key"),
+                        Column("column1", "", "PHANTOM"),
+                    ]
+                )
+            }
+
+    payload = await _describe(contract, adapter, _Shouting())
+    assert "column1" in payload["note"]
+    # The overlay reaches it too, not just the reconciliation.
+    column = next(c for c in payload["columns"] if c["name"] == "id")
+    assert column["description"] == "the key"

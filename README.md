@@ -1038,7 +1038,7 @@ A contract can declare a column that does not exist. The declaration sits inside
 from agentic_data_contracts import DataContract
 from agentic_data_contracts.validation import check_schema_drift
 
-report = check_schema_drift(contract, adapter, semantic_source)
+report = check_schema_drift(contract, adapter)  # or pass an explicit source
 if not report.ok:
     print(report.summary())
     # in CI: sys.exit(1)
@@ -1052,11 +1052,15 @@ Checked 5 tables (46 columns): 2 drifted, 0 unchecked.
 
 It walks every table the contract allows and — where the semantic source declares them — every column of those tables, reporting four kinds: `missing_schema`, `missing_table`, `missing_column`, and `case_mismatch` (a declaration matching a live column only case-insensitively, which matters because the description overlay is an exact-match lookup, so the authored text silently fails to reach a column that is right there).
 
-Three things worth knowing before you wire it into CI:
+Four things worth knowing before you wire it into CI:
+
+- **The source argument is an override, not the only way in.** Omit it and the contract's own declared source is loaded, exactly as `create_tools` does. A contract carrying an inline frozen snapshot, checked the obvious way, would otherwise compare no columns at all and report a clean bill of health.
 
 - **Gate on `report.ok`, not `report.has_drift`.** A declaration the check could not reach a verdict on — an unresolved `*` wildcard, or an adapter that raised — lands in `report.unchecked`, and `ok` is False whenever anything is there. A connection failure is no evidence a table is missing, and it is not a pass either. `tables_checked` / `columns_checked` are reported for the same reason: a run that checked nothing must not read like a run that found nothing.
 - **It never resolves a wildcard for you.** `resolve_tables()` rewrites `allowed_tables[].tables` in place, and those bytes are inside the canonical form `contract_digest` hashes. A preflight that quietly re-pinned the artifact it was auditing would be worse than the defect. Resolve first, on a copy, and accept the digest movement knowingly.
 - **The allow-list is the scope.** Columns are checked for tables the contract allows, not every table the semantic source describes — a dbt manifest carries every model in the project, and walking all of them means hundreds of warehouse round-trips to report drift in tables the agent may not query anyway.
+
+Table and schema names are matched case-insensitively; only *columns* report a `case_mismatch`. A catalog that returns unquoted identifiers upper-cased (Snowflake) would otherwise make a wholly correct lower-case contract fail CI with every table "missing" — and unlike a column, whose overlay is an exact-match lookup, a table-name case difference breaks nothing, because every other path hands the name to the adapter to resolve.
 
 Undeclared *live* columns are never reported: the description overlay is a left join by design, and flagging every undocumented column would drown the finding that matters. Type mismatches (declared `BIGINT`, live `VARCHAR`) are the same class of drift and are not covered yet — names first.
 

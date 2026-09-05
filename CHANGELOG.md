@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 
   **Scope is the contract's allow-list**, not everything the semantic source describes: a dbt manifest carries every model in a project, and walking all of them would mean hundreds of warehouse round-trips to report drift in tables the agent may not query anyway. Undeclared *live* columns are never reported — the overlay is a left join by design, and flagging every undocumented column would drown the finding that matters. Type mismatches (declared `BIGINT`, live `VARCHAR`) are the same class of drift and are deliberately not covered yet; names first.
 
+  **Omitting `semantic_source` loads the contract's own**, exactly as `create_tools` does. Every other entry point already had that fallback; without it here, a contract carrying an inline frozen snapshot — the shape a digest-pinned contract takes — checked the obvious CI way would compare zero columns and report a clean bill of health. A source the contract names but that cannot be loaded lands in `unchecked` rather than passing.
+
+  **Table and schema names are matched case-insensitively; only columns report a `case_mismatch`.** A catalog that returns unquoted identifiers upper-cased (Snowflake) would otherwise make a wholly correct lower-case contract fail CI with every table reported missing, and no columns checked behind the wrong diagnosis. The asymmetry is deliberate: a column's authored description reaches the agent through an exact-match lookup, so a case difference there is a live defect, while every path that uses a table name hands it to the adapter, which resolves it at the database.
+
+  **A semantic source whose table keys overlap the allow-list not at all is flagged once.** Per table this is indistinguishable from a table the source simply does not describe — and a source covering 3 of 10 allowed tables is the normal case, so flagging the other 7 would make the gate useless. Zero overlap is a systematic mismatch instead: a third-party source keying `project.dataset.table`, or a schema spelled differently on the two sides. One check over the whole output, so it cannot fire per table.
+
   Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
 
 ### Fixed

@@ -482,16 +482,242 @@ class TestProtocolTolerance:
         report = check_schema_drift(_contract("[orders]"), adapter, _ForeignSource())
         assert [d.column for d in report.drifts] == ["column1"]
 
-    def test_a_table_key_without_a_schema_is_skipped_not_crashed(
+    def test_a_table_key_without_a_schema_is_reported_not_crashed(
         self, adapter: DuckDBAdapter
     ) -> None:
         """Every bundled source keys `get_table_schemas()` as `schema.table`,
-        but nothing in the protocol says so. An unqualified key matches no
-        allowed table; it must fall out quietly, not raise."""
+        but nothing in the protocol says so. An unqualified key must not raise
+        -- and must not pass silently either.
+
+        The first cut of this test asserted `report.ok` here, which blessed the
+        defect: the check compared no columns and said everything was fine. The
+        key convention gap is now the finding.
+        """
 
         class _OddSource(_StubSource):
             def get_table_schemas(self) -> dict[str, Any]:
                 return {"orders": TableSchema(columns=[Column("column1", "")])}
 
         report = check_schema_drift(_contract("[orders]"), adapter, _OddSource())
+        assert not report.has_drift
+        assert [u.qualified for u in report.unchecked] == ["the contract"]
+
+
+class TestContractDeclaredSource:
+    """Review finding: the check ignored the source the contract itself names.
+
+    Every other entry point falls back to `contract.load_semantic_source()` when
+    the caller passes none -- `create_tools` does exactly that. This one did
+    not, so a contract carrying its own source (including the inline frozen
+    snapshot this module's docstring is built around), checked the obvious CI
+    way, compared zero columns and reported a clean bill of health. That is the
+    silent pass the module exists to eliminate, arrived at by a different road.
+    """
+
+    @staticmethod
+    def _inline_contract(columns: list[str]) -> DataContract:
+        cols = "\n".join(f"            - name: {c}" for c in columns)
+        return DataContract.from_yaml_string(
+            f"""
+version: "1.0"
+name: inline-source
+semantic:
+  source:
+    type: yaml
+    inline:
+      metrics: []
+      tables:
+        - schema: main
+          table: orders
+          columns:
+{cols}
+  allowed_tables:
+    - schema: main
+      tables: [orders]
+"""
+        )
+
+    def test_the_contracts_own_source_is_loaded_when_none_is_passed(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        report = check_schema_drift(self._inline_contract(["phantom"]), adapter)
+        assert report.columns_checked == 1
+        assert [d.column for d in report.drifts] == ["phantom"]
+
+    def test_an_explicit_source_still_wins(self, adapter: DuckDBAdapter) -> None:
+        """The argument is an override, not a supplement -- same precedence as
+        `create_tools`, so the two cannot disagree about what was enforced."""
+        report = check_schema_drift(
+            self._inline_contract(["phantom"]),
+            adapter,
+            _source(
+                [{"schema": "main", "table": "orders", "columns": [{"name": "id"}]}]
+            ),
+        )
         assert report.ok
+
+    def test_a_source_that_cannot_be_loaded_is_unchecked_not_clean(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """A contract naming a file that is not there checked nothing. Passing
+        would be the same lie as before, one layer along."""
+        contract = DataContract.from_yaml_string(
+            """
+version: "1.0"
+name: absent-source
+semantic:
+  source:
+    type: dbt
+    path: "./nowhere/manifest.json"
+  allowed_tables:
+    - schema: main
+      tables: [orders]
+"""
+        )
+        report = check_schema_drift(contract, adapter)
+        assert not report.ok
+        assert not report.has_drift
+        assert len(report.unchecked) == 1
+        assert "manifest.json" in report.unchecked[0].reason
+
+
+class TestIdentifierCase:
+    """Review finding: columns were folded for case, tables and schemas were not.
+
+    A warehouse whose catalog returns unquoted identifiers upper-cased
+    (Snowflake) would make a wholly correct lower-case contract report every
+    table missing -- a CI failure with a wrong diagnosis, and no columns checked
+    behind it. Unlike a column, a table-name case difference breaks nothing:
+    the adapter resolves it at the database. So it is matched loosely and not
+    reported.
+    """
+
+    @staticmethod
+    def _shouting_adapter(adapter: DuckDBAdapter) -> Any:
+        class _Shouting:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                # Only answers to the upper-cased schema, and shouts back.
+                if schema != schema.upper():
+                    return []
+                return [t.upper() for t in adapter.list_tables(schema.lower())]
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                return adapter.describe_table(schema.lower(), table.lower())
+
+            def execute(self, sql: str) -> Any:
+                return adapter.execute(sql)
+
+            def explain(self, sql: str) -> Any:
+                return adapter.explain(sql)
+
+        return _Shouting()
+
+    def test_a_table_differing_only_in_case_is_not_missing(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        report = check_schema_drift(
+            _contract("[orders]"), self._shouting_adapter(adapter)
+        )
+        assert report.ok
+        assert report.tables_checked == 1
+
+    def test_columns_are_still_reached_through_a_case_folded_table(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """The table match must yield the *live* spelling, or the follow-up
+        `describe_table` asks for a name the warehouse does not know and the
+        column check silently compares against nothing."""
+        source = _source(
+            [
+                {
+                    "schema": "main",
+                    "table": "orders",
+                    "columns": [{"name": "id"}, {"name": "column1"}],
+                }
+            ]
+        )
+        report = check_schema_drift(
+            _contract("[orders]"), self._shouting_adapter(adapter), source
+        )
+        assert report.columns_checked == 2
+        assert [d.column for d in report.drifts] == ["column1"]
+
+
+class TestKeyConventionMismatch:
+    def test_a_source_describing_nothing_the_contract_allows_is_flagged_once(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: a table with no declarations found is indistinguishable
+        from one that declares none, and both read as `ok`.
+
+        Per-table this cannot be told apart -- a source legitimately describing
+        3 of 10 allowed tables is the normal case, and flagging the other 7
+        would make the gate useless. But a source whose keys overlap the
+        allow-list *not at all* is a systematic mismatch, not seven absences:
+        a third-party source keying `project.dataset.table`, or a schema name
+        spelled differently on the two sides. One O(1) check over the whole
+        output, so it cannot fire per-table.
+        """
+
+        class _OtherConvention(_StubSource):
+            def get_table_schemas(self) -> dict[str, Any]:
+                return {"proj:main.orders": TableSchema(columns=[Column("id", "")])}
+
+        report = check_schema_drift(_contract("[orders]"), adapter, _OtherConvention())
+        assert not report.ok
+        assert not report.has_drift
+        assert len(report.unchecked) == 1
+
+    def test_a_partial_overlap_is_the_normal_case_and_stays_ok(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """A source describing some allowed tables and not others is what every
+        real contract looks like."""
+        source = _source(
+            [{"schema": "main", "table": "orders", "columns": [{"name": "id"}]}]
+        )
+        report = check_schema_drift(_contract(), adapter, source)
+        assert report.ok
+
+    def test_a_source_describing_no_tables_at_all_is_not_flagged(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Nothing declared is nothing to mismatch. Only a source that describes
+        tables, none of them the contract's, is evidence of a convention gap."""
+        report = check_schema_drift(_contract("[orders]"), adapter, _StubSource())
+        assert report.ok
+
+
+class TestFailureFanOut:
+    def test_one_unreachable_schema_is_one_finding_not_one_per_table(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the same fan-out `missing_schema` deliberately
+        collapses. A schema with 200 allowed tables produced 200 identical
+        "connection refused" lines, burying everything else in the report."""
+
+        class _BrokenAdapter:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                raise RuntimeError("connection refused")
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                raise AssertionError("should not be reached")
+
+            def execute(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+            def explain(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+        report = check_schema_drift(
+            _contract("[a, b, c, d, e]"),
+            _BrokenAdapter(),  # type: ignore[arg-type]
+        )
+        assert len(report.unchecked) == 1
+        assert "connection refused" in report.unchecked[0].reason
+        # The count is not lost by collapsing it.
+        assert "5" in report.unchecked[0].reason

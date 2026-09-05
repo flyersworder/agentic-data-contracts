@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.51.0] - 2026-09-05
+
+### Added
+
+- **`check_schema_drift` — the contract's declarations, checked against the warehouse** (#90). A semantic source could declare a column that does not exist and nothing reported it: not at load, not at `describe_table`, not anywhere. The declaration lives inside `contract_digest`, so a contract stayed "frozen" around a column the warehouse had renamed while every gate stayed green — the declarations had not changed, the *world* had. That is the failure a data contract exists to prevent, and the library had both sides in hand.
+
+  `check_schema_drift(contract, adapter, semantic_source)` walks every table the contract allows and, where the semantic source declares them, every column of those tables. It reports four kinds: `missing_schema`, `missing_table`, `missing_column`, and `case_mismatch`. The last is its own kind rather than a `missing_column` because the description overlay in `describe_table` is an exact-match dict lookup — a column declared `MCC` where the warehouse says `mcc` really does fail to receive its authored description, but calling it absent sends the reader hunting for a column that is right there.
+
+  **Gate on `report.ok`, not `report.has_drift`.** An unresolved `*` wildcard, or an adapter that raised, lands in `report.unchecked`, and `ok` is False whenever anything is there. A connection failure is no evidence that a table is missing — reporting it as drift would send someone to fix a contract that is correct — and it is emphatically not a pass. `tables_checked` and `columns_checked` are on the report for the same reason: a run that checked nothing must not read like a run that found nothing.
+
+  **The check never resolves a wildcard for you.** `resolve_tables()` rewrites `allowed_tables[].tables` in place, and those bytes are inside the canonical form `contract_digest` hashes. A preflight that quietly re-pinned the artifact it was auditing would be worse than the defect it reports, so an unresolved wildcard is declined rather than silently expanded.
+
+  **Scope is the contract's allow-list**, not everything the semantic source describes: a dbt manifest carries every model in a project, and walking all of them would mean hundreds of warehouse round-trips to report drift in tables the agent may not query anyway. Undeclared *live* columns are never reported — the overlay is a left join by design, and flagging every undocumented column would drown the finding that matters. Type mismatches (declared `BIGINT`, live `VARCHAR`) are the same class of drift and are deliberately not covered yet; names first.
+
+  Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
+
+### Fixed
+
+- **`describe_table` now says when the documentation it just served is stale** (#90). The sharp part of the issue was that this one function already held both sides and did not compare them. It overlays authored descriptions by iterating the *adapter's* columns and looking each one up in the semantic source — a left join. An adapter column with no declaration is fine and intended; a declared column with no adapter column simply never matched, and fell out with no signal.
+
+  The response now carries a `note` naming the declared columns the live table does not have, and separately any that differ only in case. A `note` rather than an error: the live column list is still correct and the table description still applies, and failing the call would cost the agent a usable answer over a documentation defect. Two details that matter more than they look:
+
+  - The reconciliation reads **every declared column name, not the overlay dict**, which holds only columns carrying a description. A declared column with no description is just as absent from the warehouse and just as stale a claim about the schema.
+  - A table that does not exist comes back from most adapters as an *empty schema* rather than an error, so the naive diff turns one missing table into one finding per declared column. That case says the table reported no columns at all, and the general listing is capped at eight names with the true count always stated — truncating in silence would be the same defect one layer along.
+
 ## [0.50.0] - 2026-09-04
 
 ### Fixed

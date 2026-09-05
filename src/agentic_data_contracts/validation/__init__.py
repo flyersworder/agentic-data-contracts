@@ -25,6 +25,12 @@ from agentic_data_contracts.validation.conformance import (
     ConformanceResult,
     evaluate_conformance,
 )
+from agentic_data_contracts.validation.drift import (
+    SchemaDrift,
+    SchemaDriftReport,
+    UncheckedTable,
+    check_schema_drift,
+)
 from agentic_data_contracts.validation.examples import (
     ExampleAnswerReport,
     ExampleAnswerResult,
@@ -65,11 +71,14 @@ __all__ = [
     "NoSelectStarChecker",
     "OperationBlocklistChecker",
     "ReconciliationResult",
+    "SchemaDrift",
+    "SchemaDriftReport",
     "RelationshipChecker",
     "RequiredFilterChecker",
     "RequireLimitChecker",
     "ResultCheckRunner",
     "TableAllowlistChecker",
+    "UncheckedTable",
     "ToolCall",
     "ToolRecorder",
     "ValidationResult",
@@ -78,6 +87,7 @@ __all__ = [
     "attribute_change",
     "check_attribution",
     "check_example_answers",
+    "check_schema_drift",
     "evaluate_conformance",
     "extract_tables",
     "reconcile_decomposition",

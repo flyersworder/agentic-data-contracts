@@ -86,6 +86,77 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
+#: How many stale column names a note will spell out before summarising. A
+#: table renamed wholesale would otherwise put every declared column into an
+#: agent's context; the count is always stated, so the truncation is not itself
+#: a silent drop.
+_MAX_NOTED_COLUMNS = 8
+
+
+def _stale_declaration_note(declared: list[str], live: list[str]) -> str:
+    """Say when a semantic source documents columns the live table lacks (#90).
+
+    Returns "" when the declarations agree with the warehouse, so the key stays
+    off the payload entirely rather than reading as an empty warning.
+
+    A case-only difference gets its own sentence. It is a real defect -- the
+    overlay is an exact-match dict lookup, so an authored description silently
+    fails to reach a column that is right there -- but reporting it as absent
+    would send the reader hunting for a column that exists.
+    """
+    if not declared:
+        return ""
+    live_exact = set(live)
+    if not live_exact:
+        # A table that does not exist comes back from most adapters as an empty
+        # schema rather than an error, and listing every declared column as
+        # absent is true and useless. The fact worth stating is the one the
+        # column list above cannot state for itself.
+        return (
+            f"The live table reports no columns, while the semantic source"
+            f" declares {len(declared)}. The table may not exist, or may not be"
+            " visible to this connection — the declarations below it could not"
+            " be checked."
+        )
+    live_folded: dict[str, str] = {}
+    for name in live:
+        live_folded.setdefault(name.casefold(), name)
+    missing: list[str] = []
+    miscased: list[tuple[str, str]] = []
+    for name in declared:
+        if name in live_exact:
+            continue
+        actual = live_folded.get(name.casefold())
+        if actual is None:
+            missing.append(name)
+        else:
+            miscased.append((name, actual))
+    sentences: list[str] = []
+    if missing:
+        sentences.append(
+            f"The semantic source declares {len(missing)} column(s) this table"
+            f" does not have: {_elide(missing)}. Its documentation is stale —"
+            " trust the column list above, not the declaration."
+        )
+    if miscased:
+        pairs = [
+            f"{declared_name} (live: {actual})" for declared_name, actual in miscased
+        ]
+        sentences.append(
+            f"{len(miscased)} declared column(s) differ from the live schema"
+            f" only in case: {_elide(pairs)}. Their authored descriptions do"
+            " not reach the column list above, which matches names exactly."
+        )
+    return " ".join(sentences)
+
+
+def _elide(items: list[str]) -> str:
+    if len(items) <= _MAX_NOTED_COLUMNS:
+        return ", ".join(items)
+    shown = ", ".join(items[:_MAX_NOTED_COLUMNS])
+    return f"{shown}, and {len(items) - _MAX_NOTED_COLUMNS} more"
+
+
 def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
     """Warn when a contract declares a token budget the given path does not enforce.
 
@@ -540,6 +611,12 @@ def create_tools(
             # comments) fill in where the semantic source has no entry. Columns
             # with no description anywhere omit the field to keep responses tight.
             sem_descs: dict[str, str] = {}
+            # Every declared column name, not just the described ones. The
+            # overlay dict above holds only columns carrying a description, and
+            # reconciling against *that* would miss a declared column with no
+            # description -- which is just as absent from the warehouse, and
+            # just as stale a claim about the schema (#90).
+            sem_col_names: list[str] = []
             # `getattr` because `DatabaseAdapter` is a structural protocol: an
             # external adapter returning its own schema-shaped object satisfied
             # this tool while it read only `.columns`, and a minor bump should
@@ -548,8 +625,15 @@ def create_tools(
             if semantic_source is not None:
                 sem_ts = semantic_source.get_table_schema(schema_name, table_name)
                 if sem_ts is not None:
+                    sem_cols = getattr(sem_ts, "columns", None) or []
+                    sem_col_names = [
+                        name for c in sem_cols if (name := getattr(c, "name", "") or "")
+                    ]
                     sem_descs = {
-                        c.name: c.description for c in sem_ts.columns if c.description
+                        name: desc
+                        for c in sem_cols
+                        if (name := getattr(c, "name", "") or "")
+                        and (desc := getattr(c, "description", "") or "")
                     }
                     # Same precedence as the column overlay: the semantic source
                     # is the canonical agent-facing documentation, and an adapter
@@ -581,6 +665,13 @@ def create_tools(
             if table_desc:
                 payload["description"] = table_desc
             payload["columns"] = cols
+            # The reconciliation this function was already positioned to do and
+            # did not (#90): it holds the declarations and the live schema in
+            # the same scope, and the overlay above is a left join, so a
+            # declared column with no live counterpart fell out in silence.
+            note = _stale_declaration_note(sem_col_names, [c.name for c in ts.columns])
+            if note:
+                payload["note"] = note
             response = _text_response(json.dumps(payload))
             _record("ok")
             return response

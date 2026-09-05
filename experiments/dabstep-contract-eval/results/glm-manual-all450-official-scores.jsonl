@@ -1,0 +1,450 @@
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1", "score": true, "level": "easy", "agent_answer": "138236"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2", "score": true, "level": "easy", "agent_answer": "91.852"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "3", "score": true, "level": "easy", "agent_answer": "27647"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "4", "score": true, "level": "easy", "agent_answer": "NL"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "5", "score": true, "level": "easy", "agent_answer": "NL"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "6", "score": true, "level": "easy", "agent_answer": "73.150"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "7", "score": false, "level": "easy", "agent_answer": "0.899997"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "8", "score": true, "level": "easy", "agent_answer": "Ecommerce"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "9", "score": true, "level": "easy", "agent_answer": "64"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "10", "score": true, "level": "easy", "agent_answer": "5"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "11", "score": true, "level": "easy", "agent_answer": "4811.76"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "12", "score": true, "level": "easy", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "13", "score": true, "level": "easy", "agent_answer": "14"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "14", "score": true, "level": "easy", "agent_answer": "has_fraudulent_dispute"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "15", "score": false, "level": "easy", "agent_answer": "9.154306"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "16", "score": true, "level": "easy", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "17", "score": false, "level": "easy", "agent_answer": "7.683437%"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "18", "score": false, "level": "easy", "agent_answer": "SwiftCharge"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "19", "score": true, "level": "easy", "agent_answer": "9.676954%"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "20", "score": true, "level": "easy", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "21", "score": true, "level": "easy", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "22", "score": true, "level": "easy", "agent_answer": "No"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "23", "score": true, "level": "easy", "agent_answer": "0"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "24", "score": true, "level": "easy", "agent_answer": "Other"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "25", "score": true, "level": "easy", "agent_answer": "2429"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "26", "score": true, "level": "easy", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "27", "score": true, "level": "easy", "agent_answer": "13"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "28", "score": false, "level": "easy", "agent_answer": "0.114862"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "29", "score": false, "level": "easy", "agent_answer": "Yes \u2014 outlier transactions (Z-Score > 3 on amount, 2023) have a fraud rate of ~11.5%, higher than the ~7.7% rate among inliers."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "30", "score": true, "level": "easy", "agent_answer": "Yes."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "31", "score": true, "level": "easy", "agent_answer": "C. both ip_address and email_address"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "32", "score": true, "level": "easy", "agent_answer": "1.429"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "33", "score": true, "level": "easy", "agent_answer": "46284"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "34", "score": true, "level": "easy", "agent_answer": "55192"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "35", "score": true, "level": "easy", "agent_answer": "28630"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "36", "score": false, "level": "easy", "agent_answer": "2.986691"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "37", "score": true, "level": "easy", "agent_answer": "2.724331"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "38", "score": false, "level": "easy", "agent_answer": "0.600917"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "39", "score": false, "level": "easy", "agent_answer": "0.249993"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "40", "score": true, "level": "easy", "agent_answer": "9.999566"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "41", "score": true, "level": "easy", "agent_answer": "ip_address"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "42", "score": false, "level": "easy", "agent_answer": "Yes \u2014 there are duplicate transactions (138,235 rows are duplicates of another row, across 1 duplicate group)."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "43", "score": false, "level": "easy", "agent_answer": "274.334"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "44", "score": true, "level": "easy", "agent_answer": "61.855893"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "45", "score": true, "level": "easy", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "46", "score": true, "level": "easy", "agent_answer": "1.544"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "47", "score": false, "level": "easy", "agent_answer": "0.864"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "48", "score": true, "level": "easy", "agent_answer": "No"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "49", "score": true, "level": "easy", "agent_answer": "B. BE"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "50", "score": true, "level": "easy", "agent_answer": "Yes"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "51", "score": true, "level": "easy", "agent_answer": "41679"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "52", "score": true, "level": "easy", "agent_answer": "NL"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "53", "score": true, "level": "easy", "agent_answer": "10765"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "54", "score": true, "level": "easy", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "55", "score": true, "level": "easy", "agent_answer": "Other"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "56", "score": true, "level": "easy", "agent_answer": "22520"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "57", "score": true, "level": "easy", "agent_answer": "55192"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "58", "score": false, "level": "easy", "agent_answer": "9.758287"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "59", "score": false, "level": "easy", "agent_answer": "BE, IT, ES"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "60", "score": false, "level": "easy", "agent_answer": "Martinis_Fine_Steakhouse, BE, TransactPlus, Ecommerce"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "61", "score": false, "level": "easy", "agent_answer": "Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "62", "score": true, "level": "easy", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "63", "score": true, "level": "easy", "agent_answer": "R, D, H, F, S, O"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "64", "score": true, "level": "easy", "agent_answer": "A, B, C, D, E, F, G"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "65", "score": true, "level": "easy", "agent_answer": "intracountry"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "66", "score": true, "level": "easy", "agent_answer": "is_credit"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "67", "score": true, "level": "easy", "agent_answer": "monthly_volume, capture_delay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "68", "score": true, "level": "easy", "agent_answer": "monthly_fraud_level"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "69", "score": true, "level": "easy", "agent_answer": "**>5m**"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "70", "score": false, "level": "easy", "agent_answer": "Yes"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "71", "score": false, "level": "easy", "agent_answer": "Yes."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "72", "score": true, "level": "easy", "agent_answer": "Belles_cookbook_store, Crossfit_Hanna, Golfclub_Baron_Friso, Martinis_Fine_Steakhouse, Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "382", "score": true, "level": "hard", "agent_answer": "[GR: 80.62, SE: 80.80, IT: 86.69, FR: 91.30, ES: 92.45, NL: 103.99, BE: 106.35, LU: 174.28]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "973", "score": true, "level": "hard", "agent_answer": "[C: 69.36, F: 77.90, B: 86.22, A: 87.79, D: 94.34, G: 115.23, ]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1217", "score": false, "level": "hard", "agent_answer": "[Ecommerce: 92.70, POS: 95.95,]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "347", "score": false, "level": "hard", "agent_answer": "[FR: 82.86, GR: 87.06, NL: 87.20, SE: 90.61, IT: 90.98, BE: 93.57, ES: 97.60, LU: 123.89]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "471", "score": true, "level": "hard", "agent_answer": "[BE: 86.39, SE: 91.89, ES: 92.83, NL: 95.38, IT: 97.15, GR: 101.00, FR: 103.33, LU: 106.02]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "842", "score": false, "level": "hard", "agent_answer": "[NL: 93.95, GB: 94.27]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "916", "score": false, "level": "hard", "agent_answer": "[A: 70.73, C: 86.42, E: 90.04, G: 106.86, B: 116.20]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "682", "score": true, "level": "hard", "agent_answer": "[US: 90.24,]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "623", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "341", "score": false, "level": "hard", "agent_answer": "[LU: 85.41, FR: 89.42, GR: 91.49, ES: 92.08, SE: 92.16, BE: 93.14, IT: 94.00, NL: 94.62]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "375", "score": true, "level": "hard", "agent_answer": "[BE: 85.30, IT: 93.82, FR: 98.57, NL: 99.87, LU: 111.42, SE: 114.36, ES: 134.41, GR: 169.92]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "617", "score": false, "level": "hard", "agent_answer": "[MacOS: 88.79, Windows: 89.10, iOS: 89.38, Linux: 91.44, Android: 97.89, Other: 98.10]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "402", "score": true, "level": "hard", "agent_answer": "[IT: 64.05, FR: 77.99, SE: 78.61, NL: 78.81, GR: 86.26, BE: 94.33, LU: 108.82, ES: 130.2]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1012", "score": true, "level": "hard", "agent_answer": "[C: 64.94, F: 66.67, D: 70.09, G: 90.47, A: 175.34, B: 251.88]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "883", "score": true, "level": "hard", "agent_answer": "[C: 75.70, A: 87.91, D: 88.10, F: 89.40, G: 93.75, B: 131.71, ]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "793", "score": false, "level": "hard", "agent_answer": "[IT: 93.12, ]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "625", "score": false, "level": "hard", "agent_answer": "[Android: 88.89, MacOS: 90.29, Other: 93.15, Linux: 95.16, iOS: 96.02, Windows: 98.77]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "178", "score": true, "level": "hard", "agent_answer": "[GR: 70.70, SE: 83.80, LU: 84.36, FR: 88.59, IT: 94.94, NL: 108.81, BE: 110.11, ES: 126.92]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1234", "score": false, "level": "hard", "agent_answer": "[POS: 86.41, Ecommerce: 91.10]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "889", "score": true, "level": "hard", "agent_answer": "[A: 60.18, D: 88.00, C: 88.72, F: 93.75, G: 97.09, B: 128.42]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1290", "score": false, "level": "hard", "agent_answer": "5.757053"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1277", "score": false, "level": "hard", "agent_answer": "0.311585"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1274", "score": false, "level": "hard", "agent_answer": "0.125516"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1296", "score": false, "level": "hard", "agent_answer": "28.300603"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1294", "score": false, "level": "hard", "agent_answer": "28.510737"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1280", "score": false, "level": "hard", "agent_answer": "0.350172"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1300", "score": false, "level": "hard", "agent_answer": "7.035690"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1295", "score": false, "level": "hard", "agent_answer": "28.070400"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1278", "score": true, "level": "hard", "agent_answer": "0.352294"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1297", "score": false, "level": "hard", "agent_answer": "6.051579"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1292", "score": false, "level": "hard", "agent_answer": "5.714397"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1286", "score": false, "level": "hard", "agent_answer": "2.912842"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1299", "score": false, "level": "hard", "agent_answer": "6.977787"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1275", "score": false, "level": "hard", "agent_answer": "0.122408"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1287", "score": false, "level": "hard", "agent_answer": "2.866800"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1301", "score": false, "level": "hard", "agent_answer": "21.017254"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1279", "score": false, "level": "hard", "agent_answer": "0.346440"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1289", "score": false, "level": "hard", "agent_answer": "4.917154"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1302", "score": false, "level": "hard", "agent_answer": "24.648299"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1281", "score": false, "level": "hard", "agent_answer": "0.553984"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1431", "score": false, "level": "hard", "agent_answer": "27.108267"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1336", "score": false, "level": "hard", "agent_answer": "22.535867"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1385", "score": false, "level": "hard", "agent_answer": "7.015000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1394", "score": false, "level": "hard", "agent_answer": "4.419000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1348", "score": false, "level": "hard", "agent_answer": "0.522857"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1420", "score": false, "level": "hard", "agent_answer": "8.14"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1417", "score": false, "level": "hard", "agent_answer": "2.810000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1427", "score": false, "level": "hard", "agent_answer": "7.763067"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1341", "score": false, "level": "hard", "agent_answer": "0.361429"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1344", "score": false, "level": "hard", "agent_answer": "0.318333"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1358", "score": false, "level": "hard", "agent_answer": "12.310000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1308", "score": false, "level": "hard", "agent_answer": "0.118667"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1347", "score": false, "level": "hard", "agent_answer": "0.524000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1305", "score": false, "level": "hard", "agent_answer": "0.064000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1331", "score": false, "level": "hard", "agent_answer": "5.681933"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1366", "score": false, "level": "hard", "agent_answer": "10.646450"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1343", "score": false, "level": "hard", "agent_answer": "0.294000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1312", "score": false, "level": "hard", "agent_answer": "0.326667"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1365", "score": false, "level": "hard", "agent_answer": "25.781160"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1401", "score": true, "level": "hard", "agent_answer": "0.115980"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1440", "score": false, "level": "hard", "agent_answer": "8049, 8062, 7298, 7991, 8021, 8011, 7231"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1434", "score": false, "level": "hard", "agent_answer": "3000, 3001, 3002, 3003, 7011, 7032, 7512, 7513"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1442", "score": false, "level": "hard", "agent_answer": "8062, 8011, 8021, 7231, 7298, 7991, 8049"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1438", "score": false, "level": "hard", "agent_answer": "8062, 7231, 7298, 8049, 8021, 8011, 7991"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1437", "score": false, "level": "hard", "agent_answer": "3000, 3001, 3002, 3003, 7011, 7032, 7231, 7298, 7512, 7513, 7991, 8011, 8021, 8049, 8062"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1433", "score": false, "level": "hard", "agent_answer": "3000, 3001, 3002, 7011, 7032, 7512, 7513"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1441", "score": false, "level": "hard", "agent_answer": "7231, 7298, 8021, 8062, 8011, 7991, 8049"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1439", "score": false, "level": "hard", "agent_answer": "7231, 7298, 7991, 8011, 8021, 8049, 8062"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1436", "score": false, "level": "hard", "agent_answer": "3000, 3001, 3002, 3003, 7011, 7032, 7512, 7513"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1435", "score": false, "level": "hard", "agent_answer": "3000, 3001, 3002, 3003, 7011, 7032, 7512, 7513"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1448", "score": false, "level": "hard", "agent_answer": "F"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1457", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1447", "score": false, "level": "hard", "agent_answer": "A"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1455", "score": false, "level": "hard", "agent_answer": "F"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1451", "score": false, "level": "hard", "agent_answer": "['F']"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1456", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1445", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1460", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1452", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1453", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1461", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1454", "score": false, "level": "hard", "agent_answer": "[E]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1458", "score": false, "level": "hard", "agent_answer": "[A]"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1443", "score": true, "level": "hard", "agent_answer": "['C']"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1446", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1444", "score": false, "level": "hard", "agent_answer": "E"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1449", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1462", "score": false, "level": "hard", "agent_answer": "['E']"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1450", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1459", "score": false, "level": "hard", "agent_answer": "['F']"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1504", "score": false, "level": "hard", "agent_answer": "**Not Applicable**"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1472", "score": false, "level": "hard", "agent_answer": "175, 186, 194, 218, 220, 252, 270, 275, 286, 305, 369, 390, 420, 476, 516, 517, 529, 645, 649, 696, 701, 706, 744, 751, 762, 787, 793, 811, 821, 841, 859, 888, 894, 900, 902, 921, 934, 941, 963, 983"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1500", "score": true, "level": "hard", "agent_answer": "1, 3, 4, 5, 8, 9, 11, 12, 13, 14, 15, 18, 20, 23, 25, 30, 35, 36, 38, 40, 44, 48, 50, 55, 57, 58, 63, 69, 86, 87, 90, 93, 95, 96, 98, 101, 108, 110, 113, 115, 119, 122, 123, 125, 127, 129, 130, 133, 136, 138, 139, 142, 143, 146, 147, 152, 155, 158, 160, 161, 163, 165, 168, 171, 173, 174, 176, 184, 187, 191, 195, 197, 198, 199, 200, 202, 205, 206, 207, 210, 211, 213, 214, 217, 219, 223, 225, 226, 227, 229, 234, 235, 239, 244, 246, 250, 251, 255, 257, 261, 262, 263, 264, 266, 269, 271, 274, 277, 280, 281, 287, 288, 290, 292, 293, 294, 299, 301, 302, 303, 304, 307, 308, 309, 311, 313, 314, 315, 317, 319, 320, 322, 330, 332, 333, 334, 335, 337, 338, 344, 346, 348, 349, 350, 358, 359, 362, 364, 365, 367, 370, 371, 372, 376, 382, 384, 387, 391, 394, 395, 397, 398, 402, 405, 406, 407, 410, 427, 428, 430, 431, 434, 435, 436, 441, 444, 445, 446, 447, 448, 449, 451, 453, 463, 465, 468, 469, 470, 477, 478, 480, 482, 485, 486, 491, 492, 499, 503, 505, 507, 508, 509, 510, 511, 514, 518, 521, 523, 524, 527, 533, 547, 548, 549, 550, 552, 553, 555, 557, 558, 560, 562, 565, 569, 570, 573, 574, 575, 576, 578, 581, 584, 591, 594, 597, 599, 603, 608, 609, 611, 615, 619, 620, 621, 624, 626, 630, 631, 632, 637, 639, 640, 644, 647, 654, 657, 660, 662, 666, 667, 669, 671, 675, 676, 677, 681, 682, 684, 685, 689, 697, 702, 709, 714, 718, 721, 722, 729, 730, 732, 734, 735, 739, 740, 746, 747, 750, 754, 767, 769, 772, 775, 777, 778, 785, 786, 788, 789, 792, 794, 796, 797, 803, 804, 805, 806, 810, 812, 813, 814, 817, 818, 820, 823, 824, 826, 829, 830, 832, 836, 838, 839, 840, 842, 847, 848, 852, 854, 855, 861, 862, 863, 864, 865, 870, 874, 875, 876, 877, 878, 880, 882, 883, 887, 889, 891, 901, 903, 906, 907, 910, 913, 916, 918, 919, 920, 927, 931, 942, 947, 949, 952, 953, 959, 960, 961, 962, 966, 968, 978, 981, 989, 990, 992, 995, 996, 997, 1000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1465", "score": false, "level": "hard", "agent_answer": "39, 47, 49, 62, 66, 80, 85, 220, 230, 248, 253, 270, 275, 286, 324, 329, 347, 355, 369, 390, 393, 418, 484, 516, 529, 583, 587, 606, 638, 645, 649, 661, 696, 706, 728, 744, 745, 779, 781, 784, 793, 811, 828, 841, 849, 859, 871, 890, 902, 963"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1493", "score": false, "level": "hard", "agent_answer": "39, 62, 66, 80, 85, 208, 230, 243, 248, 390, 484, 489, 529, 540, 542, 543, 583, 606, 638, 645, 668, 706, 745, 784, 793, 841, 902"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1473", "score": false, "level": "hard", "agent_answer": "156, 159, 170, 260, 298, 312, 377, 409, 424"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1484", "score": false, "level": "hard", "agent_answer": "34, 154, 182, 201, 278, 419, 438, 529, 561, 628, 642, 687, 737, 770, 779, 837, 871, 915, 922, 976"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1475", "score": false, "level": "hard", "agent_answer": "37, 126, 131, 167, 188, 502, 525, 534, 673, 802, 926, 957"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1463", "score": false, "level": "hard", "agent_answer": "34, 47, 62, 66, 80, 82, 106, 109, 154, 220, 230, 231, 249, 253, 275, 278, 329, 347, 352, 360, 369, 419, 438, 450, 512, 529, 583, 638, 642, 649, 665, 711, 728, 744, 745, 770, 779, 781, 784, 808, 837, 849, 859, 871, 915, 922, 923, 944, 948, 963, 964"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1474", "score": false, "level": "hard", "agent_answer": "52, 81, 88, 204, 295, 605, 625, 655, 727"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1502", "score": false, "level": "hard", "agent_answer": "19, 24, 32, 33, 43, 70, 92, 99, 105, 111, 135, 148, 164, 179, 183, 185, 192, 203, 238, 254, 259, 325, 336, 354, 361, 400, 415, 416, 458, 479, 488, 498, 500, 526, 531, 604, 652, 664, 672, 699, 705, 720, 724, 753, 766, 771, 773, 780, 795, 819, 846, 886, 892, 911, 914, 924, 932, 946, 951, 982, 987, 993"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1480", "score": false, "level": "hard", "agent_answer": "156, 159, 298, 424, 522, 528, 703, 742"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1485", "score": false, "level": "hard", "agent_answer": "34, 49, 60, 154, 182, 201, 276, 278, 297, 323, 326, 345, 355, 356, 390, 393, 419, 561, 628, 645, 687, 737, 779, 793, 828, 837, 871, 884, 909, 915, 939, 976"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1486", "score": false, "level": "hard", "agent_answer": "393, 49, 645, 793, 706, 828, 356, 390, 909, 60, 355, 396, 737, 201, 841, 258, 779, 976, 326, 871, 529, 687, 902, 969"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1470", "score": false, "level": "hard", "agent_answer": "109, 141, 154, 175, 186, 194, 220, 252, 275, 305, 34, 360, 369, 419, 420, 450, 452, 459, 476, 493, 517, 529, 551, 612, 616, 649, 674, 744, 751, 762, 770, 787, 808, 821, 859, 888, 894, 915, 934, 941, 963, 964"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1497", "score": true, "level": "hard", "agent_answer": "5, 9, 20, 30, 48, 58, 90, 96, 101, 108, 110, 122, 152, 161, 199, 205, 213, 215, 223, 227, 262, 273, 274, 290, 302, 304, 309, 314, 316, 320, 322, 344, 346, 362, 364, 395, 405, 406, 407, 408, 434, 449, 454, 491, 507, 511, 523, 527, 549, 552, 555, 558, 560, 575, 602, 609, 619, 666, 669, 707, 718, 734, 746, 750, 767, 769, 772, 775, 778, 792, 796, 797, 805, 806, 813, 820, 826, 832, 842, 851, 855, 865, 874, 889, 891, 913, 918, 940, 952, 953, 978, 1000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1489", "score": false, "level": "hard", "agent_answer": "67, 131, 188, 525, 925, 957, 985"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1494", "score": false, "level": "hard", "agent_answer": "26, 156, 298, 363, 424, 579, 653"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1467", "score": false, "level": "hard", "agent_answer": "77, 137, 169, 228, 237, 291, 295, 331, 342, 386, 464, 544, 605, 655, 727, 798, 809, 936, 971"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1477", "score": false, "level": "hard", "agent_answer": "34, 79, 102, 141, 154, 186, 194, 252, 300, 329, 347, 419, 459, 476, 493, 512, 517, 529, 538, 551, 612, 616, 728, 751, 770, 821, 849, 888, 915, 934"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1510", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1512", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1520", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1509", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1514", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1515", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1505", "score": false, "level": "hard", "agent_answer": "SwiftCharge"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1506", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1516", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1513", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1518", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1507", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1511", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1517", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1519", "score": true, "level": "hard", "agent_answer": "GlobalCard"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1508", "score": true, "level": "hard", "agent_answer": "NexPay"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1538", "score": true, "level": "hard", "agent_answer": "5.625868"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1636", "score": false, "level": "hard", "agent_answer": "5.544348"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1531", "score": false, "level": "hard", "agent_answer": "0.627000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1584", "score": false, "level": "hard", "agent_answer": "22.844081"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1641", "score": false, "level": "hard", "agent_answer": "5.933722"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1674", "score": false, "level": "hard", "agent_answer": "7.642186"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1679", "score": false, "level": "hard", "agent_answer": "26.894910"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1615", "score": false, "level": "hard", "agent_answer": "25.613732"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1676", "score": false, "level": "hard", "agent_answer": "7.122880"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1594", "score": false, "level": "hard", "agent_answer": "0.710588"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1646", "score": true, "level": "hard", "agent_answer": "23.653151"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1577", "score": false, "level": "hard", "agent_answer": "6.192667"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1645", "score": false, "level": "hard", "agent_answer": "20.596972"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1574", "score": false, "level": "hard", "agent_answer": "27.108636"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1643", "score": false, "level": "hard", "agent_answer": "10.126533"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1631", "score": false, "level": "hard", "agent_answer": "3.153913"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1593", "score": false, "level": "hard", "agent_answer": "0.635000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1570", "score": false, "level": "hard", "agent_answer": "5.472273"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1604", "score": false, "level": "hard", "agent_answer": "5.320345"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1675", "score": false, "level": "hard", "agent_answer": "9.841950"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1700", "score": false, "level": "hard", "agent_answer": "(empty list \u2014 no fee rules apply)"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1699", "score": false, "level": "hard", "agent_answer": "134, 300, 612, 616, 921"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1698", "score": false, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 163, 276, 304, 381, 384, 394, 428, 454, 473, 477, 536, 572, 595, 608, 626, 631, 678, 680, 709, 725, 741, 813, 861, 868, 871, 884, 939, 942, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1689", "score": false, "level": "hard", "agent_answer": "(No fee rules in the dataset cover MCC 7997 for Crossfit_Hanna's account type, capture delay, fraud, and volume profile for that day.)\n\n**Answer:**"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1709", "score": true, "level": "hard", "agent_answer": "17, 107, 123, 163, 183, 286, 304, 384, 427, 428, 454, 477, 595, 626, 634, 701, 709, 787, 813, 888, 892, 924"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1687", "score": false, "level": "hard", "agent_answer": "2, 7, 8, 11, 12, 18, 20, 21, 25, 29, 48, 49, 50, 51, 61, 64, 76, 84, 93, 96, 98, 100, 101, 104, 108, 117, 118, 122, 123, 127, 132, 133, 146, 147, 157, 158, 161, 163, 165, 173, 174, 177, 181, 182, 184, 190, 191, 193, 195, 197, 199, 205, 211, 213, 217, 221, 226, 233, 234, 235, 239, 240, 244, 246, 269, 276, 288, 293, 302, 303, 304, 308, 315, 320, 328, 330, 332, 335, 337, 339, 344, 358, 372, 373, 375, 380, 381, 382, 384, 385, 391, 395, 407, 410, 421, 424, 428, 430, 431, 434, 440, 444, 445, 447, 448, 454, 460, 461, 468, 473, 477, 480, 486, 491, 494, 505, 507, 508, 509, 510, 511, 514, 525, 533, 547, 548, 553, 559, 565, 572, 576, 594, 595, 598, 609, 615, 619, 624, 626, 630, 633, 637, 640, 641, 644, 645, 657, 660, 667, 675, 676, 677, 680, 682, 692, 704, 706, 709, 721, 729, 734, 735, 737, 738, 741, 759, 769, 775, 776, 777, 779, 782, 785, 786, 788, 792, 797, 799, 812, 813, 815, 820, 834, 842, 844, 848, 850, 863, 865, 866, 874, 878, 880, 891, 902, 910, 912, 913, 916, 918, 920, 922, 927, 937, 947, 950, 953, 958, 961, 967, 988, 995, 997, 1000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1681", "score": false, "level": "hard", "agent_answer": "454"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1686", "score": true, "level": "hard", "agent_answer": "53, 64, 231, 381, 454, 473"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1705", "score": false, "level": "hard", "agent_answer": "123, 286, 304, 384, 427, 498, 634, 709, 741, 813, 861, 888, 892, 924"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1701", "score": false, "level": "hard", "agent_answer": "612, 616"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1688", "score": false, "level": "hard", "agent_answer": "276, 454, 871"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1683", "score": true, "level": "hard", "agent_answer": "51, 64, 231, 249, 381, 384, 454, 473, 477, 572, 813"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1702", "score": false, "level": "hard", "agent_answer": "280, 364, 456, 804, 870"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1706", "score": false, "level": "hard", "agent_answer": "141, 276, 286, 454, 634, 701, 787, 888"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1685", "score": true, "level": "hard", "agent_answer": "64, 286, 381, 394, 473, 477, 572, 813, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1696", "score": false, "level": "hard", "agent_answer": "64, 123, 304, 381, 384, 454, 471, 473, 572, 595, 678, 813"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1682", "score": false, "level": "hard", "agent_answer": "454, 868"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1684", "score": false, "level": "hard", "agent_answer": "Confirmed: no fee rule in `fees` covers MCC 5942 (all rules list specific MCCs and none includes 5942, nor is any rule's MCC field null). Therefore no fee IDs are applicable.\n\nAnswer:"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1694", "score": false, "level": "hard", "agent_answer": "36, 64, 319, 381, 428, 470, 473, 536, 572, 631, 709, 813, 871, 942"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1704", "score": true, "level": "hard", "agent_answer": "12, 51, 64, 79, 84, 134, 163, 332, 347, 381, 547, 572, 626, 637, 640, 769, 813, 863, 878, 891, 895, 913"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1723", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1717", "score": false, "level": "hard", "agent_answer": "42.09"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1739", "score": false, "level": "hard", "agent_answer": "10.62"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1731", "score": false, "level": "hard", "agent_answer": "4.76"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1713", "score": false, "level": "hard", "agent_answer": "17.46"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1720", "score": false, "level": "hard", "agent_answer": "67.84"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1738", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1711", "score": false, "level": "hard", "agent_answer": "16.42"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1724", "score": false, "level": "hard", "agent_answer": "0.69"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1729", "score": false, "level": "hard", "agent_answer": "28.81"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1715", "score": false, "level": "hard", "agent_answer": "6.50"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1728", "score": false, "level": "hard", "agent_answer": "20.45"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1721", "score": false, "level": "hard", "agent_answer": "65.73"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1740", "score": false, "level": "hard", "agent_answer": "15.06"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1712", "score": false, "level": "hard", "agent_answer": "6.64"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1732", "score": false, "level": "hard", "agent_answer": "14.53"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1734", "score": false, "level": "hard", "agent_answer": "3.21"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1730", "score": false, "level": "hard", "agent_answer": "0.09"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1716", "score": false, "level": "hard", "agent_answer": "0.93"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1722", "score": true, "level": "hard", "agent_answer": "129.98"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1743", "score": false, "level": "hard", "agent_answer": "454"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1741", "score": true, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 154, 163, 231, 249, 276, 286, 319, 347, 381, 384, 394, 398, 428, 454, 470, 471, 473, 477, 536, 556, 572, 595, 608, 626, 680, 709, 725, 741, 813, 868, 895, 939, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1745", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1742", "score": false, "level": "hard", "agent_answer": "276, 428, 477, 572, 704, 709, 741, 792, 813, 861, 871, 884"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1744", "score": false, "level": "hard", "agent_answer": "300, 612, 616, 921"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1746", "score": false, "level": "hard", "agent_answer": "6189.91"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1749", "score": false, "level": "hard", "agent_answer": "4946.67"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1747", "score": false, "level": "hard", "agent_answer": "All checks confirm the matching logic (scheme, account type F, manual/null capture, MCC-null rules, ACI, credit flag, fraud and volume thresholds per month, intracountry). Summing fixed + rate\u00d7amount/10000 over all applicable transaction\u2013rule matches for 2023 gives **29759.57**."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1750", "score": false, "level": "hard", "agent_answer": "9905.59"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1748", "score": false, "level": "hard", "agent_answer": "9139.65"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1763", "score": false, "level": "hard", "agent_answer": "29, 36, 51, 64, 65, 89, 107, 123, 150, 163, 276, 304, 381, 384, 428, 471, 477, 536, 572, 595, 626, 631, 678, 680, 704, 709, 722, 741, 792, 813, 861, 871, 884"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1810", "score": false, "level": "hard", "agent_answer": "304, 454, 634, 813"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1789", "score": false, "level": "hard", "agent_answer": "12, 16, 36, 51, 64, 65, 79, 84, 95, 107, 123, 134, 141, 150, 162, 163, 187, 217, 276, 280, 284, 300, 304, 332, 347, 364, 367, 381, 384, 398, 428, 431, 433, 454, 456, 473, 477, 485, 491, 501, 503, 536, 547, 556, 572, 595, 616, 622, 626, 637, 640, 65, 660, 680, 682, 702, 709, 721, 741, 769, 804, 813, 834, 863, 870, 878, 888, 891, 913, 915, 921, 980"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1753", "score": true, "level": "hard", "agent_answer": "36, 51, 53, 64, 107, 123, 150, 163, 231, 249, 276, 286, 347, 381, 384, 394, 428, 454, 473, 477, 536, 556, 572, 595, 608, 626, 680, 709, 725, 741, 813, 868, 939, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1771", "score": true, "level": "hard", "agent_answer": "29, 36, 51, 64, 65, 89, 107, 123, 150, 163, 276, 304, 381, 384, 428, 454, 473, 477, 536, 572, 595, 626, 631, 678, 680, 704, 709, 741, 792, 813, 861, 871, 884"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1775", "score": false, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 163, 276, 304, 381, 384, 394, 428, 454, 473, 477, 536, 572, 595, 608, 626, 631, 678, 680, 709, 725, 741, 813, 861, 868, 871, 884, 939, 942, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1757", "score": false, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 154, 163, 231, 249, 276, 286, 319, 347, 381, 384, 394, 428, 470, 473, 477, 536, 556, 572, 595, 608, 626, 680, 709, 725, 741, 813, 868, 895, 939, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1799", "score": false, "level": "hard", "agent_answer": "141, 276, 286, 454, 634, 701, 787"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1808", "score": false, "level": "hard", "agent_answer": "\"\""}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1780", "score": false, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 154, 163, 229, 276, 304, 319, 381, 384, 394, 428, 470, 473, 477, 536, 572, 595, 608, 626, 631, 642, 678, 680, 709, 722, 725, 741, 813, 861, 871, 884, 895, 909, 960, 965"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1773", "score": false, "level": "hard", "agent_answer": "29, 36, 51, 64, 65, 89, 107, 123, 150, 163, 276, 304, 381, 384, 428, 454, 473, 477, 536, 572, 595, 626, 631, 678, 680, 700, 704, 709, 741, 792, 813, 861, 871, 884"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1760", "score": true, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 154, 163, 231, 249, 276, 286, 319, 347, 381, 384, 394, 428, 470, 473, 477, 536, 556, 572, 595, 608, 626, 680, 709, 725, 741, 813, 868, 895, 939, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1756", "score": false, "level": "hard", "agent_answer": "394, 868, 939"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1752", "score": false, "level": "hard", "agent_answer": "36, 51, 53, 64, 65, 107, 123, 150, 154, 163, 231, 249, 276, 286, 319, 347, 381, 384, 394, 428, 470, 471, 477, 536, 556, 572, 595, 608, 626, 680, 709, 725, 741, 813, 868, 895, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1769", "score": false, "level": "hard", "agent_answer": "276, 454, 871, 884"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1805", "score": false, "level": "hard", "agent_answer": "34, 420, 821, 841"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1791", "score": true, "level": "hard", "agent_answer": "12, 36, 38, 51, 64, 79, 84, 107, 123, 134, 150, 162, 163, 187, 217, 276, 280, 284, 300, 304, 332, 347, 364, 367, 381, 384, 428, 431, 433, 454, 456, 473, 477, 491, 501, 503, 536, 547, 556, 572, 595, 612, 616, 622, 626, 637, 640, 660, 678, 680, 682, 702, 709, 721, 741, 769, 804, 813, 834, 849, 858, 861, 863, 870, 878, 888, 891, 913, 915, 921, 980, 996"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1801", "score": false, "level": "hard", "agent_answer": "141, 454"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1784", "score": true, "level": "hard", "agent_answer": "107, 123, 163, 276, 304, 36, 381, 384, 394, 428, 454, 473, 477, 51, 53, 536, 572, 595, 608, 626, 631, 64, 65, 678, 680, 709, 725, 741, 813, 861, 868, 871, 942, 960"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1765", "score": false, "level": "hard", "agent_answer": "29, 36, 51, 64, 65, 89, 107, 123, 150, 154, 163, 229, 276, 304, 381, 384, 428, 454, 470, 471, 473, 477, 536, 572, 595, 626, 631, 678, 680, 704, 709, 722, 741, 792, 813, 861, 871, 884, 909"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1835", "score": false, "level": "hard", "agent_answer": "712.00"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1829", "score": false, "level": "hard", "agent_answer": "1219.63"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1851", "score": false, "level": "hard", "agent_answer": "204.88"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1868", "score": false, "level": "hard", "agent_answer": "921.52"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1841", "score": false, "level": "hard", "agent_answer": "834.62"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1853", "score": false, "level": "hard", "agent_answer": "414.99"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1819", "score": false, "level": "hard", "agent_answer": "200.51"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1818", "score": false, "level": "hard", "agent_answer": "820.00"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1823", "score": true, "level": "hard", "agent_answer": "3648.38"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1826", "score": false, "level": "hard", "agent_answer": "1950.36"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1866", "score": false, "level": "hard", "agent_answer": "846.61"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1822", "score": false, "level": "hard", "agent_answer": "82.08"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1834", "score": false, "level": "hard", "agent_answer": "2043.21"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1840", "score": false, "level": "hard", "agent_answer": "370.00"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1817", "score": false, "level": "hard", "agent_answer": "926.15"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1861", "score": false, "level": "hard", "agent_answer": "918.41"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1837", "score": false, "level": "hard", "agent_answer": "776.88"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1862", "score": false, "level": "hard", "agent_answer": "320.32"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1857", "score": false, "level": "hard", "agent_answer": "5329.38"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1846", "score": false, "level": "hard", "agent_answer": "646.10"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2132", "score": false, "level": "hard", "agent_answer": "0.60827000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2441", "score": false, "level": "hard", "agent_answer": "-2.87721200000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2385", "score": false, "level": "hard", "agent_answer": "-14.71996900000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1875", "score": false, "level": "hard", "agent_answer": "6.00740000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2264", "score": false, "level": "hard", "agent_answer": "2.63541200000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2463", "score": false, "level": "hard", "agent_answer": "-5.24362600000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2439", "score": false, "level": "hard", "agent_answer": "-1.53436040000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1892", "score": false, "level": "hard", "agent_answer": "0.00000000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2057", "score": false, "level": "hard", "agent_answer": "-6.669303999999997"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2121", "score": false, "level": "hard", "agent_answer": "-0.10269600000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2412", "score": false, "level": "hard", "agent_answer": "18.20538500000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2404", "score": false, "level": "hard", "agent_answer": "0.13074800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2419", "score": false, "level": "hard", "agent_answer": "-5.106568"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2229", "score": false, "level": "hard", "agent_answer": "-1.37683100000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1966", "score": true, "level": "hard", "agent_answer": "0.00000000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "1931", "score": false, "level": "hard", "agent_answer": "2.18177700000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2407", "score": false, "level": "hard", "agent_answer": "-0.0037"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2316", "score": false, "level": "hard", "agent_answer": "0.05853600000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2397", "score": false, "level": "hard", "agent_answer": "-10.488686"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2366", "score": false, "level": "hard", "agent_answer": "2.56869600000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2506", "score": false, "level": "hard", "agent_answer": "1.99783800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2518", "score": true, "level": "hard", "agent_answer": "93.85435600000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2489", "score": false, "level": "hard", "agent_answer": "30566.69728200"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2496", "score": true, "level": "hard", "agent_answer": "152.50433800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2477", "score": false, "level": "hard", "agent_answer": "-0.74671106"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2520", "score": false, "level": "hard", "agent_answer": "4.10680800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2480", "score": false, "level": "hard", "agent_answer": "85.88091"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2490", "score": false, "level": "hard", "agent_answer": "5964.23361599998"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2509", "score": false, "level": "hard", "agent_answer": "**36.60975000000000**"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2511", "score": true, "level": "hard", "agent_answer": "-45.81824000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2478", "score": true, "level": "hard", "agent_answer": "24.21765600"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2482", "score": false, "level": "hard", "agent_answer": "133.475075"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2481", "score": false, "level": "hard", "agent_answer": "318.79608800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2507", "score": false, "level": "hard", "agent_answer": "194.04753600000002"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2491", "score": false, "level": "hard", "agent_answer": "-2.46886200000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2494", "score": true, "level": "hard", "agent_answer": "491.37748800000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2499", "score": false, "level": "hard", "agent_answer": "-24.19382000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2485", "score": true, "level": "hard", "agent_answer": "-266.475184"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2493", "score": true, "level": "hard", "agent_answer": "511.85155000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2484", "score": true, "level": "hard", "agent_answer": "0.00000000000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2527", "score": false, "level": "hard", "agent_answer": "Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2526", "score": true, "level": "hard", "agent_answer": "Belles_cookbook_store, Crossfit_Hanna, Golfclub_Baron_Friso, Martinis_Fine_Steakhouse, Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2523", "score": true, "level": "hard", "agent_answer": "Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2522", "score": false, "level": "hard", "agent_answer": "(empty string)"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2521", "score": false, "level": "hard", "agent_answer": "**Answer:** (empty list \u2014 no merchants match Fee ID 1 in 2023)"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2525", "score": true, "level": "hard", "agent_answer": "Belles_cookbook_store, Crossfit_Hanna, Golfclub_Baron_Friso, Martinis_Fine_Steakhouse, Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2524", "score": true, "level": "hard", "agent_answer": "Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2551", "score": true, "level": "hard", "agent_answer": "15615.997106"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2535", "score": false, "level": "hard", "agent_answer": "-12483.296792"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2539", "score": false, "level": "hard", "agent_answer": "596.701565"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2550", "score": false, "level": "hard", "agent_answer": "266.002463"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2528", "score": false, "level": "hard", "agent_answer": "1720.227927"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2552", "score": false, "level": "hard", "agent_answer": "7825.313286"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2536", "score": false, "level": "hard", "agent_answer": "41.185537"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2546", "score": false, "level": "hard", "agent_answer": "597.551358"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2538", "score": false, "level": "hard", "agent_answer": "4039.225430"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2533", "score": false, "level": "hard", "agent_answer": "-1845.150718"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2543", "score": false, "level": "hard", "agent_answer": "446.456695"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2544", "score": true, "level": "hard", "agent_answer": "0.000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2530", "score": false, "level": "hard", "agent_answer": "356.179253"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2537", "score": true, "level": "hard", "agent_answer": "29034.178249"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2549", "score": false, "level": "hard", "agent_answer": "-1223.824476"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2532", "score": false, "level": "hard", "agent_answer": "0.000000"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2545", "score": true, "level": "hard", "agent_answer": "0"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2547", "score": false, "level": "hard", "agent_answer": "-332.65375"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2529", "score": false, "level": "hard", "agent_answer": "238.931165"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2534", "score": true, "level": "hard", "agent_answer": "18657.348907"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2569", "score": true, "level": "hard", "agent_answer": "Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2557", "score": false, "level": "hard", "agent_answer": "The answer is an empty string."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2566", "score": false, "level": "hard", "agent_answer": "Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2576", "score": false, "level": "hard", "agent_answer": "Empty string"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2571", "score": false, "level": "hard", "agent_answer": "Belles_cookbook_store"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2561", "score": false, "level": "hard", "agent_answer": "Eggnest, Gourmet_Bites, Brunch_Bliss, Crafty_Cuisine, Cafe_Centrale, Sunny_Side_Cafe, The_Steakhouse, Urban_Eats, Culinary_Creations, Martinis_Fine_Steakhouse, Sunny_Nest"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2559", "score": true, "level": "hard", "agent_answer": "Rafa_AI, Crossfit_Hanna, Golfclub_Baron_Friso, Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2565", "score": true, "level": "hard", "agent_answer": "Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2564", "score": false, "level": "hard", "agent_answer": "**Answer:** (empty \u2014 no merchants affected)\n\nThere are no merchants with account type O in the database, so no merchants would have been affected by applying Fee ID 384 solely to account type O."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2574", "score": false, "level": "hard", "agent_answer": "Golfclub_Baron_Friso, Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2556", "score": true, "level": "hard", "agent_answer": "Belles_cookbook_store, Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2562", "score": false, "level": "hard", "agent_answer": "Crossfit_Hanna, Golfclub_Baron_Friso, Gym_Pro, City_Golf_Club, Pilates_Place, Yoga_Masters, Luxury_Tee_Times, FitHub, Green_Fairways, Muscle_House"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2573", "score": false, "level": "hard", "agent_answer": "Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2575", "score": false, "level": "hard", "agent_answer": "AI_Pro_Labs, Tech_Trainers"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2553", "score": true, "level": "hard", "agent_answer": "Martinis_Fine_Steakhouse, Golfclub_Baron_Friso, Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2563", "score": false, "level": "hard", "agent_answer": "Tech_Trainers, AI_Pro_Labs"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2554", "score": false, "level": "hard", "agent_answer": "Crossfit_Hanna, Golfclub_Baron_Friso, Martinis_Fine_Steakhouse"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2558", "score": false, "level": "hard", "agent_answer": "No merchants in the dataset have account type 'O' (account types present are only R, D, H, F, S), so no merchants would have been affected."}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2568", "score": true, "level": "hard", "agent_answer": "Rafa_AI"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2555", "score": true, "level": "hard", "agent_answer": "Belles_cookbook_store, Golfclub_Baron_Friso, Crossfit_Hanna"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2691", "score": false, "level": "hard", "agent_answer": "TransactPlus:881.43"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2587", "score": false, "level": "hard", "agent_answer": "TransactPlus:132.57"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2583", "score": false, "level": "hard", "agent_answer": "TransactPlus:171.91"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2674", "score": false, "level": "hard", "agent_answer": "TransactPlus:0.15"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2628", "score": false, "level": "hard", "agent_answer": "GlobalCard:180.99"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2623", "score": false, "level": "hard", "agent_answer": "NexPay:66.18"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2634", "score": false, "level": "hard", "agent_answer": "GlobalCard:497.35"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2619", "score": false, "level": "hard", "agent_answer": "TransactPlus:4731.67"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2675", "score": false, "level": "hard", "agent_answer": "TransactPlus:1389.34"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2606", "score": false, "level": "hard", "agent_answer": "TransactPlus:1482.81"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2589", "score": false, "level": "hard", "agent_answer": "GlobalCard:41.10"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2581", "score": false, "level": "hard", "agent_answer": "GlobalCard:354.80"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2584", "score": false, "level": "hard", "agent_answer": "GlobalCard:1.82"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2578", "score": false, "level": "hard", "agent_answer": "NexPay:16.46"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2678", "score": false, "level": "hard", "agent_answer": "SwiftCharge:2.09"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2664", "score": false, "level": "hard", "agent_answer": "NexPay:1.36"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2608", "score": false, "level": "hard", "agent_answer": "NexPay:12.42"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2644", "score": false, "level": "hard", "agent_answer": "SwiftCharge:45.25"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2652", "score": false, "level": "hard", "agent_answer": "TransactPlus:1571.40"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2641", "score": false, "level": "hard", "agent_answer": "TransactPlus:607.18"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2748", "score": false, "level": "hard", "agent_answer": "GlobalCard:42.01"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2703", "score": false, "level": "hard", "agent_answer": "GlobalCard:33.85\nNexPay:28.19\nSwiftCharge:16.25\nTransactPlus:13.22"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2728", "score": false, "level": "hard", "agent_answer": "D:54.23"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2699", "score": false, "level": "hard", "agent_answer": "D:20.73"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2746", "score": false, "level": "hard", "agent_answer": "NexPay:41.50"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2741", "score": false, "level": "hard", "agent_answer": "B:94.23"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2755", "score": false, "level": "hard", "agent_answer": "NexPay:2.53"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2713", "score": false, "level": "hard", "agent_answer": "Not Applicable"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2711", "score": false, "level": "hard", "agent_answer": "C:54.13"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2710", "score": false, "level": "hard", "agent_answer": "GlobalCard:3.19"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2731", "score": false, "level": "hard", "agent_answer": "NexPay:16.19"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2708", "score": false, "level": "hard", "agent_answer": "GlobalCard:B:23.82\nNexPay:C:319.26\nSwiftCharge:A:28.94\nTransactPlus:E:197.90"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2729", "score": false, "level": "hard", "agent_answer": "GlobalCard:12.78\nNexPay:10.23\nTransactPlus:29.43\nSwiftCharge:7.90"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2725", "score": false, "level": "hard", "agent_answer": "A:27.66"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2715", "score": false, "level": "hard", "agent_answer": "D:18.55"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2727", "score": false, "level": "hard", "agent_answer": "TransactPlus:0.21"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2740", "score": false, "level": "hard", "agent_answer": "C:4.43"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2719", "score": false, "level": "hard", "agent_answer": "GlobalCard:19.65"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2712", "score": false, "level": "hard", "agent_answer": "C:18.37"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2751", "score": false, "level": "hard", "agent_answer": "GlobalCard:1.16"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2766", "score": false, "level": "hard", "agent_answer": "SwiftCharge:1040.35"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2764", "score": false, "level": "hard", "agent_answer": "SwiftCharge:452.70"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2765", "score": true, "level": "hard", "agent_answer": "TransactPlus:30657.21"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2760", "score": false, "level": "hard", "agent_answer": "NexPay:181.82"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2763", "score": false, "level": "hard", "agent_answer": "TransactPlus:2246.60"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2762", "score": false, "level": "hard", "agent_answer": "TransactPlus:10.17"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2758", "score": false, "level": "hard", "agent_answer": "NexPay:149.22"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2759", "score": false, "level": "hard", "agent_answer": "GlobalCard:37696.52"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2757", "score": false, "level": "hard", "agent_answer": "TransactPlus:8439.33"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2761", "score": false, "level": "hard", "agent_answer": "TransactPlus:69743.71"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2769", "score": false, "level": "hard", "agent_answer": "B:708.54"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2771", "score": false, "level": "hard", "agent_answer": "B:918.48"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2767", "score": false, "level": "hard", "agent_answer": "B:556.21"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2768", "score": false, "level": "hard", "agent_answer": "GlobalCard:232.58 (incentivize ACI **C** \u2014 the lowest-cost alternative across the fraudulent transaction volume)"}
+{"submission_id": "flyersworder-agentic-data-contracts-manual-baseline", "task_id": "2770", "score": false, "level": "hard", "agent_answer": "GlobalCard:131.33"}

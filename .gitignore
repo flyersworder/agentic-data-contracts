@@ -20,3 +20,6 @@ docs/paper/main.pdf
 
 # macOS Finder metadata
 .DS_Store
+
+# Browser-automation scratch (Playwright MCP writes snapshots/console logs here)
+.playwright-mcp/

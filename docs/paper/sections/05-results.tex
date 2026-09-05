@@ -120,9 +120,11 @@ report; on
 run~C that coincidence ends, and on run~D it nearly returns
 (Section~\ref{sec:efficiency}).
 
-One check licenses those comparisons. \armM{}
-reproduces the published leaderboard band on run~A: 22.9\% hard against a
-20--26\% band for credible named entrants, on a model weaker than any of them.
+One check licenses those comparisons. \armM{} reproduces the published
+leaderboard band on run~A: 22.9\% hard against a 20--26\% band for credible
+named entrants, on a model weaker than any of them. That figure is ours,
+though; graded officially the same arm and model score 18.8\%, below the band
+and below its lowest named entrant (Section~\ref{sec:golds}).
 On runs~B and~C the same arm reaches 42.9\% and 50.3\%, above the band, which
 is a statement about those models rather than about the harness. Run~D
 supplies the check on a second model family: 23.8\% for Sonnet~5, against the
@@ -130,12 +132,14 @@ leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
 
 That check is looser than it looks, and in a direction that favours us. Our
 side of it is 332 hard tasks graded against reconstructed golds; the band is
-378 hard tasks graded officially, and the leaderboard submission
-(Section~\ref{sec:golds}) shows our grading runs about $5.7$~pp high on the
-hard split for the one arm it could measure. Correcting \armM{} by its own
-measured exposure rather than by that headline number
-(Section~\ref{sec:threats-golds}) gives $20.3\%$ on run~A, still inside the
-band. It \emph{tightens} the run~D check rather than breaking it: \armM{} is
+378 hard tasks graded officially, and the leaderboard submissions
+(Section~\ref{sec:golds}) show our grading runs about $5.7$~pp high on the
+hard split, on both arms it measured ($+5.7$ and $+3.0$~pp). For \armM{} on \texttt{glm}
+that gap is now measured rather than estimated, which is why the official
+18.8\% is quoted above: correcting run~A by the arm's own exposure
+(Section~\ref{sec:threats-golds}) would instead give $20.3\%$, 1.5~pp high,
+on a different sweep and 332 rather than 378 hard tasks. Where an official
+number exists we quote it; the correction serves the cells where none does. It \emph{tightens} the run~D check rather than breaking it: \armM{} is
 the single most exposed cell in Table~\ref{tab:leniency} at 40.5\%, and
 correcting it moves Sonnet~5 from 23.8\% to $18.2\%$ --- from 4.0~pp above the
 officially-graded 19.8\% comparator to 1.6~pp below it. Both sides are then

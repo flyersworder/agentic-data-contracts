@@ -24,7 +24,7 @@ run and is absent from every table above: it is the contract arm alone over
 all 450 tasks, built for the leaderboard submission — where it was
 submitted on 2026-09-04 and scored **51.9% hard / 70.8% easy / 54.9%
 overall** against the official golds (see [the leaderboard
-submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds)).
+submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally)).
 It doubles as this experiment's only near-replicate — see [Run
 E](#run-e-a-near-replicate-and-the-flip-rate-at-temperature-0).
 
@@ -878,6 +878,80 @@ the original rejections having been false and the arm no longer tripping over
 defect's direction is therefore confirmed; its magnitude remains unseparable
 from the model change, which is why run A has not been re-run under the fix.
 
+## Did the agent report what its own query returned?
+
+Every accuracy above is answer-level, and so is every diagnostic built on it:
+the [counterfactual lesions](#counterfactual-macros-the-contract-kills-the-named-errors-and-the-rest-are-idiosyncratic)
+match a wrong ANSWER against a lesioned macro's numbers, and
+`analysis/clauses.py` reads the SQL but only for clause presence. That leaves
+one failure mode unmeasured and silently assumed to be zero: **the query was
+right and the answer was mis-read off it.** It matters because the
+counterfactual table leaves 417 of 444 wrong answers undiagnosed, read there as
+idiosyncratic derivation — an inference from a lesion catalogue finding no
+match, not a measurement.
+
+`analysis/replay.py` measures it. For each row it re-executes the last few
+statements the agent submitted against the frozen database and asks whether
+the reported answer is among the values they returned, scoring with the
+vendored official scorer. Contract arm, groups of correct and incorrect rows
+separately:
+
+| model | correct (control) | wrong | gap |
+|---|---:|---:|---:|
+| deepseek-v4-flash | 89% | 55% | +33 |
+| glm-5.3-flash | 85% | 85% | −0 |
+| gpt-5.6-sol | 96% | 93% | +3 |
+| Claude Sonnet 5 | 86% | 65% | +20 |
+
+**On 55–93% of wrong answers the reported value is one the agent's own query
+produced.** The SQL ran, returned a number, the agent reported that number,
+and it was wrong. That is a derivation error, and it confirms the
+idiosyncratic-failure reading rather than overturning it.
+
+Correct rows are the control and not an aside: an answer is usually a
+*projection* of a result rather than the whole of it, so a non-replay is
+normally ordinary composition. What that looks like, from the Sonnet 5
+contract arm:
+
+| query returned | reported | what the agent did |
+|---|---|---|
+| `Belles_cookbook_store, R, Crossfit_Hanna, F, …` | `Belles_cookbook_store, Crossfit_Hanna, …` | projected one column |
+| `Ecommerce, 0.10022412074991348, POS, ` | `Yes` | judged a threshold |
+| `17874.160000000003, 161` | `42.88198400000000` | arithmetic on two intermediates |
+| `138236, 138236` | `No` | compared two values |
+
+All four are correct answers. This is why the control sits at 85–96% rather
+than 100%, and why only the gap against it carries information.
+
+### The residual is answer construction, not transcription
+
+Among *wrong* rows that fail to replay, the transcripts show three mechanisms
+— none of them a mis-copied number:
+
+| task | query returned | reported | gold | mechanism |
+|---|---|---|---|---|
+| 1452 | `['C', 'B'], 0.05, 14, 0.19` | `['B']` | `['C']` | wrong element of a correct multi-value result |
+| 1435 | `3000, 0.238…, 3001, 0.238…, 3002, …` | `3000, 3001, 3002, 7011, …` | `5813` | projected the key column instead of filtering it |
+| 1502 | `183, SwiftCharge, [], …, ['E'], ` | `This is the fee rule that depends solely on account_type = …` | a list of 40+ IDs | abandoned the answer format and narrated |
+| 2566 | `Rafa_AI, D, 7` | `Only merchant matching the other criteria of Fee 17 with ca…` | (empty) | narrated instead of answering |
+
+So the unmeasured failure mode is bounded and largely absent: agents are not
+mis-copying numbers. What the residual contains instead is **answer
+construction** — selecting the wrong element, projecting the wrong column, or
+abandoning the required format for prose. That is a third category alongside
+derivation error and misreporting, and it is invisible to both the lesion
+method (which needs a number to match) and to accuracy alone.
+
+Two limits. Membership is a loose test — a short value like `0` can match a
+cell by chance — and the number of chances is **not independent of the
+verdict**: wrong rows tend to run wider queries, so their candidate pool is
+larger than the control's. Results are truncated to the harness's own
+`MAX_ROWS`, which is all the agent ever saw and caps the worst of it, but the
+asymmetry is not eliminated. That is the most likely explanation for the
+*negative* gaps on sol, which no mechanism accounts for. And only the four ablation runs
+have transcripts: the submission runs stored none, so none of this reaches the
+grader disagreements below.
+
 ## Where the contract arm loses — 33 tasks (run A)
 
 14 losses to schema_only, 29 to manual_prompt, 10 to both. Two modes:
@@ -1023,7 +1097,20 @@ mostly — and are still deliberately not offered as a governance claim.
 `db_corrupted` is `True` on exactly two rows in 6,416: **task 68,
 `schema_only`, deepseek**, and **task 2546, `manual_prompt`, Sonnet 5**. Run C
 adds 1,604 rows and no corruption, in any arm — see the governance caveat
-above: sol never attempted a write. Task 68 is 1 of the 24 attempting tasks
+above: sol never attempted a write.
+
+**The flag is not exclusively a governance signal, and this section is the
+only place it is read as one.** `dce.arms.make_working_copy`'s docstring
+records a harness path that stamps it on a row that did nothing — a resumed
+sweep inheriting a dead run's WAL — and the `manual_prompt` 450-task
+submission produced 3 such rows in a killed-and-resumed sweep whose cause is
+still unidentified (`deploy/README.md`). Neither of the two rows below is one
+of those: both belong to unresumed ablation runs, and both are corroborated by
+the mutating statement in their own transcript. But a reader running
+`dce.stats` over a resumed sweep should not read a raised flag as an agent
+having written to the warehouse without checking the transcript first.
+
+Task 68 is 1 of the 24 attempting tasks
 on runs A and B because DuckDB `TEMP` tables die with the connection; only
 this run escalated to *persistent* tables.
 
@@ -1205,7 +1292,7 @@ The one residual caveat: the 122 lost tasks are slightly enriched for hard
 (87% vs 83% overall), so run B's absolute accuracies are marginally
 optimistic. Every arm is affected identically and the contrasts are unmoved.
 
-## Related work: MotherDuck Guides, and what the comparison means
+## Related work: prepared artifacts, and what the comparison means
 
 MotherDuck reports **418 of 419 DABStep questions correct (99.8%)** with
 Gemini 3 Flash at ~$0.02/question, and separately **98.6% with a local
@@ -1276,26 +1363,273 @@ median hard; submitting 21+ times: 54.2%), which is equally consistent with
 genuine iterative improvement. A reader cannot rule it in or out, and neither
 can we.
 
+### The validated leaderboard says the same thing, from the top of the table
+
+The validated leaderboard — 28 entries, ranked on the hard split, read
+2026-09-05 from the leaderboard Space, which ships the table inside its Gradio
+config — is led by two systems built on the same principle as this one:
+
+| | hard | easy | inference model |
+|---|---:|---:|---|
+| NVIDIA KGMON (NeMo Agent Toolkit) Data Explorer | **89.95** | 87.50 | Claude Haiku 4.5 |
+| DataPilot (OceanBase / AntGroup) | **87.57** | 86.11 | Qwen3 |
+| gg-agent-gpt5-1104-1 | 62.96 | 88.89 | Doubao |
+| *this experiment's submission (unvalidated)* | *51.85* | *70.83* | *GLM-5.3-Flash* |
+
+The last row is [the leaderboard
+submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally)
+at the board's own precision — the 51.9% / 70.8% reported there. Validation
+requests closed on 2026-07-22 ahead of a DABStep-v2 the maintainers say is
+"launching in the coming weeks", so that cohort is now fixed and a submission
+made on 2026-09-04 cannot join it. It would place fifth on the hard split if
+it could.
+
+**NVIDIA's result is this document's direction, replicated against a stronger
+baseline than any arm here.** Their published method splits into three phases:
+a *learning* phase in which a heavyweight model (Opus 4.5/4.6) solves a batch
+of representative tasks and distils the result into a `helper.py` of reusable
+functions plus few-shot examples; an *inference* phase in which Haiku 4.5 runs
+a single pass given **only the function signatures**; and an offline
+*reflection* phase whose findings are injected back into the inference system
+prompt. Their own control is Claude Code on Opus 4.5 solving each task from
+scratch, which scores **66.93 hard against their 89.95** — a frontier model
+losing 23 pp to a small one holding a prepared artifact, at 10 minutes per
+task against 20 seconds. `contract` vs `schema_only` is the same contrast at a
+lower ceiling; theirs is the more convincing version of it.
+
+**The artifact is built with the golds in the loop, and that is the axis this
+experiment does not share.** The learning phase works by "validating them
+against ground truth answers" and by "actively testing candidate functions via
+the Python interpreter against the ground truth of multiple interconnected
+tasks"; the reflection phase extracts "key patterns, edge cases, and potential
+pitfalls from the test data" and compiles them into the system prompt.
+DataPilot's post is titled *Beyond Fine-tuning: Solving DABstep's Hard Mode
+with Versioned Assets* and is summarised as forking competing logic branches,
+benchmarking them against golden answers and promoting the winner — the same
+loop under a different name. *(That summary is second-hand: the post is
+client-side rendered and could not be retrieved in full, so only DataPilot's
+scores — corroborated by NVIDIA's own results table — and its title are
+first-hand here.)*
+
+Nothing in the benchmark forbids this; the dev split is labelled and the
+public task file carries golds. But it means the two numbers measure different
+things. 89.95 is an answer to *how much of an enumerable question space can be
+compiled away given labels for part of it* — and, per the section above,
+DABStep's question space is enumerable: 450 questions from 26 templates, 294
+of 332 hard tasks here about fees. The contract measured in this document was
+authored from the vendor manual alone and frozen, digest-pinned, before any
+question was read, which is an answer to a harder question. The gap between
+51.9% and 89.95% is not a like-for-like ranking, and this document should not
+be read as claiming a place in that ranking.
+
+**One of their three phases looks available to us. It was, and it is worth
+almost nothing.** The learning loop that produces `helper.py` cannot be run
+without golds, but the *group-consistency* half of their reflection phase can:
+it reads only the agent's own answers across similar questions and flags the
+ones solved by a conflicting method, referring to no answer key. Nothing about
+a frozen contract rules that out, and the ACI defect above looks like exactly
+what it is built to catch. So we built it and measured it, and the answer is
+below.
+
+### The unsupervised half does not transfer
+
+`analysis/group_consistency.py` implements the check at the answer level:
+group tasks by question shape (reusing `analysis/templates.py`'s normaliser),
+reduce each answer to a token-class signature — `D:219.36` to `A:N`,
+`TransactPlus:3458.48` to `W:N`, `42.9` and `42.89798400000003` both to `N` —
+and flag any row whose signature is a strict minority of its group. Golds
+enter only afterwards, to score the flags. Contract arm, hard and easy
+together, groups of three or more:
+
+| model | n | error base | flags | precision | lift | recall |
+|---|---:|---:|---:|---:|---:|---:|
+| glm-5.3-flash | 323 | 46.1% | 55 | 49.1% | 1.1x | 18.1% |
+| deepseek-v4-flash | 214 | 44.9% | 48 | 75.0% | **1.7x** | 37.5% |
+| gpt-5.6-sol | 323 | 22.9% | 50 | 26.0% | 1.1x | 17.6% |
+| Claude Sonnet 5 | 323 | 32.5% | 84 | 56.0% | **1.7x** | 44.8% |
+
+Lift is precision over the error base — what the rule beats blind flagging by.
+It is bounded above by `1 / base`, so the two 1.7x cells are the two models
+whose arms are wrong most often, where the bar is lowest. On sol, the lowest
+base rate here and so the fairest test, the rule is at 1.1x: nearly
+indistinguishable from flagging rows at random.
+
+**The failure is structural, not a tuning problem. Consistency is not
+correctness.** On sol's ACI family, 25 of the contract arm's 34 answers are
+`A:N` and 9 are `W:N` — the majority signature is the *wrong* one, so the rule
+flags the nine correctly-shaped answers and passes the twenty-five wrong ones.
+A minority rule inverts precisely when a model is uniformly and confidently
+wrong, which is the case one most needs it for.
+
+**Against the only official grading available, it finds nothing that matters.**
+On the 450-task submission, scored with Adyen's verdicts rather than ours, the
+rule flags 63 rows at 57.1% precision against a 48.6% base — 1.18x — and of
+the **19 tasks the official grading overturned it flags none**. All 27 of its
+flags on locally-correct rows are false alarms; not one is officially wrong.
+
+This is `contract_hollow` pointed at somebody else's method, and it constrains
+what their headline can be attributed to: **89.95 is not the unsupervised half
+doing the work**.
+
+**The stronger form of the check is closed too, and this document already
+closed it.** NVIDIA compare solution *methods*, not answers, and a method-level
+version would flag tasks whose SQL skeleton is a minority of its template
+group. That rule needs SQL content to separate an arm's right attempts from its
+wrong ones — and [the within-arm null](#does-the-contracts-vocabulary-reach-the-sql-a-behavioural-check)
+is exactly the measurement that it does not, on tasks holding the required
+clause set constant: correct and incorrect attempts write the same clauses, at
+`p` between 0.14 and 1 on every arm and model. The contract arm sharpens it
+further — on sol it writes all six required clauses on **98%** of those tasks
+and is still wrong on 22.9% of its rows overall, so method uniformity is near
+total while a quarter of the answers are wrong. A minority-of-method rule has
+nothing there to flag.
+
+Two independent routes to a gold-free self-check, then, and both are shut: the
+answer-level rule runs at ~1.1x lift and catches none of the 19, and the
+method-level rule's premise was measured null before either was contemplated.
+What remains unmeasured is a version that inspects the reasoning itself rather
+than the SQL or the answer, which is a different and much larger claim than the
+one being tested here.
+
+So the price of freezing the artifact is not 3.7 pp of recoverable slack. On
+the evidence available, the gap to the top of the leaderboard is bought with
+gold supervision, and there is no gold-free discount on it that this
+experiment has been able to find.
+
+### A deployment that ran the ungoverned arm first, and said what it cost
+
+Everything above is a benchmark result. 小米技术 (Xiaomi Tech) published a
+deployment report — 《从模型能力到业务可用：小米零售 AI 问数实践》, 2026-08-17,
+on WeChat — describing the same progression in production, for ~1,000
+first-line store managers in Xiaomi's China retail business. It is the only
+source found here that ran the ungoverned configuration in front of real users
+before replacing it, and reported what that cost.
+
+Their opening failure is this experiment's `schema_only` arm, in the field: a
+manager asks how much the store sold yesterday, the model sums the
+payment-amount column, and
+
+> 「SQL 语法完全正确，却漏掉了取消、退款、退货等关键过滤条件，结果比业务标准口径高出近 10%。」
+>
+> *the SQL is syntactically perfectly correct, but it omits the key filters for
+> cancellations, refunds and returns, and the result comes out nearly 10% above
+> the business's standard definition.*
+
+They decompose it exactly as the counterfactual analysis above does — field
+ambiguity (a dozen money-shaped columns, none of them canonically "revenue"),
+missing status filters, and cross-table refund/return joins the model guesses
+at. They then add retrieval, and report that it does not fix it:
+
+> 「RAG 并不是一条独立路线，而是对 Text-to-SQL 的增强……根源仍在于 Text-to-SQL"现场推理 schema"这一确定性的缺失。」
+>
+> *RAG is not an independent path but an augmentation of Text-to-SQL … the root
+> cause is still the missing determinism of Text-to-SQL reasoning about the
+> schema on the spot.*
+
+That is this document's `manual_prompt` arm and its result, argued from
+production rather than from a benchmark. Their replacement, *Text-to-Metrics*,
+governs the metric definitions ahead of time and leaves the model to recognise
+intent and fill parameters — and several of its mechanisms are this library's:
+an alias whitelist so only registered metrics and dimensions can execute,
+permission scope injected at query-construction time rather than decided by the
+model, semantic partitions over eight business domains with a load cap of three
+and a clarifying question beyond it, and a zero-result rule that treats an empty
+result as a valid business conclusion and forbids retrying under changed dates.
+Their retrospective's first line is the thesis: 「用确定性换可靠性」 — *trade
+determinism for reliability*.
+
+**What it is not is a controlled comparison.** The headline number — metric
+selection on "达成率" (achievement rate) queries rising from about 65% to nearly
+98% — is one metric family, self-reported, against no held-out set, and the
+before and after differ in more than one variable. Deployment figures (88.8%
+penetration across 1,000+ managers, 16k conversations, 4.32/5 satisfaction) say
+the system is used, not that the governance is what makes it right. It is
+corroboration of direction and mechanism, and it is not evidence of effect size.
+
+**One thing they measure that this document does not — and its lesson is the
+opposite of the obvious one.** They score *DSL accuracy* and *answer accuracy*
+separately, and report a revision where DSL accuracy stayed at 93.2% while
+answer accuracy reached 100% (44/44). Read carelessly that argues for adding a
+query-level check here, since every accuracy in this document is answer-level.
+It does not. Their point is that agreement on the generated query says nothing
+about whether the answer is right — the query-level metric was the *less*
+informative of their two, and it is the one that moved least.
+
+The same holds here, twice over. This document already has a query-level
+instrument — `analysis/clauses.py`, which measures whether the required
+clauses reach the SQL — and [within an arm it is
+null](#does-the-contracts-vocabulary-reach-the-sql-a-behavioural-check).
+And it would not have caught the 19: the scorer normalises precision by
+rounding both sides to `min(dec_places)`, which rules out a precision or
+formatting difference as the cause — though not a value copied from the wrong
+cell, which is simply a different number and fails outright. Replay cannot
+adjudicate these either way: the submission runs stored no transcripts.
+
+What Xiaomi has that this experiment cannot get is narrower than "a query-level
+check": a **reference query per case**. DABStep ships answers and no reference
+queries, and authoring 401 of them now — after seeing which tasks failed —
+would be the same test-set fitting refused under [The deliberate
+non-response](#the-deliberate-non-response). The gap is real and it is closed
+by the benchmark's design, not by an instrument we declined to build.
+
+*Availability, stated because a reader will hit it.* The article is
+WeChat-only, has no English version, and is served behind a verification wall
+that refuses plain HTTP clients (`环境异常`); it was read here through a real
+browser. Submission to the Wayback Machine on 2026-09-05 captured the CAPTCHA
+page rather than the article and archive.today refused the request, so no
+durable archive link exists. The 原文 is quoted alongside each translation
+above for that reason: the claims should be checkable from the quotes even
+where the link is not.
+
 ### What is unique here
 
-Their comparison is Guides vs no-Guides: two accuracy numbers, from which no
-mechanism can be recovered. Was it the content, the MCP fetch loop, or the
-views? This experiment answers that question and, as far as we know, is the
-only one that does:
+MotherDuck's comparison is Guides vs no-Guides and NVIDIA's is artifact vs
+from-scratch: two accuracy numbers each, from which no mechanism can be
+recovered. Was it the content, the fetch loop, or the views? This experiment
+answers that question and, as far as we know, is the only one that does:
 
-| | MotherDuck | this experiment |
-|---|---|---|
-| comparison | Guides vs none | four arms |
-| separates content from tooling | no | **yes** (`contract_hollow`) |
-| statistical test | two accuracies | paired McNemar, every arm pair |
-| replicated on further models | no | **yes**, three more, same direction |
-| artifact frozen before seeing questions | undisclosed | **yes**, digest-pinned |
-| harness and transcripts published | defers to a repo | full, 6,416 traces |
+| | MotherDuck | NVIDIA KGMON | this experiment |
+|---|---|---|---|
+| comparison | Guides vs none | artifact vs from-scratch | four arms |
+| separates content from tooling | no | no | **yes** (`contract_hollow`) |
+| statistical test | two accuracies | two accuracies | paired McNemar, every arm pair |
+| replicated on further models | no | no | **yes**, three more, same direction |
+| artifact frozen before seeing questions | undisclosed | **no**, gold-supervised | **yes**, digest-pinned |
+| harness and transcripts published | defers to a repo | toolkit open, DABStep artifact not | full, 6,416 traces |
 
 **The gain is mostly content, and the content term dominates the scaffolding
 term on every model** — by 1.8× and 2.0× on the two models where the
 scaffolding term is large, and unboundedly on the other two. That decomposition is the
 contribution; the accuracy number is not.
+
+### Four artifacts, and only one of them can be published
+
+The row above that only this experiment ticks is not really about discipline.
+Look at what each group's artifact *is*, and the publication status follows
+from it:
+
+| | the artifact | published? |
+|---|---|---|
+| MotherDuck | a Guide refined iteratively against one serving model | no — and its author writes that *"the tuned artifact is coupled"* |
+| NVIDIA KGMON | a `helper.py` distilled from DABStep tasks, plus few-shots and prompt-injected pitfalls | no — the NeMo Agent Toolkit and its 12 community examples are open, and neither repo contains a `dabstep` or `helper.py` match |
+| OceanBase DataPilot | versioned SOPs and code templates promoted by benchmarking against golden answers | no — the leaderboard's "Repo URL" for it is a blog post |
+| Xiaomi retail | governed metric definitions — three rival "达成率" formulas, aliases, 8 domain partitions | no — nothing across the 81 repos under `github.com/XiaoMi`, and the asset *is* their revenue definitions |
+| **this experiment** | **a YAML contract authored from the vendor manual** | **yes — in this repository, digest-pinned** |
+
+Two different reasons, one consequence. NVIDIA's, OceanBase's and MotherDuck's
+artifacts are fused to the *test set* — publishing them would publish a fit,
+and re-using them elsewhere means re-running the loop. Xiaomi's is fused to the
+*business* — theirs encodes what Xiaomi means by revenue, which is not theirs
+to give away and would mean nothing to anyone else. Either way the artifact
+cannot travel, and a reader cannot check it.
+
+A contract written from a vendor manual has neither coupling, which is why it
+can be frozen before the questions are read, hashed, committed, and run
+unchanged against four model families. That is a property of the *kind* of
+object, not of how careful we were — and it is the concrete sense in which a
+data contract is a different thing from a semantic layer, a helper library, or
+a Guide. The cost of that property is the accuracy gap this document reports
+and does not explain away.
 
 ### The deliberate non-response
 
@@ -1310,6 +1644,12 @@ fitting to the test set, and it would spend the strongest methodological
 asset here: a contract authored from the vendor manual alone and frozen
 before any question was read. The order is measure, ship, re-measure — this
 document is the baseline the feature will be judged against.
+
+The same reasoning never applied to an unsupervised group-consistency pass,
+which reads only the arm's own answers and never an answer key — so it was
+built rather than deferred, and it does not work: see [The unsupervised half
+does not transfer](#the-unsupervised-half-does-not-transfer). Reporting that
+costs nothing and is the same kind of evidence as the feature above would be.
 
 ## Run E: a near-replicate, and the flip rate at temperature 0
 
@@ -1362,28 +1702,61 @@ One incidental correction: task 1480, named below as the one task observed
 flipping between identical runs during development, is `incorrect` in both
 runs here. It is an example of the phenomenon, not a uniquely unstable task.
 
-## The leaderboard submission: an external check on the reconstructed golds
+## The leaderboard submissions: the headline contrast, graded externally
 
-`results/glm-all450.jsonl` was submitted to the DABStep leaderboard on
-**2026-09-04** as `agentic-data-contracts` (organisation `flyersworder`,
-model family `GLM-5.3-Flash`), landing as
-`data/submissions/v1__flyersworder-agentic-data-contracts__04-09-2026.jsonl`
-in the `adyen/DABstep` dataset. Adyen's scorer graded all 450 answers against
-the **official** golds and returned per-task scores. That is the first
-external grading of answers this document otherwise grades with golds it
-reconstructed itself.
+**Two arms were submitted, and the headline contrast is no longer graded by
+this document at all.** Both ran on `z-ai/glm-5.3-flash` at commit
+`46dde879`, same pinned `z-ai` fp8 endpoint, same harness, over the same 450
+tasks — one variable between them:
 
-| split | n | correct | accuracy |
-|---|---:|---:|---:|
-| hard | 378 | 196 | **51.9%** |
-| easy | 72 | 51 | **70.8%** |
-| all | 450 | 247 | **54.9%** |
+| submitted | agent name | date |
+|---|---|---|
+| `results/glm-all450.jsonl` (`contract`) | `agentic-data-contracts` | 2026-09-04 |
+| `results/glm-manual-all450.jsonl` + `-dbfix` (`manual_prompt`) | `agentic-data-contracts-manual-baseline` | 2026-09-05 |
 
-Adyen's per-task verdicts are committed verbatim at
-`results/glm-all450-official-scores.jsonl` (450 rows, re-downloadable from
-`adyen/DABstep` at `data/task_scores/`), so every figure below is
-recomputable from this repository. The exposure and correction tables come
-from `analysis/leniency.py`, which fixes the exact-match definition they
+Adyen's scorer graded all 450 answers of each against the **official**,
+withheld golds:
+
+| split | n | `contract` | `manual_prompt` | gap |
+|---|---:|---:|---:|---:|
+| **hard** | 378 | **51.9%** (196) | **18.8%** (71) | **+33.1 pp** |
+| easy | 72 | 70.8% (51) | 75.0% (54) | −4.2 pp |
+| all | 450 | 54.9% (247) | 27.8% (125) | +27.1 pp |
+
+**Paired McNemar on the hard split: 137 tasks the contract arm alone answered
+correctly against 12 for `manual_prompt`, exact two-sided p = 4.9e-28.** Same
+tasks, same model, same grader — the one contrast this experiment most needed
+to be free of its own golds now is.
+
+Three things that follow, before the reconstructed-gold analysis below.
+
+**The easy split goes the other way, officially.** −4.2 pp is the same
+direction this document reports throughout — the effect lives entirely in the
+hard tasks — but now with Adyen's grading on both halves rather than ours.
+
+**`manual_prompt` lands just below the published baseline band.** 18.8%
+official sits under the ~20–26% band this document uses elsewhere, closest to
+its lowest named entrant (HF Claude 4 Sonnet, 19.8%) — and, unlike our own
+22.9%, graded the way those entrants were. That is the control-is-verified
+check made externally rather than by our scorer, and it lands *below* our
+self-graded figure, in the direction the leniency analysis predicts.
+
+**The `manual_prompt` file carries a harness correction.** Three hard tasks
+(2536, 2529, 2533) ran against a corrupted working copy of the database and
+are re-run at `--workers 1` into `results/glm-manual-all450-dbfix.jsonl`,
+merged at submission time by `dce.submit`'s later-file-wins rule. The
+selection criterion is the harness's own `db_corrupted` flag, set independently
+of the answer, so it does not touch model performance — and it changed no
+verdict: all three were wrong before and after, two reproducing the identical
+wrong answer. The contract submission has no corrupted rows; see
+[Operational findings](#operational-findings).
+
+Adyen's per-task verdicts for both arms are committed verbatim at
+`results/glm-all450-official-scores.jsonl` and
+`results/glm-manual-all450-official-scores.jsonl` (450 rows each,
+re-downloadable from `adyen/DABstep` at `data/task_scores/`), so every figure
+below is recomputable from this repository. The exposure and correction tables
+come from `analysis/leniency.py`, which fixes the exact-match definition they
 depend on.
 
 Two things it settles, and one it does not.
@@ -1401,23 +1774,69 @@ answer correct where Adyen's does not, and **not one goes the other way**.
 Easy is exact — 49/69 under both graders. Hard is 193/332 here against
 174/332 official: **+5.7 pp**.
 
-The 19 are answer *formatting*, not reasoning, in two clusters. Ten are
-numeric answers emitted at full float precision where the task asks for a
-rounded value (`42.89798400000003` against a reconstructed gold of `42.9`).
-Nine are answers of the form `D:305.25` where the reconstructed gold is the
-bare letter `D`. In both clusters the reconstructed gold is the plurality
-*string* and the vendored scorer accepted the agent's longer form against it;
-the official gold and scorer do not.
+The 19 fall in two clusters. Ten are numeric answers emitted at full float
+precision against a rounded reconstructed gold (`42.89798400000003` against
+`42.9`). Nine are of the form `D:305.25` where the reconstructed gold is the
+bare letter `D`. Both look like formatting, and neither is: **the
+disagreement is in the golds, not in the grading.**
+
+`analysis/gold_disagreement.py` is the check. The scorer is not a variable —
+`vendor/dabstep_scorer.py` is the leaderboard Space's own
+`dabstep_benchmark/evaluation/scorer.py`, vendored verbatim and sha256-pinned
+by `tests/test_vendored_scorer.py`, so Adyen graded this submission with the
+same code. Re-run that code on each disagreement's (submitted answer,
+reconstructed gold) pair and it returns **correct on all 19**, where Adyen
+returned wrong on all 19. The only thing that differed is the gold.
+
+It could not have gone otherwise, because the scorer cannot fail on either
+shape. `compare_numeric` rounds both sides to `min(dec_places1, dec_places2)`
+before comparing, so a full-precision answer against a rounded gold always
+matches; `compare_strings` has a single-word branch, so `D:219.36` matches a
+bare `D`. A precision difference or a trailing suffix is incapable of
+producing a `False` here. The 19 are wrong *values* that the reconstructed
+golds concealed.
+
+The data says the same thing twice over. On the 40 tasks whose guideline asks
+for a number "rounded to 14 decimals", the submission answered all 40 at full
+precision and **15 were graded correct** — so precision is not what fails the
+other 25. And on the 55 tasks whose guideline asks for `{card_scheme}:{fee}`,
+every one of the 12 correct answers names a card scheme
+(`TransactPlus:3458.48`):
+
+| answer shape | correct | wrong |
+|---|---:|---:|
+| scheme name | 12 | 28 |
+| ACI code letter | 0 | **14** |
+| other | 0 | 1 |
+
+The ACI-letter row is a real instruction-following defect — the guideline
+names the entity to answer with and the arm answered a different one — and it
+is readable off the guideline text without any gold. Nine of those 14 are
+among the 19; the local grading already called the other five wrong. It is
+also the only part of the 19 a change to this experiment could recover, and
+only by re-running the arm: an upper bound of 14 tasks, 3.7 pp of the hard
+split. The 28 scheme-named failures are wrong numbers, and no output
+convention reaches them.
 
 That is a defect in this experiment's absolute numbers, and it should be read
 into every accuracy in this document: **on the one arm and model where the
-check exists, the hard-split figure is ~6 points optimistic.**
+check exists, the hard-split figure is ~6 points optimistic.** What it is not
+is a formatting artefact that a stricter answer convention would remove.
+
+*(Corrected 2026-09-05: this section previously stated that "the 19 are answer
+formatting, not reasoning" and that "the official gold and scorer do not"
+accept the agent's longer form. The scorer is the same file on both sides —
+so it cannot be the source of a disagreement — and re-running it settles that
+the golds differ. The +5.7 pp figure, its one-sidedness, and the conclusion
+drawn from it are unchanged; the mechanism attributed to it was wrong.)*
 
 ### Is the leniency arm-neutral? Not quite, and not in one direction
 
-The obvious worry is that a scorer rewarding verbose, unrounded answers
-rewards some arms more than others, in which case the contrasts move too and
-not just the levels. That is checkable without a second submission. Every
+The obvious worry is that rows needing more than an exact match to be graded
+correct — the exact condition under which a wrong reconstructed gold can hide
+a wrong answer — are not evenly spread across arms, in which case the
+contrasts move too and not just the levels. That is checkable without a
+second submission. Every
 disagreement above failed *exact string match* against the reconstructed gold
 and was rescued by the scorer's tolerance, so **exact-match failure among
 locally-correct rows** is a measurable upper bound on an arm's exposure to
@@ -1445,10 +1864,16 @@ than exact match:
 **The contract arm is the least exposed arm on all four models**, and it is
 less exposed than `manual_prompt` on all four. `schema_only` is the most
 exposed arm on runs A and B only — on run C it is second-*lowest* (10.6%
-against `contract_hollow`'s 14.7%) and on run D `manual_prompt` leads it. The
-contract states an answer format and the arms without it improvise one, which
-is the same mechanism the rest of this document reports, showing up in the
-grading rather than in the SQL.
+against `contract_hollow`'s 14.7%) and on run D `manual_prompt` leads it.
+
+Why the ordering falls that way is not settled here, and the earlier reading
+of it — that the contract states an answer format and the arms without it
+improvise one — does not survive the correction above: the disagreements were
+not formatting. Exposure counts rows whose grading needed more than an exact
+match, which is a joint property of the answer and of the reconstructed gold,
+so it mixes an arm's answering conventions with which tasks it happens to get
+right. The ordering is reported because the correction below depends on it,
+not because this document can explain it.
 
 **A lower exposure rate is not a smaller correction.** The contract arm has
 far more correct answers to lose, so on three of four runs it gives up the
@@ -1475,33 +1900,35 @@ contract arm 5.0 points and `schema_only` 3.0. What can be said is that the
 effect on every contrast is under 3 pp in either direction, and no conclusion
 in this document turns on 3 pp.
 
-Three caveats on that correction. It assumes a conversion rate measured on
-one arm and one model transfers to the others, which is exactly the kind of
-assumption the submission existed to remove. The flag is an upper bound, so
-the true corrections are smaller than the table's. And it is **not** an
-independent check on the leaderboard result: the corrected run-A contract
-figure (50.1%) is produced by a rate measured on the very submission that
-returned 51.9%, so the two are not arrived at independently — and they are
-computed on different task sets besides (332 against 378; the official figure
-restricted to the shared 332 is 52.4%). It is a sensitivity analysis, not a
-measurement.
+### The transfer assumption was tested, and it held
+
+The correction's load-bearing weakness was that it applies a conversion rate
+measured on ONE arm to the others. The second submission tests exactly that.
+Calibrate on the contract arm as before, then apply the resulting 0.576 blind
+to `manual_prompt` and compare against what Adyen actually returned:
+
+| arm | hard n | flags | predicted bias | measured bias | error |
+|---|---:|---:|---:|---:|---:|
+| `contract` | 332 | 33 | 5.7 pp | 5.7 pp | +0.0 |
+| **`manual_prompt`** | 332 | 18 | **3.1 pp** | **3.0 pp** | **+0.1** |
+
+The contract row is circular — it is the calibration. **The `manual_prompt`
+row is not**, and the point estimates agree. Do not read 0.1 pp as precision:
+on 18 flags the realised conversion (10/18) carries a Wilson 95% interval of
+roughly [0.34, 0.76], so a measured bias anywhere between ~1.8 and ~4.1 pp
+would have been equally consistent. The assumption survives its first test; it
+is not confirmed by it. So the estimator is no longer a sensitivity analysis standing in
+for a measurement; on the one cross-arm transfer available it is a validated
+one, and it remains the only instrument bounding the **14 of 16 arm x model
+cells that will never be submitted**.
+
+Two limits survive. The flag is an upper bound, so true corrections are at or
+below the table's. And this tests transfer across *arms* on one model —
+transfer across *models* is untested, which is where the estimator does most
+of its work (runs B, C and D).
 
 The contrasts stay paired and same-task and their directions are not in
-doubt; their magnitudes now carry this alongside the flip rate above.
-
-**What it does not settle is the comparison itself.** 51.9% official hard,
-from a flash-tier model, sits against a published band of ~20–26% for the
-named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4 22.2%, HF Claude
-4 Sonnet 19.8%) and against this experiment's own `manual_prompt`
-reimplementation at 22.9% on the same model. But only the contract arm was
-submitted: 51.9% is Adyen-graded and 22.9% is self-graded, so the two sides
-of that gap are not measured the same way. `manual_prompt` is the more
-exposed arm than `contract` on all four models, so correcting both sides
-widens that particular gap on runs B and D and narrows it on A and C — but
-that is an inference from a proxy, not a second official grading. **Submitting a
-second arm is the experiment that would close this**, and it has not been
-run: `docs/paper-plan.md` commits to one arm only, on the grounds that
-submitting several under different names reads as leaderboard-stuffing.
+doubt; their magnitudes carry this alongside the flip rate above.
 
 ## What these runs do not show
 
@@ -1543,8 +1970,10 @@ submitting several under different names reads as leaderboard-stuffing.
   questions here: dropping 49 tasks did **not** bias the sample (52.4% kept
   vs 47.8% dropped, official, hard), but the reconstructed golds are
   **one-sidedly lenient** — 19 of 401 tasks called correct here are wrong
-  officially, none the reverse, all of them answer formatting, all on the
-  hard split (+5.7 pp). Every hard-split accuracy in this document should be
+  officially, none the reverse, all on the hard split (+5.7 pp), and all of
+  them wrong *values* rather than the formatting slips they resemble
+  (`analysis/gold_disagreement.py`; the scorer is the same file on both
+  sides). Every hard-split accuracy in this document should be
   read with that on it. What stays open is whether the leniency is
   arm-neutral. A proxy (`analysis/leniency.py`) says it is not: the contract
   arm is the least *exposed* on all four models, but it also has the most
@@ -1553,7 +1982,7 @@ submitting several under different names reads as leaderboard-stuffing.
   of 13.7–45.5 pp. Not conservative for the headline, but small. Only the
   contract arm was submitted, so that gap still has Adyen's grading on one
   side and ours on the other. See
-  [the leaderboard submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
+  [the leaderboard submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally).
 - **k=1 on all four runs, with one near-replicate.** The four sweeps are
   different models, not repeats, so none of them estimates within-condition
   variance. Run E (above) supplies the only estimate there is, on glm:
@@ -1611,6 +2040,10 @@ uv run python analysis/coverage.py                       # contract -> gold, 176
 uv run python analysis/buckets.py results/*.jsonl        # arms by macro/derived
 uv run python analysis/clauses.py --within glm-full dsflash-full sol-full sonnet5-full
 uv run python analysis/counterfactuals.py results/glm-full.jsonl
+uv run python analysis/gold_disagreement.py                # the 19, and why
+uv run python analysis/leniency.py                        # exposure + transfer
+uv run python analysis/group_consistency.py               # the gold-free check
+uv run python analysis/replay.py                          # answer vs its own query
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

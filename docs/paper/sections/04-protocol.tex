@@ -79,13 +79,14 @@ harness, one variable --- were submitted and graded against the withheld
 golds:
 
 \begin{center}
-\begin{tabular}{lrrr}
+\small
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-split & \armC{} & \armM{} & gap \\
+split & $n$ & \armC{} & \armM{} & gap \\
 \midrule
-hard ($n{=}378$) & \textbf{51.9\%} & \textbf{18.8\%} & $+33.1$~pp \\
-easy ($n{=}72$)  & 70.8\% & 75.0\% & $-4.2$~pp \\
-all ($n{=}450$)  & 54.9\% & 27.8\% & $+27.1$~pp \\
+hard & 378 & \textbf{51.9\%} & \textbf{18.8\%} & $+33.1$~pp \\
+easy & 72  & 70.8\% & 75.0\% & $-4.2$~pp \\
+all  & 450 & 54.9\% & 27.8\% & $+27.1$~pp \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -95,9 +96,10 @@ answers correctly against 12 for \armM{}, exact two-sided $p = 4.9\times
 10^{-28}$. \textbf{The paper's headline contrast is therefore graded by the
 benchmark's own withheld golds, not by ours}, and the easy-split reversal ---
 the effect living entirely in the hard tasks --- is confirmed externally too.
-\armM{}'s 18.8\% also places our reimplementation of the manual-in-prompt
-baseline inside the published 20--26\% band without relying on our scorer.
-Three further results follow.
+\armM{}'s 18.8\% sits just below the published 20--26\% band for named
+manual-in-prompt baselines, closest to the lowest of them (19.8\% for
+Claude~4 Sonnet); it is the same reimplementation, graded the same way as
+those entries rather than by us. Three further results follow.
 
 The excluded tasks are not a biased sample. Officially, the 332 hard tasks we
 keep score 52.4\% and the 46 hard tasks we drop score 47.8\%: the

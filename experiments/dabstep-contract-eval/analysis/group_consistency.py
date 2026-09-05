@@ -170,8 +170,14 @@ def against_official(shapes: dict[str, str]) -> None:
         )
     }
 
+    # Graded rows only. The 49 `ungraded` tasks have no reconstructed gold, so
+    # they can never count as an error under that grader while still padding
+    # its denominator — which flatters the reconstructed-golds lift and not the
+    # official one (Adyen scored all 450).
     groups: dict[str, list[str]] = defaultdict(list)
-    for task_id in local:
+    for task_id, row in local.items():
+        if row["verdict"] not in ("correct", "incorrect"):
+            continue
         groups[shapes.get(task_id, "")].append(task_id)
 
     considered, flagged = [], []

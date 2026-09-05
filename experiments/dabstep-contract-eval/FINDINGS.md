@@ -24,7 +24,7 @@ run and is absent from every table above: it is the contract arm alone over
 all 450 tasks, built for the leaderboard submission — where it was
 submitted on 2026-09-04 and scored **51.9% hard / 70.8% easy / 54.9%
 overall** against the official golds (see [the leaderboard
-submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds)).
+submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally)).
 It doubles as this experiment's only near-replicate — see [Run
 E](#run-e-a-near-replicate-and-the-flip-rate-at-temperature-0).
 
@@ -1093,7 +1093,20 @@ mostly — and are still deliberately not offered as a governance claim.
 `db_corrupted` is `True` on exactly two rows in 6,416: **task 68,
 `schema_only`, deepseek**, and **task 2546, `manual_prompt`, Sonnet 5**. Run C
 adds 1,604 rows and no corruption, in any arm — see the governance caveat
-above: sol never attempted a write. Task 68 is 1 of the 24 attempting tasks
+above: sol never attempted a write.
+
+**The flag is not exclusively a governance signal, and this section is the
+only place it is read as one.** `dce.arms.make_working_copy`'s docstring
+records a harness path that stamps it on a row that did nothing — a resumed
+sweep inheriting a dead run's WAL — and the `manual_prompt` 450-task
+submission produced 3 such rows in a killed-and-resumed sweep whose cause is
+still unidentified (`deploy/README.md`). Neither of the two rows below is one
+of those: both belong to unresumed ablation runs, and both are corroborated by
+the mutating statement in their own transcript. But a reader running
+`dce.stats` over a resumed sweep should not read a raised flag as an agent
+having written to the warehouse without checking the transcript first.
+
+Task 68 is 1 of the 24 attempting tasks
 on runs A and B because DuckDB `TEMP` tables die with the connection; only
 this run escalated to *persistent* tables.
 
@@ -1360,7 +1373,7 @@ config — is led by two systems built on the same principle as this one:
 | *this experiment's submission (unvalidated)* | *51.85* | *70.83* | *GLM-5.3-Flash* |
 
 The last row is [the leaderboard
-submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds)
+submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally)
 at the board's own precision — the 51.9% / 70.8% reported there. Validation
 requests closed on 2026-07-22 ahead of a DABStep-v2 the maintainers say is
 "launching in the coming weeks", so that cohort is now fixed and a submission
@@ -1446,7 +1459,7 @@ wrong, which is the case one most needs it for.
 
 **Against the only official grading available, it finds nothing that matters.**
 On the 450-task submission, scored with Adyen's verdicts rather than ours, the
-rule flags 66 rows at 56.1% precision against a 49.1% base — 1.14x — and of
+rule flags 63 rows at 57.1% precision against a 48.6% base — 1.18x — and of
 the **19 tasks the official grading overturned it flags none**. All 27 of its
 flags on locally-correct rows are false alarms; not one is officially wrong.
 
@@ -1543,9 +1556,10 @@ instrument — `analysis/clauses.py`, which measures whether the required
 clauses reach the SQL — and [within an arm it is
 null](#does-the-contracts-vocabulary-reach-the-sql-a-behavioural-check).
 And it would not have caught the 19: the scorer normalises precision by
-rounding both sides to `min(dec_places)`, so a reporting slip cannot fail it,
-which means those answers were wrong *derivations*, not wrong transcriptions
-of a right query.
+rounding both sides to `min(dec_places)`, which rules out a precision or
+formatting difference as the cause — though not a value copied from the wrong
+cell, which is simply a different number and fails outright. Replay cannot
+adjudicate these either way: the submission runs stored no transcripts.
 
 What Xiaomi has that this experiment cannot get is narrower than "a query-level
 check": a **reference query per case**. DABStep ships answers and no reference
@@ -1894,8 +1908,11 @@ to `manual_prompt` and compare against what Adyen actually returned:
 | **`manual_prompt`** | 332 | 18 | **3.1 pp** | **3.0 pp** | **+0.1** |
 
 The contract row is circular — it is the calibration. **The `manual_prompt`
-row is not**, and the proxy predicted its bias to 0.1 pp on an arm it had
-never seen. So the estimator is no longer a sensitivity analysis standing in
+row is not**, and the point estimates agree. Do not read 0.1 pp as precision:
+on 18 flags the realised conversion (10/18) carries a Wilson 95% interval of
+roughly [0.34, 0.76], so a measured bias anywhere between ~1.8 and ~4.1 pp
+would have been equally consistent. The assumption survives its first test; it
+is not confirmed by it. So the estimator is no longer a sensitivity analysis standing in
 for a measurement; on the one cross-arm transfer available it is a validated
 one, and it remains the only instrument bounding the **14 of 16 arm x model
 cells that will never be submitted**.
@@ -1960,7 +1977,7 @@ doubt; their magnitudes carry this alongside the flip rate above.
   of 13.7–45.5 pp. Not conservative for the headline, but small. Only the
   contract arm was submitted, so that gap still has Adyen's grading on one
   side and ours on the other. See
-  [the leaderboard submission](#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
+  [the leaderboard submission](#the-leaderboard-submissions-the-headline-contrast-graded-externally).
 - **k=1 on all four runs, with one near-replicate.** The four sweeps are
   different models, not repeats, so none of them estimates within-condition
   variance. Run E (above) supplies the only estimate there is, on glm:

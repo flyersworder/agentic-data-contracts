@@ -36,26 +36,33 @@ this host is stolen automatically, so a restart is never blocked by its own
 corpse; a lock from another host is never stolen, and the refusal message
 names the file to delete.
 
-**Clear the working copies before resuming a KILLED sweep.** The lock is
-stolen from a dead process, which is what you want — but stealing it is all
-that happens. The dead sweep's `data/<db>.working*` files are left behind, and
-the restart's workers re-derive copies over files whose previous owner died
-holding a live DuckDB connection on them. That is the same race the lock
-prevents *between* concurrent sweeps, reappearing *across* a kill and a
-resume:
-
-```bash
-rm -f data/*.working*      # ONLY when no sweep is running
-```
-
+**Check `db_corrupted` after resuming a KILLED sweep — cause unknown.**
 Measured on 2026-09-05: a sweep killed mid-flight and resumed into the same
 results file produced **3 `db_corrupted` rows in 450** (`manual_prompt`, glm),
-against 0-1 in 1,604 for each of the four ablation runs — which used the same
+against 0–1 in 1,604 for each of the four ablation runs — which used the same
 `--workers 6` but were never killed and resumed. Width is not the variable;
-the restart is. The corrupted rows are recoverable (re-run them into a
-separate results file and let `dce.submit`'s later-file-wins rule merge them),
-but they are silent: nothing fails, the rows just carry the flag. Check for
-it after any resumed sweep:
+the restart correlates.
+
+**The obvious explanation is already fixed, so it is probably not the
+explanation.** `dce.arms.make_working_copy` unlinks a stale `.wal` sidecar
+before every copy, and its docstring records that it was added for exactly
+this symptom: "a resumed sweep's first task saw the dead run's mutation and
+was stamped `db_corrupted: True` having done nothing itself." If that fix
+holds, deleting `data/*.working*` by hand is a no-op here and the real cause
+of these 3 rows is unidentified — so **treat this as a detection rule, not a
+remedy**, and do not assume a resumed sweep is clean because you cleared the
+copies.
+
+Note also which direction the flag can fail in: the docstring's case is a
+**false positive** — a row stamped corrupt having done nothing. That matches
+what we saw. All 3 rows were wrong before and after re-running, and 2 of 3
+reproduced the identical wrong answer, so the flag did not track a changed
+outcome. Re-running them is cheap insurance against a provenance objection,
+not a correction of a measurement (see [The leaderboard
+submissions](#the-leaderboard-submissions-the-headline-contrast-graded-externally)
+in `FINDINGS.md`).
+
+Check for it after any resumed sweep:
 
 ```bash
 uv run python -c "import json,sys; sys.path.insert(0,'.'); from dce.runner import latest_rows; from pathlib import Path; rows=latest_rows(Path('results/<name>.jsonl')); print(sum(1 for r in rows if r.get('db_corrupted')), 'of', len(rows))"

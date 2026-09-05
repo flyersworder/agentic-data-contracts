@@ -55,12 +55,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from clauses import SQL_TOOLS, trace_for  # noqa: E402
+from clauses import trace_for  # noqa: E402
 from coverage import BASE_TABLES, DB  # noqa: E402
 from dce.stats import ANSWER_VERDICTS, load  # noqa: E402
 from vendor.dabstep_scorer import question_scorer  # noqa: E402
 
 ARMS = ["contract", "contract_hollow", "manual_prompt", "schema_only"]
+
+#: Tools whose RESULT SET the agent actually receives. Deliberately NOT
+#: `clauses.SQL_TOOLS`, which also contains `inspect_query`: that tool returns
+#: a validation verdict (`{"valid": false, "violations": [...]}`) and never
+#: rows, so a value found by replaying its SQL was never in front of the model.
+#: Counting it would also be one-sided — only the governed arms have the tool,
+#: so it would inflate `contract` and `contract_hollow` against the two arms
+#: that cannot produce such a call at all.
+ANSWERING_TOOLS = frozenset({"run_query", "execute_sql"})
 
 #: A transcript can hold dozens of statements; only the tail is plausibly the
 #: one that produced the answer, and replaying all of them is slow for nothing.
@@ -107,7 +116,7 @@ def sql_statements(path: Path) -> list[str]:
         for part in message.get("parts", []):
             if part.get("part_kind") != "tool-call":
                 continue
-            if part.get("tool_name") not in SQL_TOOLS:
+            if part.get("tool_name") not in ANSWERING_TOOLS:
                 continue
             args = part.get("args")
             if isinstance(args, str):
@@ -154,7 +163,6 @@ def replay(con: duckdb.DuckDBPyConnection, statements: list[str]) -> list[str]:
 
 
 def main(paths: list[str]) -> None:
-    con = connect()
     for path in paths:
         rows = [r for r in load(Path(path)) if r.get("verdict") in ANSWER_VERDICTS]
         if not rows:
@@ -175,7 +183,16 @@ def main(paths: list[str]) -> None:
                 trace = trace_for(run, str(row["task_id"]), arm)
                 if trace is None:
                     continue
-                results = replay(con, sql_statements(trace))
+                # A fresh catalogue per row. Transcripts contain DDL
+                # (`CREATE TEMP TABLE feats`, `DROP TABLE ... ; CREATE TABLE m1`)
+                # and object names repeat across tasks, so a shared connection
+                # lets one task's leftover table satisfy another task's query
+                # whose own CREATE fell outside TAIL.
+                con = connect()
+                try:
+                    results = replay(con, sql_statements(trace))
+                finally:
+                    con.close()
                 if not results:
                     continue
                 reported = row.get("answer") or ""

@@ -36,6 +36,31 @@ this host is stolen automatically, so a restart is never blocked by its own
 corpse; a lock from another host is never stolen, and the refusal message
 names the file to delete.
 
+**Clear the working copies before resuming a KILLED sweep.** The lock is
+stolen from a dead process, which is what you want — but stealing it is all
+that happens. The dead sweep's `data/<db>.working*` files are left behind, and
+the restart's workers re-derive copies over files whose previous owner died
+holding a live DuckDB connection on them. That is the same race the lock
+prevents *between* concurrent sweeps, reappearing *across* a kill and a
+resume:
+
+```bash
+rm -f data/*.working*      # ONLY when no sweep is running
+```
+
+Measured on 2026-09-05: a sweep killed mid-flight and resumed into the same
+results file produced **3 `db_corrupted` rows in 450** (`manual_prompt`, glm),
+against 0-1 in 1,604 for each of the four ablation runs — which used the same
+`--workers 6` but were never killed and resumed. Width is not the variable;
+the restart is. The corrupted rows are recoverable (re-run them into a
+separate results file and let `dce.submit`'s later-file-wins rule merge them),
+but they are silent: nothing fails, the rows just carry the flag. Check for
+it after any resumed sweep:
+
+```bash
+uv run python -c "import json,sys; sys.path.insert(0,'.'); from dce.runner import latest_rows; from pathlib import Path; rows=latest_rows(Path('results/<name>.jsonl')); print(sum(1 for r in rows if r.get('db_corrupted')), 'of', len(rows))"
+```
+
 **`fsync` per row.** `flush()` hands bytes to the OS page cache: that survives
 the process dying but not the machine dying. Rows arrive about once a minute
 per worker, so the guarantee is bought outright rather than batched. (On Linux

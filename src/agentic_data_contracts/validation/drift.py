@@ -19,7 +19,6 @@ and the contract's own declared source is loaded, exactly as ``create_tools``
 does — otherwise a contract carrying an inline frozen snapshot, checked the
 obvious way, compares no columns at all and reports a clean bill of health.
 
-
 **A check that could not run is not a check that passed.** An unresolved
 wildcard and an adapter that raised both land in :attr:`SchemaDriftReport.
 unchecked`, and :attr:`~SchemaDriftReport.ok` is False whenever anything is
@@ -142,8 +141,11 @@ class UncheckedTable:
 class SchemaDriftReport:
     drifts: list[SchemaDrift] = field(default_factory=list)
     unchecked: list[UncheckedTable] = field(default_factory=list)
-    #: Tables that existed and were compared. Reported so a run that checked
-    #: nothing cannot be mistaken for a run that found nothing.
+    #: Tables whose existence was verified. Not the same as tables whose
+    #: columns were compared -- a contract may allow tables the semantic source
+    #: does not describe, which is the normal case; `columns_checked` carries
+    #: that half. Both are reported so a run that checked nothing cannot be
+    #: mistaken for a run that found nothing.
     tables_checked: int = 0
     columns_checked: int = 0
 
@@ -197,7 +199,9 @@ def _declared_tables(
     return by_schema, unchecked
 
 
-def _declared_columns(source: SemanticSource | None) -> dict[str, list[str]]:
+def _declared_columns(
+    source: SemanticSource | None,
+) -> tuple[dict[str, list[str]], list[str]]:
     """Declared column names per ``schema.table``, in declaration order.
 
     Reads through ``getattr`` because ``SemanticSource`` is a structural
@@ -205,8 +209,9 @@ def _declared_columns(source: SemanticSource | None) -> dict[str, list[str]]:
     only ``.columns`` and ``.name`` are things the protocol actually promises.
     """
     if source is None:
-        return {}
+        return {}, []
     declared: dict[str, list[str]] = {}
+    original: list[str] = []
     for key, table_schema in source.get_table_schemas().items():
         names = [
             name
@@ -214,8 +219,15 @@ def _declared_columns(source: SemanticSource | None) -> dict[str, list[str]]:
             if (name := getattr(column, "name", "") or "")
         ]
         if names:
-            declared[key] = names
-    return declared
+            # Keyed casefolded, because the lookup and the mismatch guard below
+            # have to fold the same way. They did not: the guard casefolded
+            # while the per-table lookup matched exactly, so a source keyed
+            # `MAIN.ORDERS` against a contract allowing `main.orders` satisfied
+            # the guard *and* missed every lookup -- zero columns compared, `ok`
+            # True. The guard silenced the very thing it was added to catch.
+            declared.setdefault(key.casefold(), names)
+            original.append(key)
+    return declared, original
 
 
 def _live_tables(
@@ -230,8 +242,25 @@ def _live_tables(
     only on the path that was about to report the whole schema missing, and
     turns a wrong CI diagnosis on a wholly correct contract back into a pass.
     """
-    for candidate in (schema_name, schema_name.upper(), schema_name.lower()):
-        names = adapter.list_tables(candidate)
+    candidates = [schema_name]
+    candidates += [
+        alt
+        for alt in (schema_name.upper(), schema_name.lower())
+        if alt not in candidates
+    ]
+    for index, candidate in enumerate(candidates):
+        try:
+            names = adapter.list_tables(candidate)
+        except Exception:
+            # Only the spelling the contract actually declares can report a
+            # real failure. BigQuery- and Snowflake-style adapters raise for an
+            # absent dataset rather than returning `[]`, so letting a retry's
+            # exception through would turn an existing-but-empty schema into
+            # "connection failed" and send the reader after a problem that is
+            # not there.
+            if index == 0:
+                raise
+            continue
         if names:
             folded: dict[str, str] = {}
             for name in names:
@@ -280,7 +309,7 @@ def check_schema_drift(
                     ),
                 )
             )
-    declared_columns = _declared_columns(semantic_source)
+    declared_columns, declared_keys = _declared_columns(semantic_source)
     drifts: list[SchemaDrift] = []
     tables_checked = 0
     columns_checked = 0
@@ -331,7 +360,7 @@ def check_schema_drift(
                     SchemaDrift(kind="missing_table", schema=schema_name, table=table)
                 )
                 continue
-            names = declared_columns.get(f"{schema_name}.{table}")
+            names = declared_columns.get(f"{schema_name}.{table}".casefold())
             if not names:
                 tables_checked += 1
                 continue
@@ -354,11 +383,33 @@ def check_schema_drift(
                     )
                 )
                 continue
+            if not live_names:
+                # The same fan-out collapsed for `missing_table` above and for a
+                # failed schema listing before it -- and guarded in
+                # `_stale_declaration_note` on the tool side. A table
+                # `list_tables` just named but `describe_table` cannot
+                # introspect (an opaque view, a permissions-restricted table)
+                # would otherwise turn every declaration into a bogus
+                # `missing_column` telling the author to delete correct
+                # declarations. Nothing was compared, so there is no evidence
+                # the declarations are wrong: unchecked, not drift.
+                unchecked.append(
+                    UncheckedTable(
+                        schema=schema_name,
+                        table=table,
+                        reason=(
+                            "the table is listed but reports no columns, so its"
+                            f" {_plural(len(names), 'declaration')} could not be"
+                            " checked"
+                        ),
+                    )
+                )
+                continue
             tables_checked += 1
             columns_checked += len(names)
             drifts += _column_drifts(schema_name, table, names, live_names)
 
-    unchecked += _key_convention_mismatch(by_schema, declared_columns)
+    unchecked += _key_convention_mismatch(by_schema, declared_columns, declared_keys)
 
     # Sorted so CI diffs a stable report: dict and set iteration would let an
     # unchanged contract produce a changed file.
@@ -373,7 +424,9 @@ def check_schema_drift(
 
 
 def _key_convention_mismatch(
-    by_schema: dict[str, list[str]], declared_columns: dict[str, list[str]]
+    by_schema: dict[str, list[str]],
+    declared_columns: dict[str, list[str]],
+    declared_keys: list[str],
 ) -> list[UncheckedTable]:
     """Flag a semantic source whose table keys overlap the allow-list not at all.
 
@@ -386,14 +439,18 @@ def _key_convention_mismatch(
     """
     if not declared_columns:
         return []  # Nothing declared is nothing to mismatch.
+    # `declared_columns` is already casefolded; fold this side to match, or the
+    # guard and the per-table lookup disagree about what "the same table" means.
     allowed = {
         f"{schema_name}.{table}".casefold()
         for schema_name, tables in by_schema.items()
         for table in tables
     }
-    if not allowed or any(key.casefold() in allowed for key in declared_columns):
+    if not allowed or any(key in allowed for key in declared_columns):
         return []
-    sample = sorted(declared_columns)[0]
+    # The source's own spelling, not the folded key -- a reader comparing
+    # conventions must see what they actually wrote.
+    sample = sorted(declared_keys)[0]
     return [
         UncheckedTable(
             schema="",

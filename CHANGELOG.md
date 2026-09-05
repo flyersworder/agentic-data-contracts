@@ -22,6 +22,10 @@ All notable changes to this project will be documented in this file.
 
   **A semantic source whose table keys overlap the allow-list not at all is flagged once.** Per table this is indistinguishable from a table the source simply does not describe — and a source covering 3 of 10 allowed tables is the normal case, so flagging the other 7 would make the gate useless. Zero overlap is a systematic mismatch instead: a third-party source keying `project.dataset.table`, or a schema spelled differently on the two sides. One check over the whole output, so it cannot fire per table.
 
+  **Table names are matched case-insensitively on both sides of the comparison.** The per-table declaration lookup and the key-convention guard have to fold the same way; when only the guard folded, a source keyed `MAIN.ORDERS` against a contract allowing `main.orders` satisfied the guard *and* missed every lookup — zero columns compared, nothing unchecked, `ok` True. The guard silenced the defect it was added to catch.
+
+  **A live table that reports no columns is `unchecked`, not one `missing_column` per declaration.** A table `list_tables` names but `describe_table` cannot introspect — an opaque view, a permissions-restricted table — would otherwise turn every declaration into a finding telling the author to delete correct declarations. Nothing was compared, so there is no evidence the declarations are wrong.
+
   Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
 
 ### Fixed

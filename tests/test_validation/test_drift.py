@@ -721,3 +721,161 @@ class TestFailureFanOut:
         assert "connection refused" in report.unchecked[0].reason
         # The count is not lost by collapsing it.
         assert "5" in report.unchecked[0].reason
+
+
+class TestDeclarationLookupCase:
+    def test_a_source_keyed_in_another_case_still_has_its_columns_checked(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the per-table lookup was exact while the guard meant
+        to catch a key mismatch casefolded — so the guard silenced itself.
+
+        A source keyed `MAIN.ORDERS` against a contract allowing `main.orders`
+        satisfied `_key_convention_mismatch` *and* missed every per-table
+        lookup: zero columns compared, nothing unchecked, `ok` True. The two
+        halves of the same question have to fold the same way.
+        """
+
+        class _Shouting(_StubSource):
+            def get_table_schemas(self) -> dict[str, Any]:
+                return {
+                    "MAIN.ORDERS": TableSchema(
+                        columns=[Column("id", ""), Column("column1", "")]
+                    )
+                }
+
+        report = check_schema_drift(_contract("[orders]"), adapter, _Shouting())
+        assert report.columns_checked == 2
+        assert [d.column for d in report.drifts] == ["column1"]
+
+    def test_one_matching_key_does_not_silence_the_guard_for_the_rest(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """The partial-overlap variant, which is worse than the total one: a
+        single matching key satisfied `any(...)` and let every mismatched key
+        through unexamined."""
+
+        class _Mixed(_StubSource):
+            def get_table_schemas(self) -> dict[str, Any]:
+                return {
+                    "main.orders": TableSchema(columns=[Column("id", "")]),
+                    "MAIN.CUSTOMERS": TableSchema(columns=[Column("column9", "")]),
+                }
+
+        report = check_schema_drift(_contract(), adapter, _Mixed())
+        assert [d.column for d in report.drifts] == ["column9"]
+
+
+class TestUnintrospectableTable:
+    def test_a_live_table_reporting_no_columns_is_unchecked_not_all_drift(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the same fan-out collapsed everywhere else.
+
+        `describe_table` returning nothing for a table `list_tables` just named
+        — a view the connection cannot introspect, a permissions-restricted
+        table, an adapter quirk — turned every declaration into a bogus
+        `missing_column` telling the author to delete correct declarations.
+        `_stale_declaration_note` already guards exactly this; the preflight did
+        not. It is `unchecked` rather than one drift: nothing was compared, so
+        there is no evidence the declarations are wrong.
+        """
+
+        class _Opaque:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                return adapter.list_tables(schema)
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                return TableSchema(columns=[])
+
+            def execute(self, sql: str) -> Any:
+                return adapter.execute(sql)
+
+            def explain(self, sql: str) -> Any:
+                return adapter.explain(sql)
+
+        source = _source(
+            [
+                {
+                    "schema": "main",
+                    "table": "orders",
+                    "columns": [{"name": "id"}, {"name": "amount"}],
+                }
+            ]
+        )
+        report = check_schema_drift(
+            _contract("[orders]"),
+            _Opaque(),  # type: ignore[arg-type]
+            source,
+        )
+        assert not report.has_drift
+        assert [u.qualified for u in report.unchecked] == ["main.orders"]
+        assert report.columns_checked == 0
+
+
+class TestSchemaRetryDiagnosis:
+    def test_an_empty_schema_on_a_raising_adapter_is_still_missing_schema(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the case-retry could convert a correct diagnosis into
+        a wrong one.
+
+        BigQuery- and Snowflake-style adapters raise for an absent dataset
+        rather than returning `[]`. An *existing but empty* schema answered the
+        first spelling with `[]`, and the retry's exception was then reported as
+        a connection failure — sending the reader after a problem that is not
+        there. Only the first spelling's failure is a real one.
+        """
+
+        class _Raising:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                if schema != "main":
+                    raise RuntimeError(f"NotFound: schema {schema}")
+                return []  # exists, but empty
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                raise AssertionError("should not be reached")
+
+            def execute(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+            def explain(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+        report = check_schema_drift(
+            _contract("[orders]"),
+            _Raising(),  # type: ignore[arg-type]
+        )
+        assert report.unchecked == []
+        assert _kinds(report) == ["missing_schema"]
+
+    def test_the_first_spellings_failure_is_still_reported(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """A genuine connection failure must not be swallowed by the retry."""
+
+        class _Broken:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                raise RuntimeError("connection refused")
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                raise AssertionError("should not be reached")
+
+            def execute(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+            def explain(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+        report = check_schema_drift(
+            _contract("[orders]"),
+            _Broken(),  # type: ignore[arg-type]
+        )
+        assert not report.has_drift
+        assert "connection refused" in report.unchecked[0].reason

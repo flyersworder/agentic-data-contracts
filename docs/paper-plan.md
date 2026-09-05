@@ -34,10 +34,11 @@ dissolves the "no novel method" objection an industrial track would raise.
 
 The contribution is the **decomposition**, not the accuracy: **the gain is
 semantic content, and the scaffolding term is not distinguishable from zero on
-either model.** Published context-layer results (MotherDuck Guides, +72pp)
-report two accuracy numbers, from which no mechanism can be recovered — was it
-the content, the fetch loop, or the pre-built views? This is, as far as we
-know, the only controlled answer.
+either model.** Published context-layer results (MotherDuck Guides, +72pp; and
+the two systems atop DABStep's validated leaderboard, NVIDIA KGMON at 89.95
+hard and OceanBase DataPilot at 87.57) report two accuracy numbers each, from
+which no mechanism can be recovered — was it the content, the fetch loop, or
+the pre-built views? This is, as far as we know, the only controlled answer.
 
 **Corrected 2026-09-01.** This plan previously claimed "content 87%,
 scaffolding 13%" from run A's +5.4pp point estimate. That estimate does not
@@ -67,8 +68,21 @@ safety property of the same artifact, on the same runs, at no extra cost.
 ## Positioning: anticipated metrics vs unanticipated ones
 
 The paper's most likely misreading is "they score 55% where MotherDuck scores
-99.8%, so this is worse." §8 must close that off early and explicitly, because
-a reviewer who forms that impression in §1 will not revise it in §8.
+99.8% and the DABStep leaderboard's top entry scores 89.95, so this is worse."
+§8 must close that off early and explicitly, because a reviewer who forms that
+impression in §1 will not revise it in §8.
+
+The leaderboard version of the objection has a sharper answer than the
+MotherDuck version, and the paper should use it: both leading systems build
+their artifact **against the benchmark's gold answers** — NVIDIA's learning
+loop "validat[es] them against ground truth answers" and its reflection phase
+compiles pitfalls "from the test data" into the inference prompt; DataPilot
+benchmarks competing branches against golden answers and promotes the winner.
+Our contract was authored from the vendor manual alone and frozen, digest-
+pinned, before any question was read. Their number bounds what a labelled,
+enumerable question space can be compiled down to; ours does not. State this
+factually — nothing in the benchmark forbids gold supervision — and do not
+imply misconduct.
 
 **The two approaches compile the semantics at different times.**
 
@@ -78,7 +92,8 @@ a reviewer who forms that impression in §1 will not revise it in §8.
 | covers | metrics someone anticipated | any question over the described domain |
 | authoring cost | one macro per metric, tested and maintained | one description per domain |
 | fails when | the question was not anticipated | the model reimplements the rule wrongly |
-| DABStep score | 88% retrieval -> **93%** warehouse-baked macros/views -> **100%** hierarchical semantic layer (MotherDuck's own progression) | 55.1% / 56.6% |
+| DABStep score | 88% retrieval -> **93%** warehouse-baked macros/views -> **100%** hierarchical semantic layer (MotherDuck's own progression); **89.95** hard, gold-supervised `helper.py` (NVIDIA KGMON, leaderboard 1st) | 55.1% / 56.6% |
+| artifact built against golds | yes, iteratively | no, frozen before any question was read |
 
 DABStep is 450 questions from **26 templates**, and 294 of 332 hard tasks here
 are fee questions. That is a question space enumerable in advance, which is
@@ -130,7 +145,7 @@ nothing.
 | 6 Mechanism | task 1278 traced end to end; both baselines produce the identical wrong number | **`FINDINGS.md`** |
 | 6b Governance | 144 mutating statements vs 0, deterrence not interception, the task-68 escalation | **`FINDINGS.md`** |
 | 7 Threats to validity | one benchmark / 26 templates, reconstructed golds, k=1, run B's 29% truncation, self-attested provenance | **`FINDINGS.md`** |
-| 8 Related work | MotherDuck Guides; why their 99.8% and our 55.1% measure different things | **`FINDINGS.md`** |
+| 8 Related work | MotherDuck Guides; the validated leaderboard's top two (NVIDIA KGMON, OceanBase DataPilot) and their gold-supervised learning loops; the negative result that their *unsupervised* group-consistency half yields ~1.1x here and catches 0 of the 19 official overturns; why their 88–100% and our 55.1% measure different things | **`FINDINGS.md`** |
 | 9 Artifacts | harness, frozen contract, 3,208 transcripts, results JSONL | **in repo** |
 
 Most of sections 3–8 already exist in `experiments/dabstep-contract-eval/FINDINGS.md`.
@@ -165,8 +180,12 @@ the rest are writing.
 4. ~~**Gold reconstruction needs its own subsection**~~ **done, and the
    submission was made (2026-09-04).** The measurement replaced the argument
    and it did not come back clean: 95.3% agreement on 401 tasks, but the 19
-   disagreements are **one-sided** — lenient here, wrong officially, all
-   answer formatting, all hard split, **+5.7 pp**. The exclusion of 49 tasks
+   disagreements are **one-sided** — lenient here, wrong officially, all hard
+   split, **+5.7 pp**, and all of them wrong *values* rather than the
+   formatting slips they resemble: the scorer is the same vendored file on
+   both sides and calls all 19 correct against our reconstructed golds
+   (`analysis/gold_disagreement.py`), so the golds differ, not the rules.
+   The exclusion of 49 tasks
    *is* unbiased (52.4% kept vs 47.8% dropped, official). A proxy
    (`analysis/leniency.py`) shows the contract arm is the least *exposed* on
    all four models but has the most correct answers to lose, so correcting it

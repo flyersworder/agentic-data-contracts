@@ -3,14 +3,17 @@
 The leaderboard submission (see `FINDINGS.md`) graded the contract arm's 450
 answers against DABStep's withheld golds and disagreed with our reconstructed
 golds on 19 of 401 tasks — every one of them lenient here and wrong
-officially, every one of them an answer-formatting difference rather than a
-reasoning one.
+officially. The cause is a wrong reconstructed gold, not a lenient scorer:
+Adyen grades with this same vendored file, and `analysis/gold_disagreement.py`
+shows it calls all 19 correct against our golds. What the scorer's tolerance
+did was let a wrong value pass a wrong gold.
 
 That measures the bias on ONE arm and ONE model. This script bounds it on the
 rest, without a second submission. Every one of the 19 failed *exact match*
-against the reconstructed gold and was rescued by the vendored scorer's
-tolerance, so exact-match failure among locally-correct rows over-counts, but
-never misses, an arm's exposure to that tolerance.
+against the reconstructed gold and needed the vendored scorer's tolerance to
+be graded correct — a necessary condition for a bad gold to hide a bad answer
+— so exact-match failure among locally-correct rows over-counts, but never
+misses, an arm's exposure.
 
 Exact match is deliberately crude: strip surrounding whitespace and Markdown
 bold, compare the raw `answer` to `gold`. It is NOT `answer_normalized` —

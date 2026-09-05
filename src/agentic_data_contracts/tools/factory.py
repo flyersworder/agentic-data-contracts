@@ -86,27 +86,60 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
-def _semantic_table(source: SemanticSource, schema: str, table: str) -> Any:
+def _folded_table_index(source: SemanticSource) -> dict[str, Any]:
+    """A casefolded ``schema.table`` → schema index, or ``{}`` if unreadable.
+
+    Built once per ``create_tools`` call and cached, because the miss path is
+    the *normal* one -- a source covering 3 of 10 allowed tables is typical --
+    and every bundled source implements ``get_table_schemas`` as
+    ``dict(self._tables)``, a full copy of every model in the manifest. Walking
+    that per ``describe_table`` would put an O(n) copy on the event loop for
+    each undocumented table.
+
+    A key whose fold collides with another maps to ``None``: which declaration
+    applies is not knowable, and serving one arbitrarily is worse than serving
+    none. ``check_schema_drift`` reports the collision, so CI names it while the
+    agent still gets a correct column list.
+
+    Never raises. ``SemanticSource`` is a structural protocol, so a third-party
+    source that parses lazily may fail on the bulk read -- and that must not
+    crash an agent's turn where the exact lookup alone would have returned the
+    live columns without descriptions.
+    """
+    try:
+        schemas = source.get_table_schemas()
+    except Exception:  # noqa: BLE001 - a lazily-parsing source may fail here
+        logger.warning(
+            "Semantic source failed a bulk table read; describe_table will fall"
+            " back to exact-match key lookup only.",
+            exc_info=True,
+        )
+        return {}
+    index: dict[str, Any] = {}
+    for key, table_schema in schemas.items():
+        folded = key.casefold()
+        # `None` marks an ambiguous fold and must survive a later insert.
+        index[folded] = None if folded in index else table_schema
+    return index
+
+
+def _semantic_table(
+    source: SemanticSource, index: dict[str, Any], schema: str, table: str
+) -> Any:
     """The source's schema for one table, tolerating a case-only key difference.
 
     Every bundled source implements ``get_table_schema`` as an exact-match dict
     get on ``f"{schema}.{table}"``. ``check_schema_drift`` folds case for the
-    same lookup, so without this the two halves of one fix disagree in exactly
-    the case they were hardened for: a source keyed ``MAIN.ORDERS`` against a
-    contract allowing ``main.orders`` has its phantom column reported in CI and
-    silently ignored in the agent's turn -- no note, and no descriptions either.
-
-    The fallback only runs when the exact lookup misses, so the common path
-    costs nothing, and `get_table_schemas()` is only walked on that miss.
+    same lookup, so without the fallback the two halves of one fix disagree in
+    exactly the case they were hardened for: a source keyed ``MAIN.ORDERS``
+    against a contract allowing ``main.orders`` has its phantom column reported
+    in CI and silently ignored in the agent's turn -- no note, and no
+    descriptions either.
     """
     found = source.get_table_schema(schema, table)
     if found is not None:
         return found
-    wanted = f"{schema}.{table}".casefold()
-    for key, table_schema in source.get_table_schemas().items():
-        if key.casefold() == wanted:
-            return table_schema
-    return None
+    return index.get(f"{schema}.{table}".casefold())
 
 
 #: How many stale column names a note will spell out before summarising. A
@@ -473,6 +506,11 @@ def create_tools(
     if semantic_source is None:
         semantic_source = contract.load_semantic_source()
 
+    # Built once, not per describe_table: see `_folded_table_index`.
+    folded_tables: dict[str, Any] = (
+        _folded_table_index(semantic_source) if semantic_source is not None else {}
+    )
+
     # Resolve wildcard tables if adapter is available
     if contract.has_wildcard_tables():
         if adapter is not None:
@@ -646,7 +684,9 @@ def create_tools(
             # not raise AttributeError out of an agent's turn.
             table_desc = getattr(ts, "description", "") or ""
             if semantic_source is not None:
-                sem_ts = _semantic_table(semantic_source, schema_name, table_name)
+                sem_ts = _semantic_table(
+                    semantic_source, folded_tables, schema_name, table_name
+                )
                 if sem_ts is not None:
                     sem_cols = getattr(sem_ts, "columns", None) or []
                     sem_col_names = [

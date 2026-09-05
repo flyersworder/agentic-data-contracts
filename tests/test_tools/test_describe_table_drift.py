@@ -326,3 +326,56 @@ async def test_a_source_keyed_in_another_case_still_reaches_the_table(
     # The overlay reaches it too, not just the reconciliation.
     column = next(c for c in payload["columns"] if c["name"] == "id")
     assert column["description"] == "the key"
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_raises_on_bulk_read_does_not_crash_the_turn(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """Review finding: the case-folded fallback introduced a new crash path.
+
+    `_semantic_table` walks `get_table_schemas()` when the exact lookup misses,
+    which is the *normal* case for an undocumented table. A structurally valid
+    source that parses lazily and fails on the bulk read then crashed an agent's
+    turn where it previously returned the live column list without descriptions.
+    `check_schema_drift` guards this exact shape; the tool half must too.
+    """
+
+    class _Lazy(_StubSource):
+        def get_table_schema(self, schema: str, table: str) -> Any:
+            return None
+
+        def get_table_schemas(self) -> dict[str, Any]:
+            raise RuntimeError("manifest corrupt")
+
+    payload = await _describe(contract, adapter, _Lazy())
+    assert [c["name"] for c in payload["columns"]] == ["id", "amount"]
+    assert "note" not in payload
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_source_keys_serve_no_descriptions_rather_than_a_guess(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """Review finding: the two halves disagreed on a case collision.
+
+    `check_schema_drift` reports it as `unchecked`; the fallback silently served
+    whichever key iteration reached first. Which declaration applies is not
+    knowable, so serving one arbitrarily is worse than serving none — the live
+    column list is still correct, and CI names the collision.
+    """
+
+    class _Colliding(_StubSource):
+        def get_table_schema(self, schema: str, table: str) -> Any:
+            return None
+
+        def get_table_schemas(self) -> dict[str, Any]:
+            return {
+                "ANALYTICS.ORDERS": TableSchema(columns=[Column("id", "", "one")]),
+                "Analytics.Orders": TableSchema(columns=[Column("id", "", "two")]),
+            }
+
+    payload = await _describe(contract, adapter, _Colliding())
+    column = next(c for c in payload["columns"] if c["name"] == "id")
+    assert "description" not in column
+    assert "note" not in payload

@@ -30,6 +30,8 @@ All notable changes to this project will be documented in this file.
 
   Cases the law covers that the first cut did not: a source key lost to a case collision (reachable through `OssieSource`, which drops the database qualifier and warns only on an *exact* collision), a source that parses lazily and raises on read, and an empty allow-list, which used to short-circuit the zero-overlap guard so the same zero comparisons that hard-failed with a populated allow-list came back clean with an empty one.
 
+  **The case-retry reaches the adapters it names.** A catalog that *raises* for a schema it does not know — BigQuery, Snowflake — is how those warehouses answer a wrong-cased name, so re-raising the declared spelling's failure immediately made the retry dead for exactly the adapters that motivated it. Every spelling is tried; the declared one's failure is reported only when none succeeded, which still keeps an existing-but-empty schema (it answers with no rows and no exception) out of the connection-failure channel. An unresolved wildcard is also exempt from the zero-overlap guard, which reads *resolved* names and so fabricated a key-convention mismatch beside the true wildcard finding — a report that names a problem the reader does not have costs more than one that names nothing.
+
   Verified against the artifact the issue came from: the frozen DABStep contract checks clean at 5 tables and 44 columns, and re-injecting the original `column1`/`column2` declarations reproduces exactly two findings — so the pass is a real one, not a check that reached nothing.
 
 ### Fixed

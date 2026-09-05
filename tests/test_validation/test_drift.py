@@ -976,3 +976,131 @@ semantic:
         reason = check_schema_drift(contract, adapter, source).unchecked[0].reason
         assert "outside the contract's allow-list" in reason
         assert "key tables differently" in reason
+
+
+class TestRaisingCatalogCaseRetry:
+    """Review finding: the case-retry was dead for the adapters it names.
+
+    Round 2 asked that a *retry's* exception not be reported, since an
+    existing-but-empty schema answers `[]` and the retry then raises. The fix --
+    re-raise at index 0 -- made the retry unreachable for the adapters whose
+    behaviour motivated it: BigQuery and Snowflake raise for an unknown schema,
+    so a lower-case contract against an upper-case catalog never reached the
+    second spelling at all.
+
+    Both are satisfied by trying every spelling and reporting the declared
+    one's failure only when *none* succeeded. A raise no longer means "give up";
+    it means "not under that name".
+    """
+
+    @staticmethod
+    def _snowflake(adapter: DuckDBAdapter, *, empty: bool = False) -> Any:
+        class _Snowflake:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                if schema != schema.upper():
+                    raise RuntimeError(f"Schema '{schema}' does not exist")
+                if empty:
+                    return []
+                return [t.upper() for t in adapter.list_tables(schema.lower())]
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                return adapter.describe_table(schema.lower(), table.lower())
+
+            def execute(self, sql: str) -> Any:
+                return adapter.execute(sql)
+
+            def explain(self, sql: str) -> Any:
+                return adapter.explain(sql)
+
+        return _Snowflake()
+
+    def test_a_raising_catalog_is_still_retried_in_the_other_case(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        source = _source(
+            [{"schema": "main", "table": "orders", "columns": [{"name": "id"}]}]
+        )
+        report = check_schema_drift(
+            _contract("[orders]"), self._snowflake(adapter), source
+        )
+        assert report.ok, report.summary()
+        assert report.columns_checked == 1
+
+    def test_an_existing_but_empty_schema_is_still_missing_schema(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Round 2's finding must keep holding: reaching the schema and finding
+        it empty is a drift, not a connection failure."""
+        report = check_schema_drift(
+            _contract("[orders]"), self._snowflake(adapter, empty=True)
+        )
+        assert report.unchecked == []
+        assert _kinds(report) == ["missing_schema"]
+
+    def test_a_failure_under_every_spelling_is_still_reported(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        class _Broken:
+            dialect = "duckdb"
+
+            def list_tables(self, schema: str) -> list[str]:
+                raise RuntimeError("connection refused")
+
+            def describe_table(self, schema: str, table: str) -> TableSchema:
+                raise AssertionError("should not be reached")
+
+            def execute(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+            def explain(self, sql: str) -> Any:
+                raise AssertionError("should not be reached")
+
+        report = check_schema_drift(
+            _contract("[orders]"),
+            _Broken(),  # type: ignore[arg-type]
+        )
+        assert not report.has_drift
+        assert "connection refused" in report.unchecked[0].reason
+
+
+class TestWildcardAndKeyGuard:
+    def test_an_unresolved_wildcard_does_not_fake_a_key_mismatch(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: the zero-overlap guard reads *resolved* table names,
+        so an unresolved `*` contributes nothing and every declaration reads as
+        outside the allow-list — a key-convention mismatch that does not exist.
+
+        The wildcard already makes `ok` False and says why; a second, wrong
+        explanation beside it sends the reader after the wrong problem.
+        """
+        source = _source(
+            [{"schema": "main", "table": "orders", "columns": [{"name": "id"}]}]
+        )
+        report = check_schema_drift(_contract('["*"]'), adapter, source)
+        assert not report.ok
+        assert [u.reason for u in report.unchecked] == [
+            UncheckedTable.UNRESOLVED_WILDCARD
+        ]
+
+
+class TestVerdictAccounting:
+    def test_a_table_found_absent_still_counts_as_checked(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """Review finding: `Checked 0 tables (0 columns): 1 drifted` read like a
+        run that checked nothing, which is the one thing the counter exists to
+        rule out. Existence *was* verified — the verdict was "absent"."""
+        report = check_schema_drift(_contract("[ghosts]"), adapter)
+        assert _kinds(report) == ["missing_table"]
+        assert report.tables_checked == 1
+
+    def test_every_declared_table_is_either_counted_or_unchecked(
+        self, adapter: DuckDBAdapter
+    ) -> None:
+        """The conservation law for tables, next to the one for columns: a
+        declared table either got a verdict or is named as unreachable."""
+        report = check_schema_drift(_contract("[orders, customers, ghosts]"), adapter)
+        assert report.tables_checked + len(report.unchecked) == 3

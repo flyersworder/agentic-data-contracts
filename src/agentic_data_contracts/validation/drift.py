@@ -141,11 +141,12 @@ class UncheckedTable:
 class SchemaDriftReport:
     drifts: list[SchemaDrift] = field(default_factory=list)
     unchecked: list[UncheckedTable] = field(default_factory=list)
-    #: Tables whose existence was verified. Not the same as tables whose
-    #: columns were compared -- a contract may allow tables the semantic source
-    #: does not describe, which is the normal case; `columns_checked` carries
-    #: that half. Both are reported so a run that checked nothing cannot be
-    #: mistaken for a run that found nothing.
+    #: Declared tables that reached a verdict -- present or absent. Not the same
+    #: as tables whose columns were compared: a contract may allow tables the
+    #: semantic source does not describe, which is the normal case, and
+    #: `columns_checked` carries that half. Every declared table is either
+    #: counted here or named in `unchecked`, so a run that checked nothing
+    #: cannot be mistaken for a run that found nothing.
     tables_checked: int = 0
     columns_checked: int = 0
 
@@ -258,24 +259,30 @@ def _live_tables(
         for alt in (schema_name.upper(), schema_name.lower())
         if alt not in candidates
     ]
+    # A raise means "not under that name", not "give up". BigQuery- and
+    # Snowflake-style adapters raise for an absent dataset rather than returning
+    # `[]`, so re-raising the declared spelling's failure immediately made this
+    # retry dead for exactly the adapters that motivated it. Every spelling is
+    # tried; the declared one's failure is reported only when *none* succeeded,
+    # which still keeps an existing-but-empty schema (it answers `[]` without
+    # raising) out of the connection-failure channel.
+    first_error: Exception | None = None
+    reached = False
     for index, candidate in enumerate(candidates):
         try:
             names = adapter.list_tables(candidate)
-        except Exception:
-            # Only the spelling the contract actually declares can report a
-            # real failure. BigQuery- and Snowflake-style adapters raise for an
-            # absent dataset rather than returning `[]`, so letting a retry's
-            # exception through would turn an existing-but-empty schema into
-            # "connection failed" and send the reader after a problem that is
-            # not there.
+        except Exception as exc:  # noqa: BLE001 - tried under another spelling
             if index == 0:
-                raise
+                first_error = exc
             continue
+        reached = True
         if names:
             folded: dict[str, str] = {}
             for name in names:
                 folded.setdefault(name.casefold(), name)
             return candidate, folded
+    if not reached and first_error is not None:
+        raise first_error
     return schema_name, {}
 
 
@@ -382,6 +389,11 @@ def check_schema_drift(
             drifts.append(
                 SchemaDrift(kind="missing_schema", schema=schema_name, table="")
             )
+            # Every table in the schema got its verdict at once, so they are
+            # checked, not unreachable. Otherwise the report reads "Checked 0
+            # tables: 1 drifted", which is the one thing this counter exists to
+            # rule out.
+            tables_checked += len(tables)
             continue
         for table in tables:
             # Matched loosely, and a case difference is *not* reported. Unlike a
@@ -398,6 +410,7 @@ def check_schema_drift(
                 drifts.append(
                     SchemaDrift(kind="missing_table", schema=schema_name, table=table)
                 )
+                tables_checked += 1
                 continue
             names = declared_columns.get(f"{schema_name}.{table}".casefold())
             if not names:
@@ -448,7 +461,12 @@ def check_schema_drift(
             columns_checked += len(names)
             drifts += _column_drifts(schema_name, table, names, live_names)
 
-    unchecked += _key_convention_mismatch(by_schema, declared_columns, declared_keys)
+    unchecked += _key_convention_mismatch(
+        by_schema,
+        declared_columns,
+        declared_keys,
+        has_wildcard=contract.has_wildcard_tables(),
+    )
 
     # Sorted so CI diffs a stable report: dict and set iteration would let an
     # unchanged contract produce a changed file.
@@ -466,6 +484,7 @@ def _key_convention_mismatch(
     by_schema: dict[str, list[str]],
     declared_columns: dict[str, list[str]],
     declared_keys: list[str],
+    has_wildcard: bool,
 ) -> list[UncheckedTable]:
     """Flag a semantic source whose table keys overlap the allow-list not at all.
 
@@ -478,6 +497,12 @@ def _key_convention_mismatch(
     """
     if not declared_columns:
         return []  # Nothing declared is nothing to mismatch.
+    if has_wildcard:
+        # An unresolved `*` contributes no resolved names, so every declaration
+        # would read as outside the allow-list -- a key mismatch that does not
+        # exist. The wildcard already makes `ok` False and says why; a second,
+        # wrong explanation beside it sends the reader after the wrong problem.
+        return []
     # `declared_columns` is already casefolded; fold this side to match, or the
     # guard and the per-table lookup disagree about what "the same table" means.
     allowed = {

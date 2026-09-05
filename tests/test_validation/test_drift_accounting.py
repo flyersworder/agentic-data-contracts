@@ -30,34 +30,44 @@ is precisely the defect this module was written to eliminate, reappearing one
 level up in the thing that reports it.
 
 **Verified by mutation, not asserted.** A green gate proves nothing until you
-have watched it go red. Every fix from all three review rounds was reverted in
+have watched it go red. Every fix from all four review rounds was reverted in
 turn and this file re-run:
 
 ===================================  ===========================
 reverted fix                         variants failing
 ===================================  ===========================
-contract's own source loaded         96
-casefolded declaration lookup        60
-table name matched case-folded       48
-schema case-retry                    40
-colliding source keys recorded       1
-source read wrapped                  2
+casefolded declaration lookup        160
+contract's own source loaded         160
+table name matched case-folded       80
+schema case-retry reached            40
+source read wrapped                  4
 empty allow-list not short-circuit   2
+colliding source keys recorded       1
+wildcard exempt from key guard       1
+absent table counted as checked      1
 empty-live-columns guard             1
 ===================================  ===========================
 
-Two of those rows exist only because the exercise was run. With the matrix
-passing an explicit source every time, reverting the contract-source fallback
-left **all 100 variants green**; that is why `_PROVENANCE` exists. With only
-spelling axes, all three of round 3's findings scored **0** -- caught by
-targeted tests, which is how the previous rounds' defects were caught too, and
-is precisely the coverage that did not converge. That is why `_SHAPES` and
-`_CONTRACT_SHAPES` exist.
+Every axis in this file exists because that exercise scored **0** for something:
+
+- `_PROVENANCE` -- with a source passed explicitly every time, reverting the
+  contract-source fallback left all 100 variants green.
+- `_SHAPES` and `_CONTRACT_SHAPES` -- with only spelling axes, all three of
+  round 3's findings scored 0.
+- the raising catalogs in `_CATALOGS`, and the `absent_table` contract shape --
+  round 4's, likewise.
+
+Two laws are stated here, not one, and the second exists because the first
+cannot see the second class of defect. *Never report clean while having
+compared nothing* catches a silent pass; it says nothing about a report that
+invents a problem. The dead case-retry produced an honest-looking `unchecked`
+entry for a wholly correct contract, satisfied the first law, and was caught
+only once the second law -- *a correct contract against a reachable warehouse
+comes back `ok`* -- stopped allowing `unchecked` as an outcome there.
 
 Scope: this file gates `check_schema_drift`. The `describe_table` note is the
 other half of the same fix and is held by `tests/test_tools/
-test_describe_table_drift.py` -- including the case-folded table lookup the two
-halves must agree on, which they did not until round 3 found it.
+test_describe_table_drift.py`.
 """
 
 from __future__ import annotations
@@ -70,7 +80,7 @@ import pytest
 from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.validation.drift import check_schema_drift
+from agentic_data_contracts.validation.drift import UncheckedTable, check_schema_drift
 
 #: One real column and one phantom, so a variant that compares nothing and one
 #: that compares everything give visibly different reports.
@@ -168,12 +178,21 @@ class _Catalog:
 
     dialect = "duckdb"
 
-    def __init__(self, inner: DuckDBAdapter, spelling: str) -> None:
+    def __init__(
+        self, inner: DuckDBAdapter, spelling: str, *, raises: bool = False
+    ) -> None:
         self._inner = inner
         self._case = _SPELLINGS[spelling]
+        self._raises = raises
 
     def list_tables(self, schema: str) -> list[str]:
         if schema != self._case(schema):
+            # BigQuery and Snowflake raise for an unknown dataset rather than
+            # answering `[]`. Round 4 found the case-retry dead for exactly
+            # those adapters, and this double could not see it because it only
+            # ever returned `[]`.
+            if self._raises:
+                raise RuntimeError(f"Schema '{schema}' does not exist")
             return []
         return [self._case(t) for t in self._inner.list_tables(schema.lower())]
 
@@ -208,7 +227,15 @@ def duckdb() -> DuckDBAdapter:
 #: `missing_schema` is the correct answer there, not a false negative. Guessing
 #: spellings can never be complete, so the code guesses only the two foldings
 #: that exist and this axis says so.
-_CATALOG_SPELLINGS = ["asis", "upper", "lower"]
+#: Paired with whether the catalog *raises* for a name it does not know, which
+#: is the other half of how a warehouse can answer.
+_CATALOGS: dict[str, tuple[str, bool]] = {
+    "asis": ("asis", False),
+    "upper": ("upper", False),
+    "lower": ("lower", False),
+    "upper_raises": ("upper", True),
+    "lower_raises": ("lower", True),
+}
 
 #: Where the declarations come from. `create_tools` loads the contract's own
 #: source when the caller passes none, and this check must agree -- round 1's
@@ -217,9 +244,7 @@ _CATALOG_SPELLINGS = ["asis", "upper", "lower"]
 #: leaves every variant of the three-axis matrix passing.
 _PROVENANCE = ["argument", "contract"]
 
-_VARIANTS = list(
-    itertools.product(_SPELLINGS, _SPELLINGS, _CATALOG_SPELLINGS, _PROVENANCE)
-)
+_VARIANTS = list(itertools.product(_SPELLINGS, _SPELLINGS, _CATALOGS, _PROVENANCE))
 
 
 def _check(
@@ -240,17 +265,21 @@ def _check(
         inline,
     )
     source = None if provenance == "contract" else _Source(f"{schema}.{table}", columns)
-    return check_schema_drift(contract, _Catalog(duckdb, catalog_case), source)
+    spelling, raises = _CATALOGS[catalog_case]
+    return check_schema_drift(
+        contract, _Catalog(duckdb, spelling, raises=raises), source
+    )
 
 
 def test_the_matrix_is_large_enough_to_be_a_real_gate() -> None:
     """Guards the generator: an empty variant list would pass vacuously."""
-    assert len(_VARIANTS) == (
-        len(_SPELLINGS) ** 2 * len(_CATALOG_SPELLINGS) * len(_PROVENANCE)
-    )
+    assert len(_VARIANTS) == (len(_SPELLINGS) ** 2 * len(_CATALOGS) * len(_PROVENANCE))
     assert len(_VARIANTS) > 50
     # Both provenances must actually appear, or the axis is decorative.
     assert {v[3] for v in _VARIANTS} == set(_PROVENANCE)
+    # A catalog that raises must be exercised, or the case-retry is untested
+    # against the adapters whose behaviour motivated it.
+    assert any(_CATALOGS[v[2]][1] for v in _VARIANTS)
 
 
 @pytest.mark.parametrize(
@@ -284,6 +313,11 @@ def test_a_clean_report_compared_every_declaration(
     if report.columns_checked == 0:
         # Nothing compared is allowed only when the report says why.
         assert report.drifts or report.unchecked, report.summary()
+    # The same law for tables: the one declared table either reached a verdict
+    # or is named as unreachable. "Checked 0 tables: 1 drifted" reads like a run
+    # that checked nothing, which is the one thing these counters rule out.
+    per_table_unchecked = [u for u in report.unchecked if u.schema]
+    assert report.tables_checked + len(per_table_unchecked) == 1, report.summary()
 
 
 @pytest.mark.parametrize(
@@ -313,12 +347,13 @@ def test_a_declaration_is_never_dropped_in_silence(
         provenance,
         ["id", "amount"],  # both real
     )
-    assert not report.has_drift, report.summary()
-    if report.unchecked:
-        # Not found is a permitted outcome; a wrong verdict is not.
-        assert report.columns_checked == 0, report.summary()
-    else:
-        assert report.ok and report.columns_checked == _DECLARED, report.summary()
+    # Every catalog in this matrix answers under *some* spelling, and every
+    # declared column exists, so there is no honest way for this to be anything
+    # but clean. Allowing an `unchecked` escape here is what let the dead
+    # case-retry through: a wrong diagnosis is not a silent pass, so the
+    # conservation law above cannot see it -- only this one can.
+    assert report.ok, report.summary()
+    assert report.columns_checked == _DECLARED, report.summary()
 
 
 class _Colliding(_Source):
@@ -385,10 +420,64 @@ semantic:
 
 #: How the *contract* may be shaped. Only a contract that names tables can
 #: produce a clean report against a source that describes them.
+def _wildcard() -> DataContract:
+    """A contract whose tables are an unresolved `*`.
+
+    Its own axis because the zero-overlap guard reads *resolved* names: a
+    wildcard contributes none, so every declaration read as outside the
+    allow-list and the report grew a fabricated key-convention mismatch beside
+    the true wildcard finding.
+    """
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: wildcard
+semantic:
+  allowed_tables:
+    - schema: main
+      tables: ["*"]
+"""
+    )
+
+
 _CONTRACT_SHAPES: dict[str, tuple[Any, bool]] = {
     "normal": (lambda: _contract("main", "orders"), True),
     "empty_allow_list": (_empty_allow_list, False),
+    "wildcard": (_wildcard, False),
+    # A table that is simply not there. Its own axis because nothing else in
+    # this file produces a `missing_table`, so the verdict counter went
+    # untested on the one path where it reads most wrongly.
+    "absent_table": (lambda: _contract("main", "ghosts"), False),
 }
+
+
+def test_a_table_found_absent_is_counted_as_checked(duckdb: DuckDBAdapter) -> None:
+    """`Checked 0 tables (0 columns): 1 drifted` reads like a run that checked
+    nothing, which is the single thing these counters exist to rule out. The
+    verdict was "absent", and reaching it is a check."""
+    report = check_schema_drift(
+        _contract("main", "ghosts"),
+        _Catalog(duckdb, "asis"),
+        _Source("main.ghosts", ["id"]),
+    )
+    assert [d.kind for d in report.drifts] == ["missing_table"]
+    assert report.tables_checked == 1
+    assert "Checked 1 table" in report.summary()
+
+
+def test_a_wildcard_does_not_also_fabricate_a_key_mismatch(
+    duckdb: DuckDBAdapter,
+) -> None:
+    """Not `ok` is right; two reasons, one of them invented, is not.
+
+    A report that names a problem the reader does not have costs more than one
+    that names nothing -- they will go looking for it.
+    """
+    report = check_schema_drift(
+        _wildcard(), _Catalog(duckdb, "asis"), _Source("main.orders", ["id"])
+    )
+    assert not report.ok
+    assert [u.reason for u in report.unchecked] == [UncheckedTable.UNRESOLVED_WILDCARD]
 
 
 @pytest.mark.parametrize("contract_shape", list(_CONTRACT_SHAPES), ids=lambda s: s)

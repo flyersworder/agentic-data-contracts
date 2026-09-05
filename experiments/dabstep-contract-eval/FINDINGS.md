@@ -878,6 +878,76 @@ the original rejections having been false and the arm no longer tripping over
 defect's direction is therefore confirmed; its magnitude remains unseparable
 from the model change, which is why run A has not been re-run under the fix.
 
+## Did the agent report what its own query returned?
+
+Every accuracy above is answer-level, and so is every diagnostic built on it:
+the [counterfactual lesions](#counterfactual-macros-the-contract-kills-the-named-errors-and-the-rest-are-idiosyncratic)
+match a wrong ANSWER against a lesioned macro's numbers, and
+`analysis/clauses.py` reads the SQL but only for clause presence. That leaves
+one failure mode unmeasured and silently assumed to be zero: **the query was
+right and the answer was mis-read off it.** It matters because the
+counterfactual table leaves 417 of 444 wrong answers undiagnosed, read there as
+idiosyncratic derivation — an inference from a lesion catalogue finding no
+match, not a measurement.
+
+`analysis/replay.py` measures it. For each row it re-executes the last few
+statements the agent submitted against the frozen database and asks whether
+the reported answer is among the values they returned, scoring with the
+vendored official scorer. Contract arm, groups of correct and incorrect rows
+separately:
+
+| model | correct (control) | wrong | gap |
+|---|---:|---:|---:|
+| deepseek-v4-flash | 89% | 55% | +33 |
+| glm-5.3-flash | 85% | 85% | +1 |
+| gpt-5.6-sol | 96% | 93% | +3 |
+| Claude Sonnet 5 | 86% | 66% | +19 |
+
+**On 55–93% of wrong answers the reported value is one the agent's own query
+produced.** The SQL ran, returned a number, the agent reported that number,
+and it was wrong. That is a derivation error, and it confirms the
+idiosyncratic-failure reading rather than overturning it.
+
+Correct rows are the control and not an aside: an answer is usually a
+*projection* of a result rather than the whole of it, so a non-replay is
+normally ordinary composition. What that looks like, from the Sonnet 5
+contract arm:
+
+| query returned | reported | what the agent did |
+|---|---|---|
+| `Belles_cookbook_store, R, Crossfit_Hanna, F, …` | `Belles_cookbook_store, Crossfit_Hanna, …` | projected one column |
+| `Ecommerce, 0.10022412074991348, POS, ` | `Yes` | judged a threshold |
+| `17874.160000000003, 161` | `42.88198400000000` | arithmetic on two intermediates |
+| `138236, 138236` | `No` | compared two values |
+
+All four are correct answers. This is why the control sits at 85–96% rather
+than 100%, and why only the gap against it carries information.
+
+### The residual is answer construction, not transcription
+
+Among *wrong* rows that fail to replay, the transcripts show three mechanisms
+— none of them a mis-copied number:
+
+| task | query returned | reported | gold | mechanism |
+|---|---|---|---|---|
+| 1452 | `['C', 'B'], 0.05, 14, 0.19` | `['B']` | `['C']` | wrong element of a correct multi-value result |
+| 1435 | `3000, 0.238…, 3001, 0.238…, 3002, …` | `3000, 3001, 3002, 7011, …` | `5813` | projected the key column instead of filtering it |
+| 1502 | `183, SwiftCharge, [], …, ['E'], ` | `This is the fee rule that depends solely on account_type = …` | a list of 40+ IDs | abandoned the answer format and narrated |
+| 2566 | `Rafa_AI, D, 7` | `Only merchant matching the other criteria of Fee 17 with ca…` | (empty) | narrated instead of answering |
+
+So the unmeasured failure mode is bounded and largely absent: agents are not
+mis-copying numbers. What the residual contains instead is **answer
+construction** — selecting the wrong element, projecting the wrong column, or
+abandoning the required format for prose. That is a third category alongside
+derivation error and misreporting, and it is invisible to both the lesion
+method (which needs a number to match) and to accuracy alone.
+
+Two limits. Membership is a loose test — a short value like `0` can match a
+cell by chance, which is why `manual_prompt` and `schema_only` on sol show
+*negative* gaps that no mechanism explains. And only the four ablation runs
+have transcripts: the submission runs stored none, so none of this reaches the
+grader disagreements below.
+
 ## Where the contract arm loses — 33 tasks (run A)
 
 14 losses to schema_only, 29 to manual_prompt, 10 to both. Two modes:
@@ -1614,28 +1684,60 @@ One incidental correction: task 1480, named below as the one task observed
 flipping between identical runs during development, is `incorrect` in both
 runs here. It is an example of the phenomenon, not a uniquely unstable task.
 
-## The leaderboard submission: an external check on the reconstructed golds
+## The leaderboard submissions: the headline contrast, graded externally
 
-`results/glm-all450.jsonl` was submitted to the DABStep leaderboard on
-**2026-09-04** as `agentic-data-contracts` (organisation `flyersworder`,
-model family `GLM-5.3-Flash`), landing as
-`data/submissions/v1__flyersworder-agentic-data-contracts__04-09-2026.jsonl`
-in the `adyen/DABstep` dataset. Adyen's scorer graded all 450 answers against
-the **official** golds and returned per-task scores. That is the first
-external grading of answers this document otherwise grades with golds it
-reconstructed itself.
+**Two arms were submitted, and the headline contrast is no longer graded by
+this document at all.** Both ran on `z-ai/glm-5.3-flash` at commit
+`46dde879`, same pinned `z-ai` fp8 endpoint, same harness, over the same 450
+tasks — one variable between them:
 
-| split | n | correct | accuracy |
-|---|---:|---:|---:|
-| hard | 378 | 196 | **51.9%** |
-| easy | 72 | 51 | **70.8%** |
-| all | 450 | 247 | **54.9%** |
+| submitted | agent name | date |
+|---|---|---|
+| `results/glm-all450.jsonl` (`contract`) | `agentic-data-contracts` | 2026-09-04 |
+| `results/glm-manual-all450.jsonl` + `-dbfix` (`manual_prompt`) | `agentic-data-contracts-manual-baseline` | 2026-09-05 |
 
-Adyen's per-task verdicts are committed verbatim at
-`results/glm-all450-official-scores.jsonl` (450 rows, re-downloadable from
-`adyen/DABstep` at `data/task_scores/`), so every figure below is
-recomputable from this repository. The exposure and correction tables come
-from `analysis/leniency.py`, which fixes the exact-match definition they
+Adyen's scorer graded all 450 answers of each against the **official**,
+withheld golds:
+
+| split | n | `contract` | `manual_prompt` | gap |
+|---|---:|---:|---:|---:|
+| **hard** | 378 | **51.9%** (196) | **18.8%** (71) | **+33.1 pp** |
+| easy | 72 | 70.8% (51) | 75.0% (54) | −4.2 pp |
+| all | 450 | 54.9% (247) | 27.8% (125) | +27.1 pp |
+
+**Paired McNemar on the hard split: 137 tasks the contract arm alone answered
+correctly against 12 for `manual_prompt`, exact two-sided p = 4.9e-28.** Same
+tasks, same model, same grader — the one contrast this experiment most needed
+to be free of its own golds now is.
+
+Three things that follow, before the reconstructed-gold analysis below.
+
+**The easy split goes the other way, officially.** −4.2 pp is the same
+direction this document reports throughout — the effect lives entirely in the
+hard tasks — but now with Adyen's grading on both halves rather than ours.
+
+**`manual_prompt` lands inside the published baseline band.** 18.8% official
+sits among the named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4
+22.2%, HF Claude 4 Sonnet 19.8%), which is the control-is-verified check made
+externally rather than by our own scorer. It is *below* our self-graded 22.9%,
+in the direction the leniency analysis predicts.
+
+**The `manual_prompt` file carries a harness correction.** Three hard tasks
+(2536, 2529, 2533) ran against a corrupted working copy of the database and
+are re-run at `--workers 1` into `results/glm-manual-all450-dbfix.jsonl`,
+merged at submission time by `dce.submit`'s later-file-wins rule. The
+selection criterion is the harness's own `db_corrupted` flag, set independently
+of the answer, so it does not touch model performance — and it changed no
+verdict: all three were wrong before and after, two reproducing the identical
+wrong answer. The contract submission has no corrupted rows; see
+[Operational findings](#operational-findings).
+
+Adyen's per-task verdicts for both arms are committed verbatim at
+`results/glm-all450-official-scores.jsonl` and
+`results/glm-manual-all450-official-scores.jsonl` (450 rows each,
+re-downloadable from `adyen/DABstep` at `data/task_scores/`), so every figure
+below is recomputable from this repository. The exposure and correction tables
+come from `analysis/leniency.py`, which fixes the exact-match definition they
 depend on.
 
 Two things it settles, and one it does not.
@@ -1779,33 +1881,32 @@ contract arm 5.0 points and `schema_only` 3.0. What can be said is that the
 effect on every contrast is under 3 pp in either direction, and no conclusion
 in this document turns on 3 pp.
 
-Three caveats on that correction. It assumes a conversion rate measured on
-one arm and one model transfers to the others, which is exactly the kind of
-assumption the submission existed to remove. The flag is an upper bound, so
-the true corrections are smaller than the table's. And it is **not** an
-independent check on the leaderboard result: the corrected run-A contract
-figure (50.1%) is produced by a rate measured on the very submission that
-returned 51.9%, so the two are not arrived at independently — and they are
-computed on different task sets besides (332 against 378; the official figure
-restricted to the shared 332 is 52.4%). It is a sensitivity analysis, not a
-measurement.
+### The transfer assumption was tested, and it held
+
+The correction's load-bearing weakness was that it applies a conversion rate
+measured on ONE arm to the others. The second submission tests exactly that.
+Calibrate on the contract arm as before, then apply the resulting 0.576 blind
+to `manual_prompt` and compare against what Adyen actually returned:
+
+| arm | hard n | flags | predicted bias | measured bias | error |
+|---|---:|---:|---:|---:|---:|
+| `contract` | 332 | 33 | 5.7 pp | 5.7 pp | +0.0 |
+| **`manual_prompt`** | 332 | 18 | **3.1 pp** | **3.0 pp** | **+0.1** |
+
+The contract row is circular — it is the calibration. **The `manual_prompt`
+row is not**, and the proxy predicted its bias to 0.1 pp on an arm it had
+never seen. So the estimator is no longer a sensitivity analysis standing in
+for a measurement; on the one cross-arm transfer available it is a validated
+one, and it remains the only instrument bounding the **14 of 16 arm x model
+cells that will never be submitted**.
+
+Two limits survive. The flag is an upper bound, so true corrections are at or
+below the table's. And this tests transfer across *arms* on one model —
+transfer across *models* is untested, which is where the estimator does most
+of its work (runs B, C and D).
 
 The contrasts stay paired and same-task and their directions are not in
-doubt; their magnitudes now carry this alongside the flip rate above.
-
-**What it does not settle is the comparison itself.** 51.9% official hard,
-from a flash-tier model, sits against a published band of ~20–26% for the
-named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4 22.2%, HF Claude
-4 Sonnet 19.8%) and against this experiment's own `manual_prompt`
-reimplementation at 22.9% on the same model. But only the contract arm was
-submitted: 51.9% is Adyen-graded and 22.9% is self-graded, so the two sides
-of that gap are not measured the same way. `manual_prompt` is the more
-exposed arm than `contract` on all four models, so correcting both sides
-widens that particular gap on runs B and D and narrows it on A and C — but
-that is an inference from a proxy, not a second official grading. **Submitting a
-second arm is the experiment that would close this**, and it has not been
-run: `docs/paper-plan.md` commits to one arm only, on the grounds that
-submitting several under different names reads as leaderboard-stuffing.
+doubt; their magnitudes carry this alongside the flip rate above.
 
 ## What these runs do not show
 
@@ -1920,6 +2021,7 @@ uv run python analysis/counterfactuals.py results/glm-full.jsonl
 uv run python analysis/gold_disagreement.py                # the 19, and why
 uv run python analysis/leniency.py results/*-full.jsonl    # per-arm exposure
 uv run python analysis/group_consistency.py               # the gold-free check
+uv run python analysis/replay.py                          # answer vs its own query
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

@@ -193,6 +193,17 @@ the rest are writing.
    the headline, but small. Written up in `FINDINGS.md` and in the paper
    (§protocol *External validation*, §threats *Reconstructed golds are
    lenient*).
+4a. **A SECOND arm was submitted (2026-09-05), and it changes §protocol.**
+   `manual_prompt` on the same model, commit and provider went up as
+   `agentic-data-contracts-manual-baseline`. Adyen-graded both sides:
+   **51.9% vs 18.8% hard, +33.1 pp, paired McNemar p = 4.9e-28** on 378 tasks.
+   The headline contrast no longer needs our golds at all — drop the hedging
+   that 51.9% and 22.9% "are not measured the same way", and drop the
+   stuffing objection with it: validation closed 2026-07-22, so a second
+   entry cannot be a ranking claim, and it is labelled a baseline control.
+   Bonus: applying the leniency proxy blind to the new arm predicted its bias
+   at 3.1 pp against a measured 3.0 pp, so the transfer assumption is tested
+   and holds — keep the estimator, it still bounds the 14 unsubmitted cells.
 4b. **Related work closes on publishability, not on accuracy.** All four
    comparable artifacts are unpublished, for two reasons: MotherDuck's,
    NVIDIA's and OceanBase's are fused to the test set, Xiaomi's to its own

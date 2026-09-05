@@ -59,8 +59,7 @@ what we saw. All 3 rows were wrong before and after re-running, and 2 of 3
 reproduced the identical wrong answer, so the flag did not track a changed
 outcome. Re-running them is cheap insurance against a provenance objection,
 not a correction of a measurement (see [The leaderboard
-submissions](#the-leaderboard-submissions-the-headline-contrast-graded-externally)
-in `FINDINGS.md`).
+submissions](../FINDINGS.md#the-leaderboard-submissions-the-headline-contrast-graded-externally)).
 
 Check for it after any resumed sweep:
 

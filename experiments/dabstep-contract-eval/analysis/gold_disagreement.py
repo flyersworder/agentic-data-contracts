@@ -41,8 +41,8 @@ Two families make the same point from the data rather than from the code:
 Run:  uv run python analysis/gold_disagreement.py
 
 Reads `results/glm-all450.jsonl` and `results/glm-all450-official-scores.jsonl`
-and re-downloads the task guidelines through `dce.data.load_tasks` (pinned
-revision). No API calls, no writes.
+and the committed `data/tasks.json` for the guidelines. No API calls, no
+writes, no network.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dce.data import load_tasks  # noqa: E402
+from dce.runner import latest_rows  # noqa: E402
 from vendor.dabstep_scorer import question_scorer  # noqa: E402
 
 LOCAL = ROOT / "results" / "glm-all450.jsonl"
@@ -67,11 +67,27 @@ ACI_GUIDELINE = "card_scheme}:{fee"
 
 
 def _rows(path: Path) -> dict[str, dict]:
+    """Sweep results, deduplicated. `latest_rows` is mandatory for anything
+    that counts verdicts (see its docstring): a resumed sweep leaves stale
+    rows for a retried unit, and a raw line-by-line parse counts them all."""
+    return {str(r["task_id"]): r for r in latest_rows(path)}
+
+
+def _scores(path: Path) -> dict[str, dict]:
+    """Adyen's per-task verdicts — one row per task, not a sweep file."""
     with open(path) as fh:
         return {
             str(r["task_id"]): r
             for r in (json.loads(line) for line in fh if line.strip())
         }
+
+
+def _tasks() -> dict[str, dict]:
+    """The committed task file, so this runs offline like the rest of
+    `analysis/` — `dce.data.load_tasks` would hit the HF Hub."""
+    raw = json.loads((ROOT / "data" / "tasks.json").read_text())
+    raw = raw if isinstance(raw, list) else raw.get("tasks", raw)
+    return {str(t["task_id"]): t for t in raw}
 
 
 def _answer_shape(answer: str) -> str:
@@ -84,8 +100,8 @@ def _answer_shape(answer: str) -> str:
 
 def main() -> None:
     local = _rows(LOCAL)
-    official = _rows(OFFICIAL)
-    tasks = {str(t["task_id"]): t for t in load_tasks("default")}
+    official = _scores(OFFICIAL)
+    tasks = _tasks()
 
     # `ungraded` rows are the 49 tasks the plurality-consensus filter dropped:
     # Adyen scored them, this document could not, so they are not a comparison.

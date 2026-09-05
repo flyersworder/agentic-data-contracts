@@ -118,9 +118,12 @@ inference model driving a helper library distilled offline by a heavyweight
 one, built by \emph{``validating them against ground truth answers''} and by
 testing candidate functions \emph{``against the ground truth of multiple
 interconnected tasks''}, with pitfalls extracted \emph{``from the test
-data''} and injected into the inference prompt~\cite{nvidia-kgmon}. The second,
-at 87.57\%, promotes competing logic branches by benchmarking them against
-golden answers~\cite{oceanbase-datapilot}. Nothing in the benchmark forbids
+data''} and injected into the inference prompt~\cite{nvidia-kgmon}. The second, at 87.57\%, is
+titled \emph{Beyond Fine-tuning: Solving DABstep's Hard Mode with Versioned
+Assets} and is reported to promote competing logic branches by benchmarking
+them against golden answers~\cite{oceanbase-datapilot}; we could not retrieve
+that post in full, so we source the mechanism second-hand and the scores ---
+which the first system's own results table corroborates --- directly. Nothing in the benchmark forbids
 this --- the dev split is labelled --- but it means those numbers answer a
 different question from ours: how much of a labelled, enumerable question space
 can be compiled away in advance. Our contract was authored from the vendor

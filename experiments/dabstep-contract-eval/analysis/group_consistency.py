@@ -151,14 +151,7 @@ def against_official(shapes: dict[str, str]) -> None:
     check that spots errors without golds ought to spot the errors the golds
     themselves got wrong.
     """
-    local = {
-        str(r["task_id"]): r
-        for r in (
-            json.loads(line)
-            for line in (ROOT / "results" / "glm-all450.jsonl").read_text().splitlines()
-            if line.strip()
-        )
-    }
+    local = {str(r["task_id"]): r for r in load(ROOT / "results" / "glm-all450.jsonl")}
     official = {
         str(r["task_id"]): r
         for r in (
@@ -169,6 +162,9 @@ def against_official(shapes: dict[str, str]) -> None:
             if line.strip()
         )
     }
+    # Degrade rather than KeyError if the two files ever stop covering the
+    # same task set.
+    local = {t: r for t, r in local.items() if t in official}
 
     # Graded rows only. The 49 `ungraded` tasks have no reconstructed gold, so
     # they can never count as an error under that grader while still padding

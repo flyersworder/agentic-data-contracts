@@ -899,9 +899,9 @@ separately:
 | model | correct (control) | wrong | gap |
 |---|---:|---:|---:|
 | deepseek-v4-flash | 89% | 55% | +33 |
-| glm-5.3-flash | 85% | 85% | +1 |
+| glm-5.3-flash | 85% | 85% | −0 |
 | gpt-5.6-sol | 96% | 93% | +3 |
-| Claude Sonnet 5 | 86% | 66% | +19 |
+| Claude Sonnet 5 | 86% | 65% | +20 |
 
 **On 55–93% of wrong answers the reported value is one the agent's own query
 produced.** The SQL ran, returned a number, the agent reported that number,
@@ -943,8 +943,12 @@ derivation error and misreporting, and it is invisible to both the lesion
 method (which needs a number to match) and to accuracy alone.
 
 Two limits. Membership is a loose test — a short value like `0` can match a
-cell by chance, which is why `manual_prompt` and `schema_only` on sol show
-*negative* gaps that no mechanism explains. And only the four ablation runs
+cell by chance — and the number of chances is **not independent of the
+verdict**: wrong rows tend to run wider queries, so their candidate pool is
+larger than the control's. Results are truncated to the harness's own
+`MAX_ROWS`, which is all the agent ever saw and caps the worst of it, but the
+asymmetry is not eliminated. That is the most likely explanation for the
+*negative* gaps on sol, which no mechanism accounts for. And only the four ablation runs
 have transcripts: the submission runs stored none, so none of this reaches the
 grader disagreements below.
 
@@ -1730,11 +1734,12 @@ Three things that follow, before the reconstructed-gold analysis below.
 direction this document reports throughout — the effect lives entirely in the
 hard tasks — but now with Adyen's grading on both halves rather than ours.
 
-**`manual_prompt` lands inside the published baseline band.** 18.8% official
-sits among the named manual-in-prompt baselines (Google 26%, Adyen GPT-5.4
-22.2%, HF Claude 4 Sonnet 19.8%), which is the control-is-verified check made
-externally rather than by our own scorer. It is *below* our self-graded 22.9%,
-in the direction the leniency analysis predicts.
+**`manual_prompt` lands just below the published baseline band.** 18.8%
+official sits under the ~20–26% band this document uses elsewhere, closest to
+its lowest named entrant (HF Claude 4 Sonnet, 19.8%) — and, unlike our own
+22.9%, graded the way those entrants were. That is the control-is-verified
+check made externally rather than by our scorer, and it lands *below* our
+self-graded figure, in the direction the leniency analysis predicts.
 
 **The `manual_prompt` file carries a harness correction.** Three hard tasks
 (2536, 2529, 2533) ran against a corrupted working copy of the database and
@@ -2036,7 +2041,7 @@ uv run python analysis/buckets.py results/*.jsonl        # arms by macro/derived
 uv run python analysis/clauses.py --within glm-full dsflash-full sol-full sonnet5-full
 uv run python analysis/counterfactuals.py results/glm-full.jsonl
 uv run python analysis/gold_disagreement.py                # the 19, and why
-uv run python analysis/leniency.py results/*-full.jsonl    # per-arm exposure
+uv run python analysis/leniency.py                        # exposure + transfer
 uv run python analysis/group_consistency.py               # the gold-free check
 uv run python analysis/replay.py                          # answer vs its own query
 ```

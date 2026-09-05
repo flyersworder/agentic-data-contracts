@@ -42,8 +42,9 @@ from dce.stats import ANSWER_VERDICTS, load  # noqa: E402
 ARMS = ["contract", "contract_hollow", "manual_prompt", "schema_only"]
 
 #: Flags that convert to a real error, measured on the submitted file's hard
-#: split. Applying it to another arm or model assumes it transfers, which is
-#: exactly what a second submission would test and this script cannot.
+#: split. Applying it to another arm assumed transfer until a second arm was
+#: submitted; `transfer()` below now tests that, and it holds on the one case
+#: available. Transfer across MODELS remains untested.
 CONVERSION = 19 / 33
 
 _BOLD = re.compile(r"^\*+|\*+$")
@@ -98,8 +99,84 @@ def main(paths: list[str]) -> None:
             )
 
 
+#: The two arms with an official grading, and the sweep files behind each.
+SUBMITTED = {
+    "contract": (
+        ["results/glm-all450.jsonl"],
+        "results/glm-all450-official-scores.jsonl",
+    ),
+    "manual_prompt": (
+        ["results/glm-manual-all450.jsonl", "results/glm-manual-all450-dbfix.jsonl"],
+        "results/glm-manual-all450-official-scores.jsonl",
+    ),
+}
+
+
+def transfer() -> None:
+    """Does the conversion rate calibrated on one arm predict another's bias?
+
+    That was this proxy's load-bearing assumption and, until a second arm was
+    submitted, an untestable one. `contract` is the calibration and so is
+    circular; `manual_prompt` is the test. Prints the realised conversion with
+    a Wilson interval, because agreement to 0.1 pp on 18 flags is a point
+    estimate inside a wide band, not a precise result.
+    """
+    import json
+    from math import sqrt
+
+    print("\nTransfer check (hard split, official vs reconstructed golds)")
+    print(f"  {'arm':<16}{'hard':>6}{'flags':>7}{'predicted':>11}{'measured':>10}")
+    for arm, (sweeps, scores) in SUBMITTED.items():
+        local: dict[str, dict] = {}
+        for sweep in sweeps:
+            for row in load(ROOT / sweep):
+                local[str(row["task_id"])] = row
+        with open(ROOT / scores) as fh:
+            official = {
+                str(r["task_id"]): r
+                for r in (json.loads(line) for line in fh if line.strip())
+            }
+        hard = [
+            t
+            for t in official
+            if t in local
+            and local[t]["verdict"] in ANSWER_VERDICTS
+            and local[t]["level"] == "hard"
+        ]
+        flags = [
+            t for t in hard if local[t]["verdict"] == "correct" and flagged(local[t])
+        ]
+        real = [t for t in flags if official[t]["score"] is False]
+        predicted = 100 * len(flags) * CONVERSION / len(hard)
+        measured = (
+            100
+            * sum(
+                1
+                for t in hard
+                if local[t]["verdict"] == "correct" and official[t]["score"] is False
+            )
+            / len(hard)
+        )
+        print(
+            f"  {arm:<16}{len(hard):>6}{len(flags):>7}"
+            f"{predicted:>10.1f}{measured:>10.1f}"
+        )
+        if arm != "contract" and flags:
+            p, n = len(real) / len(flags), len(flags)
+            z = 1.96
+            d = 1 + z * z / n
+            c = (p + z * z / (2 * n)) / d
+            h = z * sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+            print(
+                f"    realised conversion {len(real)}/{n} = {p:.3f}, "
+                f"Wilson 95% [{c - h:.2f}, {c + h:.2f}] — the point estimates "
+                "agree, the interval is wide"
+            )
+
+
 if __name__ == "__main__":
     args = sys.argv[1:] or [
         str(p) for p in sorted((ROOT / "results").glob("*-full.jsonl"))
     ]
     main(args)
+    transfer()

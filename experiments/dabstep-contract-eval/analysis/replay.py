@@ -57,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from clauses import trace_for  # noqa: E402
 from coverage import BASE_TABLES, DB  # noqa: E402
+from dce.arms import MAX_ROWS  # noqa: E402
 from dce.stats import ANSWER_VERDICTS, load  # noqa: E402
 from vendor.dabstep_scorer import question_scorer  # noqa: E402
 
@@ -144,6 +145,14 @@ def replay(con: duckdb.DuckDBPyConnection, statements: list[str]) -> list[str]:
     Each statement contributes its whole rendered result AND each individual
     cell, because a reported answer may be either.
 
+    Truncated to `dce.arms.MAX_ROWS`, because that is all the harness ever
+    showed the agent: rows past the cap were never in front of the model, so
+    counting them is the same error as replaying `inspect_query`. It also
+    keeps the candidate pool from growing with the query, which matters
+    because pool size is not independent of the verdict --- wrong rows tend to
+    run wider queries, and an uncapped pool would give them more chances to
+    match by accident than the control rows it is compared against.
+
     Not just the final statement. Agents routinely compute the answer and then
     run a sanity check after it, so "the last query that executes" is the wrong
     unit — measured on correct rows, taking only the last one put the control
@@ -154,7 +163,7 @@ def replay(con: duckdb.DuckDBPyConnection, statements: list[str]) -> list[str]:
     out: list[str] = []
     for sql in reversed(statements[-TAIL:]):
         try:
-            rows = con.execute(sql).fetchall()
+            rows = con.execute(sql).fetchall()[:MAX_ROWS]
         except Exception:
             continue
         out.append(render(rows))

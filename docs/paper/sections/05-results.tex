@@ -132,10 +132,14 @@ That check is looser than it looks, and in a direction that favours us. Our
 side of it is 332 hard tasks graded against reconstructed golds; the band is
 378 hard tasks graded officially, and the leaderboard submission
 (Section~\ref{sec:golds}) shows our grading runs about $5.7$~pp high on the
-hard split for the one arm it could measure. Correcting \armM{} by its own
-measured exposure rather than by that headline number
-(Section~\ref{sec:threats-golds}) gives $20.3\%$ on run~A, still inside the
-band. It \emph{tightens} the run~D check rather than breaking it: \armM{} is
+hard split for the one arm it could measure. That gap is now closed for this arm and model rather than estimated:
+\armM{} on \texttt{glm} was itself submitted and scored \textbf{18.8\%}
+officially (Section~\ref{sec:golds}), just below the band rather than inside
+it. Read the run~A check accordingly. Correcting \armM{} by its own measured
+exposure instead (Section~\ref{sec:threats-golds}) gives $20.3\%$ on run~A
+--- 1.5~pp above the measurement, on a different sweep and 332 rather than
+378 hard tasks. Where an official number exists we quote it; the correction
+serves the cells where none does. It \emph{tightens} the run~D check rather than breaking it: \armM{} is
 the single most exposed cell in Table~\ref{tab:leniency} at 40.5\%, and
 correcting it moves Sonnet~5 from 23.8\% to $18.2\%$ --- from 4.0~pp above the
 officially-graded 19.8\% comparator to 1.6~pp below it. Both sides are then

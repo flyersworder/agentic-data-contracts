@@ -49,11 +49,13 @@ outside the domain the contract describes it is inert, and a frontier-class mode
 does not rescue it. That is the expected behaviour of a domain contract, and it
 is why this benchmark cannot answer the general question.
 
-A 30-task sub-bucket inside the fee bucket (\emph{most expensive MCC}, or
-\emph{ACI}, \emph{for a transaction of $N$ euros}; 10 and 20 tasks) scores 0--3 of 30 for
-\emph{every} arm on runs~A, B and~D. Run~C partially solves it (\armS{} 8,
-\armH{} 5, \armC{} 4, \armM{} 2 of 30), which is a second slice where the bare
-baseline leads.
+Thirty of the 38 non-fee tasks are one family (\emph{most expensive MCC}, or
+\emph{ACI}, \emph{for a transaction of $N$ euros}; 10 and 20 tasks), which
+needs the fee rules without naming fees and so counts as \emph{derived} in
+Section~\ref{sec:derivation}. It scores 0--3 of 30 for \emph{every} arm on
+runs~A, B and~D. Run~C partially solves it (\armS{} 8, \armH{} 5, \armC{} 4,
+\armM{} 2 of 30), and that is where the bare baseline's lead on the non-fee
+slice comes from.
 
 The benchmark is also a single one, and a concentrated one: 450 tasks reduce
 to 113 question shapes, 27 of which cover three quarters of the benchmark
@@ -241,9 +243,9 @@ only makes plausible.
 already broke once}
 
 The capability claims in this paper rest on two frontier-class models, and we
-have direct evidence for how little one supported: two claims written against
-runs~A and~B did not survive run~C (Sections~\ref{sec:ablation}
-and~\ref{sec:interaction}), and a third,
+have direct evidence for how little one supported: three claims written against
+runs~A and~B did not survive run~C (Sections~\ref{sec:ablation},
+\ref{sec:interaction} and~\ref{sec:efficiency}), and a fourth,
 written against runs~A--C, did not survive run~D. \textbf{Readers should apply
 the same discount to the derivation-gap result} (Section~\ref{sec:derivation}):
 the second frontier-class model confirms the direction of the collapse (26.1

@@ -133,8 +133,8 @@ leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
 That check is looser than it looks, and in a direction that favours us. Our
 side of it is 332 hard tasks graded against reconstructed golds; the band is
 378 hard tasks graded officially, and the leaderboard submissions
-(Section~\ref{sec:golds}) show our grading runs about $5.7$~pp high on the
-hard split, on both arms it measured ($+5.7$ and $+3.0$~pp). For \armM{} on \texttt{glm}
+(Section~\ref{sec:golds}) show our grading runs 3--6~pp high on the hard
+split on the two arms it measured ($+5.7$ and $+3.0$~pp). For \armM{} on \texttt{glm}
 that gap is now measured rather than estimated, which is why the official
 18.8\% is quoted above: correcting run~A by the arm's own exposure
 (Section~\ref{sec:threats-golds}) would instead give $20.3\%$, 1.5~pp high,
@@ -303,7 +303,9 @@ Forced answers & 43 & 27 & 32 & \textbf{0} \\
 \end{tabular}
 \caption{The governed arm wins while doing less work on every model. It is not
 the cheapest arm on run~C; on run~D it is second by 3\% outright and cheapest
-per correct answer by about $2{\times}$.}
+per correct answer by about $2{\times}$. Run~B's reasoning row is per task
+rather than a total, because its complete-case set has fewer rows than the
+other runs.}
 \label{tab:efficiency}
 \end{table*}
 
@@ -360,7 +362,11 @@ Second, it converts accuracy into \emph{efficiency against a proven ceiling}.
 Classifying all 401 tasks by question shape alone, never by gold and never by
 any arm's output, gives 176 tasks the compiled contract answers outright
 (all hard), 148 that need those semantics \emph{plus} a counterfactual or an
-optimisation it does not encode, and 77 with no fee semantics at all. A
+optimisation it does not encode, and 77 with no fee semantics at all. The
+38 non-fee hard tasks of Section~\ref{sec:threats} are not all among the 77:
+that split counts questions that name fees, and 30 of the 38 ask for the most
+expensive MCC or ACI at a given amount, which needs the fee rules without
+naming them, so they are \emph{derived} here. A
 pre-computed macro layer \emph{of this kind} therefore reaches 53\% of the hard
 set on this benchmark. We do not offer that as a bound on pre-computation in
 general (Section~\ref{sec:related} reports a hierarchical semantic layer
@@ -402,7 +408,8 @@ Hard tasks & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} & \em
 \caption{Arms split by whether the compiled contract answers the task outright
 (\emph{macro}, $n{=}176$; 118 on run~B's complete-case set) or requires
 reasoning on top of it (\emph{derived}, $n{=}148$; 101). Models are in order
-of bare-schema capability. The gap between \armC{} and the compiled contract
+of bare-schema capability, which puts Sonnet~5 before \texttt{gpt-5.6-sol};
+the run-ordered tables above put them the other way round. The gap between \armC{} and the compiled contract
 on \emph{macro} is derivation failure on information the agent provably had.}
 \label{tab:buckets}
 \end{table*}

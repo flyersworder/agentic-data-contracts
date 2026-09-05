@@ -10,7 +10,7 @@ make figures  # figures only
 make check    # fail on overfull boxes or unresolved refs
 ```
 
-22 pages with `article`, references included. Requires only a basic TeX Live
+23 pages with `article`, references included. Requires only a basic TeX Live
 install; `multirow` and `balance` were dropped rather than added as
 dependencies.
 
@@ -35,8 +35,11 @@ to promote one or two more; `make check` will say which.
 - **`motherduck-semantic` is dated from page metadata.** The page shows no
   byline or date, but its `datePublished` metadata says 8 June 2026, and the
   bib entry says so.
+- **arXiv build.** arXiv does not run BibTeX: upload `main.bbl` alongside the
+  sources. `\pdfoutput=1` is on line 1 of `main.tex` so its build picks
+  pdflatex for the PDF figures.
 - **arXiv abstract field.** `abstract.txt` is the plain-text abstract for
-  the submission form (about 1,750 characters, under arXiv's 1,920 cap);
+  the submission form (about 1,780 characters, under arXiv's 1,920 cap);
   regenerate it if `sections/00-abstract.tex` changes.
 
 ## Figures

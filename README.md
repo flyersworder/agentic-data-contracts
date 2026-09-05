@@ -1635,7 +1635,7 @@ uv run python examples/ops_agent/agent.py     "What's our MTTR by severity this 
 
 Each example directory contains four files:
 - `contract.yml` — governance rules, allowed tables, resource limits
-- `semantic.yml` — metrics, relationships, metric impacts
+- `semantic.yml` — metrics, relationships, metric impacts (and, in `revenue_agent`, `tables:` with per-table and per-column descriptions)
 - `setup_db.py` — sample DuckDB data (auto-created on first run)
 - `agent.py` — runnable demo with a Claude Agent SDK path plus a fallback that exercises the tools directly
 
@@ -1644,6 +1644,14 @@ Each example directory contains four files:
 ```bash
 uv run python examples/revenue_agent/verify_examples.py
 ```
+
+…and a **schema-drift preflight** — `check_drift.py`, which reconciles the contract's declared tables and columns against the live warehouse ([above](#checking-declarations-against-the-live-schema)). It prints the clean report, then the same check against two deliberately stale declarations, then the `note` an agent would receive — because a check you have never watched fail tells you nothing:
+
+```bash
+uv run python examples/revenue_agent/check_drift.py
+```
+
+The three validation verbs answer different questions, and the third fills a gap the first two cannot see: a live `EXPLAIN` catches a renamed column the moment some SQL references it, while a column that is *declared and never queried* goes stale in silence.
 
 Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
 

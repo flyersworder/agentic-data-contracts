@@ -75,6 +75,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`revenue_agent` now declares its tables, and ships a schema-drift preflight.** The examples are executable documentation gated by CI, and neither shipped feature appeared in them: no example declared a `tables:` section at all, so `describe_table` rendered bare columns and `check_schema_drift` compared **zero columns** across all three. `examples/revenue_agent/semantic.yml` now carries per-table and per-column descriptions — 14 columns the preflight actually checks — and `check_drift.py` joins `verify_examples.py` and `evaluate_conformance.py` as the third validation verb, printing the clean report, then the same check against two deliberately stale declarations, then the `note` an agent would receive. Its output is golden-diffed rather than grepped, for the reason the `examples` job already gives: a report that quietly stops naming a finding keeps every marker satisfied.
+
+  The phantom columns it injects are `revenue` and `order_date` — the two names the example's hand-written `column_hints` section warns about, one of them carrying "Verified against the warehouse on 2026-05-15". That claim is exactly what this check makes automatic.
+
 - **A blank identity is now refused at load.** New `require_text`, the counterpart to `as_text`, applies to what a thing is *called* or *points at*: a metric or column name, a relationship or metric-impact endpoint, a decomposition operator, a drill dimension. A null `name:` coerced to `""` produced a metric that loaded clean, rendered into the prompt, and was unfindable by any name a caller would use — the silent-drop shape #89 exists to eliminate, reintroduced by the fix for it. The error names the offending entry, since a parser error a consumer cannot locate is barely better than silence.
 
   **This can fail a document that loaded before.** A metric with a blank name previously became `MetricDefinition(name=None)` and every lookup against it silently missed; it now raises at load. Nothing that worked stops working — a nameless metric was never reachable — but a build that tolerated one will now stop.

@@ -113,6 +113,15 @@ jobs:
                    -e 's/age_days=[0-9]+/age_days=N/' out.txt > got.txt
             diff -u "examples/$d/expected_output.txt" got.txt
           done
+      - name: schema-drift preflight prints its documented report
+        # Diffed, not grepped, for the same reason as the examples above: a
+        # report that quietly stopped naming a finding would keep every marker
+        # satisfied. Exits non-zero on drift, and this contract is clean, so a
+        # failure here is either real drift in the sample database or a
+        # regression in the check.
+        run: |
+          uv run python examples/revenue_agent/check_drift.py > drift.txt
+          diff -u examples/revenue_agent/expected_drift_output.txt drift.txt
       - name: verified-examples corpus validation + answer checks
         run: |
           uv run python examples/revenue_agent/verify_examples.py > out.txt

@@ -80,6 +80,85 @@ metrics:
     operational_owner: data-eng-finance
     last_reviewed: 2026-05-15
 
+tables:
+  # What a table *means*, which is what an agent needs before it writes SQL over
+  # it. `AllowedTable.description` in contract.yml describes the schema as a
+  # group; this is per table, and `columns[].description` is per column.
+  # `describe_table` renders all three, so a declaration here is the only way
+  # column documentation reaches an agent.
+  #
+  # These declarations are checked against the live warehouse by
+  # `check_drift.py` — a column named here that no longer exists is reported
+  # rather than silently dropped, which is what the `column_hints` note below
+  # had to assert by hand.
+  - schema: analytics
+    table: orders
+    description: >-
+      One row per order, not per line item and not per payment. An order in
+      `pending` has not been fulfilled and is excluded from recognized revenue.
+    columns:
+      - name: id
+        type: INTEGER
+        description: Order identifier. Not a payment or invoice id.
+      - name: customer_id
+        type: INTEGER
+        description: FK to analytics.customers.id.
+      - name: amount
+        type: DECIMAL(10,2)
+        description: >-
+          Order value in USD. This is the money column — there is no `revenue`
+          column, despite the metric names.
+      - name: status
+        type: VARCHAR
+        description: >-
+          One of `completed`, `pending`, `refunded`. Revenue metrics filter to
+          `completed`.
+      - name: tenant_id
+        type: VARCHAR
+        description: Tenant isolation key. Every query must filter on it.
+      - name: created_at
+        type: DATE
+        description: >-
+          When the order was placed, not when it was fulfilled or paid.
+  - schema: analytics
+    table: customers
+    description: >-
+      One row per customer, current state only — this table is overwritten, so
+      it carries no history and cannot answer "what region were they in then?".
+    columns:
+      - name: id
+        type: INTEGER
+        description: Customer identifier.
+      - name: name
+        type: VARCHAR
+        description: Display name. Not unique; do not group by it.
+      - name: region
+        type: VARCHAR
+        description: >-
+          Customer geography, and the only place region lives. Orders and
+          subscriptions carry none of their own.
+      - name: tenant_id
+        type: VARCHAR
+        description: Tenant isolation key. Every query must filter on it.
+  - schema: analytics
+    table: subscriptions
+    description: >-
+      One row per customer per plan. A customer with no row here has never
+      subscribed, which is not the same as having churned.
+    columns:
+      - name: id
+        type: INTEGER
+        description: Subscription identifier.
+      - name: customer_id
+        type: INTEGER
+        description: FK to analytics.customers.id.
+      - name: plan
+        type: VARCHAR
+        description: Plan tier. Free-text today, not an enum.
+      - name: tenant_id
+        type: VARCHAR
+        description: Tenant isolation key. Every query must filter on it.
+
 relationships:
   - from: analytics.orders.customer_id
     to: analytics.customers.id

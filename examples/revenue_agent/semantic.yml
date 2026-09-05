@@ -87,10 +87,21 @@ tables:
   # `describe_table` renders all three, so a declaration here is the only way
   # column documentation reaches an agent.
   #
-  # These declarations are checked against the live warehouse by
+  # The *names* declared here are checked against the live warehouse by
   # `check_drift.py` — a column named here that no longer exists is reported
   # rather than silently dropped, which is what the `column_hints` note below
   # had to assert by hand.
+  #
+  # `type:` is NOT checked, and is worth understanding before you rely on it.
+  # Its only consumer is `dump_semantic_source`, so it reaches `contract_digest`
+  # and anyone reading this file — never the agent, which is always shown the
+  # warehouse's own type by `describe_table`, and never the system prompt. A
+  # wrong `type:` here is therefore inert at query time but frozen into the
+  # contract's attestation. It is carried because dbt, Cube and Ossie sources
+  # populate it from their manifests and the YAML format matches them; checking
+  # it needs type *equivalence* (BIGINT/INT64/NUMBER(38,0) are one type, and
+  # dbt's own hand-typed `DECIMAL` will not string-match a warehouse's
+  # `DECIMAL(10,2)`), which is deliberately not built yet — see issue #100.
   - schema: analytics
     table: orders
     description: >-

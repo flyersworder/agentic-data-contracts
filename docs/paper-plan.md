@@ -245,20 +245,26 @@ submissions on a rolling monthly cycle, verified from
 What remains, ranked by what a reviewer would reject over. Costs are from the
 recorded `usd` of the four sweeps: A $3.27, B $6.32, C $72.36, D $164.75.
 
-1. **Repeat runs.** The paper names k=1 as its largest gap in both Threats
-   and Future Work, and the 23.4% flip rate makes every point estimate that
-   is not a McNemar contrast (cost ordering, the `derived`-bucket ordering,
-   Sonnet 5 leading `derived`) an unmeasured quantity. Design: two more
-   full four-arm repeats on glm and deepseek (k=3, ~$19) and one more on sol
-   and Sonnet 5 (k=2, ~$237), same commit, same pinned endpoints. Total
-   about **$260**. Two side effects are free: the deepseek repeats run with
-   the 429 retry the harness now has, so run B stops being a 279-task
-   complete-case set; and a glm repeat runs on the fixed validator, so the
-   original run A becomes the pre-fix run rather than the only run. Report
-   per-model mean and range for every headline number, McNemar per repeat
-   and pooled, and the flip rate as a measurement instead of an upper bound.
-   The headline contrasts (p from 1e-17 to 1e-35) cannot move; the
-   scaffolding step on glm (p=0.058) and everything in Section 5.5 can.
+1. **Repeat runs, flash tier at k=3.** The paper names k=1 as its largest
+   gap in both Threats and Future Work, and the 23.4% flip rate makes every
+   point estimate that is not a McNemar contrast (cost ordering, the
+   `derived`-bucket ordering, Sonnet 5 leading `derived`) an unmeasured
+   quantity. Decided 2026-09-05: repeat only where temperature is pinned,
+   which is the only place a within-model variance estimate is clean.
+
+   | model | runs to add | why that many | cost |
+   |---|---|---|---|
+   | glm-5.3-flash | 2 full four-arm | run A is pre-fix validator; run E has only `contract` and `manual_prompt`, so the ablation row (p=0.058) has no clean replicate yet | ~$7 |
+   | deepseek-v4-flash | 3 full four-arm | run B is truncated to 279 tasks; the harness now retries 429, so the first repeat replaces it outright | ~$19 |
+   | gpt-5.6-sol | 1, `contract` arm only | the 5.1-point derivation gap (94.9% on `macro`) is the one frontier number carrying an economic claim, and it is not a contrast, so it needs no other arm | ~$21 |
+   | Claude Sonnet 5 | none | every run D claim is a paired contrast or already hedged; $165 buys the least | 0 |
+
+   Total about **$47**. Same commit, same pinned endpoints. Report per-model
+   mean and range (k=3 supports a range, not a standard error; say so),
+   McNemar per repeat and pooled, and the flip rate as a measurement instead
+   of an upper bound. Keep run A in the paper as the pre-fix run. State as a
+   limit that the variance estimate does not transfer to the frontier tier.
+
 2. **The fifth arm.** Threats admits the contract's margin bundles delivery
    of what the manual states with resolution of what it leaves open, and
    names the arm that separates them: the contract with its seven

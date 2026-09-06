@@ -69,6 +69,11 @@ and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
 
 ## What is not finished
 
+- **The self-citation `extended` in `refs.bib` has no arXiv id yet.** The
+  submission build cites it wherever the extended version's appendices are
+  referenced; fill in the id once arXiv v1 is posted, and post v1 before
+  the PVLDB submission so the citation resolves.
+
 - **`motherduck-semantic` is dated from page metadata.** The page shows no
   byline or date, but its `datePublished` metadata says 8 June 2026, and the
   bib entry says so.

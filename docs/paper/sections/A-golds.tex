@@ -1,0 +1,103 @@
+\section{Gold Reconstruction and External Validation}
+\label{app:golds}
+
+DABStep withholds golds for its 450 test tasks, which is good for the
+benchmark and inconvenient for anyone running an offline ablation. We
+reconstruct them from the leaderboard's own published artifacts, and because
+this is the one component a reader cannot check independently, we describe
+it in full.
+
+Every submission to the DABStep leaderboard publishes a per-task file
+containing, for each task, the submitted answer and whether the official
+grader marked it correct. At the time of reconstruction the corpus held
+2{,}199 such submissions. Reconstruction proceeds by plurality over
+\emph{officially-graded-correct} answers only:
+
+\begin{enumerate}
+\itemsep2pt
+\item An answer enters the vote only if DABStep's own grader marked that
+      submission correct on that task. Crowd agreement alone is never
+      sufficient; the benchmark's own verdict is the admission criterion.
+\item Answers are normalised with the benchmark's own normaliser, so
+      submissions differing only in formatting or list order agree.
+\item A task yields a gold only if one answer holds at least a 75\%
+      plurality of admitted votes. Median realised share: 0.981.
+\end{enumerate}
+
+After excluding five tasks whose consensus answer manual verification showed
+to be wrong, this yields golds for 401 of 450 tasks (332 hard, 69 easy).
+Consensus inherits the leaderboard's errors, and we found some.
+
+\paragraph{Independent verification.} Consensus is an argument, not a
+measurement, so we checked it against the database. The largest template
+families, the three fee-average question shapes, were recomputed directly
+from DuckDB using the matching rule documented in \texttt{manual.md}. All 59
+reconstructed golds reproduce exactly.
+
+\paragraph{What the compiled ceiling shares with this check.} Of the 176
+tasks the compiled contract answers (Section~\ref{sec:ceiling}), the 97 in
+the seven payments families exercise the full
+\texttt{payments}-to-\texttt{fees} join the views encode; the other 79
+resolve off \texttt{fees} and \texttt{merchant\_category\_codes} alone, with
+the same wildcard predicates but not the join. And 59 of those 79 are
+exactly the tasks verified above using the matching rule the contract
+declares, so on that subset the ceiling and the gold check share a premise;
+the other 117, graded against consensus golds we did not recompute, carry
+the claim.
+
+\paragraph{External validation.} A leaderboard submission converts the
+argument into a measurement, because every submission returns per-task
+official verdicts on the exact answers we scored against reconstructed
+golds. We ran that check on both arms of the main contrast. Sweeps of
+\armC{} and \armM{} over all 450 tasks on \mGLM{}, at the same commit, the
+same pinned provider endpoint and the same harness, were submitted and
+graded against the withheld golds. (The \armM{} sweep was interrupted and
+resumed; three hard tasks it stamped \texttt{db\_corrupted} were re-run
+serially and merged, changing no verdict.)
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+split & $n$ & \armC{} & \armM{} & gap \\
+\midrule
+hard & 378 & \textbf{51.9\%} & \textbf{18.8\%} & $+33.1$~pp \\
+easy & 72  & 70.8\% & 75.0\% & $-4.2$~pp \\
+all  & 450 & 54.9\% & 27.8\% & $+27.1$~pp \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Paired McNemar on the hard split gives 137 tasks \armC{} alone
+answers correctly against 12 for \armM{}, exact two-sided
+$p{=}4.9\times10^{-28}$. The easy-split reversal, the effect living entirely
+in the hard tasks, is confirmed externally too. \armM{}'s 18.8\% sits just
+below the cluster of named manual-in-prompt baselines, 1.0~pp under its
+lowest member, Claude~4 Sonnet at 19.8\%, and is the same reimplementation
+graded the way those entries were rather than by us. The second submission
+went up as an explicitly named baseline control after validation had closed,
+so no ranking claim was available to buy.
+
+The excluded tasks are not a biased sample. Officially, the 332 hard tasks
+we keep score 52.4\% and the 46 hard tasks we drop score 47.8\%: the
+consensus threshold filters on gold agreement, not on task difficulty, and
+the 401-task subset stands in fairly for the 450.
+
+The reconstructed golds are \emph{lenient}, one-sidedly, and only on hard
+tasks. Across the 401 shared tasks the two gradings agree on 382 (95.3\%).
+All 19 disagreements run the same way, correct under our grading and wrong
+under the official one, and none run the other way. Easy is exact (49/69
+under both); hard is 193/332 against 174/332 official, $+5.7$~pp. The same
+measurement on \armM{} gives $+3.0$~pp, likewise one-sided.
+
+The 19 look like formatting and are not. Our scorer is the leaderboard's own
+file, vendored verbatim and hash-pinned, so both gradings apply identical
+rules; re-running it on each disagreement against the reconstructed gold
+returns \emph{correct} on all 19, where the official grading returns wrong
+on all 19. The rules cannot be the difference, and indeed cannot fail on
+these shapes: numeric comparison rounds both sides to the smaller precision,
+so a full-precision answer against a rounded gold always matches, and
+single-word comparison matches \texttt{D:219.36} against a bare \texttt{D}.
+The 19 are wrong \emph{values} that the reconstructed golds concealed, not
+wrong renderings of right ones. \appref{app:leniency} bounds what this
+does to the results.

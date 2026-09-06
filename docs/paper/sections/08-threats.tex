@@ -1,326 +1,107 @@
 \section{Threats to Validity}
 \label{sec:threats}
 
-\subsection{The effect is domain-specific, and the benchmark cannot show
-otherwise}
+\subsection{One benchmark, one domain}
 
-This is the sharpest limit on the result, so we give it first.
-
-DABStep's hard set is dominated by one question family: 294 of 332 hard tasks
-in run~A concern fees, and the contract encodes fee-domain semantics
-(Table~\ref{tab:feebucket}).
-
-\begin{table*}[t]
-\centering
-\small
-\begin{tabular}{@{}llrrrr@{}}
-\toprule
-\tabhead{Run} & \tabhead{Bucket} & \armS{} & \armH{} & \armM{} & \armC{} \\
-\midrule
-A & fee (294)     & 13.9\% & 18.7\% & 24.5\% & \textbf{59.2\%} \\
-A & non-fee (38)  & 5 & 9 & 4 & 9 \\
-B & fee (196)     & 23.0\% & 22.4\% & 44.9\% & \textbf{61.2\%} \\
-B & non-fee (30)  & 6 & 7 & \textbf{9} & 8 \\
-C & fee (294)     & 37.1\% & 53.4\% & 53.4\% & \textbf{83.7\%} \\
-C & non-fee (38)  & \textbf{14} & 13 & 10 & 11 \\
-D & fee (294)     & 22.4\% & 40.1\% & 24.1\% & \textbf{73.5\%} \\
-D & non-fee (38)  & 10 & 8 & 8 & \textbf{11} \\
-\bottomrule
-\end{tabular}
-\caption{Hard-task accuracy split by whether the question concerns the domain
-the contract describes. Non-fee cells are counts, not rates.}
-\label{tab:feebucket}
-\end{table*}
-
-``Hard accuracy'' on this benchmark is close to ``fee-question accuracy'', so
-the result should be stated as: \textbf{a contract carrying a domain's semantics produces
-a large gain on questions in that domain.}
-
-\textbf{On the non-fee bucket there is no detectable contract advantage on any
-model} ---
-against \armM{}, 9 to 4 in run~A, 8 to 9 in run~B, 11 to 10 in run~C, 11 to 8
-in run~D. At 38, 30, 38 and 38 tasks these are far too small to be a negative
-result, and equally unable to support a general claim. On run~C the ordering inverts outright:
-\armS{} leads that slice at 14 of 38 while \armC{} takes 11 --- the only
-top-level slice anywhere in the four runs where the bare baseline beats the
-contract. All
-four are consistent with the effect being domain-specific by construction:
-outside the domain the contract describes it is inert, and a frontier-class model
-does not rescue it. That is the expected behaviour of a domain contract, and it
-is why this benchmark cannot answer the general question.
-
-Thirty of the 38 non-fee tasks are one family (\emph{most expensive MCC}, or
-\emph{ACI}, \emph{for a transaction of $N$ euros}; 10 and 20 tasks), which
-needs the fee rules without naming fees and so counts as \emph{derived} in
-Section~\ref{sec:derivation}. It scores 0--3 of 30 for \emph{every} arm on
-runs~A, B and~D. Run~C partially solves it (\armS{} 8, \armH{} 5, \armC{} 4,
-\armM{} 2 of 30), and that is where the bare baseline's lead on the non-fee
-slice comes from.
-
-The benchmark is also a single one, and a concentrated one: 450 tasks reduce
-to 113 question shapes, 27 of which cover three quarters of the benchmark
-(Section~\ref{sec:background}). No amount of compute fixes that, and results
-on so narrow a question space should not be read as results about analytics
-agents in general.
+Section~\ref{sec:domain} showed that the gain is confined to fee questions,
+which are 294 of the 332 hard tasks. The benchmark is also a single and
+concentrated one: 450 tasks reduce to 113 question shapes, 27 of which cover
+three quarters of the benchmark (Section~\ref{sec:dabstep}). No amount of
+compute fixes that, and results on so narrow a question space should not be
+read as results about analytics agents in general. We ran no second benchmark. BIRD's withheld evidence~\cite{bird} is the
+nearest analogue, but it supplies a hint per question rather than a domain
+manual, and a domain manual is what a contract is compiled from.
 
 \subsection{The contract resolves ambiguities the manual leaves open}
-\label{sec:threats-interpretation}
+\label{sec:interpretation}
 
-The arms are matched on the sources they may consult, not on how those sources
-read. \texttt{semantic.yml} marks seven clauses with a sentence beginning
-\texttt{INTERPRETATION}, flagging where a metric commits to a reading the
-prose does not force. Three are glosses of wording the manual supplies
-outright. One derives the \texttt{capture\_delay} day-count-to-band mapping by
-applying the manual's own band definitions to a column of days. The remaining
-three go further, and we state them plainly: the manual says a \texttt{null}
-field ``applies to all possible values'', but the annexed \texttt{fees} data
-encodes that wildcard for list-typed fields as an \emph{empty list}, which the
-manual never mentions; and two band metrics break a tie on values sitting
-exactly on a shared boundary, which the manual's ``between A and B'' does not
-decide.
+The arms are matched on the sources they may consult, not on how those
+sources read. Seven metric descriptions carry an \texttt{INTERPRETATION}
+sentence (Section~\ref{sec:contract}). Three gloss wording the manual
+supplies outright; one derives the capture-delay band mapping by applying
+the manual's own band definitions to a column of days; three go further. The
+manual says a \texttt{null} field ``applies to all possible values'', but the
+annexed \texttt{fees} data encodes that wildcard for list-typed fields as an
+\emph{empty list}, which the manual never mentions, and two band metrics
+break a tie on values sitting exactly on a shared boundary, which the
+manual's ``between A and B'' does not decide. All three are recoverable from
+the annexed data, which every arm could query, and none supplies a task's
+answer. But they were recovered once, by us, and handed to one arm, and the
+empty-list clause matters: reversing it in the compiled contract changes the
+answer on 87 of the 97 tasks in the payments families. The contract arm's
+margin therefore combines delivery of what the manual states with resolution
+of what it leaves open. Separating them needs a fifth arm carrying the
+contract with its seven clauses stripped, which we did not run.
 
-All three are recoverable from the annexed data, which every arm could query,
-and none supplies a task's answer. But they were recovered once, by us, and
-handed to one arm. The empty-list clause in particular is load-bearing:
-reversing it in the compiled contract changes the answer on 87 of the 97
-tasks in the payments families, so an agent lacking the clause has somewhere
-to go wrong. A reader should
-therefore treat the contract arm's margin as combining two things this
-experiment does not separate --- delivery of what the manual states, and
-resolution of what it leaves open. Separating them needs a fifth arm carrying
-the contract with its \texttt{INTERPRETATION} clauses stripped, which we did
-not run.
+\subsection{No repeats, and two frontier points that disagree}
+\label{sec:power}
 
-\subsection{\texorpdfstring{Statistical power: $k{=}1$, and 24
-uncorrected tests}{Statistical power: k=1, and 24 uncorrected tests}}
+None of the four runs repeats, so none estimates within-condition variance.
+One near-replicate exists: the all-450 \armC{} sweep on \mGLM{} submitted to
+the leaderboard (Section~\ref{sec:golds}) shares 401 tasks with the \mGLM{}
+run and differs from it only by a validator fix. Paired, the two agree on
+accuracy (60.3\% against 57.9\%, exact McNemar $p{=}0.35$) and
+\textbf{disagree on 94 of 401 tasks, a 23.4\% flip rate}, at temperature 0
+on a pinned endpoint. The churn is symmetric (52 one way, 42 the other), so
+the McNemar contrasts, which read asymmetry, are not at risk; but noise
+alone supplies 94 discordant pairs against the 86 to 182 our contrasts rest
+on, so no claim about a named task's verdict should be read as
+reproducible, and the frontier runs, which could not pin temperature, are
+likelier to flip more. Table~\ref{tab:mcnemar} reports 24 tests and
+corrects none; the three vs-\armC{} contrasts survive any correction, and
+the scaffolding row on the two flash models does not. Underpowered
+comparisons are the norm in this literature~\cite{little-power}.
 
-None of the four runs repeats, so none of them estimates within-condition
-variance: they are different models, not replicates. One near-replicate
-exists. A single-arm sweep of \armC{} over all 450 tasks, run on
-\texttt{glm-5.3-flash} and submitted to the leaderboard
-(Section~\ref{sec:golds}), shares 401 tasks with run~A's \armC{} and differs
-from it only by a validator fix that run~A predates. Paired, the two agree on accuracy --- 60.3\% against 57.9\%,
-exact McNemar $p{=}0.35$ --- and \textbf{disagree on 94 of 401 tasks, a
-23.4\% flip rate}, at temperature 0 on a pinned endpoint. On the hard split
-it is 25.9\%; on the easy split both runs score exactly 49/69 while
-disagreeing about which 8 tasks. Because the two runs also differ by that
-validator fix, 23.4\% is an upper bound on run-to-run noise rather than a
-clean estimate of it.
+The capability claims rest on two frontier models that disagree, by 21
+points on the \emph{macro} bucket and by 4, the other way, on
+\emph{derived}. Capability is also not one number here: \mDS{} and \mSON{} tie on the
+bare-schema arm we use as the axis and sit 12 points apart with the
+contract, so the two orderings agree on rank and not on spacing. The
+literature does not settle the direction either~\cite{prompt-engineering-advanced,scaffold-gaia},
+and the frontier runs differ from the flash runs in provider and model
+family as well as capability.
 
-Two consequences. The headline comparisons are not at risk: McNemar reads
-asymmetry, and this churn is symmetric (52 one way, 42 the other). But our
-contrasts rest on 86--182 discordant pairs and noise alone supplies 94, so a
-contrast near that floor is close to the noise, and \textbf{no claim about a
-named task's verdict should be read as reproducible}. Repeats remain the
-largest gap for runs~B, C and~D, and largest for the last two:
-\texttt{gpt-5.6-sol} does not accept a temperature parameter, and run~D's
-gateway rejects both \texttt{temperature} and \texttt{seed}, so neither ran
-at 0 like the first two --- and the glm figure suggests their flip rates are
-higher, not lower.
+One lesson from how this paper was written belongs here. With only the two
+flash models, the scaffolding step was a null with disagreeing signs over all
+tasks and a pooled $p{=}0.29$; the two frontier models put it at $+15$ and $+14$ points
+at $p{<}10^{-6}$. The same two models also showed a margin over the prompt
+that shrank with capability and a derivation gap fixed near 38 points, and
+neither survived a third. \textbf{A null across two adjacent models is weak
+evidence of absence}, and the size of the derivation gap, which rests on two
+frontier points 21 apart, deserves the same discount.
 
-The pre-registration also named a primary comparison, on
-\texttt{deepseek-v4-pro-0813}, that was never run: a 40-task probe showed it
-would not supply a third capability point, and runs~C and~D were chosen in its
-place after that probe. Every contrast involving them is therefore
-exploratory, the derivation-gap result included, and the public prediction of
-Section~\ref{sec:derivation} was recorded against run~C after the substitution
-was made.
+\subsection{Reconstructed golds are lenient}
+\label{sec:threats-golds}
 
-Table~\ref{tab:mcnemar} reports 24 pairwise comparisons and we correct none of
-them. The three vs-\armC{} contrasts survive any correction at these
-$p$-values; the \armS{}-vs-\armH{} row, which carries the ablation, does not
-have that margin on runs~A and~B and should be read with Benjamini--Hochberg in
-mind. Underpowered comparisons are the norm in this literature rather than the
-exception~\cite{little-power}.
-
-\subsection{Reconstructed golds are lenient, and the absolute numbers
-inherit it}\label{sec:threats-golds}
-
-Every accuracy in this paper is measured against golds we reconstructed
-(Section~\ref{sec:golds}), and the leaderboard submission described there
-shows they are one-sidedly permissive: on the 401 shared tasks, 19 answers
-graded correct here are wrong officially and none go the other way,
-\textbf{$+5.7$~pp on the hard split}. Read every absolute hard-split figure in
-this paper as roughly that optimistic.
-
-This threat does \emph{not} reach the headline contrast. Both \armC{} and
-\armM{} were submitted, so that comparison ($51.9\%$ against $18.8\%$ hard,
-$p = 4.9\times10^{-28}$; Section~\ref{sec:golds}) has official grading on
-both sides. What remains exposed is every absolute number for the other two
-arms and the other three models, and the 20--26\% band we use as a validity
-check in Section~\ref{sec:results} where it is quoted against a self-graded
-figure.
-
-The sharper question is whether the leniency is arm-neutral. If it is, it
-moves levels and not contrasts. That is checkable from the proxy alone, and separately from the second submission.
-Every one of the 19 failed exact string match against the reconstructed gold
-and was rescued by the scorer's tolerance, so exact-match failure among
-locally-correct rows upper-bounds an arm's exposure
-(\texttt{analysis/leniency.py}; exact match strips whitespace and Markdown
-bold and nothing else, deliberately not the benchmark normaliser, which is
-the tolerance being measured). On the hard split, where all 19 disagreements
-lie, the flag has perfect recall at 33 flags, so a flag converts to a real
-error at $19/33 = 0.576$.
-
-\begin{table}[htbp]
-\centering
-\caption{Exposure to scorer leniency across runs~A--D: the share of each arm's
-correct hard-split answers that required more than exact match against the
-reconstructed gold, and the accuracy that follows from correcting it. Arm
-names abbreviated; an upper bound.}
-\label{tab:leniency}
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrr@{}}
-\toprule
-& \multicolumn{2}{c}{Run A} & \multicolumn{2}{c}{Run B}
-& \multicolumn{2}{c}{Run C} & \multicolumn{2}{c}{Run D} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
-\tabhead{Arm} & exp. & corr. & exp. & corr. & exp. & corr. & exp. & corr. \\
-\midrule
-\textsc{contract} & \textbf{15.8} & 50.1 & \textbf{17.2} & 51.0 & \textbf{10.5} & 72.7 & \textbf{10.6} & 64.2 \\
-\textsc{hollow} & 26.6 & 16.3 & 21.6 & 19.8 & 14.7 & 46.9 & 14.3 & 34.8 \\
-\textsc{manual} & 19.7 & 20.3 & 23.7 & 37.1 & 13.8 & 46.3 & 40.5 & 18.2 \\
-\textsc{schema} & 37.0 & 10.9 & 31.4 & 18.5 & 10.6 & 34.8 & 36.8 & 18.0 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\armC{} is the \emph{least} exposed arm on all four models, which is the same
-mechanism the rest of the paper reports surfacing in the grading rather than
-the SQL: the contract states an answer format and the arms without it
-improvise one. It does not follow that the correction is conservative for the
-headline. \armC{} has far more correct answers to lose, so on three of four
-runs it gives up the most \emph{points} --- on run~A, 5.0 against
-\armS{}'s 3.0. Across the twelve \armC{}-versus-baseline contrasts the gap
-narrows on nine and widens on three, by $-2.8$ to $+1.4$~pp against raw gaps
-of 13.7--45.5~pp. It widens exactly where the baseline is the heavily exposed
-one: run~D's \armM{} sits at 40.5\% exposure, and correcting both sides moves
-that contrast from 44.6 to 46.0~pp. The honest summary is not that the
-leniency favours either side, but that its effect on every contrast is under
-3~pp and no conclusion here turns on 3~pp.
-
-The correction's load-bearing weakness was that it applies a conversion rate
-calibrated on one arm to the others. The second submission tests exactly that.
-Calibrating on \armC{} as before and applying the resulting rate blind to
-\armM{} predicts a $3.1$~pp reconstructed-gold bias against a measured
-$3.0$~pp. The point estimates agree, but on 18 flags the realised conversion
-($10/18$) carries a Wilson 95\% interval of roughly $[0.34, 0.75]$, so any
-measured bias between about $1.8$ and $4.1$~pp would have been equally
-consistent. The transfer assumption survives its first test rather than being
-confirmed by it --- and it is still the only instrument bounding the fourteen
-of sixteen arm~$\times$~model cells we do not submit. Two limits survive: the
-flag is an upper bound, so true corrections are at or below the table's, and
-transfer across \emph{models} remains untested, which is where the estimator
-does most of its work.
+Every accuracy in this paper except the officially graded pair rests on
+reconstructed golds that are one-sidedly lenient on the hard split
+(Section~\ref{sec:golds}); read every absolute hard-split figure as a few
+points optimistic. The proxy that bounds the other cells shows \armC{} to be
+the least exposed arm on all four models but the one with the most correct
+answers to lose, so the correction moves the twelve \armC{}-versus-baseline
+gaps by $-2.8$ to $+1.4$ points against raw gaps of 13.7 to 45.5
+(\appref{app:leniency}). No conclusion here turns on 3 points.
 
 \subsection{Contamination}
 
-DABStep is public, and so is the material an agent needs to answer it. Our own
-gold reconstruction (Section~\ref{sec:golds}) makes the point sharply: we
-recovered 59 hard-split answers from public sources alone, which is a
-demonstration that the answer key exists in machine-readable form outside the
-withheld split. Nothing stops that material from having entered a model's
-training data, and we ran no contamination probe --- no canary strings, no
-perturbed restatements of the questions, no comparison against a
-post-cutoff held-out set.
-
-This bears asymmetrically on the capability claims. Our four models differ
-in training data as well as in capability, and nothing here separates the
-two, so ``stronger model'' and ``different training data'' are confounded
-across every comparison in Section~\ref{sec:derivation}. A memorising model would
-show exactly what we report: high accuracy on the \emph{macro} bucket, whose
-tasks follow the benchmark's most common shapes, and a smaller gain on the
-\emph{derived} bucket, whose tasks compose them. We do not believe this
-explains the result, because \texttt{gpt-5.6-sol}'s contract arm scores
-94.9\% against 31.8\% for its schema-only arm on the same tasks, and Sonnet~5's
-73.9\% against 6.8\%, and memorisation
-should not care which context the agent was handed. But that argument is an
-inference, not a measurement, and a contamination probe would settle what it
-only makes plausible.
-
-\subsection{Two frontier-class points that disagree on size, and a trend that
-already broke once}
-
-The capability claims in this paper rest on two frontier-class models, and we
-have direct evidence for how little one supported: three claims written against
-runs~A and~B did not survive run~C (Sections~\ref{sec:ablation},
-\ref{sec:interaction} and~\ref{sec:efficiency}), and a fourth,
-written against runs~A--C, did not survive run~D. \textbf{Readers should apply
-the same discount to the derivation-gap result} (Section~\ref{sec:derivation}):
-the second frontier-class model confirms the direction of the collapse (26.1
-points, between the flash-tier models' ${\approx}38$ and run~C's 5.1) and not
-its size. The two frontier-class models disagree by 21 points on the
-\emph{macro} bucket and by 4, in the other direction, on \emph{derived}.
-Capability is also not one number
-here. Sonnet~5 ties \texttt{deepseek-v4-flash} on the bare-schema arm we use
-as the capability axis and sits 12 points above it with the contract; the two
-orderings agree on every model's rank but not on the spacing, and every
-``ordered by capability'' statement in this paper depends on which arm is
-doing the ordering. The literature does not settle the direction either. Some
-prompt scaffolding does lose value as models
-improve~\cite{prompt-engineering-advanced}; but a pre-registered study across
-five frontier models found the opposite on GAIA, with the most capable model
-gaining \emph{most} from structured scaffolds~\cite{scaffold-gaia}. Runs~C
-and~D also differ from the others in provider and model family, so any
-contrast between the frontier-class runs and the flash-tier ones confounds
-capability with both.
+DABStep is public, and so is the material an agent needs to answer it. We
+ran no contamination probe. This bears on the capability claims, because
+the four models differ in training data as well as capability, and a
+memorising model would show exactly what we report: high accuracy on the
+\emph{macro} bucket, whose tasks follow the benchmark's most common shapes,
+and less on \emph{derived}. We do not believe that explains the result,
+because \mGPT{}'s contract arm scores 94.9\% against 31.8\% for its
+bare-schema arm on the same tasks, and \mSON{}'s 73.9\% against 6.8\%, and
+memorisation should not care which context the agent was handed. That is an
+inference, not a measurement.
 
 \subsection{Harness asymmetries}
-\label{sec:harness-asym}
 
-Three properties of the harness treated the arms unequally, two against the
-governed arms and one, small, in their favour; a fourth makes the runs less
-comparable to each other.
-
-\paragraph{A validator defect, run~A only.} Run~A's governed arms carried a
-defect in the validator: a check intended to reject \texttt{SELECT *} also
-rejected \texttt{COUNT(*)}, because the latter parses with a \texttt{Star}
-node. The agent was told \emph{``SELECT * is not allowed''} about queries
-containing no \texttt{SELECT *} --- 161 rejections across 124 of 401 tasks;
-replaying the 160 distinct rejected queries showed 79 were falsely rejected. A rejection whose stated reason is not true of the query cannot be
-complied with, and the transcripts show the agent guessing at unrelated clauses
-before finding a formulation that passed.
-
-This handicapped both contract arms and neither baseline, so on this axis
-run~A's 55.1\% is a floor rather than a ceiling. It is not a floor overall:
-Section~\ref{sec:threats-golds} identifies a second asymmetry pushing the
-other way, and the two are not netted here. Run~B ran with the fix, and the contract arm's
-total count of queries rejected by the validator (218 on run~A, the 161
-above among them) falls to 29, confirming the diagnosis. The defect's direction is known; its magnitude
-is not separable from the model change, and we do not attempt to estimate it.
-
-\paragraph{Different endpoints across runs.} The runs used different provider
-endpoints as well as different models, and run~D a different kind of route
-altogether: an enterprise gateway fronting Bedrock, on the Messages API with
-cache control. Run~D's dollar figures are that gateway's billed rates under
-Messages-API cache pricing; on the same gateway's OpenAI-compatible route the
-arms would have been billed at multiples that differ by arm
-(Section~\ref{sec:runs}), so the run~D cost ordering is a property of the
-route as well as of the arms. Each run's internal contrasts are sound;
-cross-run differences are suggestive only.
-
-\paragraph{The row limit.} Symmetric result limits are not a detail. An
-earlier iteration of this experiment used a 1{,}000-row limit, and the
-governed arm looked $11{\times}$ more expensive than the baselines; the cause
-was oversized result payloads poisoning the context window, not the contract.
-The reported runs cap every result at 50 rows, but not perfectly
-symmetrically: the cap reached the governed arms' \texttt{run\_query} but not
-their \texttt{preview\_table}, which the library clamps at 100 rows of its own
-accord. A governed arm could therefore see 100 rows from a preview where an
-ungoverned arm saw 50 from \texttt{execute\_sql}. That happened on
-\textbf{31 preview calls} across runs~A--C, against many thousands of tool
-calls: small, but in the treatment's favour. Run~D ran with the cap in place
-(484 preview calls, none over 50 rows); runs~A--C are as they ran.
-
-\paragraph{The forced-answer policy.} When an agent exhausts its output budget the harness forces a final answer
-instead of discarding the run. In run~A that produced one additional correct
-answer out of 59, nearly worthless for accuracy, but it eliminated unscoreable
-rows --- and those rows were 41 \armS{}, 18 \armM{} and \textbf{zero} in either
-governed arm. Dropping them would have inflated the two baselines by silently
-discarding their hardest runs. Run~B repeats the pattern (49, 38, 15 and zero
-on the complete-case set; 55, 42 and 15 before it), run~C forces 8 answers in
-\armH{} and none elsewhere, and run~D forces 43, 32, 27 and zero. \armC{} is
-the only arm that never exhausted its budget on any run. The policy therefore works against the treatment, and we
-report scored and strict accuracy for every arm throughout
-(Section~\ref{sec:protocol}).
+Section~\ref{sec:fixed} listed them: a validator defect on \mGLM{} against
+the governed arms, a preview cap in their favour, a forced-answer policy
+against them, and different provider routes across models. Two more are
+recorded in \appref{app:harness}: a 1{,}000-row result limit, since
+replaced, under which the governed arm looked $11{\times}$ more expensive,
+and a digest stamp that pinned the hollow arm's rows to the wrong artifact
+without changing any result. Each run's internal contrasts are sound; cross-run cost
+differences are suggestive only.

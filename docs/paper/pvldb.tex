@@ -1,0 +1,45 @@
+% Submission driver: acmart sigconf, no appendix. Shares every section file
+% with main.tex; only the class, the top matter and the appendix switch
+% differ. Build with `make pvldb.pdf`.
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[sigconf,nonacm]{acmart}
+\settopmatter{printacmref=false}
+
+\usepackage{array}
+\usepackage{listings}
+
+\newif\ifextended
+\extendedfalse
+\input{preamble}
+
+\title{Which Part of the Context Layer Does the Work?}
+\subtitle{Separating Semantic Content from Retrieval Scaffolding in Text-to-SQL Agents}
+\author{Qing Ye}
+\affiliation{\institution{Independent Researcher}\country{}}
+\email{qing.leafnode@gmail.com}
+
+\begin{document}
+\raggedbottom
+
+\begin{abstract}
+\input{sections/00-abstract}
+\end{abstract}
+
+\maketitle
+
+\input{sections/01-intro}
+\input{sections/02-background}
+\input{sections/03-system}
+\input{sections/04-design}
+\input{sections/05-results}
+\input{sections/06-why}
+\input{sections/07-governance}
+\input{sections/08-threats}
+\input{sections/09-conclusion}
+
+\label{end:content}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}

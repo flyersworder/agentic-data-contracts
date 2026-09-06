@@ -1,0 +1,178 @@
+\section{Experimental Design}
+\label{sec:design}
+
+\subsection{Two factors, four arms}
+\label{sec:arms}
+
+Every arm sees the same tasks, the same warehouse, the same model, the same
+answer-format instruction and the same scorer. The arms vary two factors
+(Table~\ref{tab:arms}): whether the agent has the governed tools and the
+instruction to consult them before writing SQL (\emph{scaffolding}), and
+whether it is given the domain's semantics (\emph{content}).
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & no scaffolding & scaffolding \\
+\midrule
+no content & \armS{} & \armH{} \\
+content    & \armM{} & \armC{} \\
+\bottomrule
+\end{tabular}
+\caption{The four arms as a two-factor design (artifact names:
+\texttt{schema\_only}, \texttt{contract\_hollow}, \texttt{manual\_prompt},
+\texttt{contract}). \armH{} differs from \armC{} only in that its prose
+fields are empty. \armM{} carries the same knowledge as \armC{} in its
+original form, pasted into the prompt.}
+\label{tab:arms}
+\end{table}
+
+\armS{} is the floor: three ungoverned tools (\texttt{list\_tables},
+\texttt{describe\_table}, \texttt{execute\_sql}), a 281-character system
+prompt, no documentation. It measures what the model can do from the schema
+alone, and it doubles as our operational definition of model capability.
+
+\armM{} is the published approach reimplemented. DABStep's own
+\texttt{manual.md} is pasted verbatim into the system prompt, bringing it to
+24{,}177 characters; the tools are identical to \armS{}. It validates the
+harness against the leaderboard band, and it is the comparison a
+practitioner actually faces: the alternative to a contract is not ignorance
+but a long prompt.
+
+\armC{} is the treatment: the nine governed tools over the frozen contract,
+and a 2{,}475-character system prompt that names the domains and metrics
+available and instructs the agent to look them up before writing SQL.
+
+\armH{} is the control that makes the ablation an ablation: the same tools
+and the same instruction over the hollow contract, with a 1{,}984-character
+prompt. \armC{} differs from the baselines in tools, in a procedural
+instruction and in content at once; \armH{} holds the first two fixed and
+removes only the third.
+
+Two qualifications on reading Table~\ref{tab:arms} as a factorial. The
+content factor is the same knowledge in two forms, the manual itself and a
+contract authored from the manual alone, so the \armM{}--\armC{} contrast
+measures the form of delivery as well as its presence. And the scaffolding
+factor changes the tool surface as well as the instruction, because that is
+the bundle a curated catalogue actually brings; we measure the bundle, not
+its parts.
+
+\subsection{Four models}
+\label{sec:models}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llllr@{}}
+\toprule
+\tabhead{Model} & \tabhead{Pinned id} & \tabhead{Route} & \tabhead{T} & \tabhead{Tasks} \\
+\midrule
+\mGLM{} & \texttt{glm-5.3-flash} & OpenRouter, fp8 & 0 & 401 \\
+\mDS{} & \texttt{deepseek-v4-flash} & OpenRouter, fp8 & 0 & 279 \\
+\mSON{} & Claude Sonnet~5 & Bedrock via gateway & --- & 401 \\
+\mGPT{} & \texttt{gpt-5.6-sol} & OpenRouter & --- & 401 \\
+\bottomrule
+\end{tabular}
+\caption{The four models, in the order used throughout: bare-schema hard
+accuracy. Each is pinned to one provider endpoint with fallbacks disabled.
+T is temperature; a dash means the route does not accept the parameter. \mDS{}'s
+task count is its complete-case set, defined below.}
+\label{tab:models}
+\end{table}
+
+We ran the full design once on each of four models
+(Table~\ref{tab:models}), each pinned to a single provider endpoint with
+fallbacks disabled so that quantization, price and throughput are fixed
+within a run. We call \mGLM{} and \mDS{} the two flash models and \mSON{}
+and \mGPT{} the two frontier models; that is the vendors' tiering, not a
+measured quantity. Models appear throughout in order of bare-schema hard
+accuracy (13.9\%, 22.6\%, 22.9\%, 37.0\%), the only capability axis declared
+before any result was read; Section~\ref{sec:threats} records where that
+axis disagrees with the contract arm's ordering. The four runs are separate
+experiments, not replicates: they differ in model, in provider and in one
+library fix (\appref{app:harness}).
+
+Reasoning effort is \texttt{medium} throughout, a nominal setting rather
+than an equated one: under it the contract arm reasons for about 2{,}050
+tokens per task on \mSON{} and about 350 on \mGPT{}. Temperature is 0 on
+the two flash models; \mSON{}'s gateway rejects both \texttt{temperature}
+and \texttt{seed} and \mGPT{} does not accept the parameter, so neither
+frontier run has a determinism control. \mSON{} is reached through an
+enterprise gateway on Anthropic's Messages API with cache control, because
+the gateway's OpenAI-compatible route bills every input token fresh at a
+multiple that differs by arm, a caching confound.
+
+Two departures from the pre-registered design are recorded here. The
+pre-registered primary model,
+\texttt{deepseek-v4-pro}, was never swept: a 50-task probe of the
+bare-schema arm showed it does not differ from the flash tier (27.5\%
+against 25.0\%, $p{=}1.0$), so it would not have supplied the capability
+contrast it was chosen for; \mGPT{} was substituted by the same criterion,
+\mSON{} was added later, and every contrast involving them is exploratory
+(\appref{app:harness}).
+And the \mDS{} run lost 29\% of its rows to provider rate limiting,
+near-uniformly across arms and with 114 of the 122 lost tasks losing all
+four arms together, so we report it on the 279 tasks scoreable in all four
+arms (its complete-case set), with intervals about 20\% wider
+(\appref{app:truncation}).
+
+\subsection{What is held fixed}
+\label{sec:fixed}
+
+Within a run everything else is fixed across the four arms: row limit (50
+rows per result), tool-call cap (40), token budget, temperature, reasoning
+effort, model, endpoint, quantization, task set, gold set, scorer and the
+verbatim answer-format instruction. When an agent exhausts its output
+budget the harness forces a final answer rather than discarding the row;
+the rows so rescued fell mostly on the ungoverned arms and never on \armC{}
+(on \mGLM{}, 41 in \armS{}, 18 in \armM{}, none in either governed arm), so
+the policy works against the treatment. Three harness properties treated the arms unequally
+(\appref{app:harness}): a validator defect on \mGLM{} that rejected
+\texttt{COUNT(*)} as if it were \texttt{SELECT *} in the governed arms only,
+so \mGLM{}'s contract figures are a floor on that axis; a 100-row preview
+cap that reached the governed arms on 31 calls, in the treatment's favour;
+and different provider routes across models, which makes cross-run cost
+differences suggestive only.
+
+\subsection{Tasks, golds and grading}
+\label{sec:golds}
+
+DABStep withholds golds for its 450 test tasks. We reconstruct them from the
+leaderboard's published per-task files by plurality over answers the
+benchmark's own grader marked correct, with a 75\% plurality threshold
+(median realised share 0.981), which yields golds for 401 of 450 tasks (332
+hard, 69 easy) after excluding five consensus answers that manual
+verification showed to be wrong.
+The three largest question families, 59 tasks, were recomputed directly from
+the database using the manual's matching rule and reproduce exactly
+(\appref{app:golds}).
+
+The reconstruction was then measured rather than argued. Both arms of the
+main contrast, \armC{} and \armM{} on \mGLM{}, were swept over all 450 tasks
+and submitted to the leaderboard, which graded them against the withheld
+golds: 51.9\% against 18.8\% on the 378 hard tasks, paired McNemar
+$p{=}4.9\times10^{-28}$. On this model the main contrast is therefore graded
+by the benchmark, not by us. On the 401 shared tasks the two gradings agree
+on 382 (95.3\%); all 19 disagreements are wrong values our golds concealed,
+all lie on the hard split, and all run the same way, so our hard-split
+figures run about 5.7 points high for \armC{} and 3.0 for \armM{}. The
+excluded tasks score like the kept ones under official grading, and a proxy
+calibrated on these submissions bounds the leniency in every other arm and
+model at under 3 points on any contrast (\appref{app:leniency}).
+
+Answers are graded by DABStep's own scorer, vendored verbatim at a pinned
+revision; our own earlier normaliser was stricter than the benchmark, and on
+a 12-task pilot it manufactured a significant result in the contract's
+favour that the official rules do not support.
+Every arm sees every task, so all comparisons are paired and use McNemar's
+exact test~\cite{mcnemar,dietterich}, reported with the discordant-pair
+count and its split; proportions carry Wilson
+intervals~\cite{wilson,brown-cai-dasgupta}; no multiplicity correction is
+applied, and Section~\ref{sec:threats} says which results that exposes.
+Tables report scored accuracy, correct over correct plus incorrect with
+harness failures excluded; the released results carry strict accuracy, which
+counts every non-correct row as wrong, beside it.

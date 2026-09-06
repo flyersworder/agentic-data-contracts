@@ -1,53 +1,8 @@
-\section{Results}
+\section{Results: The Decomposition}
 \label{sec:results}
 
-\subsection{Run B lost 29\% of its rows}
-\label{sec:truncation}
-
-We state this before the numbers, because every run~B figure is conditioned on
-it.
-
-Roughly 1{,}000 rows into run~B, the pinned provider endpoint began returning
-HTTP 429. The harness had no retry for that status, so each throttled request
-was written to the results file as a terminal error: 466 of 468 error rows are
-rate limits. Error rate was 0.2\% over the first 1{,}000 rows, 31\% over the
-next 200, and 100\% thereafter. The sweep then \emph{finished early}, because a
-throttled request fails instantly, and exited cleanly.
-
-The loss costs power, not validity, and the evidence for that is specific:
-
-\begin{itemize}
-\itemsep2pt
-\item Errors are near-uniform across arms: 113, 116, 118 and 121 of 401
-      rows. No arm is preferentially damaged.
-\item 114 of the 122 lost tasks lost \emph{all four} arms together, because
-      the runner schedules a task's arms close in time. Independent per-arm
-      failure would have left roughly 100 complete tasks; 279 survived.
-      Missingness is a property of \emph{when} a task ran.
-\item Figures on the 279 tasks scoreable in all four arms (the complete-case
-      set, used for run~B throughout) and per-arm figures over each arm's
-      own denominator agree to within one point.
-\end{itemize}
-
-We therefore report run~B on the 279 tasks scoreable in all four arms, with
-intervals roughly 20\% wider than run~A's. One
-residual caveat: the lost tasks are slightly enriched for hard tasks (87\%
-hard against 83\% overall), so run~B's absolute accuracies are marginally optimistic. Every
-arm is affected identically.
-
-One lesson generalises beyond this paper. Pinning a single provider endpoint
-with fallbacks disabled is correct for validity, since it holds quantization,
-price and throughput fixed across arms, but it transfers responsibility for
-transient failures to the harness, and here nothing looked wrong until the
-results were read. Benchmark harnesses that pin endpoints need a
-rate-of-progress check, not just a liveness check.
-
-\subsection{Headline}
+\subsection{Accuracy and cost on four models}
 \label{sec:headline}
-
-Runs~A and~B were analysed first. Run~C overturned two claims written against
-them and withdrew a third, and run~D replicated the first two overturnings;
-each is reported below at the number that overturned it.
 
 \begin{table*}[t]
 \centering
@@ -56,37 +11,36 @@ each is reported below at the number that overturned it.
 \toprule
 \tabhead{Arm} & \tabhead{Overall} & \tabhead{Hard} & \tabhead{Easy} & \tabhead{Cost} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run A (\texttt{glm-5.3-flash}, 401 tasks)}}\\
+\multicolumn{5}{@{}l}{\emph{\mGLM{} (\texttt{glm-5.3-flash}, 401 tasks)}}\\
 \armS{} & 22.7\% & 13.9\% & 65.2\% & \$0.76 \\
 \armH{} & 26.4\% & 19.3\% & 60.9\% & \$0.85 \\
 \armM{} & 31.7\% & 22.9\% & 73.9\% & \$0.96 \\
 \armC{} & \textbf{57.9\%} & \textbf{55.1\%} & 71.0\% & \textbf{\$0.67} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run B (\texttt{deepseek-v4-flash}, 279 tasks)}}\\
+\multicolumn{5}{@{}l}{\emph{\mDS{} (\texttt{deepseek-v4-flash}, 279 tasks)}}\\
 \armS{} & 33.0\% & 22.6\% & 77.4\% & \$1.79 \\
 \armH{} & 31.5\% & 22.6\% & 69.8\% & \$1.52 \\
 \armM{} & 52.0\% & 42.9\% & 90.6\% & \$1.69 \\
 \armC{} & \textbf{61.3\%} & \textbf{56.6\%} & 81.1\% & \textbf{\$1.05} \\
 \midrule
-\multicolumn{5}{@{}l}{\emph{Run C (\texttt{gpt-5.6-sol}, 401 tasks)}}\\
-\armS{} & 43.9\% & 37.0\% & 76.8\% & \$14.52 \\
-\armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
-\armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
-\armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
-\midrule
-\multicolumn{5}{@{}l}{\emph{Run D (Claude Sonnet~5, 401 tasks)}}\\
+\multicolumn{5}{@{}l}{\emph{\mSON{} (Claude Sonnet~5, 401 tasks)}}\\
 \armS{} & 31.9\% & 22.9\% & 75.4\% & \textbf{\$36.80} \\
 \armH{} & 44.4\% & 38.0\% & 75.4\% & \$46.08 \\
 \armM{} & 35.2\% & 23.8\% & 89.9\% & \$43.89 \\
 \armC{} & \textbf{69.6\%} & \textbf{68.4\%} & 75.4\% & \$37.97 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{\mGPT{} (\texttt{gpt-5.6-sol}, 401 tasks)}}\\
+\armS{} & 43.9\% & 37.0\% & 76.8\% & \$14.52 \\
+\armH{} & 55.6\% & 51.2\% & 76.8\% & \$22.09 \\
+\armM{} & 57.9\% & 50.3\% & 94.2\% & \textbf{\$14.42} \\
+\armC{} & \textbf{78.8\%} & \textbf{77.4\%} & 85.5\% & \$21.32 \\
 \bottomrule
 \end{tabular}
-\caption{Accuracy and cost. Hard splits are $n{=}332$, 226, 332 and 332; easy
-are 69, 53, 69 and 69. \armC{} is the most accurate arm on all four models,
-the cheapest on the two flash-tier ones, and within about 3\% of the cheapest
-on run~D. Cost against accuracy is plotted in
-Figure~\ref{fig:cost}. Rows are in the same fixed arm order in every block, so
-the two ablation arms (\armH{}, \armS{}) are adjacent throughout.}
+\caption{Accuracy and cost, models in order of bare-schema capability. Hard
+splits are $n{=}332$, 226, 332 and 332; easy are 69, 53, 69 and 69. \armC{}
+is the most accurate arm on all four models, the cheapest on the two flash
+models, and within about 3\% of the cheapest on \mSON{}. Arms are in ladder
+order, so the two content-free arms are adjacent.}
 \label{tab:headline}
 \end{table*}
 
@@ -96,296 +50,146 @@ the two ablation arms (\armH{}, \armS{}) are adjacent throughout.}
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-\tabhead{Comparison} & \tabhead{Run A} & \tabhead{Run B} & \tabhead{Run C} & \tabhead{Run D} \\
+\tabhead{Comparison} & \mGLM{} & \mDS{} & \mSON{} & \mGPT{} \\
 \midrule
-\armS{} vs \armC{}     & $3{\times}10^{-31}$ \,\, 14/\textbf{155} & $2{\times}10^{-15}$ \,\, 14/\textbf{93} & $5{\times}10^{-32}$ \,\, 12/\textbf{152} & $1{\times}10^{-35}$ \,\, 11/\textbf{162} \\
-\armM{} vs \armC{}     & $2{\times}10^{-17}$ \,\, 29/\textbf{134} & \textbf{0.0067} \,\, 30/\textbf{56} & $2{\times}10^{-17}$ \,\, 12/\textbf{96} & $5{\times}10^{-27}$ \,\, 22/\textbf{160} \\
-\armH{} vs \armC{}     & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} & $2{\times}10^{-17}$ \,\, 18/\textbf{111} & $2{\times}10^{-17}$ \,\, 25/\textbf{126} \\
-\armS{} vs \armM{}     & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 & $2{\times}10^{-8}$ \,\, 22/78 & \textbf{0.066} \,\, 15/28 \\
-\armM{} vs \armH{}     & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 & 0.44 \,\, 58/49 & $1{\times}10^{-4}$ \,\, 27/\textbf{64} \\
-\armS{} vs \armH{} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 & $\mathbf{4{\times}10^{-7}}$ \,\, 20/\textbf{67} & $\mathbf{9{\times}10^{-9}}$ \,\, 14/\textbf{64} \\
+\armS{} vs \armC{} & $3{\times}10^{-31}$ \,\, 14/\textbf{155} & $2{\times}10^{-15}$ \,\, 14/\textbf{93} & $1{\times}10^{-35}$ \,\, 11/\textbf{162} & $5{\times}10^{-32}$ \,\, 12/\textbf{152} \\
+\armM{} vs \armC{} & $2{\times}10^{-17}$ \,\, 29/\textbf{134} & \textbf{0.0067} \,\, 30/\textbf{56} & $5{\times}10^{-27}$ \,\, 22/\textbf{160} & $2{\times}10^{-17}$ \,\, 12/\textbf{96} \\
+\armH{} vs \armC{} & $9{\times}10^{-24}$ \,\, 23/\textbf{149} & $8{\times}10^{-17}$ \,\, 13/\textbf{96} & $2{\times}10^{-17}$ \,\, 25/\textbf{126} & $2{\times}10^{-17}$ \,\, 18/\textbf{111} \\
+\armS{} vs \armM{} & $7{\times}10^{-6}$ \,\, 14/50 & $2{\times}10^{-12}$ \,\, 5/58 & \textbf{0.066} \,\, 15/28 & $2{\times}10^{-8}$ \,\, 22/78 \\
+\armM{} vs \armH{} & 0.033 \,\, 55/34 & $4{\times}10^{-13}$ \,\, 63/6 & $1{\times}10^{-4}$ \,\, 27/\textbf{64} & 0.44 \,\, 58/49 \\
+\armS{} vs \armH{} & \textbf{0.058} \,\, 20/35 & \textbf{0.61} \,\, 19/15 & $\mathbf{9{\times}10^{-9}}$ \,\, 14/\textbf{64} & $\mathbf{4{\times}10^{-7}}$ \,\, 20/\textbf{67} \\
 \bottomrule
 \end{tabular}
-\caption{Every pairwise paired McNemar: $p$-value, then discordant pairs won by
-the left arm / by the right arm. The last row carries the ablation, and the
-four runs split two and two on it. Run~D's fourth row is its own result: the
-pasted manual is not distinguishable from a bare schema.}
+\caption{Every pairwise paired McNemar over all tasks: $p$-value, then
+discordant pairs won by the left arm / by the right arm. The last row is the
+scaffolding step of the decomposition, on which the flash and frontier
+models split two and two. \mSON{}'s fourth row is its own result: the pasted
+manual is not distinguishable from a bare schema.}
 \label{tab:mcnemar}
 \end{table*}
 
-\armC{} wins every comparison on all four models
-(Tables~\ref{tab:headline} and~\ref{tab:mcnemar}). On the two flash-tier
-models it is also the cheapest arm, so there is no accuracy/cost trade-off to
-report; on
-run~C that coincidence ends, and on run~D it nearly returns
-(Section~\ref{sec:efficiency}).
+\armC{} wins every comparison over all tasks on all four models
+(Tables~\ref{tab:headline} and~\ref{tab:mcnemar}), by 32.2, 13.7, 44.6 and
+27.1 hard-task points over \armM{}. That margin is not monotone in
+capability, and four points cannot support a story about why
+(\appref{app:interaction}). On the two flash models \armC{} is also
+the cheapest arm outright; on \mSON{} it is within about 3\% of the
+cheapest; on \mGPT{} the \armM{} arm is cheaper, and
+Section~\ref{sec:efficiency} says why.
 
-One check licenses those comparisons. \armM{} reproduces the published
-leaderboard band on run~A: 22.9\% hard against a 20--26\% band for credible
-named entrants, on a model weaker than any of them. That figure is ours,
-though; graded officially the same arm and model score 18.8\%, below the band
-and below its lowest named entrant (Section~\ref{sec:golds}).
-On runs~B and~C the same arm reaches 42.9\% and 50.3\%, above the band, which
-is a statement about those models rather than about the harness. Run~D
-supplies the check on a second model family: 23.8\% for Sonnet~5, against the
-leaderboard's 19.8\% for Claude~4 Sonnet under the same approach.
+Two checks tie the harness to the leaderboard. \armM{} reproduces the
+published band where a comparison exists: 22.9\% hard on \mGLM{} against
+the 20--26\% band for named entrants (18.8\% graded officially), and 23.8\%
+on \mSON{} against the leaderboard's 19.8\% for Claude~4 Sonnet under the
+same approach; on \mDS{} and \mGPT{} the same arm reaches 42.9\% and
+50.3\%, above the band, which is a statement about those models. The check
+is looser than it looks and in a direction that favours us, because our
+grading runs 3 to 6 points high on the hard split (Section~\ref{sec:golds},
+\appref{app:leniency}). The easy split is the negative check: \armC{} is not
+the best arm on easy tasks on any model, and \armM{} leads on all four
+(73.9\%, 90.6\%, 89.9\% and 94.2\% against 71.0\%, 81.1\%, 75.4\% and
+85.5\%). The contract does nothing for questions that need no domain
+knowledge, which is what it should do; an instrument that showed a contract
+effect there would be measuring itself. On \mSON{} the lead is an
+interaction rather than noise (62 of 69 against exactly 52 for each other
+arm), and none of it is fee semantics: four of the 13 tasks involved have
+their answer printed verbatim in \texttt{manual.md}, and on the rest \armC{}
+returned prose the scorer cannot parse, or an ordinary near-miss.
 
-That check is looser than it looks, and in a direction that favours us. Our
-side of it is 332 hard tasks graded against reconstructed golds; the band is
-378 hard tasks graded officially, and the leaderboard submissions
-(Section~\ref{sec:golds}) show our grading runs 3--6~pp high on the hard
-split on the two arms it measured ($+5.7$ and $+3.0$~pp). For \armM{} on \texttt{glm}
-that gap is now measured rather than estimated, which is why the official
-18.8\% is quoted above: correcting run~A by the arm's own exposure
-(Section~\ref{sec:threats-golds}) would instead give $20.3\%$, 1.5~pp high,
-on a different sweep and 332 rather than 378 hard tasks. Where an official
-number exists we quote it; the correction serves the cells where none does. It \emph{tightens} the run~D check rather than breaking it: \armM{} is
-the single most exposed cell in Table~\ref{tab:leniency} at 40.5\%, and
-correcting it moves Sonnet~5 from 23.8\% to $18.2\%$ --- from 4.0~pp above the
-officially-graded 19.8\% comparator to 1.6~pp below it. Both sides are then
-graded on something closer to the same footing, and part of the original
-overshoot was our own leniency rather than a real difference. That 40.5\% also
-makes this the least safe extrapolation in the analysis, applying a conversion
-rate measured on \armC{} and \texttt{glm} to the arm and model furthest from
-it; read $18.2\%$ as a direction, not a second measurement.
+\paragraph{On one model the manual is indistinguishable from a bare schema
+on hard tasks.} \mSON{}'s \armM{} scores 79 of 332 hard tasks against
+\armS{}'s 76: paired McNemar $p{=}0.72$, 17 discordant pairs one way and 14
+the other. The same 24{,}177-character prompt that lifts \mGLM{} by 9 points
+and \mDS{} by 20 lifts \mSON{} by less than one; the contract carrying the
+same knowledge lifts it by 45.5. It is also the only model on which empty
+governed tools beat the whole manual by a significant margin (38.0\%
+against 23.8\%, hard split $p{=}6{\times}10^{-8}$, 15/62). One alternative is not excluded: that prompt
+puts 191k input tokens per task in front of \mSON{} against \armS{}'s 91k,
+and a context-load effect would produce the same null. The clause analysis
+of Section~\ref{sec:clauses} cannot separate the two, since rules absent from
+the SQL is what both predict.
 
-The easy split gives a second, negative check. \armC{} is not the best arm on
-easy tasks in any of the four runs: \armM{} leads on all four (73.9\%,
-90.6\%, 94.2\%, 89.9\% against \armC{}'s 71.0\%, 81.1\%, 85.5\%, 75.4\%). The
-contract does nothing for questions that need no domain knowledge, which is
-what it should do, and an instrument that showed a contract effect there would
-be measuring itself. On run~D the lead is an interaction rather than noise:
-62 of 69 against exactly 52 for each of the other three arms. Of the 13 easy
-tasks \armM{} gets right and \armC{} gets wrong, four have an answer printed
-verbatim in \texttt{manual.md}; the rest are prose answers the scorer cannot
-parse and ordinary near-misses. None of it is fee semantics, and on the hard
-split the same arm is last. Where else the effect is absent is reported in
-Section~\ref{sec:threats}.
-
-\paragraph{On one model the manual is indistinguishable from a bare schema on
-hard tasks.} Run~D's \armM{} scores 79 of 332 hard tasks against \armS{}'s
-76: paired McNemar on the hard split $p{=}0.72$, 17 discordant pairs one way
-and 14 the other. The same 24{,}177-character prompt that lifts run~A by 9
-points and run~B by 20 lifts Sonnet~5 by less than one; the contract carrying
-the same knowledge lifts it by 45.5. Section~\ref{sec:clauses} shows the same
-thing in the submitted SQL. This is the sharpest instance in any run of the
-claim that delivery matters as much as possession, and it is also the one run
-on which empty governed tools (38.0\%) beat the whole manual (23.8\%), hard
-split $p{=}6{\times}10^{-8}$ (15/62). One alternative is not excluded: that
-prompt puts 191k input tokens per task in front of Sonnet~5 against \armS{}'s
-91k, and a context-load effect would produce the same null. The clause
-analysis cannot separate the two, since rules absent from the SQL is what both
-predict.
-
-\subsection{The ablation: content dominates scaffolding, but scaffolding is
-not zero}
-\label{sec:ablation}
+\subsection{Content dominates scaffolding}
+\label{sec:decomposition}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{figures/fig-ablation.pdf}
-\caption{The two steps of the ablation, on all four models. Adding nine
-governed tools, the retrieval instruction, the table allow-list and the
-operation rules, with the prose emptied, moves hard accuracy by $+5.4$,
-$+0.0$, $+14.2$ and $+15.1$ points across runs~A, B, C and~D. Restoring the
-prose moves it by a further $+35.8$, $+34.0$, $+26.2$ and $+30.4$. Bars are
-Wilson 95\% intervals.}
-\label{fig:ablation}
+\includegraphics[width=\columnwidth]{figures/fig-ladder.pdf}
+\caption{The two steps of the decomposition on hard tasks, four models in
+order of bare-schema capability. Adding the nine governed tools, the
+retrieval instruction, the table allow-list and the operation rules with
+the prose emptied (\armS{} to \armH{}) moves accuracy by $+5.4$, $+0.0$,
+$+15.1$ and $+14.2$ points; restoring the prose (\armH{} to \armC{}) moves
+it by a further $+35.8$, $+34.0$, $+30.4$ and $+26.2$. Bars are Wilson
+95\% intervals.}
+\label{fig:ladder}
 \end{figure}
 
-On hard tasks the gain splits into a scaffolding step and a content step. The
-ladder runs \armS{} to \armH{} to \armC{}: 13.9 to 19.3 to 55.1 on run~A,
-22.6 to 22.6 to 56.6 on run~B, 37.0 to 51.2 to 77.4 on run~C, and 22.9 to
-38.0 to 68.4 on run~D (Figure~\ref{fig:ablation}; the same rows in Table~\ref{tab:headline}, costs
-and work in Table~\ref{tab:efficiency}).
+On hard tasks the gain splits into a scaffolding step, \armS{} to \armH{},
+and a content step, \armH{} to \armC{}: 13.9 to 19.3 to 55.1 on \mGLM{},
+22.6 to 22.6 to 56.6 on \mDS{}, 22.9 to 38.0 to 68.4 on \mSON{}, and 37.0 to
+51.2 to 77.4 on \mGPT{} (Figure~\ref{fig:ladder}; the same rows in
+Table~\ref{tab:headline}, and the last row of Table~\ref{tab:mcnemar}).
 
-\textbf{The content step is the larger of the two on every model. The
-scaffolding step is model-dependent: absent on one model, marginal on one,
-substantial on two.}
+The content step is the larger of the two on every model. The scaffolding
+step depends on the model: $+5.4$ on \mGLM{} ($p{=}0.058$ over all tasks,
+20/35; on the hard slice alone $p{=}0.015$), $+0.0$ on \mDS{} ($p{=}0.61$,
+19/15), $+15.1$ on \mSON{} ($p{=}9{\times}10^{-9}$, 14/64) and $+14.2$ on
+\mGPT{} ($p{=}4{\times}10^{-7}$, 20/67). Three of the four models favour the
+scaffolding and one is flat, and the two that favour it most are from
+different model families.
 
-\begin{center}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-& \tabhead{$\Delta$ hard} & \tabhead{discordant} & \tabhead{$p$ (all tasks)} \\
-\midrule
-Run A    & $+5.4$ & 55 (20/35) & 0.058 \\
-Run B    & $+0.0$ & 34 (19/15) & 0.61 \\
-Run C    & $+14.2$ & 87 (20/67) & $4{\times}10^{-7}$ \\
-Run D    & $+15.1$ & 78 (14/64) & $9{\times}10^{-9}$ \\
-\bottomrule
-\end{tabular}
-\end{center}
+The claim the hollow arm was built to test survives. The sceptical reading, that
+the contract helps through a narrowed table surface, an imposed procedure,
+or simply by making the agent slow down, predicts that \armH{} captures most
+of the gain. It does not, on any model: the content step is $6.6{\times}$
+the scaffolding step on \mGLM{}, the whole of the effect on \mDS{},
+$2.0{\times}$ on \mSON{} and $1.8{\times}$ on \mGPT{}. \textbf{Scaffolding is a real
+but secondary effect that the content dominates everywhere.} On the two
+flash models alone this step would have read as a null;
+Section~\ref{sec:power} says why that would have been weak evidence.
 
-On runs~A and~B alone the scaffolding step did not survive a significance
-test, and a pooled $p{=}0.29$ with disagreeing signs looked like evidence of
-absence. It was evidence of a capability range too narrow to show the effect. Three of
-four models favour the scaffolding and one is flat; none favours the bare
-schema, and the two that favour it most are from different model families.\footnote{On run~A
-the hard slice alone is already $p{=}0.015$ (16/34); the 0.058 above is the
-all-401 test, diluted by the easy tasks.}
+\paragraph{Empty tools are not free.} \armH{} is the most expensive arm on
+both frontier models (\$46.08 on \mSON{}, \$22.09 on \mGPT{}), makes the
+most tool calls on three of the four, burns the most reasoning on \mGLM{}
+and \mSON{}, and forces answers on three models where \armC{} forces none
+(Table~\ref{tab:efficiency}). The transcripts show why: the agent calls
+\texttt{lookup\_domain}, is told nothing is available, and searches harder.
+On \mSON{} it makes that call 392 times, plus 1{,}620 calls to
+\texttt{lookup\_metric} with every metric emptied; on \mGPT{}, on 401 of
+401 tasks. The
+models that gain most from the scaffolding are also the ones that exercise
+the lookup tools hardest.
 
-What the fourth arm was built to test survives intact. The deflationary
-reading, that the contract helps through a narrowed table surface, an
-imposed procedure, or simply making the agent slow down, predicts \armH{}
-captures most of the gain. It does not, on any model: the content step is
-$1.8{\times}$ the scaffolding step on run~C, $2.0{\times}$ on run~D,
-$6.6{\times}$ on run~A, and the whole of the effect on run~B, where the
-scaffolding step is zero. \textbf{Scaffolding is a real but secondary effect that the content
-dominates everywhere.}
+\subsection{The compiled ceiling and the derivation gap}
+\label{sec:ceiling}
 
-\paragraph{Empty tools are not free.} In run~A, \armH{} burns the most
-reasoning of any arm (525k tokens against \armC{}'s 154k) and costs
-\$0.0080 per correct answer against \armC{}'s \$0.0029. In run~B it makes the
-most tool calls of any arm (6{,}375 against 4{,}155) for the fewest correct
-answers. In run~C it is the most expensive arm outright (\$22.09) and the only
-arm of the four to exhaust its output budget. In run~D it is again the most
-expensive arm (\$46.08), makes the most tool calls (6{,}494), burns the most
-reasoning (1{,}411k tokens, $1.7{\times}$ \armC{}'s) and forces 27 answers. The
-transcripts show why: the agent calls \texttt{lookup\_domain}, is told nothing
-is available, and searches harder. On run~C it makes that call on 401 of 401
-tasks, 804 times in total; on run~D, 392 times, plus 1{,}620 calls to
-\texttt{lookup\_metric} with every metric emptied. The models that gain most
-from the scaffolding are also the ones that exercise the lookup tools
-hardest.
-
-\subsection{Efficiency}
-\label{sec:efficiency}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig-cost.pdf}
-\caption{Accuracy against spend, all four arms on all four models. \armC{} is
-the cheapest arm \emph{and} the most accurate on the two flash-tier models;
-on run~C it is the most accurate but \armM{} is cheaper, and on run~D it is
-within about 3\% of the cheapest. Cost differences between
-models reflect different token prices and are not comparable across runs; the
-within-run ordering is.}
-\label{fig:cost}
-\end{figure}
-
-\begin{table*}[t]
-\centering
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
- & \armS{} & \armH{} & \armM{} & \armC{} \\
-\midrule
-\multicolumn{5}{@{}l}{\emph{Run A}}\\
-Turns / task & 12.1 & 8.4 & 9.8 & \textbf{7.1} \\
-Tool calls & 5{,}134 & 4{,}110 & 4{,}282 & \textbf{3{,}355} \\
-Reasoning tokens & 428k & 525k & 400k & \textbf{154k} \\
-Cost / correct & \$0.0084 & \$0.0080 & \$0.0076 & \textbf{\$0.0029} \\
-Forced answers & 41 & 0 & 18 & \textbf{0} \\
-\midrule
-\multicolumn{5}{@{}l}{\emph{Run B}}\\
-Turns / task & 13.7 & 11.4 & 12.8 & \textbf{8.2} \\
-Tool calls & 5{,}489 & 6{,}375 & 4{,}770 & \textbf{4{,}155} \\
-Reasoning / task & 10{,}941 & 10{,}766 & 9{,}243 & \textbf{4{,}844} \\
-Cost / correct & \$0.0195 & \$0.0173 & \$0.0117 & \textbf{\$0.0061} \\
-Forced answers & 55 & 15 & 42 & \textbf{0} \\
-\midrule
-\multicolumn{5}{@{}l}{\emph{Run C}}\\
-Turns / task & 7.9 & 10.4 & 7.6 & \textbf{6.5} \\
-Tool calls & 5{,}099 & 7{,}997 & \textbf{4{,}354} & 5{,}245 \\
-Reasoning tokens & 357k & 311k & 277k & \textbf{141k} \\
-Cost / correct & \$0.082 & \$0.099 & \textbf{\$0.062} & \$0.067 \\
-Forced answers & 0 & 8 & 0 & \textbf{0} \\
-\midrule
-\multicolumn{5}{@{}l}{\emph{Run D}}\\
-Turns / task & 11.3 & 10.0 & 11.1 & \textbf{7.0} \\
-Tool calls & 5{,}644 & 6{,}494 & 5{,}176 & \textbf{3{,}791} \\
-Reasoning tokens & 942k & 1{,}411k & 1{,}044k & \textbf{824k} \\
-Cost / correct & \$0.288 & \$0.259 & \$0.311 & \textbf{\$0.136} \\
-Forced answers & 43 & 27 & 32 & \textbf{0} \\
-\bottomrule
-\end{tabular}
-\caption{The governed arm wins while doing less work on every model. It is not
-the cheapest arm on run~C; on run~D it is second by 3\% outright and cheapest
-per correct answer by about $2{\times}$. Run~B's reasoning row is per task
-rather than a total, because its complete-case set has fewer rows than the
-other runs.}
-\label{tab:efficiency}
-\end{table*}
-
-\armC{} is not thinking harder; it has less to search for. That holds on all
-four models: it uses the fewest turns everywhere and the least reasoning
-everywhere (by a factor of two to three on runs~A--C, by 12\% on run~D), and
-it is the only arm that never exhausted its output budget on any run
-(the forced-answer rows: when the budget runs out the harness forces a final
-answer rather than discarding the run, Section~\ref{sec:harness-asym}).
-Table~\ref{tab:efficiency} sits beside the accuracy table because
-reporting accuracy without cost yields needlessly expensive agents and
-mistaken conclusions about where accuracy comes
-from~\cite{agents-that-matter}.
-
-\textbf{The cost claim does not survive run~C, and we withdraw it as a general
-statement.} On the two flash-tier models \armC{} is the cheapest arm outright. On
-\texttt{gpt-5.6-sol} it costs \$21.32 against \armM{}'s \$14.42: the contract's
-own text is a real input-token bill, and a model whose output tokens are
-expensive relative to its input tokens amortises that bill differently. Per
-correct answer the ordering nearly closes (\$0.067 against \$0.062) but \armM{}
-still edges it. Run~D sits between: \armS{} is cheaper outright by \$1.17 on
-a \$37.97 bill, and per correct answer \armC{} costs \$0.136 against \$0.259
-for the next arm. On three of four models the contract arm is the cheapest
-way to buy a correct answer; on all four it is the least work. What
-generalises is the work claim, not the price claim.
-
-\subsection{The contract compiles, and the residual gap is derivation}
-\label{sec:derivation}
-
-Every result so far compares arms to each other. None of them says how much of
-the contract's own content an agent recovers, because nothing establishes what
-recovering all of it would look like. We can establish that, because the
-contract is executable in a sense we did not design for.
-
-The frozen artifact carries a \texttt{sql\_expression} field on each declared
-metric. We transcribed those fields into two DuckDB views: the fee-rule match
-predicate, the natural-month reconstruction, the monthly volume and fraud-level
-aggregates, the fee formula, and the instruction to sum over all matched
-(transaction, rule) pairs. The result is a pre-computed fee layer of the kind a
+Every result so far compares arms to each other. None says how much of the
+contract's own content an agent recovers, because nothing establishes what
+recovering all of it would look like. The contract lets us establish that.
+Transcribing its \texttt{sql\_expression} fields into two DuckDB views (the
+fee-rule match predicate, the natural-month reconstruction, the monthly
+volume and fraud-level aggregates, the fee formula, and the sum over matched
+transaction--rule pairs) gives a pre-computed fee layer of the kind a
 context-layer product ships. Nothing in it is authored independently of the
-contract. The only work the transcription adds is \emph{composition}:
-correlating the two placeholders in the month-scoped predicate to a
-per-merchant aggregate.
+contract; the only work the transcription adds is composition.
 
-\textbf{The compiled contract reproduces the benchmark's gold answers exactly
-on every task it covers: 176 of 176, graded by the official scorer.} This is a
-statement about the artifact, not about an agent, and it has two uses.
-
-First, it forecloses an objection we cannot otherwise answer: that \armC{} wins
-because the contract is subtly wrong in a benchmark-favouring way. It is not
-wrong; it compiles to gold.
-
-Second, it converts accuracy into \emph{efficiency against a proven ceiling}.
-Classifying all 401 tasks by question shape alone, never by gold and never by
-any arm's output, gives 176 tasks the compiled contract answers outright
-(all hard), 148 that need those semantics \emph{plus} a counterfactual or an
-optimisation it does not encode, and 77 with no fee semantics at all. The
-38 non-fee hard tasks of Section~\ref{sec:threats} are not all among the 77:
-that split counts questions that name fees, and 30 of the 38 ask for the most
-expensive MCC or ACI at a given amount, which needs the fee rules without
-naming them, so they are \emph{derived} here. A
-pre-computed macro layer \emph{of this kind} therefore reaches 53\% of the hard
-set on this benchmark. We do not offer that as a bound on pre-computation in
-general (Section~\ref{sec:related} reports a hierarchical semantic layer
-reaching 100\% here), only on a layer compiled from a domain contract's
-declared expressions. On the 176 where the information is provably
-sufficient, whatever an agent fails to get is a failure to derive
-(Table~\ref{tab:buckets}).
-
-Two qualifications on the 176 itself. The 97 tasks in the seven payments
-families exercise the full \texttt{payments}-to-\texttt{fees} join that the
-two views encode; the other 79 resolve off \texttt{fees} and
-\texttt{merchant\_category\_codes} alone, using the same wildcard predicates
-transcribed from the same contract fields but not the join. And 59 of those 79,
-the three fee-average families, are exactly the tasks whose golds
-Section~\ref{sec:golds} verified against the database using the same matching
-rule the contract declares. On that subset the compiled contract and the gold
-check share a premise, so it is a consistency check, not an independent one.
-The other 117 are graded against consensus golds we did not recompute, and they
-are what carries the claim.
+\textbf{The compiled contract reproduces the benchmark's gold answers on
+every task it covers: 176 of 176, graded by the official scorer.} This is a
+statement about the artifact, not about an agent, and it has two uses. It
+answers the objection that \armC{} wins because the contract is subtly wrong
+in a benchmark-favouring way: it compiles to gold. And it converts accuracy
+into recovery against a proven ceiling. Classifying all 401 tasks by question
+shape alone, never by gold and never by any arm's output, gives 176 tasks
+the compiled contract answers outright (all hard; the \emph{macro} bucket),
+148 that need those semantics plus a counterfactual or an optimisation it
+does not encode (\emph{derived}), and 77 with no fee semantics at all. A
+layer compiled from a domain contract's declared expressions therefore
+reaches 53\% of this benchmark's hard set, a bound on that kind of layer
+rather than on pre-computation in general (Section~\ref{sec:prior}). On the
+176, whatever an agent fails to get is a failure to derive
+(Table~\ref{tab:buckets}; \appref{app:golds} says which of the 176 share a
+premise with the gold verification).
 
 \begin{table*}[t]
 \centering
@@ -393,7 +197,7 @@ are what carries the claim.
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
-& \multicolumn{2}{c}{\texttt{glm-5.3-flash}} & \multicolumn{2}{c}{\texttt{deepseek-v4-flash}} & \multicolumn{2}{c}{Claude Sonnet~5} & \multicolumn{2}{c}{\texttt{gpt-5.6-sol}} \\
+& \multicolumn{2}{c}{\mGLM{}} & \multicolumn{2}{c}{\mDS{}} & \multicolumn{2}{c}{\mSON{}} & \multicolumn{2}{c}{\mGPT{}} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
 Hard tasks & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} \\
 \midrule
@@ -405,12 +209,11 @@ Hard tasks & \emph{macro} & \emph{derived} & \emph{macro} & \emph{derived} & \em
 \emph{compiled contract} & \emph{100\%} & --- & \emph{100\%} & --- & \emph{100\%} & --- & \emph{100\%} & --- \\
 \bottomrule
 \end{tabular}
-\caption{Arms split by whether the compiled contract answers the task outright
-(\emph{macro}, $n{=}176$; 118 on run~B's complete-case set) or requires
-reasoning on top of it (\emph{derived}, $n{=}148$; 101). Models are in order
-of bare-schema capability, which puts Sonnet~5 before \texttt{gpt-5.6-sol};
-the run-ordered tables above put them the other way round. The gap between \armC{} and the compiled contract
-on \emph{macro} is derivation failure on information the agent provably had.}
+\caption{Hard tasks split by whether the compiled contract answers the task
+outright (\emph{macro}, $n{=}176$; 118 on \mDS{}'s complete-case set) or
+requires reasoning on top of it (\emph{derived}, $n{=}148$; 101). The gap
+between \armC{} and the compiled contract on \emph{macro} is derivation
+failure on information the agent provably had.}
 \label{tab:buckets}
 \end{table*}
 
@@ -418,104 +221,60 @@ Three readings follow.
 
 \textbf{The contract's advantage concentrates where its semantics apply
 directly.} Over \armS{} it is $+58.0$, $+54.2$, $+67.1$ and $+63.1$ points on
-\emph{macro} against $+20.9$, $+11.8$, $+22.3$ and $+14.9$ on \emph{derived}. This is
-the same domain-specificity as the fee/non-fee split
-(Section~\ref{sec:threats}), measured on a cleaner boundary.
+\emph{macro} against $+20.9$, $+11.8$, $+22.3$ and $+14.9$ on \emph{derived}.
+This is the domain-specificity of Section~\ref{sec:domain}, measured on a
+cleaner boundary.
 
-\textbf{The two buckets do not move together.} In order of bare-schema
-capability \armC{} scores 60.8\%, 62.7\%, 73.9\% and \textbf{94.9\%} on
-\emph{macro} against 45.9\%, 46.5\%, \textbf{60.1\%} and 56.1\% on
-\emph{derived}. The \emph{macro} series rises with that ordering, with one
-caveat: runs~B and~D are 0.3 points apart on the axis and 11 apart on
-\emph{macro}, so the axis does not order them. The \emph{derived} series rises
-under no ordering: Sonnet~5 leads it while trailing \texttt{gpt-5.6-sol}
-by 21 points on \emph{macro}. An earlier version of this paper, written
-against three models, said that nearly all of \texttt{gpt-5.6-sol}'s gain
-lands on the \emph{macro} tasks. Sonnet~5's gain over
-\texttt{deepseek-v4-flash} is $+11.2$ on \emph{macro} and $+13.6$ on
-\emph{derived}, so that was a description of one model. What survives four is
-narrower: the \emph{macro} gap is smaller on both frontier-class models, and
-the \emph{derived} bucket does not track it.
+\textbf{The two buckets do not move together.} \armC{} scores 60.8\%, 62.7\%,
+73.9\% and 94.9\% on \emph{macro}, rising with capability (with one caveat:
+\mDS{} and \mSON{} are 0.3 points apart on the capability axis and 11 apart
+here), against 45.9\%, 46.5\%, 60.1\% and 56.1\% on \emph{derived}, which
+rises under no ordering: \mSON{} leads it while trailing \mGPT{} by 21
+points on \emph{macro}.
 
-Read against the compiled ceiling, the \emph{macro} series is a shortfall of
-39.2, 37.3, 26.1 and 5.1 points below an accuracy we have proven reachable: the
-\emph{derivation gap}, the price of making an agent derive a query the
-contract could have pre-computed. That framing is worth stating carefully,
-because against a ceiling of 100\% the gap is arithmetically the arm's error
-rate, and ``errors fall as models improve'' is not a finding. The finding is
-the contrast with \emph{derived}: between the flash models and the strongest
-one, the same capability increment closes 87\% of the macro-bucket gap and
-19\% of the derived-bucket one (the latter against 100\%, not a proven ceiling
-there), and the fourth model's \emph{macro} score falls between the flash
-models and run~C while its \emph{derived} score exceeds all three. On two models the
-macro gap looked like a fixed ${\approx}38$-point tax, model-invariant to
-within two points. It is not a tax. We recorded this prediction in the public
-artifact repository before run~C executed, stating that the capability reading
-predicted ``well above 62.7\%, moving toward 100\%'' and the harness reading
-predicted ``near 61--63\% like the other two''. The observed value is 94.9\%.
-Run~D, executed after this section was written, was not covered by that
-prediction; it lands at 73.9\%, above the harness reading's 61--63\% and below
-run~C. The direction of the collapse replicated on a fourth model family; its
-size did not.
+\textbf{The derivation gap closes with capability.} Read against the
+ceiling, the \emph{macro} series is a shortfall of 39.2, 37.3, 26.1 and 5.1
+points below an accuracy proven reachable: the \emph{derivation gap}, the
+price of making an agent derive a query the contract could have
+pre-computed. Against a ceiling of 100\% the gap is arithmetically the arm's
+error rate, and ``errors fall as models improve'' is not a finding. The
+finding is the contrast with \emph{derived}, whose shortfall we call the
+\emph{composition gap}: between the flash models and the strongest one, the same capability increment closes 87\% of the
+macro-bucket gap and 19\% of the derived-bucket one, and \mSON{}'s
+\emph{macro} score falls between the flash models and \mGPT{} while its
+\emph{derived} score exceeds all three. We recorded the direction of this
+result publicly before \mGPT{} ran, predicting a \emph{macro} score ``well
+above 62.7\%, moving toward 100\%'' if capability governed it and ``near
+61--63\%'' if the harness did; the observed value is 94.9\%. \mSON{}, run
+later and outside the prediction, lands at 73.9\%: the direction replicated,
+the size did not.
 
-This bears directly on the economics in Section~\ref{sec:intro}. The derivation
-gap is exactly what separates a declarative contract, which requires the agent
-to derive the query, from pre-computed macros, which do not. A gap fixed at 38
-points would be a standing structural cost of the declarative approach. A gap
-that falls to 5 points on the strongest model is a \emph{transient} cost, one the
-trend in model capability is already paying down, while the per-metric
-authoring cost of a macro layer is paid down by nothing.
+This bears on the economics of Section~\ref{sec:intro}. The derivation gap
+is exactly what separates a declarative contract, which requires the agent
+to derive the query, from pre-computed macros, which do not. A gap fixed
+near 38 points would be a standing structural cost of the declarative
+approach. A gap that falls to 5 points on the strongest model is a
+\emph{transient} cost, one the trend in model capability is already paying
+down, while the per-metric authoring cost of a macro layer is paid down by
+nothing. What survives the strongest model is not difficulty in knowing the
+domain but the counterfactual and optimisation reasoning built on top of it,
+on which the four models have no clean ordering.
 
-What survives the strongest model, then, is not difficulty in knowing the
-domain. It is the counterfactual and optimisation reasoning built on top of
-it, on which the four models have no clean ordering.
+\subsection{The gain stays inside the contract's domain}
+\label{sec:domain}
 
-\subsection{The margin over a prompt is not monotone in capability}
-\label{sec:interaction}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig-interaction.pdf}
-\caption{Hard accuracy against base-model capability, where capability is the
-bare-schema arm's own accuracy. The margin over \armM{} is $+32.2$, $+13.7$,
-$+44.6$ and $+27.1$: not monotone. \textbf{The apparent convergence between
-the first two models did not survive the third, and the fourth reverses it
-outright.}}
-\label{fig:interaction}
-\end{figure}
-
-\begin{table*}[t]
-\centering
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Hard tasks & \armS{} & \armM{} & \armC{} & \armC{}${-}$\armM{} \\
-\midrule
-\texttt{glm-5.3-flash}     & 13.9\% & 22.9\% & 55.1\% & $+32.2$ \\
-\texttt{deepseek-v4-flash} & 22.6\% & 42.9\% & 56.6\% & $+13.7$ \\
-Claude Sonnet~5            & 22.9\% & 23.8\% & 68.4\% & $+44.6$ \\
-\texttt{gpt-5.6-sol}       & 37.0\% & 50.3\% & 77.4\% & $+27.1$ \\
-\bottomrule
-\end{tabular}
-\caption{Hard accuracy and the contract's margin over a hand-written prompt,
-in order of bare-schema capability.}
-\label{tab:interaction}
-\end{table*}
-
-Ordered by what each model achieves from a bare schema
-(Figure~\ref{fig:interaction} and Table~\ref{tab:interaction}), the contract's
-margin over \armM{} runs $+32.2$, $+13.7$, $+44.6$ and $+27.1$. With two models this
-looked like a clean interaction: \armM{} improved by 20.0 points while
-\armC{} moved 1.5, and the lines converged. Two readings were available.
-Structured context might substitute for capability, so that a stronger model
-extracts the same semantics from prose unaided and the margin keeps shrinking;
-or \armC{} might have been pinned near a benchmark ceiling at ${\approx}56\%$
-while \armM{} rose to meet it. Run~C reached \textbf{77.4\%}, so there is no
-ceiling at 56\%, and its $+27.1$ refutes the shrinking margin; run~D's
-$+44.6$ is the largest of the four, on a model whose bare-schema score ties
-run~B's. Whatever governs the size of the contract's advantage over a
-hand-written prompt, it is not a monotone function of base capability, and
-four points cannot support a third story. Run~D adds one thing to that: the
-bare-schema score is a poor proxy for what a model does with structure.
-Sonnet~5 and \texttt{deepseek-v4-flash} are 0.3 points apart on it and 11.8
-points apart with the contract.
+DABStep's hard set is dominated by one question family: 294 of 332 hard
+tasks concern fees, and the contract encodes fee semantics. On those 294 the
+contract arm scores 59.2\%, 61.2\%, 73.5\% and 83.7\% against the manual
+arm's 24.5\%, 44.9\%, 24.1\% and 53.4\%. On the 38, 30, 38 and 38 hard tasks
+that do not concern fees it holds no detectable advantage (9 against 4, 8
+against 9, 11 against 8 and 11 against 10 correct), and on \mGPT{} the bare
+schema leads the slice outright at 14, the only slice in the four runs where
+it does (\appref{app:domain}). Thirty of the 38 are one family, which needs
+the fee rules without naming them and scores 0 to 3 of 30 for every arm on
+three of the four models. The slices are too small to be a negative result
+and equally unable to support a general claim. ``Hard accuracy'' on this
+benchmark is close to ``fee-question accuracy'', so the result should be
+stated as: \textbf{a contract carrying a domain's semantics produces a large
+gain on questions in that domain.} That is what a domain contract should do,
+and it is why this benchmark cannot answer the general question.

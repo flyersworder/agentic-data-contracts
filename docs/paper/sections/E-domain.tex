@@ -1,0 +1,37 @@
+\section{Accuracy Inside and Outside the Contract's Domain}
+\label{app:domain}
+
+Table~\ref{tab:feebucket} is the split behind Section~\ref{sec:domain}.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\tabhead{Model} & \tabhead{Bucket} & \armS{} & \armH{} & \armM{} & \armC{} \\
+\midrule
+\mGLM{} & fee (294)     & 13.9\% & 18.7\% & 24.5\% & \textbf{59.2\%} \\
+\mGLM{} & non-fee (38)  & 5 & 9 & 4 & 9 \\
+\mDS{} & fee (196)     & 23.0\% & 22.4\% & 44.9\% & \textbf{61.2\%} \\
+\mDS{} & non-fee (30)  & 6 & 7 & \textbf{9} & 8 \\
+\mSON{} & fee (294)     & 22.4\% & 40.1\% & 24.1\% & \textbf{73.5\%} \\
+\mSON{} & non-fee (38)  & 10 & 8 & 8 & \textbf{11} \\
+\mGPT{} & fee (294)     & 37.1\% & 53.4\% & 53.4\% & \textbf{83.7\%} \\
+\mGPT{} & non-fee (38)  & \textbf{14} & 13 & 10 & 11 \\
+\bottomrule
+\end{tabular}
+\caption{Hard-task accuracy split by whether the question concerns the
+domain the contract describes. Non-fee cells are counts, not rates.}
+\label{tab:feebucket}
+\end{table}
+
+Thirty of the 38 non-fee tasks are one family (\emph{most expensive MCC}, or
+\emph{ACI}, \emph{for a transaction of $N$ euros}; 10 and 20 tasks), which
+needs the fee rules without naming fees and so counts as \emph{derived} in
+Section~\ref{sec:ceiling}. It scores 0--3 of 30 for \emph{every} arm on
+\mGLM{}, \mDS{} and \mSON{}. \mGPT{} partially solves it (\armS{} 8, \armH{}
+5, \armC{} 4, \armM{} 2 of 30), and that is where the bare baseline's lead on
+the non-fee slice comes from. The 38 non-fee hard tasks are not all among
+the 77 tasks with no fee semantics in Section~\ref{sec:ceiling}: this split
+counts questions that name fees, that one counts questions that need them.

@@ -739,7 +739,7 @@ Run B — deepseek, the 279 complete tasks:
 | turns / row | 13.7 | 12.8 | 11.4 | **8.2** |
 | tool calls | 5,489 | 4,770 | **6,375** | **4,155** |
 | reasoning tokens / row | 10,941 | 9,243 | 10,765 | **4,844** |
-| forced answers (all 401) | 55 | 42 | 15 | **0** |
+| forced answers (all 401; complete-case) | 55; 49 | 42; 38 | 15; 15 | **0** |
 
 Run C — sol, all 401 tasks:
 
@@ -1877,8 +1877,9 @@ right. The ordering is reported because the correction below depends on it,
 not because this document can explain it.
 
 **A lower exposure rate is not a smaller correction.** The contract arm has
-far more correct answers to lose, so on three of four runs it gives up the
-most *points*. Applying the 0.576 conversion:
+far more correct answers to lose, so on two of four runs (A and C) it gives
+up the most *points*; on B and D `manual_prompt` does. Applying the 0.576
+conversion:
 
 | arm | A raw → corr. | B raw → corr. | C raw → corr. | D raw → corr. |
 |---|---:|---:|---:|---:|

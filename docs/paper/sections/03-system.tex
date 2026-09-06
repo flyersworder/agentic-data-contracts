@@ -1,0 +1,138 @@
+\section{The System Under Test}
+\label{sec:system}
+
+\texttt{agentic-data-contracts} is an open-source Python library that loads a
+data contract and exposes a warehouse to an agent through nine governed
+tools. The library is the instrument, not the contribution, and the
+experiment is designed so that its identity does not matter: the hollow arm
+runs the identical library, tools and rules with the prose removed.
+
+\subsection{The contract}
+\label{sec:contract}
+
+The contract is two YAML files, 60{,}181 characters together.
+\texttt{contract.yml} declares the five tables the agent may read, the eleven
+operations it may not issue (\texttt{DELETE}, \texttt{DROP},
+\texttt{UPDATE}, \texttt{INSERT}, \texttt{CREATE}, \texttt{ALTER} and five
+more), and eight domains, each with a one-line summary and a prose
+description; the \texttt{fees} description restates the manual's account of
+every column of the fee-rule table. \texttt{semantic.yml} declares 14
+metrics, each with a description and an executable
+\texttt{sql\_expression}, the five tables with a description per column, and
+one relationship. Figure~\ref{fig:contract} shows one metric as it appears in
+the contract and in its hollow counterpart. Seven metric descriptions carry a
+sentence beginning \texttt{INTERPRETATION}, marking where the contract
+commits to a reading the manual does not force; Section~\ref{sec:threats}
+returns to them.
+
+The same file supplies both the semantics the agent reads and the rules the
+tool layer enforces. The agent reads the first through
+\texttt{lookup\_domain} and \texttt{lookup\_metric}; the tool layer checks
+every statement against the second before it reaches the database.
+
+\begin{figure*}[t]
+\begin{minipage}[t]{0.63\textwidth}
+\begin{lstlisting}
+- name: fee_rule_matches_transaction
+  description: >
+    True when fee rule `f` applies to transaction `p` of merchant `m`, on
+    every field that a single transaction can decide. The manual's rule is
+    that "if a field is set to null it means that it applies to all possible
+    values of that field", so each clause below is satisfied either by the
+    field being null or by the field agreeing with the transaction. [...]
+    INTERPRETATION: the list-typed fields (account_type, aci,
+    merchant_category_code) are never null in the annexed `fees` data --
+    they express "applies to all values" as an empty list -- so each clause
+    accepts an empty list as the wildcard the manual describes.
+  sql_expression: >
+    (f.card_scheme IS NULL OR f.card_scheme = p.card_scheme)
+    AND (f.is_credit IS NULL OR f.is_credit = p.is_credit)
+    AND (f.aci IS NULL OR len(f.aci) = 0 OR list_contains(f.aci, p.aci))
+    AND (f.intracountry IS NULL
+         OR (f.intracountry = 1) = (p.issuing_country = p.acquirer_country))
+    [... three more clauses: account_type, merchant_category_code,
+     capture_delay mapped from days to the manual's bands]
+  source_model: main.fees
+  domains: [fees]
+\end{lstlisting}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.35\textwidth}
+\begin{lstlisting}
+- name: fee_rule_matches_transaction
+  description: No definition is
+    available for this metric.
+  sql_expression: ''
+  source_model: main.fees
+  domains:
+  - fees
+\end{lstlisting}
+\vspace{2pt}
+{\small The same metric in the hollow contract. Name, source table and
+domain membership survive; the description and the SQL expression do not.
+Domain prose and column descriptions are emptied the same way.}
+\end{minipage}
+\caption{One of the 14 metrics of the frozen contract (left, abridged) and
+its hollow counterpart (right). The contract arm can fetch the left with one
+\texttt{lookup\_metric} call; the hollow arm fetches the right.}
+\label{fig:contract}
+\end{figure*}
+
+\subsection{Nine tools and two-layer validation}
+\label{sec:tools}
+
+{\sloppy The tools fall into three groups. Four discover structure:
+\texttt{describe\_table}, \texttt{preview\_table},
+\texttt{lookup\_relationships} and \texttt{list\_metrics}. Three deliver
+semantics: \texttt{lookup\_domain} returns a domain's prose,
+\texttt{lookup\_metric} a metric's description and SQL expression, and
+\texttt{trace\_metric\_impacts} the metrics that depend on a table. Two
+handle queries: \texttt{inspect\_query} validates a statement and returns
+either a pass or a reason, and \texttt{run\_query} validates and executes
+it. Validation is two-layer. Every statement is parsed with
+sqlglot~\cite{sqlglot} and checked statically against the table allow-list
+and the forbidden operations; where a database adapter is available, a dry
+run follows. A rejected statement returns its reason to the model rather
+than an error to the user. The tool descriptions themselves carry 3{,}042
+characters of procedural text (\texttt{inspect\_query} tells the model to
+call \texttt{lookup\_metric} first), and that text is part of what the
+hollow arm holds fixed.\par}
+
+\subsection{The hollow contract}
+\label{sec:hollow}
+
+The hollow contract is generated from the frozen contract by a script, not
+written by hand, so the only difference between the two artifacts is the one
+the generator makes, and it is auditable as a diff. Emptied: domain summaries
+and descriptions, metric descriptions, every \texttt{sql\_expression}
+(the fee formula lives there), and all column and relationship descriptions.
+Retained byte-for-byte: every name, every type, the structure, the table
+allow-list, the forbidden operations and the identical nine-tool surface. An
+agent that calls \texttt{lookup\_domain} against it is told \emph{``No
+documentation is available for this domain.''}
+
+The control is verified in both directions. The test suite asserts that no
+6-gram of \texttt{manual.md} survives into the hollow contract, and that the
+real contract does share 6-grams with it; the second half is what makes the
+first meaningful. The transcripts confirm that the retrieval loop ran: on
+\mGLM{} the hollow arm called \texttt{lookup\_domain} on 272 of 401 tasks and
+received the placeholder 282 times. Prompt length is deliberately not held
+constant (1{,}984 characters against the contract arm's 2{,}475): padding the
+hollow arm with text that reads as content but carries none would be a
+different treatment, not a cleaner control. The variable under test is
+knowledge, not tokens.
+
+\subsection{Provenance and freeze}
+\label{sec:freeze}
+
+The most obvious way to fake this result is to write a contract that answers
+the benchmark. The contract's header records that every fact in it came from
+\texttt{manual.md} and the dataset README and nothing else, which a reader
+can verify by reading the 60{,}181-character contract against the
+22{,}127-character manual. The artifact is content-hashed
+(\texttt{sha256:e438ecf7\ldots}), was frozen roughly 35 commits before the
+first run, and every result row records its digest, so a post-hoc edit would
+invalidate every row.\footnote{On three of the four models the hollow arm's
+rows carry the real contract's hash rather than the hollow artifact's, a
+stamping defect that changes no result (\appref{app:harness}).} What cannot be verified from outside is that
+no benchmark question was read while the contract was authored. We claim
+provenance; we cannot prove intent.

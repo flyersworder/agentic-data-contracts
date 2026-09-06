@@ -23,3 +23,11 @@ docs/paper/main.pdf
 
 # Browser-automation scratch (Playwright MCP writes snapshots/console logs here)
 .playwright-mcp/
+
+# PVLDB submission build (docs/paper/pvldb.tex)
+docs/paper/pvldb.pdf
+docs/paper/pvldb.aux
+docs/paper/pvldb.log
+docs/paper/pvldb.out
+docs/paper/pvldb.bbl
+docs/paper/pvldb.blg

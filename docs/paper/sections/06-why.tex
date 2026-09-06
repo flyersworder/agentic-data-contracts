@@ -1,0 +1,228 @@
+\section{Why the Contract Arm Wins}
+\label{sec:why}
+
+Aggregate accuracy does not explain itself. This section traces one task end
+to end, reads the SQL every arm submitted, and accounts for the work and
+money each arm spent.
+
+\subsection{The rule was in both prompts; only one arm reached it}
+\label{sec:reach}
+
+Task~1278 asks for \emph{the average fee NexPay would charge for a credit
+transaction of 50 EUR}.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lr@{}}
+\toprule
+Gold      & \texttt{0.352294} \\
+\armC{} (correct)  & \texttt{0.352294} \\
+\armM{} (wrong)    & \texttt{0.353053} \\
+\armS{} (wrong)    & \texttt{0.353053} \\
+\midrule
+\texttt{is\_credit IS NULL OR is\_credit = true} & \texttt{0.352294} \\
+\texttt{is\_credit = true} & \texttt{0.353053} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both figures reproduce against the warehouse with the two predicates
+shown. A \texttt{NULL} in a \texttt{fees} column means \emph{this rule
+applies to every value}, not \emph{unknown}; both baselines dropped the
+\texttt{NULL} rows and produced the identical wrong number. The contract arm called
+\texttt{lookup\_domain("fees")}, and its recorded reasoning states the rule
+back: \emph{``rules that apply to credit transactions: is\_credit true or
+null''}.
+
+The decisive detail is that \texttt{manual.md} documents this rule too.
+\armM{} had it, inside a 24{,}177-character system prompt. \armC{}'s system
+prompt is 2{,}475 characters, with the rule reachable by one targeted call.
+Two published results frame the difference: retrieval quality falls for
+material buried mid-prompt~\cite{lost-in-the-middle}, and what a tool's
+documentation says changes what an agent does with
+it~\cite{tool-documentation}. \armM{}'s copy of the rule was buried
+mid-prompt; \armC{}'s was a tool's documentation.
+
+The finding is not that the contract arm was given more information. For
+\emph{this} rule both arms had it, and only one used it. What the contract
+changes is not what is knowable but what is reachable at the moment of use.
+That scoping matters: it holds for the clauses the manual states outright,
+which is the class this failure belongs to, and not for the three clauses
+the contract resolves on its own (Section~\ref{sec:threats}).
+
+\subsection{The contract's clauses reach the SQL}
+\label{sec:clauses}
+
+The claim that delivery matters as much as possession can be observed
+directly, by reading the SQL each agent submitted rather than the answer it
+produced. We defined one detector per clause of the contract's fee semantics
+that a correct query must express: the \texttt{NULL}-wildcard disjunct, the
+empty-list wildcard, the capture-delay band mapping, a per-merchant monthly
+aggregate, the natural-month reconstruction, and fraud measured on euro
+volume. We then restricted the comparison to the 97 tasks that require all
+six (69 on \mDS{}, whose truncation cost the rest), so every row compared
+carries the same requirement (Table~\ref{tab:clauses}). The detectors are
+deliberately permissive: the question is whether the agent expressed the
+idea, not whether it copied the contract's phrasing.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\tabhead{Wrote all six clauses} & \mGLM{} & \mDS{} & \mSON{} & \mGPT{} \\
+\midrule
+\armS{} & 7\% & 4\% & 3\% & 8\% \\
+\armH{} & 14\% & 4\% & 4\% & 8\% \\
+\armM{} & 3\% & 9\% & 4\% & 4\% \\
+\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{55\%} & \textbf{98\%} \\
+\bottomrule
+\end{tabular}
+\caption{Share of the 97 tasks requiring all six fee clauses (69 on \mDS{})
+on which the agent's submitted SQL expresses all six. \armM{} holds the same
+knowledge as prose in its system prompt. \armC{} against \armM{} is
+$p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$, $9{\times}10^{-16}$ and
+$2{\times}10^{-47}$ (Fisher exact).}
+\label{tab:clauses}
+\end{table}
+
+\textbf{Note what does not move.} \armM{} writes no more of the contract's
+clauses on a strong model than on a weak one (3\%, 9\%, 4\%, 4\%), while
+\armC{} reaches 55\% and 98\% on the two frontier models. \mSON{} is the
+extreme case: 4\% against 55\% in the SQL, no better than a bare schema
+against 45 points above it in accuracy. Capability does not, on its own,
+make a model extract structure from prose; it makes a model much better at
+\emph{using} structure it is handed. That is the same asymmetry the
+derivation gap shows (Section~\ref{sec:ceiling}), measured on behaviour
+instead of outcomes.
+
+\textbf{What this does not measure.} Clause presence does not predict
+success: within every arm on every model, attempts that got the task right
+and attempts that got it wrong write the same clauses (every Fisher
+$p{\ge}0.14$), and \armH{} on \mGLM{} writes more clauses than \armM{} while
+scoring at the bare-schema floor. The measure captures whether the
+contract's vocabulary reaches the query, not whether the query is any good.
+
+\subsection{Less work, and usually less money}
+\label{sec:efficiency}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & \armS{} & \armH{} & \armM{} & \armC{} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{\mGLM{}}}\\
+Turns / task & 12.1 & 8.4 & 9.8 & \textbf{7.1} \\
+Tool calls & 5{,}134 & 4{,}110 & 4{,}282 & \textbf{3{,}355} \\
+Reasoning tokens & 428k & 525k & 400k & \textbf{154k} \\
+Cost / correct & \$0.0084 & \$0.0080 & \$0.0076 & \textbf{\$0.0029} \\
+Forced answers & 41 & 0 & 18 & \textbf{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{\mDS{}}}\\
+Turns / task & 13.7 & 11.4 & 12.8 & \textbf{8.2} \\
+Tool calls & 5{,}489 & 6{,}375 & 4{,}770 & \textbf{4{,}155} \\
+Reasoning / task & 10{,}941 & 10{,}766 & 9{,}243 & \textbf{4{,}844} \\
+Cost / correct & \$0.0195 & \$0.0173 & \$0.0117 & \textbf{\$0.0061} \\
+Forced answers & 49 & 15 & 38 & \textbf{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{\mSON{}}}\\
+Turns / task & 11.3 & 10.0 & 11.1 & \textbf{7.0} \\
+Tool calls & 5{,}644 & 6{,}494 & 5{,}176 & \textbf{3{,}791} \\
+Reasoning tokens & 942k & 1{,}411k & 1{,}044k & \textbf{824k} \\
+Cost / correct & \$0.288 & \$0.259 & \$0.311 & \textbf{\$0.136} \\
+Forced answers & 43 & 27 & 32 & \textbf{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{\mGPT{}}}\\
+Turns / task & 7.9 & 10.4 & 7.6 & \textbf{6.5} \\
+Tool calls & 5{,}099 & 7{,}997 & \textbf{4{,}354} & 5{,}245 \\
+Reasoning tokens & 357k & 311k & 277k & \textbf{141k} \\
+Cost / correct & \$0.082 & \$0.099 & \textbf{\$0.062} & \$0.067 \\
+Forced answers & 0 & 8 & 0 & \textbf{0} \\
+\bottomrule
+\end{tabular}
+\caption{Work and cost per arm. The contract arm uses the fewest turns and
+the least reasoning on every model and never exhausts its output budget; it
+is the cheapest arm per correct answer on three of the four. \mDS{}'s
+reasoning row is per task rather than a total, because its complete-case set
+has fewer rows than the other runs.}
+\label{tab:efficiency}
+\end{table*}
+
+\armC{} is not thinking harder; it has less to search for. On all four
+models it uses the fewest turns and the least reasoning (by a factor of two
+to three on three models, by 12\% on \mSON{}), and it is the only arm that
+never exhausted its output budget on any model (Table~\ref{tab:efficiency};
+on reporting cost beside accuracy, see~\cite{agents-that-matter}).
+
+Money follows work on three models and not on the fourth. \armC{} is the
+cheapest arm outright on both flash models, and per correct answer it is the
+cheapest on \mGLM{}, \mDS{} and \mSON{}, by about $2{\times}$ on \mSON{}
+(\$0.136 against \$0.259 for the next arm). On \mGPT{} it bills \$21.32
+against \armM{}'s \$14.42, and \$0.067 per correct answer against \$0.062.
+The recorded token counts locate the difference (Table~\ref{tab:gptcost}):
+fresh, uncached input accounts for \$5.3 of the \$6.9 gap and output for
+\$1.6, and cached input is a wash. \armC{} reads 1{,}692 fresh tokens per
+turn against \armM{}'s 582, because its knowledge arrives as tool results.
+On \mGPT{} it calls \texttt{lookup\_metric} 1{,}690 times and
+\texttt{lookup\_domain} 776 times over 401 tasks, two tool calls per turn,
+and each result is billed at the fresh rate when it first enters the
+context. \armM{}'s knowledge sits in a system prompt that is the same prefix
+in every request of every task, and is billed at the cached rate. \armC{}
+also emits more visible output (726k tokens against 425k) despite half the
+reasoning (141k against 277k), because \mGPT{} validates before it runs: 676
+\texttt{inspect\_query} calls against 622 \texttt{run\_query}, so most
+queries are written twice. \mSON{} shows the same mechanism (1{,}976 against
+1{,}037 fresh tokens per turn), but its \armM{} arm carries 191k tokens of
+context per task and pays \$14.40 in cached input alone, which is what makes
+the contract arm cheaper there.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\mGPT{} & \tabhead{Fresh input} & \tabhead{Cached input} & \tabhead{Output} & \tabhead{Total} \\
+\midrule
+\armM{} & \$3.55 & \$3.85 & \$7.02 & \$14.42 \\
+\armC{} & \$8.87 & \$3.78 & \$8.67 & \$21.32 \\
+\bottomrule
+\end{tabular}
+\caption{\mGPT{}'s bill for the two content-bearing arms, decomposed from the
+recorded token counts at the pinned endpoint's prices: \$2.00 per million
+fresh input tokens, \$0.20 cached, \$10.00 output (reasoning included).}
+\label{tab:gptcost}
+\end{table}
+
+The general statement is about prices, not about the contract: at a
+ten-to-one ratio between fresh and cached input, on-demand delivery is
+charged per task and a static prompt once per cache window, and whether the
+contract's savings in turns and reasoning cover the difference depends on
+how often the model looks things up and how long its conversations run.
+What generalises across the four models is the work claim, not the price
+claim.
+
+\subsection{Where the contract arm fails}
+\label{sec:losses}
+
+On \mGLM{} \armC{} loses 14 tasks to \armS{} and 29 to \armM{}, 10 to both,
+and two modes account for nearly all of them: set membership under
+\texttt{NULL} wildcards, the rule of Section~\ref{sec:reach} failing in the
+other direction (on task~1500, \emph{fee IDs that apply to account\_type = O
+and aci = C}, \armC{} returns both false positives and false negatives while
+\armM{} matches exactly), and near-miss arithmetic (task~1274: gold
+\texttt{0.126459}, \armC{} \texttt{0.125516}). These are not retrieval
+failures. \texttt{lookup\_domain} is called on 331 of 401 tasks, the 70 that
+skip it are easier for every arm, and 26 of the 33 losses occur on tasks
+where the lookup was performed; \mSON{} repeats the pattern: of the 42 tasks it
+loses to at least one other arm, 35 had the lookup. The agent fetches the rule and misapplies it.
+That points away from hoisting rule bodies into the system prompt, since
+the rules were already fetched, and toward making the wildcard semantics
+executable: a
+five-line DuckDB macro encoding the rule the contract states in prose
+answers tasks~1500 and~1502 exactly. Section~\ref{sec:conclusion} says why
+that tool was not built before this measurement.

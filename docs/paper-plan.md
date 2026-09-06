@@ -227,7 +227,14 @@ the rest are writing.
 
 ## PVLDB timing and what remains (2026-09-05)
 
-The arXiv preprint is ready on `main` as of #104 and the
+**Submitted to arXiv on 2026-09-06** from `main` at a75e249 (cs.DB, cross-list
+cs.AI). **Action item, open:** when the id is assigned, fill it into the
+`extended` entry in `docs/paper/refs.bib` (it currently reads "arXiv preprint"
+with no id), rebuild with `make check`, and commit. The PVLDB build cites
+that entry wherever an appendix is referenced, so the citation must resolve
+before the PVLDB submission.
+
+The preprint was prepared on `main` as of #104 and the
 `dabstep-eval-2026-09` release. PVLDB Volume 20 (VLDB 2027, Athens) takes
 submissions on a rolling monthly cycle, verified from
 [vldb.org/2027/submission-guidelines.html](https://www.vldb.org/2027/submission-guidelines.html):

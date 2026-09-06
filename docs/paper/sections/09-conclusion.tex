@@ -1,64 +1,41 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-Context layers work. The open question was which part of one does the work,
-and it matters because the parts cost different amounts: semantic prose is
-written once per domain and often exists already, retrieval scaffolding is
-engineering paid once, and pre-computed macros are paid per metric forever.
+Context layers work; the open question was which part of one does the
+work, and it matters because the parts cost different amounts. Holding the
+tool surface, the retrieval instruction, the table allow-list and the
+operation rules byte-for-byte fixed and emptying only the prose,
+\textbf{the content step dominates the scaffolding step on every model}, by
+$1.8{\times}$ to $6.6{\times}$. The contract beats the same knowledge
+pasted into a prompt because its rule is one lookup away at the moment of
+use, visibly so in the SQL it submits, and it does so with the fewest turns
+and the least reasoning on every model and at the lowest cost per correct
+answer on three of four. Because the contract compiles to a layer that
+reproduces gold, each arm's accuracy is a recovery rate: the contract arm
+recovers 60.8\%, 62.7\%, 73.9\% and 94.9\% of what it was handed, in order
+of capability, so \textbf{the cost of making an agent derive rather than
+call a macro is transient}, while the composition gap above it does not yet
+track capability. Declared rules the model merely reads stopped every
+mutating statement, 166 to zero, without the enforcement layer behind them
+ever firing.
 
-Holding the tool surface, the retrieval instruction, the table allow-list
-and the operation rules byte-for-byte fixed and emptying only the prose,
-\textbf{the content step dominates the scaffolding step on every model}: by
-$6.6{\times}$ on the weakest model, entirely on the one where scaffolding
-does nothing at all, and by $2.0{\times}$ and $1.8{\times}$ on the two
-frontier models.
-The contract beats the same knowledge in a prompt because its rule is
-reachable at the moment of use, visibly so in the SQL it submits, where it
-writes all six fee clauses up to 98\% of the time against the prompt arm's
-4\%; on one model the prompt is indistinguishable from a bare schema on hard
-tasks while the contract is 45 points above both. It does so with the fewest
-turns and the least reasoning on every model, and at the lowest cost per
-correct answer on three of four. On the fourth, a ten-to-one price ratio
-between fresh and cached input tokens charges on-demand delivery more than
-it charges a cached prompt.
-
-Because the contract's declared expressions compile to a layer that
-reproduces gold exactly, each arm's accuracy is a recovery rate against a
-proven ceiling. The contract arm recovers 60.8\%, 62.7\%, 73.9\% and 94.9\%
-of what it was handed, in order of capability: \textbf{the cost of requiring
-an agent to derive, rather than handing it a pre-computed macro, is
-transient}, and already small on the strongest model we ran. The composition
-gap above it does not track capability.
-
-The same transcripts carry a narrower result. Declared rules that the model
-merely reads stopped every mutating statement it would otherwise have
-submitted, 166 to zero on the three models that attempted a write, one of
-them frontier-class, while the enforcement layer behind those rules never
-had to fire.
-
-Three limits bound all of this. The gain appears only inside the domain the
-contract describes. The benchmark is a single and concentrated one. And none
-of the four runs repeats: the one near-replicate flips 23.4\% of per-task
-verdicts at temperature 0, which leaves the aggregate comparisons standing
-and no individual verdict reproducible.
+Three limits bound all of this: the gain appears only inside the domain the
+contract describes, the benchmark is a single and concentrated one, and no
+run repeats, so the aggregate comparisons stand and no individual verdict
+is reproducible.
 
 \paragraph{Future work,} in order of what it would settle. Repeat runs on
-the two models whose temperature can be pinned would put a variance estimate
-under every number here. A fifth arm, the contract with its seven
+the two models whose temperature can be pinned would put a variance
+estimate under every number here. A fifth arm, the contract with its seven
 interpretation clauses stripped, would separate delivery of what the manual
-states from resolution of what it leaves open. A fifth model would say
-whether the derivation gap's size is a function of anything the bare-schema
-arm measures. And an executable metric layer, a tool that runs a declared
-expression rather than describing it, would separate the declarative
-contribution from the executable one the way this paper separates content
-from scaffolding. It was deliberately not built before this measurement,
-because it would be designed from knowledge of which tasks the contract arm
-lost, and that would spend the strongest methodological asset here: an
-artifact frozen before any question was read. MotherDuck's later experiment,
-in which a generated Malloy semantic layer scored 95\% against 100\% for
-Markdown plus SQL while costing $2.5{\times}$ the
-tokens~\cite{motherduck-ai-writes}, is a with/without comparison on that
-component, and it lands where our ablation does. The order is measure, ship, re-measure; this paper is the baseline.
+states from resolution of what it leaves open. And an executable metric
+layer, a tool that runs a declared expression rather than describing it,
+would separate the declarative contribution from the executable one the way
+this paper separates content from scaffolding; MotherDuck's later
+with/without comparison on that component, a generated semantic layer at
+95\% against 100\% for Markdown plus SQL at $2.5{\times}$ the
+tokens~\cite{motherduck-ai-writes}, lands where our ablation does. The
+order is measure, ship, re-measure; this paper is the baseline.
 
 \section*{Artifact Availability}
 

@@ -3,105 +3,81 @@
 
 \subsection{One benchmark, one domain}
 
-Section~\ref{sec:domain} showed that the gain is confined to fee questions,
-which are 294 of the 332 hard tasks. The benchmark is also a single and
-concentrated one: 450 tasks reduce to 113 question shapes, 27 of which cover
-three quarters of the benchmark (Section~\ref{sec:dabstep}). No amount of
-compute fixes that, and results on so narrow a question space should not be
-read as results about analytics agents in general. We ran no second benchmark. BIRD's withheld evidence~\cite{bird} is the
-nearest analogue, but it supplies a hint per question rather than a domain
-manual, and a domain manual is what a contract is compiled from.
+The gain is confined to fee questions, 294 of the 332 hard tasks
+(Section~\ref{sec:domain}), and the benchmark is a concentrated one: 450
+tasks reduce to 113 question shapes, 27 of which cover three quarters of it
+(Section~\ref{sec:dabstep}). Results on so narrow a question space should
+not be read as results about analytics agents in general. We ran no second
+benchmark; BIRD's withheld evidence~\cite{bird} is the nearest analogue,
+but it supplies a hint per question rather than a domain manual.
 
 \subsection{The contract resolves ambiguities the manual leaves open}
 \label{sec:interpretation}
 
 The arms are matched on the sources they may consult, not on how those
 sources read. Seven metric descriptions carry an \texttt{INTERPRETATION}
-sentence (Section~\ref{sec:contract}). Three gloss wording the manual
-supplies outright; one derives the capture-delay band mapping by applying
-the manual's own band definitions to a column of days; three go further. The
-manual says a \texttt{null} field ``applies to all possible values'', but the
-annexed \texttt{fees} data encodes that wildcard for list-typed fields as an
-\emph{empty list}, which the manual never mentions, and two band metrics
-break a tie on values sitting exactly on a shared boundary, which the
-manual's ``between A and B'' does not decide. All three are recoverable from
-the annexed data, which every arm could query, and none supplies a task's
-answer. But they were recovered once, by us, and handed to one arm, and the
-empty-list clause matters: reversing it in the compiled contract changes the
-answer on 87 of the 97 tasks in the payments families. The contract arm's
-margin therefore combines delivery of what the manual states with resolution
-of what it leaves open. Separating them needs a fifth arm carrying the
-contract with its seven clauses stripped, which we did not run.
+sentence (Section~\ref{sec:contract}). Four restate or apply what the manual
+supplies; three go further. The manual says a \texttt{null} field ``applies
+to all possible values'', but the annexed \texttt{fees} data encodes that
+wildcard for list-typed fields as an \emph{empty list}, which the manual
+never mentions, and two band metrics break a tie on a shared boundary that
+the manual's ``between A and B'' does not decide. All three are recoverable
+from data every arm could query, and none supplies a task's answer; but they
+were recovered once, by us, and handed to one arm, and the empty-list clause
+matters: reversing it in the compiled contract changes the answer on 87 of
+the 97 tasks in the payments families. The contract arm's margin therefore
+combines delivery of what the manual states with resolution of what it
+leaves open. Separating them needs a fifth arm, the contract with its seven
+clauses stripped, which we did not run.
 
 \subsection{No repeats, and two frontier points that disagree}
 \label{sec:power}
 
-None of the four runs repeats, so none estimates within-condition variance.
-One near-replicate exists: the all-450 \armC{} sweep on \mGLM{} submitted to
-the leaderboard (Section~\ref{sec:golds}) shares 401 tasks with the \mGLM{}
-run and differs from it only by a validator fix. Paired, the two agree on
-accuracy (60.3\% against 57.9\%, exact McNemar $p{=}0.35$) and
-\textbf{disagree on 94 of 401 tasks, a 23.4\% flip rate}, at temperature 0
-on a pinned endpoint. The churn is symmetric (52 one way, 42 the other), so
-the McNemar contrasts, which read asymmetry, are not at risk; but noise
-alone supplies 94 discordant pairs against the 86 to 182 our contrasts rest
-on, so no claim about a named task's verdict should be read as
-reproducible, and the frontier runs, which could not pin temperature, are
-likelier to flip more. Table~\ref{tab:mcnemar} reports 24 tests and
-corrects none; the three vs-\armC{} contrasts survive any correction, and
-the scaffolding row on the two flash models does not. Underpowered
-comparisons are the norm in this literature~\cite{little-power}.
+None of the four runs repeats. One near-replicate exists: the all-450
+\armC{} sweep on \mGLM{} submitted to the leaderboard
+(Section~\ref{sec:golds}) shares 401 tasks with the \mGLM{} run and differs
+from it only by a validator fix. Paired, the two agree on accuracy (60.3\%
+against 57.9\%, exact McNemar $p{=}0.35$) and \textbf{disagree on 94 of 401
+tasks, a 23.4\% flip rate}, at temperature 0 on a pinned endpoint. The
+churn is symmetric (52 one way, 42 the other), so the McNemar contrasts,
+which read asymmetry, are not at risk; but no claim about a named task's
+verdict should be read as reproducible, and the frontier runs, which could
+not pin temperature, are likelier to flip more. Table~\ref{tab:mcnemar}
+reports 24 tests and corrects none; the three vs-\armC{} contrasts survive
+any correction, and the scaffolding row on the two flash models does not.
+Underpowered comparisons are the norm in this
+literature~\cite{little-power}.
 
 The capability claims rest on two frontier models that disagree, by 21
 points on the \emph{macro} bucket and by 4, the other way, on
-\emph{derived}. Capability is also not one number here: \mDS{} and \mSON{} tie on the
-bare-schema arm we use as the axis and sit 12 points apart with the
-contract, so the two orderings agree on rank and not on spacing. The
-literature does not settle the direction either~\cite{prompt-engineering-advanced,scaffold-gaia},
-and the frontier runs differ from the flash runs in provider and model
-family as well as capability.
-
-One lesson from how this paper was written belongs here. With only the two
-flash models, the scaffolding step was a null with disagreeing signs over all
-tasks and a pooled $p{=}0.29$; the two frontier models put it at $+15$ and $+14$ points
-at $p{<}10^{-6}$. The same two models also showed a margin over the prompt
-that shrank with capability and a derivation gap fixed near 38 points, and
-neither survived a third. \textbf{A null across two adjacent models is weak
-evidence of absence}, and the size of the derivation gap, which rests on two
-frontier points 21 apart, deserves the same discount.
+\emph{derived}, and the literature does not settle the direction
+either~\cite{prompt-engineering-advanced,scaffold-gaia}. Capability is also
+not one number here: \mDS{} and \mSON{} tie on the bare-schema axis and sit
+12 points apart with the contract. With only the two flash models, the
+scaffolding step was a null (pooled $p{=}0.29$), the prompt margin shrank
+with capability, and the derivation gap sat fixed near 38 points; \mGPT{},
+the third model run, overturned all three, putting the scaffolding step at
+$+14$ points at $p{<}10^{-6}$, and \mSON{}, run last, confirmed it at
+$+15$. \textbf{A null across two adjacent models is weak evidence of
+absence}, and the size of the derivation gap, which rests on two frontier
+points 21 apart, deserves the same discount.
 
 \subsection{Reconstructed golds are lenient}
 \label{sec:threats-golds}
 
-Every accuracy in this paper except the officially graded pair rests on
-reconstructed golds that are one-sidedly lenient on the hard split
+Every accuracy here except the officially graded pair rests on reconstructed
+golds that are one-sidedly lenient on the hard split
 (Section~\ref{sec:golds}); read every absolute hard-split figure as a few
-points optimistic. The proxy that bounds the other cells shows \armC{} to be
-the least exposed arm on all four models but the one with the most correct
-answers to lose, so the correction moves the twelve \armC{}-versus-baseline
-gaps by $-2.8$ to $+1.4$ points against raw gaps of 13.7 to 45.5
-(\appref{app:leniency}). No conclusion here turns on 3 points.
+points optimistic. The proxy that bounds the other cells moves the twelve
+\armC{}-versus-baseline gaps by $-2.8$ to $+1.4$ points against raw gaps of
+13.7 to 45.5 (\appref{app:leniency}). No conclusion here turns on 3 points.
 
 \subsection{Contamination}
 
-DABStep is public, and so is the material an agent needs to answer it. We
-ran no contamination probe. This bears on the capability claims, because
-the four models differ in training data as well as capability, and a
-memorising model would show exactly what we report: high accuracy on the
-\emph{macro} bucket, whose tasks follow the benchmark's most common shapes,
-and less on \emph{derived}. We do not believe that explains the result,
-because \mGPT{}'s contract arm scores 94.9\% against 31.8\% for its
-bare-schema arm on the same tasks, and \mSON{}'s 73.9\% against 6.8\%, and
+DABStep is public, and we ran no contamination probe. A memorising model
+would show what we report: high accuracy on the \emph{macro} bucket, whose
+tasks follow the benchmark's most common shapes, and less on \emph{derived}.
+Against that, \mGPT{}'s contract arm scores 94.9\% on the same tasks where
+its bare-schema arm scores 31.8\%, and \mSON{}'s 73.9\% against 6.8\%, and
 memorisation should not care which context the agent was handed. That is an
 inference, not a measurement.
-
-\subsection{Harness asymmetries}
-
-Section~\ref{sec:fixed} listed them: a validator defect on \mGLM{} against
-the governed arms, a preview cap in their favour, a forced-answer policy
-against them, and different provider routes across models. Two more are
-recorded in \appref{app:harness}: a 1{,}000-row result limit, since
-replaced, under which the governed arm looked $11{\times}$ more expensive,
-and a digest stamp that pinned the hollow arm's rows to the wrong artifact
-without changing any result. Each run's internal contrasts are sound; cross-run cost
-differences are suggestive only.

@@ -72,7 +72,7 @@ and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
 ## What is not finished
 
 - **`make check` also runs `analysis/cost_decomposition.py --check`** in
-  the experiment directory, which recomputes every number in Section 6.3
+  the experiment directory, which recomputes every number in Section 6.2 (efficiency)
   from the result rows and the pinned prices.
 - **The self-citation `extended` in `refs.bib` has no arXiv id yet.** The
   submission build cites it wherever the extended version's appendices are

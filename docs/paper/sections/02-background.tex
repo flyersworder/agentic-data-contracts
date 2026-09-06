@@ -139,23 +139,21 @@ contract was authored from the vendor manual alone, frozen before any
 question was read, and run unchanged against four model families, which is
 why it can be published with the paper (\appref{app:leaderboard}).
 
-\textbf{Methods this paper borrows.} Stripping the semantic content of a
-prompt component while holding its form fixed, to see what the form alone
-was worth, is the move of~\cite{min-demonstrations}; here the component is a
-whole retrieval layer. Two results frame the delivery mechanism of
+\textbf{Related methods.} Emptying a component's content while holding
+its form fixed, to see what the form alone is worth, is also the move
+of~\cite{min-demonstrations}, applied there to demonstrations and here to a
+whole retrieval layer. Two results bear on the delivery mechanism of
 Section~\ref{sec:why}: retrieval quality falls for material buried
-mid-prompt~\cite{lost-in-the-middle}, and what a tool's documentation says
-changes what an agent does with it~\cite{tool-documentation}. For governance,
-capability-based enforcement outside the model is the design behind
-CaMeL~\cite{camel}, policy compliance under a prompt-stated document is what
-$\tau$-bench measures~\cite{tau-bench}, and RuLES finds models breaking
-simple stated rules with no adversary present~\cite{rules}, the published
-expectation Section~\ref{sec:governance} runs against. Reporting cost beside
-accuracy follows~\cite{agents-that-matter}. Paired testing across several
-models is standard~\cite{semantic-paired,dbt-benchmark}, and the latter's 20
-repetitions per question is better variance discipline than ours
-(Section~\ref{sec:threats}); McNemar's test for learners executed once is
-Dietterich's recommendation~\cite{dietterich}.
+mid-prompt~\cite{lost-in-the-middle}, and a tool's documentation shapes
+what an agent does with it~\cite{tool-documentation}. On governance, CaMeL
+enforces capabilities outside the model~\cite{camel}, $\tau$-bench
+measures compliance with a prompt-stated policy~\cite{tau-bench}, and RuLES
+finds models breaking simple stated rules with no adversary
+present~\cite{rules}, the expectation Section~\ref{sec:governance} runs
+against. Reporting cost beside accuracy follows~\cite{agents-that-matter};
+paired testing across several models is
+standard~\cite{semantic-paired,dbt-benchmark}, and McNemar's test for
+learners executed once is Dietterich's recommendation~\cite{dietterich}.
 
 What is new here is the decomposition, not the accuracy: four arms rather
 than with/without, a control that removes content while holding the

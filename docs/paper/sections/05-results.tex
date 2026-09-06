@@ -174,20 +174,28 @@ transaction--rule pairs) gives a pre-computed fee layer of the kind a
 context-layer product ships. Nothing in it is authored independently of the
 contract; the only work the transcription adds is composition.
 
-\textbf{The compiled contract reproduces the benchmark's gold answers on
-every task it covers: 176 of 176, graded by the official scorer.} This is a
-statement about the artifact, not about an agent, and it has two uses. It
-answers the objection that \armC{} wins because the contract is subtly wrong
-in a benchmark-favouring way: it compiles to gold. And it converts accuracy
-into recovery against a proven ceiling. Classifying all 401 tasks by question
-shape alone, never by gold and never by any arm's output, gives 176 tasks
-the compiled contract answers outright (all hard; the \emph{macro} bucket),
-148 that need those semantics plus a counterfactual or an optimisation it
-does not encode (\emph{derived}), and 77 with no fee semantics at all. A
+Which tasks the views cover is decided from question text alone, never
+from gold and never from any arm's output. DABStep's tasks are instances of
+parameterised question shapes (Section~\ref{sec:dabstep}), and five of
+those shapes, in eleven date and grouping variants, ask exactly what the
+views compute: the total fees a merchant paid in a period, the fee rules
+that applied to it, the merchants a rule applies to, the average fee for a
+transaction profile, and the rules matching an account type and ACI. A
+regular expression per shape matches 176 of the 401 tasks, all hard.
+Instantiating the views with each task's own parameters and grading the
+result with the official scorer gives the ceiling: \textbf{the compiled
+contract reproduces the benchmark's gold answer on every one of the 176
+tasks it covers.} This is a statement about the artifact, not about an
+agent, and it has two uses. It answers the objection that \armC{} wins
+because the contract is subtly wrong in a benchmark-favouring way: it
+compiles to gold. And it converts accuracy into recovery against a proven
+ceiling. We call the 176 the \emph{macro} bucket. Of the remaining tasks,
+148 need the same semantics plus a counterfactual or an optimisation the
+views do not encode (\emph{derived}), and 77 involve no fee semantics. A
 layer compiled from a domain contract's declared expressions therefore
 reaches 53\% of this benchmark's hard set, a bound on that kind of layer
-rather than on pre-computation in general (Section~\ref{sec:prior}). On the
-176, whatever an agent fails to get is a failure to derive
+rather than on pre-computation in general (Section~\ref{sec:prior}). On
+the 176, whatever an agent fails to get is a failure to derive
 (Table~\ref{tab:buckets}; \appref{app:golds} says which of the 176 share a
 premise with the gold verification).
 
@@ -246,7 +254,7 @@ macro-bucket gap and 19\% of the derived-bucket one, and \mSON{}'s
 result publicly before \mGPT{} ran, predicting a \emph{macro} score ``well
 above 62.7\%, moving toward 100\%'' if capability governed it and ``near
 61--63\%'' if the harness did; the observed value is 94.9\%. \mSON{}, run
-later and outside the prediction, lands at 73.9\%: the direction replicated,
+last and outside the prediction, lands at 73.9\%: the direction replicated,
 the size did not.
 
 This bears on the economics of Section~\ref{sec:intro}. The derivation gap

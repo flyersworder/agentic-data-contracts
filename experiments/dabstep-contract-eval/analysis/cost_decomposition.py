@@ -1,6 +1,6 @@
 """Where does the contract arm's bill go, token class by token class?
 
-Section 6.3 of the paper explains why the contract arm is the cheapest way
+Section 6.2 of the paper explains why the contract arm is the cheapest way
 to buy a correct answer on three models and not on GPT-5.6: at that
 endpoint's ten-to-one price ratio between fresh and cached input, the
 contract's knowledge (delivered as tool results, billed fresh the first time
@@ -32,7 +32,7 @@ FILES = {
 }
 ARMS = ("schema_only", "contract_hollow", "manual_prompt", "contract")
 
-# As printed in the paper (Table 9 and the prose of Section 6.3). Dollar
+# As printed in the paper (Table 9 and the prose of Section 6.2). Dollar
 # figures are rounded to cents, token figures as the text rounds them.
 EXPECTED = {
     ("gpt-5.6", "manual_prompt"): {
@@ -156,7 +156,7 @@ def main() -> int:
     if drift:
         print("\nPAPER/ROWS MISMATCH:\n  " + "\n  ".join(drift))
         return 1 if args.check else 0
-    print("\nevery Section 6.3 number reproduces from the rows")
+    print("\nevery Section 6.2 number reproduces from the rows")
     return 0
 
 

@@ -78,7 +78,7 @@ its parts.
 \bottomrule
 \end{tabular}
 \caption{The four models, in the order used throughout: bare-schema hard
-accuracy. Each is pinned to one provider endpoint with fallbacks disabled.
+accuracy. This is not the order they were run in; \mSON{} ran last. Each is pinned to one provider endpoint with fallbacks disabled.
 T is temperature; a dash means the route does not accept the parameter. \mDS{}'s
 task count is its complete-case set, defined below.}
 \label{tab:models}
@@ -92,7 +92,10 @@ and \mGPT{} the two frontier models; that is the vendors' tiering, not a
 measured quantity. Models appear throughout in order of bare-schema hard
 accuracy (13.9\%, 22.6\%, 22.9\%, 37.0\%), the only capability axis declared
 before any result was read; Section~\ref{sec:threats} records where that
-axis disagrees with the contract arm's ordering. The four runs are separate
+axis disagrees with the contract arm's ordering. That is not the order the
+runs were made in: \mSON{} was run last, after \mGPT{}, and sits third.
+Every list of four numbers in this paper follows the table's order, \mGLM{},
+\mDS{}, \mSON{}, \mGPT{}. The four runs are separate
 experiments, not replicates: they differ in model, in provider and in one
 library fix (\appref{app:harness}).
 
@@ -112,7 +115,8 @@ pre-registered primary model,
 bare-schema arm showed it does not differ from the flash tier (27.5\%
 against 25.0\%, $p{=}1.0$), so it would not have supplied the capability
 contrast it was chosen for; \mGPT{} was substituted by the same criterion,
-\mSON{} was added later, and every contrast involving them is exploratory
+\mSON{} was added last, after \mGPT{} had run, and every contrast involving
+them is exploratory
 (\appref{app:harness}).
 And the \mDS{} run lost 29\% of its rows to provider rate limiting,
 near-uniformly across arms and with 114 of the 122 lost tasks losing all
@@ -136,7 +140,9 @@ the policy works against the treatment. Three harness properties treated the arm
 so \mGLM{}'s contract figures are a floor on that axis; a 100-row preview
 cap that reached the governed arms on 31 calls, in the treatment's favour;
 and different provider routes across models, which makes cross-run cost
-differences suggestive only.
+differences suggestive only. The validator defect, the preview cap and the
+digest defect recorded there are fixed in the released harness; the rows
+reported here are left as they ran.
 
 \subsection{Tasks, golds and grading}
 \label{sec:golds}

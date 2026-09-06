@@ -113,3 +113,14 @@ contract describes, it holds no detectable advantage over the prompt, and on
 the strongest model the bare schema leads that slice. The gain is
 domain-specific by construction. That is what a domain contract should do,
 and it is the sharpest limit on what one benchmark can show.
+
+\textbf{What a practitioner should take from this.} Spend on the
+semantics first: write down what the columns mean and how the metrics are
+defined, once per domain, in a form an agent can fetch one rule at a time.
+That step bought most of the gain on every model, and the prose often
+exists already. Build the retrieval scaffolding second; on frontier models
+it is worth 14 to 15 points, on flash models close to nothing. Pre-compute
+a macro only for a metric the agent demonstrably fails to derive, because
+the shortfall macros close is already 5 points on the strongest model and
+falling with capability, while the per-metric cost of writing and
+maintaining them falls with nothing.

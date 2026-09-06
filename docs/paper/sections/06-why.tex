@@ -2,11 +2,12 @@
 \label{sec:why}
 
 Aggregate accuracy does not explain itself. This section traces one task end
-to end, reads the SQL every arm submitted, and accounts for the work and
-money each arm spent.
+to end, reads the SQL every arm submitted, accounts for the work and money
+each arm spent, and looks at where the contract arm still loses.
 
-\subsection{The rule was in both prompts; only one arm reached it}
+\subsection{The rule was in both prompts; only one arm's SQL carries it}
 \label{sec:reach}
+\label{sec:clauses}
 
 Task~1278 asks for \emph{the average fee NexPay would charge for a credit
 transaction of 50 EUR}.
@@ -44,19 +45,16 @@ documentation says changes what an agent does with
 it~\cite{tool-documentation}. \armM{}'s copy of the rule was buried
 mid-prompt; \armC{}'s was a tool's documentation.
 
-The finding is not that the contract arm was given more information. For
-\emph{this} rule both arms had it, and only one used it. What the contract
-changes is not what is knowable but what is reachable at the moment of use.
-That scoping matters: it holds for the clauses the manual states outright,
-which is the class this failure belongs to, and not for the three clauses
-the contract resolves on its own (Section~\ref{sec:threats}).
+The finding is not that the contract arm was given more information: for
+this rule both arms had it, and only one used it. What the contract changes
+is where the rule sits at the moment of use, in the result of one targeted
+call rather than in a long prompt. The scoping matters: it holds for the
+clauses the manual states outright, which is the class this failure
+belongs to, and not for the three clauses the contract resolves on its own
+(Section~\ref{sec:interpretation}).
 
-\subsection{The contract's clauses reach the SQL}
-\label{sec:clauses}
-
-The claim that delivery matters as much as possession can be observed
-directly, by reading the SQL each agent submitted rather than the answer it
-produced. We defined one detector per clause of the contract's fee semantics
+One task shows the mechanism. Whether it is general can be read from the
+SQL every arm submitted, rather than from the answers. We defined one detector per clause of the contract's fee semantics
 that a correct query must express: the \texttt{NULL}-wildcard disjunct, the
 empty-list wildcard, the capture-delay band mapping, a per-merchant monthly
 aggregate, the natural-month reconstruction, and fraud measured on euro
@@ -224,5 +222,7 @@ That points away from hoisting rule bodies into the system prompt, since
 the rules were already fetched, and toward making the wildcard semantics
 executable: a
 five-line DuckDB macro encoding the rule the contract states in prose
-answers tasks~1500 and~1502 exactly. Section~\ref{sec:conclusion} says why
-that tool was not built before this measurement.
+answers tasks~1500 and~1502 exactly. We did not build that tool before
+measuring: it would have been designed from knowledge of which tasks the
+contract arm lost, and an artifact frozen before any question was read is
+this study's strongest methodological asset.

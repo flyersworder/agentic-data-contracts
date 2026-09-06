@@ -80,7 +80,7 @@ its parts.
 \caption{The four models, in the order used throughout: bare-schema hard
 accuracy. Each is pinned to one provider endpoint with fallbacks disabled.
 T is temperature; a dash means the route does not accept the parameter. \mDS{}'s
-task count is its complete-case set (Section~\ref{sec:models}).}
+task count is its complete-case set, defined below.}
 \label{tab:models}
 \end{table}
 
@@ -145,7 +145,8 @@ DABStep withholds golds for its 450 test tasks. We reconstruct them from the
 leaderboard's published per-task files by plurality over answers the
 benchmark's own grader marked correct, with a 75\% plurality threshold
 (median realised share 0.981), which yields golds for 401 of 450 tasks (332
-hard, 69 easy) after five manually falsified consensus answers are excluded.
+hard, 69 easy) after excluding five consensus answers that manual
+verification showed to be wrong.
 The three largest question families, 59 tasks, were recomputed directly from
 the database using the manual's matching rule and reproduce exactly
 (\appref{app:golds}).

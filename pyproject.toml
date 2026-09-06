@@ -122,7 +122,6 @@ packages = ["src/agentic_data_contracts"]
 exclude = [
     "experiments",
     ".claude",
-    "docs/superpowers",
 ]
 
 [tool.pytest.ini_options]

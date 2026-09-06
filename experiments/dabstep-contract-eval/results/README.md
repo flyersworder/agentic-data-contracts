@@ -27,8 +27,8 @@ FINDINGS.md that compares arms is built from the four-arm files below.
 Three rows (task 1712, all arms, `z-ai/glm-5.3-flash`) from the first smoke
 run, stopped after the first task. **Not usable for FINDINGS**, and not
 comparable with any later file. Every one of these defects has since been
-fixed; the rows are kept only because they are the measurements that
-`docs/superpowers/specs/2026-08-30-dabstep-smoke-findings.md` argues from.
+fixed; the rows are kept only because they are the measurements the smoke-run
+findings (formerly `docs/superpowers/specs/`, now in git history only) argue from.
 
 - `usd` is inflated 1.94x-2.81x: cache reads were billed at the fresh-input
   rate (F4).

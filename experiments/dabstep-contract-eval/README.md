@@ -4,7 +4,8 @@ A four-arm ablation measuring whether contract-delivered context beats a
 manual-in-prompt baseline and a schema-only floor on the
 [DABStep](https://huggingface.co/datasets/adyen/DABstep) benchmark.
 
-Design: `docs/superpowers/specs/2026-08-30-dabstep-contract-eval-design.md`.
+The design spec and implementation plan were process scaffolding under
+`docs/superpowers/`, removed once the work shipped; they remain in git history.
 Results and conclusions: **[`FINDINGS.md`](FINDINGS.md)** — glm-5.3-flash,
 401 tasks, **four arms, 1,604 runs**, complete. The fourth arm
 (`contract_hollow`) is the ablation that separates contract *content*

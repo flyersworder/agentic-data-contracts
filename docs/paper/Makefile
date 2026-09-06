@@ -1,7 +1,7 @@
 # Two pdflatex passes bracket bibtex: the first writes the .aux bibtex reads,
 # and the last two resolve \ref and \cite forward references. Dropping either
 # trailing pass leaves "??" in the PDF.
-.PHONY: all clean check figures pvldb
+.PHONY: all clean check figures pvldb arxiv
 
 all: main.pdf
 
@@ -52,6 +52,24 @@ check: main.pdf pvldb.pdf
 	 echo "abstract.txt: $$c characters (arXiv cap 1920)"; test "$$c" -le 1920
 	@cd ../../experiments/dabstep-contract-eval && uv run python analysis/cost_decomposition.py --check
 
+# arXiv upload bundle: sources plus main.bbl (arXiv does not run BibTeX),
+# without pvldb.tex (a second top-level .tex reads as a second document),
+# refs.bib, the Makefile or the figure script. The bundle is compiled in a
+# clean directory first, the way arXiv will compile it.
+ARXIV := arxiv-$(shell date +%Y%m%d).tar.gz
+arxiv: main.pdf
+	rm -rf build/arxiv && mkdir -p build/arxiv/sections build/arxiv/figures
+	cp main.tex preamble.tex main.bbl build/arxiv/
+	cp sections/*.tex build/arxiv/sections/
+	cp $(FIGS) build/arxiv/figures/
+	cd build/arxiv && pdflatex -interaction=nonstopmode -halt-on-error main.tex >/dev/null \
+	  && pdflatex -interaction=nonstopmode -halt-on-error main.tex >/dev/null
+	@grep 'Reference.*undefined\|Citation.*undefined' build/arxiv/main.log && exit 1 || true
+	@grep -o 'Output written on main.pdf ([0-9]* pages' build/arxiv/main.log
+	tar -czf $(ARXIV) -C build/arxiv main.tex preamble.tex main.bbl sections figures
+	@echo "wrote $(ARXIV); the abstract for the form is abstract.txt"
+
 clean:
-	rm -f main.pdf main.aux main.log main.out main.bbl main.blg \
+	rm -rf build
+	rm -f arxiv-*.tar.gz main.pdf main.aux main.log main.out main.bbl main.blg \
 	      pvldb.pdf pvldb.aux pvldb.log pvldb.out pvldb.bbl pvldb.blg

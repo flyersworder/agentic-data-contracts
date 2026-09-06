@@ -8,6 +8,7 @@ from [`../../experiments/dabstep-contract-eval/FINDINGS.md`](../../experiments/d
 make            # rebuild figures if stale, then main.pdf (extended, arXiv)
 make pvldb.pdf  # the PVLDB submission: acmart sigconf, no appendix
 make figures    # figures only
+make arxiv      # arXiv upload bundle, compiled in a clean directory first
 make check      # both builds: no overfull boxes, no unresolved refs,
                 # and the submission's content pages <= 12
 ```
@@ -82,9 +83,10 @@ and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
 - **`motherduck-semantic` is dated from page metadata.** The page shows no
   byline or date, but its `datePublished` metadata says 8 June 2026, and the
   bib entry says so.
-- **arXiv build.** arXiv does not run BibTeX: upload `main.bbl` alongside the
-  sources. `\pdfoutput=1` is on line 1 of `main.tex` so its build picks
-  pdflatex for the PDF figures.
+- **arXiv build.** `make arxiv` writes the upload tarball: sources and
+  `main.bbl` (arXiv does not run BibTeX), no `pvldb.tex`, no `refs.bib`.
+  `\pdfoutput=1` is on line 1 of `main.tex` so arXiv picks pdflatex for the
+  PDF figures.
 - **arXiv abstract field.** `abstract.txt` is the plain-text abstract for
   the submission form; regenerate it if `sections/00-abstract.tex` changes.
   `make check` fails if it exceeds arXiv's 1,920-character cap.

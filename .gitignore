@@ -31,3 +31,7 @@ docs/paper/pvldb.log
 docs/paper/pvldb.out
 docs/paper/pvldb.bbl
 docs/paper/pvldb.blg
+
+# arXiv bundle (docs/paper: make arxiv)
+docs/paper/build/
+docs/paper/arxiv-*.tar.gz

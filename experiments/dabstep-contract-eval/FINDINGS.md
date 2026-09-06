@@ -773,10 +773,11 @@ answer* the ordering is closer ($0.067 vs $0.062) but `manual_prompt` still
 edges it. On Sonnet 5 the price claim nearly returns: `schema_only` is cheaper
 outright by $1.17 on a $37.97 bill, and per correct answer the contract arm
 costs about half of what any other arm does. What survives on all four models is the
-work claim: the contract arm uses the fewest turns, the fewest tool calls and
-by far the least reasoning (140,692 tokens against `schema_only`'s 357,191 on
+work claim: the contract arm uses the fewest turns and by far the least
+reasoning on every model (140,692 tokens against `schema_only`'s 357,191 on
 sol, under a third as on glm; 824,370 against `contract_hollow`'s 1,411,378 on
-Sonnet 5). It is not thinking harder — it has less to search for. `contract`
+Sonnet 5), and the fewest tool calls on three of the four — on sol
+`manual_prompt` makes fewer (4,354 against 5,245). It is not thinking harder — it has less to search for. `contract`
 is also the only arm that never needed a forced answer on any of the four
 runs.
 

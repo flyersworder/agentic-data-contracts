@@ -42,12 +42,13 @@ That table is the claim; [`experiments/dabstep-contract-eval/`](experiments/dabs
 | `manual_prompt` | the vendor manual verbatim in the prompt | 22.9% | 42.9% | 50.3% | 23.8% |
 | `schema_only` | table and column names only | 13.9% | 22.6% | 37.0% | 22.9% |
 
-- **The gain is the content, not the scaffolding.** `contract_hollow` runs identical tooling with the domain knowledge removed — that is what separates the two, and the content term dominates on every model tested.
+- **The gain is the content, not the scaffolding.** `contract_hollow` runs identical tooling with the domain knowledge stripped out. That is the only difference between the two arms, and on every model tested it explains more of the contract's lead than the tooling does.
+- **The contract is also the cheapest way to be right.** On every model the contract arm uses the fewest turns and by far the least reasoning; on three of four it also makes the fewest tool calls and is cheapest per correct answer (on Sonnet 5, about half the cost of any other arm). The exception is `gpt-5.6-sol`, where the contract's own text is a real input-token bill and `manual_prompt` edges it. It is the only arm that never had to be forced to answer. It is not thinking harder; it has less to search for.
 - **Governance held.** Across the ungoverned arms the models submitted 166 mutating SQL statements on 26 tasks. Both governed arms submitted zero.
-- The contract was written from the vendor's manual alone and **frozen, digest-pinned, before any benchmark question was read.**
-- **Externally scored.** The contract arm answered all 450 tasks and was submitted to the [DABStep leaderboard](https://huggingface.co/spaces/adyen/DABstep), where Adyen graded it against the official golds: **51.9% on the hard split** for `glm-5.3-flash` — against a published band of ~20–26% hard for manual-in-prompt baselines running stronger models.
+- **No leakage.** The contract was written from the vendor's manual alone and frozen, digest-pinned, before any benchmark question was read.
+- **Externally scored.** The contract arm answered all 450 tasks and was submitted to the [DABStep leaderboard](https://huggingface.co/spaces/adyen/DABstep), where Adyen graded it against the official golds: **51.9% on the hard split** for `glm-5.3-flash`, against a published band of ~20–26% hard for manual-in-prompt baselines running stronger models.
 
-Scope, stated plainly: the effect concentrates in the domain-specific task bucket (the non-fee bucket shows no contract advantage on any model), the table's golds are reconstructed for 401 of 450 tasks and the leaderboard check shows that scoring runs ~6 points optimistic on hard tasks (one-sidedly; correcting for it moves the arm gaps by under 3 points, in both directions), only the contract arm was submitted so the gap above is not graded the same way on both sides, and this is one benchmark at k=1 — where a replicate finds 23% of task verdicts flip at temperature 0. Full results, every caveat, and all 6,416 transcripts: **[`FINDINGS.md`](experiments/dabstep-contract-eval/FINDINGS.md)**.
+Scope, stated plainly. The effect concentrates in the domain-specific task bucket; the non-fee bucket shows no contract advantage on any model. The table's golds are reconstructed for 401 of 450 tasks, and the leaderboard check shows that scoring runs ~6 points optimistic on hard tasks, one-sidedly; correcting for it moves the arm gaps by under 3 points, in both directions. Only the contract arm was submitted, so the gap above is not graded the same way on both sides. And this is one benchmark at k=1, where a replicate finds 23% of task verdicts flip at temperature 0. Full results, every caveat, and all 6,416 transcripts: **[`FINDINGS.md`](experiments/dabstep-contract-eval/FINDINGS.md)**.
 
 **Works with:** any Python agent framework — first-class helpers for the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), [LangChain](https://github.com/langchain-ai/langchain) / [deepagents](https://github.com/langchain-ai/deepagents), and [Pydantic AI](https://github.com/pydantic/pydantic-ai), plus a framework-free path (the tools are plain async functions). Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 
@@ -65,6 +66,7 @@ Scope, stated plainly: the effect concentrates in the domain-specific task bucke
 - [Table Relationships](#table-relationships)
 - [Metric Impacts](#metric-impacts) (incl. [decomposition & drill dimensions](#metric-decomposition-and-drill-dimensions))
 - [Checking declarations against the live schema](#checking-declarations-against-the-live-schema)
+- [Validating a verified-examples corpus](#validating-a-verified-examples-corpus)
 - [Custom Prompt Rendering](#custom-prompt-rendering)
 - [Consumer-authored sections (extras)](#consumer-authored-sections-extras)
 - [Scaling to Large Organizations](#scaling-to-large-organizations)
@@ -697,7 +699,7 @@ column list, and read from a **YAML** source, a **dbt** model's `description`,
 an **Ossie** dataset's, and a **Cube** cube's. It is omitted from a contract's
 canonical bytes when empty.
 
-That last point has a consequence worth reading before you upgrade to 0.50.0.
+That last point has a consequence worth reading before you upgrade to 0.50.0 or later.
 A contract keeps a byte-identical digest only if **no** table description
 reaches it from anywhere. It gains content, and `contract_digest` moves, if
 either:
@@ -878,7 +880,7 @@ relationships:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `from` / `to` | Yes | Fully qualified column references (`schema.table.column`) |
-| `type` | No | Cardinality: `many_to_one` (default), `one_to_one`, `many_to_many` |
+| `type` | No | Cardinality: `many_to_one` (default), `one_to_one`, `one_to_many`, `many_to_many` |
 | `description` | No | Free-text context for the agent (join guidance, caveats, data quality notes) |
 | `required_filter` | No | SQL condition that **must** be applied when using this join (e.g., bridge table disambiguation) |
 | `preferred` | No | Mark the canonical join when alternatives exist (defaults to `false`). Surfaces as `preferred="true"` in the prompt, floats the edge to the front of `lookup_relationships` direct-lookup output, and biases multi-hop BFS path-finding toward it. Leave unset for role-playing peers (e.g. `order_date` vs `ship_date`) where no single path is canonical. |
@@ -1028,7 +1030,7 @@ decomposition operand comes back under one direction, as two edges. An identity
 walk that finds nothing where edges exist on the other side says so in a `note`
 rather than returning a bare `[]`.
 
-Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction and a variance-diagnosis tool are deferred.
+Today `decompositions` / `drill_by` are declared directly in YAML contracts or in an Ossie model's `custom_extensions`; dbt/Cube extraction is deferred. Variance diagnosis itself is left to the agent, which already performs it from this grounding.
 
 ## Checking declarations against the live schema
 
@@ -1314,7 +1316,7 @@ dc = DataContract.from_yaml("contract.yml")
 print(dc.to_system_prompt())  # XML output, works with any frontier model
 ```
 
-For other models (GPT-4, Gemini, Llama), implement the `PromptRenderer` protocol:
+To render the contract differently, implement the `PromptRenderer` protocol:
 
 ```python
 from agentic_data_contracts import PromptRenderer, DataContract
@@ -1415,8 +1417,7 @@ rather than a list of entries).
 `nullable` is deliberately **not** part of the column vocabulary, even though
 `Column` has the field and `describe_table` emits it. The overlay carries only
 descriptions and the field is not serialized, so reading it would store a value
-that never reaches a prompt or a digest — the silent drop this release exists to
-remove. Column nullability comes from the adapter, which is the side that knows.
+that never reaches a prompt or a digest — the silent drop 0.50.0 removed. Column nullability comes from the adapter, which is the side that knows.
 
 Note that `expected_extras` whitelists *top-level sections only* — naming
 `summary` there does not excuse a `summary:` key on a table entry. Declaring
@@ -1610,7 +1611,7 @@ contract = compile_to_contract(dc)  # YAML → formal 7-tuple Contract
 | Rule violations | Exception + retry | `TerminationCondition` with contract state machine |
 | Success evaluation | Log-based | Weighted `SuccessCriterion` scoring, LLM judge support |
 | Contract lifecycle | None | `DRAFTED → ACTIVE → FULFILLED / VIOLATED / TERMINATED` |
-| Framework support | Claude Agent SDK | + LiteLLM, LangChain, LangGraph, Google ADK |
+| Framework support | Claude Agent SDK, LangChain, Pydantic AI | + LiteLLM, LangGraph, Google ADK |
 | Multi-agent | Single agent | Coordination patterns (sequential, parallel, hierarchical) |
 
 **When to use it:** formal audit trails, success scoring, multi-agent coordination, or integration with non-Claude agent frameworks.
@@ -1651,7 +1652,13 @@ uv run python examples/revenue_agent/verify_examples.py
 uv run python examples/revenue_agent/check_drift.py
 ```
 
-The three validation verbs answer different questions, and the third fills a gap the first two cannot see: a live `EXPLAIN` catches a renamed column the moment some SQL references it, while a column that is *declared and never queried* goes stale in silence.
+The two checks answer different questions: a live `EXPLAIN` catches a renamed column the moment some SQL references it, while a column that is *declared and never queried* goes stale in silence, and only the drift preflight sees it.
+
+…and an **agent-conformance** demo — `evaluate_conformance.py`, the third pass over the same corpus ([above](#evaluating-agent-conformance)), driven by a scripted stand-in agent so it needs no API key and no network:
+
+```bash
+uv run python examples/revenue_agent/evaluate_conformance.py
+```
 
 Reading all three gives you a complete tour of the library's design space: different enforcement levels (`block` / `warn` / `log`), different impact confidences and directions, and resource profiles tuned for very different user-latency expectations.
 

@@ -155,8 +155,9 @@ most tool calls on three of the four, burns the most reasoning on \mGLM{}
 and \mSON{}, and forces answers on three models where \armC{} forces none
 (Table~\ref{tab:efficiency}). The transcripts show why: the agent calls
 \texttt{lookup\_domain}, is told nothing is available, and searches harder.
-On \mGPT{} it makes that call on 401 of 401 tasks; on \mSON{}, 392 times,
-plus 1{,}620 calls to \texttt{lookup\_metric} with every metric emptied. The
+On \mSON{} it makes that call 392 times, plus 1{,}620 calls to
+\texttt{lookup\_metric} with every metric emptied; on \mGPT{}, on 401 of
+401 tasks. The
 models that gain most from the scaffolding are also the ones that exercise
 the lookup tools hardest.
 

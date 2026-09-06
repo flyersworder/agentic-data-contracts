@@ -1,0 +1,45 @@
+% Shared by main.tex (extended, article) and pvldb.tex (submission,
+% acmart): everything the section files depend on. A rename of an arm or
+% a model is a one-line change here. The driver sets \ifextended before
+% inputting this file.
+
+% Narrow p{} columns justify into rivers of whitespace; L is ragged-right.
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\Urlmuskip=0mu plus 1mu
+
+% Long \texttt tokens (tool names, model ids) cannot hyphenate; let TeX
+% stretch a little rather than overrun the column.
+\setlength{\emergencystretch}{1.5em}
+\renewcommand{\arraystretch}{1.12}
+\newcommand{\tabhead}[1]{\textbf{#1}}
+
+% Arm and model names appear constantly; one macro each keeps them
+% typographically identical everywhere. Models are always listed in this
+% order, which is bare-schema hard accuracy: 13.9, 22.6, 22.9, 37.0.
+\newcommand{\armS}{\textsc{schema}}
+\newcommand{\armM}{\textsc{manual}}
+\newcommand{\armH}{\textsc{hollow}}
+\newcommand{\armC}{\textsc{contract}}
+\newcommand{\mGLM}{GLM}
+\newcommand{\mDS}{DeepSeek}
+\newcommand{\mSON}{Sonnet~5}
+\newcommand{\mGPT}{GPT-5.6}
+
+% Appendix cross-references. The extended build resolves them; the
+% submission build, which has no appendix, points at the extended version.
+\ifextended
+  \newcommand{\appref}[1]{Appendix~\ref{#1}}
+\else
+  \newcommand{\appref}[1]{the extended version~\cite{extended}}
+\fi
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  framesep=3pt,
+  rulecolor=\color{gray!50},
+  showstringspaces=false,
+}

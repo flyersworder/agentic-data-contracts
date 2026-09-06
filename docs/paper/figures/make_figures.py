@@ -11,8 +11,8 @@ WHY THIS RECOMPUTES RATHER THAN IMPORTS. The scoring logic lives in
 ``dce.stats`` inside the experiment's own virtualenv, and importing it here
 would couple figure rendering to that environment. Instead this script
 reimplements the two rules that matter -- deduplicate to the last row per
-(arm, task_id), and restrict run B to tasks scoreable in all four arms --
-and then ASSERTS every derived number against the value printed in the
+(arm, task_id), and restrict each model to tasks scoreable in all four arms
+-- and then ASSERTS every derived number against the value printed in the
 paper (see EXPECTED below). A divergence between the results file and the
 prose fails the build loudly instead of drawing a wrong chart quietly.
 
@@ -127,12 +127,12 @@ def load(path: Path) -> dict[tuple[str, str], dict]:
     return rows
 
 
-def hard_stats(rows: dict) -> tuple[dict[str, tuple[int, int]], dict[str, float]]:
-    """Hard-split (correct, n) and total cost per arm, on common support.
+def hard_stats(rows: dict) -> dict[str, tuple[int, int]]:
+    """Hard-split (correct, n) per arm, on common support.
 
     Restricting to tasks scoreable in EVERY arm is what makes the four
-    numbers comparable; run B needs it because a provider rate-limit voided
-    122 tasks, and run A is unaffected because nothing there failed.
+    numbers comparable; DeepSeek needs it because a provider rate-limit
+    voided 122 tasks, and the other three are unaffected.
     """
     scoreable = {"correct", "incorrect"}
     tasks = sorted({t for _, t in rows})
@@ -143,11 +143,10 @@ def hard_stats(rows: dict) -> tuple[dict[str, tuple[int, int]], dict[str, float]
     ]
     hard = [t for t in common if rows[(ARMS[0], t)]["level"] == "hard"]
 
-    acc, cost = {}, {}
+    acc = {}
     for a in ARMS:
         acc[a] = (sum(rows[(a, t)]["verdict"] == "correct" for t in hard), len(hard))
-        cost[a] = sum(rows[(a, t)]["usd"] for t in common)
-    return acc, cost
+    return acc
 
 
 def style_axes(ax) -> None:
@@ -214,7 +213,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
         return k / n * 100
 
     # y positions chosen so the text sits right of every connecting line at
-    # that height: at y=1.35 the rightmost line (sol's) is at x=60, and at
+    # that height: at y=1.35 the rightmost line (GPT-5.6's) is at x=60, and at
     # y=0.5 it is at x=44; the text spans roughly x=62 to 83.
     steps = [
         (0.5, "schema_only", "contract_hollow", "+ tools, procedure", INK_MUTED),
@@ -224,7 +223,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
         # min and max of ALL runs, not deltas[0]/deltas[1]. With two runs
         # those were the same thing; with three, indexing the first two
         # silently dropped the largest delta -- which on the scaffolding step
-        # is run C's +14.2, the entire reason this section is a correction.
+        # is GPT-5.6's +14.2.
         deltas = sorted(pct(m, hi_arm) - pct(m, lo_arm) for m in RUNS)
         lo, hi = deltas[0], deltas[-1]
         span = f"{lo:+.1f} pp" if abs(hi - lo) < 0.6 else f"{lo:+.1f} to {hi:+.1f} pp"
@@ -275,8 +274,8 @@ def fig_interaction(acc: dict, out: Path) -> None:
     xs = [acc[m]["schema_only"][0] / acc[m]["schema_only"][1] * 100 for m in RUNS]
 
     # Nudges in POINTS, applied only where two lines end within ~1.5 points
-    # of each other. Run C's manual_prompt (50.3) and contract_hollow (51.2)
-    # would otherwise print their labels on top of one another.
+    # of each other. GPT-5.6's manual (50.3) and hollow (51.2) would
+    # otherwise print their labels on top of one another.
     label_dy = {"contract": 0.0, "manual_prompt": -5.0, "contract_hollow": 5.0}
     for a in ("contract", "manual_prompt", "contract_hollow"):
         ys = [acc[m][a][0] / acc[m][a][1] * 100 for m in RUNS]
@@ -309,14 +308,14 @@ def fig_interaction(acc: dict, out: Path) -> None:
         va="top",
     )
 
-    # Wide enough for run C: its schema_only x is 37.0 and its contract y is
+    # Wide enough for GPT-5.6: its schema x is 37.0 and its contract y is
     # 77.4, both outside the previous (11.5, 31) x (10, 66) window, so the
     # third model -- the whole point of this figure's caption -- was drawn
     # off-canvas.
     ax.set_xlim(11.5, 41)
     ax.set_ylim(10, 84)
     ax.set_xlabel(
-        "base-model capability:\nschema_only hard accuracy (%)",
+        "base-model capability:\nbare-schema hard accuracy (%)",
         fontsize=7.5,
         color=INK_MUTED,
     )
@@ -361,11 +360,11 @@ def main() -> None:
         }
     )
 
-    acc, cost = {}, {}
+    acc = {}
     for model, path in RUNS.items():
         if not path.exists():
             raise SystemExit(f"missing results file: {path}")
-        acc[model], cost[model] = hard_stats(load(path))
+        acc[model] = hard_stats(load(path))
 
     for (model, arm), want in EXPECTED.items():
         got = acc[model][arm]

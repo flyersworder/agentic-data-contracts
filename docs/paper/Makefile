@@ -42,12 +42,15 @@ pvldb.pdf: pvldb.tex refs.bib $(FIGS) $(wildcard sections/*.tex)
 check: main.pdf pvldb.pdf
 	@for j in main pvldb; do \
 	   n=$$(grep -c 'Overfull \\hbox' $$j.log || true); \
-	   echo "$$j: overfull hboxes: $$n"; test "$$n" -eq 0; \
+	   echo "$$j: overfull hboxes: $$n"; test "$$n" -eq 0 || exit 1; \
 	   grep 'Reference.*undefined\|Citation.*undefined' $$j.log && exit 1 || \
 	   echo "$$j: all references and citations resolved"; \
 	 done
 	@p=$$(sed -n 's/.*newlabel{end:content}{{[^}]*}{\([0-9]*\)}.*/\1/p' pvldb.aux | head -1); \
 	 echo "pvldb: content pages: $$p (limit 12)"; test "$$p" -le 12
+	@c=$$(wc -m < abstract.txt | tr -d ' '); \
+	 echo "abstract.txt: $$c characters (arXiv cap 1920)"; test "$$c" -le 1920
+	@cd ../../experiments/dabstep-contract-eval && uv run python analysis/cost_decomposition.py --check
 
 clean:
 	rm -f main.pdf main.aux main.log main.out main.bbl main.blg \

@@ -97,10 +97,10 @@ experiments, not replicates: they differ in model, in provider and in one
 library fix (\appref{app:harness}).
 
 Reasoning effort is \texttt{medium} throughout, a nominal setting rather
-than an equated one: under it the contract arm reasons for about 350 tokens
-per task on \mGPT{} and about 2{,}050 on \mSON{}. Temperature is 0 on the
-two flash models; \mGPT{} does not accept the parameter and \mSON{}'s
-gateway rejects both \texttt{temperature} and \texttt{seed}, so neither
+than an equated one: under it the contract arm reasons for about 2{,}050
+tokens per task on \mSON{} and about 350 on \mGPT{}. Temperature is 0 on
+the two flash models; \mSON{}'s gateway rejects both \texttt{temperature}
+and \texttt{seed} and \mGPT{} does not accept the parameter, so neither
 frontier run has a determinism control. \mSON{} is reached through an
 enterprise gateway on Anthropic's Messages API with cache control, because
 the gateway's OpenAI-compatible route bills every input token fresh at a
@@ -128,9 +128,9 @@ rows per result), tool-call cap (40), token budget, temperature, reasoning
 effort, model, endpoint, quantization, task set, gold set, scorer and the
 verbatim answer-format instruction. When an agent exhausts its output
 budget the harness forces a final answer rather than discarding the row;
-the rows so rescued fell on the ungoverned arms (on \mGLM{}, 41 in \armS{},
-18 in \armM{}, none in either governed arm), so the policy works against the
-treatment. Three harness properties treated the arms unequally
+the rows so rescued fell mostly on the ungoverned arms and never on \armC{}
+(on \mGLM{}, 41 in \armS{}, 18 in \armM{}, none in either governed arm), so
+the policy works against the treatment. Three harness properties treated the arms unequally
 (\appref{app:harness}): a validator defect on \mGLM{} that rejected
 \texttt{COUNT(*)} as if it were \texttt{SELECT *} in the governed arms only,
 so \mGLM{}'s contract figures are a floor on that axis; a 100-row preview

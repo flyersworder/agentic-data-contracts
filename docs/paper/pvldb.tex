@@ -6,41 +6,11 @@
 \settopmatter{printacmref=false}
 
 \usepackage{array}
-\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \usepackage{listings}
-\Urlmuskip=0mu plus 1mu
 
-% Long \texttt tokens (tool names, model ids) cannot hyphenate; let TeX
-% stretch a little rather than overrun the column.
-\setlength{\emergencystretch}{1.5em}
-\renewcommand{\arraystretch}{1.12}
-\newcommand{\tabhead}[1]{\textbf{#1}}
-
-\newcommand{\armS}{\textsc{schema}}
-\newcommand{\armM}{\textsc{manual}}
-\newcommand{\armH}{\textsc{hollow}}
-\newcommand{\armC}{\textsc{contract}}
-\newcommand{\mGLM}{GLM}
-\newcommand{\mDS}{DeepSeek}
-\newcommand{\mSON}{Sonnet~5}
-\newcommand{\mGPT}{GPT-5.6}
-
-% No appendix in the submission: appendix references point at the extended
-% version.
 \newif\ifextended
 \extendedfalse
-\newcommand{\appref}[1]{the extended version~\cite{extended}}
-
-\lstset{
-  basicstyle=\ttfamily\scriptsize,
-  breaklines=true,
-  columns=fullflexible,
-  keepspaces=true,
-  frame=single,
-  framesep=3pt,
-  rulecolor=\color{gray!50},
-  showstringspaces=false,
-}
+\input{preamble}
 
 \title{Which Part of the Context Layer Does the Work?}
 \subtitle{Separating Semantic Content from Retrieval Scaffolding in Text-to-SQL Agents}

@@ -12,7 +12,8 @@ make check      # both builds: no overfull boxes, no unresolved refs,
                 # and the submission's content pages <= 12
 ```
 
-Two builds share the section files. `main.tex` is the extended version
+Two builds share the section files and `preamble.tex` (macros, listings
+style, the `\appref` switch). `main.tex` is the extended version
 (stock `article`, appendix included, compiles on a basic TeX Live); it is
 21 pages with references. `pvldb.tex` is the submission (acmart `sigconf`,
 no appendix, since PVLDB counts appendices toward its 12 content pages);
@@ -28,9 +29,10 @@ The rewrite of 2026-09-06 fixed these; keep them.
   \armH{} (`contract_hollow`) and \armC{} (`contract`). Prose and tables
   use the macros; the artifact names appear once, in the arms table.
 - **Models, not runs.** There are no run letters. Models are named by
-  the \mGLM{}, \mDS{}, \mSON{} and \mGPT{} macros and always appear in
-  that order, which is bare-schema hard accuracy (13.9, 22.6, 22.9,
-  37.0). Every table and figure uses the same order. "The two flash
+  the \mGLM{}, \mDS{}, \mSON{} and \mGPT{} macros and appear in that
+  order, which is bare-schema hard accuracy (13.9, 22.6, 22.9, 37.0), in
+  every table, figure and enumeration, and wherever prose names two of
+  them. "The two flash
   models" and "the two frontier models" are the only tier words.
 - **Terms are defined once**, at first use, and then used unqualified:
   content, scaffolding, hollow, compiled contract, derivation gap,
@@ -69,6 +71,9 @@ and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
 
 ## What is not finished
 
+- **`make check` also runs `analysis/cost_decomposition.py --check`** in
+  the experiment directory, which recomputes every number in Section 6.3
+  from the result rows and the pinned prices.
 - **The self-citation `extended` in `refs.bib` has no arXiv id yet.** The
   submission build cites it wherever the extended version's appendices are
   referenced; fill in the id once arXiv v1 is posted, and post v1 before
@@ -81,8 +86,8 @@ and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
   sources. `\pdfoutput=1` is on line 1 of `main.tex` so its build picks
   pdflatex for the PDF figures.
 - **arXiv abstract field.** `abstract.txt` is the plain-text abstract for
-  the submission form (about 1,780 characters, under arXiv's 1,920 cap);
-  regenerate it if `sections/00-abstract.tex` changes.
+  the submission form; regenerate it if `sections/00-abstract.tex` changes.
+  `make check` fails if it exceeds arXiv's 1,920-character cap.
 
 ## Figures
 

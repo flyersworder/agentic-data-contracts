@@ -4,15 +4,14 @@
 % TARGET: PVLDB "Experiment, Analysis & Benchmark" track; arXiv preprint
 % (primary cs.DB).
 %
-% This file deliberately uses stock `article` + `twocolumn` so that it
-% compiles with a plain TeX Live install and no downloaded class file.
-% To switch to the PVLDB template, replace the \documentclass line with
-%
-%     \documentclass[sigconf, nonacm]{acmart}
-%
-% and drop the \geometry, \titleformat and abstract-environment blocks
-% below; acmart supplies all three. Nothing in the section files depends
-% on the class.
+% This is the EXTENDED build (arXiv): stock `article` + `twocolumn`, so it
+% compiles with a plain TeX Live install, appendix included. The PVLDB
+% submission is `pvldb.tex`: acmart sigconf, same section files, no
+% appendix (PVLDB counts appendices toward its 12 content pages), with
+% appendix references pointing at this version.
+
+\newif\ifextended
+\extendedtrue
 
 \documentclass[10pt,twocolumn]{article}
 
@@ -37,15 +36,32 @@
 \setlength{\columnsep}{0.28in}
 
 % Tables in this paper are dense; give them room to breathe.
+% Long \texttt tokens (tool names, model ids) cannot hyphenate; let TeX
+% stretch a little rather than overrun the column.
+\setlength{\emergencystretch}{1.5em}
 \renewcommand{\arraystretch}{1.12}
 \newcommand{\tabhead}[1]{\textbf{#1}}
 
-% Arm names appear constantly; one macro each keeps them typographically
-% identical everywhere and makes a global rename a one-line change.
-\newcommand{\armS}{\textsc{schema\_only}}
-\newcommand{\armM}{\textsc{manual\_prompt}}
+% Arm and model names appear constantly; one macro each keeps them
+% typographically identical everywhere and makes a rename a one-line
+% change. Models are always listed in this order, which is bare-schema
+% hard accuracy: 13.9, 22.6, 22.9, 37.0.
+\newcommand{\armS}{\textsc{schema}}
+\newcommand{\armM}{\textsc{manual}}
+\newcommand{\armH}{\textsc{hollow}}
 \newcommand{\armC}{\textsc{contract}}
-\newcommand{\armH}{\textsc{contract\_hollow}}
+\newcommand{\mGLM}{GLM}
+\newcommand{\mDS}{DeepSeek}
+\newcommand{\mSON}{Sonnet~5}
+\newcommand{\mGPT}{GPT-5.6}
+
+% Appendix cross-references. The extended build resolves them; the
+% submission build, which has no appendix, points at the extended version.
+\ifextended
+  \newcommand{\appref}[1]{Appendix~\ref{#1}}
+\else
+  \newcommand{\appref}[1]{the extended version~\cite{extended}}
+\fi
 
 \lstset{
   basicstyle=\ttfamily\scriptsize,
@@ -78,16 +94,31 @@
 
 \input{sections/01-intro}
 \input{sections/02-background}
-\input{sections/03-design}
-\input{sections/04-protocol}
+\input{sections/03-system}
+\input{sections/04-design}
 \input{sections/05-results}
-\input{sections/06-mechanism}
+\input{sections/06-why}
 \input{sections/07-governance}
 \input{sections/08-threats}
-\input{sections/09-related}
-\input{sections/10-conclusion}
+\input{sections/09-conclusion}
+
+% Content ends here; `make check` reads this label's page from the .aux
+% to count content pages against the PVLDB limit.
+\label{end:content}
 
 \bibliographystyle{abbrv}
 \bibliography{refs}
+
+\ifextended
+\appendix
+\input{sections/A-golds}
+\input{sections/B-truncation}
+\input{sections/C-leniency}
+\input{sections/D-harness}
+\input{sections/E-domain}
+\input{sections/F-interaction}
+\input{sections/G-leaderboard}
+\input{sections/H-escalations}
+\fi
 
 \end{document}

@@ -1,0 +1,78 @@
+\section{Scorer Leniency and the Correction}
+\label{app:leniency}
+
+Every accuracy in the paper except the officially graded pair of
+\appref{app:golds} is measured against reconstructed golds, which the
+leaderboard submissions show to be one-sidedly permissive: 19 answers graded
+correct here are wrong officially and none go the other way, $+5.7$~pp on
+the hard split for \armC{} and $+3.0$~pp for \armM{}. What remains exposed is
+every absolute number for the other two arms and the other three models, and
+the 20--26\% leaderboard band where it is quoted against a self-graded
+figure.
+
+The sharper question is whether the leniency is arm-neutral. If it is, it
+moves levels and not contrasts. That is checkable from a proxy. Every one of
+the 19 failed exact string match against the reconstructed gold and was
+rescued by the scorer's tolerance, so exact-match failure among
+locally-correct rows upper-bounds an arm's exposure
+(\texttt{analysis/leniency.py}; exact match strips whitespace and Markdown
+bold and nothing else, deliberately not the benchmark normaliser, which is
+the tolerance being measured). On the hard split, where all 19 disagreements
+lie, the flag has perfect recall at 33 flags, so a flag converts to a real
+error at $19/33 = 0.576$.
+
+\begin{table}[htbp]
+\centering
+\caption{Exposure to scorer leniency: the share of each arm's correct
+hard-split answers that required more than exact match against the
+reconstructed gold (exp.), and the accuracy that follows from correcting it
+(corr.). An upper bound.}
+\label{tab:leniency}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{\mGLM{}} & \multicolumn{2}{c}{\mDS{}}
+& \multicolumn{2}{c}{\mSON{}} & \multicolumn{2}{c}{\mGPT{}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+\tabhead{Arm} & exp. & corr. & exp. & corr. & exp. & corr. & exp. & corr. \\
+\midrule
+\armC{} & \textbf{15.8} & 50.1 & \textbf{17.2} & 51.0 & \textbf{10.6} & 64.2 & \textbf{10.5} & 72.7 \\
+\armH{} & 26.6 & 16.3 & 21.6 & 19.8 & 14.3 & 34.8 & 14.7 & 46.9 \\
+\armM{} & 19.7 & 20.3 & 23.7 & 37.1 & 40.5 & 18.2 & 13.8 & 46.3 \\
+\armS{} & 37.0 & 10.9 & 31.4 & 18.5 & 36.8 & 18.0 & 10.6 & 34.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\armC{} is the \emph{least} exposed arm on all four models, which is the
+same mechanism the rest of the paper reports, surfacing in the grading
+rather than the SQL: the contract states an answer format and the arms
+without it improvise one. It does not follow that the correction is
+conservative for the main contrast. \armC{} has far more correct answers to
+lose, so on \mGLM{} and \mGPT{} it gives up the most \emph{points} (5.0 and
+4.7), and on the other two \armM{} does. Across the twelve \armC{}-versus-baseline
+contrasts the gap narrows on nine and widens on three, by $-2.8$ to $+1.4$~pp
+against raw gaps of 13.7--45.5~pp. It widens exactly where the baseline is
+the heavily exposed one: \mSON{}'s \armM{} sits at 40.5\% exposure, and
+correcting both sides moves that contrast from 44.6 to 46.0~pp. That 40.5\%
+also makes \mSON{}'s corrected \armM{} figure of 18.2\% the least safe
+extrapolation in the analysis, applying a conversion rate measured on
+\armC{} and \mGLM{} to the arm and model furthest from it; read it as a
+direction, not a second measurement. The honest summary is not that the
+leniency favours either side, but that its effect on every contrast is under
+3~pp and no conclusion in the paper turns on 3~pp.
+
+The correction's weakness is that it applies a conversion rate calibrated
+on one arm to the others. The second submission tests exactly that.
+Calibrating on \armC{} as before and applying the resulting rate blind to
+\armM{} predicts a $3.1$~pp reconstructed-gold bias against a measured
+$3.0$~pp. The point estimates agree, but on 18 flags the realised conversion
+($10/18$) carries a Wilson 95\% interval of roughly $[0.34, 0.75]$, so any
+measured bias between about $1.8$ and $4.1$~pp would have been equally
+consistent. The transfer assumption survives its first test rather than
+being confirmed by it, and it is still the only instrument bounding the
+fourteen of sixteen arm~$\times$~model cells we do not submit. Two limits
+survive: the flag is an upper bound, so true corrections are at or below
+the table's, and transfer across \emph{models} remains untested, which is
+where the estimator does most of its work.

@@ -271,9 +271,22 @@ recorded `usd` of the four sweeps: A $3.27, B $6.32, C $72.36, D $164.75.
    `INTERPRETATION` clauses stripped. About $2 on the two flash models, ~$40
    on Sonnet 5. Do it if the repeats leave time; the paper survives without
    it because it says so.
-3. **acmart and the cut to 12 pages.** 23 pages under `article` today. The
-   class switch is one line (README); the page cut is the real writing work
-   and should follow the repeats so numbers are written once.
+3. ~~**acmart and the cut to 12 pages.**~~ **Done 2026-09-06.** The paper
+   was rewritten around two things: the decomposition ladder (schema,
+   scaffolding, content, compiled views) and why the contract arm wins
+   (reachability, the clauses in the SQL, work and cost). Related work
+   moved up to §2, the framework got its own §3 with a contract-vs-hollow
+   excerpt, arms are \textsc{schema}/\textsc{manual}/\textsc{hollow}/\textsc{contract},
+   runs are named by model in one fixed order, and the revision narrative
+   is gone except for one paragraph in Threats. Protocol detail,
+   truncation, leniency, harness asymmetries, the fee/non-fee table, the
+   interaction figure, leaderboard coupling and the escalation transcripts
+   are appendices A--H, arXiv-only. `pvldb.tex` (acmart) is exactly 12
+   content pages; `make check` gates it. The repeats will change table
+   cells, not sentences. One new finding came out of the rewrite: the
+   GPT-5.6 cost premium is fresh-input tokens (lookup results billed at
+   the uncached rate, 2 tool calls per turn) plus SQL written twice
+   (`inspect_query` then `run_query`), decomposed in §6.3.
 4. **Zenodo DOI.** Connect the repo to Zenodo so future releases archive
    automatically, and upload the `dabstep-eval-2026-09` assets by hand for
    this one; cite the DOI in Artifact Availability. A GitHub release

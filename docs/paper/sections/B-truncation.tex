@@ -1,0 +1,41 @@
+\section{The \mDS{} Run Lost 29\% of Its Rows}
+\label{app:truncation}
+
+Roughly 1{,}000 rows into the \mDS{} run, the pinned provider endpoint
+began returning HTTP~429. The harness had no retry for that status, so each
+throttled request was written to the results file as a terminal error: 466
+of 468 error rows are rate limits. Error rate was 0.2\% over the first
+1{,}000 rows, 31\% over the next 200, and 100\% thereafter. The sweep then
+finished early, because a throttled request fails instantly, and exited
+cleanly.
+
+The loss costs power, not validity, and the evidence for that is specific:
+
+\begin{itemize}
+\itemsep2pt
+\item Errors are near-uniform across arms: 113, 116, 118 and 121 of 401
+      rows. No arm is preferentially damaged.
+\item 114 of the 122 lost tasks lost \emph{all four} arms together, because
+      the runner schedules a task's arms close in time. Independent per-arm
+      failure would have left roughly 100 complete tasks; 279 survived.
+      Missingness is a property of \emph{when} a task ran.
+\item Figures on the 279 tasks scoreable in all four arms (the
+      complete-case set, used for \mDS{} throughout) and per-arm figures
+      over each arm's own denominator agree to within one point.
+\end{itemize}
+
+We therefore report \mDS{} on the 279 tasks scoreable in all four arms,
+with intervals roughly 20\% wider than the other runs'. One residual caveat:
+the lost tasks are slightly enriched for hard tasks (87\% hard against 83\%
+overall), so \mDS{}'s absolute accuracies are marginally optimistic. Every
+arm is affected identically. The 122 tasks are re-runnable, but only on a
+different provider than the other 279, which would be its own confound;
+leaving them out is cleaner.
+
+One lesson generalises beyond this paper. Pinning a single provider endpoint
+with fallbacks disabled is correct for validity, since it holds
+quantization, price and throughput fixed across arms, but it transfers
+responsibility for transient failures to the harness, and here nothing
+looked wrong until the results were read. Benchmark harnesses that pin
+endpoints need a rate-of-progress check, not just a liveness check. The
+harness now retries 429.

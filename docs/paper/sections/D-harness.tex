@@ -1,0 +1,85 @@
+\section{Harness Asymmetries, the Digest Defect, and the Substituted Primary
+Model}
+\label{app:harness}
+
+\paragraph{A validator defect, \mGLM{} only.} \mGLM{}'s governed arms
+carried a defect in the validator: a check intended to reject
+\texttt{SELECT *} also rejected \texttt{COUNT(*)}, because the latter parses
+with a \texttt{Star} node. The agent was told \emph{``SELECT * is not
+allowed''} about queries containing no \texttt{SELECT *}: 161 rejections
+across 124 of 401 tasks, and replaying the 160 distinct rejected queries
+showed 79 were falsely rejected. A rejection whose stated reason is not true
+of the query cannot be complied with, and the transcripts show the agent
+guessing at unrelated clauses before finding a formulation that passed. This
+handicapped both governed arms and neither baseline, so on this axis
+\mGLM{}'s 55.1\% is a floor rather than a ceiling. \mDS{} ran with the fix,
+and the contract arm's total count of queries rejected by the validator (218
+on \mGLM{}, the 161 above among them) falls to 29, confirming the diagnosis.
+The defect's direction is known; its magnitude is not separable from the
+model change, and we do not attempt to estimate it.
+
+\paragraph{Different endpoints across runs.} The runs used different
+provider endpoints as well as different models, and \mSON{} a different kind
+of route altogether: an enterprise gateway fronting Bedrock, on the Messages
+API with cache control. \mSON{}'s dollar figures are that gateway's billed
+rates under Messages-API cache pricing; on the same gateway's
+OpenAI-compatible route the arms would have been billed at multiples that
+differ by arm ($1.86{\times}$ on \armS{} against $3.40{\times}$ on \armM{},
+replaying \mGPT{}'s rows at the same rates), so the \mSON{} cost ordering is
+a property of the route as well as of the arms.
+
+\paragraph{The row limit.} Symmetric result limits are not a detail. An
+earlier iteration of this experiment used a 1{,}000-row limit, and the
+governed arm looked $11{\times}$ more expensive than the baselines; the cause
+was oversized result payloads poisoning the context window, not the
+contract. The reported runs cap every result at 50 rows, but not perfectly
+symmetrically: the cap reached the governed arms' \texttt{run\_query} but
+not their \texttt{preview\_table}, which the library clamps at 100 rows of
+its own accord. A governed arm could therefore see 100 rows from a preview
+where an ungoverned arm saw 50 from \texttt{execute\_sql}. That happened on
+31 preview calls across \mGLM{}, \mDS{} and \mGPT{}, against many thousands
+of tool calls: small, but in the treatment's favour. \mSON{} ran with the
+cap in place (484 preview calls, none over 50 rows); the other three are as
+they ran.
+
+\paragraph{The forced-answer policy.} When an agent exhausts its output
+budget the harness forces a final answer instead of discarding the row. On
+\mGLM{} that produced one additional correct answer out of 59, nearly
+worthless for accuracy, but it eliminated unscoreable rows, and those rows
+were 41 \armS{}, 18 \armM{} and zero in either governed arm. Dropping them
+would have inflated the two baselines by silently discarding their hardest
+tasks. In the arm order of the tables (\armS{}, \armH{}, \armM{}, \armC{}), \mDS{}
+repeats the pattern (49, 15, 38 and zero on its complete-case set; 55, 15
+and 42 before it), \mGPT{} forces 8 answers in \armH{} and none elsewhere,
+and \mSON{} forces 43, 27, 32 and zero. \armC{} is the only arm
+that never exhausted its budget on any run.
+
+\paragraph{The digest defect.} The contract digest is stamped
+unconditionally, so \armH{}'s rows on \mGLM{}, \mDS{} and \mGPT{} carry the
+\emph{real} contract's hash (\texttt{sha256:e438ecf7\ldots}) instead of the
+hollow artifact's (\texttt{sha256:c46a767d\ldots}), pinned to a file that arm
+never loaded. No result changes. Which artifact each arm loaded is fixed by
+the harness, and the hollow arm's empty-placeholder responses and the
+$n$-gram tests of Section~\ref{sec:hollow} evidence it independently. What is
+missing is the per-row tamper-evidence we claim for \armH{}. The harness is
+fixed; the released rows of the three earlier runs are left as they ran, and
+\mSON{}, executed after the fix, stamps the hollow digest on all 401 of its
+\armH{} rows.
+
+\paragraph{The substituted primary model.} The pre-registration named
+\texttt{deepseek-v4-pro-0813} as the primary comparison. Before sweeping it
+we probed the bare-schema arm on 50 stratified tasks per candidate; on the
+40 hard tasks all candidates scored, \mGLM{} answered 6, \mDS{} 10,
+\texttt{deepseek-v4-pro} 11 and \mGPT{} 17. Pro against \mDS{} is three
+discordant pairs (1 against 2), $p{=}1.0$; \mGPT{} against each of the
+others is $p{\le}0.0156$. Pro would therefore not have supplied the
+capability contrast the primary was chosen to provide, and \mGPT{} was
+substituted by the same pre-specified criterion. What makes that a
+substitution rather than a researcher degree of freedom is that the probe
+measured the covariate, not the effect: model selection used bare-schema
+accuracy while blind to the \armC{}-versus-\armM{} contrast the paper is
+about. The public prediction of Section~\ref{sec:ceiling} was recorded
+against \mGPT{} after the substitution was made. \mSON{} was added after a
+three-model draft of the paper had been written; its rows carry the
+commit, the contract digest and the hollow digest, which is the evidence
+that it ran the frozen harness.

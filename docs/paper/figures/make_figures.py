@@ -30,7 +30,6 @@ import math
 from pathlib import Path
 
 import matplotlib
-import matplotlib.ticker
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -57,9 +56,16 @@ COLOR = {
 }
 LABEL = {
     "contract": "contract",
-    "manual_prompt": "manual_prompt",
-    "contract_hollow": "contract_hollow",
-    "schema_only": "schema_only",
+    "manual_prompt": "manual",
+    "contract_hollow": "hollow",
+    "schema_only": "schema",
+}
+# Short model names as printed in the paper (\mGLM etc.), in RUNS order.
+MODEL_LABEL = {
+    "glm-5.3-flash": "GLM",
+    "deepseek-v4-flash": "DeepSeek",
+    "claude-sonnet-5": "Sonnet 5",
+    "gpt-5.6-sol": "GPT-5.6",
 }
 MARKER = {
     "glm-5.3-flash": "o",
@@ -193,7 +199,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
             )
 
     ax.set_yticks(list(ys))
-    ax.set_yticklabels(order, fontsize=7.5)
+    ax.set_yticklabels([LABEL[a] for a in order], fontsize=7.5)
     ax.set_ylim(-0.55, len(order) - 0.35)
     ax.set_xlim(0, 84)
     ax.set_xlabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
@@ -242,7 +248,7 @@ def fig_ladder(acc: dict, out: Path) -> None:
                 ls=LINESTYLE[m],
                 lw=1.0,
                 ms=5,
-                label=m,
+                label=MODEL_LABEL[m],
             )
             for m in RUNS
         ],
@@ -251,80 +257,6 @@ def fig_ladder(acc: dict, out: Path) -> None:
         frameon=False,
         handlelength=2.2,
         bbox_to_anchor=(-0.01, 1.02),
-    )
-    fig.tight_layout(pad=0.3)
-    fig.savefig(out, format="pdf", bbox_inches="tight")
-    plt.close(fig)
-
-
-def fig_cost(acc: dict, cost: dict, out: Path) -> None:
-    """Accuracy against spend. The treatment arm is cheapest and best."""
-    fig, ax = plt.subplots(figsize=(3.3, 2.3))
-    for model in RUNS:
-        for a in ARMS:
-            k, n = acc[model][a]
-            ax.plot(
-                cost[model][a],
-                k / n * 100,
-                MARKER[model],
-                color=COLOR[a],
-                ms=7,
-                mec="white",
-                mew=0.9,
-                zorder=3,
-            )
-    ax.set_xlabel("cost of the run (USD)", fontsize=7.5, color=INK_MUTED)
-    ax.set_ylabel("hard-task accuracy (%)", fontsize=7.5, color=INK_MUTED)
-    # Log scale, and wide enough for runs C and D. The four runs' costs span
-    # $0.67 to $46.08 -- a 69x range that a linear axis cannot show without
-    # collapsing runs A and B onto the origin. The previous limits (0.4, 2.05)
-    # silently placed all four run-C points off-canvas while the legend went
-    # on advertising the model; (0.55, 30) would have done the same to run D.
-    ax.set_xscale("log")
-    ax.set_xlim(0.55, 60)
-    ax.set_ylim(5, 85)
-    ax.set_xticks([0.6, 1, 2, 5, 10, 20, 50])
-    ax.get_xaxis().set_major_formatter(
-        matplotlib.ticker.FuncFormatter(lambda v, _: f"${v:g}")
-    )
-    ax.grid(color=GRID, lw=0.5)
-    style_axes(ax)
-
-    handles = [
-        Line2D([], [], color=COLOR[a], marker="o", ls="none", ms=5, label=LABEL[a])
-        for a in ("contract", "manual_prompt", "contract_hollow", "schema_only")
-    ] + [
-        Line2D([], [], color=INK_MUTED, marker=MARKER[m], ls="none", ms=5, label=m)
-        for m in RUNS
-    ]
-    # Without a direction cue the reader has to work out which corner is
-    # good; with two encodings on the plot that is a real ask.
-    ax.annotate(
-        "cheaper and more accurate",
-        xy=(0.58, 65),
-        fontsize=6,
-        color=INK_MUTED,
-        style="italic",
-    )
-    ax.annotate(
-        "",
-        xy=(0.58, 61.5),
-        xytext=(0.95, 47),
-        arrowprops=dict(arrowstyle="->", color=GRID, lw=0.9),
-    )
-    # The band between $2 and $10 is the only region with no marks in it:
-    # runs A and B sit left of it and runs C and D right of it. Upper-right
-    # would now cover sol's and sonnet 5's contract points.
-    ax.legend(
-        handles=handles,
-        loc="upper left",
-        fontsize=5.8,
-        frameon=False,
-        ncol=2,
-        columnspacing=0.9,
-        handletextpad=0.35,
-        labelspacing=0.35,
-        bbox_to_anchor=(0.17, 1.03),
     )
     fig.tight_layout(pad=0.3)
     fig.savefig(out, format="pdf", bbox_inches="tight")
@@ -400,7 +332,7 @@ def fig_interaction(acc: dict, out: Path) -> None:
     for x, m in zip(xs, RUNS):
         dx, y, ha = label_pos.get(m, (0, 63.4, "center"))
         ax.annotate(
-            m,
+            MODEL_LABEL[m],
             xy=(x, y),
             xytext=(dx, 0),
             textcoords="offset points",
@@ -443,10 +375,9 @@ def main() -> None:
                 f"the paper states {want}. Reconcile before rendering."
             )
 
-    fig_ladder(acc, HERE / "fig-ablation.pdf")
-    fig_cost(acc, cost, HERE / "fig-cost.pdf")
+    fig_ladder(acc, HERE / "fig-ladder.pdf")
     fig_interaction(acc, HERE / "fig-interaction.pdf")
-    print("wrote fig-ablation.pdf, fig-cost.pdf, fig-interaction.pdf")
+    print("wrote fig-ladder.pdf, fig-interaction.pdf")
 
 
 if __name__ == "__main__":

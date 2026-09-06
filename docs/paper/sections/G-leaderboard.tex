@@ -1,0 +1,49 @@
+\section{Reading a Leaderboard Number}
+\label{app:leaderboard}
+
+Section~\ref{sec:prior} quoted the two coupling costs the sources document
+themselves: a tuned artifact is coupled to the serving model, and a Guide
+tuned against a benchmark has to be measured on questions it has not seen.
+The two systems atop DABStep's validated leaderboard make the point concrete
+and disclose it. The first reports 89.95\% hard with a lightweight inference
+model driving a helper library distilled offline by a heavyweight one, built
+by ``validating them against ground truth answers'' and by testing candidate
+functions ``against the ground truth of multiple interconnected tasks'',
+with pitfalls extracted ``from the test data'' and injected into the
+inference prompt~\cite{nvidia-kgmon}. The second, at 87.57\%, publishes under
+the title \emph{Beyond Fine-tuning: Solving DABstep's Hard Mode with
+Versioned Assets}~\cite{oceanbase-datapilot}; we could not retrieve that post
+in full and make no claim about its mechanism. Nothing in the benchmark
+forbids using its labelled dev split this way, and we allege no violation;
+where the first system says ``the test data'' we read its own loose usage
+rather than an admission. Such numbers answer a different question from
+ours: how much of a labelled, enumerable question space can be compiled away
+in advance.
+
+Our gold reconstruction supplies one datum on the same point. Across the
+2{,}199 published DABStep submissions, organisations submitting once achieve
+a median hard-split accuracy of 19.6\%, while those submitting 21 or more
+times achieve 54.2\%. That gradient is equally consistent with genuine
+iterative improvement. But on a small-template benchmark with a public
+leaderboard, a single accuracy carries little information about
+generalisation unless the submission count and the artifact's provenance
+are stated alongside it. Ours are: one sweep per model, no tuning against
+the task set, a digest-pinned artifact frozen 35 commits before the first
+run, and two leaderboard submissions, one per arm of the main contrast on
+one of the four models, both made after the runs were complete and neither
+followed by a change to the artifact. They exist to move that contrast onto
+official grading and to audit our own golds (\appref{app:golds}), not
+to place.
+
+The comparable artifacts are unpublished: MotherDuck's and NVIDIA's are
+fused to the test set and coupled to the model they were tuned against, and
+OceanBase's is described only in a post we could not retrieve. Ours is in
+the repository with a digest because a contract written from a vendor
+manual has neither coupling. That
+is the sense in which a data contract is a different object from a semantic
+layer, and it costs us the accuracy gap rather than excusing it.
+
+Two claims that might look distinctive here belong to others. Paired testing
+across several models is not distinctive~\cite{semantic-paired,dbt-benchmark},
+and paired McNemar is standard practice for comparing learners on one
+run~\cite{dietterich}. The contribution is the decomposition.

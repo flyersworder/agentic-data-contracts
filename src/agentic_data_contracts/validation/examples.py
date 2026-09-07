@@ -14,7 +14,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import sqlglot
 
@@ -787,7 +787,11 @@ def _check_one(
         normalized = (
             sql_normalizer.normalize_sql(example.sql) if sql_normalizer else example.sql
         )
-        statement = sqlglot.parse_one(normalized, dialect=dialect)
+        # parse_one is annotated to return the `Expr` base; every node it
+        # actually builds is an `Expression`, which is what validation/ takes.
+        statement = cast(
+            "sqlglot.exp.Expression", sqlglot.parse_one(normalized, dialect=dialect)
+        )
         found = _relative_time_node(statement)
         if found is not None:
             return _make(

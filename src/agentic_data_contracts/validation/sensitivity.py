@@ -46,6 +46,7 @@ import sqlglot
 from sqlglot import exp
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
+from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.validation.validator import Validator, _is_multi_statement
 
 if TYPE_CHECKING:
@@ -585,6 +586,7 @@ def validate_sensitivity_tables(
     *,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
+    caller_principal: str | None = None,
 ) -> list[str]:
     """Problems where a shadow reads a table the contract does not govern.
 
@@ -608,8 +610,23 @@ def validate_sensitivity_tables(
     only after normalization (Denodo VQL) is normalized before its tables are
     read. This gate takes no adapter, so -- unlike ``check_sensitivity`` -- it
     has no adapter to fall back on; pass the normalizer explicitly.
+
+    ``caller_principal`` chooses WHICH tables count as governed. Omitted, the
+    check is structural -- every table the contract declares, via
+    ``contract.allowed_table_names()`` -- because a CI gate has no caller:
+    it asks whether a shadow stays inside the contract at all, not whether
+    some particular caller may read what it reads. Given, it checks against
+    ``contract.allowed_table_names_for(caller_principal)``, the set
+    ``check_sensitivity`` enforces at run time for that caller. Pass it to
+    gate a metric that a known principal will check; leave it out and a
+    shadow over a principal-restricted table passes here, then is refused at
+    run time for any caller denied that table.
     """
-    allowed = contract.allowed_table_names()
+    allowed = (
+        contract.allowed_table_names()
+        if caller_principal is None
+        else contract.allowed_table_names_for(caller_principal)
+    )
     normalize = _normalizer_fn(sql_normalizer)
     problems: list[str] = []
     for metric in metrics:
@@ -642,6 +659,7 @@ def check_sensitivity(
     repeats: int = DEFAULT_REPEATS,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
+    caller_principal: Principal = None,
 ) -> SensitivityReport:
     """Check *sql* against the sensitivity properties *metric* declares.
 
@@ -667,14 +685,17 @@ def check_sensitivity(
     is what makes skipping the raise safe: this function never runs SQL Layer
     1 did not first see and clear.
 
-    **Principal-restricted tables cannot be checked yet.** Step 0's
-    ``Validator`` is built with no caller principal, so a query over a table
-    restricted by ``allowed_principals``/``blocked_principals`` is blocked at
-    Step 0 and this function raises ``ValueError`` rather than returning a
-    verdict; the shadow-governance check above also governs shadows against
-    ``contract.allowed_table_names()`` -- every declared table -- with no
-    regard to principal. A ``caller_principal`` parameter to thread through
-    both is a planned follow-up, not yet implemented.
+    **Principals.** ``caller_principal`` has the type and semantics of
+    ``Validator``'s: a string, a zero-arg callable, or None. It is resolved
+    ONCE per call, and that one identity is used twice: Step 0's
+    ``Validator`` checks the query as that caller, and every shadow must read
+    only tables in ``contract.allowed_table_names_for(<that caller>)``, so a
+    contract-authored shadow can never reach a table the caller is denied. A
+    callable is not re-invoked between the two -- it cannot clear the query
+    as one caller and have the shadow governed as another. The default, None,
+    is an anonymous caller: fail-closed, it is denied every table restricted
+    by ``allowed_principals``/``blocked_principals``, so a query over one is
+    blocked at Step 0 and a shadow reading one raises ``ValueError``.
 
     **Dialects that parse only after normalization.** ``sql_normalizer`` --
     defaulting to ``adapter`` when the adapter implements ``SqlNormalizer`` --
@@ -737,6 +758,9 @@ def check_sensitivity(
     if sql_normalizer is None and isinstance(adapter, SqlNormalizer):
         sql_normalizer = adapter
     normalize = _normalizer_fn(sql_normalizer)
+    # Resolved once: Step 0 and shadow governance must judge the same caller,
+    # so the Validator gets the resolved string, never the callable.
+    principal = resolve_principal(caller_principal)
 
     # Step 0 -- refuse to be the weak door. The query is normalized ONCE here
     # and Layer 1 sees the normalized text. That is equivalent to handing the
@@ -759,7 +783,9 @@ def check_sensitivity(
                 f"normalizer failed: returned {type(normalized_sql).__name__}, not str"
             )
         else:
-            verdict = Validator(contract, dialect=dialect).validate(normalized_sql)
+            verdict = Validator(
+                contract, dialect=dialect, caller_principal=principal
+            ).validate(normalized_sql)
             if verdict.blocked and not verdict.parse_error:
                 raise ValueError(
                     f"query is blocked by the contract and will not be executed: "
@@ -768,15 +794,17 @@ def check_sensitivity(
             if verdict.parse_error:
                 no_verdict = f"unparseable: {'; '.join(verdict.reasons)}"
 
-    # A shadow that fails to parse cannot be checked against `allowed` here --
+    # A shadow that fails to parse cannot be checked against the contract --
     # `None` is a refusal, never an empty set of tables read. Recorded now and
     # turned into an `unchecked` result (never an execution) in the loop below,
     # so a governance hole never opens just because sqlglot cannot read the
-    # dialect a shadow is written in.
+    # dialect a shadow is written in. Governed means governed FOR THIS
+    # CALLER: a shadow reading a table the caller is denied is refused the
+    # same as one reading a table the contract never declared.
     unparseable_shadows: set[str] = set()
     for prop, ungoverned in _shadow_governance(
         selected,
-        contract.allowed_table_names(),
+        contract.allowed_table_names_for(principal),
         dialect=dialect,
         normalize=normalize,
     ):

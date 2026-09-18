@@ -1438,3 +1438,138 @@ semantic:
         assert result.status == "pass"
         assert result.moved is False
         assert report.ok is True
+
+
+def _principal_contract() -> DataContract:
+    """`mkt.touchpoints` open to all; `mkt.lead_scores` restricted to alice."""
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: sensitivity-principal-test
+semantic:
+  allowed_tables:
+    - schema: mkt
+      tables: [touchpoints]
+    - schema: mkt
+      tables: [lead_scores]
+      allowed_principals: [alice@co.com]
+  forbidden_operations: [DELETE, DROP]
+  rules: []
+"""
+    )
+
+
+class TestCallerPrincipal:
+    def test_an_allowed_principal_gets_a_verdict_on_a_restricted_table(
+        self, mkt_adapter
+    ) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal="alice@co.com",
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert report.ok is True
+
+    @pytest.mark.parametrize("principal", [None, "", "bob@co.com"])
+    def test_a_denied_or_anonymous_principal_is_blocked_at_step_zero(
+        self, mkt_adapter, monkeypatch, principal
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="blocked"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                FIRST_TOUCH,
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert seen == []
+
+    @pytest.mark.parametrize("principal", [None, "bob@co.com"])
+    def test_a_shadow_reading_a_table_the_caller_is_denied_raises(
+        self, mkt_adapter, monkeypatch, principal
+    ) -> None:
+        # The caller's own query reads only the open table, so Step 0 clears
+        # it -- but MKT_SHADOW reads mkt.lead_scores, which this caller may
+        # not. Governing the shadow against every declared table would let a
+        # contract-authored SELECT reach data the caller is denied.
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="lead_scores"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                "SELECT count(*) FROM mkt.touchpoints",
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert seen == []
+
+    def test_a_callable_principal_is_resolved_once(self, mkt_adapter) -> None:
+        # Step 0 and shadow governance must see ONE identity: a callable
+        # re-invoked between them could clear the query as one caller and
+        # govern the shadow as another.
+        calls: list[int] = []
+
+        def principal() -> str:
+            calls.append(1)
+            return "alice@co.com"
+
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal=principal,
+        )
+        assert report.results[0].status == "pass"
+        assert len(calls) == 1
+
+    def test_a_callable_that_changes_identity_cannot_split_the_call(
+        self, mkt_adapter
+    ) -> None:
+        # Alice first, anonymous after: resolved once, the whole call is
+        # Alice's -- never cleared as Alice and then governed as nobody.
+        identities = iter(["alice@co.com", None, None, None])
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal=lambda: next(identities),
+        )
+        assert report.results[0].status == "pass"
+
+    def test_the_ci_gate_without_a_principal_checks_every_declared_table(
+        self,
+    ) -> None:
+        # A CI gate has no caller: structurally, the shadow reads only tables
+        # the contract declares.
+        assert (
+            validate_sensitivity_tables(
+                _principal_contract(), [_metric(FIRST_TOUCH_PROP)]
+            )
+            == []
+        )
+
+    def test_the_ci_gate_with_an_allowed_principal_is_silent(self) -> None:
+        assert (
+            validate_sensitivity_tables(
+                _principal_contract(),
+                [_metric(FIRST_TOUCH_PROP)],
+                caller_principal="alice@co.com",
+            )
+            == []
+        )
+
+    def test_the_ci_gate_with_a_denied_principal_reports_the_table(self) -> None:
+        (problem,) = validate_sensitivity_tables(
+            _principal_contract(),
+            [_metric(FIRST_TOUCH_PROP)],
+            caller_principal="bob@co.com",
+        )
+        assert "'mkt.lead_scores'" in problem
+        assert "does not allow" in problem

@@ -78,7 +78,7 @@ class TestRewrite:
         out = _rw("SELECT count(*) FROM main.payments")
         assert out.startswith("WITH __sens_0 AS (")
         assert "FROM __sens_0" in out
-        assert "FROM main.payments)" in out  # inside the shadow, untouched
+        assert "FROM main.payments\n)" in out  # inside the shadow, untouched
 
     def test_rewrites_a_bare_reference_and_keeps_its_alias(self) -> None:
         out = _rw("SELECT count(*) FROM payments p WHERE p.eur_amount > 10")
@@ -123,6 +123,19 @@ class TestRewrite:
     def test_not_applicable_when_the_target_is_absent(self) -> None:
         with pytest.raises(_Refused, match="not_applicable"):
             _rw("SELECT * FROM main.fees")
+
+    def test_a_trailing_line_comment_in_the_shadow_keeps_the_cte_closed(
+        self,
+    ) -> None:
+        # Unguarded, the comment runs to the end of the line and swallows the
+        # CTE's closing paren, so the rewrite no longer parses.
+        shadow = Shadow(
+            table="main.payments",
+            sql="SELECT * FROM main.payments -- the shadow's own note",
+        )
+        out = _rewrite("SELECT count(*) FROM main.payments", shadow, dialect="duckdb")
+        sqlglot.parse_one(out, dialect="duckdb")
+        assert "FROM __sens_0" in out
 
     def test_alias_collision_picks_the_next_free_name(self) -> None:
         assert _free_alias("SELECT 1") == "__sens_0"
@@ -346,6 +359,7 @@ class TestCheckSensitivity:
         )
         (result,) = report.results
         assert result.status == "unchecked"
+        assert result.reason.startswith("unparseable")
         assert report.ok is False
         assert seen == []
 
@@ -463,6 +477,150 @@ class TestCheckSensitivity:
         assert result.status == "unchecked"
         assert result.reason.startswith("unparseable shadow")
         assert seen == []
+
+    def test_tokenizer_error_is_unchecked_and_executes_nothing(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # An unterminated literal fails in sqlglot's TOKENIZER, whose error is
+        # not a ParseError. It is still "Layer 1 could not read this", so it
+        # takes the unparseable path: no verdict, nothing executed.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        second = SensitivityProperty(
+            name="other",
+            description="another claim",
+            shadow=MKT_SHADOW,
+            expect="changes",
+        )
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP, second),
+            "SELECT 'abc",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        assert [r.status for r in report.results] == ["unchecked", "unchecked"]
+        assert all(r.reason.startswith("unparseable") for r in report.results)
+        assert seen == []
+
+    def test_nondeterministic_base_is_unchecked_and_refused_once(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # random() differs on every execution, so the repeat filter trips. The
+        # refusal is cached: the base query runs `repeats` times for the whole
+        # call, not per property, and no rewrite is ever executed.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        second = SensitivityProperty(
+            name="other",
+            description="another claim",
+            shadow=MKT_SHADOW,
+            expect="changes",
+        )
+        sql = "SELECT lead_id, random() AS r FROM mkt.touchpoints"
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP, second),
+            sql,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        assert [r.status for r in report.results] == ["unchecked", "unchecked"]
+        assert all("not deterministic" in r.reason for r in report.results)
+        assert seen == [sql, sql]
+
+    def test_engine_error_on_the_base_is_cached(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # A base query the engine rejects is refused once for the whole call.
+        # Re-running it for every property would break the stated cost model
+        # and only repeat the same error.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        second = SensitivityProperty(
+            name="other",
+            description="another claim",
+            shadow=MKT_SHADOW,
+            expect="changes",
+        )
+        sql = "SELECT no_such_column FROM mkt.touchpoints"
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP, second),
+            sql,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        assert [r.status for r in report.results] == ["unchecked", "unchecked"]
+        assert all(r.reason.startswith("engine error") for r in report.results)
+        assert seen == [sql]
+
+    @pytest.mark.parametrize("repeats", [0, -1])
+    def test_repeats_below_one_raises(
+        self, mkt_adapter, mkt_contract, repeats: int
+    ) -> None:
+        # Fewer than one base execution would disable the determinism filter
+        # silently; malformed input raises instead.
+        with pytest.raises(ValueError, match="repeats"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                FIRST_TOUCH,
+                contract=mkt_contract,
+                adapter=mkt_adapter,
+                repeats=repeats,
+            )
+
+    @pytest.mark.parametrize("broken_first", [True, False])
+    def test_unparseable_shadow_never_executes_beside_a_good_one(
+        self, mkt_adapter, mkt_contract, monkeypatch, broken_first: bool
+    ) -> None:
+        # Security property: in ONE call, the good property still earns its
+        # verdict while the unparseable shadow -- whose tables were never
+        # checked against the contract -- is never sent to the engine, in
+        # either order.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        broken = SensitivityProperty(
+            name="broken_shadow",
+            description="a shadow sqlglot cannot parse",
+            shadow=UNPARSEABLE_SHADOW,
+            expect="unchanged",
+        )
+        props = (
+            (broken, FIRST_TOUCH_PROP) if broken_first else (FIRST_TOUCH_PROP, broken)
+        )
+        report = check_sensitivity(
+            _metric(*props),
+            FIRST_TOUCH,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        by_name = {r.name: r for r in report.results}
+        assert by_name["attribution_is_first_touch"].status == "pass"
+        assert by_name["broken_shadow"].status == "unchecked"
+        assert seen, "the good property must have executed"
+        assert not any(UNPARSEABLE_SHADOW.sql in stmt for stmt in seen)
 
     def test_shadow_tables_returns_none_for_an_unparseable_shadow(self) -> None:
         # The probe behind the test above: confirms UNPARSEABLE_SHADOW really

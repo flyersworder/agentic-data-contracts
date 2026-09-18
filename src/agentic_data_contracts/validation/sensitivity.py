@@ -162,7 +162,9 @@ def _rewrite(sql: str, shadow: Shadow, *, dialect: str | None) -> str:
         out = out[:start] + alias + out[end:]
 
     toks = list(sqlglot.tokenize(out, dialect=dialect))
-    cte = f"{alias} AS ({shadow.sql})"
+    # The newline ends any trailing line comment in the shadow before the
+    # closing paren, which the comment would otherwise swallow.
+    cte = f"{alias} AS ({shadow.sql}\n)"
     if toks and toks[0].token_type == sqlglot.TokenType.WITH:
         head = toks[1] if len(toks) > 1 else None
         cut = (
@@ -391,6 +393,12 @@ def check_sensitivity(
     A passing property says the query *responds* to an input the contract says
     it depends on. It never says the answer is right.
     """
+    if repeats < 1:
+        raise ValueError(
+            f"repeats must be at least 1, got {repeats}: fewer base executions "
+            "would silently disable the determinism filter"
+        )
+
     selected = list(metric.sensitivity)
     if properties is not None:
         by_name = {p.name: p for p in selected}
@@ -465,7 +473,10 @@ def check_sensitivity(
             raise _Refused(f"engine error: {e}") from e
 
     # The base result is computed at most once per call and reused across every
-    # property; a metric with four properties costs six executions, not twelve.
+    # property; a metric with four properties costs `repeats` + 4 executions,
+    # not 4 * (`repeats` + 1). A refusal while computing it -- nondeterminism
+    # or an engine error -- is cached the same way, so a failing base query is
+    # not re-run for every property.
     base: list[tuple] | None = None
     base_refusal: str | None = None
 
@@ -474,11 +485,14 @@ def check_sensitivity(
         if base_refusal is not None:
             raise _Refused(base_refusal)
         if base is None:
-            first = _run(sql)
-            for _ in range(max(repeats - 1, 0)):
-                if _run(sql) != first:
-                    base_refusal = "query is not deterministic"
-                    raise _Refused(base_refusal)
+            try:
+                first = _run(sql)
+                for _ in range(repeats - 1):
+                    if _run(sql) != first:
+                        raise _Refused("query is not deterministic")
+            except _Refused as e:
+                base_refusal = str(e)
+                raise
             base = first
         return base
 

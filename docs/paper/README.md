@@ -69,6 +69,95 @@ tlmgr --usermode install acmart xstring environ totpages ncctools comment \
 (`.../tlnet/archive/hyperxmp.tar.xz`) into `~/Library/texmf/tex/latex/hyperxmp/`
 and run `mktexlsr ~/Library/texmf`. A full TeX Live has all of this already.
 
+## Next: the k=3 gateway panel (decided 2026-09-18)
+
+Pick this up from the company laptop. It replaces the ~$47 flash-tier repeat
+plan in [`../paper-plan.md`](../paper-plan.md) ("PVLDB timing and what
+remains") and moves the target from the 2026-11-01 cycle to **2026-12-01**
+(abstract due **2026-11-25**). Volume 20 stays open monthly until 2027-03-01,
+so the extra month costs nothing.
+
+**What to run.** Every arm, k=3, on four models reached through the company's
+self-hosted LiteLLM gateway (the same route as `claudesonnet5`; see
+"`claudesonnet5` — the enterprise gateway route" in the
+[eval README](../../experiments/dabstep-contract-eval/README.md)):
+
+| Model | Why it is in the panel |
+|---|---|
+| Qwen 3.6 27B | Same size class as MotherDuck's local Qwen3.8 27B (`motherduck-local`), so our contract can be compared against their semantic layer on nearly the same model, not just by citing their number. It is a different Qwen version, so say so. |
+| GPT-5.6 luna | Second and third points on the GPT-5.6 tier ladder next to sol |
+| GPT-5.6 terra | (same) |
+| Claude Sonnet 5 | k=3 closes the gap left by the k=1 run, which was skipped only on cost. Bedrock rejects any temperature but 1, so its variance is measured, not pinned. |
+
+401 tasks x 4 arms x 3 repeats x 4 models is about 19k agent runs.
+
+**Rules for the panel.**
+
+- **One library commit for the whole panel.** The eval installs the library
+  as an editable path dependency, so the library under test is whatever is
+  checked out. Start from `v0.53.0` (or a later tag) and record the SHA.
+  Every row stamps `commit_sha`; all panel rows must carry the same one.
+  0.52.0 added the Layer 1 multi-statement block, which changes the
+  treatment relative to the earlier runs; that is fine inside the panel,
+  because every arm and model runs on the same version.
+- **Frozen contract, untouched.** Do not add `sensitivity_checks`
+  properties to `contract/` or `contract_hollow/`. Properties written after
+  reading the losing traces would be fitted to the test set.
+- **Keep the existing runs.** glm, deepseek and sol (and the k=1 Sonnet 5
+  run) stay in the paper as independent k=1 replication across other model
+  families. The gateway panel becomes the main k=3 result. Dropping glm and
+  deepseek would lose the finding that scaffolding's effect depends on the
+  model.
+- **Report** per-model McNemar per repeat and pooled, and the flip rate as
+  a measured quantity instead of the 23.4% upper bound.
+
+**Before spending anything.**
+
+1. **Company sign-off** to use the gateway for a publication, and the
+   wording of the acknowledgment. This touches how much of the pilot can be
+   disclosed (see Paper 2 in `../paper-plan.md`).
+2. **Public model ids.** EA&B requires "all experimental data and related
+   software must be available". Confirm luna and terra are public GPT-5.6
+   models served unmodified, and name every model by its public id. Each
+   needs an entry in `dce/pricing.py`, which rejects any id it does not list,
+   and `--max-spend` is required even when the gateway bills the company.
+3. **Smoke test**: `--n 12` per model through the gateway to check
+   throughput, rate limits and parameter handling (temperature, reasoning
+   effort). The Sonnet 5 route needed special handling for both, and GPT-5.6
+   through LiteLLM will probably need its own. Throughput decides whether
+   12-01 is realistic.
+
+**Not in this panel.**
+
+- **Sensitivity checks in the agent's loop.** They find latent defects, and
+  most of those are in answers already scored correct, so they cannot close
+  an accuracy gap. The after-the-fact audit is already measured: on 1,411
+  agent queries the shipped verdicts agreed with ground truth every time, and
+  they found latent defects in answers scored correct (glm 20/84, Sonnet 5
+  10/80, deepseek 5/43, sol 4/95). That goes into the paper as a paragraph.
+  Testing them inside the agent's loop needs questions the frozen contract
+  has never seen; see the second-benchmark notes below.
+- **DABStep v2.** Not released as of 2026-09-18. The only public sign is a
+  leaderboard notice of 2026-07-22 (`dabstep-v2-notice`) that closed the
+  validated leaderboard. Call the benchmark "DABStep (v1)" in the paper, and
+  note that the validated leaderboard is frozen, which keeps the MotherDuck
+  comparison stable.
+
+### Second-benchmark candidates (checked 2026-09-18)
+
+The paper states that relying on one benchmark is a limitation. A second
+benchmark only counts if its domain rules are **shared across questions**
+(so a contract can be written from them and frozen before any question is
+read) and its **gold answers are public** (the EA&B availability rule).
+
+| Candidate | Bib key | Verdict |
+|---|---|---|
+| EntSQL | `entsql` | **Ruled out.** Checked in the released data: every question carries its own `long_doc` (942 distinct documents for 942 questions outside HR; in HR, 78 documents over 124 questions, 43 with none), written from that question's own evidence. Gold answers are not in the release; `evaluate.py` expects a ground-truth file that isn't included. Use it in related work as the contrast: each question comes with its own rules document, where a contract states the rules once for every question. |
+| DI-Bench | `di-bench` | **Best fit, unconfirmed.** Business rules shared across questions that change the computation; 731 tasks; models reach 32% on rule-grounded tasks. Published 2026-09-04; the paper does not say whether the data is released. Future work. |
+| DataAgentBench | `dab-berkeley` | Too small: 54 queries over 12 datasets, and the leaderboard top is already 94.7% pass@1. |
+| ACME Insurance | `dbt-benchmark` | 11 questions; too few for any statistics. Already cited. |
+| AgenticDataBench | `agenticdatabench` | Found but not assessed. |
+
 ## What is not finished
 
 - **`make check` also runs `analysis/cost_decomposition.py --check`** in

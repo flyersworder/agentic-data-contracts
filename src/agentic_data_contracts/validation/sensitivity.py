@@ -33,12 +33,18 @@ from typing import TYPE_CHECKING, cast
 import sqlglot
 from sqlglot import exp
 
-from agentic_data_contracts.core.contract import DataContract
-from agentic_data_contracts.semantic.base import MetricDefinition, Shadow
 from agentic_data_contracts.validation.validator import Validator
 
 if TYPE_CHECKING:
+    # Deferred to avoid a circular import: adapters.base imports
+    # validation.explain, which initializes this package (validation/__init__)
+    # before adapters.base finishes defining DatabaseAdapter, and semantic.base
+    # itself imports TableSchema from adapters.base at module level. Safe at
+    # runtime because `from __future__ import annotations` keeps annotations
+    # unevaluated.
     from agentic_data_contracts.adapters.base import DatabaseAdapter
+    from agentic_data_contracts.core.contract import DataContract
+    from agentic_data_contracts.semantic.base import MetricDefinition, Shadow
 
 #: Only an identifier in one of these positions names a table. Without this, a
 #: COLUMN ALIAS sharing the table's name (``COUNT(DISTINCT psp_reference) AS

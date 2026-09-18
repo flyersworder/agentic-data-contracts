@@ -44,6 +44,50 @@ as a third member of the family that already contains `reconcile_decomposition`
 (0.29.0) and `validate_examples` (0.30.0): the contract declares a property,
 the caller supplies execution, the library contributes one verb.
 
+### The mechanism was validated before the feature was written
+
+The p = 1.2e-23 result above was produced by copying the database and running
+`UPDATE` against the copy. This feature does no writes: it rewrites the
+caller's text and injects the mutation as a CTE. Those are different
+mechanisms, so the result does not transfer for free.
+
+A prototype of sections 2.1-2.2 was therefore run against the stored corpus,
+expressing `volume_x10` as a declared shadow instead of an `UPDATE`:
+
+```yaml
+shadow:
+  table: main.payments
+  sql: SELECT * REPLACE (eur_amount * 10 AS eur_amount) FROM main.payments
+```
+
+which returns exactly the 138,236 rows the `UPDATE` touched. Both arms of the
+comparison read the same **read-only** base database.
+
+| over 1,411 stored agent queries, four models, all four arms | |
+|---|---:|
+| comparable (both methods returned a verdict) | 1,007 |
+| **agreement** | **1,006 (99.9%)** |
+| moved under `UPDATE`-on-copy | 652 |
+| moved under shadow CTE | 653 |
+| `not_applicable` (references `fees`, not `payments`) | 388 |
+| `unchecked` (non-deterministic) | 13 |
+
+The two move counts matter as much as the agreement: 65% of queries move, so
+this is not a degenerate "both always said no". The rewrite held on real agent
+SQL -- nested CTEs, `WITH RECURSIVE`, correlated subqueries, bare and
+schema-qualified spellings, and `'payments'` as a string literal, which is
+correctly left alone.
+
+The single residual disagreement was a `LIMIT` without `ORDER BY`; see step 3.
+The exercise also produced the two guards marked in this spec as measured
+rather than anticipated: the table-position restriction in step 2 and the
+honesty note in step 3.
+
+**`expect: unchanged` has no DABStep case** -- all three mutations are
+`changes` -- so it was confirmed only on the worked example below. That
+asymmetry is real, and it is the harder direction: "did not move" has more
+innocent explanations than "moved".
+
 ## Non-goals
 
 Named so the scope cannot drift:
@@ -183,7 +227,14 @@ Then, per property, five steps:
    the result is `not_applicable`: an outcome, not a failure.
 2. **Rewrite.** Locate character spans with `sqlglot.tokenize` (tokens *do*
    carry `start`/`end`), matching qualified names as alternating identifier/DOT
-   token runs. **Assert the span count equals the table-node count from step 1**;
+   token runs. **A candidate must sit in table position** — its preceding token
+   is `FROM`, `JOIN`, `,` or `(`. Without that restriction a *column alias*
+   sharing the table's name is counted as a reference: four stored DABStep
+   queries write `COUNT(DISTINCT psp_reference) AS payments`, and each one
+   inflated the span count past the table-node count and was refused although it
+   was perfectly checkable. Since `unchecked` fails `report.ok`, that is a
+   spurious CI failure, so the restriction is load-bearing rather than tidiness.
+   **Assert the span count equals the table-node count from step 1**;
    a mismatch refuses to edit and returns `unchecked`. Apply edits
    right-to-left so earlier offsets stay valid. Inject `__sens_0 AS (<shadow.sql>)`
    as a CTE — prepending `WITH ...` when the query has none, and splicing after
@@ -193,6 +244,15 @@ Then, per property, five steps:
    returns `unchecked: query is not deterministic`. Without this a query with
    `LIMIT` and no `ORDER BY`, `random()` or `current_date` reads as sensitive
    and the check silently passes garbage.
+
+   **This probe is a filter, not a proof, and the docstring must say so.**
+   A query that is merely *usually* stable passes it and then produces a
+   verdict it did not earn. Measured on the DABStep corpus, two executions
+   caught 13 of ~14 flaky queries; the survivor differed on every repetition of
+   the experiment and was always a `LIMIT` with no `ORDER BY` — one such query
+   returned 2 distinct results across 12 identical runs. No finite number of
+   probes closes this. `repeats: int = 2` is therefore a parameter, not a
+   constant, and the limitation is stated rather than engineered away.
 4. **Execute** base and mutated through the `DatabaseAdapter`. Any engine error
    on either side → `unchecked` carrying the engine's message.
 5. **Judge.** Compare normalised results — rows sorted by their repr, floats
@@ -265,7 +325,8 @@ says "the answer did not move", not "you hardcoded the threshold".
 |---|---|
 | text surgery on someone else's SQL | span count must equal sqlglot's table-node count, else refuse |
 | target name inside a string literal or comment | tokenizer classifies both; only identifier tokens are candidates |
-| non-deterministic query reads as sensitive | base run twice; disagreement -> `unchecked` |
+| column alias sharing the table's name | candidate must sit in table position (`FROM`/`JOIN`/`,`/`(`) |
+| non-deterministic query reads as sensitive | base run `repeats` times; disagreement -> `unchecked`. Probabilistic — see step 3 |
 | vacuous test (empty base, `expect: changes`) | -> `unchecked`, not `pass` |
 | CTE alias collision with `__sens_0` | assert absent from the SQL; pick the next free `__sens_N` |
 | dialect sqlglot cannot parse | -> `unchecked`; never silently skipped |
@@ -305,14 +366,16 @@ TDD, red first, one task per behaviour, per `CLAUDE.md`.
 - `not_applicable` when the query never references the target;
 - rewrite: no `WITH`; existing `WITH`; existing `WITH RECURSIVE`; two references
   including a correlated subquery; target inside a string literal (must not be
-  rewritten); alias collision with `__sens_0`;
+  rewritten); alias collision with `__sens_0`; **a column alias sharing the
+  target's name (`COUNT(*) AS payments ... FROM payments`) rewrites the table
+  and not the alias**;
 - `unchecked` paths: unparseable SQL, count-guard mismatch, engine error,
   non-deterministic base, vacuous (empty base with `expect: changes`);
 - `report.ok` false on violation *and* on unchecked, true when every result is
   `pass` or `not_applicable`, and true for a metric with no properties;
 - step 0 raises when the caller's own query is blocked by Layer 1;
-- the base result is executed twice per call and reused across properties, not
-  re-executed per property;
+- the base result is executed `repeats` times per call and reused across
+  properties, not re-executed per property; `repeats` is configurable;
 - `properties=` selection, and `ValueError` on an unknown name.
 
 `tests/test_semantic/`:

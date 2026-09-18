@@ -44,6 +44,36 @@ class DrillDimension:
     column: str  # "schema.table.column" — same convention as Relationship endpoints
 
 
+@dataclass(frozen=True)
+class Shadow:
+    """One SELECT that stands in for ``table`` while a property is checked.
+
+    ``sql`` is engine-native, exactly as ``sql_expression`` is throughout a
+    contract, so a Denodo author writes VQL here as they do there. It is
+    contract-authored and therefore trusted: it is NOT put through the
+    Validator, which would reject the ``SELECT *`` most shadows want.
+    """
+
+    table: str  # "schema.table"
+    sql: str
+
+
+@dataclass(frozen=True)
+class SensitivityProperty:
+    """A claim about what a metric's query must respond to.
+
+    ``description`` is required and carries the claim in the owner's words --
+    see the Ownership section of the design. It is the one field a business
+    owner contributes, and a property nobody stated in words is one nobody can
+    review.
+    """
+
+    name: str
+    description: str
+    shadow: Shadow
+    expect: str  # one of VALID_EXPECT
+
+
 @dataclass
 class MetricDefinition:
     name: str
@@ -62,6 +92,7 @@ class MetricDefinition:
     last_reviewed: date | None = None
     decompositions: list[Decomposition] = field(default_factory=list)
     drill_by: list[DrillDimension] = field(default_factory=list)
+    sensitivity: list[SensitivityProperty] = field(default_factory=list)
 
 
 @dataclass
@@ -238,6 +269,9 @@ VALID_CONVENTIONS = frozenset({"explicit", "split_evenly", "fold_into"})
 #: Only these have a ``ΔC·ΔP`` cross term to place. ``sum`` and ``difference``
 #: are linear, so a convention on them states nothing.
 _CROSS_TERM_OPERATORS = frozenset({"product", "ratio"})
+#: The only two responses a property may require. There is no third value: a
+#: property that cannot say which way the answer must go is not a property.
+VALID_EXPECT = frozenset({"unchanged", "changes"})
 
 
 def validate_decompositions(metrics: list[MetricDefinition]) -> None:

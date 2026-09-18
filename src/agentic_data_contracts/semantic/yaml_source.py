@@ -16,6 +16,8 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     MetricImpact,
     Relationship,
+    SensitivityProperty,
+    Shadow,
     _apply_convention_default,
     _parse_convention_default,
     as_list,
@@ -72,12 +74,17 @@ METRIC_KEYS = frozenset(
         "last_reviewed",
         "decompositions",
         "drill_by",
+        "sensitivity",
     }
 )
 DECOMPOSITION_KEYS = frozenset(
     {"operator", "operands", "convention", "convention_operand"}
 )
 DRILL_BY_KEYS = frozenset({"dimension", "column"})
+#: Exported for the same reason as ``SEMANTIC_KEYS``: a guard cannot be written
+#: against key names that exist only as string literals in a constructor.
+SENSITIVITY_KEYS = frozenset({"name", "description", "shadow", "expect"})
+SHADOW_KEYS = frozenset({"table", "sql"})
 #: ``decomposition_convention`` is a *mapping*, not a list of entries, and
 #: ``_parse_convention_default`` reads exactly one key from it -- so a second key
 #: was dropped the way #89 complains about, and it is the one section a walk over
@@ -225,6 +232,18 @@ def _check_nested_keys(
             _check_entry_keys(
                 dd, DRILL_BY_KEYS, where=f"{label} drill_by[{j}]", strict=strict
             )
+        for j, sp in enumerate(_entries(m.get("sensitivity"), f"{label} sensitivity")):
+            _check_entry_keys(
+                sp, SENSITIVITY_KEYS, where=f"{label} sensitivity[{j}]", strict=strict
+            )
+            shadow = sp.get("shadow")
+            if isinstance(shadow, dict):
+                _check_entry_keys(
+                    shadow,
+                    SHADOW_KEYS,
+                    where=f"{label} sensitivity[{j}] shadow",
+                    strict=strict,
+                )
 
     for i, t in enumerate(_entries(raw.get("tables"), "tables")):
         label = f"tables[{i}] ({t.get('schema', '?')}.{t.get('table', '?')})"
@@ -255,6 +274,24 @@ def _check_nested_keys(
             where="decomposition_convention",
             strict=strict,
         )
+
+
+def _shadow_from(raw: Any, *, where: str) -> Shadow:
+    """Parse one ``shadow:`` block, refusing a non-mapping loudly.
+
+    Without the isinstance check a scalar ``shadow: SELECT 1`` reaches
+    ``.get`` and raises ``AttributeError`` naming neither the metric nor the
+    property.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{where} 'shadow' must be a mapping with 'table' and 'sql', got "
+            f"{type(raw).__name__}"
+        )
+    return Shadow(
+        table=require_text(raw.get("table"), where=f"{where} shadow.table"),
+        sql=require_text(raw.get("sql"), where=f"{where} shadow.sql"),
+    )
 
 
 class YamlSource:
@@ -356,6 +393,23 @@ class YamlSource:
                             ),
                         )
                         for dd in m.get("drill_by") or []
+                    ],
+                    sensitivity=[
+                        SensitivityProperty(
+                            name=require_text(
+                                sp.get("name"),
+                                where="metrics[] sensitivity[] name",
+                            ),
+                            description=require_text(
+                                sp.get("description"),
+                                where="metrics[] sensitivity[] description",
+                            ),
+                            shadow=_shadow_from(
+                                sp.get("shadow"), where="metrics[] sensitivity[]"
+                            ),
+                            expect=as_text(sp.get("expect")),
+                        )
+                        for sp in m.get("sensitivity") or []
                     ],
                 )
             )

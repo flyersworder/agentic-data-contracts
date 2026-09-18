@@ -33,6 +33,8 @@ from agentic_data_contracts.semantic.yaml_source import (
     METRIC_KEYS,
     RELATIONSHIP_KEYS,
     SEMANTIC_KEYS,
+    SENSITIVITY_KEYS,
+    SHADOW_KEYS,
     TABLE_KEYS,
     YamlSource,
 )
@@ -273,6 +275,17 @@ _FULL_DOCUMENT: dict[str, Any] = {
                 }
             ],
             "drill_by": [{"dimension": "region", "column": "main.payments.region"}],
+            "sensitivity": [
+                {
+                    "name": "prop",
+                    "description": "d",
+                    "shadow": {
+                        "table": "main.payments",
+                        "sql": "SELECT * FROM main.payments",
+                    },
+                    "expect": "unchanged",
+                }
+            ],
         },
         # Leaf operands, so the decomposition above resolves. Their sparser key
         # sets are a subset of METRIC_KEYS, so they raise nothing; only
@@ -319,6 +332,8 @@ def test_the_full_document_uses_every_interpreted_key() -> None:
     assert set(metric) == METRIC_KEYS
     assert set(metric["decompositions"][0]) == DECOMPOSITION_KEYS
     assert set(metric["drill_by"][0]) == DRILL_BY_KEYS
+    assert set(metric["sensitivity"][0]) == SENSITIVITY_KEYS
+    assert set(metric["sensitivity"][0]["shadow"]) == SHADOW_KEYS
     assert set(_FULL_DOCUMENT["relationships"][0]) == RELATIONSHIP_KEYS
     assert set(_FULL_DOCUMENT["metric_impacts"][0]) == METRIC_IMPACT_KEYS
     assert (

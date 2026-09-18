@@ -46,6 +46,13 @@ def _strip_context(sql: str) -> str:
     return _CONTEXT.sub("", sql)
 
 
+class _VqlNormalizer:
+    """A standalone SqlNormalizer -- the CI gate takes no adapter."""
+
+    def normalize_sql(self, sql: str) -> str:
+        return _strip_context(sql)
+
+
 def _rw(sql: str) -> str:
     out = _rewrite(sql, SHADOW, dialect="duckdb")
     # Every rewrite must still be SQL. The assertions below only look for
@@ -405,6 +412,15 @@ FIRST_TOUCH_PROP = SensitivityProperty(
     name="attribution_is_first_touch",
     description="A touchpoint after qualification cannot change a first touch.",
     shadow=MKT_SHADOW,
+    expect="unchanged",
+)
+
+VQL_SHADOW = Shadow(table="mkt.touchpoints", sql=MKT_SHADOW.sql + _CTX)
+
+VQL_PROP = SensitivityProperty(
+    name="attribution_is_first_touch",
+    description="A touchpoint after qualification cannot change a first touch.",
+    shadow=VQL_SHADOW,
     expect="unchanged",
 )
 
@@ -852,3 +868,55 @@ class TestPolicy:
         problems = validate_sensitivity_tables(contract, [_metric(prop)])
         assert len(problems) == 1
         assert "broken_shadow" in problems[0]
+
+
+class TestNormalizedShadowGovernance:
+    def test_a_shadow_is_read_after_normalization(self) -> None:
+        assert _shadow_tables(VQL_SHADOW, dialect="duckdb") is None  # raw: unreadable
+        assert _shadow_tables(
+            VQL_SHADOW, dialect="duckdb", normalize=_strip_context
+        ) == {"mkt.touchpoints", "mkt.lead_scores"}
+
+    def test_a_normalizer_failure_leaves_the_tables_unknown(self) -> None:
+        def boom(sql: str) -> str:
+            raise RuntimeError("no")
+
+        assert _shadow_tables(MKT_SHADOW, dialect="duckdb", normalize=boom) is None
+
+    def test_a_multi_statement_shadow_leaves_the_tables_unknown(self) -> None:
+        # Not exploitable -- the CTE's parentheses make the `;` a syntax error --
+        # but governance saw only governed tables and waved it through
+        # (DEVIATION 3).
+        smuggle = Shadow(
+            table="mkt.touchpoints",
+            sql="SELECT * FROM mkt.touchpoints; DELETE FROM mkt.touchpoints",
+        )
+        assert _shadow_tables(smuggle, dialect="duckdb") is None
+
+    def test_the_ci_gate_governs_a_normalized_shadow(self) -> None:
+        governed = _contract("touchpoints", "lead_scores")
+        assert (
+            validate_sensitivity_tables(
+                governed,
+                [_metric(VQL_PROP)],
+                dialect="duckdb",
+                sql_normalizer=_VqlNormalizer(),
+            )
+            == []
+        )
+
+    def test_the_ci_gate_without_a_normalizer_cannot_read_it(self) -> None:
+        governed = _contract("touchpoints", "lead_scores")
+        (problem,) = validate_sensitivity_tables(
+            governed, [_metric(VQL_PROP)], dialect="duckdb"
+        )
+        assert "cannot be parsed" in problem
+
+    def test_the_ci_gate_still_refuses_an_ungoverned_normalized_shadow(self) -> None:
+        (problem,) = validate_sensitivity_tables(
+            _contract("touchpoints"),
+            [_metric(VQL_PROP)],
+            dialect="duckdb",
+            sql_normalizer=_VqlNormalizer(),
+        )
+        assert "lead_scores" in problem

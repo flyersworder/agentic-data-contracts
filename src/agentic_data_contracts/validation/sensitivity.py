@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, cast
 import sqlglot
 from sqlglot import exp
 
+from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.validation.validator import Validator, _is_multi_statement
 
 if TYPE_CHECKING:
@@ -95,6 +96,11 @@ def _normalized(sql: str, normalize: Normalize, *, what: str) -> str:
         return normalize(sql)
     except Exception as e:  # noqa: BLE001 - any normalizer failure is one outcome
         raise _Refused(f"normalizer failed on {what}: {e}") from e
+
+
+def _normalizer_fn(sql_normalizer: SqlNormalizer | None) -> Normalize:
+    """The normalizer as a callable; the identity when there is none."""
+    return sql_normalizer.normalize_sql if sql_normalizer is not None else _identity
 
 
 def _cte_aliases(tree: exp.Expression) -> set[str]:
@@ -391,11 +397,25 @@ class SensitivityReport:
 DEFAULT_REPEATS = 2
 
 
-def _shadow_tables(shadow: Shadow, *, dialect: str | None) -> set[str] | None:
-    """Qualified names ``shadow.sql`` reads, or None if it does not parse."""
+def _shadow_tables(
+    shadow: Shadow, *, dialect: str | None, normalize: Normalize = _identity
+) -> set[str] | None:
+    """Qualified names ``shadow.sql`` reads, or None when they cannot be known.
+
+    The shadow is normalized first, so a shadow written in a dialect that parses
+    only after normalization is governed like any other. None covers every way
+    its tables cannot be read off it: the normalizer raised, the normalized text
+    does not parse, or it holds more than one statement. The last is not
+    exploitable -- the CTE's parentheses make a statement boundary a syntax
+    error -- but refusing it here gives both gates a clear finding instead of
+    an opaque engine error.
+    """
     try:
-        parsed = sqlglot.parse_one(shadow.sql, dialect=dialect)
-    except Exception:  # noqa: BLE001 - an unparseable shadow is one outcome
+        text = normalize(shadow.sql)
+        if _is_multi_statement(text, dialect):
+            return None
+        parsed = sqlglot.parse_one(text, dialect=dialect)
+    except Exception:  # noqa: BLE001 - every failure means "tables unknown"
         return None
     if parsed is None:
         return None
@@ -419,6 +439,7 @@ def validate_sensitivity_tables(
     metrics: list[MetricDefinition],
     *,
     dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
 ) -> list[str]:
     """Problems where a shadow reads a table the contract does not govern.
 
@@ -437,12 +458,18 @@ def validate_sensitivity_tables(
     the adapter's). Left at the default of None, a shadow using syntax only
     that dialect accepts parses at run time but not here, and this gate would
     flag it as unparseable regardless of governance.
+
+    ``sql_normalizer`` should likewise match: a shadow in a dialect that parses
+    only after normalization (Denodo VQL) is normalized before its tables are
+    read. This gate takes no adapter, so -- unlike ``check_sensitivity`` -- it
+    has no adapter to fall back on; pass the normalizer explicitly.
     """
     allowed = {name.lower() for name in contract.allowed_table_names()}
+    normalize = _normalizer_fn(sql_normalizer)
     problems: list[str] = []
     for metric in metrics:
         for prop in metric.sensitivity:
-            read = _shadow_tables(prop.shadow, dialect=dialect)
+            read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
             if read is None:
                 problems.append(
                     f"metric {metric.name!r} sensitivity property "

@@ -1489,7 +1489,7 @@ class TestCallerPrincipal:
             )
         assert seen == []
 
-    @pytest.mark.parametrize("principal", [None, "bob@co.com"])
+    @pytest.mark.parametrize("principal", [None, "", "bob@co.com"])
     def test_a_shadow_reading_a_table_the_caller_is_denied_raises(
         self, mkt_adapter, monkeypatch, principal
     ) -> None:
@@ -1571,8 +1571,139 @@ class TestCallerPrincipal:
             [_metric(FIRST_TOUCH_PROP)],
             caller_principal="bob@co.com",
         )
-        assert "'mkt.lead_scores'" in problem
-        assert "does not allow" in problem
+        assert problem == (
+            "metric 'mql_count' sensitivity property "
+            "'attribution_is_first_touch': shadow reads 'mkt.lead_scores', which "
+            "caller 'bob@co.com' may not read (the table is restricted by "
+            "allowed_principals/blocked_principals)"
+        )
+
+    def test_the_ci_gate_with_the_anonymous_caller_reports_the_table(self) -> None:
+        # `""` is the anonymous caller's tables -- what check_sensitivity
+        # applies by default -- not the structural check omission gives.
+        (problem,) = validate_sensitivity_tables(
+            _principal_contract(), [_metric(FIRST_TOUCH_PROP)], caller_principal=""
+        )
+        assert "caller '<no caller identified>' may not read" in problem
+
+    def test_the_ci_gate_keeps_the_undeclared_text_with_a_principal(self) -> None:
+        # Undeclared outranks denied: a table the contract never declares keeps
+        # the 0.52.0 wording byte-for-byte, whoever the caller is.
+        (problem,) = validate_sensitivity_tables(
+            _contract("touchpoints"),
+            [_metric(FIRST_TOUCH_PROP)],
+            caller_principal="alice@co.com",
+        )
+        assert problem == (
+            "metric 'mql_count' sensitivity property "
+            "'attribution_is_first_touch': shadow reads 'mkt.lead_scores', which "
+            "the contract does not allow"
+        )
+
+
+class TestShadowGovernanceMessages:
+    """Undeclared and denied-to-this-caller are different findings."""
+
+    _QUERY = "SELECT count(*) FROM mkt.touchpoints"
+
+    def test_an_undeclared_table_keeps_the_existing_text(self, mkt_adapter) -> None:
+        with pytest.raises(ValueError) as info:
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                self._QUERY,
+                contract=_contract("touchpoints"),
+                adapter=mkt_adapter,
+                caller_principal="alice@co.com",
+            )
+        assert str(info.value) == (
+            "sensitivity property 'attribution_is_first_touch' of metric "
+            "'mql_count' has a shadow reading 'mkt.lead_scores', which the "
+            "contract does not allow"
+        )
+
+    @pytest.mark.parametrize(
+        ("principal", "shown"),
+        [
+            ("bob@co.com", "'bob@co.com'"),
+            (None, "'<no caller identified>'"),
+            ("", "'<no caller identified>'"),
+        ],
+    )
+    def test_a_declared_table_denied_to_the_caller_names_the_caller(
+        self, mkt_adapter, principal, shown
+    ) -> None:
+        with pytest.raises(ValueError) as info:
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                self._QUERY,
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert str(info.value) == (
+            "sensitivity property 'attribution_is_first_touch' of metric "
+            f"'mql_count' has a shadow reading 'mkt.lead_scores', which caller "
+            f"{shown} may not read (the table is restricted by "
+            "allowed_principals/blocked_principals)"
+        )
+
+
+def _blocked_contract() -> DataContract:
+    """`mkt.lead_scores` open to everyone except the intern."""
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: sensitivity-blocked-test
+semantic:
+  allowed_tables:
+    - schema: mkt
+      tables: [touchpoints]
+    - schema: mkt
+      tables: [lead_scores]
+      blocked_principals: [intern@co.com]
+  forbidden_operations: [DELETE, DROP]
+  rules: []
+"""
+    )
+
+
+class TestBlockedPrincipals:
+    def test_a_blocked_callers_shadow_over_the_table_raises(
+        self, mkt_adapter, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="caller 'intern@co.com' may not read"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                "SELECT count(*) FROM mkt.touchpoints",
+                contract=_blocked_contract(),
+                adapter=mkt_adapter,
+                caller_principal="intern@co.com",
+            )
+        assert seen == []
+
+    def test_another_caller_is_fine(self, mkt_adapter) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_blocked_contract(),
+            adapter=mkt_adapter,
+            caller_principal="bob@co.com",
+        )
+        assert report.results[0].status == "pass"
+
+    def test_the_ci_gate_reports_only_the_blocked_caller(self) -> None:
+        metrics = [_metric(FIRST_TOUCH_PROP)]
+        assert (
+            validate_sensitivity_tables(
+                _blocked_contract(), metrics, caller_principal="bob@co.com"
+            )
+            == []
+        )
+        (problem,) = validate_sensitivity_tables(
+            _blocked_contract(), metrics, caller_principal="intern@co.com"
+        )
+        assert "caller 'intern@co.com' may not read" in problem
 
 
 _NULL_SUM = (

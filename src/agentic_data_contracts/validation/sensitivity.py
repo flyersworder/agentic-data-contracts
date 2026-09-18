@@ -599,6 +599,24 @@ def _shadow_governance(
         yield prop, [name for name in sorted(read) if name.lower() not in allowed_lower]
 
 
+def _why_ungoverned(name: str, declared: set[str], principal: str | None) -> str:
+    """Why *name* is refused, finishing a sentence that ends "..., which ".
+
+    A table the contract never declares keeps the 0.52.0 wording; a declared
+    table denied to this caller names the caller, in the phrasing the
+    Validator's "restricted to other principals" uses -- so an upgrader whose
+    default caller is None sees why, not a claim the contract lacks the table.
+    *declared* is lowercased.
+    """
+    if name.lower() not in declared:
+        return "the contract does not allow"
+    who = principal if principal else "<no caller identified>"
+    return (
+        f"caller {who!r} may not read (the table is restricted by "
+        "allowed_principals/blocked_principals)"
+    )
+
+
 def validate_sensitivity_tables(
     contract: DataContract,
     metrics: list[MetricDefinition],
@@ -639,8 +657,11 @@ def validate_sensitivity_tables(
     ``check_sensitivity`` enforces at run time for that caller. Pass it to
     gate a metric that a known principal will check; leave it out and a
     shadow over a principal-restricted table passes here, then is refused at
-    run time for any caller denied that table.
+    run time for any caller denied that table. ``caller_principal=""`` checks
+    against the anonymous caller's tables -- exactly what ``check_sensitivity``
+    applies by default -- whereas omitting it gives the structural check.
     """
+    declared = {name.lower() for name in contract.allowed_table_names()}
     allowed = (
         contract.allowed_table_names()
         if caller_principal is None
@@ -662,8 +683,8 @@ def validate_sensitivity_tables(
             for name in ungoverned:
                 problems.append(
                     f"metric {metric.name!r} sensitivity property "
-                    f"{prop.name!r}: shadow reads {name!r}, which the "
-                    "contract does not allow"
+                    f"{prop.name!r}: shadow reads {name!r}, which "
+                    f"{_why_ungoverned(name, declared, caller_principal)}"
                 )
     return problems
 
@@ -818,8 +839,10 @@ def check_sensitivity(
     # turned into an `unchecked` result (never an execution) in the loop below,
     # so a governance hole never opens just because sqlglot cannot read the
     # dialect a shadow is written in. Governed means governed FOR THIS
-    # CALLER: a shadow reading a table the caller is denied is refused the
-    # same as one reading a table the contract never declared.
+    # CALLER: a shadow reading a table the caller is denied is refused just as
+    # one reading a table the contract never declared -- with a message that
+    # says which of the two it is.
+    declared = {name.lower() for name in contract.allowed_table_names()}
     unparseable_shadows: set[str] = set()
     for prop, ungoverned in _shadow_governance(
         selected,
@@ -833,7 +856,7 @@ def check_sensitivity(
             raise ValueError(
                 f"sensitivity property {prop.name!r} of metric "
                 f"{metric.name!r} has a shadow reading {ungoverned[0]!r}, which "
-                "the contract does not allow"
+                f"{_why_ungoverned(ungoverned[0], declared, principal)}"
             )
 
     # No verdict for the query -- unparseable, or its normalizer failed -- is

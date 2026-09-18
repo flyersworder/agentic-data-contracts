@@ -11,11 +11,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- **`check_sensitivity` governs shadows against the caller's tables, not every declared table. The default is stricter than 0.52.0.** A shadow reading a table the caller is denied now raises `ValueError`, even when the caller's own query is allowed. With the default `caller_principal=None` — an anonymous caller — that includes any shadow reading a table restricted by `allowed_principals`/`blocked_principals`, which 0.52.0 let through. This is fail-closed and matches step 0, which already blocked an anonymous caller's query over those tables; pass the caller's principal to check such a metric.
+- **`check_sensitivity` governs shadows against the caller's tables, not every declared table. The default is stricter than 0.52.0.** A shadow reading a table the caller is denied now raises `ValueError`, even when the caller's own query is allowed. With the default `caller_principal=None` — an anonymous caller — that includes any shadow reading a table restricted by `allowed_principals`/`blocked_principals`, which 0.52.0 let through. This is fail-closed and matches step 0, which already blocked an anonymous caller's query over those tables; pass the caller's principal to check such a metric. A declared table denied to the caller gets its own error text — "…which caller 'bob@co.com' may not read (the table is restricted by allowed_principals/blocked_principals)" — while a table the contract never declares keeps the 0.52.0 wording, "…which the contract does not allow", in both `check_sensitivity` and `validate_sensitivity_tables`.
 
 ### Fixed
 
-- **An all-NULL result now counts as empty for the vacuous rule.** `SUM` over no rows is NULL, not no rows, so a query whose filter matched nothing got an unearned verdict: `violation` under `expect: changes`, `pass` under `expect: unchanged`. Both now come back `unchecked` as vacuous. This narrows the gap rather than closing it: `COUNT` over no rows is `0`, indistinguishable from a real zero, and is deliberately not treated as vacuous.
+- **An all-NULL result now counts as empty for the vacuous rule.** `SUM` over no rows is NULL, not no rows, so a query whose filter matched nothing got an unearned verdict: `violation` under `expect: changes`, `pass` under `expect: unchanged`. Both now come back `unchecked` as vacuous. This narrows the gap rather than closing it: `COUNT` over no rows is `0`, indistinguishable from a real zero, and is deliberately not treated as vacuous. The vacuous `unchecked` reasons now read "empty or all-NULL".
 
 ## [0.52.0] - 2026-09-18
 

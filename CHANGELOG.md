@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.53.0] - 2026-09-18
+
+### Added
+
+- **`check_sensitivity` takes `caller_principal`**, with the same type and semantics as `Validator`'s (a string, a zero-arg callable, or `None`). It is resolved once per call, and that one identity drives both step 0 and shadow governance, so a callable cannot clear the query as one caller and have the shadow governed as another. A metric over a principal-restricted table can now be checked by a caller allowed to read it; in 0.52.0 step 0 always raised.
+- **`validate_sensitivity_tables` takes an optional `caller_principal` string.** Omitted, the CI gate keeps its structural check against every table the contract declares, because a CI gate has no caller; given, it checks against `allowed_table_names_for(caller_principal)` — exactly what `check_sensitivity` enforces for that caller.
+
+### Changed
+
+- **`check_sensitivity` governs shadows against the caller's tables, not every declared table. The default is stricter than 0.52.0.** A shadow reading a table the caller is denied now raises `ValueError`, even when the caller's own query is allowed. With the default `caller_principal=None` — an anonymous caller — that includes any shadow reading a table restricted by `allowed_principals`/`blocked_principals`, which 0.52.0 let through. This is fail-closed and matches step 0, which already blocked an anonymous caller's query over those tables; pass the caller's principal to check such a metric.
+
+### Fixed
+
+- **An all-NULL result now counts as empty for the vacuous rule.** `SUM` over no rows is NULL, not no rows, so a query whose filter matched nothing got an unearned verdict: `violation` under `expect: changes`, `pass` under `expect: unchanged`. Both now come back `unchecked` as vacuous. This narrows the gap rather than closing it: `COUNT` over no rows is `0`, indistinguishable from a real zero, and is deliberately not treated as vacuous.
+
 ## [0.52.0] - 2026-09-18
 
 ### Security

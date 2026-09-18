@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.52.0] - 2026-09-18
+
+### Added
+
+- **`check_sensitivity` — does the query derive what it depends on, not just compute something plausible?** The two-layer validator sees policy (allowed tables, forbidden operations, required filters) and plannability (a live `EXPLAIN`); neither sees a query that is authorized, parseable, plannable — and simply wrong. The DABStep evaluation measured how large that blind spot is, and that it cannot be closed by reading the query text: a detector for the *absence* of a load-bearing clause, and a second detector — fitted after the fact to the contract arm's own wrong answers — for the *presence* of a specific bad construction, are both null across four models (`experiments/dabstep-contract-eval/FINDINGS.md`, "No static property of the query predicts derivation correctness — but a behavioural one does"). Mutating the data the contract's own way and re-running the agent's own query instead — asking whether the answer *moved* — separates the defect cleanly: restricted to contract-arm answers the benchmark scored correct, 0 of 31 queries that failed to respond to the mutation were still right against the mutated data, versus 103 of 112 that did respond (Fisher exact **p = 1.2 × 10⁻²³**). `check_sensitivity(metric, sql, *, contract, adapter, properties=None, repeats=2, dialect=None)` moves that instrument out of the experiment and into the library: a metric declares a `sensitivity` property — a shadow `SELECT` that replaces one table, plus the response the contract requires (`unchanged` or `changes`) — and the function re-runs the caller's own SQL against it.
+
+  **It reads behaviour, not text, because the defect is invisible in the text.** Both detectors above read SQL as strings and both are null; the mechanism this catches — an agent that computes an intermediate value in one turn, decides a band or a filter itself, and pastes the result into the next query as a literal ("premature materialization") — produces SQL that is syntactically and semantically unremarkable. Only re-running the query against data that would move a *correct* answer surfaces it.
+
+  **Nothing is written, and no SQL is regenerated.** The shadow is spliced into the caller's own query text as a CTE, at the token spans sqlglot finds for the shadowed table; the string executed is the caller's own text with one span replaced, never a fresh `.sql()` render of a new statement. That was checked before the feature was built, not assumed: the no-writes CTE-shadow mechanism was run against the original `UPDATE`-on-a-copy method that produced the p = 1.2 × 10⁻²³ result above, across 1,411 stored agent queries. Of 1,007 comparable verdicts, 1,006 agreed (652 moved under `UPDATE`, 653 under the shadow) — different mechanisms reaching the same verdict, with one residual disagreement traced to a `LIMIT` with no `ORDER BY`.
+
+  **Step 0: the caller's query goes through the contract's own `Validator` first.** A policy block — a forbidden table, a missing tenant filter — raises `ValueError`; without this the function would be a policy bypass, an entry point running arbitrary SQL past every other check. An **unparseable** query is a different outcome from a policy block, even though the `Validator` reports both as blocked: there is no policy verdict to render on text Layer 1 could not read, so every selected property degrades to `unchecked` and nothing at all executes — not even the base query.
+
+  **An unparseable shadow fails closed the same way.** A shadow sqlglot cannot parse is never executed; its property comes back `unchecked`, and `validate_sensitivity_tables` — the CI-time counterpart — reports it as a problem rather than staying silent, since its tables cannot be checked against the contract either.
+
+  **A shadow reading a table the contract does not govern is refused at run time and in CI, not at load.** `check_sensitivity` raises `ValueError` before executing anything, and `validate_sensitivity_tables(contract, metrics, *, dialect=None)` is the CI-time gate over a metric list. Neither check can live at load: `YamlSource` holds no `DataContract` to check a shadow's tables against, so a contract-authored shadow reaching an ungoverned table would otherwise be a governance hole nothing caught until it ran.
+
+  **Determinism is filtered, not proved.** The base query runs `repeats` (default 2) times, and disagreement degrades every property to `unchecked`. A query that is merely *usually* stable — a `LIMIT` with no `ORDER BY` — can still agree across two repeats and produce a verdict it did not earn; no finite number of probes closes this, which is why `repeats` is a parameter and the limitation is stated rather than engineered away.
+
+  **`report.ok` is a safe CI gate, and that includes the empty case.** It is False on any `violation` or `unchecked` result — "no verdict was possible" must not read as a pass — while `not_applicable` (the query never references the shadowed table) does not block. A metric that declares no `sensitivity` properties returns an empty report, and an empty report is `ok`: nothing was claimed, so nothing failed.
+
+  **`description` is required on every property.** It carries the claim in the owner's words, not the shadow SQL — a property nobody stated in words is one nobody can review.
+
+  **`lookup_metric` surfaces a property's `name`, `description`, and `expect` — never `shadow.sql`.** The shadow is the encoding of the claim, not the claim itself, and putting engine SQL in a tool response would invite the agent to run it directly.
+
+  `check_sensitivity` is the third member of the family alongside `reconcile_decomposition` (0.29.0) and `validate_examples` (0.30.0): the contract declares a property, the caller supplies execution, the library contributes one verb. See [`examples/revenue_agent/check_sensitivity.py`](examples/revenue_agent/check_sensitivity.py) for a runnable, DuckDB-backed demo, and the README section ["Checking that a query derives what it depends on"](README.md#checking-that-a-query-derives-what-it-depends-on).
+
 ## [0.51.0] - 2026-09-05
 
 ### Added

@@ -888,7 +888,7 @@ The spec is `0.2.0.dev0` with no tagged releases (apache/ossie#102), and the acc
 | `OssieSource` | Apache Ossie semantic model (YAML/JSON) | Datasets, fields, relationships, metrics; governance vocabulary from `custom_extensions` |
 | `YamlSource` | Inline YAML definitions | Metric / table / relationship / `metric_impacts` definitions for teams not using dbt/Cube |
 
-`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`, `decompositions`, `drill_by`. `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by` are parsed by `YamlSource`, and by `OssieSource` from its vendor `custom_extensions` block; `DbtSource` / `CubeSource` leave them unset/empty.
+`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`, `decompositions`, `drill_by`, `sensitivity`. `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by` are parsed by `YamlSource`, and by `OssieSource` from its vendor `custom_extensions` block; `DbtSource` / `CubeSource` leave them unset/empty. `sensitivity` (v0.52.0+) is a list of `SensitivityProperty` (`name`, `description`, `shadow`, `expect`), parsed and validated by `YamlSource` only; `description` is required on every property, and load-time validation stops at shape — a shadow's tables are checked against the contract only at run time (`check_sensitivity`) and at CI time (`validate_sensitivity_tables`), since `YamlSource` holds no `DataContract` to check against at load. `Shadow`: `table`, `sql` — the one SELECT that replaces `table` while the property is checked, contract-authored and never put through the `Validator`.
 `MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
 `Decomposition`: `operator`, `operands`. `DrillDimension`: `dimension`, `column`. `IdentityEdge`: `from_metric`, `to_metric`, `operator`.
 `Relationship`: `from_`, `to`, `type`, `description`, `required_filter`, `preferred`. The `preferred` flag (default `False`) marks the canonical join when alternatives exist between the same table pair. `build_relationship_index` stable-sorts each adjacency list with preferred edges first, so `find_join_path` (BFS) and `get_relationships_for_table` both surface the canonical edge automatically. The flat list returned by `get_relationships()` deliberately keeps declaration order; that list feeds the prompt renderer, which renders `preferred="true"` as a per-edge attribute instead of via reordering.
@@ -1001,6 +1001,7 @@ agentic-data-contracts/
 │   │   ├── examples.py          # Verified-examples corpus: validate_examples + check_example_answers
 │   │   ├── reconciliation.py    # reconcile_decomposition (declared identity vs. live data)
 │   │   ├── attribution.py       # attribute_change / check_attribution (convention arithmetic)
+│   │   ├── sensitivity.py       # check_sensitivity / validate_sensitivity_tables (behavioural derivation check)
 │   │   └── _scalar.py           # Shared scalar measurement (reconciliation + answer checks)
 │   ├── tools/
 │   │   ├── __init__.py

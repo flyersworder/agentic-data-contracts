@@ -67,6 +67,7 @@ Scope, stated plainly. The effect concentrates in the domain-specific task bucke
 - [Metric Impacts](#metric-impacts) (incl. [decomposition & drill dimensions](#metric-decomposition-and-drill-dimensions))
 - [Checking declarations against the live schema](#checking-declarations-against-the-live-schema)
 - [Validating a verified-examples corpus](#validating-a-verified-examples-corpus)
+- [Checking that a query derives what it depends on](#checking-that-a-query-derives-what-it-depends-on)
 - [Custom Prompt Rendering](#custom-prompt-rendering)
 - [Consumer-authored sections (extras)](#consumer-authored-sections-extras)
 - [Scaling to Large Organizations](#scaling-to-large-organizations)
@@ -1306,6 +1307,65 @@ if not (report.ok and answers.ok and conformance.ok):
 Run each question several times and `by_example()` groups the repeats — keyed on the example's `id`, falling back to its `question`, never on the positional label — so a verdict can be a *measurement* ("7 of 10 runs found the metric") rather than a single sample of a stochastic process.
 
 **Corpus readiness.** `VerifiedExample.question` has always been optional and non-load-bearing, so most existing corpora do not populate it. Adopting this pass therefore starts there: fill in `question` on the rows you want evaluated, and `expects_metrics` on the rows where the path matters. Rows without a question are skipped and counted, never treated as errors — an unevaluatable corpus stays visible instead of silently shrinking the run.
+
+## Checking that a query derives what it depends on
+
+Every check above reads either a policy (allowed tables, required filters) or a declared identity against live data. None of them can see a query that is authorized, parseable, plannable — and simply computes the wrong thing because it dropped a filter the metric's own definition assumes. `check_sensitivity` reads behaviour instead of text: it re-runs the caller's own query against a contract-authored shadow — one SELECT that stands in for a single table — and asks whether the answer moved.
+
+A metric declares what a correct query must respond to with a `sensitivity:` list. Each property names a `shadow` (the table it replaces and the SELECT that replaces it) and an `expect` (`unchanged` or `changes`), plus a required `description` — the claim in the owner's words, so a property nobody stated in words is one nobody can review:
+
+```yaml
+    sensitivity:
+      - name: only_completed_orders_count
+        description: >
+          Revenue recognizes completed orders only. A pending or refunded
+          order, however large, cannot change total_revenue.
+        shadow:
+          table: analytics.orders
+          sql: >
+            SELECT * FROM analytics.orders
+            UNION ALL
+            SELECT 900 + c.id, c.id, 999999.00, 'pending', c.tenant_id,
+                   DATE '2026-01-01'
+            FROM analytics.customers c
+        expect: unchanged
+```
+
+```python
+from agentic_data_contracts.validation import (
+    check_sensitivity,
+    validate_sensitivity_tables,
+)
+
+# CI-time gate: refuses a shadow that reads a table the contract does not
+# govern. Pass the adapter's dialect so this parses shadows the same way
+# check_sensitivity below will.
+problems = validate_sensitivity_tables(
+    contract, source.get_metrics(), dialect=adapter.dialect
+)
+
+metric = source.get_metric("total_revenue")
+report = check_sensitivity(metric, sql, contract=contract, adapter=adapter)
+if not report.ok:
+    print(report.summary())
+    # in CI: sys.exit(1)
+```
+
+`check_sensitivity` takes the `MetricDefinition` itself, not a metric name — the same convention as `reconcile_decomposition`. Before anything runs, `sql` goes through the contract's own `Validator` (**step 0**): a policy block (a forbidden table, a missing tenant filter) raises `ValueError`, because an entry point that ran arbitrary SQL past every other check would be a policy bypass. SQL the Validator cannot parse is a different outcome: there is no policy verdict to render on text Layer 1 could not read, so every selected property comes back `unchecked` and nothing at all executes — not even the base query.
+
+The shadow itself is never sent through the Validator; it is contract-authored, like `sql_expression`, and most shadows want the `SELECT *` the Validator would reject. It is constrained a different way instead: its tables must be ones the contract governs. That is checked in two places — at CI time by `validate_sensitivity_tables`, and again at run time inside `check_sensitivity`, which raises `ValueError` the moment a shadow reads an ungoverned table. Both are run-time and CI-time gates, deliberately not a load-time one: `YamlSource` holds no `DataContract` to check a shadow's tables against, so there is nothing to check at load. A shadow sqlglot cannot parse fails closed the same way an unparseable caller query does — its property comes back `unchecked` and nothing executes for it — and `validate_sensitivity_tables` reports it as a problem rather than staying silent about it.
+
+Each property lands in exactly one `status`: `pass`, `violation`, `not_applicable` (the query never references the shadowed table — an outcome, not a failure), or `unchecked` (no verdict was possible). `report.ok` is a safe CI gate — `if not report.ok: sys.exit(1)` — False on any `violation` or `unchecked`, True when everything left is `pass` or `not_applicable`. An **empty** report (a metric that declares no `sensitivity` properties) is `ok`: nothing was claimed, so nothing failed.
+
+**Determinism is filtered, not proved.** The base query runs `repeats` (default 2) times, and disagreement degrades every property to `unchecked`. Two runs catch most flakiness but not all of it — a `LIMIT` with no `ORDER BY` can agree across both repeats and still not be truly deterministic — so a passing property is evidence of stability, not a proof of it.
+
+**Cost:** two base executions per call plus one per property. The base result is computed once and reused, so a metric with four properties costs six executions total, not twelve — which is why this belongs at a promotion gate rather than in an agent's hot path.
+
+**Nothing is written, and no SQL is regenerated.** The shadow is spliced into the caller's own query text as a CTE, at the exact character spans sqlglot finds for the shadowed table — no DDL, no DML, and never a fresh `.sql()` render of a new statement. That is what keeps this working on a dialect sqlglot can parse but cannot emit, the same constraint the rest of the library assembles SQL templates around.
+
+`lookup_metric` surfaces a declared property's `name`, `description`, and `expect` to the agent — never `shadow.sql`. The shadow is the encoding of the claim, not the claim itself, and putting engine SQL in a tool response would invite the agent to run it directly.
+
+`check_sensitivity` is the third member of the family alongside [`reconcile_decomposition`](#validating-a-verified-examples-corpus) (a declared arithmetic identity, checked against live data) and [`validate_examples`](#validating-a-verified-examples-corpus) (a corpus of SQL, checked for compliance and, separately, correctness): the contract declares a property, the caller supplies execution, the library contributes one verb. A passing property never says the answer is right — only that the query *responded* to an input the contract says it depends on. See [`examples/revenue_agent/check_sensitivity.py`](examples/revenue_agent/check_sensitivity.py) for a runnable, DuckDB-backed demo.
 
 ## Custom Prompt Rendering
 

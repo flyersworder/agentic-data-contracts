@@ -1,0 +1,13 @@
+
+filters to completed:
+**Sensitivity:** 1 pass
+
+- `total_revenue` / `only_completed_orders_count`: **pass** (expected unchanged, moved=False)
+
+no status filter:
+**Sensitivity:** 1 violation
+
+- `total_revenue` / `only_completed_orders_count`: **violation** (expected unchanged, moved=True) — the answer moved
+
+The second query is legal, plannable and wrong. Only the
+behavioural check disagrees with it.

@@ -402,15 +402,41 @@ def _round_sig(v: float) -> float:
     return round(v, _SIG_DIGITS - 1 - math.floor(math.log10(abs(v))))
 
 
+class _NaN:
+    """The one canonical NaN `_norm` substitutes for every float NaN.
+
+    ``nan != nan``, so a raw NaN never equals itself across two fetches: every
+    NaN answer would read "not deterministic", and with ``repeats=1`` would
+    always look moved. The single instance below compares equal only to
+    itself (identity equality), so it cannot collide with any genuine value
+    -- not a float, not None, not the string ``"NaN"`` -- and its fixed repr
+    keeps ``sorted(..., key=repr)`` deterministic. It is not None, so an
+    all-NaN result is a value, never vacuous.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<NaN>"
+
+
+_NAN = _NaN()
+
+
+def _norm_value(v: object) -> object:
+    if not isinstance(v, float):
+        return v
+    return _NAN if math.isnan(v) else _round_sig(v)
+
+
 def _norm(rows: list[tuple]) -> list[tuple]:
     """Order- and float-noise-insensitive form.
 
     So "the answer moved" means the values moved, not that the engine returned
-    them in a different order.
+    them in a different order. Float NaN becomes the canonical `_NAN`, so NaN
+    in the same position compares equal; ``inf``/``-inf`` are kept as-is.
     """
-    rounded = [
-        tuple(_round_sig(v) if isinstance(v, float) else v for v in row) for row in rows
-    ]
+    rounded = [tuple(_norm_value(v) for v in row) for row in rows]
     return sorted(rounded, key=repr)
 
 

@@ -325,6 +325,29 @@ class TestNormalise:
     def test_distinguishes_different_values(self) -> None:
         assert _norm([(1,)]) != _norm([(2,)])
 
+    def test_nan_equals_nan(self) -> None:
+        # Two independently produced NaNs: `nan != nan`, so without a
+        # canonical form no NaN answer ever equals itself across two fetches.
+        a = float("nan")
+        b = float("inf") - float("inf")
+        assert a is not b
+        assert _norm([(1, a)]) == _norm([(1, b)])
+
+    def test_nan_differs_from_a_number(self) -> None:
+        assert _norm([(float("nan"),)]) != _norm([(1.0,)])
+        assert _norm([(float("nan"),)]) != _norm([(None,)])
+        assert _norm([(float("nan"),)]) != _norm([("NaN",)])
+
+    def test_nan_sorts_stably_among_numbers(self) -> None:
+        rows = [(2.0,), (float("nan"),), (1.0,), (float("inf"),)]
+        assert _norm(rows) == _norm(list(reversed(rows)))
+
+    def test_infinities_are_kept(self) -> None:
+        assert _norm([(float("inf"),), (float("-inf"),)]) == [
+            (float("-inf"),),
+            (float("inf"),),
+        ]
+
 
 def _res(status: str, name: str = "p") -> SensitivityResult:
     return SensitivityResult(name=name, metric="m", status=status, expected="unchanged")
@@ -1793,3 +1816,61 @@ class TestVacuousAllNull:
         (result,) = report.results
         assert result.status == "pass"
         assert result.moved is False
+
+
+def _nan_ratio(channel: str) -> str:
+    """0.0/0.0 on doubles -- DuckDB's NaN -- until a *channel* row exists."""
+    hit = f"CASE WHEN channel = '{channel}' THEN 1.0 ELSE 0.0 END"
+    return (
+        f"SELECT SUM({hit})::DOUBLE / SUM({hit})::DOUBLE AS share FROM mkt.touchpoints"
+    )
+
+
+class TestNaN:
+    """NaN is a value: it must equal itself, and it is not NULL."""
+
+    def test_a_stable_nan_answer_is_deterministic_and_passes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds only 'display' rows, so 'zzz' stays 0/0 = NaN.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _nan_ratio("zzz_no_such_channel"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            repeats=2,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is False
+
+    def test_an_untouched_nan_does_not_move_under_changes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # With repeats=1 the old comparison saw NaN != NaN and called it moved:
+        # an unearned pass. An all-NaN base is NOT vacuous -- NaN is a value --
+        # so this is a real violation, not unchecked.
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _nan_ratio("zzz_no_such_channel"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            repeats=1,
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is False
+
+    def test_a_nan_base_the_shadow_makes_a_number_passes_changes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds 'display' rows: 0/0 becomes n/n = 1.0.
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _nan_ratio("display"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is True

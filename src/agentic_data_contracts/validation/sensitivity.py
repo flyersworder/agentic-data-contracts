@@ -25,12 +25,14 @@ the string executed is the caller's own text with spans replaced. That is what
 makes this work on a dialect sqlglot can parse directly but cannot emit, and it
 is the same template-assembly discipline the rest of the library follows.
 
-DIALECTS THAT PARSE ONLY AFTER NORMALIZATION (Denodo/VQL, in this library) are
-supported: ``check_sensitivity``'s ``sql_normalizer`` -- defaulting to the
-adapter itself when it implements ``SqlNormalizer`` -- normalizes the query
-and every shadow before anything is parsed. References are still LOCATED in
-the raw text, because that is what executes; the normalized text is parsed,
-never executed.
+DIALECTS THAT PARSE ONLY AFTER NORMALIZATION (Denodo VQL, in this library).
+References to the target are COUNTED in the normalized text, which sqlglot can
+parse, and LOCATED in the original by tokenizing it -- tokenizing is far more
+permissive than parsing -- because a ``SqlNormalizer`` returns no offsets and
+the original is what executes. The two must agree, and the edit is proved by
+normalizing the result: the edited body must hold no reference to the target,
+and the final text must parse as one statement. The normalizer must change
+syntax only; one that renames the target fails closed as ``unchecked``.
 """
 
 from __future__ import annotations

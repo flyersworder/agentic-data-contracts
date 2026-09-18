@@ -25,12 +25,12 @@ the string executed is the caller's own text with spans replaced. That is what
 makes this work on a dialect sqlglot can parse directly but cannot emit, and it
 is the same template-assembly discipline the rest of the library follows.
 
-NOT YET SUPPORTED: a dialect that parses only after a ``SqlNormalizer``
-rewrite (Denodo/VQL, in this library). The raw query text is parsed and no
-normalizer is applied, not even an adapter's own, so such a query is
-``unchecked`` for every property -- failing closed, never a governance hole,
-but not checked either. Supporting it needs more than a normalizer for the
-Validator: the rewrite's spans are computed on the raw text.
+DIALECTS THAT PARSE ONLY AFTER NORMALIZATION (Denodo/VQL, in this library) are
+supported: ``check_sensitivity``'s ``sql_normalizer`` -- defaulting to the
+adapter itself when it implements ``SqlNormalizer`` -- normalizes the query
+and every shadow before anything is parsed. References are still LOCATED in
+the raw text, because that is what executes; the normalized text is parsed,
+never executed.
 """
 
 from __future__ import annotations
@@ -54,7 +54,11 @@ if TYPE_CHECKING:
     # unevaluated.
     from agentic_data_contracts.adapters.base import DatabaseAdapter
     from agentic_data_contracts.core.contract import DataContract
-    from agentic_data_contracts.semantic.base import MetricDefinition, Shadow
+    from agentic_data_contracts.semantic.base import (
+        MetricDefinition,
+        SensitivityProperty,
+        Shadow,
+    )
 
 #: Only an identifier in one of these positions names a table. Without this, a
 #: COLUMN ALIAS sharing the table's name (``COUNT(DISTINCT psp_reference) AS
@@ -101,6 +105,24 @@ def _normalized(sql: str, normalize: Normalize, *, what: str) -> str:
 def _normalizer_fn(sql_normalizer: SqlNormalizer | None) -> Normalize:
     """The normalizer as a callable; the identity when there is none."""
     return sql_normalizer.normalize_sql if sql_normalizer is not None else _identity
+
+
+def _all_unchecked(
+    selected: list[SensitivityProperty], metric: MetricDefinition, reason: str
+) -> SensitivityReport:
+    """Every selected property refused a verdict for the same whole-call reason."""
+    return SensitivityReport(
+        results=tuple(
+            SensitivityResult(
+                name=prop.name,
+                metric=metric.name,
+                status="unchecked",
+                expected=prop.expect,
+                reason=reason,
+            )
+            for prop in selected
+        )
+    )
 
 
 def _cte_aliases(tree: exp.Expression) -> set[str]:
@@ -496,6 +518,7 @@ def check_sensitivity(
     properties: Sequence[str] | None = None,
     repeats: int = DEFAULT_REPEATS,
     dialect: str | None = None,
+    sql_normalizer: SqlNormalizer | None = None,
 ) -> SensitivityReport:
     """Check *sql* against the sensitivity properties *metric* declares.
 
@@ -514,13 +537,22 @@ def check_sensitivity(
 
     An unparseable query is a DIFFERENT outcome from a policy block, though the
     Validator reports both as ``blocked``. There is no verdict to render on SQL
-    Layer 1 could not even read (a dialect that needs a ``SqlNormalizer``
-    included), so this degrades to ``unchecked`` for every selected property
-    -- the same "no verdict was possible" status a count-guard refusal or a
-    nondeterministic base query produces -- and nothing is executed, not even
-    the base query, not even the rewrite. That is what makes skipping the
-    raise safe: this function never runs SQL Layer 1 did not first see and
-    clear.
+    Layer 1 could not even read, so this degrades to ``unchecked`` for every
+    selected property -- the same "no verdict was possible" status a
+    count-guard refusal or a nondeterministic base query produces -- and
+    nothing is executed, not even the base query, not even the rewrite. That
+    is what makes skipping the raise safe: this function never runs SQL Layer
+    1 did not first see and clear.
+
+    **Dialects that parse only after normalization.** ``sql_normalizer`` --
+    defaulting to ``adapter`` when the adapter implements ``SqlNormalizer`` --
+    is applied before anything is parsed: the query for Layer 1 and for
+    locating the target, and each shadow for governance. The rewrite still
+    edits the ORIGINAL text, which is what executes; the edit is proved by
+    normalizing the result. The normalizer must change syntax only: one that
+    renames the target makes the counts disagree, and every such query is
+    ``unchecked``. A normalizer that raises is "no verdict possible" for the
+    whole call.
 
     ``shadow.sql`` is NOT put through the Validator. It is contract-authored,
     like ``sql_expression``, and most shadows want the ``SELECT *`` the
@@ -567,17 +599,33 @@ def check_sensitivity(
 
     if dialect is None:
         dialect = adapter.dialect
+    # An adapter that is itself a SqlNormalizer (the Denodo case) normalizes
+    # unless the caller passes one -- the convention `create_tools` follows.
+    if sql_normalizer is None and isinstance(adapter, SqlNormalizer):
+        sql_normalizer = adapter
+    normalize = _normalizer_fn(sql_normalizer)
 
-    # Step 0 -- refuse to be the weak door. Layer 1 reports an unparseable
-    # query as blocked too, but that is not a policy verdict: it is "no
-    # verdict possible", which the spec maps to `unchecked` (the decision-B
-    # case for a dialect sqlglot cannot read). Only a POLICY block raises.
-    verdict = Validator(contract, dialect=dialect).validate(sql)
-    if verdict.blocked and not verdict.parse_error:
-        raise ValueError(
-            f"query is blocked by the contract and will not be executed: "
-            f"{'; '.join(verdict.reasons)}"
-        )
+    # Step 0 -- refuse to be the weak door. The query is normalized ONCE here
+    # and Layer 1 sees the normalized text. That is equivalent to handing the
+    # Validator the normalizer -- its only use of the raw text is an EXPLAIN,
+    # and this Validator has no explain adapter -- and it keeps a normalizer
+    # that raises something other than a parse error from escaping validate().
+    # A normalizer failure, like an unparseable query, is "no verdict
+    # possible", not a policy block: it is recorded, and nothing executes.
+    no_verdict: str | None = None
+    try:
+        normalized_sql = normalize(sql)
+    except Exception as e:  # noqa: BLE001 - any normalizer failure is one outcome
+        no_verdict = f"normalizer failed: {e}"
+    else:
+        verdict = Validator(contract, dialect=dialect).validate(normalized_sql)
+        if verdict.blocked and not verdict.parse_error:
+            raise ValueError(
+                f"query is blocked by the contract and will not be executed: "
+                f"{'; '.join(verdict.reasons)}"
+            )
+        if verdict.parse_error:
+            no_verdict = f"unparseable: {'; '.join(verdict.reasons)}"
 
     # A shadow that fails to parse cannot be checked against `allowed` here --
     # `None` is a refusal, never an empty set of tables read. Recorded now and
@@ -587,7 +635,7 @@ def check_sensitivity(
     allowed = {name.lower() for name in contract.allowed_table_names()}
     unparseable_shadows: set[str] = set()
     for prop in selected:
-        read = _shadow_tables(prop.shadow, dialect=dialect)
+        read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
         if read is None:
             unparseable_shadows.add(prop.name)
             continue
@@ -599,24 +647,13 @@ def check_sensitivity(
                     "contract does not allow"
                 )
 
-    # An unparseable query is refused a verdict WITHOUT executing anything --
-    # not even the rewrite. That is what makes skipping the policy raise safe:
-    # if the Validator's parse and `_rewrite`'s ever disagreed, falling through
-    # would run SQL Layer 1 never vouched for.
-    if verdict.parse_error:
-        reason = f"unparseable: {'; '.join(verdict.reasons)}"
-        return SensitivityReport(
-            results=tuple(
-                SensitivityResult(
-                    name=prop.name,
-                    metric=metric.name,
-                    status="unchecked",
-                    expected=prop.expect,
-                    reason=reason,
-                )
-                for prop in selected
-            )
-        )
+    # No verdict for the query -- unparseable, or its normalizer failed -- is
+    # refused WITHOUT executing anything, not even the rewrite. That is what
+    # makes skipping the policy raise safe: if the Validator's parse and
+    # `_rewrite`'s ever disagreed, falling through would run SQL Layer 1 never
+    # vouched for.
+    if no_verdict is not None:
+        return _all_unchecked(selected, metric, no_verdict)
 
     def _run(statement: str) -> list[tuple]:
         try:
@@ -670,7 +707,9 @@ def check_sensitivity(
             continue
 
         try:
-            mutated_sql = _rewrite(sql, prop.shadow, dialect=dialect)
+            mutated_sql = _rewrite(
+                sql, prop.shadow, dialect=dialect, normalize=normalize
+            )
         except _Refused as e:
             reason = str(e)
             status = (

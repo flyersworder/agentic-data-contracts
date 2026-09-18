@@ -7,6 +7,7 @@ import re
 import pytest
 import sqlglot
 
+from agentic_data_contracts.adapters.base import QueryResult
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.base import (
@@ -353,9 +354,7 @@ WHERE l.is_mql GROUP BY 1 ORDER BY 1
 """
 
 
-@pytest.fixture
-def mkt_adapter() -> DuckDBAdapter:
-    adapter = DuckDBAdapter(":memory:")
+def _load_mkt[A: DuckDBAdapter](adapter: A) -> A:
     adapter.execute("CREATE SCHEMA mkt")
     adapter.execute(
         "CREATE TABLE mkt.lead_scores"
@@ -375,6 +374,32 @@ def mkt_adapter() -> DuckDBAdapter:
         "(3,'search',30),(4,'email',40)"
     )
     return adapter
+
+
+class VqlDuckDBAdapter(DuckDBAdapter):
+    """DuckDB that accepts VQL's CONTEXT clause, standing in for Denodo.
+
+    sqlglot cannot parse ``CONTEXT (...)``, so the library must normalize before
+    it parses; the engine accepts it, so the ORIGINAL text must be what runs.
+    ``normalize_sql`` makes this a ``SqlNormalizer``; ``execute`` strips the
+    clause the way Denodo would simply honour it.
+    """
+
+    def normalize_sql(self, sql: str) -> str:
+        return _strip_context(sql)
+
+    def execute(self, sql: str) -> QueryResult:
+        return super().execute(_strip_context(sql))
+
+
+@pytest.fixture
+def mkt_adapter() -> DuckDBAdapter:
+    return _load_mkt(DuckDBAdapter(":memory:"))
+
+
+@pytest.fixture
+def vql_adapter() -> VqlDuckDBAdapter:
+    return _load_mkt(VqlDuckDBAdapter(":memory:"))
 
 
 def _contract(*tables: str) -> DataContract:
@@ -920,3 +945,142 @@ class TestNormalizedShadowGovernance:
             sql_normalizer=_VqlNormalizer(),
         )
         assert "lead_scores" in problem
+
+
+def _spy(adapter, monkeypatch) -> list[str]:
+    seen: list[str] = []
+    original = adapter.execute
+
+    def spy(sql: str):
+        seen.append(sql)
+        return original(sql)
+
+    monkeypatch.setattr(adapter, "execute", spy)
+    return seen
+
+
+class _Renaming:
+    """Syntax-only it is not: renames the target to another GOVERNED table, so
+    Layer 1 and shadow governance both pass and only the count guard sees it."""
+
+    def normalize_sql(self, sql: str) -> str:
+        return sql.replace("mkt.touchpoints", "mkt.lead_scores")
+
+
+class _Raising:
+    def normalize_sql(self, sql: str) -> str:
+        raise RuntimeError("the normalizer is down")
+
+
+class TestNormalizedCheckSensitivity:
+    def test_fan_out_violates_on_a_dialect_that_parses_only_after_normalization(
+        self, vql_adapter, mkt_contract
+    ) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT + _CTX,
+            contract=mkt_contract,
+            adapter=vql_adapter,  # a SqlNormalizer: used with no keyword
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is True
+
+    def test_first_touch_passes_on_a_dialect_that_parses_only_after_normalization(
+        self, vql_adapter, mkt_contract
+    ) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH + _CTX,
+            contract=mkt_contract,
+            adapter=vql_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert report.ok is True
+
+    def test_the_original_text_executes_never_the_normalized_one(
+        self, vql_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        seen = _spy(vql_adapter, monkeypatch)
+        check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT + _CTX,
+            contract=mkt_contract,
+            adapter=vql_adapter,
+        )
+        assert seen, "something must have executed"
+        assert all("CONTEXT" in s for s in seen)
+        assert any("sens_shadow_0" in s for s in seen)
+
+    def test_without_a_normalizer_the_same_query_is_unchecked(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # Before and after: this is the capability the task adds.
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT + _CTX,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("unparseable")
+        assert seen == []
+
+    def test_a_renaming_normalizer_is_unchecked_and_runs_nothing(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            sql_normalizer=_Renaming(),
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("count guard")
+        assert seen == []
+
+    def test_a_raising_normalizer_leaves_every_property_unchecked(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            sql_normalizer=_Raising(),
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("normalizer failed")
+        assert report.ok is False
+        assert seen == []
+
+    def test_a_governed_normalized_shadow_is_checked(
+        self, vql_adapter, mkt_contract
+    ) -> None:
+        report = check_sensitivity(
+            _metric(VQL_PROP),
+            FIRST_TOUCH + _CTX,
+            contract=mkt_contract,
+            adapter=vql_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+
+    def test_an_ungoverned_normalized_shadow_raises(self, vql_adapter) -> None:
+        # VQL_SHADOW also reads mkt.lead_scores, which this contract does not
+        # govern -- visible only after normalization.
+        with pytest.raises(ValueError, match="lead_scores"):
+            check_sensitivity(
+                _metric(VQL_PROP),
+                f"SELECT count(*) FROM mkt.touchpoints{_CTX}",
+                contract=_contract("touchpoints"),
+                adapter=vql_adapter,
+            )

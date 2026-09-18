@@ -38,7 +38,7 @@ syntax only; one that renames the target fails closed as ``unchecked``.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -554,6 +554,31 @@ def _shadow_tables(
     return names
 
 
+def _shadow_governance(
+    props: Iterable[SensitivityProperty],
+    allowed: Iterable[str],
+    *,
+    dialect: str | None,
+    normalize: Normalize,
+) -> Iterator[tuple[SensitivityProperty, list[str] | None]]:
+    """Each property with the tables its shadow reads that *allowed* does not.
+
+    Yields ``(prop, None)`` when the shadow's tables cannot be read (see
+    ``_shadow_tables``), otherwise ``(prop, names)`` with the ungoverned names
+    sorted -- an empty list when the shadow is fully governed. Lazy, so a
+    caller that stops at the first problem reads no further shadows. The one
+    governance rule both gates share; what a problem MEANS -- a raise at run
+    time, a reported string in CI -- stays with each caller.
+    """
+    allowed_lower = {name.lower() for name in allowed}
+    for prop in props:
+        read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
+        if read is None:
+            yield prop, None
+            continue
+        yield prop, [name for name in sorted(read) if name.lower() not in allowed_lower]
+
+
 def validate_sensitivity_tables(
     contract: DataContract,
     metrics: list[MetricDefinition],
@@ -584,26 +609,26 @@ def validate_sensitivity_tables(
     read. This gate takes no adapter, so -- unlike ``check_sensitivity`` -- it
     has no adapter to fall back on; pass the normalizer explicitly.
     """
-    allowed = {name.lower() for name in contract.allowed_table_names()}
+    allowed = contract.allowed_table_names()
     normalize = _normalizer_fn(sql_normalizer)
     problems: list[str] = []
     for metric in metrics:
-        for prop in metric.sensitivity:
-            read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
-            if read is None:
+        for prop, ungoverned in _shadow_governance(
+            metric.sensitivity, allowed, dialect=dialect, normalize=normalize
+        ):
+            if ungoverned is None:
                 problems.append(
                     f"metric {metric.name!r} sensitivity property "
                     f"{prop.name!r}: shadow cannot be parsed, so its tables "
                     "cannot be checked against the contract"
                 )
                 continue
-            for name in sorted(read):
-                if name.lower() not in allowed:
-                    problems.append(
-                        f"metric {metric.name!r} sensitivity property "
-                        f"{prop.name!r}: shadow reads {name!r}, which the "
-                        "contract does not allow"
-                    )
+            for name in ungoverned:
+                problems.append(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r}: shadow reads {name!r}, which the "
+                    "contract does not allow"
+                )
     return problems
 
 
@@ -748,20 +773,21 @@ def check_sensitivity(
     # turned into an `unchecked` result (never an execution) in the loop below,
     # so a governance hole never opens just because sqlglot cannot read the
     # dialect a shadow is written in.
-    allowed = {name.lower() for name in contract.allowed_table_names()}
     unparseable_shadows: set[str] = set()
-    for prop in selected:
-        read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
-        if read is None:
+    for prop, ungoverned in _shadow_governance(
+        selected,
+        contract.allowed_table_names(),
+        dialect=dialect,
+        normalize=normalize,
+    ):
+        if ungoverned is None:
             unparseable_shadows.add(prop.name)
-            continue
-        for name in sorted(read):
-            if name.lower() not in allowed:
-                raise ValueError(
-                    f"sensitivity property {prop.name!r} of metric "
-                    f"{metric.name!r} has a shadow reading {name!r}, which the "
-                    "contract does not allow"
-                )
+        elif ungoverned:
+            raise ValueError(
+                f"sensitivity property {prop.name!r} of metric "
+                f"{metric.name!r} has a shadow reading {ungoverned[0]!r}, which "
+                "the contract does not allow"
+            )
 
     # No verdict for the query -- unparseable, or its normalizer failed -- is
     # refused WITHOUT executing anything, not even the rewrite. That is what

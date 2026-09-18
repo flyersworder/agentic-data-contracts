@@ -572,35 +572,56 @@ normalizer.
 ### Denodo's `WITH` clause
 
 The Virtual DataPort VQL Guide documents `WITH` in every release from 8.0 to
-9.3-beta: "Virtual DataPort supports Common Table Expressions in SELECT and
-CREATE VIEW statements." Its example references one CTE twice, once inside a
-subquery — the pattern the rewrite produces. The guide leaves three details open;
-each fails closed as an engine error, then `unchecked`.
+9.3-beta — "Virtual DataPort supports Common Table Expressions in SELECT and
+CREATE VIEW statements" — and its formal `SELECT` grammar (9.2) settles the
+shape the rewrite emits:
 
-| Detail | The rewrite emits | Guide | If Denodo refuses it |
-|---|---|---|---|
-| No column list | `sens_shadow_0 AS (<shadow>)` | its only example has one | every rewrite fails; fix by emitting the list from `adapter.describe_table(shadow.table)` |
-| Letter-leading alias | `sens_shadow_0` | silent on identifier rules | every rewrite fails |
-| Several CTEs in one `WITH` | `WITH sens_shadow_0 AS (…), <caller's CTE> …` — only when the caller wrote a `WITH` | single-CTE examples only | only those queries fail |
+```
+<query>                    ::= [ WITH <common table expressions> ] { <select> | <complex select> } … [ CONTEXT ( … ) ] [ TRACE ]
+<common table expressions> ::= <common table expression> [ , <common table expression> ]*
+<common table expression>  ::= <query name> [ ( <field> [ , <field> ]* ) ] AS ( { <select> | <complex select> } [ <order by> ] )
+<view>                     ::= <simple view> | <join view> | ( <select> )
+```
 
-`WITH RECURSIVE` is undocumented for VQL, so a VQL caller never writes it.
+| Detail | The rewrite emits | Settled by |
+|---|---|---|
+| No column list | `sens_shadow_0 AS (<shadow>)` | grammar: the list is optional |
+| Several CTEs in one `WITH` | `WITH sens_shadow_0 AS (…), <caller's CTE> …` | grammar: `<cte> [, <cte>]*` |
+| A `UNION ALL` shadow | `sens_shadow_0 AS (SELECT … UNION ALL SELECT …)` | grammar: a CTE body may be a `<complex select>` |
+| Letter-leading alias | `sens_shadow_0` | **unconfirmed** — the grammar names it `<query name>` without spelling out identifier rules |
+
+`WITH RECURSIVE` does not appear in the grammar, so a VQL caller never writes it.
+
+**The multi-CTE splice is the path that matters.** 68% of the 1,430 answer-
+computing agent queries in the DABStep corpus open with their own `WITH`, so the
+choice of how to inject a shadow into a query that already has one governs two
+thirds of real traffic.
 
 **Hardening, regardless of Denodo:** the alias stem changes from `__sens_` to
 `sens_shadow_`. Oracle requires unquoted identifiers to start with a letter, so
-`__sens_0` would fail there too. `_free_alias` already steps past collisions.
+`__sens_0` would fail there too; a letter-leading stem also removes the one
+detail the grammar leaves open. `_free_alias` already steps past collisions.
 
-**Rejected:** emitting a column list pre-emptively (a `describe_table` round trip
-on every call, for a problem the guide does not show); rewriting to an inline
-derived table, `FROM (<shadow>) AS payments` (it sidesteps all three details but
-needs alias-aware surgery on every reference — riskier than the problem). The
-derived table is the fallback if Denodo refuses the multi-CTE splice.
+**Rejected alternatives, with the grammar's reasons:**
 
-**Verification on a live Denodo** (not blocking):
+- *Inline derived table at each reference* (`JOIN (<shadow>) t`). In VQL a
+  derived table in a join is only `( <select> )` — no `UNION`, no alias — so the
+  worked example's `UNION ALL` shadow cannot be expressed. It would also need
+  alias-aware surgery at every reference and copy the shadow per reference.
+- *Wrap the caller's query* (`WITH s AS (…) SELECT * FROM (<caller>)`). `WITH`
+  may open only a top-level `<query>`, and a subquery is `( <select> )`, so the
+  nested `WITH` is invalid — exactly when the caller wrote one. SQL Server rejects
+  it too.
+- *Refuse any query that already has a `WITH`.* Valid everywhere, but gives up
+  68% of real queries.
+- *A temporary view or table.* Breaks the no-writes rule.
+- *Emitting a column list pre-emptively.* The grammar makes it optional; a
+  `describe_table` round trip on every call buys nothing.
+
+**Verification on a live Denodo** (not blocking; it settles the one open row):
 
 ```sql
 WITH sens_shadow_0 AS (SELECT * FROM <some_view>) SELECT COUNT(*) FROM sens_shadow_0;
-WITH sens_shadow_0 AS (SELECT * FROM <some_view>), b AS (SELECT * FROM sens_shadow_0)
-SELECT COUNT(*) FROM b;
 ```
 
 ### Guards
@@ -620,7 +641,7 @@ executes nothing for that property.
 | spans in the original ≠ references in the normalized AST | `unchecked` (count guard across the normalizer boundary) |
 | the edited body fails to normalize or parse, or still references the target | `unchecked` (`rewrite could not be proved`) |
 | the final text fails to normalize or parse | `unchecked` (`rewrite could not be proved`) |
-| the engine rejects the base or mutated query | `unchecked`, including any `WITH` detail above |
+| the engine rejects the base or mutated query | `unchecked`, including the one unconfirmed `WITH` detail above |
 
 Normalizing is in-process string work — the query twice (once inside Layer 1,
 once to locate), each property's edited body and final text once, each shadow
@@ -665,14 +686,15 @@ Existing tests that name `__sens_` move to the new stem.
 
 - No change to the `SqlNormalizer` protocol.
 - No offsets method yet (the named follow-up above).
-- No pre-emptive column list, and no derived-table rewrite, unless Denodo refuses
-  the CTE form.
+- No pre-emptive column list and no derived-table rewrite: the VQL grammar makes
+  the first unnecessary and the second unable to express a `UNION ALL` shadow.
 
 ### Docs
 
 The README, CHANGELOG 0.52.0 entry and module docstring drop "Denodo/VQL is not
 yet supported" and state instead: queries are normalized before they are parsed
 and edited on their original text; the normalizer must change syntax only; the
-three `WITH` details and their fail-closed behaviour; the verification queries;
+what the VQL grammar settles about the `WITH` form, the one unconfirmed detail
+and its fail-closed behaviour; the verification query;
 and the named follow-up.
 

@@ -346,7 +346,7 @@ says "the answer did not move", not "you hardcoded the threshold".
 | target name inside a string literal or comment | tokenizer classifies both; only identifier tokens are candidates |
 | column alias sharing the table's name | candidate must sit in table position (`FROM`/`JOIN`/`,`/`(`) |
 | non-deterministic query reads as sensitive | base run `repeats` times; disagreement -> `unchecked`. Probabilistic — see step 3 |
-| vacuous test (empty base, `expect: changes`) | -> `unchecked`, not `pass` |
+| vacuous test (empty base, `expect: changes`; or empty base AND empty shadowed result, `expect: unchanged`) | -> `unchecked`, not `pass` -- a non-empty shadowed result against an empty base under `expect: unchanged` is still a real `violation` |
 | CTE alias collision with `__sens_0` | assert absent from the SQL; pick the next free `__sens_N` |
 
 > **Superseded:** the alias stem is `sens_shadow_`, letter-leading for portability.

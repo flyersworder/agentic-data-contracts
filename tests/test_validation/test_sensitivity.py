@@ -200,6 +200,28 @@ class TestNormalizedRewrite:
                 normalize=lambda s: s.replace("mkt.touchpoints", "mkt.tp"),
             )
 
+    def test_absent_from_the_original_is_not_applicable_despite_a_lookalike(
+        self,
+    ) -> None:
+        # Regression: `touchpoints` here is a plain column, not a table
+        # reference, so the ORIGINAL text holds no span at all -- there is
+        # nothing to edit. A normalizer that happens to put a look-alike span
+        # in table position in the NORMALIZED text (wrapping it in parens
+        # puts it right after an L_PAREN) must not turn that into a rewrite:
+        # `refs` from the normalized AST is still 0, since it is a column
+        # expression, not an `exp.Table` node, and the original itself is
+        # absent, so this must refuse as not_applicable -- never proceed with
+        # zero edits.
+        with pytest.raises(_Refused, match="not_applicable"):
+            _rewrite(
+                "SELECT touchpoints FROM mkt.lead_scores",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=lambda s: s.replace(
+                    "SELECT touchpoints", "SELECT (touchpoints)"
+                ),
+            )
+
     def test_an_untokenizable_original_is_refused(self) -> None:
         # Normalizes to parseable SQL, but the original's unterminated literal
         # cannot be tokenized -- so its spans cannot be found.

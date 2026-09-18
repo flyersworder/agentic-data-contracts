@@ -298,17 +298,27 @@ def _rewrite(
     # column that shares the target's bare name (`SELECT lead_id, touchpoints
     # FROM mkt.lead_scores`) puts a span in table position -- `_spans` cannot
     # tell a column reference from a table one -- with no normalizer involved
-    # at all. So compare the span count in the normalized text against the
-    # original's: unchanged (including both zero) means whatever look-alikes
-    # exist survived normalization untouched, nothing was renamed, and the
-    # result is not_applicable. A normalizer that actually renamed or
-    # re-qualified the target changes that count -- it reads as zero
-    # references while erasing the look-alike spans too -- and falls through
-    # to the count guard below instead of posing as not_applicable.
+    # at all. So this branch decides the whole outcome and always raises: if
+    # the ORIGINAL holds no span, there is nothing to edit regardless of what
+    # the normalizer did, so it is not_applicable outright. Otherwise compare
+    # the span count in the normalized text against the original's: unchanged
+    # means whatever look-alikes exist survived normalization untouched,
+    # nothing was renamed, and it is still not_applicable. A different count
+    # -- a normalizer that renamed or re-qualified the target, or (rarer) one
+    # that manufactured a look-alike span of its own -- is the count guard,
+    # raised here explicitly rather than falling through to the general
+    # `len(spans) != refs` check below, which is `0 != 0` and would not fire.
     if refs == 0:
+        if not spans:
+            raise _Refused("not_applicable: query does not reference the target")
         normalized_spans = _spans(normalized_sql, shadow.table, dialect=dialect)
         if len(normalized_spans) == len(spans):
             raise _Refused("not_applicable: query does not reference the target")
+        raise _Refused(
+            f"count guard: {len(spans)} spans in the original text vs "
+            f"{len(normalized_spans)} look-alike spans in the normalized text; "
+            "refusing to edit"
+        )
     if len(spans) != refs:
         raise _Refused(
             f"count guard: {len(spans)} spans in the original text vs {refs} "

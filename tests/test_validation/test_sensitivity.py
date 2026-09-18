@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import sqlglot
 
 from agentic_data_contracts.semantic.base import Shadow
 from agentic_data_contracts.validation.sensitivity import (
@@ -20,7 +21,12 @@ SHADOW = Shadow(
 
 
 def _rw(sql: str) -> str:
-    return _rewrite(sql, SHADOW, dialect="duckdb")
+    out = _rewrite(sql, SHADOW, dialect="duckdb")
+    # Every rewrite must still be SQL. The assertions below only look for
+    # substrings, which a splice that broke an identifier or dropped a comma
+    # would still satisfy -- this is what would notice.
+    sqlglot.parse_one(out, dialect="duckdb")
+    return out
 
 
 class TestLocate:

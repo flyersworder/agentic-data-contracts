@@ -1573,3 +1573,92 @@ class TestCallerPrincipal:
         )
         assert "'mkt.lead_scores'" in problem
         assert "does not allow" in problem
+
+
+_NULL_SUM = (
+    "SELECT SUM(lead_id) AS s FROM mkt.touchpoints "
+    "WHERE channel = 'zzz_no_such_channel'"
+)
+_ZERO_COUNT = (
+    "SELECT COUNT(*) AS n FROM mkt.touchpoints WHERE channel = 'zzz_no_such_channel'"
+)
+
+
+def _null_prop(expect: str, shadow: Shadow = MKT_SHADOW) -> SensitivityProperty:
+    return SensitivityProperty(
+        name="touchpoints_prop",
+        description="A property whose test the base result may make vacuous.",
+        shadow=shadow,
+        expect=expect,
+    )
+
+
+class TestVacuousAllNull:
+    """An aggregate over no rows is NULL -- no answer, just like no rows."""
+
+    def test_null_base_and_null_shadow_under_unchanged_is_unchecked(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds only 'display' touchpoints, so the filter still
+        # matches nothing and the shadowed SUM is NULL too.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("vacuous")
+        assert report.ok is False
+
+    def test_null_base_under_changes_is_unchecked_without_the_mutation(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("vacuous")
+        # Only the base query ran (DEFAULT_REPEATS times); the rewrite never did.
+        assert seen == [_NULL_SUM, _NULL_SUM]
+
+    def test_null_base_with_a_non_null_shadowed_result_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        shadow = Shadow(
+            table="mkt.touchpoints",
+            sql=(
+                "SELECT * FROM mkt.touchpoints UNION ALL "
+                "SELECT 1, 'zzz_no_such_channel', 1"
+            ),
+        )
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged", shadow)),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is True
+
+    def test_a_zero_count_on_both_sides_still_passes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # The deliberate limit: COUNT over no rows is 0, indistinguishable
+        # from a real answer of zero, so it is NOT treated as vacuous.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _ZERO_COUNT,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert result.moved is False

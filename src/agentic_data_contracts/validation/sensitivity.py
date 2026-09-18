@@ -414,6 +414,21 @@ def _norm(rows: list[tuple]) -> list[tuple]:
     return sorted(rounded, key=repr)
 
 
+def _is_vacuous(rows: list[tuple]) -> bool:
+    """True when *rows* carry no answer at all: no rows, or only NULLs.
+
+    This NARROWS the vacuous-test gap; it does not close it. An aggregate
+    over no rows is not always an absence: ``SUM`` (and ``AVG``, ``MIN``,
+    ``MAX``) over no rows is NULL, which this catches, but ``COUNT`` over no
+    rows is ``0`` -- indistinguishable from a real answer of zero -- and is
+    deliberately NOT treated as vacuous. Calling every zero vacuous would
+    refuse a verdict on genuine zeros; a ``COUNT`` whose filter matches
+    nothing on both sides therefore still reads ``pass`` under
+    ``expect: unchanged``.
+    """
+    return not rows or all(v is None for row in rows for v in row)
+
+
 @dataclass(frozen=True)
 class SensitivityResult:
     """The verdict for one property against one query.
@@ -430,9 +445,13 @@ class SensitivityResult:
                                 ``expect: changes`` (it cannot move), or an
                                 empty base AND an empty shadowed result for
                                 ``expect: unchanged`` (nothing to hold still).
-                                A non-empty shadowed result against an empty
-                                base under ``expect: unchanged`` is still a
-                                real ``"violation"``: the answer moved.
+                                "Empty" means no rows OR only NULLs, so an
+                                aggregate such as ``SUM`` over no rows counts;
+                                ``COUNT`` over no rows is ``0`` and does not
+                                (see ``_is_vacuous``). A non-empty shadowed
+                                result against an empty base under
+                                ``expect: unchanged`` is still a real
+                                ``"violation"``: the answer moved.
 
     ``moved`` is None when no comparison was made. ``reason`` reports the
     mechanical condition only and never infers a cause -- the same boundary
@@ -910,17 +929,17 @@ def check_sensitivity(
             )
             continue
 
-        if not before and prop.expect == "changes":
-            # An empty answer cannot move, so `expect: changes` asserts
-            # nothing -- and refusing here, before the mutated query ever
-            # runs, keeps that early exit's cost the same as before.
+        if _is_vacuous(before) and prop.expect == "changes":
+            # An empty (or all-NULL) answer cannot move, so `expect: changes`
+            # asserts nothing -- and refusing here, before the mutated query
+            # ever runs, keeps that early exit's cost the same as before.
             results.append(
                 SensitivityResult(
                     name=prop.name,
                     metric=metric.name,
                     status="unchecked",
                     expected=prop.expect,
-                    reason="vacuous: an empty base result cannot move",
+                    reason="vacuous: an empty or all-NULL base result cannot move",
                 )
             )
             continue
@@ -939,7 +958,7 @@ def check_sensitivity(
             )
             continue
 
-        if not before and not after:
+        if _is_vacuous(before) and _is_vacuous(after):
             # `expect: changes` with an empty base was already refused above,
             # so reaching here with an empty base means `expect: unchanged` --
             # and an empty shadowed result too tests nothing: there is no
@@ -951,8 +970,9 @@ def check_sensitivity(
                     status="unchecked",
                     expected=prop.expect,
                     reason=(
-                        "vacuous: an empty base result and an empty shadowed "
-                        "result cannot show whether the answer would move"
+                        "vacuous: an empty or all-NULL base result and an "
+                        "empty or all-NULL shadowed result cannot show "
+                        "whether the answer would move"
                     ),
                 )
             )

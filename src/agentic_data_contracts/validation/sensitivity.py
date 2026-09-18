@@ -245,14 +245,13 @@ def _strip_trailing_semicolons(sql: str, *, dialect: str | None) -> str:
     """*sql* with any trailing SEMICOLON tokens -- and anything after them,
     such as a trailing comment -- cut off.
 
-    A shadow is one statement; ``alias AS (<shadow.sql>\n)`` is not valid SQL
-    when ``<shadow.sql>`` ends in ``;``, so every such shadow used to fail to
-    parse and every check on it came back ``unchecked``. Tokenize-based so a
-    comment trailing the ``;`` (``SELECT ...; -- note``) is cut with it,
-    rather than left dangling to swallow the CTE's closing paren. A shadow
-    with no trailing semicolon is returned unchanged -- its own trailing
-    comment, if any, is still closed by the newline `_inject` puts before the
-    paren.
+    A shadow is one statement, and ``alias AS (<shadow.sql>\n)`` is not valid
+    SQL when ``<shadow.sql>`` ends in ``;``: the CTE's own parentheses close
+    over an empty second statement. Tokenize-based so a comment trailing the
+    ``;`` (``SELECT ...; -- note``) is cut with it, rather than left dangling
+    to swallow the CTE's closing paren. A shadow with no trailing semicolon
+    is returned unchanged -- its own trailing comment, if any, is still
+    closed by the newline `_inject` puts before the paren.
     """
     try:
         toks = list(sqlglot.tokenize(sql, dialect=dialect))
@@ -370,23 +369,35 @@ def _rewrite(
 #: dropped.
 _SIG_DIGITS = 12
 
+#: Absolute floor below which a finite value snaps to 0.0. A quantity that is
+#: mathematically exactly zero -- a net-zero sum, a reconciled balance -- does
+#: not come back as literal 0.0 from a float engine: summation order alone
+#: puts it a few ULPs either side of zero (DuckDB's own `sum(x)` over rows
+#: that cancel gives ~1e-17, and the sign and magnitude of that noise depend
+#: on the order the rows arrived in). Significant-digit rounding cannot catch
+#: this: it is relative to the value's OWN magnitude, and a value near zero
+#: has effectively no magnitude to be relative to, so 12 significant digits
+#: of pure noise is still reported as 12 significant digits of pure noise.
+#: 1e-9 sits far below any plausible genuine measurement in this library's
+#: domain (currency, counts) and far above float64's noise floor.
+_ZERO_FLOOR = 1e-9
+
 
 def _round_sig(v: float) -> float:
-    """*v* rounded to `_SIG_DIGITS` significant digits.
+    """*v* rounded to `_SIG_DIGITS` significant digits, snapping near-zero
+    noise (``abs(v) < _ZERO_FLOOR``) to exactly ``0.0`` first.
 
-    Relative, not absolute, precision. `round(v, 6)` fixes the DECIMAL PLACE,
-    so it treats the sixth digit after the point as noise regardless of the
-    value's magnitude -- fine for a small aggregate, but a sum above ~1e9 has
-    that digit land well inside its genuinely significant part, and
-    run-to-run float noise from summation order shows up there too, producing
-    a false "moved" or a false "not deterministic". Rounding to a fixed
-    DIGIT COUNT instead keeps the noise floor tracking the value's magnitude.
-    0.0 and non-finite values (``nan``, ``inf``, ``-inf``) pass through
+    Rounds to a fixed significant-digit COUNT rather than a fixed decimal
+    place, so the noise floor this discards tracks the value's own
+    magnitude instead of being some absolute amount regardless of it. 0.0
+    and non-finite values (``nan``, ``inf``, ``-inf``) pass through
     unchanged -- ``log10(0)`` is undefined, and a non-finite value has no
     meaningful digit count to round to.
     """
-    if v == 0.0 or not math.isfinite(v):
+    if not math.isfinite(v):
         return v
+    if abs(v) < _ZERO_FLOOR:
+        return 0.0
     return round(v, _SIG_DIGITS - 1 - math.floor(math.log10(abs(v))))
 
 

@@ -1367,3 +1367,74 @@ class TestRelativeFloatPrecision:
     @pytest.mark.parametrize("value", [0.0, -1.5, float("nan"), float("inf")])
     def test_edge_values_do_not_raise(self, value: float) -> None:
         _norm([(value,)])  # must not raise
+
+    def test_near_zero_noise_from_summation_order_normalizes_to_zero(self) -> None:
+        # DuckDB's actual sum(x) over (0.1, 0.2, -0.3), and over the same
+        # values reordered (-0.3, 0.2, 0.1) -- a true zero, corrupted by
+        # summation-order float noise in different directions each time.
+        # Relative precision alone does not fix this: both values are well
+        # inside float64's significant-digit budget, so 12 significant
+        # digits of *nonzero* noise is still nonzero. Only an absolute floor
+        # near zero catches it.
+        duckdb_noise_a = 5.551115123125783e-17
+        duckdb_noise_b = 2.7755575615628914e-17
+        assert (
+            _norm([(duckdb_noise_a,)]) == _norm([(duckdb_noise_b,)]) == _norm([(0.0,)])
+        )
+
+
+NUM_SHADOW = Shadow(
+    table="num.vals",
+    sql=(
+        "SELECT -0.3::DOUBLE AS x UNION ALL SELECT 0.2::DOUBLE AS x "
+        "UNION ALL SELECT 0.1::DOUBLE AS x"
+    ),
+)
+
+
+class TestNearZeroFloatNoiseEndToEnd:
+    """A net-zero sum must not read as `moved` just because DuckDB's real
+    summation-order noise differs between the base and shadowed queries."""
+
+    @pytest.fixture
+    def num_adapter(self) -> DuckDBAdapter:
+        adapter = DuckDBAdapter(":memory:")
+        adapter.execute("CREATE SCHEMA num")
+        adapter.execute("CREATE TABLE num.vals(x DOUBLE)")
+        adapter.execute("INSERT INTO num.vals VALUES (0.1), (0.2), (-0.3)")
+        return adapter
+
+    @pytest.fixture
+    def num_contract(self) -> DataContract:
+        return DataContract.from_yaml_string(
+            """
+version: "1.0"
+name: near-zero-test
+semantic:
+  allowed_tables:
+    - schema: num
+      tables: [vals]
+  forbidden_operations: [DELETE, DROP]
+  rules: []
+"""
+        )
+
+    def test_a_net_zero_sum_passes_under_a_reordering_shadow(
+        self, num_adapter, num_contract
+    ) -> None:
+        prop = SensitivityProperty(
+            name="net_zero_is_stable",
+            description="A net-zero sum must not move under a reorder.",
+            shadow=NUM_SHADOW,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop),
+            "SELECT sum(x) FROM num.vals",
+            contract=num_contract,
+            adapter=num_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert result.moved is False
+        assert report.ok is True

@@ -532,10 +532,19 @@ one. So the library must edit text it cannot parse, guided by text it can.
 2. **Locate.** Count the real references to the target table in the AST of
    `normalize(sql)`.
 3. **Rewrite.** Tokenize the **original** text, find the target's spans, and
-   require the span count to equal the reference count. Zero references *and*
-   zero spans is `not_applicable`; any disagreement is the count guard — a
-   normalizer that renamed the target leaves zero references, which must not
-   read as `not_applicable`. Edit the original.
+   require the span count to equal the reference count. Zero references after
+   normalization is `not_applicable` only when the original and normalized
+   texts hold the *same* number of name-matching spans — the identity case,
+   and any normalizer that leaves look-alikes untouched. That comparison is
+   what a bare-name column (`SELECT lead_id, touchpoints FROM
+   mkt.lead_scores`) needs: `_spans` cannot tell a column that shares the
+   target's bare name from an actual table reference, so it produces a span
+   with no normalizer involved at all, and with no normalizer a renamed
+   target is impossible — the counts are always equal, so this reads as
+   `not_applicable` exactly as it did before normalization support existed.
+   A *different* span count — a normalizer that renamed or re-qualified the
+   target, which erases the look-alike spans along with the real one — is the
+   count guard instead. Edit the original.
 4. **Prove, in two parts.** First, normalize the *edited body* — before the CTE
    is injected — and require that it parses and holds **zero** real references
    to the target. The proof cannot run on the final text: the shadow itself
@@ -564,9 +573,9 @@ token in table position, the counts match and the wrong span is edited. The
 proof catches any edit that leaves a real reference to the target behind.
 
 **Assumption: the normalizer changes syntax, not names.** Infineon's Denodo
-normalizer is syntax-only. A normalizer that renames or re-qualifies the target
-makes the span and reference counts disagree, so every query fails closed as
-`unchecked`.
+normalizer is syntax-only. A normalizer that changes how the target is named —
+renaming it, or qualifying it differently from the original — makes the span
+and reference counts disagree, so every query fails closed as `unchecked`.
 
 ### Where it lives: inside the library
 
@@ -649,9 +658,9 @@ executes nothing for that property.
 | the normalized query is blocked by policy | `ValueError` |
 | a normalized shadow reads an ungoverned table | `ValueError` |
 | the normalizer raises on a shadow, or its normalized form does not parse or holds more than one statement | that property `unchecked` (`unparseable shadow`); `validate_sensitivity_tables` reports it |
-| neither the normalized query nor the original text references the target | `not_applicable` |
+| zero references in the normalized AST, and the original and normalized texts hold the same number of name-matching spans (including both zero) | `not_applicable` |
 | the original text does not tokenize | `unchecked` (`original text could not be tokenized`) |
-| spans in the original ≠ references in the normalized AST — including a normalizer that renamed the target | `unchecked` (count guard across the normalizer boundary) |
+| spans in the original ≠ references in the normalized AST, or (when references are zero) the normalized text's span count differs from the original's — including a normalizer that renamed the target | `unchecked` (count guard across the normalizer boundary) |
 | the edited body fails to normalize or parse, or still references the target | `unchecked` (`rewrite could not be proved`) |
 | the final text fails to normalize, to parse, or to be one statement | `unchecked` (`rewrite could not be proved`) |
 | the engine rejects the base or mutated query | `unchecked`, including the one unconfirmed `WITH` detail above |

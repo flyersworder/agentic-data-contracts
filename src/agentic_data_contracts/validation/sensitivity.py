@@ -99,9 +99,14 @@ def _identity(sql: str) -> str:
 def _normalized(sql: str, normalize: Normalize, *, what: str) -> str:
     """*sql* normalized, or a refusal naming what failed to normalize."""
     try:
-        return normalize(sql)
+        result = normalize(sql)
     except Exception as e:  # noqa: BLE001 - any normalizer failure is one outcome
         raise _Refused(f"normalizer failed on {what}: {e}") from e
+    if not isinstance(result, str):
+        raise _Refused(
+            f"normalizer failed on {what}: returned {type(result).__name__}, not str"
+        )
+    return result
 
 
 def _normalizer_fn(sql_normalizer: SqlNormalizer | None) -> Normalize:
@@ -286,16 +291,24 @@ def _rewrite(
     agree, and the edit is then proved rather than trusted. Raises only
     ``_Refused``.
     """
-    refs = _table_refs(
-        _normalized(sql, normalize, what="the query"), shadow.table, dialect=dialect
-    )
+    normalized_sql = _normalized(sql, normalize, what="the query")
+    refs = _table_refs(normalized_sql, shadow.table, dialect=dialect)
     spans = _spans(sql, shadow.table, dialect=dialect)
-    # Absent from BOTH texts is an outcome. Absent from only one is a
-    # disagreement -- a normalizer that renamed the target reads as zero
-    # references -- so it falls to the count guard instead of posing as
-    # not_applicable.
-    if refs == 0 and not spans:
-        raise _Refused("not_applicable: query does not reference the target")
+    # Zero references after normalization is not, by itself, an absence: a
+    # column that shares the target's bare name (`SELECT lead_id, touchpoints
+    # FROM mkt.lead_scores`) puts a span in table position -- `_spans` cannot
+    # tell a column reference from a table one -- with no normalizer involved
+    # at all. So compare the span count in the normalized text against the
+    # original's: unchanged (including both zero) means whatever look-alikes
+    # exist survived normalization untouched, nothing was renamed, and the
+    # result is not_applicable. A normalizer that actually renamed or
+    # re-qualified the target changes that count -- it reads as zero
+    # references while erasing the look-alike spans too -- and falls through
+    # to the count guard below instead of posing as not_applicable.
+    if refs == 0:
+        normalized_spans = _spans(normalized_sql, shadow.table, dialect=dialect)
+        if len(normalized_spans) == len(spans):
+            raise _Refused("not_applicable: query does not reference the target")
     if len(spans) != refs:
         raise _Refused(
             f"count guard: {len(spans)} spans in the original text vs {refs} "
@@ -553,8 +566,9 @@ def check_sensitivity(
     edits the ORIGINAL text, which is what executes; the edit is proved by
     normalizing the result. The normalizer must change syntax only: one that
     renames the target makes the counts disagree, and every such query is
-    ``unchecked``. A normalizer that raises is "no verdict possible" for the
-    whole call.
+    ``unchecked``. A normalizer that raises on the QUERY is "no verdict
+    possible" for the whole call; raising on one shadow leaves only that
+    property ``unchecked``.
 
     ``shadow.sql`` is NOT put through the Validator. It is contract-authored,
     like ``sql_expression``, and most shadows want the ``SELECT *`` the
@@ -620,14 +634,22 @@ def check_sensitivity(
     except Exception as e:  # noqa: BLE001 - any normalizer failure is one outcome
         no_verdict = f"normalizer failed: {e}"
     else:
-        verdict = Validator(contract, dialect=dialect).validate(normalized_sql)
-        if verdict.blocked and not verdict.parse_error:
-            raise ValueError(
-                f"query is blocked by the contract and will not be executed: "
-                f"{'; '.join(verdict.reasons)}"
+        if not isinstance(normalized_sql, str):
+            # A normalizer returning e.g. None must not escape as TypeError
+            # from the Validator call below -- it is one more shape of
+            # "normalizer failed", not a crash.
+            no_verdict = (
+                f"normalizer failed: returned {type(normalized_sql).__name__}, not str"
             )
-        if verdict.parse_error:
-            no_verdict = f"unparseable: {'; '.join(verdict.reasons)}"
+        else:
+            verdict = Validator(contract, dialect=dialect).validate(normalized_sql)
+            if verdict.blocked and not verdict.parse_error:
+                raise ValueError(
+                    f"query is blocked by the contract and will not be executed: "
+                    f"{'; '.join(verdict.reasons)}"
+                )
+            if verdict.parse_error:
+                no_verdict = f"unparseable: {'; '.join(verdict.reasons)}"
 
     # A shadow that fails to parse cannot be checked against `allowed` here --
     # `None` is a refusal, never an empty set of tables read. Recorded now and

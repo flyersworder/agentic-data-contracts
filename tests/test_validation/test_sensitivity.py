@@ -191,7 +191,7 @@ class TestNormalizedRewrite:
 
     def test_a_renaming_normalizer_trips_the_count_guard(self) -> None:
         # The normalized text holds zero references and the original holds one.
-        # That is a disagreement, not an absence (DEVIATION 2).
+        # That is a disagreement, not an absence.
         with pytest.raises(_Refused, match="count guard"):
             _rewrite(
                 "SELECT count(*) FROM mkt.touchpoints",
@@ -221,6 +221,32 @@ class TestNormalizedRewrite:
                 MKT_SHADOW,
                 dialect="duckdb",
                 normalize=boom,
+            )
+
+    def test_a_bare_name_column_is_not_applicable_with_no_normalizer(self) -> None:
+        # Regression: `_spans` cannot tell a column that shares the target's
+        # bare name from an actual table reference -- it puts a span in table
+        # position for both -- and with no normalizer a renamed target is
+        # impossible, so this must read as not_applicable, not the count
+        # guard that a real disagreement trips.
+        for sql in (
+            "SELECT lead_id, touchpoints FROM mkt.lead_scores",
+            "SELECT count(touchpoints) FROM mkt.lead_scores",
+            "SELECT lead_id FROM mkt.lead_scores ORDER BY 1, touchpoints",
+        ):
+            with pytest.raises(_Refused, match="not_applicable"):
+                _rewrite(sql, MKT_SHADOW, dialect="duckdb")
+
+    def test_a_normalizer_returning_none_is_refused(self) -> None:
+        # `_normalized` must refuse a non-str result the same way it refuses
+        # a raising one, so the rewrite and proof paths fail closed
+        # identically instead of letting a TypeError escape.
+        with pytest.raises(_Refused, match="normalizer failed.*not str"):
+            _rewrite(
+                "SELECT count(*) FROM mkt.touchpoints",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=lambda s: None,  # ty: ignore[invalid-argument-type]
             )
 
 
@@ -488,6 +514,22 @@ class TestCheckSensitivity:
         assert result.status == "not_applicable"
         assert result.moved is None
         assert report.ok is False
+
+    def test_a_bare_name_column_is_not_applicable(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # End-to-end regression for the same bug: a column named like the
+        # target must read not_applicable, not fail report.ok via the count
+        # guard. The column does not exist on `lead_scores`, but it is never
+        # executed -- not_applicable short-circuits before the base query.
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            "SELECT lead_id, touchpoints FROM mkt.lead_scores",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "not_applicable"
 
     def test_a_hardcoded_answer_is_not_ok(self, mkt_adapter, mkt_contract) -> None:
         # The purest form of premature materialization: the answer pasted in
@@ -910,8 +952,7 @@ class TestNormalizedShadowGovernance:
 
     def test_a_multi_statement_shadow_leaves_the_tables_unknown(self) -> None:
         # Not exploitable -- the CTE's parentheses make the `;` a syntax error --
-        # but governance saw only governed tables and waved it through
-        # (DEVIATION 3).
+        # but governance saw only governed tables and waved it through.
         smuggle = Shadow(
             table="mkt.touchpoints",
             sql="SELECT * FROM mkt.touchpoints; DELETE FROM mkt.touchpoints",
@@ -970,6 +1011,13 @@ class _Renaming:
 class _Raising:
     def normalize_sql(self, sql: str) -> str:
         raise RuntimeError("the normalizer is down")
+
+
+class _ReturnsNone:
+    """A normalizer that breaks its own contract by returning a non-str."""
+
+    def normalize_sql(self, sql: str) -> str:
+        return None  # ty: ignore[invalid-return-type]
 
 
 class TestNormalizedCheckSensitivity:
@@ -1060,6 +1108,44 @@ class TestNormalizedCheckSensitivity:
         assert result.status == "unchecked"
         assert result.reason.startswith("normalizer failed")
         assert report.ok is False
+        assert seen == []
+
+    def test_a_normalizer_returning_none_does_not_escape_as_typeerror(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # A normalizer breaking its own str-in-str-out contract must fail
+        # closed as one more "normalizer failed" outcome, not raise TypeError
+        # out of check_sensitivity.
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            sql_normalizer=_ReturnsNone(),
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("normalizer failed")
+        assert seen == []
+
+    def test_an_explicit_normalizer_beats_the_adapters_own(
+        self, vql_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # vql_adapter is itself a working SqlNormalizer, so an explicit
+        # `sql_normalizer` keyword must be used instead of it -- not merged,
+        # not ignored.
+        seen = _spy(vql_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FAN_OUT + _CTX,
+            contract=mkt_contract,
+            adapter=vql_adapter,
+            sql_normalizer=_Raising(),
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("normalizer failed")
         assert seen == []
 
     def test_a_governed_normalized_shadow_is_checked(

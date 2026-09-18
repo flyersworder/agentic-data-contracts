@@ -287,7 +287,10 @@ def _shadow_tables(shadow: Shadow, *, dialect: str | None) -> set[str] | None:
 
 
 def validate_sensitivity_tables(
-    contract: DataContract, metrics: list[MetricDefinition]
+    contract: DataContract,
+    metrics: list[MetricDefinition],
+    *,
+    dialect: str | None = None,
 ) -> list[str]:
     """Problems where a shadow reads a table the contract does not govern.
 
@@ -296,16 +299,28 @@ def validate_sensitivity_tables(
     query may reach. This is the CI-time gate; ``check_sensitivity`` refuses
     the same condition at execution time.
 
-    A shadow sqlglot cannot parse yields no problem here -- it cannot be
-    checked, and it degrades to ``unchecked`` at run time rather than being
-    silently trusted.
+    A shadow sqlglot cannot parse is ALSO a problem here, not something this
+    gate stays silent about: its tables cannot be checked against the
+    contract, which is exactly the condition this function exists to catch.
+    ``check_sensitivity`` makes the matching call at run time -- a property
+    whose shadow does not parse is reported ``unchecked`` and never executed.
+
+    ``dialect`` should match what ``check_sensitivity`` will use (typically
+    the adapter's). Left at the default of None, a shadow written in a
+    non-default dialect (Denodo/VQL, say) parses at run time but not here,
+    and this gate would flag it as unparseable regardless of governance.
     """
     allowed = {name.lower() for name in contract.allowed_table_names()}
     problems: list[str] = []
     for metric in metrics:
         for prop in metric.sensitivity:
-            read = _shadow_tables(prop.shadow, dialect=None)
+            read = _shadow_tables(prop.shadow, dialect=dialect)
             if read is None:
+                problems.append(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r}: shadow cannot be parsed, so its tables "
+                    "cannot be checked against the contract"
+                )
                 continue
             for name in sorted(read):
                 if name.lower() not in allowed:
@@ -353,7 +368,10 @@ def check_sensitivity(
     like ``sql_expression``, and most shadows want the ``SELECT *`` the
     validator would reject. It is instead constrained at both ends: its tables
     must be governed (checked here, and by ``validate_sensitivity_tables``),
-    and it can only ever be read.
+    and it can only ever be read. A shadow sqlglot cannot parse is never
+    silently trusted either: its tables cannot be checked, so that property is
+    refused a verdict -- ``unchecked``, nothing executed -- the same as an
+    unparseable *query*, just scoped to the one property whose shadow failed.
 
     **Determinism is filtered, not proved.** The base query is run ``repeats``
     times; disagreement makes every property ``unchecked``. A query that is
@@ -395,10 +413,19 @@ def check_sensitivity(
             f"{'; '.join(verdict.reasons)}"
         )
 
+    # A shadow that fails to parse cannot be checked against `allowed` here --
+    # `None` is a refusal, never an empty set of tables read. Recorded now and
+    # turned into an `unchecked` result (never an execution) in the loop below,
+    # so a governance hole never opens just because sqlglot cannot read the
+    # dialect a shadow is written in.
     allowed = {name.lower() for name in contract.allowed_table_names()}
+    unparseable_shadows: set[str] = set()
     for prop in selected:
         read = _shadow_tables(prop.shadow, dialect=dialect)
-        for name in sorted(read or ()):
+        if read is None:
+            unparseable_shadows.add(prop.name)
+            continue
+        for name in sorted(read):
             if name.lower() not in allowed:
                 raise ValueError(
                     f"sensitivity property {prop.name!r} of metric "
@@ -451,6 +478,25 @@ def check_sensitivity(
 
     results: list[SensitivityResult] = []
     for prop in selected:
+        if prop.name in unparseable_shadows:
+            # Refused a verdict, not defaulted to "reads nothing": nothing is
+            # executed for this property -- not `_rewrite`, not the base
+            # query -- because its shadow's tables were never checked against
+            # the contract.
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason=(
+                        "unparseable shadow: its tables cannot be checked "
+                        "against the contract"
+                    ),
+                )
+            )
+            continue
+
         try:
             mutated_sql = _rewrite(sql, prop.shadow, dialect=dialect)
         except _Refused as e:

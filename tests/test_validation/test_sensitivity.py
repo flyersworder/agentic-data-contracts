@@ -19,6 +19,7 @@ from agentic_data_contracts.validation.sensitivity import (
     _norm,
     _Refused,
     _rewrite,
+    _shadow_tables,
     _table_refs,
     check_sensitivity,
     validate_sensitivity_tables,
@@ -179,6 +180,14 @@ MKT_SHADOW = Shadow(
         "SELECT * FROM mkt.touchpoints UNION ALL "
         "SELECT lead_id, 'display', qualified_date + 1 FROM mkt.lead_scores"
     ),
+)
+
+# A dangling QUALIFY with no predicate is not valid SQL in any dialect sqlglot
+# knows; `sqlglot.parse_one` raises `ParseError` on it, which is exactly the
+# `_shadow_tables` -> None path this file's governance-hole tests exercise.
+UNPARSEABLE_SHADOW = Shadow(
+    table="mkt.touchpoints",
+    sql="SELECT * FROM secret.t QUALIFY",
 )
 
 FAN_OUT = """
@@ -422,6 +431,45 @@ class TestCheckSensitivity:
         assert len(seen) == 4
         assert sum(1 for s in seen if "__sens_" not in s) == 2
 
+    def test_unparseable_shadow_is_unchecked(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # A shadow sqlglot cannot parse must be refused a verdict, not treated
+        # as reading no tables: `_shadow_tables` returns None here (see
+        # test_shadow_tables_returns_none_for_an_unparseable_shadow, which
+        # probes the same string), and that must never be silently trusted as
+        # "reads nothing" -- it has to fail closed, executing nothing.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        prop = SensitivityProperty(
+            name="broken_shadow",
+            description="a shadow sqlglot cannot parse",
+            shadow=UNPARSEABLE_SHADOW,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop),
+            FIRST_TOUCH,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("unparseable shadow")
+        assert seen == []
+
+    def test_shadow_tables_returns_none_for_an_unparseable_shadow(self) -> None:
+        # The probe behind the test above: confirms UNPARSEABLE_SHADOW really
+        # exercises the None-from-_shadow_tables path and isn't accidentally
+        # valid SQL that happens to read no governed table.
+        assert _shadow_tables(UNPARSEABLE_SHADOW, dialect="duckdb") is None
+
 
 class TestPolicy:
     def test_query_blocked_by_layer_one_raises(self, mkt_adapter) -> None:
@@ -457,3 +505,17 @@ class TestPolicy:
     def test_validate_sensitivity_tables_is_silent_when_governed(self) -> None:
         contract = _contract("touchpoints", "lead_scores")
         assert validate_sensitivity_tables(contract, [_metric(FIRST_TOUCH_PROP)]) == []
+
+    def test_validate_sensitivity_tables_reports_an_unparseable_shadow(self) -> None:
+        # Governed or not is undecidable when the shadow doesn't parse -- the
+        # CI gate must flag that as a problem too, not stay silent about it.
+        contract = _contract("touchpoints", "lead_scores")
+        prop = SensitivityProperty(
+            name="broken_shadow",
+            description="a shadow sqlglot cannot parse",
+            shadow=UNPARSEABLE_SHADOW,
+            expect="unchanged",
+        )
+        problems = validate_sensitivity_tables(contract, [_metric(prop)])
+        assert len(problems) == 1
+        assert "broken_shadow" in problems[0]

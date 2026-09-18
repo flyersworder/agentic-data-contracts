@@ -41,6 +41,24 @@ metrics:
     # Priority-ordered dimensional cut the metric can be sliced by exhaustively.
     drill_by:
       - {dimension: region, column: analytics.customers.region}
+    # A claim the contract already makes in `filters:`, restated as something a
+    # machine can check. `check_sensitivity` shadows analytics.orders with a
+    # copy that carries an extra pending order; a query that filters to
+    # completed cannot move, and one that forgot the filter does.
+    sensitivity:
+      - name: only_completed_orders_count
+        description: >
+          Revenue recognizes completed orders only. A pending or refunded
+          order, however large, cannot change total_revenue.
+        shadow:
+          table: analytics.orders
+          sql: >
+            SELECT * FROM analytics.orders
+            UNION ALL
+            SELECT 900 + c.id, c.id, 999999.00, 'pending', c.tenant_id,
+                   DATE '2026-01-01'
+            FROM analytics.customers c
+        expect: unchanged
 
   - name: revenue_by_region
     description: "Revenue broken down by customer region"

@@ -466,6 +466,14 @@ def _metric_details(
         data["drill_by"] = [
             {"dimension": dd.dimension, "column": dd.column} for dd in metric.drill_by
         ]
+    # Name, claim and required response only -- never `shadow.sql`. That is the
+    # encoding rather than the claim, and putting engine SQL in a tool response
+    # invites the agent to run it.
+    if metric.sensitivity:
+        data["sensitivity"] = [
+            {"name": p.name, "description": p.description, "expect": p.expect}
+            for p in metric.sensitivity
+        ]
     data.update(owner_context(metric.business_owner, metric.operational_owner))
     data.update(_freshness_fields(metric.last_reviewed, today, threshold_days))
 

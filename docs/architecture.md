@@ -413,7 +413,7 @@ class Checker(Protocol):
     def check_ast(self, ast: Expression, *args) -> CheckResult: ...
 ```
 
-SQL is parsed once into a sqlglot AST. The Validator passes the AST to all applicable checkers, respecting table and per-rule principal scoping (rules carrying `allowed_principals` / `blocked_principals` are skipped when the resolved caller is out of scope).
+SQL is parsed into a sqlglot AST. A string holding more than one statement is blocked before any checker runs (a policy block, not a parse error): every checker analyses one statement, and `sqlglot.parse_one` cannot be trusted to surface a second — depending on the sqlglot version it wraps the statements in a container node no checker recognises, or silently keeps only the first — so a forbidden operation written after a harmless `SELECT` would otherwise reach the engine unchecked. Statements are counted with `sqlglot.parse`; a trailing semicolon is not a second statement. A tokenizer error (an unterminated literal) is reported as a parse error like any other. The Validator passes the AST to all applicable checkers, respecting table and per-rule principal scoping (rules carrying `allowed_principals` / `blocked_principals` are skipped when the resolved caller is out of scope).
 
 **Structural checkers** (from top-level config):
 
@@ -537,7 +537,8 @@ If a result check with `enforcement: block` fails, the query data is **discarded
 
 ```
 SQL string
-  → sqlglot.parse(sql, dialect=contract.dialect) — parse once
+  → sqlglot.parse(sql, dialect=contract.dialect) — count statements, parse
+  → more than one statement? → return ValidationResult(blocked=True, reasons=[...])
   → Phase 1: structural checkers + rule-based query_check checkers (table-scoped)
   → any block? → return ValidationResult(blocked=True, reasons=[...])
   → Relationship checks (if semantic_source provided, warnings only)
@@ -888,7 +889,7 @@ The spec is `0.2.0.dev0` with no tagged releases (apache/ossie#102), and the acc
 | `OssieSource` | Apache Ossie semantic model (YAML/JSON) | Datasets, fields, relationships, metrics; governance vocabulary from `custom_extensions` |
 | `YamlSource` | Inline YAML definitions | Metric / table / relationship / `metric_impacts` definitions for teams not using dbt/Cube |
 
-`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`, `decompositions`, `drill_by`. `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by` are parsed by `YamlSource`, and by `OssieSource` from its vendor `custom_extensions` block; `DbtSource` / `CubeSource` leave them unset/empty.
+`MetricDefinition`: `name`, `description`, `sql_expression`, `source_model`, `filters`, `domains`, `tier`, `indicator_kind`, `business_owner`, `operational_owner`, `last_reviewed`, `decompositions`, `drill_by`, `sensitivity`. `business_owner` / `operational_owner` / `last_reviewed` and `decompositions` / `drill_by` are parsed by `YamlSource`, and by `OssieSource` from its vendor `custom_extensions` block; `DbtSource` / `CubeSource` leave them unset/empty. `sensitivity` (v0.52.0+) is a list of `SensitivityProperty` (`name`, `description`, `shadow`, `expect`), parsed and validated by `YamlSource` only; `description` is required on every property, and load-time validation stops at shape — a shadow's tables are checked against the contract only at run time (`check_sensitivity`) and at CI time (`validate_sensitivity_tables`), since `YamlSource` holds no `DataContract` to check against at load. `Shadow`: `table`, `sql` — the one SELECT that replaces `table` while the property is checked, contract-authored and never put through the `Validator`.
 `MetricImpact`: `from_metric`, `to_metric`, `direction`, `confidence`, `evidence`, `description`.
 `Decomposition`: `operator`, `operands`. `DrillDimension`: `dimension`, `column`. `IdentityEdge`: `from_metric`, `to_metric`, `operator`.
 `Relationship`: `from_`, `to`, `type`, `description`, `required_filter`, `preferred`. The `preferred` flag (default `False`) marks the canonical join when alternatives exist between the same table pair. `build_relationship_index` stable-sorts each adjacency list with preferred edges first, so `find_join_path` (BFS) and `get_relationships_for_table` both surface the canonical edge automatically. The flat list returned by `get_relationships()` deliberately keeps declaration order; that list feeds the prompt renderer, which renders `preferred="true"` as a per-edge attribute instead of via reordering.
@@ -1001,6 +1002,7 @@ agentic-data-contracts/
 │   │   ├── examples.py          # Verified-examples corpus: validate_examples + check_example_answers
 │   │   ├── reconciliation.py    # reconcile_decomposition (declared identity vs. live data)
 │   │   ├── attribution.py       # attribute_change / check_attribution (convention arithmetic)
+│   │   ├── sensitivity.py       # check_sensitivity / validate_sensitivity_tables (behavioural derivation check)
 │   │   └── _scalar.py           # Shared scalar measurement (reconciliation + answer checks)
 │   ├── tools/
 │   │   ├── __init__.py

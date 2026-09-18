@@ -337,8 +337,8 @@ def test_public_exports() -> None:
         validate_examples,
     )
 
-    assert VerifiedExample and ExampleResult
-    assert ExampleValidationReport and validate_examples
+    assert VerifiedExample and ExampleResult and ExampleValidationReport
+    assert callable(validate_examples)
 
 
 def test_principal_scoped_validation(fixtures_dir: Path) -> None:

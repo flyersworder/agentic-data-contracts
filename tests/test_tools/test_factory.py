@@ -212,6 +212,26 @@ async def test_run_query_blocked(
 
 
 @pytest.mark.asyncio
+async def test_run_query_does_not_execute_a_smuggled_statement(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    # The contract forbids DELETE. Hidden behind a harmless SELECT in the same
+    # string, it used to pass Layer 1 and run: the table lost every row.
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+    result = await tool.callable(
+        {
+            "sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "DELETE FROM analytics.orders WHERE tenant_id = 'acme'"
+        }
+    )
+    text = result["content"][0]["text"]
+    assert "multiple statements" in text
+    row = adapter.connection.execute("SELECT count(*) FROM analytics.orders").fetchone()
+    assert row is not None and row[0] == 2
+
+
+@pytest.mark.asyncio
 async def test_lookup_metric(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:

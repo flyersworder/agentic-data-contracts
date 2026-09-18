@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover — exercised only without the extra
     # used to carry. Don't add or remove these by hand: ty errors on a missing
     # suppression and reports `unused-ignore-comment` on a dead one, so the
     # pinned hook keeps the list honest in both directions.
-    ContractMiddleware = None  # ty: ignore[invalid-assignment]
+    ContractMiddleware = None
     create_langchain_tools = None
 
 # Optional [pydantic-ai] extra — module top-level imports pydantic_ai, so this
@@ -66,9 +66,9 @@ try:
         create_pydantic_ai_toolset,
     )
 except ImportError:  # pragma: no cover — exercised only without the extra
-    ContractDeps = None  # ty: ignore[invalid-assignment]
-    contract_run_kwargs = None  # ty: ignore[invalid-assignment]
-    create_pydantic_ai_tools = None  # ty: ignore[invalid-assignment]
+    ContractDeps = None
+    contract_run_kwargs = None
+    create_pydantic_ai_tools = None
     create_pydantic_ai_toolset = None
 
 __all__ = [

@@ -1,5 +1,8 @@
 """Tests for public API exports."""
 
+import subprocess
+import sys
+
 
 def test_top_level_imports() -> None:
     from agentic_data_contracts import (
@@ -223,3 +226,41 @@ def test_schema_drift_names_are_exported() -> None:
     ]:
         assert hasattr(validation, name), name
         assert name in validation.__all__, name
+
+
+def test_sensitivity_names_are_exported() -> None:
+    """Sensitivity check exports live in the validation submodule."""
+    from agentic_data_contracts import validation
+
+    for name in [
+        "SensitivityReport",
+        "SensitivityResult",
+        "check_sensitivity",
+        "validate_sensitivity_tables",
+    ]:
+        assert hasattr(validation, name), name
+        assert name in validation.__all__, name
+
+
+def test_sensitivity_imports_without_a_cycle() -> None:
+    # adapters.base -> validation.explain triggers validation/__init__,
+    # which imports sensitivity. If sensitivity imported semantic.base at
+    # runtime, this order would hit a partially initialised module. A
+    # fresh interpreter is the only way to test it: in-process, pytest has
+    # already imported everything and sys.modules hides the cycle.
+    for first in (
+        "agentic_data_contracts.adapters.base",
+        "agentic_data_contracts.validation",
+    ):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                f"import {first}; "
+                "from agentic_data_contracts.validation import check_sensitivity",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr

@@ -44,6 +44,36 @@ class DrillDimension:
     column: str  # "schema.table.column" — same convention as Relationship endpoints
 
 
+@dataclass(frozen=True)
+class Shadow:
+    """One SELECT that stands in for ``table`` while a property is checked.
+
+    ``sql`` is engine-native, exactly as ``sql_expression`` is throughout a
+    contract, so a Denodo author writes VQL here as they do there. It is
+    contract-authored and therefore trusted: it is NOT put through the
+    Validator, which would reject the ``SELECT *`` most shadows want.
+    """
+
+    table: str  # "schema.table"
+    sql: str
+
+
+@dataclass(frozen=True)
+class SensitivityProperty:
+    """A claim about what a metric's query must respond to.
+
+    ``description`` is required and carries the claim in the owner's words --
+    see the Ownership section of the design. It is the one field a business
+    owner contributes, and a property nobody stated in words is one nobody can
+    review.
+    """
+
+    name: str
+    description: str
+    shadow: Shadow
+    expect: str  # one of VALID_EXPECT
+
+
 @dataclass
 class MetricDefinition:
     name: str
@@ -62,6 +92,7 @@ class MetricDefinition:
     last_reviewed: date | None = None
     decompositions: list[Decomposition] = field(default_factory=list)
     drill_by: list[DrillDimension] = field(default_factory=list)
+    sensitivity: list[SensitivityProperty] = field(default_factory=list)
 
 
 @dataclass
@@ -238,6 +269,9 @@ VALID_CONVENTIONS = frozenset({"explicit", "split_evenly", "fold_into"})
 #: Only these have a ``ΔC·ΔP`` cross term to place. ``sum`` and ``difference``
 #: are linear, so a convention on them states nothing.
 _CROSS_TERM_OPERATORS = frozenset({"product", "ratio"})
+#: The only two responses a property may require. There is no third value: a
+#: property that cannot say which way the answer must go is not a property.
+VALID_EXPECT = frozenset({"unchanged", "changes"})
 
 
 def validate_decompositions(metrics: list[MetricDefinition]) -> None:
@@ -430,6 +464,45 @@ def validate_drill_by(
                 raise ValueError(
                     f"metric {metric.name!r} drill_by references unknown column "
                     f"{drill.column!r}"
+                )
+
+
+def validate_sensitivity(metrics: list[MetricDefinition]) -> None:
+    """Validate declared sensitivity properties, loudly.
+
+    Everything checkable from the semantic source alone is checked here. The
+    one rule that is NOT -- that ``shadow.sql`` may only read tables the
+    contract governs -- needs a ``DataContract``, which a source does not have;
+    see ``validation.sensitivity.validate_sensitivity_tables``.
+    """
+    for metric in metrics:
+        seen: set[str] = set()
+        for prop in metric.sensitivity:
+            if prop.name in seen:
+                raise ValueError(
+                    f"metric {metric.name!r} declares duplicate sensitivity "
+                    f"property name {prop.name!r}"
+                )
+            seen.add(prop.name)
+            if not prop.description.strip():
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} needs a non-empty description: it is the "
+                    "claim the property asserts, and a property nobody stated "
+                    "in words is one nobody can review"
+                )
+            if prop.expect not in VALID_EXPECT:
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} has expect {prop.expect!r}; "
+                    f"must be one of {sorted(VALID_EXPECT)}"
+                )
+            schema, _, table = prop.shadow.table.partition(".")
+            if not schema or not table or "." in table:
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} shadow.table {prop.shadow.table!r} must be "
+                    "'schema.table'"
                 )
 
 
@@ -665,6 +738,19 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
         if m.drill_by:
             data["drill_by"] = [
                 {"dimension": dd.dimension, "column": dd.column} for dd in m.drill_by
+            ]
+        # Omitted when empty for the reason spelled out on `decompositions`
+        # above: `contract_canonical_bytes` dumps with no `exclude_none`, so an
+        # always-present key moves every published digest.
+        if m.sensitivity:
+            data["sensitivity"] = [
+                {
+                    "name": p.name,
+                    "description": p.description,
+                    "shadow": {"table": p.shadow.table, "sql": p.shadow.sql},
+                    "expect": p.expect,
+                }
+                for p in m.sensitivity
             ]
         return data
 

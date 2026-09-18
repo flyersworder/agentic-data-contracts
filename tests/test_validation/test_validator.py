@@ -404,6 +404,99 @@ def test_parse_error_sets_flag(validator: Validator) -> None:
     assert result.parse_error
 
 
+class TestMultipleStatements:
+    """One query string may carry exactly one statement.
+
+    A second statement is not analysed at all by a single-statement parse:
+    sqlglot's ``parse_one`` either wraps the statements in a container node
+    whose root no checker recognises, or (at the declared floor) silently keeps
+    only the FIRST statement. Either way a forbidden operation smuggled behind
+    a harmless ``SELECT`` reached the adapter unchecked.
+    """
+
+    def test_select_then_delete_is_blocked(self, validator: Validator) -> None:
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "DELETE FROM analytics.orders WHERE tenant_id = 'acme'"
+        )
+        assert result.blocked
+        assert any("multiple statements" in r for r in result.reasons)
+        # A policy block, not an unreadable query.
+        assert not result.parse_error
+
+    def test_two_selects_are_blocked(self, validator: Validator) -> None:
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "SELECT amount FROM analytics.orders WHERE tenant_id = 'acme'"
+        )
+        assert result.blocked
+        assert any("multiple statements" in r for r in result.reasons)
+
+    def test_a_trailing_semicolon_is_one_statement(self, validator: Validator) -> None:
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme';"
+        )
+        assert not result.blocked
+        assert result.reasons == []
+
+    @pytest.mark.parametrize("tail", ["-- note", "/* note */"])
+    def test_a_comment_after_the_final_semicolon_is_one_statement(
+        self, validator: Validator, tail: str
+    ) -> None:
+        # sqlglot parses a comment-only tail as an `exp.Semicolon` node, not
+        # None, so counting non-None entries mistook it for a second statement
+        # and refused a query agents plausibly write, with a misleading reason.
+        result = validator.validate(
+            f"SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; {tail}"
+        )
+        assert not result.blocked
+        assert result.reasons == []
+
+    def test_a_comment_does_not_hide_a_second_statement(
+        self, validator: Validator
+    ) -> None:
+        # The exclusion above must drop ONLY the comment-only tail: a real
+        # statement written after a comment is still a second statement.
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "/* note */ DELETE FROM analytics.orders WHERE tenant_id = 'acme'"
+        )
+        assert result.blocked
+        assert any("multiple statements" in r for r in result.reasons)
+
+    def test_validate_results_blocks_multiple_statements(
+        self, validator: Validator
+    ) -> None:
+        result = validator.validate_results(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "DELETE FROM analytics.orders WHERE tenant_id = 'acme'",
+            ["id"],
+            [(1,)],
+        )
+        assert result.blocked
+        assert any("multiple statements" in r for r in result.reasons)
+
+
+class TestTokenizerErrors:
+    """An unterminated literal fails in the tokenizer, not the parser.
+
+    ``sqlglot.errors.TokenError`` is not a ``ParseError`` subclass, so catching
+    only ``ParseError`` let it escape ``validate`` as a raw exception.
+    """
+
+    def test_unterminated_literal_is_a_parse_error(self, validator: Validator) -> None:
+        result = validator.validate("SELECT 'abc")
+        assert result.blocked
+        assert result.parse_error
+        assert any("parse error" in r.lower() for r in result.reasons)
+
+    def test_validate_results_survives_a_tokenizer_error(
+        self, validator: Validator
+    ) -> None:
+        result = validator.validate_results("SELECT 'abc", ["x"], [(1,)])
+        assert not result.blocked
+
+
 def test_valid_query_has_no_parse_error(validator: Validator) -> None:
     result = validator.validate(
         "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"

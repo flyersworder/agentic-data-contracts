@@ -45,6 +45,12 @@ from agentic_data_contracts.validation.reconciliation import (
     ReconciliationResult,
     reconcile_decomposition,
 )
+from agentic_data_contracts.validation.sensitivity import (
+    SensitivityReport,
+    SensitivityResult,
+    check_sensitivity,
+    validate_sensitivity_tables,
+)
 from agentic_data_contracts.validation.validator import (
     Checker,
     ValidationResult,
@@ -77,6 +83,8 @@ __all__ = [
     "ResultCheckRunner",
     "SchemaDrift",
     "SchemaDriftReport",
+    "SensitivityReport",
+    "SensitivityResult",
     "TableAllowlistChecker",
     "ToolCall",
     "ToolRecorder",
@@ -88,8 +96,10 @@ __all__ = [
     "check_attribution",
     "check_example_answers",
     "check_schema_drift",
+    "check_sensitivity",
     "evaluate_conformance",
     "extract_tables",
     "reconcile_decomposition",
     "validate_examples",
+    "validate_sensitivity_tables",
 ]

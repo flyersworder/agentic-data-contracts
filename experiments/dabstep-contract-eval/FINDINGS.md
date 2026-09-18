@@ -674,6 +674,144 @@ One arm-level figure does not replicate and should not be leaned on: glm's
 `contract_hollow` writes more clauses than its `manual_prompt`, and ds-flash's
 does not.
 
+### No static property of the query predicts derivation correctness — but a behavioural one does
+
+Two independent text instruments now read agents' SQL, and **both are null
+inside the `contract` arm**. `analysis/clauses.py --within` asks whether the
+contract's clauses are present: correct and incorrect attempts write the same
+ones, every Fisher p ≥ 0.14. A second detector, built afterwards, asks the
+opposite question — is a *specific wrong construction* present? Its four
+patterns (a band column compared to a string literal, a `capture_delay` band
+pasted as a literal, the natural month as a hand-computed `day_of_year BETWEEN`
+window, and the raw `capture_delay` compared straight to the fee band) were
+read off the contract arm's actual wrong answers, so it is a detector fitted to
+its own targets. It is still null: on Sonnet 5 it fires on 33 of 97 queries, 29
+of which are **correct** answers (precision 0.12, p = 1); on glm, 18 fires and
+2 catches.
+
+**Presence and absence both fail, so the property is not in the text.** That is
+worth stating as a result rather than as two dead ends: an enforcement layer
+that reads the query — which is what a static validator, a lint rule or a
+post-tool hook is — cannot see a derivation error on this benchmark. The
+existing two-layer validator agrees from the other side. Across all four runs
+it blocked no `run_query` call, and every `inspect_query` rejection was either
+`SELECT *` policy (161 / 58 / 46 on glm / Sonnet 5 / sol) or a DuckDB binder
+error — a nonexistent column, an unknown function, a type mismatch. Policy and
+plannability are what it sees; every derivation error is authorized, parseable,
+plannable SQL that computes the wrong thing.
+
+#### Differential execution: mutate the data the contract's own way
+
+`analysis/sensitivity.py` reads behaviour instead. It mutates the database in a
+way the contract dictates, re-runs the agent's own query, and asks whether the
+answer *moved*. It never computes an answer, so it is not `macro.sql` in
+disguise — it cannot answer a task, only observe whether a query responds to a
+change the contract says it must respond to.
+
+| mutation | contract sentence it is derived from | what a correct query does |
+|---|---|---|
+| `null_kill` | "if a field is set to null it means that it applies to all possible values of that field" — NULL replaced by a sentinel no transaction matches | loses matches, so the answer **moves** |
+| `empty_kill` | the same, for the list fields that "express 'applies to all values' as an empty list" | the answer **moves** |
+| `volume_x10` | `merchant_monthly_volume` feeding `fee_rule_matches_merchant_month`'s `:volume`; ×10 moves every merchant-month across a band boundary, and fraud level is a ratio and so scale-invariant | the band changes, so the answer **moves** |
+
+Share of queries whose answer moved (`--arms`, runnable fee queries, complete
+cases):
+
+| | glm | | | ds-flash | | | Sonnet 5 | | | sol | | |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| | null | empty | vol | null | empty | vol | null | empty | vol | null | empty | vol |
+| schema_only | 81% | 86% | 23% | 94% | 92% | 11% | 89% | 90% | 32% | 97% | 97% | 57% |
+| contract_hollow | 91% | 92% | 47% | 91% | 88% | 16% | 90% | 88% | 26% | 97% | 97% | 72% |
+| manual_prompt | 80% | 76% | 26% | 76% | 79% | 18% | 87% | 88% | 23% | 94% | 90% | 55% |
+| **contract** | **99%** | **99%** | **75%** | **97%** | **97%** | **80%** | **100%** | **100%** | **78%** | **98%** | **98%** | **94%** |
+
+`null_kill` and `empty_kill` are near-saturated on the `contract` arm (97–100%).
+That is a **behavioural replication of the counterfactual result** by an
+independent route: the contract arm does implement null-as-wildcard, which is
+why zero of its 46 errors matched a named lesion. It also means those two
+mutations carry no discriminating signal inside the arm, and are reported for
+completeness.
+
+`volume_x10` is the one that separates. The `contract` arm derives the volume
+band 75–94% of the time against 11–57% for the ungoverned arms, and its
+*within*-arm rate is the only behavioural measure that tracks the derivation
+gap: 75%, 80%, 78%, **94%** against contract-arm `macro` accuracy of 60.8%,
+62.7%, 73.9%, **94.9%**.
+
+#### The mechanism has a name: premature materialization
+
+Reading the 11 wrong contract-arm answers on Sonnet 5 — the inductive pass the
+lesion catalogue never made — the recurring construction is an agent that
+computes an intermediate value in one turn, reads the number, decides the band
+itself, and pastes it into the next query as a **string literal**
+(`f.monthly_volume = '100k-1m'`, `f.capture_delay = '<3'`), or reconstructs the
+natural month by hand as `day_of_year BETWEEN 335 AND 365`.
+
+That is a faithful reading of the contract. `fee_rule_matches_merchant_month`
+says to substitute `:volume` with the merchant's volume "(a number of euros, **or
+that metric's SQL**)" — both branches are sanctioned, and only one is correct,
+because the same metric's description warns that a value on a band boundary
+satisfies **both** adjacent bands while a materialised number can only pick one.
+**The defect is in the contract's vocabulary, not the agent's reasoning**: prose
+offered two branches where a schema should have offered one binding.
+
+It also explains why the lesion catalogue found nothing. These queries carry two
+or three deviations at once — a hand-rolled month window *and* a frozen band
+*and* a raw `capture_delay` — so no single lesion, and no pair, reproduces the
+answer. "Idiosyncratic" was partly an artifact of testing singles and pairs
+against compositions.
+
+#### The benchmark cannot score this, and that is the result
+
+Freezing the band gives the right answer on *this* data and the wrong answer one
+boundary away — so DABStep marks it correct. The `exclusive_bands` lesion above
+is diagnostic on no golded task for exactly this reason: no golded task sits on
+a band boundary. Graded against DABStep's labels the detector therefore looks
+useless (precision 0.24 on Sonnet 5, 21 fires for 5 catches).
+
+Graded against the compiled macro **on the mutated data** — the same instrument
+that is 176/176 on base — it is not. Restricting to contract-arm queries DABStep
+scored *correct* on the three fee-ID families (whose answer is a set of IDs, so
+scaling amounts cannot leak into the answer through the fee arithmetic):
+
+| model | responded to `volume_x10` | still correct | did **not** respond | still correct |
+|---|---:|---:|---:|---:|
+| glm-5.3-flash | 19 | 17 (89%) | 17 | **0 (0%)** |
+| deepseek-v4-flash | 19 | 18 (95%) | 5 | **0 (0%)** |
+| claudesonnet5 | 29 | 26 (90%) | 9 | **0 (0%)** |
+| gpt-5.6-sol | 45 | 42 (93%) | **0** | — |
+| **pooled** | **112** | **103 (92%)** | **31** | **0 (0%)** |
+
+**Fisher exact p = 1.2 × 10⁻²³.** Every insensitive query that the benchmark
+scored correct is wrong in the mutated world; 92% of the sensitive ones are
+still right. As a detector of the defect — rather than of a wrong benchmark
+answer — precision is **1.00** and recall is 0.78 (31 of the 40 queries that
+fail on the mutant).
+
+Two things follow.
+
+**Benchmark accuracy overstates governance correctness, and by a measurable
+amount.** The share of scored-correct contract-arm fee-ID answers that are
+correct by luck is 47% (glm), 21% (ds-flash), 24% (Sonnet 5) and **0% (sol)**.
+The derivation gap is larger than the leaderboard can see, and the excess is
+concentrated in exactly the models the gap is largest for.
+
+**It re-characterises the sol result.** Sol is not 21 points better than Sonnet 5
+on `macro`; it is categorically different — 0 of 45 latent defects, the only
+model that derives the band every time rather than freezing it. "Capability
+closes the derivation gap" sharpens into something mechanical: capability is
+what stops a model from materialising a parameter into a literal.
+
+**Limits.** The graded comparison covers the three fee-ID families only
+(143 queries), the `contract` arm only, and only queries correct on base data;
+the oracle for the mutated world is `macro.sql`, which is 176/176 on base but is
+not independently golded on the mutant. Sensitivity is necessary and not
+sufficient — 9 of the 112 sensitive queries also fail there. And `volume_x10`
+shows a query does not track the band *at all*, which is stronger evidence than
+a boundary failure but is not the same test. The band-literal smell detector was
+fitted to the wrong answers it is scored against, which makes its null result
+conservative and its precision figure an upper bound.
+
 ### A prediction, recorded before the third model landed — and its answer
 
 The `gpt-5.6-sol` sweep was still running when this section was first written,
@@ -2043,6 +2181,7 @@ uv run python analysis/coverage.py                       # contract -> gold, 176
 uv run python analysis/buckets.py results/*.jsonl        # arms by macro/derived
 uv run python analysis/clauses.py --within glm-full dsflash-full sol-full sonnet5-full
 uv run python analysis/counterfactuals.py results/glm-full.jsonl
+uv run python analysis/sensitivity.py --arms       # differential execution
 uv run python analysis/gold_disagreement.py                # the 19, and why
 uv run python analysis/leniency.py                        # exposure + transfer
 uv run python analysis/group_consistency.py               # the gold-free check

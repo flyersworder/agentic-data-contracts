@@ -13,15 +13,24 @@ answer MOVED. It never computes an answer, so it cannot say a query is right --
 only that it responds, or fails to respond, to an input the contract says it
 depends on.
 
-COST. Two base executions per call plus one per property: the base result is
-computed once and cached, so a metric with four properties costs six
-executions, not twelve. That is why this belongs at a promotion gate rather
-than in an agent's hot path.
+COST. The base query runs ``repeats`` times (default 2) once per call, and
+only when at least one property applies -- a call whose properties are all
+``not_applicable`` executes nothing -- plus at most one execution per
+applicable property. The base result (or its refusal) is cached, so with the
+default a metric with four properties costs six executions, not twelve. That
+is why this belongs at a promotion gate rather than in an agent's hot path.
 
 NO SQL IS REGENERATED. sqlglot decides *what* to rewrite and guards the edit;
 the string executed is the caller's own text with spans replaced. That is what
-makes this work on a dialect sqlglot can parse but not emit (Denodo/VQL), and
-it is the same template-assembly discipline the rest of the library follows.
+makes this work on a dialect sqlglot can parse directly but cannot emit, and it
+is the same template-assembly discipline the rest of the library follows.
+
+NOT YET SUPPORTED: a dialect that parses only after a ``SqlNormalizer``
+rewrite (Denodo/VQL, in this library). The raw query text is parsed and no
+normalizer is applied, not even an adapter's own, so such a query is
+``unchecked`` for every property -- failing closed, never a governance hole,
+but not checked either. Supporting it needs more than a normalizer for the
+Validator: the rewrite's spans are computed on the raw text.
 """
 
 from __future__ import annotations
@@ -236,15 +245,23 @@ class SensitivityReport:
     def ok(self) -> bool:
         """True when nothing is a violation and nothing is unchecked.
 
-        Safe as a CI gate -- ``if not report.ok: sys.exit(1)``. It is False on
-        a ``violation`` and on an ``unchecked``, because "no verdict was
-        possible" must not read as "passed". ``not_applicable`` does NOT block:
-        a query that never touches the table has nothing to answer for.
+        It is False on a ``violation`` and on an ``unchecked``, because "no
+        verdict was possible" must not read as "passed". ``not_applicable``
+        does NOT block: a metric with properties on several tables
+        legitimately gets it for a query that never reads some of them.
+
+        So ``ok`` gates the verdicts rendered, not coverage. A query reading
+        NONE of the shadowed tables -- a fully hardcoded answer included -- is
+        not checked at all and is still ok. To require coverage::
+
+            if not report.ok or len(report.not_applicable) == len(report.results):
+                sys.exit(1)
 
         An EMPTY report is ok, which differs from ``ExampleValidationReport``.
         There, zero examples means a corpus failed to load. Here it means the
         metric declares no properties -- nothing was claimed, so nothing failed.
-        Test ``report.violations`` directly for a laxer gate.
+        Test ``report.violations`` directly for a laxer gate. The coverage
+        gate above fails an empty report.
         """
         return not (self.violations or self.unchecked)
 
@@ -314,9 +331,9 @@ def validate_sensitivity_tables(
     whose shadow does not parse is reported ``unchecked`` and never executed.
 
     ``dialect`` should match what ``check_sensitivity`` will use (typically
-    the adapter's). Left at the default of None, a shadow written in a
-    non-default dialect (Denodo/VQL, say) parses at run time but not here,
-    and this gate would flag it as unparseable regardless of governance.
+    the adapter's). Left at the default of None, a shadow using syntax only
+    that dialect accepts parses at run time but not here, and this gate would
+    flag it as unparseable regardless of governance.
     """
     allowed = {name.lower() for name in contract.allowed_table_names()}
     problems: list[str] = []
@@ -353,24 +370,27 @@ def check_sensitivity(
     """Check *sql* against the sensitivity properties *metric* declares.
 
     ``properties`` selects a subset by name; None runs every declared property.
-    An unknown name raises ``ValueError`` -- malformed input raises, data
-    conditions are findings, the same split ``reconcile_decomposition`` makes.
+    An unknown name raises ``ValueError``, and so does ``repeats`` below 1 --
+    malformed input raises, data conditions are findings, the same split
+    ``reconcile_decomposition`` makes.
 
     **Step 0: the caller's query must pass Layer 1.** ``sql`` goes through the
     contract's ``Validator`` before anything is executed, and a policy block
-    raises. Without this the function is a policy bypass: an entry point that
-    runs arbitrary SQL against the adapter with none of the checks every other
-    path applies. It is less a re-run of the caller's own validation than a
-    refusal to be the weak door.
+    raises -- including a string holding more than one statement. Without
+    this the function is a policy bypass: an entry point that runs arbitrary
+    SQL against the adapter with none of the checks every other path applies.
+    It is less a re-run of the caller's own validation than a refusal to be
+    the weak door.
 
     An unparseable query is a DIFFERENT outcome from a policy block, though the
     Validator reports both as ``blocked``. There is no verdict to render on SQL
-    Layer 1 could not even read, so this degrades to ``unchecked`` for every
-    selected property -- the same "no verdict was possible" status a count-guard
-    refusal or a nondeterministic base query produces -- and nothing is
-    executed, not even the base query, not even the rewrite. That is what makes
-    skipping the raise safe: this function never runs SQL Layer 1 did not first
-    see and clear.
+    Layer 1 could not even read (a dialect that needs a ``SqlNormalizer``
+    included), so this degrades to ``unchecked`` for every selected property
+    -- the same "no verdict was possible" status a count-guard refusal or a
+    nondeterministic base query produces -- and nothing is executed, not even
+    the base query, not even the rewrite. That is what makes skipping the
+    raise safe: this function never runs SQL Layer 1 did not first see and
+    clear.
 
     ``shadow.sql`` is NOT put through the Validator. It is contract-authored,
     like ``sql_expression``, and most shadows want the ``SELECT *`` the
@@ -382,8 +402,10 @@ def check_sensitivity(
     unparseable *query*, just scoped to the one property whose shadow failed.
 
     **Determinism is filtered, not proved.** The base query is run ``repeats``
-    times; disagreement makes every property ``unchecked``. A query that is
-    merely *usually* stable passes this and then produces a verdict it did not
+    times; disagreement makes every property that needs the base result
+    ``unchecked``, and so does a base query the engine rejects. Either refusal
+    is reached once per call, not once per property. A query that is merely
+    *usually* stable passes this and then produces a verdict it did not
     earn. Measured on the DABStep corpus, two executions caught 13 of ~14 flaky
     queries -- the survivor differed on every repetition of the experiment and
     was always a ``LIMIT`` with no ``ORDER BY``. No finite number of probes

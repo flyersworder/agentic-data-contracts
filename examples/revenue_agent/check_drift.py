@@ -12,16 +12,18 @@ renamed — and every gate stays green, because the declarations did not change.
 The *world* did. ``check_schema_drift`` is the preflight that notices, and it
 belongs in CI, where a schema migration trips it, rather than in an agent's turn.
 
-This is the third of three validation verbs the library contributes, and they
-answer different questions:
+The library's validation verbs each answer a different question:
 
-  * ``validate_examples``   — is this SQL still *allowed* and *plannable*?
-  * ``check_example_answers`` — does it still return the *right number*?
-  * ``check_schema_drift``  — do the *declarations* still describe reality?
+  * ``validate_examples``       — is this SQL still *allowed* and *plannable*?
+  * ``check_example_answers``   — does it still return the *right number*?
+  * ``evaluate_conformance``    — can an agent reach it from the *contract*?
+  * ``reconcile_decomposition`` — does a declared *identity* still hold?
+  * ``check_schema_drift``      — do the *declarations* still describe reality?
+  * ``check_sensitivity``       — does the query *derive* what it depends on?
 
-The gap the third one fills is narrow and easy to miss. A live ``EXPLAIN`` (see
-``verify_examples.py``) catches a renamed column the moment some SQL references
-it. A column that is *declared and never queried* is invisible to that: the
+The gap ``check_schema_drift`` fills is narrow and easy to miss. A live
+``EXPLAIN`` (see ``verify_examples.py``) catches a renamed column the moment
+some SQL references it. A column that is *declared and never queried* is invisible to that: the
 documentation goes stale, the agent reads it, and nothing anywhere disagrees.
 
 Gate on ``report.ok``, not ``report.has_drift``

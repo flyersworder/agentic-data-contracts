@@ -23,12 +23,14 @@ violation.
 Nothing is written. The shadow is a SELECT spliced in as a CTE; the database is
 never modified, and no DDL runs.
 
-This is the fourth validation verb the library contributes:
+The library's validation verbs each answer a different question:
 
-  * ``validate_examples``     -- is this SQL still *allowed* and *plannable*?
-  * ``check_example_answers`` -- does it still return the *right number*?
-  * ``check_schema_drift``    -- do the *declarations* still describe reality?
-  * ``check_sensitivity``     -- does the query *derive* what it depends on?
+  * ``validate_examples``       -- is this SQL still *allowed* and *plannable*?
+  * ``check_example_answers``   -- does it still return the *right number*?
+  * ``evaluate_conformance``    -- can an agent reach it from the *contract*?
+  * ``reconcile_decomposition`` -- does a declared *identity* still hold?
+  * ``check_schema_drift``      -- do the *declarations* still describe reality?
+  * ``check_sensitivity``       -- does the query *derive* what it depends on?
 
 A passing property never says the answer is right. It says the query responded
 to an input the contract says it depends on.
@@ -39,9 +41,14 @@ This script exits 0 when ``check_sensitivity`` behaves as documented above --
 the correct query's one property is ``pass`` and the defective query's one
 property is flagged ``violation`` -- and 1 otherwise, so CI catches a
 regression in the check itself, the same convention ``check_drift.py`` uses.
-A *real* CI gate over your own queries reads differently: ``if not
-report.ok: sys.exit(1)`` (see the README), because there a ``violation`` is
-the failure the gate exists to catch, not evidence the gate is working.
+A *real* CI gate over your own queries reads differently, because there a
+``violation`` is the failure the gate exists to catch, not evidence the gate
+is working. ``report.ok`` alone does not require coverage -- a query reading
+none of the shadowed tables comes back ``not_applicable`` and ``ok`` -- so
+gate on both (see the README)::
+
+    if not report.ok or len(report.not_applicable) == len(report.results):
+        sys.exit(1)
 """
 
 from __future__ import annotations
@@ -85,7 +92,7 @@ def main() -> int:
         contract, source.get_metrics(), dialect=adapter.dialect
     )
     if problems:
-        print("Shadow reads an ungoverned table:")
+        print("Shadow cannot be checked against the contract:")
         for p in problems:
             print(f"  - {p}")
         return 1

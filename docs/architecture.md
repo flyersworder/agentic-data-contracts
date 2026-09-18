@@ -413,7 +413,7 @@ class Checker(Protocol):
     def check_ast(self, ast: Expression, *args) -> CheckResult: ...
 ```
 
-SQL is parsed once into a sqlglot AST. The Validator passes the AST to all applicable checkers, respecting table and per-rule principal scoping (rules carrying `allowed_principals` / `blocked_principals` are skipped when the resolved caller is out of scope).
+SQL is parsed into a sqlglot AST. A string holding more than one statement is blocked before any checker runs (a policy block, not a parse error): every checker analyses one statement, and `sqlglot.parse_one` cannot be trusted to surface a second — depending on the sqlglot version it wraps the statements in a container node no checker recognises, or silently keeps only the first — so a forbidden operation written after a harmless `SELECT` would otherwise reach the engine unchecked. Statements are counted with `sqlglot.parse`; a trailing semicolon is not a second statement. A tokenizer error (an unterminated literal) is reported as a parse error like any other. The Validator passes the AST to all applicable checkers, respecting table and per-rule principal scoping (rules carrying `allowed_principals` / `blocked_principals` are skipped when the resolved caller is out of scope).
 
 **Structural checkers** (from top-level config):
 
@@ -537,7 +537,8 @@ If a result check with `enforcement: block` fails, the query data is **discarded
 
 ```
 SQL string
-  → sqlglot.parse(sql, dialect=contract.dialect) — parse once
+  → sqlglot.parse(sql, dialect=contract.dialect) — count statements, parse
+  → more than one statement? → return ValidationResult(blocked=True, reasons=[...])
   → Phase 1: structural checkers + rule-based query_check checkers (table-scoped)
   → any block? → return ValidationResult(blocked=True, reasons=[...])
   → Relationship checks (if semantic_source provided, warnings only)

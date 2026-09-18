@@ -1332,6 +1332,8 @@ A metric declares what a correct query must respond to with a `sensitivity:` lis
 ```
 
 ```python
+import sys
+
 from agentic_data_contracts.validation import (
     check_sensitivity,
     validate_sensitivity_tables,
@@ -1346,26 +1348,34 @@ problems = validate_sensitivity_tables(
 
 metric = source.get_metric("total_revenue")
 report = check_sensitivity(metric, sql, contract=contract, adapter=adapter)
-if not report.ok:
-    print(report.summary())
-    # in CI: sys.exit(1)
+print(report.summary())
+
+# report.ok alone does not require coverage: a query that reads none of the
+# shadowed tables comes back all not_applicable, and that is ok. This gate
+# also fails when nothing was checked at all.
+if not report.ok or len(report.not_applicable) == len(report.results):
+    sys.exit(1)
 ```
 
-`check_sensitivity` takes the `MetricDefinition` itself, not a metric name — the same convention as `reconcile_decomposition`. Before anything runs, `sql` goes through the contract's own `Validator` (**step 0**): a policy block (a forbidden table, a missing tenant filter) raises `ValueError`, because an entry point that ran arbitrary SQL past every other check would be a policy bypass. SQL the Validator cannot parse is a different outcome: there is no policy verdict to render on text Layer 1 could not read, so every selected property comes back `unchecked` and nothing at all executes — not even the base query.
+`check_sensitivity` takes the `MetricDefinition` itself, not a metric name — the same convention as `reconcile_decomposition`. Before anything runs, `sql` goes through the contract's own `Validator` (**step 0**): a policy block (a forbidden table, a missing tenant filter, more than one statement in the string) raises `ValueError`, because an entry point that ran arbitrary SQL past every other check would be a policy bypass. SQL the Validator cannot parse is a different outcome: there is no policy verdict to render on text Layer 1 could not read, so every selected property comes back `unchecked` and nothing at all executes — not even the base query.
 
 The shadow itself is never sent through the Validator; it is contract-authored, like `sql_expression`, and most shadows want the `SELECT *` the Validator would reject. It is constrained a different way instead: its tables must be ones the contract governs. That is checked in two places — at CI time by `validate_sensitivity_tables`, and again at run time inside `check_sensitivity`, which raises `ValueError` the moment a shadow reads an ungoverned table. Both are run-time and CI-time gates, deliberately not a load-time one: `YamlSource` holds no `DataContract` to check a shadow's tables against, so there is nothing to check at load. A shadow sqlglot cannot parse fails closed the same way an unparseable caller query does — its property comes back `unchecked` and nothing executes for it — and `validate_sensitivity_tables` reports it as a problem rather than staying silent about it.
 
-Each property lands in exactly one `status`: `pass`, `violation`, `not_applicable` (the query never references the shadowed table — an outcome, not a failure), or `unchecked` (no verdict was possible). `report.ok` is a safe CI gate — `if not report.ok: sys.exit(1)` — False on any `violation` or `unchecked`, True when everything left is `pass` or `not_applicable`. An **empty** report (a metric that declares no `sensitivity` properties) is `ok`: nothing was claimed, so nothing failed.
+Each property lands in exactly one `status`: `pass`, `violation`, `not_applicable` (the query never references the shadowed table — an outcome, not a failure), or `unchecked` (no verdict was possible). `report.ok` is False on any `violation` or `unchecked`, True when everything left is `pass` or `not_applicable`. An **empty** report (a metric that declares no `sensitivity` properties) is `ok`: nothing was claimed, so nothing failed.
+
+**`report.ok` gates the verdicts that were rendered, not coverage.** `not_applicable` does not block, because a metric with properties on several tables legitimately gets `not_applicable` for a query that never reads some of those tables. The consequence is that a query reading **none** of the shadowed tables is not checked at all and still comes back `ok` — and that includes a fully hardcoded answer (`SELECT 10700.00 AS revenue FROM …` over some other allowed table), which is exactly the kind of query this feature exists to catch. If you want coverage, gate on it as the snippet above does: `if not report.ok or len(report.not_applicable) == len(report.results): sys.exit(1)`. That gate also fails an empty report, since a metric that declares no properties gives no coverage either.
 
 **Determinism is filtered, not proved.** The base query runs `repeats` (default 2) times, and disagreement degrades every property to `unchecked`. Two runs catch most flakiness but not all of it — a `LIMIT` with no `ORDER BY` can agree across both repeats and still not be truly deterministic — so a passing property is evidence of stability, not a proof of it.
 
-**Cost:** two base executions per call plus one per property. The base result is computed once and reused, so a metric with four properties costs six executions total, not twelve — which is why this belongs at a promotion gate rather than in an agent's hot path.
+**Cost:** the base query runs `repeats` times (default 2), once per call rather than once per property, and only when at least one property applies — a call whose properties are all `not_applicable` executes nothing. Each applicable property then adds at most one execution of its rewritten query. With the default, a metric with four properties costs six executions total, not twelve. A base query that fails — the engine rejects it, or its repeats disagree — is refused once for the whole call, and every property that needed it comes back `unchecked`. That is still not free, which is why this belongs at a promotion gate rather than in an agent's hot path.
 
-**Nothing is written, and no SQL is regenerated.** The shadow is spliced into the caller's own query text as a CTE, at the exact character spans sqlglot finds for the shadowed table — no DDL, no DML, and never a fresh `.sql()` render of a new statement. That is what keeps this working on a dialect sqlglot can parse but cannot emit, the same constraint the rest of the library assembles SQL templates around.
+**Nothing is written, and no SQL is regenerated.** The shadow is spliced into the caller's own query text as a CTE, at the exact character spans sqlglot finds for the shadowed table — no DDL, no DML, and never a fresh `.sql()` render of a new statement. That is what keeps this working on a dialect sqlglot can parse directly but cannot emit, the same constraint the rest of the library assembles SQL templates around.
+
+**Not yet supported: a dialect that parses only after a `SqlNormalizer` rewrite** — the Denodo/VQL case in this library. `check_sensitivity` applies no normalizer — not even when the adapter implements `SqlNormalizer`, which is where `create_tools` picks one up, and it takes no `sql_normalizer` argument the way `validate_examples` does — and parses the raw query text, so such a query comes back `unchecked` for every property. That fails closed and is never a governance hole, but the query is not checked. Normalizer support is a follow-up; it needs more than handing a normalizer to the `Validator`, because the rewrite's spans are computed on the raw text.
 
 `lookup_metric` surfaces a declared property's `name`, `description`, and `expect` to the agent — never `shadow.sql`. The shadow is the encoding of the claim, not the claim itself, and putting engine SQL in a tool response would invite the agent to run it directly.
 
-`check_sensitivity` is the third member of the family alongside [`reconcile_decomposition`](#validating-a-verified-examples-corpus) (a declared arithmetic identity, checked against live data) and [`validate_examples`](#validating-a-verified-examples-corpus) (a corpus of SQL, checked for compliance and, separately, correctness): the contract declares a property, the caller supplies execution, the library contributes one verb. A passing property never says the answer is right — only that the query *responded* to an input the contract says it depends on. See [`examples/revenue_agent/check_sensitivity.py`](examples/revenue_agent/check_sensitivity.py) for a runnable, DuckDB-backed demo.
+`check_sensitivity` follows the pattern of [`reconcile_decomposition`](#validating-a-verified-examples-corpus) (a declared arithmetic identity, checked against live data) and [`validate_examples`](#validating-a-verified-examples-corpus) (a corpus of SQL, checked for compliance and, separately, correctness): the contract declares a property, the caller supplies execution, the library contributes one verb. A passing property never says the answer is right — only that the query *responded* to an input the contract says it depends on. See [`examples/revenue_agent/check_sensitivity.py`](examples/revenue_agent/check_sensitivity.py) for a runnable, DuckDB-backed demo.
 
 ## Custom Prompt Rendering
 

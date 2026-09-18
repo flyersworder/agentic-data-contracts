@@ -8,6 +8,7 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     SensitivityProperty,
     Shadow,
+    validate_sensitivity,
 )
 from agentic_data_contracts.semantic.yaml_source import YamlSource
 
@@ -96,8 +97,33 @@ class TestLoadTimeValidation:
             YamlSource.from_raw(raw, expected_extras=[])
 
     def test_empty_description_raises(self) -> None:
+        # This tests the load path: `require_text` rejects the blank description
+        # in `_load_from_raw` before `validate_sensitivity` is called. Coverage
+        # of the validator's own description check is in
+        # `test_blank_description_raises_for_a_directly_built_metric`.
         with pytest.raises(ValueError, match="description"):
             YamlSource.from_raw(_raw(description="   "))
+
+    def test_blank_description_raises_for_a_directly_built_metric(self) -> None:
+        # `YamlSource` never reaches this branch -- `require_text` rejects a
+        # blank description at parse time. But dbt/Cube/Ossie sources and
+        # direct construction build `MetricDefinition` without it, so this is
+        # the call path the check actually defends.
+        metric = MetricDefinition(
+            name="mql_count",
+            description="",
+            sql_expression="COUNT(*)",
+            sensitivity=[
+                SensitivityProperty(
+                    name="p",
+                    description="   ",
+                    shadow=Shadow(table="mkt.touchpoints", sql="SELECT 1"),
+                    expect="unchanged",
+                )
+            ],
+        )
+        with pytest.raises(ValueError, match="non-empty description"):
+            validate_sensitivity([metric])
 
     def test_bad_expect_raises(self) -> None:
         with pytest.raises(ValueError, match="expect"):

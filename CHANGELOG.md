@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.53.0] - 2026-09-18
+
+### Added
+
+- **`check_sensitivity` takes `caller_principal`**, with the same type and semantics as `Validator`'s (a string, a zero-arg callable, or `None`). It is resolved once per call, and that one identity drives both step 0 and shadow governance, so a callable cannot clear the query as one caller and have the shadow governed as another. A metric over a principal-restricted table can now be checked by a caller allowed to read it; in 0.52.0 step 0 always raised.
+- **`validate_sensitivity_tables` takes an optional `caller_principal` string.** Omitted, the CI gate keeps its structural check against every table the contract declares, because a CI gate has no caller; given, it checks against `allowed_table_names_for(caller_principal)` — exactly what `check_sensitivity` enforces for that caller.
+
+### Changed
+
+- **`check_sensitivity` governs shadows against the caller's tables, not every declared table. The default is stricter than 0.52.0.** A shadow reading a table the caller is denied now raises `ValueError`, even when the caller's own query is allowed. With the default `caller_principal=None` — an anonymous caller — that includes any shadow reading a table restricted by `allowed_principals`/`blocked_principals`, which 0.52.0 let through. This is fail-closed and matches step 0, which already blocked an anonymous caller's query over those tables; pass the caller's principal to check such a metric. A declared table denied to the caller gets its own error text — "…which caller 'bob@co.com' may not read (the table is restricted by allowed_principals/blocked_principals)" — while a table the contract never declares keeps the 0.52.0 wording, "…which the contract does not allow", in both `check_sensitivity` and `validate_sensitivity_tables`.
+
+### Fixed
+
+- **A single all-NULL row now counts as vacuous.** `SUM` over no rows is one NULL row, not no rows, so a query whose filter matched nothing got an unearned verdict: `violation` under `expect: changes`, `pass` under `expect: unchanged`. The rule, stated once: a base is vacuous when it has no rows or exactly one all-NULL row; `expect: changes` refuses it before the shadowed query runs, and `expect: unchanged` refuses it only when the shadowed result is identical — any other shadowed result is compared as usual, so a row gained or lost (including several all-NULL rows losing one) is a real `violation`. This narrows the gap rather than closing it: `COUNT` over no rows is `0`, indistinguishable from a real zero, and is deliberately not vacuous. The vacuous `unchecked` reasons now read "an empty base result, or a single all-NULL row".
+- **NaN never compared equal to itself.** A NaN answer — DuckDB returns one for `0.0/0.0` on doubles, and from NaN stored in a float column — was therefore always "not deterministic" (`unchecked`) at the default `repeats`, and with `repeats=1` it always looked moved: an unearned `pass` under `expect: changes`, a false `violation` under `expect: unchanged`. A float or Decimal NaN (psycopg returns Postgres `numeric 'NaN'` as `Decimal('NaN')`; a signalling `Decimal('sNaN')` raised on comparison) now compares equal to NaN, and still differs from any number.
+
 ## [0.52.0] - 2026-09-18
 
 ### Security

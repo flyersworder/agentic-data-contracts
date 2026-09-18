@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 
 import pytest
 import sqlglot
@@ -324,6 +325,42 @@ class TestNormalise:
 
     def test_distinguishes_different_values(self) -> None:
         assert _norm([(1,)]) != _norm([(2,)])
+
+    def test_nan_equals_nan(self) -> None:
+        # Two independently produced NaNs: `nan != nan`, so without a
+        # canonical form no NaN answer ever equals itself across two fetches.
+        a = float("nan")
+        b = float("inf") - float("inf")
+        assert a is not b
+        assert _norm([(1, a)]) == _norm([(1, b)])
+
+    def test_nan_differs_from_a_number(self) -> None:
+        assert _norm([(float("nan"),)]) != _norm([(1.0,)])
+        assert _norm([(float("nan"),)]) != _norm([(None,)])
+        assert _norm([(float("nan"),)]) != _norm([("NaN",)])
+
+    def test_nan_sorts_stably_among_numbers(self) -> None:
+        rows = [(2.0,), (float("nan"),), (1.0,), (float("inf"),)]
+        assert _norm(rows) == _norm(list(reversed(rows)))
+
+    def test_decimal_nan_equals_decimal_nan(self) -> None:
+        # psycopg returns Postgres `numeric 'NaN'` as Decimal('NaN'), which,
+        # like float NaN, never equals itself.
+        assert _norm([(Decimal("NaN"),)]) == _norm([(Decimal("NaN"),)])
+
+    def test_signalling_decimal_nan_does_not_raise(self) -> None:
+        # Decimal('sNaN') raises InvalidOperation on `==`; canonicalized, it
+        # compares like any NaN.
+        assert _norm([(Decimal("sNaN"),)]) == _norm([(Decimal("NaN"),)])
+
+    def test_decimal_nan_differs_from_a_decimal_number(self) -> None:
+        assert _norm([(Decimal("NaN"),)]) != _norm([(Decimal("1"),)])
+
+    def test_infinities_are_kept(self) -> None:
+        assert _norm([(float("inf"),), (float("-inf"),)]) == [
+            (float("-inf"),),
+            (float("inf"),),
+        ]
 
 
 def _res(status: str, name: str = "p") -> SensitivityResult:
@@ -1438,3 +1475,508 @@ semantic:
         assert result.status == "pass"
         assert result.moved is False
         assert report.ok is True
+
+
+def _principal_contract() -> DataContract:
+    """`mkt.touchpoints` open to all; `mkt.lead_scores` restricted to alice."""
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: sensitivity-principal-test
+semantic:
+  allowed_tables:
+    - schema: mkt
+      tables: [touchpoints]
+    - schema: mkt
+      tables: [lead_scores]
+      allowed_principals: [alice@co.com]
+  forbidden_operations: [DELETE, DROP]
+  rules: []
+"""
+    )
+
+
+class TestCallerPrincipal:
+    def test_an_allowed_principal_gets_a_verdict_on_a_restricted_table(
+        self, mkt_adapter
+    ) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal="alice@co.com",
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert report.ok is True
+
+    @pytest.mark.parametrize("principal", [None, "", "bob@co.com"])
+    def test_a_denied_or_anonymous_principal_is_blocked_at_step_zero(
+        self, mkt_adapter, monkeypatch, principal
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="blocked"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                FIRST_TOUCH,
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert seen == []
+
+    @pytest.mark.parametrize("principal", [None, "", "bob@co.com"])
+    def test_a_shadow_reading_a_table_the_caller_is_denied_raises(
+        self, mkt_adapter, monkeypatch, principal
+    ) -> None:
+        # The caller's own query reads only the open table, so Step 0 clears
+        # it -- but MKT_SHADOW reads mkt.lead_scores, which this caller may
+        # not. Governing the shadow against every declared table would let a
+        # contract-authored SELECT reach data the caller is denied.
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="lead_scores"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                "SELECT count(*) FROM mkt.touchpoints",
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert seen == []
+
+    def test_a_callable_principal_is_resolved_once(self, mkt_adapter) -> None:
+        # Step 0 and shadow governance must see ONE identity: a callable
+        # re-invoked between them could clear the query as one caller and
+        # govern the shadow as another.
+        calls: list[int] = []
+
+        def principal() -> str:
+            calls.append(1)
+            return "alice@co.com"
+
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal=principal,
+        )
+        assert report.results[0].status == "pass"
+        assert len(calls) == 1
+
+    def test_a_callable_that_changes_identity_cannot_split_the_call(
+        self, mkt_adapter
+    ) -> None:
+        # Alice first, anonymous after: resolved once, the whole call is
+        # Alice's -- never cleared as Alice and then governed as nobody.
+        identities = iter(["alice@co.com", None, None, None])
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_principal_contract(),
+            adapter=mkt_adapter,
+            caller_principal=lambda: next(identities),
+        )
+        assert report.results[0].status == "pass"
+
+    def test_the_ci_gate_without_a_principal_checks_every_declared_table(
+        self,
+    ) -> None:
+        # A CI gate has no caller: structurally, the shadow reads only tables
+        # the contract declares.
+        assert (
+            validate_sensitivity_tables(
+                _principal_contract(), [_metric(FIRST_TOUCH_PROP)]
+            )
+            == []
+        )
+
+    def test_the_ci_gate_with_an_allowed_principal_is_silent(self) -> None:
+        assert (
+            validate_sensitivity_tables(
+                _principal_contract(),
+                [_metric(FIRST_TOUCH_PROP)],
+                caller_principal="alice@co.com",
+            )
+            == []
+        )
+
+    def test_the_ci_gate_with_a_denied_principal_reports_the_table(self) -> None:
+        (problem,) = validate_sensitivity_tables(
+            _principal_contract(),
+            [_metric(FIRST_TOUCH_PROP)],
+            caller_principal="bob@co.com",
+        )
+        assert problem == (
+            "metric 'mql_count' sensitivity property "
+            "'attribution_is_first_touch': shadow reads 'mkt.lead_scores', which "
+            "caller 'bob@co.com' may not read (the table is restricted by "
+            "allowed_principals/blocked_principals)"
+        )
+
+    def test_the_ci_gate_with_the_anonymous_caller_reports_the_table(self) -> None:
+        # `""` is the anonymous caller's tables -- what check_sensitivity
+        # applies by default -- not the structural check omission gives.
+        (problem,) = validate_sensitivity_tables(
+            _principal_contract(), [_metric(FIRST_TOUCH_PROP)], caller_principal=""
+        )
+        assert "caller '<no caller identified>' may not read" in problem
+
+    def test_the_ci_gate_keeps_the_undeclared_text_with_a_principal(self) -> None:
+        # Undeclared outranks denied: a table the contract never declares keeps
+        # the 0.52.0 wording byte-for-byte, whoever the caller is.
+        (problem,) = validate_sensitivity_tables(
+            _contract("touchpoints"),
+            [_metric(FIRST_TOUCH_PROP)],
+            caller_principal="alice@co.com",
+        )
+        assert problem == (
+            "metric 'mql_count' sensitivity property "
+            "'attribution_is_first_touch': shadow reads 'mkt.lead_scores', which "
+            "the contract does not allow"
+        )
+
+
+class TestShadowGovernanceMessages:
+    """Undeclared and denied-to-this-caller are different findings."""
+
+    _QUERY = "SELECT count(*) FROM mkt.touchpoints"
+
+    def test_an_undeclared_table_keeps_the_existing_text(self, mkt_adapter) -> None:
+        with pytest.raises(ValueError) as info:
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                self._QUERY,
+                contract=_contract("touchpoints"),
+                adapter=mkt_adapter,
+                caller_principal="alice@co.com",
+            )
+        assert str(info.value) == (
+            "sensitivity property 'attribution_is_first_touch' of metric "
+            "'mql_count' has a shadow reading 'mkt.lead_scores', which the "
+            "contract does not allow"
+        )
+
+    @pytest.mark.parametrize(
+        ("principal", "shown"),
+        [
+            ("bob@co.com", "'bob@co.com'"),
+            (None, "'<no caller identified>'"),
+            ("", "'<no caller identified>'"),
+        ],
+    )
+    def test_a_declared_table_denied_to_the_caller_names_the_caller(
+        self, mkt_adapter, principal, shown
+    ) -> None:
+        with pytest.raises(ValueError) as info:
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                self._QUERY,
+                contract=_principal_contract(),
+                adapter=mkt_adapter,
+                caller_principal=principal,
+            )
+        assert str(info.value) == (
+            "sensitivity property 'attribution_is_first_touch' of metric "
+            f"'mql_count' has a shadow reading 'mkt.lead_scores', which caller "
+            f"{shown} may not read (the table is restricted by "
+            "allowed_principals/blocked_principals)"
+        )
+
+
+def _blocked_contract() -> DataContract:
+    """`mkt.lead_scores` open to everyone except the intern."""
+    return DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: sensitivity-blocked-test
+semantic:
+  allowed_tables:
+    - schema: mkt
+      tables: [touchpoints]
+    - schema: mkt
+      tables: [lead_scores]
+      blocked_principals: [intern@co.com]
+  forbidden_operations: [DELETE, DROP]
+  rules: []
+"""
+    )
+
+
+class TestBlockedPrincipals:
+    def test_a_blocked_callers_shadow_over_the_table_raises(
+        self, mkt_adapter, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        with pytest.raises(ValueError, match="caller 'intern@co.com' may not read"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                "SELECT count(*) FROM mkt.touchpoints",
+                contract=_blocked_contract(),
+                adapter=mkt_adapter,
+                caller_principal="intern@co.com",
+            )
+        assert seen == []
+
+    def test_another_caller_is_fine(self, mkt_adapter) -> None:
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            FIRST_TOUCH,
+            contract=_blocked_contract(),
+            adapter=mkt_adapter,
+            caller_principal="bob@co.com",
+        )
+        assert report.results[0].status == "pass"
+
+    def test_the_ci_gate_reports_only_the_blocked_caller(self) -> None:
+        metrics = [_metric(FIRST_TOUCH_PROP)]
+        assert (
+            validate_sensitivity_tables(
+                _blocked_contract(), metrics, caller_principal="bob@co.com"
+            )
+            == []
+        )
+        (problem,) = validate_sensitivity_tables(
+            _blocked_contract(), metrics, caller_principal="intern@co.com"
+        )
+        assert "caller 'intern@co.com' may not read" in problem
+
+
+_NULL_SUM = (
+    "SELECT SUM(lead_id) AS s FROM mkt.touchpoints "
+    "WHERE channel = 'zzz_no_such_channel'"
+)
+_ZERO_COUNT = (
+    "SELECT COUNT(*) AS n FROM mkt.touchpoints WHERE channel = 'zzz_no_such_channel'"
+)
+
+
+def _null_prop(expect: str, shadow: Shadow = MKT_SHADOW) -> SensitivityProperty:
+    return SensitivityProperty(
+        name="touchpoints_prop",
+        description="A property whose test the base result may make vacuous.",
+        shadow=shadow,
+        expect=expect,
+    )
+
+
+class TestVacuousAllNull:
+    """An aggregate over no rows is NULL -- no answer, just like no rows."""
+
+    def test_null_base_and_null_shadow_under_unchanged_is_unchecked(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds only 'display' touchpoints, so the filter still
+        # matches nothing and the shadowed SUM is NULL too.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("vacuous")
+        assert report.ok is False
+
+    def test_null_base_under_changes_is_unchecked_without_the_mutation(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("vacuous")
+        # Only the base query ran (DEFAULT_REPEATS times); the rewrite never did.
+        assert seen == [_NULL_SUM, _NULL_SUM]
+
+    def test_null_base_with_a_non_null_shadowed_result_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        shadow = Shadow(
+            table="mkt.touchpoints",
+            sql=(
+                "SELECT * FROM mkt.touchpoints UNION ALL "
+                "SELECT 1, 'zzz_no_such_channel', 1"
+            ),
+        )
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged", shadow)),
+            _NULL_SUM,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is True
+
+    def test_a_zero_count_on_both_sides_still_passes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # The deliberate limit: COUNT over no rows is 0, indistinguishable
+        # from a real answer of zero, so it is NOT treated as vacuous.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _ZERO_COUNT,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert result.moved is False
+
+
+def _nan_ratio(channel: str) -> str:
+    """0.0/0.0 on doubles -- DuckDB's NaN -- until a *channel* row exists."""
+    hit = f"CASE WHEN channel = '{channel}' THEN 1.0 ELSE 0.0 END"
+    return (
+        f"SELECT SUM({hit})::DOUBLE / SUM({hit})::DOUBLE AS share FROM mkt.touchpoints"
+    )
+
+
+class TestNaN:
+    """NaN is a value: it must equal itself, and it is not NULL."""
+
+    def test_a_stable_nan_answer_is_deterministic_and_passes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds only 'display' rows, so 'zzz' stays 0/0 = NaN.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged")),
+            _nan_ratio("zzz_no_such_channel"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            repeats=2,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is False
+
+    def test_an_untouched_nan_does_not_move_under_changes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # With repeats=1 the old comparison saw NaN != NaN and called it moved:
+        # an unearned pass. An all-NaN base is NOT vacuous -- NaN is a value --
+        # so this is a real violation, not unchecked.
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _nan_ratio("zzz_no_such_channel"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            repeats=1,
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is False
+
+    def test_a_nan_base_the_shadow_makes_a_number_passes_changes(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW adds 'display' rows: 0/0 becomes n/n = 1.0.
+        report = check_sensitivity(
+            _metric(_null_prop("changes")),
+            _nan_ratio("display"),
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is True
+
+
+#: One NULL per channel present: three rows (search, email, social) that each
+#: carry no value -- but the row COUNT is still an answer.
+_NULL_PER_CHANNEL = (
+    "SELECT SUM(CASE WHEN lead_id < 0 THEN lead_id END) AS s "
+    "FROM mkt.touchpoints GROUP BY channel"
+)
+_DROP_SOCIAL = Shadow(
+    table="mkt.touchpoints",
+    sql="SELECT * FROM mkt.touchpoints WHERE channel <> 'social'",
+)
+
+
+class TestVacuousIsOneShape:
+    """Vacuous means no rows, or ONE all-NULL row -- and, under
+    `expect: unchanged`, only when the shadowed result is that same shape."""
+
+    def test_several_null_rows_losing_a_group_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # Base [(None,)]*3, shadowed [(None,)]*2: a group disappeared.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged", _DROP_SOCIAL)),
+            _NULL_PER_CHANNEL,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_a_null_row_that_disappears_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # A lookup: base [(None,)], shadowed [] -- a real answer vanished.
+        report = check_sensitivity(
+            _metric(
+                _null_prop(
+                    "unchanged",
+                    Shadow(
+                        table="mkt.touchpoints",
+                        sql="SELECT * FROM mkt.touchpoints WHERE lead_id <> 3",
+                    ),
+                )
+            ),
+            "SELECT CAST(NULL AS INT) AS v FROM mkt.touchpoints WHERE lead_id = 3",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_no_rows_becoming_a_null_row_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # Base [], shadowed [(None,)]: the shape moved.
+        report = check_sensitivity(
+            _metric(
+                _null_prop(
+                    "unchanged",
+                    Shadow(
+                        table="mkt.touchpoints",
+                        sql="SELECT * FROM mkt.touchpoints UNION ALL SELECT 99, 'x', 1",
+                    ),
+                )
+            ),
+            "SELECT CAST(NULL AS INT) AS v FROM mkt.touchpoints WHERE lead_id = 99",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_several_null_rows_under_changes_get_a_real_verdict(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # Not early-refused: the mutated query runs, and the lost group is
+        # the move `expect: changes` asks for.
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(_null_prop("changes", _DROP_SOCIAL)),
+            _NULL_PER_CHANNEL,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is True
+        assert len(seen) == 3  # two base runs plus the mutated query

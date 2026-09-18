@@ -38,14 +38,16 @@ syntax only; one that renames the target fails closed as ``unchecked``.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
+from agentic_data_contracts.core.principal import Principal, resolve_principal
 from agentic_data_contracts.validation.validator import Validator, _is_multi_statement
 
 if TYPE_CHECKING:
@@ -401,16 +403,69 @@ def _round_sig(v: float) -> float:
     return round(v, _SIG_DIGITS - 1 - math.floor(math.log10(abs(v))))
 
 
+class _NaN:
+    """The one canonical NaN `_norm` substitutes for every float or Decimal NaN.
+
+    ``nan != nan`` -- for ``Decimal('NaN')`` too, which is how psycopg returns
+    Postgres ``numeric 'NaN'``, and a signalling ``Decimal('sNaN')`` raises
+    ``InvalidOperation`` on ``==`` outright -- so a raw NaN never equals
+    itself across two fetches: every NaN answer would read "not
+    deterministic", and with ``repeats=1`` would always look moved. The
+    single instance below compares equal only to itself (identity equality),
+    so it cannot collide with any genuine value -- not a float, not None, not
+    the string ``"NaN"`` -- and its fixed repr keeps ``sorted(..., key=repr)``
+    deterministic. It is not None, so an
+    all-NaN result is a value, never vacuous.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<NaN>"
+
+
+_NAN = _NaN()
+
+
+def _norm_value(v: object) -> object:
+    if isinstance(v, Decimal):
+        # Quiet and signalling NaN alike; every other Decimal is untouched.
+        return _NAN if v.is_nan() else v
+    if not isinstance(v, float):
+        return v
+    return _NAN if math.isnan(v) else _round_sig(v)
+
+
 def _norm(rows: list[tuple]) -> list[tuple]:
     """Order- and float-noise-insensitive form.
 
     So "the answer moved" means the values moved, not that the engine returned
-    them in a different order.
+    them in a different order. Float or Decimal NaN becomes the canonical
+    `_NAN`, so NaN in the same position compares equal; ``inf``/``-inf``
+    are kept as-is.
     """
-    rounded = [
-        tuple(_round_sig(v) if isinstance(v, float) else v for v in row) for row in rows
-    ]
+    rounded = [tuple(_norm_value(v) for v in row) for row in rows]
     return sorted(rounded, key=repr)
+
+
+def _is_vacuous(rows: list[tuple]) -> bool:
+    """True when *rows* carry no answer at all: no rows, or exactly ONE row
+    whose values are all NULL -- the shape of an aggregate over nothing.
+
+    Several all-NULL rows are NOT vacuous: their row count is itself an
+    answer (one NULL per group, say), and a shadow that adds or drops a row
+    has moved it. Nor is NaN: it is a value, not NULL.
+
+    This NARROWS the vacuous-test gap; it does not close it. An aggregate
+    over no rows is not always an absence: ``SUM`` (and ``AVG``, ``MIN``,
+    ``MAX``) over no rows is NULL, which this catches, but ``COUNT`` over no
+    rows is ``0`` -- indistinguishable from a real answer of zero -- and is
+    deliberately NOT treated as vacuous. Calling every zero vacuous would
+    refuse a verdict on genuine zeros; a ``COUNT`` whose filter matches
+    nothing on both sides therefore still reads ``pass`` under
+    ``expect: unchanged``.
+    """
+    return not rows or (len(rows) == 1 and all(v is None for v in rows[0]))
 
 
 @dataclass(frozen=True)
@@ -425,13 +480,17 @@ class SensitivityResult:
       - ``"unchecked"``      -- no verdict was possible: unparseable SQL, the
                                 count guard refused the edit, the engine raised,
                                 the base query is not deterministic, or the
-                                test was vacuous -- an empty base result for
-                                ``expect: changes`` (it cannot move), or an
-                                empty base AND an empty shadowed result for
-                                ``expect: unchanged`` (nothing to hold still).
-                                A non-empty shadowed result against an empty
-                                base under ``expect: unchanged`` is still a
-                                real ``"violation"``: the answer moved.
+                                test was vacuous. The base is vacuous when
+                                it has no rows, or exactly one all-NULL row
+                                (``SUM`` over no rows; ``COUNT`` over no rows
+                                is ``0`` and is not -- see ``_is_vacuous``).
+                                Under ``expect: changes`` a vacuous base is
+                                refused before the shadowed query runs; under
+                                ``expect: unchanged`` only when the shadowed
+                                result is identical to it. Any other shadowed
+                                result is compared as usual, so a vacuous
+                                base that gains or loses a row is a real
+                                ``"violation"``: the answer moved.
 
     ``moved`` is None when no comparison was made. ``reason`` reports the
     mechanical condition only and never infers a cause -- the same boundary
@@ -554,12 +613,56 @@ def _shadow_tables(
     return names
 
 
+def _shadow_governance(
+    props: Iterable[SensitivityProperty],
+    allowed: Iterable[str],
+    *,
+    dialect: str | None,
+    normalize: Normalize,
+) -> Iterator[tuple[SensitivityProperty, list[str] | None]]:
+    """Each property with the tables its shadow reads that *allowed* does not.
+
+    Yields ``(prop, None)`` when the shadow's tables cannot be read (see
+    ``_shadow_tables``), otherwise ``(prop, names)`` with the ungoverned names
+    sorted -- an empty list when the shadow is fully governed. Lazy, so a
+    caller that stops at the first problem reads no further shadows. The one
+    governance rule both gates share; what a problem MEANS -- a raise at run
+    time, a reported string in CI -- stays with each caller.
+    """
+    allowed_lower = {name.lower() for name in allowed}
+    for prop in props:
+        read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
+        if read is None:
+            yield prop, None
+            continue
+        yield prop, [name for name in sorted(read) if name.lower() not in allowed_lower]
+
+
+def _why_ungoverned(name: str, declared: set[str], principal: str | None) -> str:
+    """Why *name* is refused, finishing a sentence that ends "..., which ".
+
+    A table the contract never declares keeps the 0.52.0 wording; a declared
+    table denied to this caller names the caller, in the phrasing the
+    Validator's "restricted to other principals" uses -- so an upgrader whose
+    default caller is None sees why, not a claim the contract lacks the table.
+    *declared* is lowercased.
+    """
+    if name.lower() not in declared:
+        return "the contract does not allow"
+    who = principal if principal else "<no caller identified>"
+    return (
+        f"caller {who!r} may not read (the table is restricted by "
+        "allowed_principals/blocked_principals)"
+    )
+
+
 def validate_sensitivity_tables(
     contract: DataContract,
     metrics: list[MetricDefinition],
     *,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
+    caller_principal: str | None = None,
 ) -> list[str]:
     """Problems where a shadow reads a table the contract does not govern.
 
@@ -583,27 +686,45 @@ def validate_sensitivity_tables(
     only after normalization (Denodo VQL) is normalized before its tables are
     read. This gate takes no adapter, so -- unlike ``check_sensitivity`` -- it
     has no adapter to fall back on; pass the normalizer explicitly.
+
+    ``caller_principal`` chooses WHICH tables count as governed. Omitted, the
+    check is structural -- every table the contract declares, via
+    ``contract.allowed_table_names()`` -- because a CI gate has no caller:
+    it asks whether a shadow stays inside the contract at all, not whether
+    some particular caller may read what it reads. Given, it checks against
+    ``contract.allowed_table_names_for(caller_principal)``, the set
+    ``check_sensitivity`` enforces at run time for that caller. Pass it to
+    gate a metric that a known principal will check; leave it out and a
+    shadow over a principal-restricted table passes here, then is refused at
+    run time for any caller denied that table. ``caller_principal=""`` checks
+    against the anonymous caller's tables -- exactly what ``check_sensitivity``
+    applies by default -- whereas omitting it gives the structural check.
     """
-    allowed = {name.lower() for name in contract.allowed_table_names()}
+    declared = {name.lower() for name in contract.allowed_table_names()}
+    allowed = (
+        contract.allowed_table_names()
+        if caller_principal is None
+        else contract.allowed_table_names_for(caller_principal)
+    )
     normalize = _normalizer_fn(sql_normalizer)
     problems: list[str] = []
     for metric in metrics:
-        for prop in metric.sensitivity:
-            read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
-            if read is None:
+        for prop, ungoverned in _shadow_governance(
+            metric.sensitivity, allowed, dialect=dialect, normalize=normalize
+        ):
+            if ungoverned is None:
                 problems.append(
                     f"metric {metric.name!r} sensitivity property "
                     f"{prop.name!r}: shadow cannot be parsed, so its tables "
                     "cannot be checked against the contract"
                 )
                 continue
-            for name in sorted(read):
-                if name.lower() not in allowed:
-                    problems.append(
-                        f"metric {metric.name!r} sensitivity property "
-                        f"{prop.name!r}: shadow reads {name!r}, which the "
-                        "contract does not allow"
-                    )
+            for name in ungoverned:
+                problems.append(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r}: shadow reads {name!r}, which "
+                    f"{_why_ungoverned(name, declared, caller_principal)}"
+                )
     return problems
 
 
@@ -617,6 +738,7 @@ def check_sensitivity(
     repeats: int = DEFAULT_REPEATS,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
+    caller_principal: Principal = None,
 ) -> SensitivityReport:
     """Check *sql* against the sensitivity properties *metric* declares.
 
@@ -642,14 +764,17 @@ def check_sensitivity(
     is what makes skipping the raise safe: this function never runs SQL Layer
     1 did not first see and clear.
 
-    **Principal-restricted tables cannot be checked yet.** Step 0's
-    ``Validator`` is built with no caller principal, so a query over a table
-    restricted by ``allowed_principals``/``blocked_principals`` is blocked at
-    Step 0 and this function raises ``ValueError`` rather than returning a
-    verdict; the shadow-governance check above also governs shadows against
-    ``contract.allowed_table_names()`` -- every declared table -- with no
-    regard to principal. A ``caller_principal`` parameter to thread through
-    both is a planned follow-up, not yet implemented.
+    **Principals.** ``caller_principal`` has the type and semantics of
+    ``Validator``'s: a string, a zero-arg callable, or None. It is resolved
+    ONCE per call, and that one identity is used twice: Step 0's
+    ``Validator`` checks the query as that caller, and every shadow must read
+    only tables in ``contract.allowed_table_names_for(<that caller>)``, so a
+    contract-authored shadow can never reach a table the caller is denied. A
+    callable is not re-invoked between the two -- it cannot clear the query
+    as one caller and have the shadow governed as another. The default, None,
+    is an anonymous caller: fail-closed, it is denied every table restricted
+    by ``allowed_principals``/``blocked_principals``, so a query over one is
+    blocked at Step 0 and a shadow reading one raises ``ValueError``.
 
     **Dialects that parse only after normalization.** ``sql_normalizer`` --
     defaulting to ``adapter`` when the adapter implements ``SqlNormalizer`` --
@@ -712,6 +837,9 @@ def check_sensitivity(
     if sql_normalizer is None and isinstance(adapter, SqlNormalizer):
         sql_normalizer = adapter
     normalize = _normalizer_fn(sql_normalizer)
+    # Resolved once: Step 0 and shadow governance must judge the same caller,
+    # so the Validator gets the resolved string, never the callable.
+    principal = resolve_principal(caller_principal)
 
     # Step 0 -- refuse to be the weak door. The query is normalized ONCE here
     # and Layer 1 sees the normalized text. That is equivalent to handing the
@@ -734,7 +862,9 @@ def check_sensitivity(
                 f"normalizer failed: returned {type(normalized_sql).__name__}, not str"
             )
         else:
-            verdict = Validator(contract, dialect=dialect).validate(normalized_sql)
+            verdict = Validator(
+                contract, dialect=dialect, caller_principal=principal
+            ).validate(normalized_sql)
             if verdict.blocked and not verdict.parse_error:
                 raise ValueError(
                     f"query is blocked by the contract and will not be executed: "
@@ -743,25 +873,30 @@ def check_sensitivity(
             if verdict.parse_error:
                 no_verdict = f"unparseable: {'; '.join(verdict.reasons)}"
 
-    # A shadow that fails to parse cannot be checked against `allowed` here --
+    # A shadow that fails to parse cannot be checked against the contract --
     # `None` is a refusal, never an empty set of tables read. Recorded now and
     # turned into an `unchecked` result (never an execution) in the loop below,
     # so a governance hole never opens just because sqlglot cannot read the
-    # dialect a shadow is written in.
-    allowed = {name.lower() for name in contract.allowed_table_names()}
+    # dialect a shadow is written in. Governed means governed FOR THIS
+    # CALLER: a shadow reading a table the caller is denied is refused just as
+    # one reading a table the contract never declared -- with a message that
+    # says which of the two it is.
+    declared = {name.lower() for name in contract.allowed_table_names()}
     unparseable_shadows: set[str] = set()
-    for prop in selected:
-        read = _shadow_tables(prop.shadow, dialect=dialect, normalize=normalize)
-        if read is None:
+    for prop, ungoverned in _shadow_governance(
+        selected,
+        contract.allowed_table_names_for(principal),
+        dialect=dialect,
+        normalize=normalize,
+    ):
+        if ungoverned is None:
             unparseable_shadows.add(prop.name)
-            continue
-        for name in sorted(read):
-            if name.lower() not in allowed:
-                raise ValueError(
-                    f"sensitivity property {prop.name!r} of metric "
-                    f"{metric.name!r} has a shadow reading {name!r}, which the "
-                    "contract does not allow"
-                )
+        elif ungoverned:
+            raise ValueError(
+                f"sensitivity property {prop.name!r} of metric "
+                f"{metric.name!r} has a shadow reading {ungoverned[0]!r}, which "
+                f"{_why_ungoverned(ungoverned[0], declared, principal)}"
+            )
 
     # No verdict for the query -- unparseable, or its normalizer failed -- is
     # refused WITHOUT executing anything, not even the rewrite. That is what
@@ -856,17 +991,21 @@ def check_sensitivity(
             )
             continue
 
-        if not before and prop.expect == "changes":
-            # An empty answer cannot move, so `expect: changes` asserts
-            # nothing -- and refusing here, before the mutated query ever
-            # runs, keeps that early exit's cost the same as before.
+        if _is_vacuous(before) and prop.expect == "changes":
+            # No answer -- no rows, or one all-NULL row -- cannot move, so
+            # `expect: changes` asserts nothing -- and refusing here, before
+            # the mutated query ever runs, keeps that early exit's cost the
+            # same as before.
             results.append(
                 SensitivityResult(
                     name=prop.name,
                     metric=metric.name,
                     status="unchecked",
                     expected=prop.expect,
-                    reason="vacuous: an empty base result cannot move",
+                    reason=(
+                        "vacuous: an empty base result, or a single all-NULL "
+                        "row, cannot move"
+                    ),
                 )
             )
             continue
@@ -885,11 +1024,12 @@ def check_sensitivity(
             )
             continue
 
-        if not before and not after:
-            # `expect: changes` with an empty base was already refused above,
-            # so reaching here with an empty base means `expect: unchanged` --
-            # and an empty shadowed result too tests nothing: there is no
-            # answer that moved or held still, just two absences.
+        if _is_vacuous(before) and after == before:
+            # `expect: changes` with a vacuous base was already refused above,
+            # so this is `expect: unchanged` -- and a shadowed result
+            # IDENTICAL to a vacuous base tests nothing: no answer held still,
+            # there was none. Compared exactly as the verdict below compares;
+            # any other shadowed result (a row gained or lost) is a real move.
             results.append(
                 SensitivityResult(
                     name=prop.name,
@@ -897,8 +1037,9 @@ def check_sensitivity(
                     status="unchecked",
                     expected=prop.expect,
                     reason=(
-                        "vacuous: an empty base result and an empty shadowed "
-                        "result cannot show whether the answer would move"
+                        "vacuous: an empty base result, or a single all-NULL "
+                        "row, with an identical shadowed result cannot show "
+                        "whether the answer would move"
                     ),
                 )
             )

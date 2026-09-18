@@ -1350,10 +1350,9 @@ metric = source.get_metric("total_revenue")
 report = check_sensitivity(metric, sql, contract=contract, adapter=adapter)
 print(report.summary())
 
-# report.ok alone does not require coverage: a query that reads none of the
-# shadowed tables comes back all not_applicable, and that is ok. This gate
-# also fails when nothing was checked at all.
-if not report.ok or len(report.not_applicable) == len(report.results):
+# Fails on a violation, on "no verdict possible", and on a query that read
+# none of the shadowed tables -- so nothing was checked at all.
+if not report.ok:
     sys.exit(1)
 ```
 
@@ -1361,9 +1360,9 @@ if not report.ok or len(report.not_applicable) == len(report.results):
 
 The shadow itself is never sent through the Validator; it is contract-authored, like `sql_expression`, and most shadows want the `SELECT *` the Validator would reject. It is constrained a different way instead: its tables must be ones the contract governs. That is checked in two places — at CI time by `validate_sensitivity_tables`, and again at run time inside `check_sensitivity`, which raises `ValueError` the moment a shadow reads an ungoverned table. Both are run-time and CI-time gates, deliberately not a load-time one: `YamlSource` holds no `DataContract` to check a shadow's tables against, so there is nothing to check at load. A shadow sqlglot cannot parse fails closed the same way an unparseable caller query does — its property comes back `unchecked` and nothing executes for it — and `validate_sensitivity_tables` reports it as a problem rather than staying silent about it.
 
-Each property lands in exactly one `status`: `pass`, `violation`, `not_applicable` (the query never references the shadowed table — an outcome, not a failure), or `unchecked` (no verdict was possible). `report.ok` is False on any `violation` or `unchecked`, True when everything left is `pass` or `not_applicable`. An **empty** report (a metric that declares no `sensitivity` properties) is `ok`: nothing was claimed, so nothing failed.
+Each property lands in exactly one `status`: `pass`, `violation`, `not_applicable` (the query never references the shadowed table — an outcome, not a failure), or `unchecked` (no verdict was possible). **`report.ok` is the whole CI gate.** It is False on any `violation`; on any `unchecked`, because "no verdict was possible" must not read as a pass; and on a report where **every** property is `not_applicable`. That last case is a query that read none of the shadowed tables, so nothing was checked — and it includes a fully hardcoded answer (`SELECT 10700.00 AS revenue`), the purest form of the defect this feature exists to catch. A run that checked nothing must not read like a run that found nothing; `check_schema_drift` holds itself to the same rule.
 
-**`report.ok` gates the verdicts that were rendered, not coverage.** `not_applicable` does not block, because a metric with properties on several tables legitimately gets `not_applicable` for a query that never reads some of those tables. The consequence is that a query reading **none** of the shadowed tables is not checked at all and still comes back `ok` — and that includes a fully hardcoded answer (`SELECT 10700.00 AS revenue FROM …` over some other allowed table), which is exactly the kind of query this feature exists to catch. If you want coverage, gate on it as the snippet above does: `if not report.ok or len(report.not_applicable) == len(report.results): sys.exit(1)`. That gate also fails an empty report, since a metric that declares no properties gives no coverage either.
+The floor is one verdict, not all of them: `not_applicable` beside at least one `pass` does not block, because a metric with properties on several tables legitimately gets `not_applicable` for a query that reads only some of them. When you know no declared property applies to a query, say so with `properties=[]` — it returns an empty report, which is `ok`, and makes the opt-out a visible decision rather than a silent pass. A metric that declares no `sensitivity` properties also returns an empty, `ok` report: nothing was claimed, so nothing failed.
 
 **Determinism is filtered, not proved.** The base query runs `repeats` (default 2) times, and disagreement degrades every property to `unchecked`. Two runs catch most flakiness but not all of it — a `LIMIT` with no `ORDER BY` can agree across both repeats and still not be truly deterministic — so a passing property is evidence of stability, not a proof of it.
 

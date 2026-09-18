@@ -43,11 +43,11 @@ property is flagged ``violation`` -- and 1 otherwise, so CI catches a
 regression in the check itself, the same convention ``check_drift.py`` uses.
 A *real* CI gate over your own queries reads differently, because there a
 ``violation`` is the failure the gate exists to catch, not evidence the gate
-is working. ``report.ok`` alone does not require coverage -- a query reading
-none of the shadowed tables comes back ``not_applicable`` and ``ok`` -- so
-gate on both (see the README)::
+is working. There, ``report.ok`` is the whole gate -- it also fails a query
+that read none of the shadowed tables, so nothing was checked (see the
+README)::
 
-    if not report.ok or len(report.not_applicable) == len(report.results):
+    if not report.ok:
         sys.exit(1)
 """
 

@@ -168,6 +168,16 @@ class TestReport:
         assert report.ok is True
         assert len(report.not_applicable) == 1
 
+    def test_all_not_applicable_is_not_ok(self) -> None:
+        # Properties were claimed and none could render a verdict: the query
+        # read none of the shadowed tables. "A run that checked nothing must
+        # not read like a run that found nothing" -- the rule check_schema_drift
+        # already follows.
+        report = SensitivityReport(
+            results=(_res("not_applicable"), _res("not_applicable", "q"))
+        )
+        assert report.ok is False
+
     def test_violation_blocks(self) -> None:
         report = SensitivityReport(results=(_res("pass"), _res("violation", "q")))
         assert report.ok is False
@@ -321,6 +331,34 @@ class TestCheckSensitivity:
         (result,) = report.results
         assert result.status == "not_applicable"
         assert result.moved is None
+        assert report.ok is False
+
+    def test_a_hardcoded_answer_is_not_ok(self, mkt_adapter, mkt_contract) -> None:
+        # The purest form of premature materialization: the answer pasted in
+        # as a literal. It reads no table, so every property is not_applicable
+        # -- and before coverage was required, `ok` passed it.
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            "SELECT 'search' AS channel, 2 AS mqls",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        assert [r.status for r in report.results] == ["not_applicable"]
+        assert report.ok is False
+
+    def test_an_explicit_empty_selection_opts_out(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # A caller who knows no declared property applies to this query says so
+        # with properties=[] -- a decision, not a silent pass.
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            "SELECT count(*) FROM mkt.lead_scores",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+            properties=[],
+        )
+        assert report.results == ()
         assert report.ok is True
 
     def test_metric_with_no_properties_yields_an_empty_ok_report(

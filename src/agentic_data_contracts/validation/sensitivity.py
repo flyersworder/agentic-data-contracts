@@ -243,27 +243,34 @@ class SensitivityReport:
 
     @property
     def ok(self) -> bool:
-        """True when nothing is a violation and nothing is unchecked.
+        """True when nothing failed AND at least one property was checked.
 
-        It is False on a ``violation`` and on an ``unchecked``, because "no
-        verdict was possible" must not read as "passed". ``not_applicable``
-        does NOT block: a metric with properties on several tables
-        legitimately gets it for a query that never reads some of them.
+        Safe as a CI gate -- ``if not report.ok: sys.exit(1)``. It is False on:
 
-        So ``ok`` gates the verdicts rendered, not coverage. A query reading
-        NONE of the shadowed tables -- a fully hardcoded answer included -- is
-        not checked at all and is still ok. To require coverage::
+        - a ``violation``;
+        - an ``unchecked``, because "no verdict was possible" must not read
+          as "passed";
+        - a report where EVERY result is ``not_applicable``. The query read
+          none of the shadowed tables, so nothing was checked -- and the
+          purest form of the defect this exists to catch, an answer pasted
+          in as a literal, reads no table at all. A run that checked nothing
+          must not read like a run that found nothing: the rule
+          ``check_schema_drift`` already follows.
 
-            if not report.ok or len(report.not_applicable) == len(report.results):
-                sys.exit(1)
+        ``not_applicable`` beside at least one ``pass`` does NOT block: a
+        metric with properties on several tables legitimately gets it for a
+        query that reads only some of them. The floor is one verdict, not all.
 
-        An EMPTY report is ok, which differs from ``ExampleValidationReport``.
-        There, zero examples means a corpus failed to load. Here it means the
-        metric declares no properties -- nothing was claimed, so nothing failed.
-        Test ``report.violations`` directly for a laxer gate. The coverage
-        gate above fails an empty report.
+        An EMPTY report is ok. It arises two ways, both deliberate: the metric
+        declares no properties (nothing was claimed), or the caller passed
+        ``properties=[]`` -- the explicit way to say no declared property
+        applies to this query. That differs from ``ExampleValidationReport``,
+        where zero examples means a corpus failed to load. Test
+        ``report.violations`` directly for a laxer gate.
         """
-        return not (self.violations or self.unchecked)
+        if self.violations or self.unchecked:
+            return False
+        return not self.results or any(r.status == "pass" for r in self.results)
 
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment."""

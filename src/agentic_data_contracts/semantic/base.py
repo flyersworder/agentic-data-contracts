@@ -467,6 +467,45 @@ def validate_drill_by(
                 )
 
 
+def validate_sensitivity(metrics: list[MetricDefinition]) -> None:
+    """Validate declared sensitivity properties, loudly.
+
+    Everything checkable from the semantic source alone is checked here. The
+    one rule that is NOT -- that ``shadow.sql`` may only read tables the
+    contract governs -- needs a ``DataContract``, which a source does not have;
+    see ``validation.sensitivity.validate_sensitivity_tables``.
+    """
+    for metric in metrics:
+        seen: set[str] = set()
+        for prop in metric.sensitivity:
+            if prop.name in seen:
+                raise ValueError(
+                    f"metric {metric.name!r} declares duplicate sensitivity "
+                    f"property name {prop.name!r}"
+                )
+            seen.add(prop.name)
+            if not prop.description.strip():
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} needs a non-empty description: it is the "
+                    "claim the property asserts, and a property nobody stated "
+                    "in words is one nobody can review"
+                )
+            if prop.expect not in VALID_EXPECT:
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} has expect {prop.expect!r}; "
+                    f"must be one of {sorted(VALID_EXPECT)}"
+                )
+            schema, _, table = prop.shadow.table.partition(".")
+            if not schema or not table or "." in table:
+                raise ValueError(
+                    f"metric {metric.name!r} sensitivity property "
+                    f"{prop.name!r} shadow.table {prop.shadow.table!r} must be "
+                    "'schema.table'"
+                )
+
+
 @runtime_checkable
 class SemanticSource(Protocol):
     def get_metrics(self) -> list[MetricDefinition]: ...

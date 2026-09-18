@@ -30,6 +30,7 @@ from agentic_data_contracts.semantic.base import (
     require_text,
     validate_decompositions,
     validate_drill_by,
+    validate_sensitivity,
 )
 
 logger = logging.getLogger(__name__)
@@ -463,6 +464,7 @@ class YamlSource:
         _apply_convention_default(self._metrics, default_convention)
         validate_decompositions(self._metrics)
         validate_drill_by(self._metrics, self._tables)
+        validate_sensitivity(self._metrics)
 
     def get_metrics(self) -> list[MetricDefinition]:
         return list(self._metrics)

@@ -31,3 +31,9 @@ docs/paper/pvldb.log
 docs/paper/pvldb.out
 docs/paper/pvldb.bbl
 docs/paper/pvldb.blg
+
+# Local git worktrees (isolated workspaces for plan execution)
+.worktrees/
+
+# Subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/

@@ -1888,3 +1888,95 @@ class TestNaN:
         (result,) = report.results
         assert result.status == "pass", result.reason
         assert result.moved is True
+
+
+#: One NULL per channel present: three rows (search, email, social) that each
+#: carry no value -- but the row COUNT is still an answer.
+_NULL_PER_CHANNEL = (
+    "SELECT SUM(CASE WHEN lead_id < 0 THEN lead_id END) AS s "
+    "FROM mkt.touchpoints GROUP BY channel"
+)
+_DROP_SOCIAL = Shadow(
+    table="mkt.touchpoints",
+    sql="SELECT * FROM mkt.touchpoints WHERE channel <> 'social'",
+)
+
+
+class TestVacuousIsOneShape:
+    """Vacuous means no rows, or ONE all-NULL row -- and, under
+    `expect: unchanged`, only when the shadowed result is that same shape."""
+
+    def test_several_null_rows_losing_a_group_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # Base [(None,)]*3, shadowed [(None,)]*2: a group disappeared.
+        report = check_sensitivity(
+            _metric(_null_prop("unchanged", _DROP_SOCIAL)),
+            _NULL_PER_CHANNEL,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_a_null_row_that_disappears_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # A lookup: base [(None,)], shadowed [] -- a real answer vanished.
+        report = check_sensitivity(
+            _metric(
+                _null_prop(
+                    "unchanged",
+                    Shadow(
+                        table="mkt.touchpoints",
+                        sql="SELECT * FROM mkt.touchpoints WHERE lead_id <> 3",
+                    ),
+                )
+            ),
+            "SELECT CAST(NULL AS INT) AS v FROM mkt.touchpoints WHERE lead_id = 3",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_no_rows_becoming_a_null_row_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # Base [], shadowed [(None,)]: the shape moved.
+        report = check_sensitivity(
+            _metric(
+                _null_prop(
+                    "unchanged",
+                    Shadow(
+                        table="mkt.touchpoints",
+                        sql="SELECT * FROM mkt.touchpoints UNION ALL SELECT 99, 'x', 1",
+                    ),
+                )
+            ),
+            "SELECT CAST(NULL AS INT) AS v FROM mkt.touchpoints WHERE lead_id = 99",
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation", result.reason
+        assert result.moved is True
+
+    def test_several_null_rows_under_changes_get_a_real_verdict(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # Not early-refused: the mutated query runs, and the lost group is
+        # the move `expect: changes` asks for.
+        seen = _spy(mkt_adapter, monkeypatch)
+        report = check_sensitivity(
+            _metric(_null_prop("changes", _DROP_SOCIAL)),
+            _NULL_PER_CHANNEL,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "pass", result.reason
+        assert result.moved is True
+        assert len(seen) == 3  # two base runs plus the mutated query

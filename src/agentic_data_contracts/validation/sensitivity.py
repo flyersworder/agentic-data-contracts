@@ -449,7 +449,12 @@ def _norm(rows: list[tuple]) -> list[tuple]:
 
 
 def _is_vacuous(rows: list[tuple]) -> bool:
-    """True when *rows* carry no answer at all: no rows, or only NULLs.
+    """True when *rows* carry no answer at all: no rows, or exactly ONE row
+    whose values are all NULL -- the shape of an aggregate over nothing.
+
+    Several all-NULL rows are NOT vacuous: their row count is itself an
+    answer (one NULL per group, say), and a shadow that adds or drops a row
+    has moved it. Nor is NaN: it is a value, not NULL.
 
     This NARROWS the vacuous-test gap; it does not close it. An aggregate
     over no rows is not always an absence: ``SUM`` (and ``AVG``, ``MIN``,
@@ -460,7 +465,7 @@ def _is_vacuous(rows: list[tuple]) -> bool:
     nothing on both sides therefore still reads ``pass`` under
     ``expect: unchanged``.
     """
-    return not rows or all(v is None for row in rows for v in row)
+    return not rows or (len(rows) == 1 and all(v is None for v in rows[0]))
 
 
 @dataclass(frozen=True)
@@ -475,16 +480,16 @@ class SensitivityResult:
       - ``"unchecked"``      -- no verdict was possible: unparseable SQL, the
                                 count guard refused the edit, the engine raised,
                                 the base query is not deterministic, or the
-                                test was vacuous -- an empty base result for
-                                ``expect: changes`` (it cannot move), or an
-                                empty base AND an empty shadowed result for
-                                ``expect: unchanged`` (nothing to hold still).
-                                "Empty" means no rows OR only NULLs, so an
-                                aggregate such as ``SUM`` over no rows counts;
-                                ``COUNT`` over no rows is ``0`` and does not
-                                (see ``_is_vacuous``). A non-empty shadowed
-                                result against an empty base under
-                                ``expect: unchanged`` is still a real
+                                test was vacuous. The base is vacuous when
+                                it has no rows, or exactly one all-NULL row
+                                (``SUM`` over no rows; ``COUNT`` over no rows
+                                is ``0`` and is not -- see ``_is_vacuous``).
+                                Under ``expect: changes`` a vacuous base is
+                                refused before the shadowed query runs; under
+                                ``expect: unchanged`` only when the shadowed
+                                result is identical to it. Any other shadowed
+                                result is compared as usual, so a vacuous
+                                base that gains or loses a row is a real
                                 ``"violation"``: the answer moved.
 
     ``moved`` is None when no comparison was made. ``reason`` reports the
@@ -987,16 +992,20 @@ def check_sensitivity(
             continue
 
         if _is_vacuous(before) and prop.expect == "changes":
-            # An empty (or all-NULL) answer cannot move, so `expect: changes`
-            # asserts nothing -- and refusing here, before the mutated query
-            # ever runs, keeps that early exit's cost the same as before.
+            # No answer -- no rows, or one all-NULL row -- cannot move, so
+            # `expect: changes` asserts nothing -- and refusing here, before
+            # the mutated query ever runs, keeps that early exit's cost the
+            # same as before.
             results.append(
                 SensitivityResult(
                     name=prop.name,
                     metric=metric.name,
                     status="unchecked",
                     expected=prop.expect,
-                    reason="vacuous: an empty or all-NULL base result cannot move",
+                    reason=(
+                        "vacuous: an empty base result, or a single all-NULL "
+                        "row, cannot move"
+                    ),
                 )
             )
             continue
@@ -1015,11 +1024,12 @@ def check_sensitivity(
             )
             continue
 
-        if _is_vacuous(before) and _is_vacuous(after):
-            # `expect: changes` with an empty base was already refused above,
-            # so reaching here with an empty base means `expect: unchanged` --
-            # and an empty shadowed result too tests nothing: there is no
-            # answer that moved or held still, just two absences.
+        if _is_vacuous(before) and after == before:
+            # `expect: changes` with a vacuous base was already refused above,
+            # so this is `expect: unchanged` -- and a shadowed result
+            # IDENTICAL to a vacuous base tests nothing: no answer held still,
+            # there was none. Compared exactly as the verdict below compares;
+            # any other shadowed result (a row gained or lost) is a real move.
             results.append(
                 SensitivityResult(
                     name=prop.name,
@@ -1027,8 +1037,8 @@ def check_sensitivity(
                     status="unchecked",
                     expected=prop.expect,
                     reason=(
-                        "vacuous: an empty or all-NULL base result and an "
-                        "empty or all-NULL shadowed result cannot show "
+                        "vacuous: an empty base result, or a single all-NULL "
+                        "row, with an identical shadowed result cannot show "
                         "whether the answer would move"
                     ),
                 )

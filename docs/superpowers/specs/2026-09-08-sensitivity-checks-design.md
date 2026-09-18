@@ -1,7 +1,13 @@
 # Sensitivity checks: verifying that a query derives what the contract says it depends on
 
-**Status:** design, approved 2026-09-08. Process scaffolding — delete once the
-feature ships (see the DABStep precedent, `8c0faf7`).
+**Status:** design approved 2026-09-08; implemented on `feat/sensitivity-checks`
+(0.52.0). Implementation changed several decisions, and a second design —
+dialects that parse only after normalization — was approved 2026-09-18. Every
+section above **What shipped differently** keeps its original text, so the reason
+for each change stays legible; where one disagrees with **What shipped
+differently** or **Dialects that parse only after normalization**, those two
+sections win. Process scaffolding — delete once
+the feature ships (see the DABStep precedent, `8c0faf7`).
 
 ## Problem
 
@@ -187,6 +193,8 @@ rehydration, matching how `decompositions` is validated):
 property to `unchecked` at run time — the same decision-B fallback
 `validate_examples` made for Denodo/VDP, and for the same reason: a dialect the
 engine understands and sqlglot does not must not make a contract unloadable.
+
+> **Superseded:** a shadow is now normalized before it is parsed, so a VQL shadow is checked rather than refused. See **Dialects that parse only after normalization**.
 The allowed-tables check above is only reachable when the shadow parses, so an
 unparseable shadow is never *silently* trusted: it is refused a verdict instead,
 and `report.ok` is false while it stands.
@@ -209,6 +217,11 @@ def check_sensitivity(
 ) -> SensitivityReport
 ```
 
+> **Superseded:** `metric` is a `MetricDefinition` passed positionally and
+> `contract` is keyword-only; `repeats` and `dialect` were added. A
+> `sql_normalizer` keyword is designed in **Dialects that parse only after
+> normalization**. See **What shipped differently**.
+
 `properties` selects a subset by name; `None` runs every property the metric
 declares. Unknown names raise `ValueError` (malformed input raises, data
 conditions are findings — the `reconcile_decomposition` split).
@@ -219,6 +232,8 @@ anything, and raises if it is blocked. Without this the function is a policy
 bypass — an entry point that executes arbitrary SQL against the adapter without
 the checks every other path applies. It is not a re-run of the caller's own
 validation so much as a refusal to be the weak door.
+
+> **Superseded:** only a *policy* block raises. A query Layer 1 cannot parse returns every property `unchecked` and executes nothing. See **What shipped differently**.
 
 Then, per property, five steps:
 
@@ -304,6 +319,8 @@ never touches the table has nothing to answer for. `unchecked` does, for the
 reason `validate_examples` gives: "no verdict was possible" must not read as
 "passed". Test `report.violations` directly for a laxer gate.
 
+> **Superseded:** `ok` is also False when every result is `not_applicable`. See **What shipped differently**.
+
 A metric that declares no properties yields an empty report: no results, `ok`
 True. Silence is the honest answer — nothing was claimed and nothing was checked.
 
@@ -331,6 +348,8 @@ says "the answer did not move", not "you hardcoded the threshold".
 | non-deterministic query reads as sensitive | base run `repeats` times; disagreement -> `unchecked`. Probabilistic — see step 3 |
 | vacuous test (empty base, `expect: changes`) | -> `unchecked`, not `pass` |
 | CTE alias collision with `__sens_0` | assert absent from the SQL; pick the next free `__sens_N` |
+
+> **Superseded:** the alias stem is `sens_shadow_`, letter-leading for portability.
 | dialect sqlglot cannot parse | -> `unchecked`; never silently skipped |
 | shadow reads an ungoverned table | rejected at load against `allowed_tables` |
 | `check_sensitivity` used to run SQL the contract forbids | step 0 raises if Layer 1 blocks the caller's query |
@@ -467,3 +486,193 @@ keeps `lookup_metric` as the single discovery surface, and is the smaller change
 If duplication bites, a top-level `sensitivity_mutations:` block referenced by
 name from metrics is an additive follow-up — it does not invalidate anything
 here.
+
+## What shipped differently
+
+Each change below was decided during implementation, recorded with its reason,
+and reviewed. Where one contradicts an earlier section, this section wins.
+
+| Topic | Earlier sections said | Shipped |
+|---|---|---|
+| Signature | `check_sensitivity(contract, sql, *, metric: str, …)` | `check_sensitivity(metric: MetricDefinition, sql, *, contract, adapter, properties=None, repeats=2, dialect=None)`, matching `reconcile_decomposition` and removing a lookup-by-name path |
+| Container types | `tuple`, `Literal` | `list` with a default factory; `expect` is a `str` checked against `VALID_EXPECT`, matching `decompositions` |
+| Ungoverned shadow | rejected at load | refused at run time by `check_sensitivity` and at CI time by `validate_sensitivity_tables`: `YamlSource` holds no `DataContract` to check against |
+| Step 0 | raise on any Layer 1 block | raise on a *policy* block; a query Layer 1 cannot parse returns every property `unchecked` and executes nothing. Sections 2 and 5 contradicted each other here |
+| Unparseable shadow | degrades to `unchecked` | the same, and now also never executed and reported by `validate_sensitivity_tables`; the first implementation silently ran it |
+| `report.ok` | False on `violation` or `unchecked` | also False when every result is `not_applicable`: a query reading none of the shadowed tables — a hardcoded answer included — checked nothing. `properties=[]` is the explicit opt-out |
+| Multiple statements | not considered | Layer 1 blocks a string holding more than one statement. Pre-existing in every release from 0.1.0; found because `check_sensitivity` leans on Layer 1 |
+| Determinism | two runs | `repeats` runs, a parameter; the probe is a filter, not a proof, and `repeats < 1` raises |
+
+## Dialects that parse only after normalization
+
+Approved 2026-09-18.
+
+### Problem
+
+`check_sensitivity` parses the caller's raw text. A dialect sqlglot parses only
+after a `SqlNormalizer` rewrites it — Denodo VQL, in this library's known
+deployment — returns `unchecked` for every query. That fails closed, so it opens
+no governance hole, but it leaves the feature unusable where it was meant to run.
+
+### Constraint
+
+`SqlNormalizer` is an opaque `normalize_sql(sql) -> str`. The library ships no
+implementation; the Denodo one lives outside it and reports no offsets. The
+protocol also requires that the **original** text execute, never the normalized
+one. So the library must edit text it cannot parse, guided by text it can.
+
+### Design: parse the normalized text, edit the original
+
+1. **Step 0.** Build the `Validator` with the normalizer, so the query is
+   policy-checked in normalized form, exactly as `run_query` does it.
+2. **Locate.** Count the real references to the target table in the AST of
+   `normalize(sql)`.
+3. **Rewrite.** Tokenize the **original** text, find the target's spans, and
+   require the span count to equal the reference count. Edit the original.
+4. **Prove, in two parts.** First, normalize the *edited body* — before the CTE
+   is injected — and require that it parses and holds **zero** real references
+   to the target. The proof cannot run on the final text: the shadow itself
+   legitimately reads the target (`SELECT * FROM mkt.touchpoints UNION ALL …`).
+   Second, inject the CTE, normalize the final text, and require that it parses.
+5. **Shadows.** Normalize `shadow.sql` before the governance check parses its
+   tables, so a VQL shadow reading an ungoverned view is still refused.
+
+Without a normalizer, `normalize` is the identity and the same path runs. The
+proof then costs one extra parse on plain SQL, and it turns the existing count
+guard from "the counts agree" into "the edit is shown to have worked".
+
+**Why tokenizing the original works.** Tokenizing is far more permissive than
+parsing. VQL's `CONTEXT ('k' = 'v')` clause fails `sqlglot.parse_one` but
+tokenizes cleanly (probed 2026-09-18).
+
+**Why the proof is needed.** Count equality alone can be fooled. If the
+normalizer dropped one reference and the original holds an extra look-alike
+token in table position, the counts match and the wrong span is edited. The
+proof catches any edit that leaves a real reference to the target behind.
+
+**Assumption: the normalizer changes syntax, not names.** Infineon's Denodo
+normalizer is syntax-only. A normalizer that renames or re-qualifies the target
+makes the span and reference counts disagree, so every query fails closed as
+`unchecked`.
+
+### Where it lives: inside the library
+
+The normalizer lives outside because it holds dialect knowledge the library
+cannot have. The span mapping holds none: it treats `normalize` as a black box
+and verifies the result, so it serves any syntax-only normalizer with no work
+from its author. It also decides what SQL runs, and the post-edit proof is the
+library's guarantee. Dialect knowledge stays outside; verification stays inside.
+
+**Named follow-up, not built:** an optional `SqlNormalizer` method returning
+exact offsets, for a normalizer that also rewrites names. The library would
+prefer it when present, fall back to the generic mapping when absent, and still
+run the proof on whatever it returns. It is additive and breaks no existing
+normalizer.
+
+### Denodo's `WITH` clause
+
+The Virtual DataPort VQL Guide documents `WITH` in every release from 8.0 to
+9.3-beta: "Virtual DataPort supports Common Table Expressions in SELECT and
+CREATE VIEW statements." Its example references one CTE twice, once inside a
+subquery — the pattern the rewrite produces. The guide leaves three details open;
+each fails closed as an engine error, then `unchecked`.
+
+| Detail | The rewrite emits | Guide | If Denodo refuses it |
+|---|---|---|---|
+| No column list | `sens_shadow_0 AS (<shadow>)` | its only example has one | every rewrite fails; fix by emitting the list from `adapter.describe_table(shadow.table)` |
+| Letter-leading alias | `sens_shadow_0` | silent on identifier rules | every rewrite fails |
+| Several CTEs in one `WITH` | `WITH sens_shadow_0 AS (…), <caller's CTE> …` — only when the caller wrote a `WITH` | single-CTE examples only | only those queries fail |
+
+`WITH RECURSIVE` is undocumented for VQL, so a VQL caller never writes it.
+
+**Hardening, regardless of Denodo:** the alias stem changes from `__sens_` to
+`sens_shadow_`. Oracle requires unquoted identifiers to start with a letter, so
+`__sens_0` would fail there too. `_free_alias` already steps past collisions.
+
+**Rejected:** emitting a column list pre-emptively (a `describe_table` round trip
+on every call, for a problem the guide does not show); rewriting to an inline
+derived table, `FROM (<shadow>) AS payments` (it sidesteps all three details but
+needs alias-aware surgery on every reference — riskier than the problem). The
+derived table is the fallback if Denodo refuses the multi-CTE splice.
+
+**Verification on a live Denodo** (not blocking):
+
+```sql
+WITH sens_shadow_0 AS (SELECT * FROM <some_view>) SELECT COUNT(*) FROM sens_shadow_0;
+WITH sens_shadow_0 AS (SELECT * FROM <some_view>), b AS (SELECT * FROM sens_shadow_0)
+SELECT COUNT(*) FROM b;
+```
+
+### Guards
+
+Malformed input raises; data conditions are findings. Every `unchecked` below
+executes nothing for that property.
+
+| Condition | Result |
+|---|---|
+| the normalizer raises on the query | every property `unchecked` (`normalizer failed: …`); nothing executes |
+| the normalized query does not parse | every property `unchecked`; nothing executes |
+| the normalized query is blocked by policy | `ValueError` |
+| a normalized shadow reads an ungoverned table | `ValueError` |
+| the normalizer raises on a shadow, or its normalized form does not parse | that property `unchecked` (`unparseable shadow`); `validate_sensitivity_tables` reports it |
+| the normalized query does not reference the target | `not_applicable` |
+| the original text does not tokenize | `unchecked` (`original text could not be tokenized`) |
+| spans in the original ≠ references in the normalized AST | `unchecked` (count guard across the normalizer boundary) |
+| the edited body fails to normalize or parse, or still references the target | `unchecked` (`rewrite could not be proved`) |
+| the final text fails to normalize or parse | `unchecked` (`rewrite could not be proved`) |
+| the engine rejects the base or mutated query | `unchecked`, including any `WITH` detail above |
+
+Normalizing is in-process string work — the query twice (once inside Layer 1,
+once to locate), each property's edited body and final text once, each shadow
+once — and adds no database round trips.
+
+### Public API
+
+```python
+check_sensitivity(metric, sql, *, contract, adapter, properties=None,
+                  repeats=2, dialect=None, sql_normalizer=None)
+validate_sensitivity_tables(contract, metrics, *, dialect=None, sql_normalizer=None)
+```
+
+Both keywords are additive. When `sql_normalizer` is omitted, `check_sensitivity`
+uses the adapter if it implements `SqlNormalizer`, the convention `create_tools`
+follows; a Denodo adapter needs no wiring. `validate_sensitivity_tables` takes no
+adapter, so it has no fallback. Internally the rewrite takes a `normalize`
+callable that defaults to the identity.
+
+### Testing without Denodo
+
+A test adapter wraps DuckDB and accepts a VQL `CONTEXT (…)` clause: its
+`normalize_sql` strips the clause for sqlglot, and its `execute` strips it for
+DuckDB, as Denodo accepts its own syntax.
+
+| Test | Proves |
+|---|---|
+| first-touch and fan-out queries with `CONTEXT` appended come back `pass` and `violation` | the feature works on a dialect that parses only after normalization |
+| an execute-spy sees `CONTEXT` and the CTE in what runs | the original text executes, never the normalized one |
+| the same queries through a plain adapter come back `unchecked` | before and after — the capability added |
+| a normalizer that renames the target gives `unchecked`, nothing run for that property | the count guard fails closed across the boundary |
+| a normalizer that raises gives every property `unchecked`, nothing run | the normalizer cannot crash the call or leak execution |
+| the proof helper refuses an edited body that still references the target | the proof has teeth; tested directly, since the case is hard to reach |
+| a `CONTEXT` shadow: governed passes, ungoverned raises | shadow governance is judged after normalization |
+| a `SqlNormalizer` adapter with the keyword omitted | the fallback is used |
+| `sens_shadow_0` appears, and a collision steps to `sens_shadow_1` | the alias hardening |
+
+Every test runs at the sqlglot floor (28.6) and at the lockfile's version.
+Existing tests that name `__sens_` move to the new stem.
+
+### Non-goals
+
+- No change to the `SqlNormalizer` protocol.
+- No offsets method yet (the named follow-up above).
+- No pre-emptive column list, and no derived-table rewrite, unless Denodo refuses
+  the CTE form.
+
+### Docs
+
+The README, CHANGELOG 0.52.0 entry and module docstring drop "Denodo/VQL is not
+yet supported" and state instead: queries are normalized before they are parsed
+and edited on their original text; the normalizer must change syntax only; the
+three `WITH` details and their fail-closed behaviour; the verification queries;
+and the named follow-up.
+

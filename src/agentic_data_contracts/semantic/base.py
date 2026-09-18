@@ -739,6 +739,19 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
             data["drill_by"] = [
                 {"dimension": dd.dimension, "column": dd.column} for dd in m.drill_by
             ]
+        # Omitted when empty for the reason spelled out on `decompositions`
+        # above: `contract_canonical_bytes` dumps with no `exclude_none`, so an
+        # always-present key moves every published digest.
+        if m.sensitivity:
+            data["sensitivity"] = [
+                {
+                    "name": p.name,
+                    "description": p.description,
+                    "shadow": {"table": p.shadow.table, "sql": p.shadow.sql},
+                    "expect": p.expect,
+                }
+                for p in m.sensitivity
+            ]
         return data
 
     tables: list[dict[str, Any]] = []

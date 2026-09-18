@@ -8,6 +8,7 @@ from agentic_data_contracts.semantic.base import (
     MetricDefinition,
     SensitivityProperty,
     Shadow,
+    dump_semantic_source,
     validate_sensitivity,
 )
 from agentic_data_contracts.semantic.yaml_source import YamlSource
@@ -160,3 +161,56 @@ class TestLoadTimeValidation:
             "attribution_is_first_touch",
             "another_property",
         ]
+
+
+class TestDumpAndRoundTrip:
+    def test_dump_omits_the_key_when_no_property_is_declared(self) -> None:
+        raw = {"metrics": [{"name": "m", "description": "", "sql_expression": "1"}]}
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert "sensitivity" not in dumped["metrics"][0], (
+            "an always-present key moves every published contract_digest"
+        )
+
+    def test_dump_emits_the_property_when_declared(self) -> None:
+        dumped = dump_semantic_source(YamlSource.from_raw(_raw()))
+        (prop,) = dumped["metrics"][0]["sensitivity"]
+        assert prop == {
+            "name": "attribution_is_first_touch",
+            "description": (
+                "A touchpoint after qualification cannot change a first-touch "
+                "attribution."
+            ),
+            "shadow": {"table": "mkt.touchpoints", "sql": SHADOW_SQL},
+            "expect": "unchanged",
+        }
+
+    def test_round_trips_through_from_raw(self) -> None:
+        once = dump_semantic_source(YamlSource.from_raw(_raw()))
+        twice = dump_semantic_source(YamlSource.from_raw(once))
+        assert once == twice
+
+    def test_pre_feature_contract_dumps_byte_identically(self) -> None:
+        """The 0.28.1 digest-stability regression, as a test."""
+        raw = {
+            "metrics": [
+                {
+                    "name": "total_revenue",
+                    "description": "Total revenue",
+                    "sql_expression": "SUM(amount)",
+                }
+            ]
+        }
+        dumped = dump_semantic_source(YamlSource.from_raw(raw))
+        assert set(dumped["metrics"][0]) == {
+            "name",
+            "description",
+            "sql_expression",
+            "source_model",
+            "filters",
+            "domains",
+            "tier",
+            "indicator_kind",
+            "business_owner",
+            "operational_owner",
+            "last_reviewed",
+        }

@@ -42,6 +42,10 @@ places, each flagged inline as **DEVIATION** with the reason.
   query, and that query with one table shadowed by a contract-authored SELECT.
 - Line length 88 (ruff default in this repo). Do not write `file.py:NNN`
   references in committed prose — a prek hook rejects them.
+- **Ruff `select = ["E", "F", "I", "UP"]`, so E402 is on.** When a task says
+  "append to" a test file that already exists, its imports go into that file's
+  **top-of-file import block**, merged and kept sorted — never in a new block
+  beside the appended class. An import lower down fails `prek run`.
 
 ---
 
@@ -336,16 +340,21 @@ Append to `tests/test_semantic/test_sensitivity.py`:
 
 ```python
 class TestLoadTimeValidation:
+    # `_check_entry_keys` raises only in strict mode, and `strict` is
+    # `expected_extras is not None` -- declaring it at all is this loader's
+    # documented way to say "fail my build on a key you do not read". Without
+    # it an unknown nested key logs a warning and is dropped, which is the
+    # behaviour every sibling key set already has.
     def test_unknown_property_key_raises(self) -> None:
         with pytest.raises(ValueError, match="sensitivity"):
-            YamlSource.from_raw(_raw(expects="unchanged"))
+            YamlSource.from_raw(_raw(expects="unchanged"), expected_extras=[])
 
     def test_unknown_shadow_key_raises(self) -> None:
         raw = _raw(
             shadow={"table": "mkt.touchpoints", "sql": SHADOW_SQL, "where": "1=1"}
         )
         with pytest.raises(ValueError, match="shadow"):
-            YamlSource.from_raw(raw)
+            YamlSource.from_raw(raw, expected_extras=[])
 
     def test_empty_description_raises(self) -> None:
         with pytest.raises(ValueError, match="description"):
@@ -503,12 +512,11 @@ This is its own task because it is the feature's one real compatibility risk. A
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_semantic/test_sensitivity.py`:
+Append to `tests/test_semantic/test_sensitivity.py`, merging
+`dump_semantic_source` into the existing `semantic.base` import at the top of
+the file (E402 is on — see Global Constraints):
 
 ```python
-from agentic_data_contracts.semantic.base import dump_semantic_source
-
-
 class TestDumpAndRoundTrip:
     def test_dump_omits_the_key_when_no_property_is_declared(self) -> None:
         raw = {"metrics": [{"name": "m", "description": "", "sql_expression": "1"}]}
@@ -991,15 +999,12 @@ git commit -m "feat(validation): CTE-shadow rewrite for sensitivity checks"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_validation/test_sensitivity.py`:
+Append to `tests/test_validation/test_sensitivity.py`, merging
+`SensitivityReport` and `SensitivityResult` into the existing
+`validation.sensitivity` import at the top of the file (E402 is on — see
+Global Constraints):
 
 ```python
-from agentic_data_contracts.validation.sensitivity import (
-    SensitivityReport,
-    SensitivityResult,
-)
-
-
 def _res(status: str, name: str = "p") -> SensitivityResult:
     return SensitivityResult(name=name, metric="m", status=status, expected="unchanged")
 
@@ -1181,7 +1186,9 @@ because step 0 needs it for the Validator.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_validation/test_sensitivity.py`:
+Append to `tests/test_validation/test_sensitivity.py`. These imports merge into
+the top-of-file block (E402 is on — see Global Constraints); the existing
+`semantic.base` and `validation.sensitivity` imports gain the new names:
 
 ```python
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter

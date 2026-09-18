@@ -32,6 +32,16 @@ This is the fourth validation verb the library contributes:
 
 A passing property never says the answer is right. It says the query responded
 to an input the contract says it depends on.
+
+Exit code
+---------
+This script exits 0 when ``check_sensitivity`` behaves as documented above --
+the correct query's one property is ``pass`` and the defective query's one
+property is flagged ``violation`` -- and 1 otherwise, so CI catches a
+regression in the check itself, the same convention ``check_drift.py`` uses.
+A *real* CI gate over your own queries reads differently: ``if not
+report.ok: sys.exit(1)`` (see the README), because there a ``violation`` is
+the failure the gate exists to catch, not evidence the gate is working.
 """
 
 from __future__ import annotations
@@ -83,7 +93,7 @@ def main() -> int:
     metric = source.get_metric("total_revenue")
     assert metric is not None
 
-    failed = False
+    reports = {}
     for label, sql in (
         ("filters to completed", CORRECT),
         ("no status filter", DEFECTIVE),
@@ -91,11 +101,26 @@ def main() -> int:
         report = check_sensitivity(metric, sql, contract=contract, adapter=adapter)
         print(f"\n{label}:")
         print(report.summary())
-        failed = failed or not report.ok
+        reports[label] = report
 
-    print("\nThe second query is legal, plannable and wrong. Only the")
-    print("behavioural check disagrees with it.")
-    return 1 if failed else 0
+    correct_report = reports["filters to completed"]
+    defective_report = reports["no status filter"]
+    correct_passed = (
+        len(correct_report.results) == 1 and correct_report.results[0].status == "pass"
+    )
+    defective_flagged = len(defective_report.violations) == 1
+
+    if correct_passed and defective_flagged:
+        print("\nThe second query is legal, plannable and wrong. Only the")
+        print("behavioural check disagrees with it.")
+        return 0
+
+    print("\ncheck_sensitivity did not behave as documented:")
+    if not correct_passed:
+        print("  - the correct query's property did not come back a clean `pass`")
+    if not defective_flagged:
+        print("  - the defective query was not flagged with exactly one `violation`")
+    return 1
 
 
 if __name__ == "__main__":

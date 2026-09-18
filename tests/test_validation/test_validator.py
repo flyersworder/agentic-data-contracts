@@ -439,6 +439,31 @@ class TestMultipleStatements:
         assert not result.blocked
         assert result.reasons == []
 
+    @pytest.mark.parametrize("tail", ["-- note", "/* note */"])
+    def test_a_comment_after_the_final_semicolon_is_one_statement(
+        self, validator: Validator, tail: str
+    ) -> None:
+        # sqlglot parses a comment-only tail as an `exp.Semicolon` node, not
+        # None, so counting non-None entries mistook it for a second statement
+        # and refused a query agents plausibly write, with a misleading reason.
+        result = validator.validate(
+            f"SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; {tail}"
+        )
+        assert not result.blocked
+        assert result.reasons == []
+
+    def test_a_comment_does_not_hide_a_second_statement(
+        self, validator: Validator
+    ) -> None:
+        # The exclusion above must drop ONLY the comment-only tail: a real
+        # statement written after a comment is still a second statement.
+        result = validator.validate(
+            "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'; "
+            "/* note */ DELETE FROM analytics.orders WHERE tenant_id = 'acme'"
+        )
+        assert result.blocked
+        assert any("multiple statements" in r for r in result.reasons)
+
     def test_validate_results_blocks_multiple_statements(
         self, validator: Validator
     ) -> None:

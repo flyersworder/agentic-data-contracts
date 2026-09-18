@@ -81,13 +81,20 @@ def _is_multi_statement(sql: str, dialect: str | None) -> bool:
     recognises or silently keeps only the first. So a forbidden operation
     written after a harmless ``SELECT`` would be executed unchecked. This
     counts statements with ``sqlglot.parse`` instead, which returns one entry
-    per statement on every supported version; empty entries (a trailing
-    semicolon) are not statements.
+    per statement on every supported version. Two kinds of entry are not
+    statements: ``None`` (a trailing semicolon) and ``exp.Semicolon``, which
+    is how a comment-only tail after the last semicolon parses
+    (``SELECT 1; -- note``). Counting the latter refused a query agents
+    plausibly write. Both exist and behave the same at the 28.6 floor.
 
     Raises whatever ``sqlglot.parse`` raises, so callers handle an unreadable
     query exactly as they already handle one that fails ``parse_one``.
     """
-    statements = [s for s in sqlglot.parse(sql, dialect=dialect) if s is not None]
+    statements = [
+        s
+        for s in sqlglot.parse(sql, dialect=dialect)
+        if s is not None and not isinstance(s, exp.Semicolon)
+    ]
     return len(statements) > 1
 
 

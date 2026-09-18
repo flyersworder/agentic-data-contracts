@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 
 import pytest
 import sqlglot
@@ -341,6 +342,19 @@ class TestNormalise:
     def test_nan_sorts_stably_among_numbers(self) -> None:
         rows = [(2.0,), (float("nan"),), (1.0,), (float("inf"),)]
         assert _norm(rows) == _norm(list(reversed(rows)))
+
+    def test_decimal_nan_equals_decimal_nan(self) -> None:
+        # psycopg returns Postgres `numeric 'NaN'` as Decimal('NaN'), which,
+        # like float NaN, never equals itself.
+        assert _norm([(Decimal("NaN"),)]) == _norm([(Decimal("NaN"),)])
+
+    def test_signalling_decimal_nan_does_not_raise(self) -> None:
+        # Decimal('sNaN') raises InvalidOperation on `==`; canonicalized, it
+        # compares like any NaN.
+        assert _norm([(Decimal("sNaN"),)]) == _norm([(Decimal("NaN"),)])
+
+    def test_decimal_nan_differs_from_a_decimal_number(self) -> None:
+        assert _norm([(Decimal("NaN"),)]) != _norm([(Decimal("1"),)])
 
     def test_infinities_are_kept(self) -> None:
         assert _norm([(float("inf"),), (float("-inf"),)]) == [

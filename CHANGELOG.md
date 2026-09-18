@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **An all-NULL result now counts as empty for the vacuous rule.** `SUM` over no rows is NULL, not no rows, so a query whose filter matched nothing got an unearned verdict: `violation` under `expect: changes`, `pass` under `expect: unchanged`. Both now come back `unchecked` as vacuous. This narrows the gap rather than closing it: `COUNT` over no rows is `0`, indistinguishable from a real zero, and is deliberately not treated as vacuous. The vacuous `unchecked` reasons now read "empty or all-NULL".
-- **NaN never compared equal to itself.** A NaN answer — DuckDB returns one for `0.0/0.0` on doubles, and from NaN stored in a float column — was therefore always "not deterministic" (`unchecked`) at the default `repeats`, and with `repeats=1` it always looked moved: an unearned `pass` under `expect: changes`, a false `violation` under `expect: unchanged`. NaN now compares equal to NaN, and still differs from any number.
+- **NaN never compared equal to itself.** A NaN answer — DuckDB returns one for `0.0/0.0` on doubles, and from NaN stored in a float column — was therefore always "not deterministic" (`unchecked`) at the default `repeats`, and with `repeats=1` it always looked moved: an unearned `pass` under `expect: changes`, a false `violation` under `expect: unchanged`. A float or Decimal NaN (psycopg returns Postgres `numeric 'NaN'` as `Decimal('NaN')`; a signalling `Decimal('sNaN')` raised on comparison) now compares equal to NaN, and still differs from any number.
 
 ## [0.52.0] - 2026-09-18
 

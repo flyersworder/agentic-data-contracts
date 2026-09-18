@@ -77,6 +77,8 @@ __all__ = [
     "ResultCheckRunner",
     "SchemaDrift",
     "SchemaDriftReport",
+    "SensitivityReport",
+    "SensitivityResult",
     "TableAllowlistChecker",
     "ToolCall",
     "ToolRecorder",
@@ -88,8 +90,42 @@ __all__ = [
     "check_attribution",
     "check_example_answers",
     "check_schema_drift",
+    "check_sensitivity",
     "evaluate_conformance",
     "extract_tables",
     "reconcile_decomposition",
     "validate_examples",
+    "validate_sensitivity_tables",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazy load sensitivity module exports to avoid circular imports.
+
+    The sensitivity module imports from semantic.base, which imports from
+    adapters.base, which imports from validation.explain. This creates a
+    circular dependency when validation/__init__.py is loaded early by
+    adapters/base.py. To break the cycle, sensitivity exports are loaded
+    on-demand.
+    """
+    if name in (
+        "SensitivityReport",
+        "SensitivityResult",
+        "check_sensitivity",
+        "validate_sensitivity_tables",
+    ):
+        from agentic_data_contracts.validation.sensitivity import (
+            SensitivityReport,
+            SensitivityResult,
+            check_sensitivity,
+            validate_sensitivity_tables,
+        )
+
+        _map = {
+            "SensitivityReport": SensitivityReport,
+            "SensitivityResult": SensitivityResult,
+            "check_sensitivity": check_sensitivity,
+            "validate_sensitivity_tables": validate_sensitivity_tables,
+        }
+        return _map[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

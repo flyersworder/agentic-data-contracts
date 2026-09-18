@@ -223,3 +223,17 @@ def test_schema_drift_names_are_exported() -> None:
     ]:
         assert hasattr(validation, name), name
         assert name in validation.__all__, name
+
+
+def test_sensitivity_names_are_exported() -> None:
+    """Sensitivity check exports live in the validation submodule."""
+    from agentic_data_contracts import validation
+
+    for name in [
+        "SensitivityReport",
+        "SensitivityResult",
+        "check_sensitivity",
+        "validate_sensitivity_tables",
+    ]:
+        assert hasattr(validation, name), name
+        assert name in validation.__all__, name

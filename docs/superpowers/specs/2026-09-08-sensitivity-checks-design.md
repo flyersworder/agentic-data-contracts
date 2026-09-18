@@ -161,9 +161,9 @@ class Shadow:
 @dataclass(frozen=True)
 class SensitivityProperty:
     name: str
+    description: str  # required -- the claim, in the owner's words. See Ownership.
     shadow: Shadow
     expect: Literal["unchanged", "changes"]
-    description: str = ""
 ```
 
 `MetricDefinition` gains `sensitivity: tuple[SensitivityProperty, ...] = ()`.
@@ -173,6 +173,8 @@ rehydration, matching how `decompositions` is validated):
 
 - unknown keys rejected at both levels (`SENSITIVITY_KEYS`, `SHADOW_KEYS`);
 - `name` unique within a metric;
+- **`description` present and non-empty** -- see Ownership; a property nobody
+  stated in words is one nobody can review;
 - `expect` in the enum;
 - `shadow.table` a well-formed `schema.table` identifier;
 - **`shadow.sql`'s table references rejected unless every one is in the
@@ -339,6 +341,51 @@ is computed once and cached, so a metric with four properties costs six
 executions, not twelve. Stated in the module docstring, because it is the reason
 this belongs at a promotion gate rather than in a hot path.
 
+## Ownership
+
+`sensitivity` adds a field to the contract, so it adds a question about who
+keeps it true. The answer is not one role, and the split is not arbitrary --
+it follows the one `MetricDefinition` already draws between `business_owner`
+(the definition and its review cadence) and `operational_owner` (data health).
+
+| part of the field | who | why |
+|---|---|---|
+| `description` + `expect` -- the **claim** | business owner states it, analytics engineer records it | "A touchpoint after qualification cannot change a first-touch attribution" is a business sentence, not a SQL one. It is the same kind of sentence that already justifies `sql_expression`. |
+| `shadow.sql` -- the **encoding** | analytics engineer | Engine-native SQL against governed tables, in the same dialect and the same review as `sql_expression`. |
+| `shadow.table` in `allowed_tables`, adapter, where the gate runs | data engineer / platform | Load-time validation already refuses a shadow reading an ungoverned table, so this role owns the surface the property may be written against -- not the property. |
+
+A property therefore belongs to the metric's **`business_owner`**, on the
+definition side of that line, and **not** to `operational_owner`: a violation
+means the query disagrees with the definition, never that the data is unhealthy.
+
+**Why the business owner cannot simply be left out.** A property invented by
+the engineer who wrote `sql_expression` encodes the same understanding that
+produced it, so it can only catch queries that disagree with *their* reading.
+That is exactly what this spec claims -- it is a derivation check, not a
+definition check, and "no claim about correctness" is already a non-goal -- so
+engineer-authored properties are sufficient for the stated purpose. But the
+properties worth having are the ones where an owner holds a standing opinion
+they would defend: first-touch attribution, what a NULL region means, which
+month boundary counts. An engineer working alone does not think to write those,
+because to them the query obviously does the right thing. This is the same
+structure as deriving a test from the implementation rather than the spec: it
+catches transcription, not translation. **This is why `description` is
+required** -- it is the one field that carries the owner's contribution, and a
+property with no description is an assertion nobody can review.
+
+**Deletion needs the sign-off that addition does.** The change control here is
+asymmetric in a way that is easy to miss. Adding a property tightens the gate
+*loudly*: CI fails and someone investigates. Removing one loosens it *silently*
+and nothing ever complains again. Contract review must treat a deleted
+property as a withdrawn commitment, not as cleanup.
+
+**Staleness rides `last_reviewed`, and does not get its own field.** A property
+that stops holding because the business changed -- first-touch became
+last-touch -- does not go quiet; it fires `violation` on correct queries and
+burns trust quickly. That makes it exactly as perishable as the definition it
+belongs to, and the metric's existing `last_reviewed` is the right clock. A
+second, per-property date would be a second thing to forget.
+
 ## Worked example (the acceptance test)
 
 Fixture: `mkt.lead_scores` (lead_id, region, is_mql, qualified_date) and
@@ -382,7 +429,8 @@ TDD, red first, one task per behaviour, per `CLAUDE.md`.
 
 - parse, round-trip through `dump_semantic_source` / `from_raw`;
 - unknown keys rejected at both levels;
-- duplicate property name, bad `expect`, malformed `shadow.table` all raise;
+- duplicate property name, bad `expect`, malformed `shadow.table`, and a
+  missing or empty `description` all raise;
 - shadow referencing a table outside `allowed_tables` raises;
 - **a contract declaring no `sensitivity` dumps byte-identically to its
   pre-feature form** (the 0.28.1 digest-stability regression, as a test).

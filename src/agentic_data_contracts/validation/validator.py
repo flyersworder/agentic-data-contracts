@@ -67,6 +67,30 @@ def _warn_unenforceable_operations(forbidden: frozenset[str]) -> None:
         )
 
 
+MULTIPLE_STATEMENTS_REASON = (
+    "multiple statements in one query are not allowed; send one statement per call"
+)
+
+
+def _is_multi_statement(sql: str, dialect: str | None) -> bool:
+    """True when *sql* holds more than one statement.
+
+    Every checker analyses ONE statement, and a single-statement parse cannot
+    be trusted to surface a second one: depending on the sqlglot version,
+    ``parse_one`` either wraps the statements in a container node no checker
+    recognises or silently keeps only the first. So a forbidden operation
+    written after a harmless ``SELECT`` would be executed unchecked. This
+    counts statements with ``sqlglot.parse`` instead, which returns one entry
+    per statement on every supported version; empty entries (a trailing
+    semicolon) are not statements.
+
+    Raises whatever ``sqlglot.parse`` raises, so callers handle an unreadable
+    query exactly as they already handle one that fails ``parse_one``.
+    """
+    statements = [s for s in sqlglot.parse(sql, dialect=dialect) if s is not None]
+    return len(statements) > 1
+
+
 # (allowed_principals, blocked_principals) snapshot taken at build time. None
 # means the rule has no principal restriction. Schema-level mutual exclusion
 # guarantees at most one of the two lists is non-None.
@@ -299,19 +323,27 @@ class Validator:
         schema_valid: bool = True
         explain_errors: list[str] = []
 
+        # TokenError (an unterminated literal, say) is raised by the tokenizer
+        # and is NOT a ParseError subclass; both mean "unreadable".
         try:
             normalized = (
                 self.sql_normalizer.normalize_sql(sql) if self.sql_normalizer else sql
             )
+            multi = _is_multi_statement(normalized, self.dialect)
             ast = cast(
                 exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
             )
-        except errors.ParseError as e:
+        except (errors.ParseError, errors.TokenError) as e:
             return ValidationResult(
                 blocked=True,
                 reasons=[f"SQL parse error: {e}"],
                 parse_error=True,
             )
+
+        # A policy block, not a parse error: the query was read, and it is
+        # refused because the checkers below would only see one statement of it.
+        if multi:
+            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
 
         relative_time = _relative_time_node(ast)
 
@@ -412,13 +444,21 @@ class Validator:
             normalized = (
                 self.sql_normalizer.normalize_sql(sql) if self.sql_normalizer else sql
             )
+            multi = _is_multi_statement(normalized, self.dialect)
             ast = cast(
                 exp.Expression, sqlglot.parse_one(normalized, dialect=self.dialect)
             )
-        except errors.ParseError:
+        except (errors.ParseError, errors.TokenError):
+            multi = False
             referenced_tables: set[str] = set()
         else:
             referenced_tables = extract_tables(ast)
+
+        # Same verdict ``validate`` gives. Table-scoped result rules are chosen
+        # from the parsed statement, which here would be only one of several,
+        # so scoping cannot be trusted and there is no sound partial answer.
+        if multi:
+            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
 
         resolved_principal = resolve_principal(self._caller_principal)
 

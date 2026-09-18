@@ -485,6 +485,28 @@ class TestPolicy:
                 adapter=mkt_adapter,
             )
 
+    def test_multiple_statements_raise_and_execute_nothing(
+        self, mkt_adapter, mkt_contract, monkeypatch
+    ) -> None:
+        # A forbidden DELETE smuggled behind a SELECT is a policy block, not an
+        # unparseable query: it must raise, and nothing may reach the adapter.
+        seen: list[str] = []
+        original = mkt_adapter.execute
+
+        def spy(sql: str):
+            seen.append(sql)
+            return original(sql)
+
+        monkeypatch.setattr(mkt_adapter, "execute", spy)
+        with pytest.raises(ValueError, match="multiple statements"):
+            check_sensitivity(
+                _metric(FIRST_TOUCH_PROP),
+                "SELECT count(*) FROM mkt.touchpoints; DELETE FROM mkt.touchpoints",
+                contract=mkt_contract,
+                adapter=mkt_adapter,
+            )
+        assert seen == []
+
     def test_shadow_reading_an_ungoverned_table_raises(self, mkt_adapter) -> None:
         # The shadow reads mkt.lead_scores, which this contract does not govern.
         contract = _contract("touchpoints")

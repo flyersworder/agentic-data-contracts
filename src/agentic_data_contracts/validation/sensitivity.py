@@ -35,14 +35,14 @@ Validator: the rewrite's spans are computed on the raw text.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
-from agentic_data_contracts.validation.validator import Validator
+from agentic_data_contracts.validation.validator import Validator, _is_multi_statement
 
 if TYPE_CHECKING:
     # Deferred to avoid a circular import: adapters.base imports
@@ -78,6 +78,23 @@ _ALIAS_STEM = "sens_shadow_"
 
 class _Refused(Exception):
     """The mechanical reason no verdict could be rendered for one property."""
+
+
+#: A normalizer as the rewrite sees it: dialect text in, sqlglot-parseable text
+#: out. The identity when the caller has no SqlNormalizer.
+Normalize = Callable[[str], str]
+
+
+def _identity(sql: str) -> str:
+    return sql
+
+
+def _normalized(sql: str, normalize: Normalize, *, what: str) -> str:
+    """*sql* normalized, or a refusal naming what failed to normalize."""
+    try:
+        return normalize(sql)
+    except Exception as e:  # noqa: BLE001 - any normalizer failure is one outcome
+        raise _Refused(f"normalizer failed on {what}: {e}") from e
 
 
 def _cte_aliases(tree: exp.Expression) -> set[str]:
@@ -127,7 +144,10 @@ def _spans(sql: str, target: str, *, dialect: str | None) -> list[tuple[int, int
     identifier/DOT runs. A name inside a string literal or a comment is a
     different token type and is never a candidate.
     """
-    toks = list(sqlglot.tokenize(sql, dialect=dialect))
+    try:
+        toks = list(sqlglot.tokenize(sql, dialect=dialect))
+    except Exception as e:  # noqa: BLE001 - TokenError, whatever the version
+        raise _Refused(f"original text could not be tokenized: {e}") from e
     db, _, name = target.rpartition(".")
     out: list[tuple[int, int]] = []
     for i, tok in enumerate(toks):
@@ -158,22 +178,39 @@ def _free_alias(sql: str) -> str:
     return f"{_ALIAS_STEM}{n}"
 
 
-def _rewrite(sql: str, shadow: Shadow, *, dialect: str | None) -> str:
-    """The caller's own text, with *shadow.table* pointed at an injected CTE."""
-    refs = _table_refs(sql, shadow.table, dialect=dialect)
-    if refs == 0:
-        raise _Refused("not_applicable: query does not reference the target")
-    spans = _spans(sql, shadow.table, dialect=dialect)
-    if len(spans) != refs:
-        raise _Refused(
-            f"count guard: {len(spans)} spans vs {refs} table nodes; refusing to edit"
-        )
-    alias = _free_alias(sql)
-    out = sql
-    for start, end in sorted(spans, reverse=True):  # right-to-left
-        out = out[:start] + alias + out[end:]
+def _prove_edit(
+    body: str, target: str, *, dialect: str | None, normalize: Normalize
+) -> None:
+    """Refuse unless the edited body holds no real reference to *target*.
 
-    toks = list(sqlglot.tokenize(out, dialect=dialect))
+    Runs on the body BEFORE the CTE is injected: the shadow itself legitimately
+    reads the target, so the final text always contains one. Count equality
+    alone can be fooled -- a normalizer that drops one reference while the
+    original holds a look-alike in table position gets the wrong span edited
+    with the counts still agreeing -- so this checks the outcome, not the
+    arithmetic.
+    """
+    try:
+        remaining = _table_refs(
+            _normalized(body, normalize, what="the edited query"),
+            target,
+            dialect=dialect,
+        )
+    except _Refused as e:
+        raise _Refused(f"rewrite could not be proved: {e}") from e
+    if remaining:
+        raise _Refused(
+            f"rewrite could not be proved: {remaining} reference(s) to "
+            f"{target!r} remain after the edit"
+        )
+
+
+def _inject(body: str, alias: str, shadow: Shadow, *, dialect: str | None) -> str:
+    """Put the shadow in front of *body* as a CTE, splicing into its own WITH."""
+    try:
+        toks = list(sqlglot.tokenize(body, dialect=dialect))
+    except Exception as e:  # noqa: BLE001 - the original tokenized, so unexpected
+        raise _Refused(f"rewrite could not be proved: {e}") from e
     # The newline ends any trailing line comment in the shadow before the
     # closing paren, which the comment would otherwise swallow.
     cte = f"{alias} AS ({shadow.sql}\n)"
@@ -184,8 +221,64 @@ def _rewrite(sql: str, shadow: Shadow, *, dialect: str | None) -> str:
             if head is not None and head.token_type == sqlglot.TokenType.RECURSIVE
             else toks[0].end + 1
         )
-        return f"{out[:cut]} {cte}, {out[cut:]}"
-    return f"WITH {cte} {out}"
+        return f"{body[:cut]} {cte}, {body[cut:]}"
+    return f"WITH {cte} {body}"
+
+
+def _prove_parses(final: str, *, dialect: str | None, normalize: Normalize) -> None:
+    """Refuse unless the injected text is exactly one statement that parses.
+
+    "Parses" alone is not enough: at the sqlglot 28.6 floor ``parse_one``
+    silently keeps only the first statement, so the count is checked the way
+    Layer 1 checks it.
+    """
+    try:
+        normalized = _normalized(final, normalize, what="the rewritten query")
+        if _is_multi_statement(normalized, dialect):
+            raise _Refused("it holds more than one statement")
+        sqlglot.parse_one(normalized, dialect=dialect)
+    except Exception as e:  # noqa: BLE001 - _Refused, ParseError, TokenError alike
+        raise _Refused(f"rewrite could not be proved: {e}") from e
+
+
+def _rewrite(
+    sql: str,
+    shadow: Shadow,
+    *,
+    dialect: str | None,
+    normalize: Normalize = _identity,
+) -> str:
+    """The caller's own text, with *shadow.table* pointed at an injected CTE.
+
+    References are COUNTED in the normalized text, which sqlglot can parse, and
+    LOCATED in the original, which is what executes: a ``SqlNormalizer`` returns
+    no offsets, and the protocol requires the original to run. The two must
+    agree, and the edit is then proved rather than trusted. Raises only
+    ``_Refused``.
+    """
+    refs = _table_refs(
+        _normalized(sql, normalize, what="the query"), shadow.table, dialect=dialect
+    )
+    spans = _spans(sql, shadow.table, dialect=dialect)
+    # Absent from BOTH texts is an outcome. Absent from only one is a
+    # disagreement -- a normalizer that renamed the target reads as zero
+    # references -- so it falls to the count guard instead of posing as
+    # not_applicable.
+    if refs == 0 and not spans:
+        raise _Refused("not_applicable: query does not reference the target")
+    if len(spans) != refs:
+        raise _Refused(
+            f"count guard: {len(spans)} spans in the original text vs {refs} "
+            "table references after normalization; refusing to edit"
+        )
+    alias = _free_alias(sql)
+    body = sql
+    for start, end in sorted(spans, reverse=True):  # right-to-left
+        body = body[:start] + alias + body[end:]
+    _prove_edit(body, shadow.table, dialect=dialect, normalize=normalize)
+    final = _inject(body, alias, shadow, dialect=dialect)
+    _prove_parses(final, dialect=dialect, normalize=normalize)
+    return final
 
 
 def _norm(rows: list[tuple]) -> list[tuple]:

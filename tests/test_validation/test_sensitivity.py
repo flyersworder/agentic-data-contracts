@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 import sqlglot
 
@@ -16,7 +18,10 @@ from agentic_data_contracts.validation.sensitivity import (
     SensitivityReport,
     SensitivityResult,
     _free_alias,
+    _identity,
     _norm,
+    _prove_edit,
+    _prove_parses,
     _Refused,
     _rewrite,
     _shadow_tables,
@@ -29,6 +34,16 @@ SHADOW = Shadow(
     table="main.payments",
     sql="SELECT * REPLACE (eur_amount * 10 AS eur_amount) FROM main.payments",
 )
+
+#: VQL's CONTEXT clause: sqlglot cannot parse it, but it tokenizes, and Denodo
+#: accepts it. Stripping it is the smallest faithful stand-in for a Denodo
+#: normalizer -- syntax only, table names untouched.
+_CONTEXT = re.compile(r"\s*\bCONTEXT\s*\([^)]*\)", re.IGNORECASE)
+_CTX = " CONTEXT ('i18n' = 'us_est')"
+
+
+def _strip_context(sql: str) -> str:
+    return _CONTEXT.sub("", sql)
 
 
 def _rw(sql: str) -> str:
@@ -143,6 +158,104 @@ class TestRewrite:
         assert (
             _free_alias("SELECT sens_shadow_0, sens_shadow_1 FROM t") == "sens_shadow_2"
         )
+
+
+class TestNormalizedRewrite:
+    """References are COUNTED in the normalized text and LOCATED in the original."""
+
+    def test_edits_the_original_when_only_the_normalized_text_parses(self) -> None:
+        sql = f"SELECT count(*) FROM mkt.touchpoints{_CTX}"
+        with pytest.raises(sqlglot.errors.ParseError):
+            sqlglot.parse_one(sql, dialect="duckdb")
+        out = _rewrite(sql, MKT_SHADOW, dialect="duckdb", normalize=_strip_context)
+        assert out.startswith("WITH sens_shadow_0 AS (")
+        assert "FROM sens_shadow_0 CONTEXT ('i18n' = 'us_est')" in out  # original kept
+        sqlglot.parse_one(_strip_context(out), dialect="duckdb")
+
+    def test_absent_from_both_texts_is_not_applicable(self) -> None:
+        with pytest.raises(_Refused, match="not_applicable"):
+            _rewrite(
+                f"SELECT count(*) FROM mkt.lead_scores{_CTX}",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=_strip_context,
+            )
+
+    def test_a_renaming_normalizer_trips_the_count_guard(self) -> None:
+        # The normalized text holds zero references and the original holds one.
+        # That is a disagreement, not an absence (DEVIATION 2).
+        with pytest.raises(_Refused, match="count guard"):
+            _rewrite(
+                "SELECT count(*) FROM mkt.touchpoints",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=lambda s: s.replace("mkt.touchpoints", "mkt.tp"),
+            )
+
+    def test_an_untokenizable_original_is_refused(self) -> None:
+        # Normalizes to parseable SQL, but the original's unterminated literal
+        # cannot be tokenized -- so its spans cannot be found.
+        with pytest.raises(_Refused, match="could not be tokenized"):
+            _rewrite(
+                "SELECT 'x FROM mkt.touchpoints",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=lambda s: "SELECT 1 FROM mkt.touchpoints",
+            )
+
+    def test_a_normalizer_that_raises_is_refused(self) -> None:
+        def boom(sql: str) -> str:
+            raise RuntimeError("no VQL today")
+
+        with pytest.raises(_Refused, match="normalizer failed"):
+            _rewrite(
+                "SELECT count(*) FROM mkt.touchpoints",
+                MKT_SHADOW,
+                dialect="duckdb",
+                normalize=boom,
+            )
+
+
+class TestProof:
+    """The edit is proved, not trusted. Tested directly, since a count that
+    agrees while the wrong span was edited is hard to reach naturally."""
+
+    def test_refuses_a_body_that_still_references_the_target(self) -> None:
+        with pytest.raises(_Refused, match="remain after the edit"):
+            _prove_edit(
+                "SELECT 1 FROM main.payments",
+                "main.payments",
+                dialect="duckdb",
+                normalize=_identity,
+            )
+
+    def test_accepts_a_body_with_no_reference_left(self) -> None:
+        _prove_edit(
+            "SELECT 1 FROM sens_shadow_0",
+            "main.payments",
+            dialect="duckdb",
+            normalize=_identity,
+        )
+
+    def test_refuses_when_the_normalizer_fails_on_the_body(self) -> None:
+        def boom(sql: str) -> str:
+            raise RuntimeError("no")
+
+        with pytest.raises(_Refused, match="could not be proved"):
+            _prove_edit(
+                "SELECT 1 FROM sens_shadow_0",
+                "main.payments",
+                dialect="duckdb",
+                normalize=boom,
+            )
+
+    def test_refuses_a_final_text_of_two_statements(self) -> None:
+        with pytest.raises(_Refused, match="could not be proved"):
+            _prove_parses("SELECT 1; SELECT 2", dialect="duckdb", normalize=_identity)
+
+    def test_refuses_a_final_text_that_does_not_parse(self) -> None:
+        with pytest.raises(_Refused, match="could not be proved"):
+            _prove_parses("SELECT FROM )(", dialect="duckdb", normalize=_identity)
 
 
 class TestNormalise:

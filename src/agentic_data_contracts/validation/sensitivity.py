@@ -70,7 +70,10 @@ _TABLE_POS = frozenset(
     }
 )
 _IDENT = frozenset({sqlglot.TokenType.VAR, sqlglot.TokenType.IDENTIFIER})
-_ALIAS_STEM = "__sens_"
+#: Letter-leading, because some engines require an unquoted identifier to start
+#: with a letter (Oracle documents it) and the VQL grammar names the CTE a
+#: `<query name>` without spelling out its identifier rules.
+_ALIAS_STEM = "sens_shadow_"
 
 
 class _Refused(Exception):
@@ -148,7 +151,7 @@ def _spans(sql: str, target: str, *, dialect: str | None) -> list[tuple[int, int
 
 
 def _free_alias(sql: str) -> str:
-    """The first ``__sens_N`` the query does not already contain."""
+    """The first ``sens_shadow_N`` the query does not already contain."""
     n = 0
     while f"{_ALIAS_STEM}{n}" in sql:
         n += 1

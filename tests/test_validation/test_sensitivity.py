@@ -76,19 +76,19 @@ class TestLocate:
 class TestRewrite:
     def test_prepends_a_with_clause(self) -> None:
         out = _rw("SELECT count(*) FROM main.payments")
-        assert out.startswith("WITH __sens_0 AS (")
-        assert "FROM __sens_0" in out
+        assert out.startswith("WITH sens_shadow_0 AS (")
+        assert "FROM sens_shadow_0" in out
         assert "FROM main.payments\n)" in out  # inside the shadow, untouched
 
     def test_rewrites_a_bare_reference_and_keeps_its_alias(self) -> None:
         out = _rw("SELECT count(*) FROM payments p WHERE p.eur_amount > 10")
-        assert "FROM __sens_0 p" in out
+        assert "FROM sens_shadow_0 p" in out
 
     def test_splices_into_an_existing_with(self) -> None:
         sql = "WITH v AS (SELECT 1 FROM payments) SELECT * FROM v"
         out = _rw(sql)
-        assert out.startswith("WITH __sens_0 AS (")
-        assert "v AS (SELECT 1 FROM __sens_0)" in out
+        assert out.startswith("WITH sens_shadow_0 AS (")
+        assert "v AS (SELECT 1 FROM sens_shadow_0)" in out
 
     def test_splices_after_with_recursive(self) -> None:
         sql = (
@@ -96,8 +96,8 @@ class TestRewrite:
             "SELECT (SELECT count(*) FROM payments) FROM r"
         )
         out = _rw(sql)
-        assert out.startswith("WITH RECURSIVE __sens_0 AS (")
-        assert "FROM __sens_0) FROM r" in out
+        assert out.startswith("WITH RECURSIVE sens_shadow_0 AS (")
+        assert "FROM sens_shadow_0) FROM r" in out
 
     def test_rewrites_a_reference_inside_a_correlated_subquery(self) -> None:
         sql = (
@@ -105,12 +105,12 @@ class TestRewrite:
             "FROM main.fees f"
         )
         out = _rw(sql)
-        assert "FROM __sens_0 x" in out
+        assert "FROM sens_shadow_0 x" in out
 
     def test_leaves_a_string_literal_alone(self) -> None:
         out = _rw("SELECT 'payments' AS label, count(*) FROM main.payments")
         assert "'payments' AS label" in out
-        assert "FROM __sens_0" in out
+        assert "FROM sens_shadow_0" in out
 
     def test_leaves_a_column_alias_alone(self) -> None:
         # The count guard's false-positive class, measured on the DABStep
@@ -118,7 +118,7 @@ class TestRewrite:
         sql = "SELECT count(DISTINCT psp_reference) AS payments FROM main.payments"
         out = _rw(sql)
         assert "AS payments" in out
-        assert "FROM __sens_0" in out
+        assert "FROM sens_shadow_0" in out
 
     def test_not_applicable_when_the_target_is_absent(self) -> None:
         with pytest.raises(_Refused, match="not_applicable"):
@@ -135,12 +135,14 @@ class TestRewrite:
         )
         out = _rewrite("SELECT count(*) FROM main.payments", shadow, dialect="duckdb")
         sqlglot.parse_one(out, dialect="duckdb")
-        assert "FROM __sens_0" in out
+        assert "FROM sens_shadow_0" in out
 
     def test_alias_collision_picks_the_next_free_name(self) -> None:
-        assert _free_alias("SELECT 1") == "__sens_0"
-        assert _free_alias("SELECT __sens_0 FROM t") == "__sens_1"
-        assert _free_alias("SELECT __sens_0, __sens_1 FROM t") == "__sens_2"
+        assert _free_alias("SELECT 1") == "sens_shadow_0"
+        assert _free_alias("SELECT sens_shadow_0 FROM t") == "sens_shadow_1"
+        assert (
+            _free_alias("SELECT sens_shadow_0, sens_shadow_1 FROM t") == "sens_shadow_2"
+        )
 
 
 class TestNormalise:
@@ -481,7 +483,7 @@ class TestCheckSensitivity:
             adapter=mkt_adapter,
         )
         assert len(seen) == 4
-        assert sum(1 for s in seen if "__sens_" not in s) == 2
+        assert sum(1 for s in seen if "sens_shadow_" not in s) == 2
 
     def test_unparseable_shadow_is_unchecked(
         self, mkt_adapter, mkt_contract, monkeypatch

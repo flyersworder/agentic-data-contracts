@@ -26,13 +26,19 @@ it is the same template-assembly discipline the rest of the library follows.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import sqlglot
 from sqlglot import exp
 
-from agentic_data_contracts.semantic.base import Shadow
+from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.semantic.base import MetricDefinition, Shadow
+from agentic_data_contracts.validation.validator import Validator
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.adapters.base import DatabaseAdapter
 
 #: Only an identifier in one of these positions names a table. Without this, a
 #: COLUMN ALIAS sharing the table's name (``COUNT(DISTINCT psp_reference) AS
@@ -250,3 +256,250 @@ class SensitivityReport:
                 f"(expected {r.expected}, moved={r.moved}){detail}"
             )
         return "\n".join(lines)
+
+
+#: Base executions per call. Two is a filter, not a proof -- see the note on
+#: determinism in ``check_sensitivity``.
+DEFAULT_REPEATS = 2
+
+
+def _shadow_tables(shadow: Shadow, *, dialect: str | None) -> set[str] | None:
+    """Qualified names ``shadow.sql`` reads, or None if it does not parse."""
+    try:
+        parsed = sqlglot.parse_one(shadow.sql, dialect=dialect)
+    except Exception:  # noqa: BLE001 - an unparseable shadow is one outcome
+        return None
+    if parsed is None:
+        return None
+    # sqlglot.parse_one is annotated to return the broader `Expr` base (as of
+    # the resolved sqlglot; the pinned floor still returns `Expression`
+    # directly). Every real parse produces an `exp.Expression` subtype, so
+    # this narrows the static type to match runtime reality -- same pattern
+    # as `_table_refs`.
+    tree = cast(exp.Expression, parsed)
+    ctes = _cte_aliases(tree)
+    names: set[str] = set()
+    for node in tree.find_all(exp.Table):
+        if node.name.lower() in ctes and not node.db:
+            continue
+        names.add(f"{node.db}.{node.name}" if node.db else node.name)
+    return names
+
+
+def validate_sensitivity_tables(
+    contract: DataContract, metrics: list[MetricDefinition]
+) -> list[str]:
+    """Problems where a shadow reads a table the contract does not govern.
+
+    A shadow that reads an ungoverned table is a governance hole, not a
+    convenience: it would let a contract-authored SELECT reach data no agent
+    query may reach. This is the CI-time gate; ``check_sensitivity`` refuses
+    the same condition at execution time.
+
+    A shadow sqlglot cannot parse yields no problem here -- it cannot be
+    checked, and it degrades to ``unchecked`` at run time rather than being
+    silently trusted.
+    """
+    allowed = {name.lower() for name in contract.allowed_table_names()}
+    problems: list[str] = []
+    for metric in metrics:
+        for prop in metric.sensitivity:
+            read = _shadow_tables(prop.shadow, dialect=None)
+            if read is None:
+                continue
+            for name in sorted(read):
+                if name.lower() not in allowed:
+                    problems.append(
+                        f"metric {metric.name!r} sensitivity property "
+                        f"{prop.name!r}: shadow reads {name!r}, which the "
+                        "contract does not allow"
+                    )
+    return problems
+
+
+def check_sensitivity(
+    metric: MetricDefinition,
+    sql: str,
+    *,
+    contract: DataContract,
+    adapter: DatabaseAdapter,
+    properties: Sequence[str] | None = None,
+    repeats: int = DEFAULT_REPEATS,
+    dialect: str | None = None,
+) -> SensitivityReport:
+    """Check *sql* against the sensitivity properties *metric* declares.
+
+    ``properties`` selects a subset by name; None runs every declared property.
+    An unknown name raises ``ValueError`` -- malformed input raises, data
+    conditions are findings, the same split ``reconcile_decomposition`` makes.
+
+    **Step 0: the caller's query must pass Layer 1.** ``sql`` goes through the
+    contract's ``Validator`` before anything is executed, and a policy block
+    raises. Without this the function is a policy bypass: an entry point that
+    runs arbitrary SQL against the adapter with none of the checks every other
+    path applies. It is less a re-run of the caller's own validation than a
+    refusal to be the weak door.
+
+    An unparseable query is a DIFFERENT outcome from a policy block, though the
+    Validator reports both as ``blocked``. There is no verdict to render on SQL
+    Layer 1 could not even read, so this degrades to ``unchecked`` for every
+    selected property -- the same "no verdict was possible" status a count-guard
+    refusal or a nondeterministic base query produces -- and nothing is
+    executed, not even the base query, not even the rewrite. That is what makes
+    skipping the raise safe: this function never runs SQL Layer 1 did not first
+    see and clear.
+
+    ``shadow.sql`` is NOT put through the Validator. It is contract-authored,
+    like ``sql_expression``, and most shadows want the ``SELECT *`` the
+    validator would reject. It is instead constrained at both ends: its tables
+    must be governed (checked here, and by ``validate_sensitivity_tables``),
+    and it can only ever be read.
+
+    **Determinism is filtered, not proved.** The base query is run ``repeats``
+    times; disagreement makes every property ``unchecked``. A query that is
+    merely *usually* stable passes this and then produces a verdict it did not
+    earn. Measured on the DABStep corpus, two executions caught 13 of ~14 flaky
+    queries -- the survivor differed on every repetition of the experiment and
+    was always a ``LIMIT`` with no ``ORDER BY``. No finite number of probes
+    closes this, which is why ``repeats`` is a parameter and the limitation is
+    stated rather than engineered away.
+
+    A passing property says the query *responds* to an input the contract says
+    it depends on. It never says the answer is right.
+    """
+    selected = list(metric.sensitivity)
+    if properties is not None:
+        by_name = {p.name: p for p in selected}
+        unknown = [n for n in properties if n not in by_name]
+        if unknown:
+            raise ValueError(
+                f"metric {metric.name!r} declares no sensitivity property named "
+                f"{unknown[0]!r}; declared: {sorted(by_name) or 'none'}"
+            )
+        selected = [by_name[n] for n in properties]
+
+    if not selected:
+        return SensitivityReport(results=())
+
+    if dialect is None:
+        dialect = adapter.dialect
+
+    # Step 0 -- refuse to be the weak door. Layer 1 reports an unparseable
+    # query as blocked too, but that is not a policy verdict: it is "no
+    # verdict possible", which the spec maps to `unchecked` (the decision-B
+    # case for a dialect sqlglot cannot read). Only a POLICY block raises.
+    verdict = Validator(contract, dialect=dialect).validate(sql)
+    if verdict.blocked and not verdict.parse_error:
+        raise ValueError(
+            f"query is blocked by the contract and will not be executed: "
+            f"{'; '.join(verdict.reasons)}"
+        )
+
+    allowed = {name.lower() for name in contract.allowed_table_names()}
+    for prop in selected:
+        read = _shadow_tables(prop.shadow, dialect=dialect)
+        for name in sorted(read or ()):
+            if name.lower() not in allowed:
+                raise ValueError(
+                    f"sensitivity property {prop.name!r} of metric "
+                    f"{metric.name!r} has a shadow reading {name!r}, which the "
+                    "contract does not allow"
+                )
+
+    # An unparseable query is refused a verdict WITHOUT executing anything --
+    # not even the rewrite. That is what makes skipping the policy raise safe:
+    # if the Validator's parse and `_rewrite`'s ever disagreed, falling through
+    # would run SQL Layer 1 never vouched for.
+    if verdict.parse_error:
+        reason = f"unparseable: {'; '.join(verdict.reasons)}"
+        return SensitivityReport(
+            results=tuple(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason=reason,
+                )
+                for prop in selected
+            )
+        )
+
+    def _run(statement: str) -> list[tuple]:
+        try:
+            return _norm(list(adapter.execute(statement).rows))
+        except Exception as e:  # noqa: BLE001 - any engine failure is one outcome
+            raise _Refused(f"engine error: {e}") from e
+
+    # The base result is computed at most once per call and reused across every
+    # property; a metric with four properties costs six executions, not twelve.
+    base: list[tuple] | None = None
+    base_refusal: str | None = None
+
+    def _base() -> list[tuple]:
+        nonlocal base, base_refusal
+        if base_refusal is not None:
+            raise _Refused(base_refusal)
+        if base is None:
+            first = _run(sql)
+            for _ in range(max(repeats - 1, 0)):
+                if _run(sql) != first:
+                    base_refusal = "query is not deterministic"
+                    raise _Refused(base_refusal)
+            base = first
+        return base
+
+    results: list[SensitivityResult] = []
+    for prop in selected:
+        try:
+            mutated_sql = _rewrite(sql, prop.shadow, dialect=dialect)
+        except _Refused as e:
+            reason = str(e)
+            status = (
+                "not_applicable" if reason.startswith("not_applicable") else "unchecked"
+            )
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status=status,
+                    expected=prop.expect,
+                    reason=reason,
+                )
+            )
+            continue
+
+        try:
+            before = _base()
+            if not before and prop.expect == "changes":
+                raise _Refused("vacuous: an empty base result cannot move")
+            after = _run(mutated_sql)
+        except _Refused as e:
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason=str(e),
+                )
+            )
+            continue
+
+        moved = after != before
+        expected_move = prop.expect == "changes"
+        results.append(
+            SensitivityResult(
+                name=prop.name,
+                metric=metric.name,
+                status="pass" if moved == expected_move else "violation",
+                expected=prop.expect,
+                moved=moved,
+                reason=""
+                if moved == expected_move
+                else "the answer did not respond"
+                if expected_move
+                else "the answer moved",
+            )
+        )
+    return SensitivityReport(results=tuple(results))

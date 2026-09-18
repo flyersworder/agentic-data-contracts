@@ -316,7 +316,11 @@ class TestProof:
 
 class TestNormalise:
     def test_orders_and_rounds(self) -> None:
-        assert _norm([(2, 1.000000001), (1, 2.0)]) == _norm([(1, 2.0), (2, 1.0)])
+        # 1e-13 of noise on a value near 1.0 is well past the 12 significant
+        # digits `_norm` keeps (relative precision, not the fixed 6 decimal
+        # places absolute rounding used to apply -- see TestRelativeFloatPrecision
+        # for the magnitude this changed the tolerance for).
+        assert _norm([(2, 1.0 + 1e-13), (1, 2.0)]) == _norm([(1, 2.0), (2, 1.0)])
 
     def test_distinguishes_different_values(self) -> None:
         assert _norm([(1,)]) != _norm([(2,)])
@@ -1192,3 +1196,174 @@ class TestNormalizedCheckSensitivity:
                 contract=_contract("touchpoints"),
                 adapter=vql_adapter,
             )
+
+
+class TestTrailingSemicolonShadow:
+    """A shadow ending in ``;`` used to make `_inject` paste an empty
+    statement inside `alias AS (...;\n)`, which fails to parse -- so every
+    check on an otherwise-fine shadow came back `unchecked`."""
+
+    @pytest.mark.parametrize(
+        "suffix",
+        [";", ";  \n", "; -- note"],
+        ids=["semicolon", "semicolon-trailing-ws", "semicolon-comment"],
+    )
+    def test_first_touch_still_passes(
+        self, mkt_adapter, mkt_contract, suffix: str
+    ) -> None:
+        shadow = Shadow(table="mkt.touchpoints", sql=MKT_SHADOW.sql + suffix)
+        prop = SensitivityProperty(
+            name="attribution_is_first_touch",
+            description="A touchpoint after qualification cannot change a first touch.",
+            shadow=shadow,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop), FIRST_TOUCH, contract=mkt_contract, adapter=mkt_adapter
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert result.moved is False
+        assert report.ok is True
+        assert validate_sensitivity_tables(mkt_contract, [_metric(prop)]) == []
+
+    @pytest.mark.parametrize(
+        "suffix",
+        [";", ";  \n", "; -- note"],
+        ids=["semicolon", "semicolon-trailing-ws", "semicolon-comment"],
+    )
+    def test_fan_out_still_violates(
+        self, mkt_adapter, mkt_contract, suffix: str
+    ) -> None:
+        shadow = Shadow(table="mkt.touchpoints", sql=MKT_SHADOW.sql + suffix)
+        prop = SensitivityProperty(
+            name="attribution_is_first_touch",
+            description="A touchpoint after qualification cannot change a first touch.",
+            shadow=shadow,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop), FAN_OUT, contract=mkt_contract, adapter=mkt_adapter
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is True
+        assert report.ok is False
+        assert validate_sensitivity_tables(mkt_contract, [_metric(prop)]) == []
+
+
+class TestAliasCollidesWithShadow:
+    """`_free_alias` used to search only the caller's own text, so a shadow
+    that itself mentions `sens_shadow_0` collided with the injected CTE."""
+
+    def test_alias_avoids_a_name_the_shadow_itself_contains(self) -> None:
+        shadow = Shadow(
+            table="main.payments",
+            sql="SELECT * FROM main.payments -- sens_shadow_0 is taken",
+        )
+        out = _rewrite("SELECT count(*) FROM main.payments", shadow, dialect="duckdb")
+        sqlglot.parse_one(out, dialect="duckdb")
+        assert out.startswith("WITH sens_shadow_1 AS (")
+        assert "FROM sens_shadow_1" in out
+
+    def test_check_sensitivity_still_yields_a_real_verdict(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        shadow = Shadow(
+            table="mkt.touchpoints", sql=MKT_SHADOW.sql + " -- sens_shadow_0"
+        )
+        prop = SensitivityProperty(
+            name="attribution_is_first_touch",
+            description="A touchpoint after qualification cannot change a first touch.",
+            shadow=shadow,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop), FIRST_TOUCH, contract=mkt_contract, adapter=mkt_adapter
+        )
+        (result,) = report.results
+        assert result.status == "pass"
+        assert report.ok is True
+
+
+class TestVacuousUnchanged:
+    """`expect: unchanged` against an empty base and an empty shadowed result
+    tests nothing -- it must not silently report `pass`."""
+
+    _EMPTY_FIRST_TOUCH = """
+    WITH first_touch AS (
+      SELECT lead_id, channel FROM (
+        SELECT lead_id, channel,
+               row_number() OVER (PARTITION BY lead_id ORDER BY touch_date) rn
+        FROM mkt.touchpoints) WHERE rn = 1)
+    SELECT f.channel, COUNT(DISTINCT l.lead_id) AS mqls
+    FROM mkt.lead_scores l JOIN first_touch f USING (lead_id)
+    WHERE l.is_mql AND f.channel = 'zzz_no_such_channel' GROUP BY 1 ORDER BY 1
+    """
+
+    def test_empty_base_and_empty_shadow_is_unchecked(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # MKT_SHADOW's extra rows carry channel 'display', which never
+        # matches 'zzz_no_such_channel' either, so the shadowed result is
+        # empty too -- a genuinely vacuous test, not a real pass.
+        report = check_sensitivity(
+            _metric(FIRST_TOUCH_PROP),
+            self._EMPTY_FIRST_TOUCH,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "unchecked"
+        assert result.reason.startswith("vacuous")
+        assert report.ok is False
+
+    def test_empty_base_but_the_shadow_makes_it_non_empty_is_a_violation(
+        self, mkt_adapter, mkt_contract
+    ) -> None:
+        # The shadow inserts a touchpoint, earlier than any real one, whose
+        # channel matches the filter -- so the shadowed result is non-empty
+        # while the base is empty. That is a real move, not a vacuous test.
+        shadow = Shadow(
+            table="mkt.touchpoints",
+            sql=(
+                "SELECT * FROM mkt.touchpoints UNION ALL "
+                "SELECT 1, 'zzz_no_such_channel', 1"
+            ),
+        )
+        prop = SensitivityProperty(
+            name="attribution_is_first_touch",
+            description="A touchpoint after qualification cannot change a first touch.",
+            shadow=shadow,
+            expect="unchanged",
+        )
+        report = check_sensitivity(
+            _metric(prop),
+            self._EMPTY_FIRST_TOUCH,
+            contract=mkt_contract,
+            adapter=mkt_adapter,
+        )
+        (result,) = report.results
+        assert result.status == "violation"
+        assert result.moved is True
+        assert report.ok is False
+
+
+class TestRelativeFloatPrecision:
+    """`_norm` rounds floats to a fixed number of significant digits, not a
+    fixed decimal place -- an absolute round carries run-to-run noise in its
+    least-significant surviving digit once a value's magnitude passes it."""
+
+    def test_noise_past_the_twelfth_significant_digit_normalizes_equal(self) -> None:
+        base = 1_234_567_890.123456
+        noisy = base + 1e-6  # perturbs well past the 12th significant digit
+        assert _norm([(base,)]) == _norm([(noisy,)])
+
+    def test_a_change_in_the_tenth_significant_digit_is_not_hidden(self) -> None:
+        a = 1_234_567_890.123456
+        b = 1_234_567_891.123456  # differs in the 10th significant digit
+        assert _norm([(a,)]) != _norm([(b,)])
+
+    @pytest.mark.parametrize("value", [0.0, -1.5, float("nan"), float("inf")])
+    def test_edge_values_do_not_raise(self, value: float) -> None:
+        _norm([(value,)])  # must not raise

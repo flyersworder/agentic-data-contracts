@@ -37,6 +37,7 @@ syntax only; one that renames the target fails closed as ``unchecked``.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -240,15 +241,41 @@ def _prove_edit(
         )
 
 
+def _strip_trailing_semicolons(sql: str, *, dialect: str | None) -> str:
+    """*sql* with any trailing SEMICOLON tokens -- and anything after them,
+    such as a trailing comment -- cut off.
+
+    A shadow is one statement; ``alias AS (<shadow.sql>\n)`` is not valid SQL
+    when ``<shadow.sql>`` ends in ``;``, so every such shadow used to fail to
+    parse and every check on it came back ``unchecked``. Tokenize-based so a
+    comment trailing the ``;`` (``SELECT ...; -- note``) is cut with it,
+    rather than left dangling to swallow the CTE's closing paren. A shadow
+    with no trailing semicolon is returned unchanged -- its own trailing
+    comment, if any, is still closed by the newline `_inject` puts before the
+    paren.
+    """
+    try:
+        toks = list(sqlglot.tokenize(sql, dialect=dialect))
+    except Exception as e:  # noqa: BLE001 - any tokenizer failure is one outcome
+        raise _Refused(f"shadow could not be tokenized: {e}") from e
+    end = len(toks)
+    while end > 0 and toks[end - 1].token_type == sqlglot.TokenType.SEMICOLON:
+        end -= 1
+    if end == len(toks):
+        return sql  # no trailing semicolon at all -- untouched
+    return sql[: toks[end - 1].end + 1] if end > 0 else ""
+
+
 def _inject(body: str, alias: str, shadow: Shadow, *, dialect: str | None) -> str:
     """Put the shadow in front of *body* as a CTE, splicing into its own WITH."""
     try:
         toks = list(sqlglot.tokenize(body, dialect=dialect))
     except Exception as e:  # noqa: BLE001 - the original tokenized, so unexpected
         raise _Refused(f"rewrite could not be proved: {e}") from e
+    shadow_sql = _strip_trailing_semicolons(shadow.sql, dialect=dialect)
     # The newline ends any trailing line comment in the shadow before the
     # closing paren, which the comment would otherwise swallow.
-    cte = f"{alias} AS ({shadow.sql}\n)"
+    cte = f"{alias} AS ({shadow_sql}\n)"
     if toks and toks[0].token_type == sqlglot.TokenType.WITH:
         head = toks[1] if len(toks) > 1 else None
         cut = (
@@ -324,7 +351,10 @@ def _rewrite(
             f"count guard: {len(spans)} spans in the original text vs {refs} "
             "table references after normalization; refusing to edit"
         )
-    alias = _free_alias(sql)
+    # Free in BOTH texts: the shadow is spliced in as a CTE right beside the
+    # caller's query, so a name only the shadow contains -- a comment, a CTE
+    # of its own -- collides just as surely as one in the caller's own text.
+    alias = _free_alias(sql + "\n" + shadow.sql)
     body = sql
     for start, end in sorted(spans, reverse=True):  # right-to-left
         body = body[:start] + alias + body[end:]
@@ -334,6 +364,32 @@ def _rewrite(
     return final
 
 
+#: Significant digits kept by `_round_sig`. Chosen well inside float64's ~15-17
+#: digit precision, so two engine runs of the same deterministic query agree
+#: at this many digits while genuine float noise near the precision floor is
+#: dropped.
+_SIG_DIGITS = 12
+
+
+def _round_sig(v: float) -> float:
+    """*v* rounded to `_SIG_DIGITS` significant digits.
+
+    Relative, not absolute, precision. `round(v, 6)` fixes the DECIMAL PLACE,
+    so it treats the sixth digit after the point as noise regardless of the
+    value's magnitude -- fine for a small aggregate, but a sum above ~1e9 has
+    that digit land well inside its genuinely significant part, and
+    run-to-run float noise from summation order shows up there too, producing
+    a false "moved" or a false "not deterministic". Rounding to a fixed
+    DIGIT COUNT instead keeps the noise floor tracking the value's magnitude.
+    0.0 and non-finite values (``nan``, ``inf``, ``-inf``) pass through
+    unchanged -- ``log10(0)`` is undefined, and a non-finite value has no
+    meaningful digit count to round to.
+    """
+    if v == 0.0 or not math.isfinite(v):
+        return v
+    return round(v, _SIG_DIGITS - 1 - math.floor(math.log10(abs(v))))
+
+
 def _norm(rows: list[tuple]) -> list[tuple]:
     """Order- and float-noise-insensitive form.
 
@@ -341,7 +397,7 @@ def _norm(rows: list[tuple]) -> list[tuple]:
     them in a different order.
     """
     rounded = [
-        tuple(round(v, 6) if isinstance(v, float) else v for v in row) for row in rows
+        tuple(_round_sig(v) if isinstance(v, float) else v for v in row) for row in rows
     ]
     return sorted(rounded, key=repr)
 
@@ -357,8 +413,14 @@ class SensitivityResult:
                                 An outcome, not a failure.
       - ``"unchecked"``      -- no verdict was possible: unparseable SQL, the
                                 count guard refused the edit, the engine raised,
-                                the base query is not deterministic, or the test
-                                was vacuous.
+                                the base query is not deterministic, or the
+                                test was vacuous -- an empty base result for
+                                ``expect: changes`` (it cannot move), or an
+                                empty base AND an empty shadowed result for
+                                ``expect: unchanged`` (nothing to hold still).
+                                A non-empty shadowed result against an empty
+                                base under ``expect: unchanged`` is still a
+                                real ``"violation"``: the answer moved.
 
     ``moved`` is None when no comparison was made. ``reason`` reports the
     mechanical condition only and never infers a cause -- the same boundary
@@ -569,6 +631,15 @@ def check_sensitivity(
     is what makes skipping the raise safe: this function never runs SQL Layer
     1 did not first see and clear.
 
+    **Principal-restricted tables cannot be checked yet.** Step 0's
+    ``Validator`` is built with no caller principal, so a query over a table
+    restricted by ``allowed_principals``/``blocked_principals`` is blocked at
+    Step 0 and this function raises ``ValueError`` rather than returning a
+    verdict; the shadow-governance check above also governs shadows against
+    ``contract.allowed_table_names()`` -- every declared table -- with no
+    regard to principal. A ``caller_principal`` parameter to thread through
+    both is a planned follow-up, not yet implemented.
+
     **Dialects that parse only after normalization.** ``sql_normalizer`` --
     defaulting to ``adapter`` when the adapter implements ``SqlNormalizer`` --
     is applied before anything is parsed: the query for Layer 1 and for
@@ -762,8 +833,34 @@ def check_sensitivity(
 
         try:
             before = _base()
-            if not before and prop.expect == "changes":
-                raise _Refused("vacuous: an empty base result cannot move")
+        except _Refused as e:
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason=str(e),
+                )
+            )
+            continue
+
+        if not before and prop.expect == "changes":
+            # An empty answer cannot move, so `expect: changes` asserts
+            # nothing -- and refusing here, before the mutated query ever
+            # runs, keeps that early exit's cost the same as before.
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason="vacuous: an empty base result cannot move",
+                )
+            )
+            continue
+
+        try:
             after = _run(mutated_sql)
         except _Refused as e:
             results.append(
@@ -773,6 +870,25 @@ def check_sensitivity(
                     status="unchecked",
                     expected=prop.expect,
                     reason=str(e),
+                )
+            )
+            continue
+
+        if not before and not after:
+            # `expect: changes` with an empty base was already refused above,
+            # so reaching here with an empty base means `expect: unchanged` --
+            # and an empty shadowed result too tests nothing: there is no
+            # answer that moved or held still, just two absences.
+            results.append(
+                SensitivityResult(
+                    name=prop.name,
+                    metric=metric.name,
+                    status="unchecked",
+                    expected=prop.expect,
+                    reason=(
+                        "vacuous: an empty base result and an empty shadowed "
+                        "result cannot show whether the answer would move"
+                    ),
                 )
             )
             continue

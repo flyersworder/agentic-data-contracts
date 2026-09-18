@@ -26,6 +26,7 @@ it is the same template-assembly discipline the rest of the library follows.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import cast
 
 import sqlglot
@@ -171,3 +172,81 @@ def _norm(rows: list[tuple]) -> list[tuple]:
         tuple(round(v, 6) if isinstance(v, float) else v for v in row) for row in rows
     ]
     return sorted(rounded, key=repr)
+
+
+@dataclass(frozen=True)
+class SensitivityResult:
+    """The verdict for one property against one query.
+
+    ``status`` (each result has exactly one):
+      - ``"pass"``           -- the answer responded the way the contract requires.
+      - ``"violation"``      -- it did not.
+      - ``"not_applicable"`` -- the query never references the shadowed table.
+                                An outcome, not a failure.
+      - ``"unchecked"``      -- no verdict was possible: unparseable SQL, the
+                                count guard refused the edit, the engine raised,
+                                the base query is not deterministic, or the test
+                                was vacuous.
+
+    ``moved`` is None when no comparison was made. ``reason`` reports the
+    mechanical condition only and never infers a cause -- the same boundary
+    ``ReconciliationResult.reason`` draws. The check says "the answer did not
+    move", not "you hardcoded the threshold".
+    """
+
+    name: str
+    metric: str
+    status: str
+    expected: str
+    moved: bool | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class SensitivityReport:
+    results: tuple[SensitivityResult, ...]
+
+    @property
+    def violations(self) -> tuple[SensitivityResult, ...]:
+        return tuple(r for r in self.results if r.status == "violation")
+
+    @property
+    def unchecked(self) -> tuple[SensitivityResult, ...]:
+        return tuple(r for r in self.results if r.status == "unchecked")
+
+    @property
+    def not_applicable(self) -> tuple[SensitivityResult, ...]:
+        return tuple(r for r in self.results if r.status == "not_applicable")
+
+    @property
+    def ok(self) -> bool:
+        """True when nothing is a violation and nothing is unchecked.
+
+        Safe as a CI gate -- ``if not report.ok: sys.exit(1)``. It is False on
+        a ``violation`` and on an ``unchecked``, because "no verdict was
+        possible" must not read as "passed". ``not_applicable`` does NOT block:
+        a query that never touches the table has nothing to answer for.
+
+        An EMPTY report is ok, which differs from ``ExampleValidationReport``.
+        There, zero examples means a corpus failed to load. Here it means the
+        metric declares no properties -- nothing was claimed, so nothing failed.
+        Test ``report.violations`` directly for a laxer gate.
+        """
+        return not (self.violations or self.unchecked)
+
+    def summary(self) -> str:
+        """A compact markdown report, suitable for an MR comment."""
+        if not self.results:
+            return "No sensitivity properties declared."
+        counts: dict[str, int] = {}
+        for r in self.results:
+            counts[r.status] = counts.get(r.status, 0) + 1
+        head = ", ".join(f"{n} {status}" for status, n in sorted(counts.items()))
+        lines = [f"**Sensitivity:** {head}", ""]
+        for r in self.results:
+            detail = f" — {r.reason}" if r.reason else ""
+            lines.append(
+                f"- `{r.metric}` / `{r.name}`: **{r.status}** "
+                f"(expected {r.expected}, moved={r.moved}){detail}"
+            )
+        return "\n".join(lines)

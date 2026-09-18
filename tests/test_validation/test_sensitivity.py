@@ -7,6 +7,8 @@ import sqlglot
 
 from agentic_data_contracts.semantic.base import Shadow
 from agentic_data_contracts.validation.sensitivity import (
+    SensitivityReport,
+    SensitivityResult,
     _free_alias,
     _norm,
     _Refused,
@@ -125,3 +127,39 @@ class TestNormalise:
 
     def test_distinguishes_different_values(self) -> None:
         assert _norm([(1,)]) != _norm([(2,)])
+
+
+def _res(status: str, name: str = "p") -> SensitivityResult:
+    return SensitivityResult(name=name, metric="m", status=status, expected="unchanged")
+
+
+class TestReport:
+    def test_empty_report_is_ok(self) -> None:
+        # Silence is the honest answer: nothing was claimed, nothing checked.
+        assert SensitivityReport(results=()).ok is True
+
+    def test_all_pass_is_ok(self) -> None:
+        assert SensitivityReport(results=(_res("pass"),)).ok is True
+
+    def test_not_applicable_does_not_block(self) -> None:
+        report = SensitivityReport(results=(_res("pass"), _res("not_applicable", "q")))
+        assert report.ok is True
+        assert len(report.not_applicable) == 1
+
+    def test_violation_blocks(self) -> None:
+        report = SensitivityReport(results=(_res("pass"), _res("violation", "q")))
+        assert report.ok is False
+        assert [r.name for r in report.violations] == ["q"]
+
+    def test_unchecked_blocks(self) -> None:
+        # "no verdict was possible" must not read as "passed".
+        report = SensitivityReport(results=(_res("unchecked"),))
+        assert report.ok is False
+        assert len(report.unchecked) == 1
+
+    def test_summary_names_every_status_present(self) -> None:
+        report = SensitivityReport(
+            results=(_res("pass"), _res("violation", "q"), _res("unchecked", "r"))
+        )
+        text = report.summary()
+        assert "violation" in text and "unchecked" in text and "q" in text

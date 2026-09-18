@@ -523,19 +523,32 @@ one. So the library must edit text it cannot parse, guided by text it can.
 
 ### Design: parse the normalized text, edit the original
 
-1. **Step 0.** Build the `Validator` with the normalizer, so the query is
-   policy-checked in normalized form, exactly as `run_query` does it.
+1. **Step 0.** Normalize the query once and hand Layer 1 the normalized text,
+   so it is policy-checked in normalized form, as `run_query` does it. This is
+   equivalent to building the `Validator` with the normalizer — its only other
+   use of the raw text is an EXPLAIN, and this Validator has none — and it
+   stops a normalizer that raises something other than a parse error from
+   escaping `validate()`, which catches only `ParseError` and `TokenError`.
 2. **Locate.** Count the real references to the target table in the AST of
    `normalize(sql)`.
 3. **Rewrite.** Tokenize the **original** text, find the target's spans, and
-   require the span count to equal the reference count. Edit the original.
+   require the span count to equal the reference count. Zero references *and*
+   zero spans is `not_applicable`; any disagreement is the count guard — a
+   normalizer that renamed the target leaves zero references, which must not
+   read as `not_applicable`. Edit the original.
 4. **Prove, in two parts.** First, normalize the *edited body* — before the CTE
    is injected — and require that it parses and holds **zero** real references
    to the target. The proof cannot run on the final text: the shadow itself
    legitimately reads the target (`SELECT * FROM mkt.touchpoints UNION ALL …`).
-   Second, inject the CTE, normalize the final text, and require that it parses.
+   Second, inject the CTE, normalize the final text, and require that it parses
+   as exactly **one** statement. "Parses" alone is not enough: at the sqlglot
+   28.6 floor `parse_one` keeps only the first statement.
 5. **Shadows.** Normalize `shadow.sql` before the governance check parses its
-   tables, so a VQL shadow reading an ungoverned view is still refused.
+   tables, so a VQL shadow reading an ungoverned view is still refused. A
+   shadow holding more than one statement counts as unparseable. That is not
+   exploitable — the CTE's parentheses make the semicolon a syntax error, and
+   both the parser and DuckDB reject the string — but governance used to see
+   only governed tables and wave it through to an opaque engine error.
 
 Without a normalizer, `normalize` is the identity and the same path runs. The
 proof then costs one extra parse on plain SQL, and it turns the existing count
@@ -635,17 +648,17 @@ executes nothing for that property.
 | the normalized query does not parse | every property `unchecked`; nothing executes |
 | the normalized query is blocked by policy | `ValueError` |
 | a normalized shadow reads an ungoverned table | `ValueError` |
-| the normalizer raises on a shadow, or its normalized form does not parse | that property `unchecked` (`unparseable shadow`); `validate_sensitivity_tables` reports it |
-| the normalized query does not reference the target | `not_applicable` |
+| the normalizer raises on a shadow, or its normalized form does not parse or holds more than one statement | that property `unchecked` (`unparseable shadow`); `validate_sensitivity_tables` reports it |
+| neither the normalized query nor the original text references the target | `not_applicable` |
 | the original text does not tokenize | `unchecked` (`original text could not be tokenized`) |
-| spans in the original ≠ references in the normalized AST | `unchecked` (count guard across the normalizer boundary) |
+| spans in the original ≠ references in the normalized AST — including a normalizer that renamed the target | `unchecked` (count guard across the normalizer boundary) |
 | the edited body fails to normalize or parse, or still references the target | `unchecked` (`rewrite could not be proved`) |
-| the final text fails to normalize or parse | `unchecked` (`rewrite could not be proved`) |
+| the final text fails to normalize, to parse, or to be one statement | `unchecked` (`rewrite could not be proved`) |
 | the engine rejects the base or mutated query | `unchecked`, including the one unconfirmed `WITH` detail above |
 
-Normalizing is in-process string work — the query twice (once inside Layer 1,
-once to locate), each property's edited body and final text once, each shadow
-once — and adds no database round trips.
+Normalizing is in-process string work — the query once for Layer 1 and once
+per property to locate, each property's edited body and final text once, each
+shadow once — and adds no database round trips.
 
 ### Public API
 

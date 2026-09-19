@@ -77,19 +77,23 @@ remains") and moves the target from the 2026-11-01 cycle to **2026-12-01**
 (abstract due **2026-11-25**). Volume 20 stays open monthly until 2027-03-01,
 so the extra month costs nothing.
 
-**What to run.** Every arm, k=3, on four models reached through the company's
+**What to run.** Every arm, on three models reached through the company's
 self-hosted LiteLLM gateway (the same route as `claudesonnet5`; see
 "`claudesonnet5` — the enterprise gateway route" in the
-[eval README](../../experiments/dabstep-contract-eval/README.md)):
+[eval README](../../experiments/dabstep-contract-eval/README.md)). The
+repeats exist to measure stability, so k=3 goes where stability is in
+question, not on every model:
 
-| Model | Why it is in the panel |
-|---|---|
-| Qwen 3.6 27B | Same size class as MotherDuck's local Qwen3.8 27B (`motherduck-local`), so our contract can be compared against their semantic layer on nearly the same model, not just by citing their number. It is a different Qwen version, so say so. |
-| GPT-5.6 luna | Second and third points on the GPT-5.6 tier ladder next to sol |
-| GPT-5.6 terra | (same) |
-| Claude Sonnet 5 | k=3 closes the gap left by the k=1 run, which was skipped only on cost. Bedrock rejects any temperature but 1, so its variance is measured, not pinned. |
+| Model | k | Why |
+|---|---|---|
+| Claude Sonnet 5 | 3 | Replicates run D on the claim that most needs it. The scaffolding step (`schema_only` vs `contract_hollow`, +15.1 pp on 78 discordant pairs) is decisive only on sol and Sonnet 5, and 78 is below the ~94-flip noise floor measured on glm. Bedrock rejects any temperature but 1, so this is also the unpinned run that FINDINGS names as needing a flip rate most. Run D, on an older commit, adds a near-replicate. |
+| Qwen 3.6 27B | 3 | Same size class as MotherDuck's local Qwen3.8 27B (`motherduck-local`), so our contract can be compared against their semantic layer on nearly the same model, not just by citing their number. It is a different Qwen version, so say so. Also gives stability on an open-weight model. |
+| GPT-5.6 luna | 1 | Breadth only: one more model next to sol on the GPT-5.6 tier ladder. Like sol it probably cannot pin temperature; the smoke test will show. |
 
-401 tasks x 4 arms x 3 repeats x 4 models is about 19k agent runs.
+GPT-5.6 terra is left out: the four existing k=1 models and luna already
+cover breadth. 401 tasks x 4 arms x (3 + 3 + 1) runs is about 11.2k agent
+runs. If Sonnet 5's cost matters, its k=3 can be cut to the `schema_only`
+and `contract_hollow` arms, which carry the claim it replicates.
 
 **Rules for the panel.**
 
@@ -103,9 +107,10 @@ self-hosted LiteLLM gateway (the same route as `claudesonnet5`; see
 - **Frozen contract, untouched.** Do not add `sensitivity_checks`
   properties to `contract/` or `contract_hollow/`. Properties written after
   reading the losing traces would be fitted to the test set.
-- **Keep the existing runs.** glm, deepseek and sol (and the k=1 Sonnet 5
-  run) stay in the paper as independent k=1 replication across other model
-  families. The gateway panel becomes the main k=3 result. Dropping glm and
+- **Keep the existing runs.** glm, deepseek and sol stay in the paper as
+  independent k=1 replication across other model families. Run D stays too;
+  since it predates 0.52.0, compare it with the Sonnet 5 repeats as a
+  near-replicate (like run E), not as a fourth repeat. The gateway panel becomes the main k=3 result. Dropping glm and
   deepseek would lose the finding that scaffolding's effect depends on the
   model.
 - **Report** per-model McNemar per repeat and pooled, and the flip rate as
@@ -117,8 +122,8 @@ self-hosted LiteLLM gateway (the same route as `claudesonnet5`; see
    wording of the acknowledgment. This touches how much of the pilot can be
    disclosed (see Paper 2 in `../paper-plan.md`).
 2. **Public model ids.** EA&B requires "all experimental data and related
-   software must be available". Confirm luna and terra are public GPT-5.6
-   models served unmodified, and name every model by its public id. Each
+   software must be available". Confirm luna is a public GPT-5.6 model
+   served unmodified, and name every model by its public id. Each
    needs an entry in `dce/pricing.py`, which rejects any id it does not list,
    and `--max-spend` is required even when the gateway bills the company.
 3. **Smoke test**: `--n 12` per model through the gateway to check

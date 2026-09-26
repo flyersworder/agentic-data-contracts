@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
 
-from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
+from agentic_data_contracts.adapters.base import (
+    DatabaseAdapter,
+    QueryResult,
+    QueryTimeoutError,
+    SqlNormalizer,
+    TimeoutAdapter,
+)
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.principal import (
     Principal,
@@ -493,6 +499,45 @@ def _metric_details(
     return data
 
 
+async def _execute_bounded(
+    adapter: DatabaseAdapter, sql: str, timeout_seconds: float | None
+) -> QueryResult:
+    """Run ``sql`` off the event loop under ``resources.max_query_time_seconds``.
+
+    An adapter implementing ``TimeoutAdapter`` enforces the limit itself and
+    cancels the statement in the database. Any other adapter gets a caller-side
+    timeout: the agent is answered on time, but the statement -- and the worker
+    thread waiting on it -- runs on until the database finishes it.
+    """
+    if timeout_seconds is None:
+        return await asyncio.to_thread(adapter.execute, sql)
+    if isinstance(adapter, TimeoutAdapter):
+        return await asyncio.to_thread(
+            adapter.execute_with_timeout, sql, timeout_seconds
+        )
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(adapter.execute, sql), timeout=timeout_seconds
+        )
+    except TimeoutError:
+        raise QueryTimeoutError(timeout_seconds) from None
+
+
+_HEAVY_QUERY_HINT = (
+    "It is too heavy: add date filters, narrow the WHERE clause, reduce JOINs,"
+    " or aggregate before joining."
+)
+
+
+def _timeout_message(e: QueryTimeoutError, hint: str = _HEAVY_QUERY_HINT) -> str:
+    # Actionable, like the other BLOCKED messages: a bare "timed out" gives the
+    # model nothing to change on its next attempt.
+    return (
+        f"BLOCKED — Query exceeded the contract's max_query_time_seconds"
+        f" ({e.timeout_seconds:g}s) and was stopped. {hint}"
+    )
+
+
 def create_tools(
     contract: DataContract,
     *,
@@ -531,6 +576,21 @@ def create_tools(
                 " wildcard-schema tables as 'not in allowed tables list'. Pass a"
                 " DatabaseAdapter to enable resolution."
             )
+
+    resources = contract.schema.resources
+    max_query_time = resources.max_query_time_seconds if resources else None
+    if (
+        max_query_time is not None
+        and adapter is not None
+        and not isinstance(adapter, TimeoutAdapter)
+    ):
+        logger.warning(
+            "Contract declares resources.max_query_time_seconds=%s but %s does not"
+            " implement execute_with_timeout: the query tools will stop waiting at"
+            " the limit, but cannot cancel the statement in the database.",
+            max_query_time,
+            type(adapter).__name__,
+        )
 
     dialect = adapter.dialect if adapter else None
     sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None
@@ -852,9 +912,25 @@ def create_tools(
                 return response
 
             # Offload the blocking DB round-trip — see describe_table above.
-            result = await asyncio.to_thread(
-                adapter.execute, f"SELECT * FROM {qualified} LIMIT {limit}"
-            )
+            try:
+                result = await _execute_bounded(
+                    adapter,
+                    f"SELECT * FROM {qualified} LIMIT {limit}",
+                    max_query_time,
+                )
+            except QueryTimeoutError as e:
+                # The agent wrote no SQL here, so the run_query advice to
+                # narrow a WHERE clause does not apply.
+                response = _error_response(
+                    _timeout_message(
+                        e,
+                        "This table is expensive to scan even for a preview;"
+                        " use run_query with a selective filter instead.",
+                    ),
+                    kind="blocked",
+                )
+                _record(response["_kind"], detail=str(e))
+                return response
             # `columns` precedes `rows`: json.dumps preserves insertion order, so
             # the model reads the header before the values it must align to.
             body = json.dumps(
@@ -1512,7 +1588,20 @@ def create_tools(
                 # Offload the query execution — the dominant blocking call — off
                 # the event loop. Concurrent DB work stays bounded by the adapter's
                 # own connection pool, not the thread pool.
-                qresult = await asyncio.to_thread(adapter.execute, sql)
+                qresult = await _execute_bounded(adapter, sql, max_query_time)
+            except QueryTimeoutError as e:
+                # The contract's own limit stopped the query: a governance
+                # block, counted against max_retries like any other.
+                session.record_retry()
+                response = _error_response(
+                    _with_remaining(_timeout_message(e)), kind="blocked"
+                )
+                _record(
+                    response["_kind"],
+                    detail=str(e),
+                    relative_time=vresult.relative_time,
+                )
+                return response
             except Exception as e:  # noqa: BLE001
                 session.record_retry()
                 response = _error_response(

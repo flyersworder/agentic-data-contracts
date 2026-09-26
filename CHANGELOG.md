@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.54.0] - 2026-09-26
+
+### Fixed
+
+- **`resources.max_query_time_seconds` is now enforced.** It was declared, documented and rendered into the agent's system prompt, but nothing read it at execution time, so a contract could promise a 30 s limit while a query ran for as long as the database allowed. `run_query` and `preview_table` now stop a statement at the limit and answer with a blocked query that says which limit it hit and how to make the query lighter; in `run_query` it counts against `max_retries`. With the field unset, behaviour is unchanged. (#114)
+
+### Added
+
+- **`TimeoutAdapter`, an optional adapter capability: `execute_with_timeout(sql, timeout_seconds)`**, raising the new `QueryTimeoutError`. It is detected at runtime, so `DatabaseAdapter` is unchanged. An adapter implementing it cancels the statement in the database. Any other adapter gets a caller-side timeout: the agent is answered on time but the statement keeps running, and `create_tools` warns at wiring time. `DuckDBAdapter` implements it with `connection.interrupt()`, starting the clock only once the query holds the connection lock: the interrupt is connection-wide, so a clock that also counted the wait for the lock would cancel another caller's statement.
+
 ## [0.53.0] - 2026-09-18
 
 ### Added

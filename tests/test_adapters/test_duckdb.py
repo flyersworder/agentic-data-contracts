@@ -7,7 +7,9 @@ import pytest
 from agentic_data_contracts.adapters.base import (
     DatabaseAdapter,
     QueryResult,
+    QueryTimeoutError,
     TableSchema,
+    TimeoutAdapter,
 )
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 
@@ -135,3 +137,53 @@ async def test_execute_serializes_concurrent_connection_access(
 
     assert peak == 1, f"connection access interleaved (peak concurrency={peak})"
     assert all(len(r.rows) == 2 for r in results)
+
+
+# A query that runs for minutes: DuckDB cannot short-circuit a hash over a
+# 10^10-row cross join the way it short-circuits count(*) over range().
+SLOW_SQL = "SELECT sum(hash(a.range * b.range)) FROM range(100000) a, range(100000) b"
+
+
+def test_adapter_supports_query_timeout(adapter: DuckDBAdapter) -> None:
+    assert isinstance(adapter, TimeoutAdapter)
+
+
+def test_execute_with_timeout_returns_fast_result(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_with_timeout(
+        "SELECT id FROM analytics.orders ORDER BY id", 5.0
+    )
+    assert [r[0] for r in result.rows] == [1, 2]
+
+
+def test_execute_with_timeout_cancels_slow_query(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_with_timeout(SLOW_SQL, 0.5)
+    assert time.monotonic() - start < 5
+    assert exc_info.value.timeout_seconds == 0.5
+
+
+def test_connection_usable_after_timeout(adapter: DuckDBAdapter) -> None:
+    with pytest.raises(QueryTimeoutError):
+        adapter.execute_with_timeout(SLOW_SQL, 0.3)
+    assert len(adapter.execute("SELECT id FROM analytics.orders").rows) == 2
+
+
+async def test_timeout_clock_starts_once_the_connection_is_held(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A query queued behind another must neither time out while it waits for
+    the shared connection nor interrupt the query that holds it: the interrupt
+    is connection-wide, so a clock started before the lock would cancel
+    someone else's statement."""
+    slow = asyncio.create_task(
+        asyncio.to_thread(adapter.execute_with_timeout, SLOW_SQL, 1.0)
+    )
+    await asyncio.sleep(0.2)  # let the slow query take the connection
+    fast = await asyncio.to_thread(
+        adapter.execute_with_timeout, "SELECT id FROM analytics.orders", 0.3
+    )
+    assert len(fast.rows) == 2
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        await slow
+    assert exc_info.value.timeout_seconds == 1.0

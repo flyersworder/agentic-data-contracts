@@ -53,6 +53,30 @@ class DatabaseAdapter(Protocol):
     def dialect(self) -> str: ...
 
 
+class QueryTimeoutError(Exception):
+    """A statement ran past ``resources.max_query_time_seconds`` and was stopped."""
+
+    def __init__(self, timeout_seconds: float) -> None:
+        super().__init__(f"query exceeded {timeout_seconds:g}s")
+        self.timeout_seconds = timeout_seconds
+
+
+@runtime_checkable
+class TimeoutAdapter(Protocol):
+    """Optional adapter capability: execute under a time limit, cancelling the
+    statement in the database when it is exceeded.
+
+    Detected at runtime, so ``DatabaseAdapter`` stays unchanged. Raise
+    ``QueryTimeoutError`` on timeout. Start the clock once the statement owns
+    its connection, not while it waits for one -- a query queued behind another
+    has not run yet. An adapter without this capability still gets a timeout
+    from the query tools, but only on the caller's side: the statement may
+    keep running in the database.
+    """
+
+    def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult: ...
+
+
 # Re-export SqlNormalizer so consumers can import from adapters.base
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer  # noqa: E402
 
@@ -60,6 +84,8 @@ __all__ = [
     "Column",
     "DatabaseAdapter",
     "QueryResult",
+    "QueryTimeoutError",
     "SqlNormalizer",
     "TableSchema",
+    "TimeoutAdapter",
 ]

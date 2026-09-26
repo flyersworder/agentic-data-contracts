@@ -7,7 +7,12 @@ from typing import Any
 
 import duckdb
 
-from agentic_data_contracts.adapters.base import Column, QueryResult, TableSchema
+from agentic_data_contracts.adapters.base import (
+    Column,
+    QueryResult,
+    QueryTimeoutError,
+    TableSchema,
+)
 from agentic_data_contracts.validation.explain import ExplainResult
 
 
@@ -34,9 +39,47 @@ class DuckDBAdapter:
 
     def execute(self, sql: str) -> QueryResult:
         with self._lock:
-            result = self.connection.execute(sql)
-            columns = [desc[0] for desc in result.description]
-            rows = result.fetchall()
+            return self._execute_locked(sql)
+
+    def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
+        """Run ``sql``, interrupting it after ``timeout_seconds``.
+
+        The timer starts inside the lock: ``interrupt()`` cancels whatever the
+        shared connection is running, so a clock started while this call still
+        waited for the lock would cancel another caller's statement.
+        """
+        with self._lock:
+            timed_out = threading.Event()
+            # `timer.cancel()` cannot stop a callback that has already started,
+            # so without this guard a late `interrupt()` could land after the
+            # lock is released -- on the next caller's statement.
+            guard = threading.Lock()
+            finished = False
+
+            def _interrupt() -> None:
+                with guard:
+                    if finished:
+                        return
+                    timed_out.set()
+                    self.connection.interrupt()
+
+            timer = threading.Timer(timeout_seconds, _interrupt)
+            timer.start()
+            try:
+                return self._execute_locked(sql)
+            except duckdb.InterruptException:
+                if timed_out.is_set():
+                    raise QueryTimeoutError(timeout_seconds) from None
+                raise
+            finally:
+                timer.cancel()
+                with guard:
+                    finished = True
+
+    def _execute_locked(self, sql: str) -> QueryResult:
+        result = self.connection.execute(sql)
+        columns = [desc[0] for desc in result.description]
+        rows = result.fetchall()
         return QueryResult(columns=columns, rows=rows)
 
     def explain(self, sql: str) -> ExplainResult:

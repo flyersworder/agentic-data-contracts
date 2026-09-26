@@ -136,7 +136,9 @@ def test_adapter_imports() -> None:
         Column,
         DatabaseAdapter,
         QueryResult,  # noqa: F401
+        QueryTimeoutError,  # noqa: F401
         TableSchema,  # noqa: F401
+        TimeoutAdapter,  # noqa: F401
     )
 
     assert DatabaseAdapter is not None

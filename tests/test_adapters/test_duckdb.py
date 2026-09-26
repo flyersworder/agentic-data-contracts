@@ -253,3 +253,17 @@ def test_duckdb_timeout_reports_the_statement_cancelled(
     with pytest.raises(QueryTimeoutError) as exc_info:
         adapter.execute_with_timeout(SLOW_SQL, 0.3)
     assert exc_info.value.cancelled is True
+
+
+def test_engine_error_after_the_deadline_is_not_a_timeout() -> None:
+    """Only an interrupt is the timeout. A real engine error that happens to
+    land after the deadline (memory_limit, a subclass's own validation) must
+    reach the agent as itself, not as advice to lighten the query."""
+
+    class _FailsLate(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            time.sleep(0.3)
+            raise ValueError("Out of Memory Error: failed to allocate")
+
+    with pytest.raises(ValueError, match="Out of Memory"):
+        _FailsLate(":memory:").execute_with_timeout("SELECT 1", 0.05)

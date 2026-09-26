@@ -18,6 +18,17 @@ from agentic_data_contracts.validation.explain import ExplainResult
 _REINTERRUPT_SECONDS = 0.05
 
 
+def _caused_by_interrupt(exc: BaseException) -> bool:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, duckdb.InterruptException):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 class DuckDBAdapter:
     """Database adapter for DuckDB.
 
@@ -85,10 +96,11 @@ class DuckDBAdapter:
             threading.Thread(target=_watchdog, daemon=True).start()
             try:
                 return self.execute(sql)
-            except Exception:
-                # Any failure after the deadline is the timeout, whatever type
-                # a subclass's `execute` re-raised the interrupt as.
-                if timed_out.is_set():
+            except Exception as e:
+                # The timeout is an interrupt after the deadline, even one a
+                # subclass's `execute` re-raised as another type. Any other
+                # error -- memory_limit, say -- reaches the agent as itself.
+                if timed_out.is_set() and _caused_by_interrupt(e):
                     raise QueryTimeoutError(timeout_seconds) from None
                 raise
             finally:

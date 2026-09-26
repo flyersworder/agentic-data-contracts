@@ -83,6 +83,7 @@ async def test_run_query_timeout_is_a_blocked_query(adapter: DuckDBAdapter) -> N
     assert "max_query_time_seconds" in text
     assert "0.5s" in text
     assert "filter" in text  # tells the agent how to make the query lighter
+    assert "was cancelled" in text
     assert "Remaining:" in text
     assert session.retries == 1
     # The statement was cancelled in the database, so the connection is free.
@@ -145,9 +146,9 @@ async def test_run_query_timeout_falls_back_for_adapters_without_support(
     assert result["_kind"] == "blocked"
     text = result["content"][0]["text"]
     assert "max_query_time_seconds" in text
-    # Nothing cancelled it, so the agent must not be told it was stopped.
+    # Nothing cancelled it, so the agent must not be told it was cancelled.
     assert "may still be running" in text
-    assert "was stopped" not in text
+    assert "was cancelled" not in text
     assert session.retries == 1
 
 
@@ -182,6 +183,7 @@ def test_warns_at_wiring_when_the_adapter_cannot_cancel(
     assert "cannot cancel the statement" in caplog.text
 
     caplog.clear()
+    monkeypatch.setattr(factory, "_WARNED_UNCANCELLABLE", set())
     create_tools(_contract(30), adapter=adapter)
     create_tools(_contract(None), adapter=_SlowAdapterWithoutTimeout(adapter))
     assert "max_query_time_seconds" not in caplog.text
@@ -234,3 +236,16 @@ def test_contract_middleware_warns_it_does_not_enforce_the_limit(
     caplog.clear()
     contract_middleware(_contract(None))
     assert "max_query_time_seconds" not in caplog.text
+
+
+def test_wiring_warning_repeats_for_a_different_limit(
+    adapter: DuckDBAdapter,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentic_data_contracts.tools import factory
+
+    monkeypatch.setattr(factory, "_WARNED_UNCANCELLABLE", set())
+    create_tools(_contract(30), adapter=_SlowAdapterWithoutTimeout(adapter))
+    create_tools(_contract(60), adapter=_SlowAdapterWithoutTimeout(adapter))
+    assert caplog.text.count("cannot cancel the statement") == 2

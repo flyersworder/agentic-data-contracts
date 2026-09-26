@@ -565,15 +565,17 @@ _HEAVY_QUERY_HINT = (
 )
 
 
-# Adapter classes already warned about. create_pydantic_ai_toolset rebuilds the
-# tools on every agent run, and a per-call warning would repeat with it.
-_WARNED_UNCANCELLABLE: set[type] = set()
+# (adapter class, limit) pairs already warned about. create_pydantic_ai_toolset
+# rebuilds the tools on every agent run, and a per-call warning would repeat
+# with it; keying on the limit too still warns for a second contract.
+_WARNED_UNCANCELLABLE: set[tuple[type, float]] = set()
 
 
 def _warn_uncancellable(adapter: DatabaseAdapter, max_query_time: float) -> None:
-    if type(adapter) in _WARNED_UNCANCELLABLE:
+    key = (type(adapter), max_query_time)
+    if key in _WARNED_UNCANCELLABLE:
         return
-    _WARNED_UNCANCELLABLE.add(type(adapter))
+    _WARNED_UNCANCELLABLE.add(key)
     logger.warning(
         "Contract declares resources.max_query_time_seconds=%s but %s does not"
         " implement execute_with_timeout: the query tools will stop waiting at"

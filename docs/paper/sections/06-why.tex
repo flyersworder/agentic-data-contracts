@@ -43,7 +43,11 @@ Two published results frame the difference: retrieval quality falls for
 material buried mid-prompt~\cite{lost-in-the-middle}, and what a tool's
 documentation says changes what an agent does with
 it~\cite{tool-documentation}. \armM{}'s copy of the rule was buried
-mid-prompt; \armC{}'s was a tool's documentation.
+mid-prompt; \armC{}'s was a tool's documentation. EvoOntology reports the
+same contrast on another benchmark~\cite{evoontology}: an agent-built
+semantic layer placed in the prompt scores below no layer at all on five
+of six models, while the same layer served through two MCP lookup tools,
+before any revision, gains 12.3 points averaged over four of them.
 
 The finding is not that the contract arm was given more information: for
 this rule both arms had it, and only one used it. What the contract changes
@@ -155,6 +159,8 @@ models it uses the fewest turns and the least reasoning (by a factor of two
 to three on three models, by 12\% on \mSON{}), and it is the only arm that
 never exhausted its output budget on any model (Table~\ref{tab:efficiency};
 on reporting cost beside accuracy, see~\cite{agents-that-matter}).
+EvoOntology's lookup layer cuts turns the same way, from 14.6 per task to
+8.4~\cite{evoontology}.
 
 Money follows work on three models and not on the fourth. \armC{} is the
 cheapest arm outright on both flash models, and per correct answer it is the

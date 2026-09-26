@@ -63,7 +63,10 @@ Croissant's metadata a tool loads~\cite{croissant}. MotherDuck's own primer
 draws the first line the same way: a semantic layer holds definitions
 ``written as logic that compiles to SQL'' and a context layer ``holds
 everything else''~\cite{motherduck-primer}. The database community's framing
-of the wider problem is TAG~\cite{tag}.
+of the wider problem is TAG~\cite{tag}. All three presuppose a curated
+data model; BI-Agent~\cite{bi-bench} infers the tables, reshaping steps and
+joins where none exists yet, which is what a contract declares once an
+analysis recurs.
 
 The artifact under test is of the third kind and serves both purposes at
 once: the same YAML supplies the semantics the agent reads and the rules the
@@ -134,7 +137,12 @@ The tuned artifacts also do not travel: the author of the 100\% result
 writes that ``the tuned artifact is coupled'' to the serving
 model~\cite{motherduck-semantic}, and independent commentary on Guides urges
 measuring ``whether the Guide generalizes to new questions, not whether it
-clears the benchmark you tuned it against''~\cite{corrdyn-guides}. Our
+clears the benchmark you tuned it against''~\cite{corrdyn-guides}.
+EvoOntology~\cite{evoontology} measures the coupling. Its ontology layer is
+built by an agent, then revised from failed trajectories on one fold of a
+benchmark and admitted edit by edit on held-out questions from that fold;
+served to a model other than the one it was evolved on, it loses 6.6 to
+10.9 points on average. Our
 contract was authored from the vendor manual alone, frozen before any
 question was read, and run unchanged against four model families, which is
 why it can be published with the paper (\appref{app:leaderboard}).

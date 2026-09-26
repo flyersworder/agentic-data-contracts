@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
 
 - **`TimeoutAdapter`, an optional adapter capability: `execute_with_timeout(sql, timeout_seconds)`**, raising the new `QueryTimeoutError`. It is detected at runtime, so `DatabaseAdapter` is unchanged. An adapter implementing it cancels the statement in the database. Any other adapter gets a caller-side timeout: the agent is answered on time but the statement keeps running, and `create_tools` warns at wiring time. `DuckDBAdapter` implements it with `connection.interrupt()`, starting the clock only once the query holds the connection lock: the interrupt is connection-wide, so a clock that also counted the wait for the lock would cancel another caller's statement.
 
+### Internal
+
+- **Dependency refresh.** The root lock takes 28 updates, notably `sqlglot` 30.18.0 -> 30.19.0 (Layer 1 static analysis), `pydantic-ai-slim` 2.45.0 -> 2.51.0, `anthropic` 1.6.0 -> 1.8.0, `claude-agent-sdk` 0.2.156 -> 0.2.160, `langchain-core` 1.6.3 -> 1.6.5 and `langsmith` 0.12.6 -> 0.14.1. No declared floor moves. `experiments/mermaid-joinpath-eval` is upgraded separately (`openai` 3.3.1 -> 3.19.2; its 37 tests pass). `experiments/dabstep-contract-eval` takes only the self version: its lock stays pinned for the paper's evaluation panel, and its frozen contract declares no `max_query_time_seconds`, so this release does not change its behaviour.
+- **Pre-commit hooks bumped**: ruff `v0.16.8` -> `v0.16.9`, ty `v0.0.82` -> `v0.0.84`.
+
 ## [0.53.0] - 2026-09-18
 
 ### Added

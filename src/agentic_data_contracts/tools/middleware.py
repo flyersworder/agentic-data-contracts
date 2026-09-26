@@ -12,6 +12,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.tools.factory import (
     _error_response,
+    _warn_query_time_unenforceable,
     _warn_token_budget_unenforceable,
 )
 from agentic_data_contracts.validation.validator import Validator
@@ -25,6 +26,8 @@ def contract_middleware(
 ) -> Callable:
     # Its wrapper receives an args dict only, same as the SDK path.
     _warn_token_budget_unenforceable(contract, "contract_middleware")
+    # The wrapped function executes the query, not this middleware.
+    _warn_query_time_unenforceable(contract, "contract_middleware")
 
     if session is None:
         session = ContractSession(contract)

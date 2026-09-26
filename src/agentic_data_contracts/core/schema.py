@@ -203,7 +203,12 @@ class SemanticConfig(BaseModel):
 
 class ResourceConfig(BaseModel):
     cost_limit_usd: float | None = None
-    max_query_time_seconds: float | None = None
+    # gt=0: zero is not "no limit" (that is None), and would block every query.
+    # allow_inf_nan=False: YAML `.inf` is not "no limit" either, and no timer
+    # can be armed for it.
+    max_query_time_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
     max_retries: int | None = None
     max_rows_scanned: int | None = None
     token_budget: int | None = None

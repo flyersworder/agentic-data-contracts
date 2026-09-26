@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.54.0] - 2026-09-26
+
+### Fixed
+
+- **`resources.max_query_time_seconds` is now enforced.** It was declared, documented and rendered into the agent's system prompt, but nothing read it at execution time, so a contract could promise a 30 s limit while a query ran for as long as the database allowed. `run_query` and `preview_table` now stop a statement at the limit and answer with a blocked query that says which limit it hit and how to make the query lighter; in `run_query` it counts against `max_retries`. The message says whether the statement was cancelled or only abandoned, since the caller-side fallback cannot stop it. The limit does not cover Layer 2's `EXPLAIN` dry-run. With the field unset, behaviour is unchanged. `contract_middleware` wraps a tool that runs its own query, so it cannot bound it; it now warns at wiring time when the field is set, as it already does for `token_budget`. (#114)
+
+### Changed
+
+- **`max_query_time_seconds` must be a finite number greater than zero; a contract setting it to `0`, a negative number or `.inf` now fails to load.** Zero never meant "no limit" (omit the field for that), and under enforcement it would have meant opposite things: the caller-side timeout would block every query, while DuckDB drops an interrupt fired before its statement starts and would run with no limit at all.
+
+### Added
+
+- **`TimeoutAdapter`, an optional adapter capability: `execute_with_timeout(sql, timeout_seconds)`**, raising the new `QueryTimeoutError`. It is detected at runtime, so `DatabaseAdapter` is unchanged. An adapter implementing it cancels the statement in the database. Any other adapter gets a caller-side timeout: the agent is answered on time but the statement keeps running, and `create_tools` warns at wiring time, once per adapter class and limit. `DuckDBAdapter` implements it with `connection.interrupt()`, starting the clock only once the query holds the connection lock: the interrupt is connection-wide, so a clock that also counted the wait for the lock would cancel another caller's statement. After the deadline it keeps interrupting until the call returns, because DuckDB drops an interrupt sent before its statement starts, and recognises the timeout by the interrupt in the error's chain, so a subclass that re-raises it as another type still reports a timeout while a real engine error after the deadline (a `memory_limit` failure, say) still reports itself. It runs the statement through `self.execute`, so a subclass that rewrites SQL there — like a Denodo stand-in stripping VQL's `CONTEXT` clause — keeps doing so under a time limit; the connection lock is now reentrant to allow it. On the caller-side path only the library's own deadline counts as the limit: a driver's own `TimeoutError` (`socket.timeout`) is reported as the engine failure it is.
+
+### Internal
+
+- **Dependency refresh.** The root lock takes 28 updates, notably `sqlglot` 30.18.0 -> 30.19.0 (Layer 1 static analysis), `pydantic-ai-slim` 2.45.0 -> 2.51.0, `anthropic` 1.6.0 -> 1.8.0, `claude-agent-sdk` 0.2.156 -> 0.2.160, `langchain-core` 1.6.3 -> 1.6.5 and `langsmith` 0.12.6 -> 0.14.1. No declared floor moves. `experiments/mermaid-joinpath-eval` is upgraded separately (`openai` 3.3.1 -> 3.19.2; its 37 tests pass). `experiments/dabstep-contract-eval` takes only the self version: its lock stays pinned for the paper's evaluation panel, and its frozen contract declares no `max_query_time_seconds`, so this release does not change its behaviour.
+- **Pre-commit hooks bumped** (ruff and ty; the pinned revs live in `.pre-commit-config.yaml`).
+
 ## [0.53.0] - 2026-09-18
 
 ### Added

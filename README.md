@@ -1573,6 +1573,31 @@ resources:
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
 ```
 
+`max_query_time_seconds` bounds the query `run_query` executes and the one
+`preview_table` issues. It does not bound Layer 2's `EXPLAIN` dry-run, which
+runs first. A query over the limit comes back to the agent as a blocked query
+with a hint to make it lighter (date filters, a narrower `WHERE`, fewer joins);
+in `run_query` it counts against `max_retries`. An adapter implementing
+`TimeoutAdapter` (`execute_with_timeout(sql, timeout_seconds)`) cancels the
+statement in the database; `DuckDBAdapter` does, via `connection.interrupt()`.
+Any other adapter gets a caller-side timeout: the agent is answered on time,
+but the statement keeps running until the database finishes it, and
+`create_tools` logs a warning at wiring time. Two more reasons to implement it:
+after a caller-side timeout the agent's next query can reach the adapter while
+the abandoned one still runs, so an adapter over a single non-thread-safe
+connection must lock it; and abandoned statements hold worker threads. A
+`max_query_time_seconds` of zero or less is rejected at load — omit the field
+for no limit. `contract_middleware` wraps a tool that executes its own query,
+so it cannot enforce the limit and warns instead. For a server-side engine, set
+the engine's own timeout in `execute_with_timeout` — `SET statement_timeout` on
+Postgres, `STATEMENT_TIMEOUT_IN_SECONDS` on Snowflake, a job timeout on
+BigQuery.
+
+A runaway query can exhaust memory as well as time. That is deployment
+configuration rather than contract governance, so it is not a contract field;
+on DuckDB, `adapter.connection.execute("SET memory_limit = '2GB'")` turns it
+into a query error the agent can see instead of a killed process.
+
 `token_budget` is the one limit this library cannot measure on its own — the
 tokens are spent by the *model* between tool calls. It is fed from the host
 framework's own counter, which the **Pydantic AI** adapter (`ctx.usage`) and

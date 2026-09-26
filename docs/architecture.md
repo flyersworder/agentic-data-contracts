@@ -236,6 +236,7 @@ When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-cont
 - **Token usage** — fed by the adapters via `observe_tokens()`, checked against `token_budget` (see below)
 - **Wall-clock duration** — lazy start on first `check_limits()` call (not at construction), checked against `max_duration_seconds`. Can be reset via `reset_timer()` for frameworks that manage their own idle timeouts.
 - **Cost estimate** — if EXPLAIN adapter returns cost info, checked against `cost_limit_usd`
+- **Query time** — `max_query_time_seconds` bounds each query the query tools execute (not the Layer 2 `EXPLAIN` dry-run, and not the session). An adapter implementing `TimeoutAdapter` cancels the statement in the database; any other gets a caller-side `asyncio.timeout`, and only that deadline counts as the limit (a driver's own `TimeoutError` does not). A timeout is a blocked query; in `run_query` it increments the retry count. `DuckDBAdapter` starts its timer only after taking its connection lock, because `interrupt()` cancels whatever the shared connection is running.
 
 These are simple counters/timers with guard checks before each tool call. No formal state machine.
 

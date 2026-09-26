@@ -7,7 +7,9 @@ import pytest
 from agentic_data_contracts.adapters.base import (
     DatabaseAdapter,
     QueryResult,
+    QueryTimeoutError,
     TableSchema,
+    TimeoutAdapter,
 )
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 
@@ -135,3 +137,133 @@ async def test_execute_serializes_concurrent_connection_access(
 
     assert peak == 1, f"connection access interleaved (peak concurrency={peak})"
     assert all(len(r.rows) == 2 for r in results)
+
+
+# A query that runs for minutes: DuckDB cannot short-circuit a hash over a
+# 10^10-row cross join the way it short-circuits count(*) over range().
+SLOW_SQL = "SELECT sum(hash(a.range * b.range)) FROM range(100000) a, range(100000) b"
+
+
+def test_adapter_supports_query_timeout(adapter: DuckDBAdapter) -> None:
+    assert isinstance(adapter, TimeoutAdapter)
+
+
+def test_execute_with_timeout_returns_fast_result(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_with_timeout(
+        "SELECT id FROM analytics.orders ORDER BY id", 5.0
+    )
+    assert [r[0] for r in result.rows] == [1, 2]
+
+
+def test_execute_with_timeout_cancels_slow_query(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_with_timeout(SLOW_SQL, 0.5)
+    assert time.monotonic() - start < 5
+    assert exc_info.value.timeout_seconds == 0.5
+
+
+def test_connection_usable_after_timeout(adapter: DuckDBAdapter) -> None:
+    with pytest.raises(QueryTimeoutError):
+        adapter.execute_with_timeout(SLOW_SQL, 0.3)
+    assert len(adapter.execute("SELECT id FROM analytics.orders").rows) == 2
+
+
+async def test_timeout_clock_starts_once_the_connection_is_held(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A query queued behind another must neither time out while it waits for
+    the shared connection nor interrupt the query that holds it: the interrupt
+    is connection-wide, so a clock started before the lock would cancel
+    someone else's statement."""
+    slow = asyncio.create_task(
+        asyncio.to_thread(adapter.execute_with_timeout, SLOW_SQL, 1.0)
+    )
+    await asyncio.sleep(0.2)  # let the slow query take the connection
+    fast = await asyncio.to_thread(
+        adapter.execute_with_timeout, "SELECT id FROM analytics.orders", 0.3
+    )
+    assert len(fast.rows) == 2
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        await slow
+    assert exc_info.value.timeout_seconds == 1.0
+
+
+def test_execute_with_timeout_goes_through_execute_overrides() -> None:
+    """A subclass that rewrites SQL in `execute` -- the Denodo stand-in in
+    test_sensitivity strips VQL's CONTEXT clause there -- must keep doing so
+    when a time limit is set."""
+
+    class _Rewriting(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            return super().execute(sql.replace("NOT_SQL ", ""))
+
+    db = _Rewriting(":memory:")
+    assert db.execute_with_timeout("NOT_SQL SELECT 42", 5.0).rows == [(42,)]
+    with pytest.raises(QueryTimeoutError):
+        db.execute_with_timeout(f"NOT_SQL {SLOW_SQL}", 0.3)
+
+
+def test_deadline_reached_before_the_statement_starts_still_cancels_it() -> None:
+    """DuckDB drops an interrupt sent while the connection is idle. A deadline
+    that passes during work `execute` does first -- a subclass rewriting SQL --
+    must still cancel the statement once it starts."""
+
+    class _SlowToStart(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            time.sleep(0.3)
+            return super().execute(sql)
+
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError):
+        _SlowToStart(":memory:").execute_with_timeout(SLOW_SQL, 0.05)
+    assert time.monotonic() - start < 5
+
+
+def test_timeout_is_recognised_through_a_wrapped_interrupt() -> None:
+    class _Wrapping(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            try:
+                return super().execute(sql)
+            except Exception as e:
+                raise RuntimeError(f"engine failed: {e}") from e
+
+    with pytest.raises(QueryTimeoutError):
+        _Wrapping(":memory:").execute_with_timeout(SLOW_SQL, 0.3)
+
+
+def test_huge_timeout_does_not_break_the_timer(
+    adapter: DuckDBAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A wait past threading.TIMEOUT_MAX raises OverflowError inside the timer
+    # thread -- invisible to the caller, and the limit is never armed.
+    thread_errors: list[BaseException | None] = []
+    monkeypatch.setattr(
+        threading, "excepthook", lambda args: thread_errors.append(args.exc_value)
+    )
+    result = adapter.execute_with_timeout("SELECT 1", 1e12)
+    time.sleep(0.2)
+    assert result.rows == [(1,)]
+    assert thread_errors == []
+
+
+def test_duckdb_timeout_reports_the_statement_cancelled(
+    adapter: DuckDBAdapter,
+) -> None:
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_with_timeout(SLOW_SQL, 0.3)
+    assert exc_info.value.cancelled is True
+
+
+def test_engine_error_after_the_deadline_is_not_a_timeout() -> None:
+    """Only an interrupt is the timeout. A real engine error that happens to
+    land after the deadline (memory_limit, a subclass's own validation) must
+    reach the agent as itself, not as advice to lighten the query."""
+
+    class _FailsLate(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            time.sleep(0.3)
+            raise ValueError("Out of Memory Error: failed to allocate")
+
+    with pytest.raises(ValueError, match="Out of Memory"):
+        _FailsLate(":memory:").execute_with_timeout("SELECT 1", 0.05)

@@ -604,6 +604,9 @@ async def test_run_query_execute_exception_includes_remaining_budget(
     tool = next(t for t in tools if t.name == "run_query")
 
     # SQL that passes Layer 1 + EXPLAIN but raises at execute().
+    # Patch `execute`, not `execute_with_timeout`: the fixture contract sets a
+    # limit, and the timeout path routes through `execute`, so this also covers
+    # its pass-through of an engine error raised before the deadline.
     with patch.object(
         adapter, "execute", side_effect=RuntimeError("simulated engine failure")
     ):

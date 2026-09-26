@@ -62,7 +62,10 @@ async def test_run_query_offloads_execute_and_explain(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     seen: dict[str, int] = {}
+    # The fixture contract sets max_query_time_seconds, so the query runs
+    # through execute_with_timeout; track both so neither path can regress.
     _track_thread(adapter, "execute", seen)
+    _track_thread(adapter, "execute_with_timeout", seen)
     _track_thread(adapter, "explain", seen)
 
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
@@ -73,7 +76,9 @@ async def test_run_query_offloads_execute_and_explain(
 
     main_thread = threading.get_ident()
     assert seen["explain"] != main_thread, "EXPLAIN ran on the event-loop thread"
-    assert seen["execute"] != main_thread, "execute ran on the event-loop thread"
+    ran = [seen[m] for m in ("execute", "execute_with_timeout") if m in seen]
+    assert ran, "the query was never executed"
+    assert main_thread not in ran, "execute ran on the event-loop thread"
 
 
 @pytest.mark.asyncio
@@ -116,11 +121,12 @@ async def test_preview_table_offloads_execute(
 ) -> None:
     seen: dict[str, int] = {}
     _track_thread(adapter, "execute", seen)
+    _track_thread(adapter, "execute_with_timeout", seen)
 
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
     tool = next(t for t in tools if t.name == "preview_table")
     await tool.callable({"schema": "analytics", "table": "orders"})
 
-    assert seen["execute"] != threading.get_ident(), (
-        "execute ran on the event-loop thread"
-    )
+    ran = [seen[m] for m in ("execute", "execute_with_timeout") if m in seen]
+    assert ran, "the preview was never executed"
+    assert threading.get_ident() not in ran, "execute ran on the event-loop thread"

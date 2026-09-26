@@ -325,3 +325,26 @@ def test_empty_expected_extras_survives_a_model_dump_round_trip() -> None:
 
     assert rebuilt.semantic.source is not None
     assert rebuilt.semantic.source.expected_extras == []
+
+
+@pytest.mark.parametrize("value", [0, -1, -0.5])
+def test_max_query_time_seconds_must_be_positive(value: float) -> None:
+    # 0 is not "no limit": the caller-side timeout would block every query,
+    # while DuckDB drops an interrupt sent before the statement starts.
+    from pydantic import ValidationError
+
+    from agentic_data_contracts.core.schema import ResourceConfig
+
+    with pytest.raises(ValidationError):
+        ResourceConfig(max_query_time_seconds=value)
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_max_query_time_seconds_must_be_finite(value: float) -> None:
+    # YAML `.inf` would otherwise load, and a timer cannot be armed for it.
+    from pydantic import ValidationError
+
+    from agentic_data_contracts.core.schema import ResourceConfig
+
+    with pytest.raises(ValidationError):
+        ResourceConfig(max_query_time_seconds=value)

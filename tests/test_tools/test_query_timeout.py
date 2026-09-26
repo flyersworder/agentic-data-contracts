@@ -143,7 +143,11 @@ async def test_run_query_timeout_falls_back_for_adapters_without_support(
 
     assert time.monotonic() - start < 1.0
     assert result["_kind"] == "blocked"
-    assert "max_query_time_seconds" in result["content"][0]["text"]
+    text = result["content"][0]["text"]
+    assert "max_query_time_seconds" in text
+    # Nothing cancelled it, so the agent must not be told it was stopped.
+    assert "may still be running" in text
+    assert "was stopped" not in text
     assert session.retries == 1
 
 

@@ -337,3 +337,14 @@ def test_max_query_time_seconds_must_be_positive(value: float) -> None:
 
     with pytest.raises(ValidationError):
         ResourceConfig(max_query_time_seconds=value)
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_max_query_time_seconds_must_be_finite(value: float) -> None:
+    # YAML `.inf` would otherwise load, and a timer cannot be armed for it.
+    from pydantic import ValidationError
+
+    from agentic_data_contracts.core.schema import ResourceConfig
+
+    with pytest.raises(ValidationError):
+        ResourceConfig(max_query_time_seconds=value)

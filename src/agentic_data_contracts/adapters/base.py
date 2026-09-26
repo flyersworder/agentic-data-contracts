@@ -54,11 +54,17 @@ class DatabaseAdapter(Protocol):
 
 
 class QueryTimeoutError(Exception):
-    """A statement ran past ``resources.max_query_time_seconds`` and was stopped."""
+    """A statement ran past ``resources.max_query_time_seconds``.
 
-    def __init__(self, timeout_seconds: float) -> None:
+    ``cancelled`` says whether the database stopped it. A ``TimeoutAdapter``
+    raises it with ``cancelled=True``; the query tools' caller-side fallback
+    raises it with ``cancelled=False``, because it only stopped waiting.
+    """
+
+    def __init__(self, timeout_seconds: float, *, cancelled: bool = True) -> None:
         super().__init__(f"query exceeded {timeout_seconds:g}s")
         self.timeout_seconds = timeout_seconds
+        self.cancelled = cancelled
 
 
 @runtime_checkable

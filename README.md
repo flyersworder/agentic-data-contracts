@@ -1573,8 +1573,9 @@ resources:
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
 ```
 
-`max_query_time_seconds` bounds every statement `run_query` and `preview_table`
-execute. A query over the limit is stopped and comes back to the agent as a
+`max_query_time_seconds` bounds the query `run_query` executes and the one
+`preview_table` issues. It does not bound Layer 2's `EXPLAIN` dry-run, which
+runs first. A query over the limit is stopped and comes back to the agent as a
 blocked query, counted against `max_retries`, with a hint to make it lighter
 (date filters, a narrower `WHERE`, fewer joins). An adapter implementing
 `TimeoutAdapter` (`execute_with_timeout(sql, timeout_seconds)`) cancels the

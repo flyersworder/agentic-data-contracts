@@ -555,7 +555,7 @@ async def _execute_bounded(
         # (socket.timeout is an alias) is an engine failure and must reach the
         # agent as one, not as advice to lighten a query that may be fine.
         if deadline.expired():
-            raise QueryTimeoutError(timeout_seconds) from None
+            raise QueryTimeoutError(timeout_seconds, cancelled=False) from None
         raise
 
 
@@ -586,9 +586,16 @@ def _warn_uncancellable(adapter: DatabaseAdapter, max_query_time: float) -> None
 def _timeout_message(e: QueryTimeoutError, hint: str = _HEAVY_QUERY_HINT) -> str:
     # Actionable, like the other BLOCKED messages: a bare "timed out" gives the
     # model nothing to change on its next attempt.
+    # Only claim the statement stopped when the database stopped it: an agent
+    # told so would send a heavy variant while the first still runs.
+    outcome = (
+        "was cancelled"
+        if e.cancelled
+        else "was abandoned, but may still be running in the database"
+    )
     return (
         f"BLOCKED — Query exceeded the contract's max_query_time_seconds"
-        f" ({e.timeout_seconds:g}s) and was stopped. {hint}"
+        f" ({e.timeout_seconds:g}s) and {outcome}. {hint}"
     )
 
 

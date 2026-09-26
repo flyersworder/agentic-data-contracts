@@ -15,6 +15,8 @@ from agentic_data_contracts.adapters.base import (
 )
 from agentic_data_contracts.validation.explain import ExplainResult
 
+_REINTERRUPT_SECONDS = 0.05
+
 
 class DuckDBAdapter:
     """Database adapter for DuckDB.
@@ -50,37 +52,48 @@ class DuckDBAdapter:
     def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
         """Run ``sql``, interrupting it after ``timeout_seconds``.
 
-        The timer starts inside the lock: ``interrupt()`` cancels whatever the
+        The clock starts inside the lock: ``interrupt()`` cancels whatever the
         shared connection is running, so a clock started while this call still
         waited for the lock would cancel another caller's statement.
         """
         with self._lock:
+            done = threading.Event()
             timed_out = threading.Event()
-            # `timer.cancel()` cannot stop a callback that has already started,
-            # so without this guard a late `interrupt()` could land after the
-            # lock is released -- on the next caller's statement.
+            # Held while interrupting and while marking the call done, so no
+            # interrupt can land after the lock is released -- on the next
+            # caller's statement.
             guard = threading.Lock()
-            finished = False
 
-            def _interrupt() -> None:
-                with guard:
-                    if finished:
+            def _watchdog() -> None:
+                # Clamped: a longer wait raises OverflowError in this thread,
+                # silently leaving the limit unarmed.
+                if done.wait(min(timeout_seconds, threading.TIMEOUT_MAX)):
+                    return
+                timed_out.set()
+                # DuckDB drops an interrupt sent while the connection is idle,
+                # so one fired during work `execute` does before its statement
+                # (a subclass rewriting SQL) would be lost. Repeat until the
+                # call returns.
+                while True:
+                    with guard:
+                        if done.is_set():
+                            return
+                        self.connection.interrupt()
+                    if done.wait(_REINTERRUPT_SECONDS):
                         return
-                    timed_out.set()
-                    self.connection.interrupt()
 
-            timer = threading.Timer(timeout_seconds, _interrupt)
-            timer.start()
+            threading.Thread(target=_watchdog, daemon=True).start()
             try:
                 return self.execute(sql)
-            except duckdb.InterruptException:
+            except Exception:
+                # Any failure after the deadline is the timeout, whatever type
+                # a subclass's `execute` re-raised the interrupt as.
                 if timed_out.is_set():
                     raise QueryTimeoutError(timeout_seconds) from None
                 raise
             finally:
-                timer.cancel()
                 with guard:
-                    finished = True
+                    done.set()
 
     def explain(self, sql: str) -> ExplainResult:
         try:

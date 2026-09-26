@@ -202,3 +202,54 @@ def test_execute_with_timeout_goes_through_execute_overrides() -> None:
     assert db.execute_with_timeout("NOT_SQL SELECT 42", 5.0).rows == [(42,)]
     with pytest.raises(QueryTimeoutError):
         db.execute_with_timeout(f"NOT_SQL {SLOW_SQL}", 0.3)
+
+
+def test_deadline_reached_before_the_statement_starts_still_cancels_it() -> None:
+    """DuckDB drops an interrupt sent while the connection is idle. A deadline
+    that passes during work `execute` does first -- a subclass rewriting SQL --
+    must still cancel the statement once it starts."""
+
+    class _SlowToStart(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            time.sleep(0.3)
+            return super().execute(sql)
+
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError):
+        _SlowToStart(":memory:").execute_with_timeout(SLOW_SQL, 0.05)
+    assert time.monotonic() - start < 5
+
+
+def test_timeout_is_recognised_through_a_wrapped_interrupt() -> None:
+    class _Wrapping(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            try:
+                return super().execute(sql)
+            except Exception as e:
+                raise RuntimeError(f"engine failed: {e}") from e
+
+    with pytest.raises(QueryTimeoutError):
+        _Wrapping(":memory:").execute_with_timeout(SLOW_SQL, 0.3)
+
+
+def test_huge_timeout_does_not_break_the_timer(
+    adapter: DuckDBAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A wait past threading.TIMEOUT_MAX raises OverflowError inside the timer
+    # thread -- invisible to the caller, and the limit is never armed.
+    thread_errors: list[BaseException | None] = []
+    monkeypatch.setattr(
+        threading, "excepthook", lambda args: thread_errors.append(args.exc_value)
+    )
+    result = adapter.execute_with_timeout("SELECT 1", 1e12)
+    time.sleep(0.2)
+    assert result.rows == [(1,)]
+    assert thread_errors == []
+
+
+def test_duckdb_timeout_reports_the_statement_cancelled(
+    adapter: DuckDBAdapter,
+) -> None:
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_with_timeout(SLOW_SQL, 0.3)
+    assert exc_info.value.cancelled is True

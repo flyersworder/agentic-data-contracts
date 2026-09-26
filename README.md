@@ -1581,8 +1581,14 @@ blocked query, counted against `max_retries`, with a hint to make it lighter
 statement in the database; `DuckDBAdapter` does, via `connection.interrupt()`.
 Any other adapter gets a caller-side timeout: the agent is answered on time,
 but the statement keeps running until the database finishes it, and
-`create_tools` logs a warning at wiring time. For a server-side engine, set the
-engine's own timeout in `execute_with_timeout` — `SET statement_timeout` on
+`create_tools` logs a warning at wiring time. Two more reasons to implement it:
+after a caller-side timeout the agent's next query can reach the adapter while
+the abandoned one still runs, so an adapter over a single non-thread-safe
+connection must lock it; and abandoned statements hold worker threads. A
+`max_query_time_seconds` of zero or less is rejected at load — omit the field
+for no limit. `contract_middleware` wraps a tool that executes its own query,
+so it cannot enforce the limit and warns instead. For a server-side engine, set
+the engine's own timeout in `execute_with_timeout` — `SET statement_timeout` on
 Postgres, `STATEMENT_TIMEOUT_IN_SECONDS` on Snowflake, a job timeout on
 BigQuery.
 

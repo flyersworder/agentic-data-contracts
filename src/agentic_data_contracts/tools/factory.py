@@ -252,6 +252,26 @@ def _warn_token_budget_unenforceable(contract: DataContract, path: str) -> None:
     )
 
 
+def _warn_query_time_unenforceable(contract: DataContract, path: str) -> None:
+    """Warn when a contract declares ``max_query_time_seconds`` on a path that
+    does not execute the query itself, so cannot bound it.
+
+    Same reasoning as ``_warn_token_budget_unenforceable``: the limit is
+    rendered into the agent's prompt, so leaving it silently unenforced makes
+    the contract promise something the deployment does not do.
+    """
+    resources = contract.schema.resources
+    if resources is None or resources.max_query_time_seconds is None:
+        return
+    logger.warning(
+        "Contract declares resources.max_query_time_seconds=%s but %s does not"
+        " execute the query, so it will NOT be enforced there. Bound the wrapped"
+        " tool yourself, or use create_tools(), whose query tools enforce it.",
+        resources.max_query_time_seconds,
+        path,
+    )
+
+
 RowFormat = Literal["compact", "records"]
 
 _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
@@ -500,33 +520,67 @@ def _metric_details(
 
 
 async def _execute_bounded(
-    adapter: DatabaseAdapter, sql: str, timeout_seconds: float | None
+    adapter: DatabaseAdapter,
+    sql: str,
+    timeout_seconds: float | None,
+    *,
+    timeout_adapter: TimeoutAdapter | None,
 ) -> QueryResult:
     """Run ``sql`` off the event loop under ``resources.max_query_time_seconds``.
 
-    An adapter implementing ``TimeoutAdapter`` enforces the limit itself and
-    cancels the statement in the database. Any other adapter gets a caller-side
-    timeout: the agent is answered on time, but the statement -- and the worker
-    thread waiting on it -- runs on until the database finishes it.
+    ``timeout_adapter`` is ``adapter`` when it implements ``TimeoutAdapter``
+    (checked once, at wiring), else ``None``. Such an adapter enforces the
+    limit itself and cancels the statement in the database. Any other adapter
+    gets a caller-side timeout: the agent is answered on time, but the
+    statement -- and the worker thread waiting on it -- runs on until the
+    database finishes it. Two consequences an adapter author should know: the
+    agent's next query can reach the adapter while the abandoned one is still
+    running, so an adapter over a single non-thread-safe connection must lock
+    it; and abandoned statements hold default-executor threads, so enough of
+    them delay every offloaded call. Implementing ``execute_with_timeout``
+    avoids both.
     """
     if timeout_seconds is None:
         return await asyncio.to_thread(adapter.execute, sql)
-    if isinstance(adapter, TimeoutAdapter):
+    if timeout_adapter is not None:
         return await asyncio.to_thread(
-            adapter.execute_with_timeout, sql, timeout_seconds
+            timeout_adapter.execute_with_timeout, sql, timeout_seconds
         )
+    deadline = asyncio.timeout(timeout_seconds)
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(adapter.execute, sql), timeout=timeout_seconds
-        )
+        async with deadline:
+            return await asyncio.to_thread(adapter.execute, sql)
     except TimeoutError:
-        raise QueryTimeoutError(timeout_seconds) from None
+        # Only our own deadline is the contract's limit. A driver's TimeoutError
+        # (socket.timeout is an alias) is an engine failure and must reach the
+        # agent as one, not as advice to lighten a query that may be fine.
+        if deadline.expired():
+            raise QueryTimeoutError(timeout_seconds) from None
+        raise
 
 
 _HEAVY_QUERY_HINT = (
     "It is too heavy: add date filters, narrow the WHERE clause, reduce JOINs,"
     " or aggregate before joining."
 )
+
+
+# Adapter classes already warned about. create_pydantic_ai_toolset rebuilds the
+# tools on every agent run, and a per-call warning would repeat with it.
+_WARNED_UNCANCELLABLE: set[type] = set()
+
+
+def _warn_uncancellable(adapter: DatabaseAdapter, max_query_time: float) -> None:
+    if type(adapter) in _WARNED_UNCANCELLABLE:
+        return
+    _WARNED_UNCANCELLABLE.add(type(adapter))
+    logger.warning(
+        "Contract declares resources.max_query_time_seconds=%s but %s does not"
+        " implement execute_with_timeout: the query tools will stop waiting at"
+        " the limit, but cannot cancel the statement in the database.",
+        max_query_time,
+        type(adapter).__name__,
+    )
 
 
 def _timeout_message(e: QueryTimeoutError, hint: str = _HEAVY_QUERY_HINT) -> str:
@@ -579,18 +633,9 @@ def create_tools(
 
     resources = contract.schema.resources
     max_query_time = resources.max_query_time_seconds if resources else None
-    if (
-        max_query_time is not None
-        and adapter is not None
-        and not isinstance(adapter, TimeoutAdapter)
-    ):
-        logger.warning(
-            "Contract declares resources.max_query_time_seconds=%s but %s does not"
-            " implement execute_with_timeout: the query tools will stop waiting at"
-            " the limit, but cannot cancel the statement in the database.",
-            max_query_time,
-            type(adapter).__name__,
-        )
+    timeout_adapter = adapter if isinstance(adapter, TimeoutAdapter) else None
+    if max_query_time is not None and adapter is not None and timeout_adapter is None:
+        _warn_uncancellable(adapter, max_query_time)
 
     dialect = adapter.dialect if adapter else None
     sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None
@@ -917,6 +962,7 @@ def create_tools(
                     adapter,
                     f"SELECT * FROM {qualified} LIMIT {limit}",
                     max_query_time,
+                    timeout_adapter=timeout_adapter,
                 )
             except QueryTimeoutError as e:
                 # The agent wrote no SQL here, so the run_query advice to
@@ -1588,7 +1634,9 @@ def create_tools(
                 # Offload the query execution — the dominant blocking call — off
                 # the event loop. Concurrent DB work stays bounded by the adapter's
                 # own connection pool, not the thread pool.
-                qresult = await _execute_bounded(adapter, sql, max_query_time)
+                qresult = await _execute_bounded(
+                    adapter, sql, max_query_time, timeout_adapter=timeout_adapter
+                )
             except QueryTimeoutError as e:
                 # The contract's own limit stopped the query: a governance
                 # block, counted against max_retries like any other.

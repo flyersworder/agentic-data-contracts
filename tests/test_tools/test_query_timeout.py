@@ -166,12 +166,67 @@ async def test_preview_table_honours_the_limit() -> None:
 
 
 def test_warns_at_wiring_when_the_adapter_cannot_cancel(
-    adapter: DuckDBAdapter, caplog: pytest.LogCaptureFixture
+    adapter: DuckDBAdapter,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agentic_data_contracts.tools import factory
+
+    # The warning is deduplicated per adapter class across the process.
+    monkeypatch.setattr(factory, "_WARNED_UNCANCELLABLE", set())
     create_tools(_contract(30), adapter=_SlowAdapterWithoutTimeout(adapter))
     assert "cannot cancel the statement" in caplog.text
 
     caplog.clear()
     create_tools(_contract(30), adapter=adapter)
     create_tools(_contract(None), adapter=_SlowAdapterWithoutTimeout(adapter))
+    assert "max_query_time_seconds" not in caplog.text
+
+
+async def test_fallback_does_not_mistake_a_driver_timeout_for_the_limit(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A driver's own TimeoutError (socket.timeout is an alias) is an engine
+    failure, not the contract's limit: telling the agent to lighten a correct
+    query would send it rewriting the wrong thing."""
+
+    class _DriverTimesOut(_SlowAdapterWithoutTimeout):
+        def execute(self, sql: str) -> QueryResult:
+            raise TimeoutError("read timed out")
+
+    run_query = _tool(
+        create_tools(_contract(30), adapter=_DriverTimesOut(adapter)), "run_query"
+    )
+
+    text = (await run_query({"sql": FAST_SQL}))["content"][0]["text"]
+
+    assert "read timed out" in text
+    assert "max_query_time_seconds" not in text
+
+
+def test_wiring_warning_is_logged_once_per_adapter_class(
+    adapter: DuckDBAdapter,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_pydantic_ai_toolset rebuilds the tools on every agent run; the
+    warning must not repeat with it."""
+    from agentic_data_contracts.tools import factory
+
+    monkeypatch.setattr(factory, "_WARNED_UNCANCELLABLE", set())
+    for _ in range(3):
+        create_tools(_contract(30), adapter=_SlowAdapterWithoutTimeout(adapter))
+    assert caplog.text.count("cannot cancel the statement") == 1
+
+
+def test_contract_middleware_warns_it_does_not_enforce_the_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agentic_data_contracts.tools.middleware import contract_middleware
+
+    contract_middleware(_contract(30))
+    assert "max_query_time_seconds" in caplog.text
+
+    caplog.clear()
+    contract_middleware(_contract(None))
     assert "max_query_time_seconds" not in caplog.text

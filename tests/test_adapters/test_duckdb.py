@@ -187,3 +187,18 @@ async def test_timeout_clock_starts_once_the_connection_is_held(
     with pytest.raises(QueryTimeoutError) as exc_info:
         await slow
     assert exc_info.value.timeout_seconds == 1.0
+
+
+def test_execute_with_timeout_goes_through_execute_overrides() -> None:
+    """A subclass that rewrites SQL in `execute` -- the Denodo stand-in in
+    test_sensitivity strips VQL's CONTEXT clause there -- must keep doing so
+    when a time limit is set."""
+
+    class _Rewriting(DuckDBAdapter):
+        def execute(self, sql: str) -> QueryResult:
+            return super().execute(sql.replace("NOT_SQL ", ""))
+
+    db = _Rewriting(":memory:")
+    assert db.execute_with_timeout("NOT_SQL SELECT 42", 5.0).rows == [(42,)]
+    with pytest.raises(QueryTimeoutError):
+        db.execute_with_timeout(f"NOT_SQL {SLOW_SQL}", 0.3)

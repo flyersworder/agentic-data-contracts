@@ -71,7 +71,9 @@ class TimeoutAdapter(Protocol):
     its connection, not while it waits for one -- a query queued behind another
     has not run yet. An adapter without this capability still gets a timeout
     from the query tools, but only on the caller's side: the statement may
-    keep running in the database.
+    keep running in the database, and the agent's next query can reach the
+    adapter while it does -- so such an adapter must be safe to call
+    concurrently.
     """
 
     def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult: ...

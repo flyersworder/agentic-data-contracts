@@ -31,7 +31,10 @@ class DuckDBAdapter:
 
     def __init__(self, database: str = ":memory:") -> None:
         self.connection = duckdb.connect(database)
-        self._lock = threading.Lock()
+        # Reentrant so `execute_with_timeout` can hold it while calling
+        # `self.execute`, which takes it again -- routing through `execute`
+        # keeps a subclass override (SQL rewriting, auditing) on the path.
+        self._lock = threading.RLock()
 
     @property
     def dialect(self) -> str:
@@ -39,7 +42,10 @@ class DuckDBAdapter:
 
     def execute(self, sql: str) -> QueryResult:
         with self._lock:
-            return self._execute_locked(sql)
+            result = self.connection.execute(sql)
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
+        return QueryResult(columns=columns, rows=rows)
 
     def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
         """Run ``sql``, interrupting it after ``timeout_seconds``.
@@ -66,7 +72,7 @@ class DuckDBAdapter:
             timer = threading.Timer(timeout_seconds, _interrupt)
             timer.start()
             try:
-                return self._execute_locked(sql)
+                return self.execute(sql)
             except duckdb.InterruptException:
                 if timed_out.is_set():
                     raise QueryTimeoutError(timeout_seconds) from None
@@ -75,12 +81,6 @@ class DuckDBAdapter:
                 timer.cancel()
                 with guard:
                     finished = True
-
-    def _execute_locked(self, sql: str) -> QueryResult:
-        result = self.connection.execute(sql)
-        columns = [desc[0] for desc in result.description]
-        rows = result.fetchall()
-        return QueryResult(columns=columns, rows=rows)
 
     def explain(self, sql: str) -> ExplainResult:
         try:

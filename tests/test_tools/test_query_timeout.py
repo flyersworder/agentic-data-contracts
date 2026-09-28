@@ -91,9 +91,24 @@ async def test_run_query_timeout_is_a_blocked_query(adapter: DuckDBAdapter) -> N
 
 
 async def test_run_query_without_limit_uses_plain_execute() -> None:
+    """No max_query_time_seconds declared: no timeout should reach the
+    adapter, on any dispatch path. DuckDBAdapter's default row cap
+    (max_result_rows=1000) routes run_query through execute_limited rather
+    than execute/execute_with_timeout, so asserting execute_with_timeout was
+    never called is no longer enough -- record the timeout_seconds actually
+    passed to execute_limited and assert it is None (#116)."""
+
+    seen_timeouts: list[float | None] = []
+
     class _NoTimeoutExpected(DuckDBAdapter):
         def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
             raise AssertionError("no limit declared, so no timeout path")
+
+        def execute_limited(
+            self, sql: str, max_rows: int, timeout_seconds: float | None = None
+        ) -> QueryResult:
+            seen_timeouts.append(timeout_seconds)
+            return super().execute_limited(sql, max_rows, timeout_seconds)
 
     run_query = _tool(
         create_tools(_contract(None), adapter=_build(_NoTimeoutExpected)),
@@ -104,6 +119,7 @@ async def test_run_query_without_limit_uses_plain_execute() -> None:
 
     assert "is_error" not in result
     assert '"row_count": 3' in result["content"][0]["text"]
+    assert seen_timeouts == [None]
 
 
 class _SlowAdapterWithoutTimeout:
@@ -150,6 +166,73 @@ async def test_run_query_timeout_falls_back_for_adapters_without_support(
     assert "may still be running" in text
     assert "was cancelled" not in text
     assert session.retries == 1
+
+
+class _SlowRowLimitAdapterWithoutTimeout:
+    """A RowLimitAdapter (implements execute_limited) that is NOT a
+    TimeoutAdapter (no execute_with_timeout): the tool can only stop waiting
+    on the row-limited dispatch branch, not cancel the statement."""
+
+    dialect = "duckdb"
+
+    def __init__(self, inner: DuckDBAdapter) -> None:
+        self._inner = inner
+
+    def execute(self, sql: str) -> QueryResult:
+        return self._inner.execute(sql)
+
+    def execute_limited(
+        self, sql: str, max_rows: int, timeout_seconds: float | None = None
+    ) -> QueryResult:
+        time.sleep(1.5)
+        return self._inner.execute_limited(sql, max_rows, timeout_seconds)
+
+    def explain(self, sql: str) -> ExplainResult:
+        return self._inner.explain(sql)
+
+    def describe_table(self, schema: str, table: str) -> TableSchema:
+        return self._inner.describe_table(schema, table)
+
+    def list_tables(self, schema: str) -> list[str]:
+        return self._inner.list_tables(schema)
+
+
+async def test_row_limited_path_falls_back_for_adapters_without_timeout_support(
+    adapter: DuckDBAdapter,
+) -> None:
+    """The untested dispatch branch: a RowLimitAdapter that is not also a
+    TimeoutAdapter still gets the caller-side deadline on the row-limited
+    path. execute_limited must receive timeout_seconds=None (only a
+    TimeoutAdapter is trusted to act on the real value), and a slow call is
+    abandoned at the contract's limit -- surfaced as "may still be running",
+    never "was cancelled" -- rather than running unbounded (#116)."""
+    dc = _contract(0.2)
+    session = ContractSession(dc)
+    seen_timeouts: list[float | None] = []
+
+    class _Spy(_SlowRowLimitAdapterWithoutTimeout):
+        def execute_limited(
+            self, sql: str, max_rows: int, timeout_seconds: float | None = None
+        ) -> QueryResult:
+            seen_timeouts.append(timeout_seconds)
+            return super().execute_limited(sql, max_rows, timeout_seconds)
+
+    run_query = _tool(
+        create_tools(dc, adapter=_Spy(adapter), session=session), "run_query"
+    )
+
+    start = time.monotonic()
+    result = await run_query({"sql": FAST_SQL})
+
+    assert time.monotonic() - start < 1.0
+    assert result["_kind"] == "blocked"
+    text = result["content"][0]["text"]
+    assert "max_query_time_seconds" in text
+    # Nothing cancelled it, so the agent must not be told it was cancelled.
+    assert "may still be running" in text
+    assert "was cancelled" not in text
+    assert session.retries == 1
+    assert seen_timeouts == [None]
 
 
 async def test_preview_table_honours_the_limit() -> None:

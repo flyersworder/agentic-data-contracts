@@ -1839,10 +1839,18 @@ def create_tools(
             # those two documented cases and nothing broader, so a genuinely
             # unexpected exception from an exotic adapter type still surfaces
             # loudly instead of being swallowed here.
-            try:
-                scalar, _ = _scalar_value(qresult.columns, shown_rows, "run_query")
-            except (ValueError, TypeError):
+            #
+            # A truncated result never yields a scalar: a cap of 1 makes any
+            # multi-row result look 1x1, and conformance.py's scalar_calls /
+            # sole_scalar treat a recorded scalar as an answer candidate -- a
+            # truncated first row must never be graded as the answer.
+            if truncated:
                 scalar = None
+            else:
+                try:
+                    scalar, _ = _scalar_value(qresult.columns, shown_rows, "run_query")
+                except (ValueError, TypeError):
+                    scalar = None
             _record(
                 "ok",
                 scalar=scalar,

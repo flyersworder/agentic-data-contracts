@@ -625,6 +625,34 @@ async def test_run_query_execute_exception_includes_remaining_budget(
 
 
 @pytest.mark.asyncio
+async def test_run_query_execute_limited_exception_includes_remaining_budget(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Sibling of the test above for the default (capped) path: DuckDBAdapter
+    is a RowLimitAdapter, so create_tools()'s default max_result_rows=1000
+    routes run_query through execute_limited instead of execute. An engine
+    failure there must surface the same BLOCKED + Remaining: response (#116).
+    """
+    from unittest.mock import patch
+
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+
+    with patch.object(
+        adapter,
+        "execute_limited",
+        side_effect=RuntimeError("simulated engine failure"),
+    ):
+        result = await tool.callable(
+            {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
+        )
+    text = result["content"][0]["text"]
+    assert "BLOCKED" in text
+    assert "execution failed" in text.lower()
+    assert "Remaining:" in text
+
+
+@pytest.mark.asyncio
 async def test_run_query_surfaces_log_messages() -> None:
     """enforcement=log rule should populate a LOG preamble in run_query output,
     mirroring the log_messages field inspect_query exposes."""

@@ -8,6 +8,7 @@ import pytest
 from agentic_data_contracts.adapters.base import QueryResult, TableSchema
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.recorder import ToolRecorder
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
@@ -15,6 +16,7 @@ from agentic_data_contracts.core.schema import (
     SemanticConfig,
     SemanticRule,
 )
+from agentic_data_contracts.core.session import ContractSession
 from agentic_data_contracts.tools import factory
 from agentic_data_contracts.tools.factory import create_tools
 from agentic_data_contracts.validation.explain import ExplainResult
@@ -106,6 +108,29 @@ async def test_none_returns_every_row(adapter: DuckDBAdapter) -> None:
         create_tools(_contract(), adapter=adapter, max_result_rows=None), "run_query"
     )
     assert len(_payload(await run_query({"sql": SQL}))["rows"]) == 100
+
+
+async def test_truncated_result_records_no_scalar(adapter: DuckDBAdapter) -> None:
+    """A truncated single-column result must not be recorded as a scalar:
+    conformance.py's scalar_calls/sole_scalar treat a recorded scalar as an
+    answer candidate, so a cap of 1 turning a 100-row result into a 1x1 shape
+    must not look like the query's answer (#116)."""
+    contract = _contract()
+    recorder = ToolRecorder()
+    session = ContractSession(contract, recorder=recorder)
+    run_query = _tool(
+        create_tools(contract, adapter=adapter, session=session, max_result_rows=1),
+        "run_query",
+    )
+    data = _payload(await run_query({"sql": SQL}))
+    assert data["truncated"] is True
+    assert len(data["rows"]) == 1
+
+    call = recorder.calls[-1]
+    assert call.tool == "run_query"
+    assert call.outcome == "ok"
+    assert call.scalar is None
+    assert call.row_count == 1
 
 
 @pytest.mark.parametrize("bad", [0, -1])

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 import duckdb
@@ -60,52 +62,88 @@ class DuckDBAdapter:
             rows = result.fetchall()
         return QueryResult(columns=columns, rows=rows)
 
+    @contextmanager
+    def _interrupt_after(self, timeout_seconds: float) -> Iterator[None]:
+        """Interrupt the connection if the body runs past ``timeout_seconds``.
+
+        The caller must hold ``_lock``: ``interrupt()`` cancels whatever the
+        shared connection is running, so a clock started while still waiting
+        for the lock would cancel another caller's statement.
+        """
+        done = threading.Event()
+        timed_out = threading.Event()
+        # Held while interrupting and while marking the call done, so no
+        # interrupt can land after the lock is released -- on the next
+        # caller's statement.
+        guard = threading.Lock()
+
+        def _watchdog() -> None:
+            # Clamped: a longer wait raises OverflowError in this thread,
+            # silently leaving the limit unarmed.
+            if done.wait(min(timeout_seconds, threading.TIMEOUT_MAX)):
+                return
+            timed_out.set()
+            # DuckDB drops an interrupt sent while the connection is idle,
+            # so one fired during work `execute` does before its statement
+            # (a subclass rewriting SQL) would be lost. Repeat until the
+            # call returns.
+            while True:
+                with guard:
+                    if done.is_set():
+                        return
+                    self.connection.interrupt()
+                if done.wait(_REINTERRUPT_SECONDS):
+                    return
+
+        threading.Thread(target=_watchdog, daemon=True).start()
+        try:
+            yield
+        except Exception as e:
+            # The timeout is an interrupt after the deadline, even one a
+            # subclass's `execute` re-raised as another type. Any other
+            # error -- memory_limit, say -- reaches the agent as itself.
+            if timed_out.is_set() and _caused_by_interrupt(e):
+                raise QueryTimeoutError(timeout_seconds) from None
+            raise
+        finally:
+            with guard:
+                done.set()
+
     def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
         """Run ``sql``, interrupting it after ``timeout_seconds``.
 
-        The clock starts inside the lock: ``interrupt()`` cancels whatever the
-        shared connection is running, so a clock started while this call still
-        waited for the lock would cancel another caller's statement.
+        Runs through ``self.execute``, so a subclass override (SQL rewriting,
+        auditing) stays on the path.
         """
+        with self._lock, self._interrupt_after(timeout_seconds):
+            return self.execute(sql)
+
+    def execute_limited(
+        self, sql: str, max_rows: int, timeout_seconds: float | None = None
+    ) -> QueryResult:
+        """Run ``sql`` and fetch at most ``max_rows`` rows.
+
+        DuckDB streams the result, so rows past ``max_rows + 1`` are never
+        produced. Does not call ``self.execute``: a subclass that rewrites SQL
+        there must override this method too.
+        """
+        if max_rows < 1:
+            raise ValueError(f"max_rows must be at least 1, got {max_rows}")
         with self._lock:
-            done = threading.Event()
-            timed_out = threading.Event()
-            # Held while interrupting and while marking the call done, so no
-            # interrupt can land after the lock is released -- on the next
-            # caller's statement.
-            guard = threading.Lock()
-
-            def _watchdog() -> None:
-                # Clamped: a longer wait raises OverflowError in this thread,
-                # silently leaving the limit unarmed.
-                if done.wait(min(timeout_seconds, threading.TIMEOUT_MAX)):
-                    return
-                timed_out.set()
-                # DuckDB drops an interrupt sent while the connection is idle,
-                # so one fired during work `execute` does before its statement
-                # (a subclass rewriting SQL) would be lost. Repeat until the
-                # call returns.
-                while True:
-                    with guard:
-                        if done.is_set():
-                            return
-                        self.connection.interrupt()
-                    if done.wait(_REINTERRUPT_SECONDS):
-                        return
-
-            threading.Thread(target=_watchdog, daemon=True).start()
-            try:
-                return self.execute(sql)
-            except Exception as e:
-                # The timeout is an interrupt after the deadline, even one a
-                # subclass's `execute` re-raised as another type. Any other
-                # error -- memory_limit, say -- reaches the agent as itself.
-                if timed_out.is_set() and _caused_by_interrupt(e):
-                    raise QueryTimeoutError(timeout_seconds) from None
-                raise
-            finally:
-                with guard:
-                    done.set()
+            limit = (
+                self._interrupt_after(timeout_seconds)
+                if timeout_seconds is not None
+                else nullcontext()
+            )
+            with limit:
+                result = self.connection.execute(sql)
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchmany(max_rows + 1)
+        return QueryResult(
+            columns=columns,
+            rows=rows[:max_rows],
+            truncated=len(rows) > max_rows,
+        )
 
     def explain(self, sql: str) -> ExplainResult:
         try:

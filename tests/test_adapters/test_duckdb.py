@@ -8,6 +8,7 @@ from agentic_data_contracts.adapters.base import (
     DatabaseAdapter,
     QueryResult,
     QueryTimeoutError,
+    RowLimitAdapter,
     TableSchema,
     TimeoutAdapter,
 )
@@ -267,3 +268,56 @@ def test_engine_error_after_the_deadline_is_not_a_timeout() -> None:
 
     with pytest.raises(ValueError, match="Out of Memory"):
         _FailsLate(":memory:").execute_with_timeout("SELECT 1", 0.05)
+
+
+# 10^10 rows: returning quickly proves nothing past the cap was materialised.
+HUGE_SQL = "SELECT a.range AS x, b.range AS y FROM range(100000) a, range(100000) b"
+
+
+def test_adapter_supports_row_limit(adapter: DuckDBAdapter) -> None:
+    assert isinstance(adapter, RowLimitAdapter)
+
+
+def test_query_result_truncated_defaults_false() -> None:
+    assert QueryResult(columns=["a"], rows=[(1,)]).truncated is False
+
+
+def test_execute_limited_stops_at_the_cap(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    result = adapter.execute_limited(HUGE_SQL, 50)
+    assert time.monotonic() - start < 2
+    assert result.columns == ["x", "y"]
+    assert len(result.rows) == 50
+    assert result.row_count == 50
+    assert result.truncated is True
+
+
+def test_execute_limited_exact_fit_is_not_truncated(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_limited("SELECT range FROM range(5)", 5)
+    assert len(result.rows) == 5
+    assert result.truncated is False
+
+
+def test_execute_limited_small_result(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_limited("SELECT id FROM analytics.orders ORDER BY id", 50)
+    assert result.rows == [(1,), (2,)]
+    assert result.truncated is False
+
+
+def test_execute_limited_rejects_a_non_positive_cap(adapter: DuckDBAdapter) -> None:
+    with pytest.raises(ValueError, match="max_rows"):
+        adapter.execute_limited("SELECT 1", 0)
+
+
+def test_execute_limited_honours_timeout(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_limited(SLOW_SQL, 10, timeout_seconds=0.3)
+    assert time.monotonic() - start < 5
+    assert exc_info.value.cancelled is True
+    assert adapter.execute_limited("SELECT 42", 10).rows == [(42,)]
+
+
+def test_connection_usable_after_a_truncated_fetch(adapter: DuckDBAdapter) -> None:
+    adapter.execute_limited(HUGE_SQL, 3)
+    assert adapter.execute("SELECT 42").rows == [(42,)]

@@ -97,10 +97,13 @@ async def test_untruncated_payload_is_unchanged(adapter: DuckDBAdapter) -> None:
     uncapped = _tool(
         create_tools(_contract(), adapter=adapter, max_result_rows=None), "run_query"
     )
-    a = await capped({"sql": SQL})
-    b = await uncapped({"sql": SQL})
-    assert a["content"][0]["text"] == b["content"][0]["text"]
-    assert "truncated" not in a["content"][0]["text"]
+    a = (await capped({"sql": SQL}))["content"][0]["text"]
+    b = (await uncapped({"sql": SQL}))["content"][0]["text"]
+    # `session` is last and carries each session's elapsed time, which may
+    # differ; everything before it must be byte-identical.
+    assert list(json.loads(a))[-1] == "session"
+    assert a[: a.index('"session"')] == b[: b.index('"session"')]
+    assert "truncated" not in a
 
 
 async def test_none_returns_every_row(adapter: DuckDBAdapter) -> None:
@@ -160,7 +163,11 @@ async def test_row_thresholds_above_the_cap_stay_exact(adapter: DuckDBAdapter) -
     )
     result = await blocks({"sql": SQL})
     assert result["_kind"] == "blocked"
-    assert "maximum is 20" in result["content"][0]["text"]
+    # 21 rows fetched of 100: the agent must not be told the query made 21.
+    assert (
+        "query returned at least 21 rows, maximum is 20"
+        in (result["content"][0]["text"])
+    )
 
 
 class _SpyAdapter(DuckDBAdapter):

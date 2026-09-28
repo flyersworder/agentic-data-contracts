@@ -58,6 +58,36 @@ class TestResultCheckRunnerRowBounds:
         assert not result.passed
         assert "5 rows" in result.message
 
+    def test_max_rows_on_a_truncated_fetch_says_at_least(self) -> None:
+        runner = ResultCheckRunner(
+            column=None,
+            min_value=None,
+            max_value=None,
+            not_null=None,
+            min_rows=None,
+            max_rows=2,
+            rule_name="size_limit",
+        )
+        rows = [(i,) for i in range(5)]
+        result = runner.check_results(["id"], rows, truncated=True)
+        assert not result.passed
+        assert "query returned at least 5 rows, maximum is 2" in result.message
+
+    def test_max_rows_untruncated_message_is_unchanged(self) -> None:
+        runner = ResultCheckRunner(
+            column=None,
+            min_value=None,
+            max_value=None,
+            not_null=None,
+            min_rows=None,
+            max_rows=2,
+            rule_name="size_limit",
+        )
+        rows = [(i,) for i in range(5)]
+        result = runner.check_results(["id"], rows, truncated=False)
+        assert result.message == runner.check_results(["id"], rows).message
+        assert "query returned 5 rows, maximum is 2" in result.message
+
 
 class TestResultCheckRunnerColumnBounds:
     def test_max_value_passes(self) -> None:

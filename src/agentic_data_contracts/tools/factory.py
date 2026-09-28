@@ -1822,7 +1822,10 @@ def create_tools(
 
             # Phase 3: result checks
             rresult = validator.validate_results(
-                sql, qresult.columns, [tuple(r) for r in qresult.rows]
+                sql,
+                qresult.columns,
+                [tuple(r) for r in qresult.rows],
+                truncated=qresult.truncated,
             )
             if rresult.blocked:
                 session.record_retry()

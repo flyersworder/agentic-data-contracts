@@ -549,7 +549,8 @@ T + 1)` rows, where `T` is the largest `min_rows`/`max_rows` threshold any rule
 declares (0 when there are none, computed once at `create_tools()` time), then
 trims to `max_result_rows` only when building the agent's response. A
 `max_rows: 20` rule still blocks a 100-row result even when `max_result_rows`
-is 5. A contract declaring a very large threshold widens the fetch
+is 5, and since only 21 rows were fetched its message says the query returned
+"at least 21 rows". A contract declaring a very large threshold widens the fetch
 accordingly — that is the author's declared intent.
 
 ## Domain-Driven Agent Workflow
@@ -1616,8 +1617,8 @@ Postgres, `STATEMENT_TIMEOUT_IN_SECONDS` on Snowflake, a job timeout on
 BigQuery.
 
 `run_query` and `preview_table` also cap how many rows they fetch, via
-`create_tools(max_result_rows=1000)` — see [Result encoding](#result-encoding)
-below for the payload shape. An adapter implementing the optional
+`create_tools(max_result_rows=1000)` — see [Row cap](#row-cap) above for the
+payload shape. An adapter implementing the optional
 `RowLimitAdapter` capability — `execute_limited(sql, max_rows,
 timeout_seconds=None)` — fetches at most `max_rows + 1` rows and returns at
 most `max_rows`, with `truncated=True` when the extra row existed, so a

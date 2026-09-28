@@ -57,7 +57,13 @@ class DuckDBAdapter:
         # SET after connect, not connect(config=...): a second in-process
         # connection to the same file with a different config raises.
         if memory_limit is not None:
-            self.connection.execute("SET memory_limit = ?", [memory_limit])
+            try:
+                self.connection.execute("SET memory_limit = ?", [memory_limit])
+            except BaseException:
+                # The half-built adapter is unreachable: release the
+                # connection (and a file database's lock) before raising.
+                self.connection.close()
+                raise
         # Reentrant so `execute_with_timeout` can hold it while calling
         # `self.execute`, which takes it again -- routing through `execute`
         # keeps a subclass override (SQL rewriting, auditing) on the path.

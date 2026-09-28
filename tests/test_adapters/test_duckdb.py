@@ -375,6 +375,28 @@ def test_runaway_query_is_an_engine_error_and_the_adapter_recovers() -> None:
     assert db.execute("SELECT 42").rows == [(42,)]
 
 
-def test_invalid_memory_limit_fails_at_construction() -> None:
+def test_invalid_memory_limit_fails_at_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connect = duckdb.connect
+
+    class _ClosingSpy:
+        def __init__(self, database: str) -> None:
+            self._inner = connect(database)
+            self.closed = False
+            opened.append(self)
+
+        def execute(self, *args: object) -> object:
+            return self._inner.execute(*args)  # ty: ignore[invalid-argument-type]
+
+        def close(self) -> None:
+            self.closed = True
+            self._inner.close()
+
+    opened: list[_ClosingSpy] = []
+    monkeypatch.setattr(duckdb, "connect", _ClosingSpy)
     with pytest.raises(duckdb.Error):
         DuckDBAdapter(":memory:", memory_limit="bogus")
+    # The half-built adapter is unreachable, so it must not leak the
+    # connection (and, for a file database, its lock).
+    assert [c.closed for c in opened] == [True]

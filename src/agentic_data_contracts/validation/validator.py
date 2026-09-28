@@ -441,8 +441,18 @@ class Validator:
         )
 
     def validate_results(
-        self, sql: str, columns: list[str], rows: list[tuple]
+        self,
+        sql: str,
+        columns: list[str],
+        rows: list[tuple],
+        *,
+        truncated: bool = False,
     ) -> ValidationResult:
+        """Run the result checks on ``rows``.
+
+        ``truncated`` says the fetch stopped before the result's end, so a
+        row-count message reports "at least" the rows seen.
+        """
         reasons: list[str] = []
         warnings: list[str] = []
         log_messages: list[str] = []
@@ -476,7 +486,7 @@ class Validator:
                 entry.principal_scope, resolved_principal
             ):
                 continue
-            result = entry.runner.check_results(columns, rows)
+            result = entry.runner.check_results(columns, rows, truncated=truncated)
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)

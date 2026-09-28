@@ -278,3 +278,42 @@ def test_toolset_rejects_a_bad_cap_at_construction() -> None:
 
     with pytest.raises(ValueError, match="max_result_rows"):
         create_pydantic_ai_toolset(_contract(), max_result_rows=0)
+
+
+def test_pydantic_ai_toolset_factory_forwards_max_result_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # test_toolset_rejects_a_bad_cap_at_construction (above) only proves the
+    # toolset's own eager pre-check at wiring time — that check runs before
+    # _factory is ever invoked, so it never touches the max_result_rows forward
+    # inside _factory's create_pydantic_ai_tools call. Actually invoke the
+    # factory with a real ContractDeps/RunContext so a dropped forward there
+    # is caught too.
+    pytest.importorskip("pydantic_ai")
+    from typing import Any, cast
+
+    from pydantic_ai import RunContext
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.usage import RunUsage
+
+    import agentic_data_contracts.tools.pydantic_ai as pydantic_ai_module
+    from agentic_data_contracts.core.session import ContractSession
+    from agentic_data_contracts.tools.pydantic_ai import (
+        ContractDeps,
+        create_pydantic_ai_toolset,
+    )
+
+    seen: dict[str, Any] = {}
+
+    def _spy(*args: Any, **kwargs: Any) -> list[Any]:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(pydantic_ai_module, "create_tools", _spy)
+
+    factory = create_pydantic_ai_toolset(_contract(), max_result_rows=7)
+    deps = ContractDeps(session=ContractSession(_contract()))
+    ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+    # Invoke the factory to trigger _factory's create_pydantic_ai_tools call
+    cast(Any, factory(ctx))
+    assert seen["max_result_rows"] == 7

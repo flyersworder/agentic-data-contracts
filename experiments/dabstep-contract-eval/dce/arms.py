@@ -150,9 +150,18 @@ _TRUNCATION_MARKER = "-- truncated at {n} rows (more rows not shown)"
 
 
 class _BoundedDuckDBAdapter(DuckDBAdapter):
-    """Every arm's queries run through this adapter, so every arm is bounded
-    by the same code: `MAX_ROWS` via `execute_limited`, `HARNESS_QUERY_SECONDS`
-    when no contract limit applies, and `HARNESS_MEMORY_LIMIT`."""
+    """Every arm's agent-written query SQL (`execute_sql` / `run_query`) runs
+    through this adapter's `execute_limited`, bounded by the same code:
+    `MAX_ROWS`, `HARNESS_QUERY_SECONDS` when no contract limit applies, and
+    `HARNESS_MEMORY_LIMIT`.
+
+    Only `execute_limited` is overridden. Governed `preview_table` and
+    `describe_table` (arm `contract`/`contract_hollow`, via `create_tools`)
+    and ungoverned `list_tables`/`describe_table` (arm `schema_only`/
+    `manual_prompt`, in `_ungoverned_tools`) run without the harness timeout —
+    they issue a `LIMIT`-bounded or metadata query against `information_schema`
+    /`DESCRIBE`, neither of which can run away the way agent-written SQL can.
+    """
 
     def __init__(self, db_path: Path) -> None:
         super().__init__(str(db_path), memory_limit=HARNESS_MEMORY_LIMIT)
@@ -373,10 +382,11 @@ def _ungoverned_tools(db_path: Path) -> list[Tool]:
 
 
 # The exact leading substring of `run_query`'s success JSON, built from
-# `{"columns": ..., "rows": ..., "row_count": ..., "session": ...}` in that
-# key order (see tools/factory.py). Locating this literal, rather than a bare
-# `"{"`, means a `{` appearing anywhere in a `WARNINGS:`/`LOG:` preamble can't
-# be mistaken for the payload boundary.
+# `{"columns": ..., "rows": ..., "row_count": ..., ["truncated": true,]
+# "session": ...}` in that key order (see tools/factory.py; `truncated` is
+# present only when the result was truncated). Locating this literal, rather
+# than a bare `"{"`, means a `{` appearing anywhere in a `WARNINGS:`/`LOG:`
+# preamble can't be mistaken for the payload boundary.
 _RUN_QUERY_PAYLOAD_MARKER = '{"columns"'
 
 
@@ -393,16 +403,19 @@ def _append_truncation_marker(tool_def, max_rows: int):
     absence leaves the response untouched, which is correct for the latter
     (nothing to truncate in a block message). If the marker *is* found but
     what follows doesn't parse as JSON, that is not a shape this wrapper
-    understands and is not something to paper over: silently returning the
-    untruncated payload here would quietly reopen the row-count asymmetry
-    this wrapper exists to close, with no sign anything went wrong — so this
-    raises instead.
+    understands and is not something to paper over: the library caps rows
+    itself now (`create_tools(max_result_rows=...)`), so silently returning
+    the payload without the marker text would only lose that cosmetic marker,
+    not reopen a row-count asymmetry — but a shape this parser doesn't
+    recognize means something upstream changed in a way this wrapper was not
+    written to handle, and that deserves a loud failure rather than a silent
+    pass-through — so this raises instead.
     """
     from agentic_data_contracts.tools.factory import ToolDef
 
     inner = tool_def.callable
 
-    async def _capped(args: dict) -> dict:
+    async def _marked(args: dict) -> dict:
         result = await inner(args)
         content = result.get("content") or []
         if not content or content[0].get("type") != "text":
@@ -431,7 +444,7 @@ def _append_truncation_marker(tool_def, max_rows: int):
         name=tool_def.name,
         description=tool_def.description,
         input_schema=tool_def.input_schema,
-        callable=_capped,
+        callable=_marked,
     )
 
 

@@ -324,6 +324,32 @@ def test_connection_usable_after_a_truncated_fetch(adapter: DuckDBAdapter) -> No
     assert adapter.execute("SELECT 42").rows == [(42,)]
 
 
+def test_truncated_fetch_releases_engine_memory() -> None:
+    """A truncated fetch leaves a pending streaming result, which pins the
+    engine's operator state (here a 2M-row hash-join build side) until the
+    next statement on the connection. `execute_limited` must release it."""
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        "CREATE TABLE big AS SELECT range AS k, range * 2 AS v FROM range(2000000)"
+    )
+    side = db.connection.cursor()
+
+    def engine_bytes() -> int:
+        row = side.execute(
+            "SELECT sum(memory_usage_bytes) FROM duckdb_memory()"
+        ).fetchone()
+        assert row is not None
+        return int(row[0])
+
+    baseline = engine_bytes()
+    result = db.execute_limited(
+        "SELECT a.k, b.v FROM big a JOIN big b ON a.k = b.k", 10
+    )
+    assert result.truncated
+    # Pinned, the join holds about 80 MiB over baseline; released, none.
+    assert engine_bytes() - baseline < 20 * 2**20
+
+
 def _setting(db: DuckDBAdapter, name: str) -> str:
     row = db.connection.execute("SELECT current_setting(?)", [name]).fetchone()
     assert row is not None

@@ -136,9 +136,13 @@ class DuckDBAdapter:
         """Run ``sql`` and fetch at most ``max_rows`` rows.
 
         DuckDB streams the result, so rows past ``max_rows + 1`` are never
-        produced. Does not call ``self.execute``: for a subclass that overrides
-        only ``execute``, the query tools call ``execute`` instead (results
-        capped, memory unbounded), so override this method too.
+        fetched into Python. The engine still produces whole vector chunks,
+        and pipeline breakers (sorts, aggregates, join build sides) still
+        materialise their input in the engine -- ``memory_limit`` bounds that.
+
+        Does not call ``self.execute``: for a subclass that overrides only
+        ``execute``, the query tools call ``execute`` instead (results capped,
+        memory unbounded), so override this method too.
         """
         if max_rows < 1:
             raise ValueError(f"max_rows must be at least 1, got {max_rows}")
@@ -152,6 +156,14 @@ class DuckDBAdapter:
                 result = self.connection.execute(sql)
                 columns = [desc[0] for desc in result.description]
                 rows = result.fetchmany(max_rows + 1)
+            if len(rows) > max_rows:
+                # The unread rest of the result stays pending on the
+                # connection, pinning the engine's operator memory (a hash
+                # join's build side, say) until the next statement replaces
+                # it. `result.close()` cannot release it: `execute` returns the
+                # connection itself. Run a trivial statement to drop it, after
+                # the watchdog is disarmed so it cannot be interrupted.
+                self.connection.execute("SELECT NULL")
         return QueryResult(
             columns=columns,
             rows=rows[:max_rows],

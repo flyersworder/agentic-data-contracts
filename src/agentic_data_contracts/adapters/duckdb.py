@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
@@ -42,10 +42,22 @@ class DuckDBAdapter:
     consistent. DuckDB still parallelizes the work of an individual query
     internally; the lock only prevents two queries from interleaving on the
     same connection.
+
+    ``memory_limit`` (a DuckDB size string such as ``"512MB"``) caps the
+    engine's memory, so a runaway query fails with an out-of-memory error the
+    agent sees instead of exhausting the process. It does not bound the Python
+    objects built from a result; ``execute_limited`` does that. Unset, DuckDB
+    uses its own default of 80% of RAM.
     """
 
-    def __init__(self, database: str = ":memory:") -> None:
+    def __init__(
+        self, database: str = ":memory:", *, memory_limit: str | None = None
+    ) -> None:
         self.connection = duckdb.connect(database)
+        # SET after connect, not connect(config=...): a second in-process
+        # connection to the same file with a different config raises.
+        if memory_limit is not None:
+            self.connection.execute("SET memory_limit = ?", [memory_limit])
         # Reentrant so `execute_with_timeout` can hold it while calling
         # `self.execute`, which takes it again -- routing through `execute`
         # keeps a subclass override (SQL rewriting, auditing) on the path.
@@ -63,7 +75,7 @@ class DuckDBAdapter:
         return QueryResult(columns=columns, rows=rows)
 
     @contextmanager
-    def _interrupt_after(self, timeout_seconds: float) -> Iterator[None]:
+    def _interrupt_after(self, timeout_seconds: float) -> Generator[None]:
         """Interrupt the connection if the body runs past ``timeout_seconds``.
 
         The caller must hold ``_lock``: ``interrupt()`` cancels whatever the
@@ -84,9 +96,9 @@ class DuckDBAdapter:
                 return
             timed_out.set()
             # DuckDB drops an interrupt sent while the connection is idle,
-            # so one fired during work `execute` does before its statement
-            # (a subclass rewriting SQL) would be lost. Repeat until the
-            # call returns.
+            # so one fired during work the body does before its statement
+            # starts (a subclass's `execute` rewriting SQL) would be lost.
+            # Repeat until the call returns.
             while True:
                 with guard:
                     if done.is_set():

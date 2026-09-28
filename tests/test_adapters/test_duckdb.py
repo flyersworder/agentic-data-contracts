@@ -2,6 +2,7 @@ import asyncio
 import threading
 import time
 
+import duckdb
 import pytest
 
 from agentic_data_contracts.adapters.base import (
@@ -321,3 +322,33 @@ def test_execute_limited_honours_timeout(adapter: DuckDBAdapter) -> None:
 def test_connection_usable_after_a_truncated_fetch(adapter: DuckDBAdapter) -> None:
     adapter.execute_limited(HUGE_SQL, 3)
     assert adapter.execute("SELECT 42").rows == [(42,)]
+
+
+def _setting(db: DuckDBAdapter, name: str) -> str:
+    row = db.connection.execute("SELECT current_setting(?)", [name]).fetchone()
+    assert row is not None
+    return row[0]
+
+
+def test_memory_limit_is_applied() -> None:
+    db = DuckDBAdapter(":memory:", memory_limit="64MB")
+    assert _setting(db, "memory_limit") == "61.0 MiB"
+
+
+def test_memory_limit_default_leaves_duckdb_default() -> None:
+    assert _setting(DuckDBAdapter(":memory:"), "memory_limit") == _setting(
+        DuckDBAdapter(":memory:", memory_limit=None), "memory_limit"
+    )
+
+
+def test_runaway_query_is_an_engine_error_and_the_adapter_recovers() -> None:
+    db = DuckDBAdapter(":memory:", memory_limit="50MB")
+    # list() cannot spill to disk, so it hits the limit instead of paging.
+    with pytest.raises(duckdb.OutOfMemoryException):
+        db.execute_limited("SELECT list(range) FROM range(100000000)", 10)
+    assert db.execute("SELECT 42").rows == [(42,)]
+
+
+def test_invalid_memory_limit_fails_at_construction() -> None:
+    with pytest.raises(duckdb.Error):
+        DuckDBAdapter(":memory:", memory_limit="bogus")

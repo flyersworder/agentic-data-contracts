@@ -640,6 +640,43 @@ def _warn_unbounded_fetch(adapter: DatabaseAdapter) -> None:
     )
 
 
+# Adapter classes already warned about; see _WARNED_UNCANCELLABLE.
+_WARNED_EXECUTE_OVERRIDE: set[type] = set()
+
+
+def _execute_limited_is_current(adapter: DatabaseAdapter) -> bool:
+    """Whether ``execute_limited`` is defined at or below the class that
+    defines ``execute`` in the adapter's MRO.
+
+    ``execute_limited`` does not go through ``execute``, so a subclass that
+    overrides only ``execute`` (SQL rewriting, auditing, tenant filters) would
+    be bypassed silently if the query tools called ``execute_limited``.
+    """
+    mro = type(adapter).__mro__
+
+    def _owner(name: str) -> int | None:
+        return next((i for i, cls in enumerate(mro) if name in vars(cls)), None)
+
+    limited, execute = _owner("execute_limited"), _owner("execute")
+    # Not found on a class (an instance attribute, __getattr__): nothing to
+    # compare, so trust the capability.
+    return limited is None or execute is None or limited <= execute
+
+
+def _warn_execute_override(adapter: DatabaseAdapter) -> None:
+    key = type(adapter)
+    if key in _WARNED_EXECUTE_OVERRIDE:
+        return
+    _WARNED_EXECUTE_OVERRIDE.add(key)
+    logger.warning(
+        "%s overrides execute but not execute_limited: the query tools call"
+        " execute so the override keeps applying, and cap the rows they"
+        " return, but every row is fetched into memory first. Override"
+        " execute_limited too to bound memory.",
+        key.__name__,
+    )
+
+
 def validate_max_result_rows(max_result_rows: int | None) -> None:
     if max_result_rows is not None and max_result_rows < 1:
         raise ValueError(
@@ -729,13 +766,20 @@ def create_tools(
     if max_query_time is not None and adapter is not None and timeout_adapter is None:
         _warn_uncancellable(adapter, max_query_time)
 
-    row_limit_adapter = adapter if isinstance(adapter, RowLimitAdapter) else None
+    row_limit_adapter = (
+        adapter
+        if isinstance(adapter, RowLimitAdapter) and _execute_limited_is_current(adapter)
+        else None
+    )
     if (
         max_result_rows is not None
         and adapter is not None
         and row_limit_adapter is None
     ):
-        _warn_unbounded_fetch(adapter)
+        if isinstance(adapter, RowLimitAdapter):
+            _warn_execute_override(adapter)
+        else:
+            _warn_unbounded_fetch(adapter)
     # Rows to fetch: past the cap only as far as the result checks need. See
     # _result_check_row_threshold.
     fetch_rows = (

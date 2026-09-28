@@ -1630,9 +1630,15 @@ honoured exactly as `execute_with_timeout` honours it; any other adapter gets
 call. Without `execute_limited`, results are still capped for what the agent
 sees, but only after `execute` has fetched every row — `create_tools` logs a
 warning once per adapter class, naming it and saying that implementing
-`execute_limited` bounds memory. A subclass of `DuckDBAdapter` that overrides
-`execute` to rewrite SQL (a Denodo stand-in stripping VQL's `CONTEXT` clause,
-say) must override `execute_limited` too — it does not call `execute`.
+`execute_limited` bounds memory. `execute_limited` does not call `execute`, so
+a subclass that overrides `execute` alone — a `DuckDBAdapter` subclass
+rewriting SQL (a Denodo stand-in stripping VQL's `CONTEXT` clause, say), or
+auditing every statement — would be bypassed by it. `create_tools` therefore
+uses `execute_limited` only when it is defined at or below the class that
+defines `execute` in the adapter's MRO. Otherwise it calls `execute`, so the
+override keeps applying, and caps the result afterwards — results are capped
+but memory is not bounded — and logs a warning once per adapter class saying
+so. Override `execute_limited` too to bound memory.
 
 A runaway query can exhaust memory as well as time, and the row cap above
 bounds only what reaches the agent, not what the engine builds while running

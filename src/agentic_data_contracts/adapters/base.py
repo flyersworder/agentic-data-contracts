@@ -103,7 +103,8 @@ class RowLimitAdapter(Protocol):
     ``execute_with_timeout`` does. Any other adapter receives ``None`` and gets
     the tools' caller-side deadline instead. Without this capability the tools
     still cap what the agent sees, but only after ``execute`` has fetched
-    everything.
+    everything. The same fallback applies to a subclass that overrides
+    ``execute`` but not ``execute_limited``, so the override is never bypassed.
     """
 
     def execute_limited(

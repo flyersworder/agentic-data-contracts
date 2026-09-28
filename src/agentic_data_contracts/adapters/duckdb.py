@@ -136,8 +136,9 @@ class DuckDBAdapter:
         """Run ``sql`` and fetch at most ``max_rows`` rows.
 
         DuckDB streams the result, so rows past ``max_rows + 1`` are never
-        produced. Does not call ``self.execute``: a subclass that rewrites SQL
-        there must override this method too.
+        produced. Does not call ``self.execute``: for a subclass that overrides
+        only ``execute``, the query tools call ``execute`` instead (results
+        capped, memory unbounded), so override this method too.
         """
         if max_rows < 1:
             raise ValueError(f"max_rows must be at least 1, got {max_rows}")

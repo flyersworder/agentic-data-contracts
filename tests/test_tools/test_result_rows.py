@@ -317,3 +317,76 @@ def test_pydantic_ai_toolset_factory_forwards_max_result_rows(
     # Invoke the factory to trigger _factory's create_pydantic_ai_tools call
     cast(Any, factory(ctx))
     assert seen["max_result_rows"] == 7
+
+
+class _RewritingExecute(DuckDBAdapter):
+    """Overrides only `execute`: `execute_limited` would bypass the rewrite."""
+
+    def __init__(self) -> None:
+        super().__init__(":memory:")
+        self.execute_calls = 0
+
+    def normalize_sql(self, sql: str) -> str:
+        return sql.replace("NOT_SQL ", "")
+
+    def explain(self, sql: str) -> ExplainResult:
+        return super().explain(sql.replace("NOT_SQL ", ""))
+
+    def execute(self, sql: str) -> QueryResult:
+        self.execute_calls += 1
+        return super().execute(sql.replace("NOT_SQL ", ""))
+
+
+class _RewritingBoth(_RewritingExecute):
+    """Overrides `execute_limited` too, so it keeps the bounded fetch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.limited_calls = 0
+
+    def execute_limited(
+        self, sql: str, max_rows: int, timeout_seconds: float | None = None
+    ) -> QueryResult:
+        self.limited_calls += 1
+        return super().execute_limited(
+            sql.replace("NOT_SQL ", ""), max_rows, timeout_seconds
+        )
+
+
+def _orders(db: DuckDBAdapter) -> None:
+    db.connection.execute(
+        "CREATE SCHEMA analytics;"
+        " CREATE TABLE analytics.orders AS SELECT range AS id FROM range(100);"
+    )
+
+
+async def test_execute_override_is_not_bypassed_by_execute_limited(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(factory, "_WARNED_EXECUTE_OVERRIDE", set())
+    db = _RewritingExecute()
+    _orders(db)
+    tools = create_tools(_contract(), adapter=db, max_result_rows=10)
+    create_tools(_contract(), adapter=db, max_result_rows=10)
+    assert caplog.text.count("overrides execute but not execute_limited") == 1
+
+    data = _payload(await _tool(tools, "run_query")({"sql": f"NOT_SQL {SQL}"}))
+    assert db.execute_calls == 1
+    assert data["rows"] == [[i] for i in range(10)]
+    assert data["truncated"] is True
+
+
+async def test_overriding_both_keeps_execute_limited(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(factory, "_WARNED_EXECUTE_OVERRIDE", set())
+    monkeypatch.setattr(factory, "_WARNED_UNBOUNDED_FETCH", set())
+    db = _RewritingBoth()
+    _orders(db)
+    tools = create_tools(_contract(), adapter=db, max_result_rows=10)
+    assert "execute_limited" not in caplog.text
+
+    data = _payload(await _tool(tools, "run_query")({"sql": f"NOT_SQL {SQL}"}))
+    assert db.limited_calls == 1
+    assert db.execute_calls == 0
+    assert data["truncated"] is True

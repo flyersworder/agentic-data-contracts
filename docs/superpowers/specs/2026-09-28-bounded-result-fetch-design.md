@@ -91,15 +91,17 @@ Dispatch in `_execute_bounded`, given a fetch limit `n` (see section 3) or `None
 | otherwise | today's path | today's path, then slice to `n` and set `truncated` |
 
 The second row of the right column bounds what the agent sees but not memory.
-The first time a given adapter class takes it, log one warning naming the
-class and saying that implementing `execute_limited` bounds memory — the same
-once-per-key pattern as `_warn_uncancellable`.
+`create_tools` warns at wiring when `max_result_rows` is set and the adapter
+lacks `execute_limited`, once per adapter class, naming the class and saying
+that implementing `execute_limited` bounds memory — the same pattern as
+`_warn_uncancellable`.
 
 ### 3. Result checks stay exact
 
-The tool fetches `n = max(max_result_rows, T) + 1` rows, where `T` is the
-largest `min_rows` or `max_rows` across the contract's `result_check` rules
-(0 when there are none), then trims to `max_result_rows` only when building the
+The tool asks the adapter for `n = max(max_result_rows, T + 1)` rows (the
+adapter reads one more to detect truncation), where `T` is the largest
+`min_rows` or `max_rows` across the contract's `result_check` rules (0 when
+there are none), then trims to `max_result_rows` only when building the
 response. Result checks run on all fetched rows.
 
 - Truncation means more than `T` rows exist and the fetch saw `T + 1` of them,

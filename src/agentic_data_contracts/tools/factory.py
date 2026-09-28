@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
@@ -14,6 +15,7 @@ from agentic_data_contracts.adapters.base import (
     DatabaseAdapter,
     QueryResult,
     QueryTimeoutError,
+    RowLimitAdapter,
     SqlNormalizer,
     TimeoutAdapter,
 )
@@ -519,37 +521,13 @@ def _metric_details(
     return data
 
 
-async def _execute_bounded(
-    adapter: DatabaseAdapter,
-    sql: str,
-    timeout_seconds: float | None,
-    *,
-    timeout_adapter: TimeoutAdapter | None,
-) -> QueryResult:
-    """Run ``sql`` off the event loop under ``resources.max_query_time_seconds``.
-
-    ``timeout_adapter`` is ``adapter`` when it implements ``TimeoutAdapter``
-    (checked once, at wiring), else ``None``. Such an adapter enforces the
-    limit itself and cancels the statement in the database. Any other adapter
-    gets a caller-side timeout: the agent is answered on time, but the
-    statement -- and the worker thread waiting on it -- runs on until the
-    database finishes it. Two consequences an adapter author should know: the
-    agent's next query can reach the adapter while the abandoned one is still
-    running, so an adapter over a single non-thread-safe connection must lock
-    it; and abandoned statements hold default-executor threads, so enough of
-    them delay every offloaded call. Implementing ``execute_with_timeout``
-    avoids both.
-    """
-    if timeout_seconds is None:
-        return await asyncio.to_thread(adapter.execute, sql)
-    if timeout_adapter is not None:
-        return await asyncio.to_thread(
-            timeout_adapter.execute_with_timeout, sql, timeout_seconds
-        )
+async def _with_deadline[T](call: Callable[[], T], timeout_seconds: float) -> T:
+    """Answer within ``timeout_seconds`` even though ``call`` cannot be
+    cancelled: the worker thread runs on until the database finishes it."""
     deadline = asyncio.timeout(timeout_seconds)
     try:
         async with deadline:
-            return await asyncio.to_thread(adapter.execute, sql)
+            return await asyncio.to_thread(call)
     except TimeoutError:
         # Only our own deadline is the contract's limit. A driver's TimeoutError
         # (socket.timeout is an alias) is an engine failure and must reach the
@@ -557,6 +535,66 @@ async def _execute_bounded(
         if deadline.expired():
             raise QueryTimeoutError(timeout_seconds, cancelled=False) from None
         raise
+
+
+async def _execute_bounded(
+    adapter: DatabaseAdapter,
+    sql: str,
+    timeout_seconds: float | None,
+    *,
+    timeout_adapter: TimeoutAdapter | None,
+    row_limit_adapter: RowLimitAdapter | None = None,
+    max_rows: int | None = None,
+) -> QueryResult:
+    """Run ``sql`` off the event loop under ``resources.max_query_time_seconds``,
+    returning at most ``max_rows`` rows when it is set.
+
+    ``timeout_adapter`` / ``row_limit_adapter`` are ``adapter`` when it
+    implements that capability (checked once, at wiring), else ``None``. A
+    ``TimeoutAdapter`` enforces the limit itself and cancels the statement in
+    the database. Any other adapter gets a caller-side timeout: the agent is
+    answered on time, but the statement -- and the worker thread waiting on it
+    -- runs on until the database finishes it. Two consequences an adapter
+    author should know: the agent's next query can reach the adapter while the
+    abandoned one is still running, so an adapter over a single
+    non-thread-safe connection must lock it; and abandoned statements hold
+    default-executor threads, so enough of them delay every offloaded call.
+    Implementing ``execute_with_timeout`` avoids both.
+
+    A ``RowLimitAdapter`` never fetches past ``max_rows``. Any other adapter
+    fetches everything and is sliced here: the agent's result is bounded, the
+    process's memory is not.
+    """
+    call: Callable[[], QueryResult]
+    if max_rows is not None and row_limit_adapter is not None:
+        # Pass the limit only to an adapter that can cancel; any other gets the
+        # caller-side deadline below, as `execute` does.
+        cancels = timeout_adapter is not None
+        call = functools.partial(
+            row_limit_adapter.execute_limited,
+            sql,
+            max_rows,
+            timeout_seconds if cancels else None,
+        )
+        if timeout_seconds is None or cancels:
+            return await asyncio.to_thread(call)
+        return await _with_deadline(call, timeout_seconds)
+
+    if timeout_seconds is None:
+        result = await asyncio.to_thread(adapter.execute, sql)
+    elif timeout_adapter is not None:
+        result = await asyncio.to_thread(
+            timeout_adapter.execute_with_timeout, sql, timeout_seconds
+        )
+    else:
+        result = await _with_deadline(
+            functools.partial(adapter.execute, sql), timeout_seconds
+        )
+    if max_rows is not None and len(result.rows) > max_rows:
+        return QueryResult(
+            columns=result.columns, rows=list(result.rows[:max_rows]), truncated=True
+        )
+    return result
 
 
 _HEAVY_QUERY_HINT = (
@@ -585,6 +623,49 @@ def _warn_uncancellable(adapter: DatabaseAdapter, max_query_time: float) -> None
     )
 
 
+# Adapter classes already warned about; see _WARNED_UNCANCELLABLE.
+_WARNED_UNBOUNDED_FETCH: set[type] = set()
+
+
+def _warn_unbounded_fetch(adapter: DatabaseAdapter) -> None:
+    key = type(adapter)
+    if key in _WARNED_UNBOUNDED_FETCH:
+        return
+    _WARNED_UNBOUNDED_FETCH.add(key)
+    logger.warning(
+        "%s does not implement execute_limited: the query tools cap the rows"
+        " they return, but every row is fetched into memory first. Implement"
+        " it (e.g. with cursor.fetchmany) to bound memory.",
+        key.__name__,
+    )
+
+
+def validate_max_result_rows(max_result_rows: int | None) -> None:
+    if max_result_rows is not None and max_result_rows < 1:
+        raise ValueError(
+            f"max_result_rows must be at least 1, or None for no cap;"
+            f" got {max_result_rows}"
+        )
+
+
+def _result_check_row_threshold(contract: DataContract) -> int:
+    """The largest ``min_rows``/``max_rows`` any result check declares, or 0.
+
+    A capped fetch reads past this, so a truncated result has provably more
+    rows than every threshold and the row-count checks stay exact.
+    """
+    return max(
+        (
+            bound
+            for rule in contract.schema.semantic.rules
+            if rule.result_check is not None
+            for bound in (rule.result_check.min_rows, rule.result_check.max_rows)
+            if bound is not None
+        ),
+        default=0,
+    )
+
+
 def _timeout_message(e: QueryTimeoutError, hint: str = _HEAVY_QUERY_HINT) -> str:
     # Actionable, like the other BLOCKED messages: a bare "timed out" gives the
     # model nothing to change on its next attempt.
@@ -610,8 +691,10 @@ def create_tools(
     caller_principal: Principal = None,
     staleness_threshold_days: int = 90,
     row_format: RowFormat = "compact",
+    max_result_rows: int | None = 1000,
 ) -> list[ToolDef]:
     validate_row_format(row_format)
+    validate_max_result_rows(max_result_rows)
 
     rows_note = _COMPACT_ROWS_NOTE if row_format == "compact" else ""
 
@@ -645,6 +728,21 @@ def create_tools(
     timeout_adapter = adapter if isinstance(adapter, TimeoutAdapter) else None
     if max_query_time is not None and adapter is not None and timeout_adapter is None:
         _warn_uncancellable(adapter, max_query_time)
+
+    row_limit_adapter = adapter if isinstance(adapter, RowLimitAdapter) else None
+    if (
+        max_result_rows is not None
+        and adapter is not None
+        and row_limit_adapter is None
+    ):
+        _warn_unbounded_fetch(adapter)
+    # Rows to fetch: past the cap only as far as the result checks need. See
+    # _result_check_row_threshold.
+    fetch_rows = (
+        max(max_result_rows, _result_check_row_threshold(contract) + 1)
+        if max_result_rows is not None
+        else None
+    )
 
     dialect = adapter.dialect if adapter else None
     sql_normalizer = adapter if isinstance(adapter, SqlNormalizer) else None
@@ -877,6 +975,8 @@ def create_tools(
                 limit = max(1, min(int(args.get("limit", 5)), 100))
             except (ValueError, TypeError):
                 limit = 5
+            if max_result_rows is not None:
+                limit = min(limit, max_result_rows)
             qualified = f"{schema}.{table}"
             if qualified not in contract.allowed_table_names():
                 response = _error_response(
@@ -1644,7 +1744,12 @@ def create_tools(
                 # the event loop. Concurrent DB work stays bounded by the adapter's
                 # own connection pool, not the thread pool.
                 qresult = await _execute_bounded(
-                    adapter, sql, max_query_time, timeout_adapter=timeout_adapter
+                    adapter,
+                    sql,
+                    max_query_time,
+                    timeout_adapter=timeout_adapter,
+                    row_limit_adapter=row_limit_adapter,
+                    max_rows=fetch_rows,
                 )
             except QueryTimeoutError as e:
                 # The contract's own limit stopped the query: a governance
@@ -1688,12 +1793,23 @@ def create_tools(
                 )
                 return response
 
-            data = {
+            # Result checks saw every fetched row; the agent sees the cap.
+            shown_rows = qresult.rows
+            truncated = qresult.truncated
+            if max_result_rows is not None and len(shown_rows) > max_result_rows:
+                shown_rows = shown_rows[:max_result_rows]
+                truncated = True
+            data: dict[str, Any] = {
                 "columns": qresult.columns,
-                "rows": _render_rows(qresult.columns, qresult.rows, row_format),
-                "row_count": qresult.row_count,
-                "session": {"remaining": session.remaining()},
+                "rows": _render_rows(qresult.columns, shown_rows, row_format),
+                # Untruncated, the adapter's own count, as before. Truncated,
+                # the true total is unknown and counting it would cost what
+                # the query did, so report the rows returned.
+                "row_count": len(shown_rows) if truncated else qresult.row_count,
             }
+            if truncated:
+                data["truncated"] = True
+            data["session"] = {"remaining": session.remaining()}
             response_text = json.dumps(data, default=str)
 
             # Prepend warnings and log-enforcement messages from both query checks
@@ -1724,13 +1840,13 @@ def create_tools(
             # unexpected exception from an exotic adapter type still surfaces
             # loudly instead of being swallowed here.
             try:
-                scalar, _ = _scalar_value(qresult.columns, qresult.rows, "run_query")
+                scalar, _ = _scalar_value(qresult.columns, shown_rows, "run_query")
             except (ValueError, TypeError):
                 scalar = None
             _record(
                 "ok",
                 scalar=scalar,
-                row_count=qresult.row_count,
+                row_count=data["row_count"],
                 relative_time=vresult.relative_time,
             )
             return _text_response(response_text)

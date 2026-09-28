@@ -600,7 +600,12 @@ async def test_run_query_execute_exception_includes_remaining_budget(
     """Adapter execute exceptions should surface BLOCKED with Remaining: suffix."""
     from unittest.mock import patch
 
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    # max_result_rows=None: this test exercises the plain `execute` path (it
+    # patches `execute` directly), not the default row-capped `execute_limited`
+    # path DuckDBAdapter (a RowLimitAdapter) now takes. See #116.
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, max_result_rows=None
+    )
     tool = next(t for t in tools if t.name == "run_query")
 
     # SQL that passes Layer 1 + EXPLAIN but raises at execute().

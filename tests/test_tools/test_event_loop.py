@@ -68,7 +68,12 @@ async def test_run_query_offloads_execute_and_explain(
     _track_thread(adapter, "execute_with_timeout", seen)
     _track_thread(adapter, "explain", seen)
 
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    # max_result_rows=None: DuckDBAdapter is a RowLimitAdapter, so with the
+    # default cap the query would run through execute_limited instead of the
+    # two methods this test tracks. See #116.
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, max_result_rows=None
+    )
     tool = next(t for t in tools if t.name == "run_query")
     await tool.callable(
         {"sql": "SELECT id, amount FROM analytics.orders WHERE tenant_id = 'acme'"}

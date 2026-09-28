@@ -36,6 +36,10 @@ class QueryResult:
     columns: list[str]
     rows: list[tuple[Any, ...]]
     row_count: int = 0
+    # Appended so positional construction keeps binding as before. True when
+    # the query produced more rows than were fetched: `rows` is a prefix and
+    # `row_count` counts only it.
+    truncated: bool = False
 
     def __post_init__(self) -> None:
         if self.row_count == 0:
@@ -85,6 +89,29 @@ class TimeoutAdapter(Protocol):
     def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult: ...
 
 
+@runtime_checkable
+class RowLimitAdapter(Protocol):
+    """Optional adapter capability: fetch at most ``max_rows`` rows.
+
+    Detected at runtime, so ``DatabaseAdapter`` stays unchanged. Read at most
+    ``max_rows + 1`` rows from the database and return at most ``max_rows``,
+    with ``truncated=True`` when the extra row existed; never read the rest.
+    DB-API drivers do this with ``cursor.fetchmany(max_rows + 1)``.
+
+    The query tools pass ``timeout_seconds`` only to an adapter that also
+    implements ``TimeoutAdapter``, which must then honour it as
+    ``execute_with_timeout`` does. Any other adapter receives ``None`` and gets
+    the tools' caller-side deadline instead. Without this capability the tools
+    still cap what the agent sees, but only after ``execute`` has fetched
+    everything. The same fallback applies to a subclass that overrides
+    ``execute`` but not ``execute_limited``, so the override is never bypassed.
+    """
+
+    def execute_limited(
+        self, sql: str, max_rows: int, timeout_seconds: float | None = None
+    ) -> QueryResult: ...
+
+
 # Re-export SqlNormalizer so consumers can import from adapters.base
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer  # noqa: E402
 
@@ -93,6 +120,7 @@ __all__ = [
     "DatabaseAdapter",
     "QueryResult",
     "QueryTimeoutError",
+    "RowLimitAdapter",
     "SqlNormalizer",
     "TableSchema",
     "TimeoutAdapter",

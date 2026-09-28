@@ -62,10 +62,16 @@ async def test_run_query_offloads_execute_and_explain(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     seen: dict[str, int] = {}
-    # The fixture contract sets max_query_time_seconds, so the query runs
-    # through execute_with_timeout; track both so neither path can regress.
+    # DuckDBAdapter is both a TimeoutAdapter and a RowLimitAdapter, and
+    # create_tools()'s default max_result_rows=1000 makes the row-limit path
+    # win (see _execute_bounded): with the fixture contract's
+    # max_query_time_seconds, that path runs through execute_limited, not
+    # execute/execute_with_timeout. Track all three so this test covers
+    # whichever path actually executes, on the default -- the one most
+    # callers hit -- rather than pinning to the uncapped fallback (#116).
     _track_thread(adapter, "execute", seen)
     _track_thread(adapter, "execute_with_timeout", seen)
+    _track_thread(adapter, "execute_limited", seen)
     _track_thread(adapter, "explain", seen)
 
     tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
@@ -76,7 +82,11 @@ async def test_run_query_offloads_execute_and_explain(
 
     main_thread = threading.get_ident()
     assert seen["explain"] != main_thread, "EXPLAIN ran on the event-loop thread"
-    ran = [seen[m] for m in ("execute", "execute_with_timeout") if m in seen]
+    ran = [
+        seen[m]
+        for m in ("execute", "execute_with_timeout", "execute_limited")
+        if m in seen
+    ]
     assert ran, "the query was never executed"
     assert main_thread not in ran, "execute ran on the event-loop thread"
 

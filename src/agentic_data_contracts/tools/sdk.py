@@ -138,6 +138,7 @@ def create_sdk_mcp_server(
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
     row_format: RowFormat = "compact",
+    max_result_rows: int | None = 1000,
     server_name: str = "data-contracts",
     server_version: str = "1.0.0",
 ) -> Any:
@@ -157,6 +158,9 @@ def create_sdk_mcp_server(
             rows — ``"compact"`` (default) for positional arrays aligned
             to ``columns``, ``"records"`` for one dict per row. Ignored
             when ``tools`` is supplied.
+        max_result_rows: The most rows ``run_query`` / ``preview_table``
+            return (default 1000); ``None`` for no cap. See ``create_tools``.
+            Ignored when ``tools`` is supplied.
         apply_middleware: When ``True`` (default since v0.20.0), every
             wrapped tool pre-checks ``session.check_limits()`` and
             short-circuits on overrun. Aligned with ``create_langchain_tools``
@@ -208,6 +212,7 @@ def create_sdk_mcp_server(
             semantic_source=semantic_source,
             session=session,
             row_format=row_format,
+            max_result_rows=max_result_rows,
         )
 
     sdk_tools = []

@@ -205,6 +205,7 @@ def create_langchain_tools(
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
     row_format: RowFormat = "compact",
+    max_result_rows: int | None = 1000,
 ) -> list[BaseTool]:
     """Create a list of LangChain ``BaseTool``s from a ``DataContract``.
 
@@ -220,6 +221,9 @@ def create_langchain_tools(
             rows — ``"compact"`` (default) for positional arrays aligned
             to ``columns``, ``"records"`` for one dict per row. Ignored
             when ``tools`` is supplied.
+        max_result_rows: The most rows ``run_query`` / ``preview_table``
+            return (default 1000); ``None`` for no cap. See ``create_tools``.
+            Ignored when ``tools`` is supplied.
         apply_middleware: When ``True`` (default), each tool pre-checks
             ``session.check_limits()``. Set ``False`` if you are pairing
             this with ``ContractMiddleware`` to avoid duplicate
@@ -242,6 +246,7 @@ def create_langchain_tools(
             semantic_source=semantic_source,
             session=session,
             row_format=row_format,
+            max_result_rows=max_result_rows,
         )
 
     return [_to_structured_tool(t, session, apply_middleware) for t in tools]

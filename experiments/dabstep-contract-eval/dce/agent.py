@@ -488,8 +488,8 @@ def _inspect_rejections(messages: list) -> int:
             # rejected" here would delete the library's own headline metric
             # without a trace, so only a genuine parse failure is tolerated
             # (an inspect_query response is not always bare JSON in general,
-            # see `_truncate_run_query` in `dce/arms.py` for the sibling case
-            # on `run_query`), and everything else propagates.
+            # see `_append_truncation_marker` in `dce/arms.py` for the sibling
+            # case on `run_query`), and everything else propagates.
             try:
                 data = json.loads(content)
             except (TypeError, ValueError):

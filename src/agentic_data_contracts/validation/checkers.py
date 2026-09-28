@@ -784,7 +784,11 @@ class ResultCheckRunner:
         self.max_rows = max_rows
         self.rule_name = rule_name
 
-    def check_results(self, columns: list[str], rows: list[tuple]) -> CheckResult:
+    def check_results(
+        self, columns: list[str], rows: list[tuple], *, truncated: bool = False
+    ) -> CheckResult:
+        """``truncated`` says the fetch stopped before the result's end, so
+        ``rows`` is a prefix and the true row count is larger."""
         row_count = len(rows)
         if self.min_rows is not None and row_count < self.min_rows:
             return CheckResult(
@@ -798,8 +802,9 @@ class ResultCheckRunner:
             return CheckResult(
                 passed=False,
                 message=(
-                    f"Rule '{self.rule_name}': query returned {row_count} rows, "
-                    f"maximum is {self.max_rows}"
+                    f"Rule '{self.rule_name}': query returned"
+                    f" {'at least ' if truncated else ''}{row_count} rows,"
+                    f" maximum is {self.max_rows}"
                 ),
             )
 

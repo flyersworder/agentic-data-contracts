@@ -137,6 +137,7 @@ def test_adapter_imports() -> None:
         DatabaseAdapter,
         QueryResult,  # noqa: F401
         QueryTimeoutError,  # noqa: F401
+        RowLimitAdapter,  # noqa: F401
         TableSchema,  # noqa: F401
         TimeoutAdapter,  # noqa: F401
     )

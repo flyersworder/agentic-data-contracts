@@ -227,10 +227,9 @@ def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
 
     setup_a = build_arm("schema_only", db, DOCS)
     out_a = _tool(setup_a, "execute_sql").function("SELECT psp_reference FROM payments")
-    # The marker carries the true total too, not just that a cut happened:
-    # arm C keeps `row_count` regardless of truncation, so arm A must learn
-    # the same thing about the rows it didn't see.
-    assert "-- truncated at 3 rows (10 total)" in out_a
+    # Every arm reads the same marker, and none of them counts the rest: the
+    # count would cost as much as the query it protects against.
+    assert "-- truncated at 3 rows (more rows not shown)" in out_a
 
     setup_c = build_arm("contract", db, DOCS)
     out_c = asyncio.run(
@@ -238,10 +237,67 @@ def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
             _CTX, sql="SELECT psp_reference FROM main.payments"
         )
     )
-    assert "-- truncated at 3 rows (10 total)" in out_c
+    assert "-- truncated at 3 rows (more rows not shown)" in out_c
 
     setup_a.close()
     setup_c.close()
+
+
+def test_every_arm_gets_the_same_marker(db, monkeypatch):
+    import dce.arms as arms_mod
+
+    monkeypatch.setattr(arms_mod, "MAX_ROWS", 3)
+    con = duckdb.connect(str(db))
+    con.execute(
+        "CREATE OR REPLACE TABLE payments AS "
+        "SELECT range AS psp_reference FROM range(10)"
+    )
+    con.close()
+
+    markers = []
+    for arm in ARMS:
+        setup = build_arm(arm, db, DOCS)
+        if setup.session is None:
+            out = _tool(setup, "execute_sql").function(
+                "SELECT psp_reference FROM payments"
+            )
+        else:
+            out = asyncio.run(
+                _tool(setup, "run_query").function(
+                    _CTX, sql="SELECT psp_reference FROM main.payments"
+                )
+            )
+        markers.append(out.splitlines()[-1])
+        setup.close()
+    assert set(markers) == {"-- truncated at 3 rows (more rows not shown)"}
+
+
+def test_execute_sql_is_bounded_in_time(db, monkeypatch):
+    import time
+
+    import dce.arms as arms_mod
+
+    monkeypatch.setattr(arms_mod, "HARNESS_QUERY_SECONDS", 0.3)
+    setup = build_arm("schema_only", db, DOCS)
+    start = time.monotonic()
+    out = _tool(setup, "execute_sql").function(
+        "SELECT sum(hash(a.range * b.range)) FROM range(100000) a, range(100000) b"
+    )
+    assert time.monotonic() - start < 5
+    assert out == "ERROR: query exceeded 0.3s"
+    setup.close()
+
+
+def test_governed_arms_share_the_harness_bounds(db):
+    import dce.arms as arms_mod
+
+    setup = build_arm("contract", db, DOCS)
+    assert isinstance(setup.adapter, arms_mod._BoundedDuckDBAdapter)
+    limit = setup.adapter.connection.execute(
+        "SELECT current_setting('memory_limit')"
+    ).fetchone()[0]
+    assert limit == "488.2 MiB"  # DuckDB's rendering of 512MB
+    setup.close()
 
 
 def test_check_and_restore_detects_a_mutation_made_while_a_governed_arm_is_open(

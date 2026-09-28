@@ -302,6 +302,39 @@ def test_validate_results_blocks() -> None:
     assert any("wau" in r for r in result.reasons)
 
 
+def test_validate_results_truncated_says_at_least() -> None:
+    schema = DataContractSchema(
+        name="test",
+        semantic=SemanticConfig(
+            allowed_tables=[
+                AllowedTable.model_validate(
+                    {"schema": "analytics", "tables": ["metrics"]}
+                ),
+            ],
+            rules=[
+                SemanticRule(
+                    name="small",
+                    description="small results only",
+                    enforcement=Enforcement.BLOCK,
+                    result_check=ResultCheck(max_rows=2),
+                ),
+            ],
+        ),
+    )
+    validator = Validator(DataContract(schema))
+    sql = "SELECT wau FROM analytics.metrics"
+    rows = [(i,) for i in range(3)]
+
+    exact = validator.validate_results(sql, columns=["wau"], rows=rows)
+    assert exact.reasons == ["Rule 'small': query returned 3 rows, maximum is 2"]
+    truncated = validator.validate_results(
+        sql, columns=["wau"], rows=rows, truncated=True
+    )
+    assert truncated.reasons == [
+        "Rule 'small': query returned at least 3 rows, maximum is 2"
+    ]
+
+
 def test_validate_results_passes() -> None:
     schema = DataContractSchema(
         name="test",

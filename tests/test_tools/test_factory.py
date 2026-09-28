@@ -600,7 +600,12 @@ async def test_run_query_execute_exception_includes_remaining_budget(
     """Adapter execute exceptions should surface BLOCKED with Remaining: suffix."""
     from unittest.mock import patch
 
-    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    # max_result_rows=None: this test exercises the plain `execute` path (it
+    # patches `execute` directly), not the default row-capped `execute_limited`
+    # path DuckDBAdapter (a RowLimitAdapter) now takes. See #116.
+    tools = create_tools(
+        contract, adapter=adapter, semantic_source=semantic, max_result_rows=None
+    )
     tool = next(t for t in tools if t.name == "run_query")
 
     # SQL that passes Layer 1 + EXPLAIN but raises at execute().
@@ -609,6 +614,34 @@ async def test_run_query_execute_exception_includes_remaining_budget(
     # its pass-through of an engine error raised before the deadline.
     with patch.object(
         adapter, "execute", side_effect=RuntimeError("simulated engine failure")
+    ):
+        result = await tool.callable(
+            {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
+        )
+    text = result["content"][0]["text"]
+    assert "BLOCKED" in text
+    assert "execution failed" in text.lower()
+    assert "Remaining:" in text
+
+
+@pytest.mark.asyncio
+async def test_run_query_execute_limited_exception_includes_remaining_budget(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """Sibling of the test above for the default (capped) path: DuckDBAdapter
+    is a RowLimitAdapter, so create_tools()'s default max_result_rows=1000
+    routes run_query through execute_limited instead of execute. An engine
+    failure there must surface the same BLOCKED + Remaining: response (#116).
+    """
+    from unittest.mock import patch
+
+    tools = create_tools(contract, adapter=adapter, semantic_source=semantic)
+    tool = next(t for t in tools if t.name == "run_query")
+
+    with patch.object(
+        adapter,
+        "execute_limited",
+        side_effect=RuntimeError("simulated engine failure"),
     ):
         result = await tool.callable(
             {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
@@ -686,9 +719,13 @@ async def test_run_query_principal_denied_never_hits_database(
 ) -> None:
     """A principal-denied query must not reach the database.
 
-    Uses a spy that counts execute() calls on top of DuckDBAdapter; asserts
-    that a blocked query leaves the count at zero.
+    Uses a spy that counts every execution entry point on top of
+    DuckDBAdapter -- `execute` and `execute_limited`, which the default row
+    cap uses -- and asserts that a blocked query leaves the count at zero. An
+    allowed principal running the same query counts one, so the spy is not
+    vacuous.
     """
+    from agentic_data_contracts.adapters.base import QueryResult
     from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
     from agentic_data_contracts.core.contract import DataContract
     from agentic_data_contracts.tools.factory import create_tools
@@ -698,9 +735,15 @@ async def test_run_query_principal_denied_never_hits_database(
             super().__init__(path)
             self.execute_calls: int = 0
 
-        def execute(self, sql: str):  # type: ignore[override]
+        def execute(self, sql: str) -> QueryResult:
             self.execute_calls += 1
             return super().execute(sql)
+
+        def execute_limited(
+            self, sql: str, max_rows: int, timeout_seconds: float | None = None
+        ) -> QueryResult:
+            self.execute_calls += 1
+            return super().execute_limited(sql, max_rows, timeout_seconds)
 
     contract = DataContract.from_yaml(fixtures_dir / "principals_contract.yml")
     db = SpyAdapter(":memory:")
@@ -710,15 +753,20 @@ async def test_run_query_principal_denied_never_hits_database(
         "INSERT INTO hr.salaries VALUES (1, 100000.00);"
     )
 
-    tools = create_tools(contract, adapter=db, caller_principal="bob@co.com")
-    run_query = next(t for t in tools if t.name == "run_query").callable
+    async def _run(principal: str) -> str:
+        tools = create_tools(contract, adapter=db, caller_principal=principal)
+        run_query = next(t for t in tools if t.name == "run_query").callable
+        response = await run_query({"sql": "SELECT salary FROM hr.salaries"})
+        return response["content"][0]["text"]
 
-    response = await run_query({"sql": "SELECT salary FROM hr.salaries"})
-    text = response["content"][0]["text"]
-
+    text = await _run("bob@co.com")
     assert "BLOCKED" in text
     assert "caller: 'bob@co.com'" in text
     assert db.execute_calls == 0, (
-        f"Expected 0 execute() calls for a principal-denied query, "
+        f"Expected 0 database calls for a principal-denied query, "
         f"got {db.execute_calls}"
     )
+
+    # Control: the same query from an allowed principal reaches the database.
+    assert "BLOCKED" not in await _run("alice@co.com")
+    assert db.execute_calls == 1

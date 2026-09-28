@@ -533,7 +533,7 @@ async def test_run_query_unexpected_error_still_records_and_reraises(
     """
     from agentic_data_contracts.validation.validator import Validator
 
-    def _boom(self, sql, columns, rows):
+    def _boom(self, sql, columns, rows, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(Validator, "validate_results", _boom)

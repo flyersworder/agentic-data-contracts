@@ -473,7 +473,7 @@ asyncio.run(demo())
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges (a metric's operands are drivers of it), filtered by `kinds` |
 | `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
-| `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, session}` |
+| `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, [truncated,] session}` |
 
 ### Query protocol
 
@@ -529,6 +529,29 @@ t, t u`) collapses under `records`, since `dict(zip(columns, row))` is
 last-value-wins and silently drops one column — `compact`'s positional arrays
 keep both. An unrecognised value raises `ValueError` at `create_tools()` time,
 not on the first query.
+
+### Row cap
+
+`create_tools(..., max_result_rows=1000)` caps how many rows `run_query` and
+`preview_table` return; pass `None` for no cap. It changes the payload only
+when a result is actually truncated: `run_query`'s JSON gains `"truncated":
+true` after `row_count`, and `row_count` then counts the rows returned, not
+the query's true total — counting that would cost as much as the query this
+protects against, so it is never reported. An untruncated result's payload is
+byte-identical to what it always was. `preview_table`'s SQL `LIMIT` becomes
+`min(requested, 100, max_result_rows)`, so it is never truncated. A value less
+than 1 raises `ValueError` at `create_tools()` time, same as `row_format`.
+
+A contract's `result_check` rules (`min_rows`, `max_rows`, `min_value`,
+`max_value`, `not_null`) still see every row the adapter fetches, not the
+capped rows the agent sees: the tool asks the adapter for `max(max_result_rows,
+T + 1)` rows, where `T` is the largest `min_rows`/`max_rows` threshold any rule
+declares (0 when there are none, computed once at `create_tools()` time), then
+trims to `max_result_rows` only when building the agent's response. A
+`max_rows: 20` rule still blocks a 100-row result even when `max_result_rows`
+is 5, and since only 21 rows were fetched its message says the query returned
+"at least 21 rows". A contract declaring a very large threshold widens the fetch
+accordingly — that is the author's declared intent.
 
 ## Domain-Driven Agent Workflow
 
@@ -1593,10 +1616,42 @@ the engine's own timeout in `execute_with_timeout` — `SET statement_timeout` o
 Postgres, `STATEMENT_TIMEOUT_IN_SECONDS` on Snowflake, a job timeout on
 BigQuery.
 
-A runaway query can exhaust memory as well as time. That is deployment
-configuration rather than contract governance, so it is not a contract field;
-on DuckDB, `adapter.connection.execute("SET memory_limit = '2GB'")` turns it
-into a query error the agent can see instead of a killed process.
+`run_query` and `preview_table` also cap how many rows they fetch, via
+`create_tools(max_result_rows=1000)` — see [Row cap](#row-cap) above for the
+payload shape. An adapter implementing the optional
+`RowLimitAdapter` capability — `execute_limited(sql, max_rows,
+timeout_seconds=None)` — fetches at most `max_rows + 1` rows and returns at
+most `max_rows`, with `truncated=True` when the extra row existed, so a
+many-to-many join never becomes a fully-materialised Python list before it is
+cut down. `DuckDBAdapter` implements it with `fetchmany(max_rows + 1)`; a
+DB-API adapter can do the same with `cursor.fetchmany(max_rows + 1)`.
+`timeout_seconds` is passed only when the adapter is also a `TimeoutAdapter`,
+honoured exactly as `execute_with_timeout` honours it; any other adapter gets
+`None` and the caller-side deadline described above still applies around the
+call. Without `execute_limited`, results are still capped for what the agent
+sees, but only after `execute` has fetched every row — `create_tools` logs a
+warning once per adapter class, naming it and saying that implementing
+`execute_limited` bounds memory. `execute_limited` does not call `execute`, so
+a subclass that overrides `execute` alone — a `DuckDBAdapter` subclass
+rewriting SQL (a Denodo stand-in stripping VQL's `CONTEXT` clause, say), or
+auditing every statement — would be bypassed by it. `create_tools` therefore
+uses `execute_limited` only when it is defined at or below the class that
+defines `execute` in the adapter's MRO. Otherwise it calls `execute`, so the
+override keeps applying, and caps the result afterwards — results are capped
+but memory is not bounded — and logs a warning once per adapter class saying
+so. Override `execute_limited` too to bound memory.
+
+A runaway query can exhaust memory as well as time, and the row cap above
+bounds only what reaches the agent, not what the engine builds while running
+the query. `DuckDBAdapter(database, memory_limit="512MB")` caps the engine
+itself: a query that exceeds it raises DuckDB's out-of-memory error, which
+reaches the agent as a query error like any other, and the connection stays
+usable for the next query. The constructor runs `SET memory_limit = ?` after
+`connect` rather than `duckdb.connect(config=...)`, because two in-process
+connections to the same file with different `config` raise. Both limits are
+needed for different things: `memory_limit` bounds the engine, the row cap
+bounds the Python objects built from its results. Left unset (the default),
+DuckDB uses its own default of 80% of RAM.
 
 `token_budget` is the one limit this library cannot measure on its own — the
 tokens are spent by the *model* between tool calls. It is fed from the host

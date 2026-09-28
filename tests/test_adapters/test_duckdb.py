@@ -2,12 +2,14 @@ import asyncio
 import threading
 import time
 
+import duckdb
 import pytest
 
 from agentic_data_contracts.adapters.base import (
     DatabaseAdapter,
     QueryResult,
     QueryTimeoutError,
+    RowLimitAdapter,
     TableSchema,
     TimeoutAdapter,
 )
@@ -267,3 +269,134 @@ def test_engine_error_after_the_deadline_is_not_a_timeout() -> None:
 
     with pytest.raises(ValueError, match="Out of Memory"):
         _FailsLate(":memory:").execute_with_timeout("SELECT 1", 0.05)
+
+
+# 10^10 rows: returning quickly proves nothing past the cap was materialised.
+HUGE_SQL = "SELECT a.range AS x, b.range AS y FROM range(100000) a, range(100000) b"
+
+
+def test_adapter_supports_row_limit(adapter: DuckDBAdapter) -> None:
+    assert isinstance(adapter, RowLimitAdapter)
+
+
+def test_query_result_truncated_defaults_false() -> None:
+    assert QueryResult(columns=["a"], rows=[(1,)]).truncated is False
+
+
+def test_execute_limited_stops_at_the_cap(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    result = adapter.execute_limited(HUGE_SQL, 50)
+    assert time.monotonic() - start < 2
+    assert result.columns == ["x", "y"]
+    assert len(result.rows) == 50
+    assert result.row_count == 50
+    assert result.truncated is True
+
+
+def test_execute_limited_exact_fit_is_not_truncated(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_limited("SELECT range FROM range(5)", 5)
+    assert len(result.rows) == 5
+    assert result.truncated is False
+
+
+def test_execute_limited_small_result(adapter: DuckDBAdapter) -> None:
+    result = adapter.execute_limited("SELECT id FROM analytics.orders ORDER BY id", 50)
+    assert result.rows == [(1,), (2,)]
+    assert result.truncated is False
+
+
+def test_execute_limited_rejects_a_non_positive_cap(adapter: DuckDBAdapter) -> None:
+    with pytest.raises(ValueError, match="max_rows"):
+        adapter.execute_limited("SELECT 1", 0)
+
+
+def test_execute_limited_honours_timeout(adapter: DuckDBAdapter) -> None:
+    start = time.monotonic()
+    with pytest.raises(QueryTimeoutError) as exc_info:
+        adapter.execute_limited(SLOW_SQL, 10, timeout_seconds=0.3)
+    assert time.monotonic() - start < 5
+    assert exc_info.value.cancelled is True
+    assert adapter.execute_limited("SELECT 42", 10).rows == [(42,)]
+
+
+def test_connection_usable_after_a_truncated_fetch(adapter: DuckDBAdapter) -> None:
+    adapter.execute_limited(HUGE_SQL, 3)
+    assert adapter.execute("SELECT 42").rows == [(42,)]
+
+
+def test_truncated_fetch_releases_engine_memory() -> None:
+    """A truncated fetch leaves a pending streaming result, which pins the
+    engine's operator state (here a 2M-row hash-join build side) until the
+    next statement on the connection. `execute_limited` must release it."""
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        "CREATE TABLE big AS SELECT range AS k, range * 2 AS v FROM range(2000000)"
+    )
+    side = db.connection.cursor()
+
+    def engine_bytes() -> int:
+        row = side.execute(
+            "SELECT sum(memory_usage_bytes) FROM duckdb_memory()"
+        ).fetchone()
+        assert row is not None
+        return int(row[0])
+
+    baseline = engine_bytes()
+    result = db.execute_limited(
+        "SELECT a.k, b.v FROM big a JOIN big b ON a.k = b.k", 10
+    )
+    assert result.truncated
+    # Pinned, the join holds about 80 MiB over baseline; released, none.
+    assert engine_bytes() - baseline < 20 * 2**20
+
+
+def _setting(db: DuckDBAdapter, name: str) -> str:
+    row = db.connection.execute("SELECT current_setting(?)", [name]).fetchone()
+    assert row is not None
+    return row[0]
+
+
+def test_memory_limit_is_applied() -> None:
+    db = DuckDBAdapter(":memory:", memory_limit="64MB")
+    assert _setting(db, "memory_limit") == "61.0 MiB"
+
+
+def test_memory_limit_default_leaves_duckdb_default() -> None:
+    assert _setting(DuckDBAdapter(":memory:"), "memory_limit") == _setting(
+        DuckDBAdapter(":memory:", memory_limit=None), "memory_limit"
+    )
+
+
+def test_runaway_query_is_an_engine_error_and_the_adapter_recovers() -> None:
+    db = DuckDBAdapter(":memory:", memory_limit="50MB")
+    # list() cannot spill to disk, so it hits the limit instead of paging.
+    with pytest.raises(duckdb.OutOfMemoryException):
+        db.execute_limited("SELECT list(range) FROM range(100000000)", 10)
+    assert db.execute("SELECT 42").rows == [(42,)]
+
+
+def test_invalid_memory_limit_fails_at_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connect = duckdb.connect
+
+    class _ClosingSpy:
+        def __init__(self, database: str) -> None:
+            self._inner = connect(database)
+            self.closed = False
+            opened.append(self)
+
+        def execute(self, *args: object) -> object:
+            return self._inner.execute(*args)  # ty: ignore[invalid-argument-type]
+
+        def close(self) -> None:
+            self.closed = True
+            self._inner.close()
+
+    opened: list[_ClosingSpy] = []
+    monkeypatch.setattr(duckdb, "connect", _ClosingSpy)
+    with pytest.raises(duckdb.Error):
+        DuckDBAdapter(":memory:", memory_limit="bogus")
+    # The half-built adapter is unreachable, so it must not leak the
+    # connection (and, for a file database, its lock).
+    assert [c.closed for c in opened] == [True]

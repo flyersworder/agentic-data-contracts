@@ -50,6 +50,7 @@ from agentic_data_contracts.tools.factory import (
     RowFormat,
     ToolDef,
     create_tools,
+    validate_max_result_rows,
     validate_row_format,
 )
 
@@ -113,6 +114,7 @@ def create_pydantic_ai_tools(
     tools: list[ToolDef] | None = None,
     apply_middleware: bool = True,
     row_format: RowFormat = "compact",
+    max_result_rows: int | None = 1000,
 ) -> list[Tool]:
     """Create a list of ``pydantic_ai.Tool``s from a ``DataContract``.
 
@@ -130,6 +132,9 @@ def create_pydantic_ai_tools(
             rows — ``"compact"`` (default) for positional arrays aligned
             to ``columns``, ``"records"`` for one dict per row. Ignored
             when ``tools`` is supplied.
+        max_result_rows: The most rows ``run_query`` / ``preview_table``
+            return (default 1000); ``None`` for no cap. See ``create_tools``.
+            Ignored when ``tools`` is supplied.
         apply_middleware: When ``True`` (default), each tool pre-checks
             ``session.check_limits()`` and raises ``ContractSessionLimitError``
             on overrun. Set ``False`` to skip the pre-check.
@@ -149,6 +154,7 @@ def create_pydantic_ai_tools(
             session=session,
             caller_principal=caller_principal,
             row_format=row_format,
+            max_result_rows=max_result_rows,
         )
 
     return [_to_pydantic_ai_tool(t, session, apply_middleware) for t in tools]
@@ -404,6 +410,7 @@ def create_pydantic_ai_toolset(
     semantic_source: SemanticSource | None = None,
     apply_middleware: bool = True,
     row_format: RowFormat = "compact",
+    max_result_rows: int | None = 1000,
 ) -> ToolsetFunc[ContractDeps]:
     """Create a deps-aware toolset factory so ONE shared ``Agent`` serves many users.
 
@@ -429,6 +436,18 @@ def create_pydantic_ai_toolset(
     per-step rebuild. (The rebuild does no I/O, so the cost is small either way,
     but once-per-run is the right default for this factory.)
 
+    Args:
+        contract: The data contract to enforce.
+        adapter: Optional database adapter for query execution.
+        semantic_source: Optional semantic source (auto-loaded if not given).
+        apply_middleware: When ``True`` (default), each tool pre-checks
+            ``session.check_limits()``.
+        row_format: How ``run_query`` / ``preview_table`` render result
+            rows — ``"compact"`` (default) for positional arrays aligned
+            to ``columns``, ``"records"`` for one dict per row.
+        max_result_rows: The most rows ``run_query`` / ``preview_table``
+            return (default 1000); ``None`` for no cap. See ``create_tools``.
+
     Enforcement is identical to :func:`create_pydantic_ai_tools` (a validation
     block becomes ``ModelRetry``; a session-budget breach becomes the terminal
     ``ContractSessionLimitError``). The shared config (adapter connection pool,
@@ -438,6 +457,7 @@ def create_pydantic_ai_toolset(
     # This function returns a factory that builds tools per run, so deferring
     # to create_tools would push a typo to the first agent run. Check now.
     validate_row_format(row_format)
+    validate_max_result_rows(max_result_rows)
 
     def _factory(ctx: RunContext[ContractDeps]) -> FunctionToolset[ContractDeps]:
         deps = ctx.deps
@@ -459,6 +479,7 @@ def create_pydantic_ai_toolset(
             caller_principal=deps.caller_principal,
             apply_middleware=apply_middleware,
             row_format=row_format,
+            max_result_rows=max_result_rows,
         )
         return FunctionToolset(tools)
 

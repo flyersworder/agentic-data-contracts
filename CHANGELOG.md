@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.55.0] - 2026-09-28
+
+### Changed
+
+- **`run_query` and `preview_table` now return at most 1000 rows by default.** A truncated `run_query` result carries `"truncated": true` after `row_count`, and `row_count` then counts the rows returned — not the query's true total, which is never counted or reported. `run_query` also records no scalar for a truncated result: a cap of 1 makes any multi-row result look 1x1, and a truncated first row must never be graded as the answer. An untruncated result's payload is byte-identical to 0.54.0's. Pass `max_result_rows=None` for 0.54.0's behaviour. The same argument is on `create_tools` and all four framework builders (`create_sdk_mcp_server`, `create_langchain_tools`, and both Pydantic AI builders). **This changes behaviour**: a caller relying on `run_query` returning every row now needs `max_result_rows=None`.
+
+### Added
+
+- **`RowLimitAdapter`, an optional adapter capability: `execute_limited(sql, max_rows, timeout_seconds=None)`.** Detected at runtime, so `DatabaseAdapter` is unchanged. It fetches at most `max_rows + 1` rows and returns at most `max_rows`, with `truncated=True` when the extra row existed — a DB-API adapter implements it with `cursor.fetchmany(max_rows + 1)`. `timeout_seconds` is passed only to an adapter that is also a `TimeoutAdapter`, honoured exactly as `execute_with_timeout` honours it; any other adapter gets `None` and the tools' caller-side deadline instead. Without it, results are still capped for what the agent sees, but only after `execute` has fetched everything into memory first, and `create_tools` warns once per adapter class. Result checks (`min_rows`, `max_rows`, `min_value`, `max_value`, `not_null`) stay exact: the tool fetches `max(max_result_rows, T + 1)` rows, `T` being the largest `min_rows`/`max_rows` any rule declares, and trims to `max_result_rows` only when building the agent's response.
+- **`QueryResult.truncated`**, appended last so existing positional construction keeps binding as before.
+- **`DuckDBAdapter(memory_limit=...)`.** Runs `SET memory_limit = ?` after `connect` (not `duckdb.connect(config=...)`, which raises when two in-process connections to the same file disagree on config). A query that exceeds it raises DuckDB's out-of-memory error, reaching the agent as a query error like any other, and the connection stays usable. Bounds the engine's memory, not the Python objects built from its results — the row cap above bounds those; both are needed. Unset (the default), DuckDB keeps its own default of 80% of RAM.
+- **`DuckDBAdapter.execute_limited`.** Runs the statement under the connection lock and calls `fetchmany(max_rows + 1)`, so rows past the cap are never produced. It does not call `self.execute`: a subclass that rewrites SQL there must override `execute_limited` too.
+
+### Fixed
+
+- **Results were materialised in full before anything cut them down.** `DuckDBAdapter.execute` called `fetchall()` unconditionally, and `run_query` serialised all of it to JSON before the size ever mattered — a model-written many-to-many join could produce hundreds of millions of rows, exhausting memory and, because DuckDB's conversion holds the GIL, stalling every other session in the process. `RowLimitAdapter` fetches incrementally instead. (#116)
+
+### Internal
+
+- **The DABStep harness gives all four arms the same row, time and memory bounds**, and its truncation marker no longer reports a total (draining the cursor to count it was the same defect this release fixes in the library). This applies to future runs only — the panel under way runs from a pinned commit.
+
 ## [0.54.0] - 2026-09-26
 
 ### Fixed

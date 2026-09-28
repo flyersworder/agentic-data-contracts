@@ -284,7 +284,7 @@ def test_execute_sql_is_bounded_in_time(db, monkeypatch):
         "SELECT sum(hash(a.range * b.range)) FROM range(100000) a, range(100000) b"
     )
     assert time.monotonic() - start < 5
-    assert out.startswith("ERROR:")
+    assert out == "ERROR: query exceeded 0.3s"
     setup.close()
 
 

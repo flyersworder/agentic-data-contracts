@@ -243,3 +243,38 @@ async def test_preview_table_is_capped(adapter: DuckDBAdapter) -> None:
     )
     result = await preview({"schema": "analytics", "table": "orders", "limit": 50})
     assert len(json.loads(result["content"][0]["text"])["rows"]) == 3
+
+
+@pytest.mark.parametrize(
+    ("module", "builder"),
+    [
+        ("agentic_data_contracts.tools.pydantic_ai", "create_pydantic_ai_tools"),
+        ("agentic_data_contracts.tools.langchain", "create_langchain_tools"),
+        ("agentic_data_contracts.tools.sdk", "create_sdk_mcp_server"),
+    ],
+)
+def test_entry_points_forward_max_result_rows(
+    module: str, builder: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+
+    seen: dict[str, Any] = {}
+
+    def _spy(*args: Any, **kwargs: Any) -> list[Any]:
+        seen.update(kwargs)
+        return []
+
+    try:
+        mod = importlib.import_module(module)
+        monkeypatch.setattr(mod, "create_tools", _spy)
+        getattr(mod, builder)(_contract(), max_result_rows=7)
+    except ImportError:
+        pytest.skip(f"{module}'s optional dependency is not installed")
+    assert seen["max_result_rows"] == 7
+
+
+def test_toolset_rejects_a_bad_cap_at_construction() -> None:
+    from agentic_data_contracts.tools.pydantic_ai import create_pydantic_ai_toolset
+
+    with pytest.raises(ValueError, match="max_result_rows"):
+        create_pydantic_ai_toolset(_contract(), max_result_rows=0)

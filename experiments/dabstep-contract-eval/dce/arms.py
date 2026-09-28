@@ -94,15 +94,13 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import duckdb
 from pydantic_ai import Tool
 
+from agentic_data_contracts.adapters.base import QueryResult
+from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from dce.frozen import load_contract, load_hollow_contract
-
-if TYPE_CHECKING:
-    from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 
 ARMS: tuple[str, ...] = (
     "schema_only",
@@ -114,10 +112,9 @@ ARMS: tuple[str, ...] = (
 # A harness property, not a contract limit: `semantic.limits.max_rows` is not
 # part of the library's contract schema, and the frozen contract declares no
 # row limit. Applied identically to all three arms — arms A/B cap
-# `execute_sql`'s own fetch below, and arm C's `run_query` is post-truncated
-# by `_truncate_run_query` (the library's `run_query` does not cap rows on its
-# own) — so no arm is advantaged by seeing an uncapped result the others
-# cannot.
+# `execute_sql` through `_BoundedDuckDBAdapter.execute_limited`, and arm C's
+# `run_query` is capped by `create_tools(max_result_rows=MAX_ROWS)` — so no
+# arm is advantaged by seeing an uncapped result the others cannot.
 #
 # Cut twice, each time on measurement. N2 cut 10,000 -> 1,000: a 10,000-row
 # `payments` result serializes to roughly 429k tokens, which then becomes the
@@ -132,11 +129,41 @@ ARMS: tuple[str, ...] = (
 # 50 rows is still beyond anything a DABStep answer needs — the questions ask
 # for aggregates, so 1,000 raw rows were never what an arm needed, only what
 # it could ask for. Applied identically to every arm, same as the values it
-# replaces, so this is a harness property and not a confound. The truncation
-# marker below reports the true total row count, so cutting the cap hides
-# nothing from the model; it only stops the model being handed all of it at
-# once.
+# replaces, so this is a harness property and not a confound. The marker says
+# only that more rows exist. Counting them meant draining the cursor, which on
+# a runaway join built every row in Python (#116).
 MAX_ROWS = 50
+
+# Per statement, every arm. A harness property like MAX_ROWS: the frozen
+# contracts declare no `resources`, and adding one would change their
+# published digests. 120 s is far past any query a DABStep answer needs; it
+# exists to end a runaway join, which in one unattended sweep pinned a CPU
+# for 35 minutes (#116).
+HARNESS_QUERY_SECONDS = 120
+
+# Per worker: each worker has its own working copy, so its own DuckDB
+# instance. Four workers at 512MB leave headroom under the 4 GiB container
+# that was OOM-killed without it (#116).
+HARNESS_MEMORY_LIMIT = "512MB"
+
+_TRUNCATION_MARKER = "-- truncated at {n} rows (more rows not shown)"
+
+
+class _BoundedDuckDBAdapter(DuckDBAdapter):
+    """Every arm's queries run through this adapter, so every arm is bounded
+    by the same code: `MAX_ROWS` via `execute_limited`, `HARNESS_QUERY_SECONDS`
+    when no contract limit applies, and `HARNESS_MEMORY_LIMIT`."""
+
+    def __init__(self, db_path: Path) -> None:
+        super().__init__(str(db_path), memory_limit=HARNESS_MEMORY_LIMIT)
+
+    def execute_limited(
+        self, sql: str, max_rows: int, timeout_seconds: float | None = None
+    ) -> QueryResult:
+        if timeout_seconds is None:
+            timeout_seconds = HARNESS_QUERY_SECONDS
+        return super().execute_limited(sql, max_rows, timeout_seconds)
+
 
 # CUT FROM 1,000 AFTER THE FIRST SMOKE RUN (F5). A tool return is not paid for
 # once: it stays in the conversation and is resent as input on EVERY subsequent
@@ -324,37 +351,23 @@ def _ungoverned_tools(db_path: Path) -> list[Tool]:
 
     def execute_sql(sql: str) -> str:
         """Run a SQL query and return its result as CSV (header + rows)."""
-        con = None
+        adapter = None
         try:
-            con = duckdb.connect(str(db_path))
-            cur = con.execute(sql)
-            cols = [d[0] for d in cur.description]
-            # Fetch one row past the cap so truncation can be detected and
-            # reported rather than silently swallowed (see I5 in the design
-            # notes: a truncated aggregate must not be answered as complete).
-            rows = cur.fetchmany(MAX_ROWS + 1)
-            truncated = len(rows) > MAX_ROWS
-            total = len(rows)
-            if truncated:
-                # Drain the rest of the same cursor purely to count it — no
-                # re-execution — so the marker below can report the true
-                # total, the same thing arm C's `row_count` already tells it.
-                total += len(cur.fetchall())
-            rows = rows[:MAX_ROWS]
-
+            adapter = _BoundedDuckDBAdapter(db_path)
+            result = adapter.execute_limited(sql, MAX_ROWS)
             buf = io.StringIO()
             writer = csv.writer(buf)
-            writer.writerow(cols)
-            writer.writerows(rows)
+            writer.writerow(result.columns)
+            writer.writerows(result.rows)
             text = buf.getvalue().rstrip("\n")
-            if truncated:
-                text += f"\n-- truncated at {MAX_ROWS} rows ({total} total)"
+            if result.truncated:
+                text += "\n" + _TRUNCATION_MARKER.format(n=MAX_ROWS)
             return text
         except Exception as exc:  # surfaced to the model, same as arm C's errors
             return f"ERROR: {exc}"
         finally:
-            if con is not None:
-                con.close()
+            if adapter is not None:
+                adapter.connection.close()
 
     return [Tool(list_tables), Tool(describe_table), Tool(execute_sql)]
 
@@ -367,17 +380,11 @@ def _ungoverned_tools(db_path: Path) -> list[Tool]:
 _RUN_QUERY_PAYLOAD_MARKER = '{"columns"'
 
 
-def _truncate_run_query(tool_def, max_rows: int):
-    """Cap `run_query`'s row count the same way `execute_sql` is capped.
-
-    The library's `run_query` returns every row the query produced — measured
-    on one identical query, arm A's `execute_sql` returned 10,001 lines
-    (`MAX_ROWS` + header) while arm C's `run_query` returned 138,236 rows.
-    `MAX_ROWS` is meant to apply identically everywhere, so this wraps the
-    `run_query` `ToolDef` before it reaches `create_pydantic_ai_tools`,
-    truncating its JSON payload's `rows` list and appending the same
-    `-- truncated at N rows (M total)` marker `execute_sql` appends, rather
-    than changing the library's own (frozen) implementation.
+def _append_truncation_marker(tool_def, max_rows: int):
+    """Append the marker `execute_sql` appends when `run_query` reports
+    `truncated`. The library caps the rows (`create_tools(max_result_rows=
+    MAX_ROWS)`); this only makes the governed arms read the same marker text
+    as the ungoverned ones.
 
     Response text is not always bare JSON: `run_query` prepends
     `WARNINGS:`/`LOG:` sections before the JSON blob, and a blocked call
@@ -406,25 +413,19 @@ def _truncate_run_query(tool_def, max_rows: int):
         if idx == -1:
             return result
 
-        prefix, blob = text[:idx], text[idx:]
+        blob = text[idx:]
         try:
             data = json.loads(blob)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"_truncate_run_query: found {_RUN_QUERY_PAYLOAD_MARKER!r} but "
-                f"could not parse JSON after it: {exc}"
+                f"_append_truncation_marker: found {_RUN_QUERY_PAYLOAD_MARKER!r} "
+                f"but could not parse JSON after it: {exc}"
             ) from exc
 
-        rows = data.get("rows")
-        if not isinstance(rows, list) or len(rows) <= max_rows:
+        if data.get("truncated") is not True:
             return result
-
-        total = data.get("row_count", len(rows))
-        data["rows"] = rows[:max_rows]
-        blob_out = json.dumps(data, default=str)
-        marker = f"-- truncated at {max_rows} rows ({total} total)"
-        new_text = f"{prefix}{blob_out}\n{marker}"
-        return {**result, "content": [{"type": "text", "text": new_text}]}
+        marker = _TRUNCATION_MARKER.format(n=max_rows)
+        return {**result, "content": [{"type": "text", "text": f"{text}\n{marker}"}]}
 
     return ToolDef(
         name=tool_def.name,
@@ -436,24 +437,20 @@ def _truncate_run_query(tool_def, max_rows: int):
 
 def _governed_tools(db_path: Path, *, contract=None):
     from agentic_data_contracts import create_pydantic_ai_tools
-    from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
     from agentic_data_contracts.core.session import ContractSession
     from agentic_data_contracts.tools.factory import create_tools
 
     contract = contract if contract is not None else load_contract()
     session = ContractSession(contract)
-    adapter = DuckDBAdapter(database=str(db_path))
-    tool_defs = create_tools(contract, adapter=adapter, session=session)
-    # BOTH row-returning tools, not just `run_query`. The library clamps
-    # `preview_table` at 100 rows of its own accord, so leaving it unwrapped
-    # handed the governed arms up to 100 rows per preview against the 50 the
-    # ungoverned arms get from `execute_sql` -- an asymmetry in the treatment's
-    # favour, on the very control the row cap exists to equalise. Measured on
-    # runs A-C: 31 `preview_table` calls asked for more than 50 rows.
+    adapter = _BoundedDuckDBAdapter(db_path)
+    tool_defs = create_tools(
+        contract, adapter=adapter, session=session, max_result_rows=MAX_ROWS
+    )
+    # `preview_table` needs no wrapping: `max_result_rows` caps its `LIMIT` at
+    # `MAX_ROWS` too, so only `run_query`'s reported `truncated` flag needs the
+    # marker text appended for it to read the same as the ungoverned arms.
     tool_defs = [
-        _truncate_run_query(t, MAX_ROWS)
-        if t.name in ("run_query", "preview_table")
-        else t
+        _append_truncation_marker(t, MAX_ROWS) if t.name == "run_query" else t
         for t in tool_defs
     ]
     tools = create_pydantic_ai_tools(contract, tools=tool_defs, session=session)

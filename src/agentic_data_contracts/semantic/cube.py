@@ -350,6 +350,8 @@ def _assemble_measure(measure: dict[str, Any], refs: _CubeRefs) -> str:
     filters = entry_list(measure.get("filters"), where=f"cube {where} filters")
     raw_sql = measure.get("sql")
     sql = None if raw_sql is None else refs.resolve(as_text(raw_sql), where=where)
+    if sql is not None and not sql.strip():
+        sql = None  # blank is absent: COUNT(*) for a count, refused otherwise
     if kind in _CUBE_PASSTHROUGH:
         if filters:
             raise _Untranslatable(

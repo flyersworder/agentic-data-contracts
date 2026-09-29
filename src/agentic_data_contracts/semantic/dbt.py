@@ -105,9 +105,7 @@ class DbtSource:
         for node in nodes.values():
             if node.get("resource_type") != "model":
                 continue
-            schema_name = node.get("schema", "")
-            table_name = node.get("name", "")
-            key = f"{schema_name}.{table_name}"
+            key = _physical_name(node)
             columns = [
                 Column(
                     name=require_text(
@@ -180,8 +178,8 @@ class DbtSource:
             if referenced is None or referenced.get("resource_type") != "model":
                 continue
 
-            owner_table = f"{owner.get('schema', '')}.{owner.get('name', '')}"
-            ref_table = f"{referenced.get('schema', '')}.{referenced.get('name', '')}"
+            owner_table = _physical_name(owner)
+            ref_table = _physical_name(referenced)
             meta = as_mapping(node.get("meta"), where="dbt test meta")
 
             relationships.append(
@@ -224,6 +222,18 @@ class DbtSource:
         # dbt has no native impact-graph concept; impacts live in the
         # contract YAML (declared via YamlSource) and reference metric names.
         return []
+
+
+def _physical_name(node: dict[str, Any]) -> str:
+    """``schema.table`` as the warehouse holds it: dbt's ``alias``, else name.
+
+    A model's ``alias`` names its physical table; the model name is not
+    queryable when they differ. Tables, relationship endpoints and a metric's
+    ``source_model`` (from ``node_relation``) all use this, so they agree.
+    """
+    alias = node.get("alias")
+    table = alias if isinstance(alias, str) and alias else node.get("name", "")
+    return f"{node.get('schema', '')}.{table}"
 
 
 # ── MetricFlow metric assembly ────────────────────────────────────────────────

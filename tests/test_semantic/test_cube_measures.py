@@ -54,6 +54,7 @@ def db() -> duckdb.DuckDBPyConnection:
         # completed AND amount > 100 (a dimension reference): orders 2 and 4.
         ("large_completed_revenue", 550.0),
         ("completed_status_revenue", 560.0),  # {CUBE.status}
+        ("blank_count", 5),  # a blank `sql` on a count is "every row"
     ],
 )
 def test_the_measure_computes_what_cube_would(
@@ -80,6 +81,7 @@ def test_the_measure_computes_what_cube_would(
         ("filter_without_sql", "no sql"),
         ("by_band", "size_band"),  # a `case:` dimension has no sql
         ("multi_stage_revenue", "multi_stage"),
+        ("blank_sql", "no sql"),
     ],
 )
 def test_an_untranslatable_measure_says_why(
@@ -96,3 +98,10 @@ def test_the_source_model_is_the_cubes_table(source: CubeSource) -> None:
     metric = source.get_metric("revenue")
     assert metric is not None
     assert metric.source_model == "main.orders"
+
+
+def test_a_blank_count_sql_is_every_row_in_portable_sql(source: CubeSource) -> None:
+    # DuckDB accepts COUNT(); most engines do not.
+    metric = source.get_metric("blank_count")
+    assert metric is not None
+    assert metric.sql_expression == "COUNT(*)"

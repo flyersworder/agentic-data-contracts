@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
   - Checked against dbt's own `osi_document.json`: every metric without a filter returns the same value.
 - **`CubeSource` returned a measure's `sql` without its aggregation or filters.** A standard Cube measure (`sql: amount`, `type: sum`) reached the agent as `amount`. The measure is now combined the same way as a dbt metric, with `{CUBE}`, `${CUBE}` and `{dimension}` references resolved to this cube's columns.
 
+- **`DbtSource` listed an aliased model under its model name instead of its table name.** A dbt `alias` sets the physical table's name, which is the only name a query can use. Tables and relationship endpoints now use the alias when one is set, matching the `source_model` that metrics take from the semantic model. Unaliased models are unchanged, because their alias and name are equal.
+
 ### Added
 
 - **`MetricDefinition.untranslated`: why a source couldn't express a metric as one SQL expression.** When it is set, `sql_expression` is empty, and `lookup_metric` passes the reason to the agent. The source doesn't emit SQL that would compute something else. It is set for:

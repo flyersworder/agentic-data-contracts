@@ -307,3 +307,64 @@ class TestOlderAndMalformedManifests:
         metric = src.get_metric("m")
         assert metric is not None
         assert metric.untranslated is not None
+
+
+def test_an_aliased_model_is_one_table_under_its_physical_name(tmp_path: Path) -> None:
+    # dbt `alias` names the table the warehouse holds; the model name is not
+    # queryable. The table list, relationship endpoints and a metric's
+    # source_model must all use the alias, so an agent following
+    # source_model into describe_table finds the table.
+    doc = {
+        "nodes": {
+            "model.p.orders": {
+                "resource_type": "model",
+                "schema": "mart",
+                "name": "orders",
+                "alias": "fct_orders",
+                "columns": {"customer_id": {"name": "customer_id"}},
+            },
+            "model.p.customers": {
+                "resource_type": "model",
+                "schema": "mart",
+                "name": "customers",
+                "alias": "dim_customers",
+                "columns": {"id": {"name": "id"}},
+            },
+            "test.p.rel": {
+                "resource_type": "test",
+                "attached_node": "model.p.orders",
+                "depends_on": {"nodes": ["model.p.orders", "model.p.customers"]},
+                "test_metadata": {
+                    "name": "relationships",
+                    "kwargs": {"column_name": "customer_id", "field": "id"},
+                },
+            },
+        },
+        "semantic_models": {
+            "semantic_model.p.orders": {
+                "name": "orders",
+                "node_relation": {"schema_name": "mart", "alias": "fct_orders"},
+                "entities": [{"name": "order", "type": "primary"}],
+                "measures": [{"name": "n", "agg": "sum", "expr": "1"}],
+            }
+        },
+        "metrics": {
+            "metric.p.m": {
+                "name": "m",
+                "type": "simple",
+                "type_params": {"measure": {"name": "n"}},
+            }
+        },
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(doc))
+    src = DbtSource(path)
+    assert set(src.get_table_schemas()) == {"mart.fct_orders", "mart.dim_customers"}
+    metric = src.get_metric("m")
+    assert metric is not None
+    assert metric.source_model in src.get_table_schemas()
+    (rel,) = src.get_relationships()
+    assert (rel.from_, rel.to) == (
+        "mart.fct_orders.customer_id",
+        "mart.dim_customers.id",
+    )

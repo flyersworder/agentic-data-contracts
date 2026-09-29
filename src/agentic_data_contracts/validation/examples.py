@@ -627,7 +627,7 @@ def _expand_metric_refs(
     from agentic_data_contracts.semantic.cube import CubeSource
     from agentic_data_contracts.semantic.dbt import DbtSource
 
-    if isinstance(semantic_source, (DbtSource, CubeSource)):
+    if names and isinstance(semantic_source, (DbtSource, CubeSource)):
         # Both keep a metric's aggregation (`agg`, `type: sum`) and filters
         # beside its expression -- MetricFlow's filters are Jinja, not SQL --
         # so the expression alone is never the metric, filters or not.

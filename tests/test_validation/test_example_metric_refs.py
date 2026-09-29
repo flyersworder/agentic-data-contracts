@@ -339,6 +339,28 @@ class TestRefusedAtLoadTime:
         msg = self._refuse(contract, ex, source)
         assert "r1" in msg and source_cls.__name__ in msg
 
+    @pytest.mark.parametrize(
+        ("source_cls", "fixture"),
+        [
+            (DbtSource, "sample_dbt_manifest.json"),
+            (CubeSource, "sample_cube_schema.yml"),
+        ],
+    )
+    def test_a_placeholder_free_corpus_still_validates_on_those_sources(
+        self,
+        contract: DataContract,
+        fixtures_dir: Path,
+        source_cls: type,
+        fixture: str,
+    ) -> None:
+        # `semantic_source` predates placeholders (it feeds the Validator's
+        # relationship checks), so a dbt or Cube user with no placeholder
+        # must see exactly the behaviour they had before.
+        source = source_cls(fixtures_dir / fixture)
+        ex = VerifiedExample(sql="SELECT count(*) FROM analytics.fees")
+        report = validate_examples([ex], contract, semantic_source=source)
+        assert report.ok, report.summary()
+
     def test_a_bad_row_stops_the_corpus_before_anything_is_validated(
         self, contract: DataContract
     ) -> None:

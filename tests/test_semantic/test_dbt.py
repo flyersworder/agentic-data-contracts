@@ -24,7 +24,13 @@ def test_get_metrics(source: DbtSource) -> None:
 def test_get_metric(source: DbtSource) -> None:
     metric = source.get_metric("total_revenue")
     assert metric is not None
-    assert "SUM(amount)" in metric.sql_expression
+    # The measure's `agg`/`expr` live on the semantic model and the filter is
+    # MetricFlow Jinja; DbtSource folds them into one expression (#123).
+    assert metric.sql_expression == (
+        "SUM(CASE WHEN status = 'completed' THEN amount END)"
+    )
+    assert metric.source_model == "analytics.orders"
+    assert metric.untranslated is None
     assert metric.description == "Sum of all completed order amounts"
 
 

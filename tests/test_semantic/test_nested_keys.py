@@ -266,6 +266,7 @@ _FULL_DOCUMENT: dict[str, Any] = {
             "business_owner": None,
             "operational_owner": None,
             "last_reviewed": None,
+            "untranslated": None,
             "decompositions": [
                 {
                     "operator": "product",

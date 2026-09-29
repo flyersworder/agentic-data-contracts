@@ -1,0 +1,4 @@
+metricflow_probe:
+  target: dev
+  outputs:
+    dev: {type: duckdb, path: ":memory:"}

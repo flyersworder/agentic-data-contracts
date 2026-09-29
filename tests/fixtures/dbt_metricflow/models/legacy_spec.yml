@@ -1,0 +1,131 @@
+# The standard (pre-1.12) spec: top-level semantic_models with measures, and
+# metrics that reference a measure through type_params.
+models:
+  - name: metricflow_time_spine
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day
+
+semantic_models:
+  - name: orders
+    model: ref('orders')
+    defaults: {agg_time_dimension: ordered_at}
+    entities:
+      - {name: order, type: primary, expr: order_id}
+      - {name: customer, type: foreign, expr: customer_id}
+    dimensions:
+      - {name: status, type: categorical}
+      - {name: is_large, type: categorical, expr: "amount > 100"}
+      - {name: ordered_at, type: time, type_params: {time_granularity: day}}
+    measures:
+      - {name: order_total, agg: sum, expr: amount}
+      - {name: order_count, agg: count, expr: order_id}
+      - {name: unique_customers, agg: count_distinct, expr: customer_id}
+      - {name: avg_amount, agg: average, expr: amount}
+      - {name: max_amount, agg: max, expr: amount}
+      - {name: paid_orders, agg: sum_boolean, expr: is_paid}
+      - {name: amount, agg: sum}
+      - name: p90_amount
+        agg: percentile
+        expr: amount
+        agg_params: {percentile: 0.9}
+
+  - name: customers
+    model: ref('customers')
+    entities:
+      - {name: customer, type: primary, expr: customer_id}
+    dimensions:
+      - {name: region, type: categorical}
+
+  - name: accounts
+    model: ref('accounts')
+    defaults: {agg_time_dimension: snapshot_at}
+    entities:
+      - {name: account, type: primary, expr: account_id}
+    dimensions:
+      - {name: snapshot_at, type: time, type_params: {time_granularity: day}}
+    measures:
+      - name: closing_balance
+        agg: sum
+        expr: balance
+        non_additive_dimension: {name: snapshot_at, window_choice: max}
+
+metrics:
+  - name: revenue
+    label: Revenue
+    description: Sum of order amounts
+    config:
+      meta: {tier: [north_star], domains: [revenue], indicator_kind: lagging}
+    type: simple
+    type_params: {measure: order_total}
+  - {name: orders_placed, label: Orders placed, type: simple, type_params: {measure: order_count}}
+  - {name: customers_ordering, label: Customers ordering, type: simple, type_params: {measure: unique_customers}}
+  - {name: average_order, label: Average order, type: simple, type_params: {measure: avg_amount}}
+  - {name: largest_order, label: Largest order, type: simple, type_params: {measure: max_amount}}
+  - {name: paid_order_count, label: Paid orders, type: simple, type_params: {measure: paid_orders}}
+  - {name: amount_default_expr, label: Amount, type: simple, type_params: {measure: amount}}
+  - {name: p90_order, label: P90 order, type: simple, type_params: {measure: p90_amount}}
+  - {name: balance, label: Balance, type: simple, type_params: {measure: closing_balance}}
+  - name: completed_revenue
+    label: Completed revenue
+    description: Revenue from completed orders
+    type: simple
+    type_params:
+      measure:
+        name: order_total
+        filter: "{{ Dimension('order__status') }} = 'completed'"
+  - name: completed_orders
+    label: Completed orders
+    type: simple
+    type_params: {measure: order_count}
+    filter: "{{ Dimension('order__status') }} = 'completed'"
+  - name: large_paid_orders
+    label: Large paid orders
+    type: simple
+    type_params:
+      measure:
+        name: paid_orders
+        filter: "{{ Dimension('order__is_large') }} = true"
+    filter:
+      - "{{ Dimension('order__status') }} = 'completed'"
+  - name: eu_revenue
+    label: EU revenue
+    type: simple
+    type_params: {measure: order_total}
+    filter: "{{ Dimension('customer__region') }} = 'EU'"
+  - name: jan_revenue
+    label: January revenue
+    type: simple
+    type_params: {measure: order_total}
+    filter: "{{ TimeDimension('order__ordered_at', 'month') }} = '2026-01-01'"
+  - name: orders_since_mid_jan
+    label: Orders since mid January
+    type: simple
+    type_params: {measure: order_count}
+    # A time dimension through plain Dimension(): MetricFlow truncates it to
+    # its grain before comparing, so the raw column would be wrong.
+    filter: "{{ Dimension('order__ordered_at') }} >= '2026-01-15'"
+  - name: refunded_revenue_or_zero
+    label: Refunded revenue (zero when none)
+    type: simple
+    type_params:
+      measure:
+        name: order_total
+        filter: "{{ Dimension('order__status') }} = 'refunded'"
+        fill_nulls_with: 0
+  - name: order_value
+    label: Order value
+    type: ratio
+    type_params: {numerator: revenue, denominator: orders_placed}
+  - name: revenue_less_largest
+    label: Revenue less largest order
+    type: derived
+    type_params:
+      expr: revenue - largest_order
+      metrics: [{name: revenue}, {name: largest_order}]
+  - name: running_revenue
+    label: Running revenue
+    type: cumulative
+    type_params: {measure: order_total}

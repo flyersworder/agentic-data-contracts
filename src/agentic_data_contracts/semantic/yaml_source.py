@@ -76,6 +76,9 @@ METRIC_KEYS = frozenset(
         "decompositions",
         "drill_by",
         "sensitivity",
+        # Written by `dump_semantic_source` for a dbt/Cube metric that could
+        # not be assembled, so a frozen contract keeps the reason (#123).
+        "untranslated",
     }
 )
 DECOMPOSITION_KEYS = frozenset(
@@ -367,6 +370,11 @@ class YamlSource:
                     business_owner=m.get("business_owner"),
                     operational_owner=m.get("operational_owner"),
                     last_reviewed=parse_review_date(m.get("last_reviewed")),
+                    untranslated=(
+                        None
+                        if m.get("untranslated") is None
+                        else as_text(m.get("untranslated"))
+                    ),
                     decompositions=[
                         Decomposition(
                             operator=require_text(

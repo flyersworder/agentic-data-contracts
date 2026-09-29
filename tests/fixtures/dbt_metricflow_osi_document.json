@@ -1,0 +1,584 @@
+{
+ "dialects": [
+  "ANSI_SQL"
+ ],
+ "semantic_model": [
+  {
+   "datasets": [
+    {
+     "fields": [
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "order_id"
+         }
+        ]
+       },
+       "name": "order"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "customer_id"
+         }
+        ]
+       },
+       "name": "customer"
+      },
+      {
+       "dimension": {
+        "is_time": false
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "status"
+         }
+        ]
+       },
+       "name": "status"
+      },
+      {
+       "dimension": {
+        "is_time": false
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount > 100"
+         }
+        ]
+       },
+       "name": "is_large"
+      },
+      {
+       "dimension": {
+        "is_time": true
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "ordered_at"
+         }
+        ]
+       },
+       "name": "ordered_at"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount"
+         }
+        ]
+       },
+       "name": "order_total"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "CASE WHEN order_id IS NOT NULL THEN 1 ELSE 0 END"
+         }
+        ]
+       },
+       "name": "order_count"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "customer_id"
+         }
+        ]
+       },
+       "name": "unique_customers"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount"
+         }
+        ]
+       },
+       "name": "avg_amount"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount"
+         }
+        ]
+       },
+       "name": "max_amount"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "CASE WHEN is_paid THEN 1 ELSE 0 END"
+         }
+        ]
+       },
+       "name": "paid_orders"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount"
+         }
+        ]
+       },
+       "name": "amount"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "amount"
+         }
+        ]
+       },
+       "name": "p90_amount"
+      }
+     ],
+     "name": "orders",
+     "primary_key": [
+      "order_id"
+     ],
+     "source": "\"memory\".\"main\".\"orders\""
+    },
+    {
+     "fields": [
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "customer_id"
+         }
+        ]
+       },
+       "name": "customer"
+      },
+      {
+       "dimension": {
+        "is_time": false
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "region"
+         }
+        ]
+       },
+       "name": "region"
+      }
+     ],
+     "name": "customers",
+     "primary_key": [
+      "customer_id"
+     ],
+     "source": "\"memory\".\"main\".\"customers\""
+    },
+    {
+     "fields": [
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "account_id"
+         }
+        ]
+       },
+       "name": "account"
+      },
+      {
+       "dimension": {
+        "is_time": true
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "snapshot_at"
+         }
+        ]
+       },
+       "name": "snapshot_at"
+      },
+      {
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "balance"
+         }
+        ]
+       },
+       "name": "closing_balance"
+      }
+     ],
+     "name": "accounts",
+     "primary_key": [
+      "account_id"
+     ],
+     "source": "\"memory\".\"main\".\"accounts\""
+    },
+    {
+     "description": "",
+     "fields": [
+      {
+       "description": "",
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "payment_id"
+         }
+        ]
+       },
+       "name": "payment"
+      },
+      {
+       "description": "",
+       "dimension": {
+        "is_time": false
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "status"
+         }
+        ]
+       },
+       "name": "status"
+      },
+      {
+       "description": "",
+       "dimension": {
+        "is_time": true
+       },
+       "expression": {
+        "dialects": [
+         {
+          "dialect": "ANSI_SQL",
+          "expression": "paid_at"
+         }
+        ]
+       },
+       "name": "paid_at"
+      }
+     ],
+     "name": "payments",
+     "primary_key": [
+      "payment_id"
+     ],
+     "source": "\"memory\".\"main\".\"payments\""
+    }
+   ],
+   "metrics": [
+    {
+     "description": "Sum of order amounts",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(orders.amount)"
+       }
+      ]
+     },
+     "name": "revenue"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN orders.order_id IS NOT NULL THEN 1 ELSE 0 END)"
+       }
+      ]
+     },
+     "name": "orders_placed"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "COUNT(DISTINCT orders.customer_id)"
+       }
+      ]
+     },
+     "name": "customers_ordering"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "AVG(orders.amount)"
+       }
+      ]
+     },
+     "name": "average_order"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "MAX(orders.amount)"
+       }
+      ]
+     },
+     "name": "largest_order"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN is_paid THEN 1 ELSE 0 END)"
+       }
+      ]
+     },
+     "name": "paid_order_count"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(orders.amount)"
+       }
+      ]
+     },
+     "name": "amount_default_expr"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY orders.amount)"
+       }
+      ]
+     },
+     "name": "p90_order"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(accounts.balance)"
+       }
+      ]
+     },
+     "name": "balance"
+    },
+    {
+     "description": "Revenue from completed orders",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN order__status = 'completed' THEN orders.amount END)"
+       }
+      ]
+     },
+     "name": "completed_revenue"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN order__status = 'completed' THEN CASE WHEN orders.order_id IS NOT NULL THEN 1 ELSE 0 END END)"
+       }
+      ]
+     },
+     "name": "completed_orders"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN (order__is_large = true) AND (order__status = 'completed') THEN CASE WHEN is_paid THEN 1 ELSE 0 END END)"
+       }
+      ]
+     },
+     "name": "large_paid_orders"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN customer__region = 'EU' THEN orders.amount END)"
+       }
+      ]
+     },
+     "name": "eu_revenue"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN order__ordered_at__month = '2026-01-01' THEN orders.amount END)"
+       }
+      ]
+     },
+     "name": "jan_revenue"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "(SUM(orders.amount)) / (SUM(CASE WHEN orders.order_id IS NOT NULL THEN 1 ELSE 0 END))"
+       }
+      ]
+     },
+     "name": "order_value"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(orders.amount) - MAX(orders.amount)"
+       }
+      ]
+     },
+     "name": "revenue_less_largest"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(orders.amount)"
+       }
+      ]
+     },
+     "name": "running_revenue"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN order__status = 'refunded' THEN orders.amount END)"
+       }
+      ]
+     },
+     "name": "refunded_revenue_or_zero"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN order__ordered_at >= '2026-01-15' THEN CASE WHEN orders.order_id IS NOT NULL THEN 1 ELSE 0 END END)"
+       }
+      ]
+     },
+     "name": "orders_since_mid_jan"
+    },
+    {
+     "description": "Sum of payments",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(payments.amount)"
+       }
+      ]
+     },
+     "name": "paid_total"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(CASE WHEN payment__status = 'completed' THEN payments.amount END)"
+       }
+      ]
+     },
+     "name": "completed_paid_total"
+    },
+    {
+     "description": "",
+     "expression": {
+      "dialects": [
+       {
+        "dialect": "ANSI_SQL",
+        "expression": "SUM(payments.fee)"
+       }
+      ]
+     },
+     "name": "fee"
+    }
+   ],
+   "name": "semantic_model",
+   "relationships": [
+    {
+     "from": "orders",
+     "from_columns": [
+      "customer_id"
+     ],
+     "name": "orders__customers__customer",
+     "to": "customers",
+     "to_columns": [
+      "customer_id"
+     ]
+    }
+   ]
+  }
+ ],
+ "version": "0.1.1"
+}

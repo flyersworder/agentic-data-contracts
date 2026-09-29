@@ -42,8 +42,9 @@ _CUBE: dict[str, Any] = {
             "measures": [
                 {
                     "name": "revenue",
-                    "sql": "SUM(amount)",
+                    "sql": "{CUBE}.amount",
                     "type": "sum",
+                    "filters": [{"sql": "{region} = 'EU'"}],
                     "description": "Revenue.",
                     "meta": {
                         "tier": ["north_star"],
@@ -109,19 +110,57 @@ _DBT: dict[str, Any] = {
             },
         },
     },
+    # The shape `dbt parse` writes (see dbt_metricflow_manifest.json): the
+    # measure's agg/expr on a semantic model, the filter as Jinja, and the
+    # 1.12 spec's metric_aggregation_params beside it.
+    "semantic_models": {
+        "semantic_model.p.orders": {
+            "name": "orders",
+            "node_relation": {"schema_name": "analytics", "alias": "orders"},
+            "entities": [{"name": "order", "type": "primary", "expr": "id"}],
+            "dimensions": [{"name": "status", "type": "categorical", "expr": None}],
+            "measures": [
+                {"name": "order_total", "agg": "sum", "expr": "amount"},
+            ],
+        }
+    },
     "metrics": {
         "metric.p.revenue": {
             "name": "revenue",
             "description": "Revenue.",
-            "model": "analytics.orders",
-            "type_params": {"measure": {"expr": "SUM(amount)"}},
-            "filters": [{"field": "status", "operator": "=", "value": "'done'"}],
+            "type": "simple",
+            "type_params": {
+                "measure": {
+                    "name": "order_total",
+                    "filter": {
+                        "where_filters": [
+                            {
+                                "where_sql_template": (
+                                    "{{ Dimension('order__status') }} = 'done'"
+                                )
+                            }
+                        ]
+                    },
+                }
+            },
             "meta": {
                 "tier": ["north_star"],
                 "domains": ["revenue"],
                 "indicator_kind": "lagging",
             },
-        }
+        },
+        "metric.p.paid": {
+            "name": "paid",
+            "type": "simple",
+            "type_params": {
+                "expr": "amount",
+                "metric_aggregation_params": {
+                    "semantic_model": "orders",
+                    "agg": "sum",
+                    "non_additive_dimension": None,
+                },
+            },
+        },
     },
 }
 

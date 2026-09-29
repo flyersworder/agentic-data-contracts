@@ -315,29 +315,17 @@ class TestRefusedAtLoadTime:
         msg = self._refuse(contract, ex, source)
         assert "recent" in msg and "filters" in msg
 
-    @pytest.mark.parametrize(
-        ("source_cls", "fixture"),
-        [
-            (DbtSource, "sample_dbt_manifest.json"),
-            (CubeSource, "sample_cube_schema.yml"),
-        ],
-    )
-    def test_a_source_whose_expression_is_not_the_metric(
-        self,
-        contract: DataContract,
-        fixtures_dir: Path,
-        source_cls: type,
-        fixture: str,
+    def test_a_metric_its_source_could_not_translate(
+        self, contract: DataContract, fixtures_dir: Path
     ) -> None:
-        # dbt and Cube keep a metric's aggregation and filters beside its
-        # expression (MetricFlow's filters are Jinja, not SQL), so no metric
-        # from either can be expanded faithfully, filters declared or not.
-        source = source_cls(fixtures_dir / fixture)
+        # A ratio is computed by dbt from two metrics at query time: there is
+        # no single expression to expand, and the refusal says why.
+        source = DbtSource(fixtures_dir / "dbt_metricflow_manifest.json")
         ex = VerifiedExample(
-            sql="SELECT {{ metric:total_revenue }} FROM analytics.fees", id="r1"
+            sql="SELECT {{ metric:order_value }} FROM analytics.fees", id="r1"
         )
         msg = self._refuse(contract, ex, source)
-        assert "r1" in msg and source_cls.__name__ in msg
+        assert "r1" in msg and "order_value" in msg and "ratio" in msg
 
     @pytest.mark.parametrize(
         ("source_cls", "fixture"),
@@ -370,6 +358,24 @@ class TestRefusedAtLoadTime:
             validate_examples(
                 [good, bad], contract, semantic_source=_source(rules="count(*)")
             )
+
+
+class TestAssembledSources:
+    """dbt and Cube metrics expand once their source assembles them (#123)."""
+
+    def test_a_dbt_metric_expands_to_its_assembled_expression(
+        self, contract: DataContract, fixtures_dir: Path
+    ) -> None:
+        source = DbtSource(fixtures_dir / "dbt_metricflow_manifest.json")
+        ex = VerifiedExample(
+            sql="SELECT {{ metric:completed_revenue }} FROM analytics.fees"
+        )
+        (row,) = validate_examples([ex], contract, semantic_source=source).results
+        assert row.sql == (
+            "SELECT (SUM(CASE WHEN status = 'completed' THEN amount END)\n)"
+            " FROM analytics.fees"
+        )
+        assert row.metrics == ["completed_revenue"]
 
 
 class TestCoverage:

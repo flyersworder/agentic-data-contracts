@@ -471,6 +471,11 @@ def _metric_details(
         "source_model": metric.source_model,
         "filters": metric.filters,
     }
+    # Beside an empty `sql_expression`, so the agent reads "this source could
+    # not express the metric as one SQL expression, because ..." rather than
+    # "this metric has no SQL" (#123).
+    if metric.untranslated:
+        data["untranslated"] = metric.untranslated
     if metric.domains:
         data["domains"] = list(metric.domains)
     if metric.tier:

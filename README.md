@@ -751,6 +751,23 @@ semantic:
     path: "./dbt/manifest.json"
 ```
 
+**How a dbt metric becomes one expression.** MetricFlow keeps a metric's pieces apart. In the standard spec, `expr` and `agg` sit on a semantic model's measure, and the metric only names that measure. In the dbt 1.12 spec, they sit on the metric itself (`agg`, `expr`). Filters are Jinja either way. `DbtSource` combines the pieces into one `sql_expression` and takes `source_model` from the semantic model's table. A filter becomes a condition inside the aggregate, `SUM(CASE WHEN status = 'completed' THEN amount END)`, which gives the same result as a `WHERE` clause.
+
+A filter is translated only when it is a plain `{{ Dimension('entity__dim') }}` on the metric's own semantic model. The following are marked **untranslated**:
+
+- ratio, derived, cumulative and conversion metrics;
+- `percentile` and `median`, whose SQL differs by dialect;
+- semi-additive measures (`non_additive_dimension`, such as a closing balance);
+- any filter that needs a join, a time grain, an `Entity` or a `Metric`;
+- a filter on a time dimension, even through plain `Dimension()`, because MetricFlow truncates it to its grain before comparing;
+- metrics from pre-1.6 `dbt_metrics` manifests, which keep their `filters` and `model` as before.
+
+`fill_nulls_with` becomes `COALESCE(<expr>, <value>)`. `count` compiles to `SUM(CASE WHEN <e> IS NOT NULL THEN 1 ELSE 0 END)`, as MetricFlow compiles it. `join_to_timespine` is not represented: it adds empty time periods to a grouped result and doesn't change any value.
+
+An untranslated metric keeps its name and description. Its `sql_expression` is empty, and `untranslated` says why, which `lookup_metric` passes on to the agent. The source doesn't emit SQL that would compute something else.
+
+dbt 1.12 also writes `target/osi_document.json`, which `OssieSource` can load. For filtered, semi-additive or cumulative metrics that export is not safe: it keeps MetricFlow paths such as `order__status` in the SQL and drops window semantics. Prefer `manifest.json` with `DbtSource`.
+
 dbt's built-in `relationships` schema test compiles into the manifest as a test node — `DbtSource` projects each one into a `Relationship`, resolving the owner via `attached_node` (manifest v12+) and the referenced model via `depends_on.nodes`. Tests with non-`relationships` types (`not_null`, `unique`, custom tests) and tests that can't be resolved are silently ignored. Three optional knobs read from the test's `meta:` block (matching how `tier` / `domains` are read on metrics):
 
 ```yaml
@@ -776,6 +793,18 @@ semantic:
     type: cube
     path: "./cube/schema.yml"
 ```
+
+**How a Cube measure becomes one expression.** A measure's `sql` is aggregated by its `type`, and its `filters` fold into the aggregate the same way as dbt filters: `sql: amount`, `type: sum` becomes `SUM(amount)`.
+- `{CUBE}.col`, `${CUBE}.col` and `{<cube name>}.col` resolve to plain columns.
+- `{dimension}` and `{CUBE.dimension}` resolve to that dimension's SQL.
+- `number`, `string`, `time` and `boolean` measures already contain an aggregate, so their SQL is used as written.
+
+The following are marked **untranslated**, as for dbt:
+- a reference to another cube (it needs a join), to another measure, or to a `case:` dimension;
+- multi-stage measures (`multi_stage`, `time_shift`, `group_by`, `reduce_by`, `add_group_by`) and filters with no `sql`;
+- `count_distinct_approx`, `running_total` and `rolling_window`;
+- a `number` measure with `filters`;
+- a measure with no `type`.
 
 Each cube's `joins:` block projects into `Relationship` instances. The parser handles the single-equality form `{CUBE}.col1 = {Other}.col2` (in either direction); the `from` side is always the column on the cube declaring the join, regardless of how the SQL was written. Cube's `relationship` enum (`belongsTo`, `hasOne`, `hasMany`, plus the snake_case aliases `many_to_one` / `one_to_one` / `one_to_many`) maps to the canonical `Relationship.type`. Reads from each join's `meta:` block:
 
@@ -1208,7 +1237,7 @@ A certified answer of "no rows" — the shape of every data-quality invariant ("
 
 Pass the contract's semantic source to `validate_examples(..., semantic_source=source)`. Each placeholder expands to `(<sql_expression>\n)` before anything else sees the SQL. The parentheses keep a metric's top-level `OR` from binding to the example's `AND`, and the newline keeps a trailing `--` comment in the metric from commenting out the closing parenthesis. The Validator, the EXPLAIN dry-run and `check_example_answers` all get the expanded text, which is recorded as `ExampleResult.sql`, so the metric's SQL is also checked against the contract's table rules. The example binds every table alias the expression reads (`p`, `m`, `f` above). When someone edits the metric, the certified answer moves and the row turns `mismatch`.
 
-Expansion is plain text substitution, applied before any `sql_normalizer`, so it works for dialects sqlglot can parse but cannot emit. Every row is expanded before any is validated. A placeholder that cannot expand faithfully raises `ValueError` naming the row: an unknown metric, an empty `sql_expression`, a placeholder with no `semantic_source`, a placeholder inside a metric's own expression (expansion is a single pass), or any other `{{` in the SQL. `{{` is reserved in example SQL, including inside string literals. **A metric that declares `filters` is refused too**: expanding its `sql_expression` alone would drop the filters and certify a different quantity. Write that metric's SQL out in full in the example instead. **Placeholders are refused for every metric from a `DbtSource` or `CubeSource`**, whether or not it declares filters. Both keep a metric's aggregation (`agg`, `type: sum`) and its filters outside `sql_expression`, and MetricFlow filters are Jinja, not SQL, so the expression on its own is never the whole metric. Placeholders work with `YamlSource` and `OssieSource`, where `sql_expression` is the complete metric SQL the author wrote.
+Expansion is plain text substitution, applied before any `sql_normalizer`, so it works for dialects sqlglot can parse but cannot emit. Every row is expanded before any is validated. A placeholder that cannot expand faithfully raises `ValueError` naming the row: an unknown metric, an empty `sql_expression`, a placeholder with no `semantic_source`, a placeholder inside a metric's own expression (expansion is a single pass), or any other `{{` in the SQL. `{{` is reserved in example SQL, including inside string literals. **A metric that declares `filters` is refused too**: expanding its `sql_expression` alone would drop the filters and certify a different quantity. Write that metric's SQL out in full in the example instead. **A metric its source marked `untranslated` is refused too**, with the source's reason, for example a dbt ratio metric or a filter that needs a join. A dbt or Cube metric that *was* assembled expands like any other.
 
 `answers.covered_metrics` lists the metrics referenced by a row that asserted an answer and matched. `answers.uncovered_metrics(source)` lists the rest, i.e. the metrics no certified example tests. A row that references a metric but asserts no answer is validated but never executed, so it does not count as coverage. Coverage counts references, not what the engine ran: a placeholder inside a SQL comment or string literal is still expanded and still counts, so keep placeholders in live SQL.
 

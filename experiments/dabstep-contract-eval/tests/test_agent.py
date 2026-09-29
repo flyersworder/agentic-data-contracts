@@ -1571,6 +1571,94 @@ def test_the_vllm_route_fails_loudly_on_missing_gateway_credentials(
         )
 
 
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_responses"]
+)
+def test_the_responses_route_sends_effort_summary_and_bypasses_the_gateway_cache(
+    model_id, monkeypatch
+):
+    """The Responses route's settings, each verified against the live gateway.
+
+    This route exists because Azure rejects function tools combined with
+    `reasoning_effort` on `/v1/chat/completions` for `gpt-6-sol` ("use
+    /v1/responses or set reasoning_effort to 'none'"), and this harness needs
+    both. On `/v1/responses` the same pair works.
+
+    `cache: {"no-cache": true}` is the one setting no other route sends, and
+    the one a repeat depends on: the gateway replays identical requests from
+    its own response cache (measured: the same "random" number, 0.05 s, a
+    cache-key header), so without it a repeat's first turn could be a replay of
+    an earlier repeat's rather than a new sample.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key-never-called")
+
+    built = agent._default_agent_factory(
+        model=model_id, system_prompt="s", tools=[], retries=1
+    )
+    settings = built.model_settings or {}
+
+    assert settings["openai_reasoning_effort"] == agent.REASONING_EFFORT
+    # Without a summary the trace keeps only an encrypted blob, and loses the
+    # text `dce.trace` exists to preserve.
+    assert settings["openai_reasoning_summary"] == "detailed"
+    # Not stored server-side: the encrypted reasoning is replayed in the
+    # request history instead, which is what keeps it across turns.
+    assert settings["openai_store"] is False
+    assert settings["extra_body"] == {"cache": {"no-cache": True}}
+
+    # Temperature is fixed at 1 by the model (HTTP 400 on 0), and the
+    # Responses API has no seed; neither control exists here, as on
+    # `claudesonnet5`.
+    for rejected in ("temperature", "seed"):
+        assert rejected not in settings, rejected
+
+    # The controls that keep the arm comparison honest are NOT route-specific.
+    assert settings["max_tokens"] == agent.MAX_OUTPUT_TOKENS_PER_REQUEST
+    assert settings["timeout"] == 300
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_responses"]
+)
+def test_the_responses_route_is_treated_as_a_reasoning_model(model_id, monkeypatch):
+    """The pinned pydantic-ai predates `gpt-6-sol` and profiles the name as a
+    model WITHOUT reasoning, which would silently drop the effort and mishandle
+    the encrypted reasoning carried between turns. The factory must supply a
+    reasoning profile explicitly rather than trust name inference.
+    """
+    from pydantic_ai.profiles.openai import openai_model_profile
+
+    # The failure this guards against, stated so it is noticed if it changes.
+    assert openai_model_profile(model_id).get("openai_supports_reasoning") is False
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key-never-called")
+    built = agent._default_agent_factory(
+        model=model_id, system_prompt="s", tools=[], retries=1
+    )
+    profile = built.model.profile
+    assert profile["openai_supports_reasoning"] is True
+    assert profile["openai_supports_encrypted_reasoning_content"] is True
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_responses"]
+)
+def test_the_responses_route_fails_loudly_on_missing_gateway_credentials(
+    model_id, monkeypatch
+):
+    """Same contract as the other gateway routes: raise at construction rather
+    than fall back to `OpenAIProvider`'s default of api.openai.com."""
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+
+    with pytest.raises(KeyError):
+        agent._default_agent_factory(
+            model=model_id, system_prompt="s", tools=[], retries=1
+        )
+
+
 def test_spec_field_returns_unknown_rather_than_raising_for_an_unpinned_model():
     """`_priced_fallback_row` is the last line of defense inside `run_task`'s
     own exception handler; a bare `MODELS[model]` there would raise on exactly

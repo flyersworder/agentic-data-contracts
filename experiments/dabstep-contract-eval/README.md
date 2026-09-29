@@ -113,6 +113,98 @@ confound the smoke-run checklist below exists to catch, and taking the
 one-line route would have written it into the data. See
 `dce.agent._litellm_anthropic_agent`.
 
+### `qwen3.6-27b` — the same gateway, the other route
+
+A second pinned model is not an OpenRouter model either, and it is **not on
+the same route as `claudesonnet5`**. `qwen3.6-27b` is Qwen3.6-27B self-hosted
+on vLLM in-house, reached through the same production LiteLLM gateway
+over its **OpenAI-compatible `/v1/chat/completions`** route. It reads the same
+three variables as `claudesonnet5` — `LITELLM_BASE_URL`,
+`LITELLM_MASTER_KEY`, `SSL_CERT_FILE` — and `SSL_CERT_FILE` is load-bearing
+for the same reason.
+
+It is here to answer a question the other five cannot. Every model measured so
+far is a commercial frontier or near-frontier model, so "the contract arm wins
+on every model" has only ever been tested where the model was strong. A 27B
+open-weights model on our own hardware is the case that matters operationally.
+
+**Both determinism controls are available here**, which makes this the *more*
+reproducible of the two gateway models: vLLM accepts `temperature=0` and
+`seed=0` (verified live, HTTP 200 on each), where `claudesonnet5`'s Bedrock
+backend rejects both.
+
+**But the endpoint pin is the weakest of any model in this harness.** The
+gateway alias fans out across **three vLLM replicas running two different
+builds** — three consecutive requests on 2026-09-04 reported
+`system_fingerprint` of `vllm-0.22.1-tp4-efbb389f`, `vllm-0.26.0-tp4-41646db4`
+and `vllm-0.26.0-tp4-34e424af`. That is the same per-request fan-out this
+README describes for OpenRouter, except OpenRouter gives us `provider.order` +
+`allow_fallbacks: false` to pin it and fail loudly, and this route gives us
+nothing. `system_fingerprint` comes back on every response, so which replica
+served a row is *knowable*; it is not *controllable*. Uniform across arms, so
+it weakens reproducibility rather than biasing the arm contrast.
+
+**Reasoning is a BOOLEAN here, not an effort level**, and the rows say so
+rather than claiming `medium`. vLLM's knob is
+`chat_template_kwargs.enable_thinking`; there is no graded scale to translate
+`REASONING_EFFORT` into, so these rows stamp `on:enable_thinking` (or `off:`)
+and an analysis grouping by `reasoning_effort` sees this model as its own
+group. The gateway's own model config pins the knob **false**, so thinking is
+OFF unless we send it — measured, three requests with no `chat_template_kwargs`
+returned 0 characters of reasoning, and three with `true` returned 450/327/329
+characters. `dce.agent.QWEN_ENABLE_THINKING` is the switch, defaulted `True` so
+this model reasons like the other five. The known risk is qwen-specific and is
+settled by the smoke run rather than by argument: Qwen3 has a documented
+failure mode where tool calls are dropped in thinking mode (QwenLM/Qwen3#1817).
+
+**Whether `reasoning_tokens` is reported depends on the deployment, not the
+route, and `reasoning_chars` covers the case where it is not.** For
+`qwen3.6-27b` it is 0 on every row: that deployment's non-streaming response
+carries `reasoning_content` in full but a usage block of exactly three
+integers, so there is no provider token count to read. `qwen3.8-27b`'s
+deployment (`vllm-0.28.0`) does report it, on every panel row, so for that
+model the column is the provider's own count. The rest of this section
+describes the `qwen3.6-27b` case. Three other routes were tried and
+none help: `/v1/messages` returns no reasoning at all, `stream_options` is
+rejected outright without `stream=True` (*"Stream options can only be defined
+when `stream=True`"*), and the count appears **only** on the streaming usage
+chunk — verified, 471 characters of reasoning against
+`completion_tokens_details.reasoning_tokens: 173`.
+
+Switching this route to streaming to collect it was rejected, and not on
+style: the one documented qwen tool-call failure mode is specifically the vLLM
+**streaming** tool-call parser degrading under large generations, which is
+exactly the failure the non-streaming smoke run showed to be absent. Trading a
+descriptive column for a risk to the experiment itself is the wrong trade.
+
+So the harness measures the text instead. pydantic-ai maps `reasoning_content`
+onto a `ThinkingPart`, and every row now carries **`reasoning_chars`** — exact,
+free, and independent of whether the provider reports a token count. The
+conversion is measured per model, since it belongs to the tokenizer
+(`REASONING_CHARS_PER_TOKEN`): **3.73 characters per reasoning token** for
+`qwen3.6-27b` and **3.87** for `qwen3.8-27b`, pooled over four streaming
+requests each on DABStep-style prompts. An earlier single-request value of
+2.72 was 27% low. The "wrong answers involve 4–10x more reasoning tokens than right ones"
+finding is therefore computable for this model after all. The `qwen3.8-27b`
+ratio has since been checked against that model's reported counts: panel
+repeat 1 recorded 13.4M reasoning tokens for 53.5M characters, 4.00
+characters per token, within 3% of the 3.87 measured beforehand.
+
+For scale: one 41-turn smoke run produced 22,759 characters of reasoning —
+~6,100 tokens, roughly 41% of that run's 14,708 output tokens, all of it billed
+and all of it previously invisible.
+
+**Input is metered at $0.00/MTok** and there is no cache tier at all
+(`cache_read_input_token_cost: null`), so `cached_tokens` is an honest 0 on
+every row and the caching confound that forced `claudesonnet5` onto the
+Messages API cannot arise here — there is no discount for a route to forfeit.
+Output is $0.13205/MTok, which makes a full four-arm sweep of this model cost
+single-digit dollars. See `dce.agent._litellm_openai_agent`.
+
+**It is served on hardware shared with production.** Unlike every other model
+here, a sweep against this one is load on an internal inference cluster that
+other internal workloads depend on. Keep `--workers` modest.
+
 ## Run
 
 ```bash

@@ -150,3 +150,60 @@ def test_active_scorer_names_the_scorer_actually_in_use():
     instead, and one results file must never silently mix provenances."""
     assert active_scorer() in {"official", "official-vendored"}
     assert active_scorer() == "official-vendored"
+
+
+# ── end-to-end view: the answer in the final paragraph ─────────────────────
+
+
+def test_final_paragraph_is_the_last_non_empty_block():
+    from dce.grade import final_paragraph
+
+    assert final_paragraph("Working: 24 x 17874.16 / 10000.\n\n42.897984") == (
+        "42.897984"
+    )
+    # Trailing blank lines and whitespace-only blocks are not a paragraph.
+    assert final_paragraph("Some working.\n\n  42  \n\n \n") == "42"
+    # One block is its own final paragraph; nothing is empty-string'd away.
+    assert final_paragraph("36, 51, 65") == "36, 51, 65"
+    assert final_paragraph("") == ""
+    assert final_paragraph(None) == ""
+
+
+def test_score_final_paragraph_credits_an_answer_given_after_its_working():
+    """The measured case. Qwen 3.8 explains, then states the exact value as
+    its last paragraph, against a prompt that asked for the answer alone.
+    DABStep's scorer grades the whole message and marks it wrong; the
+    end-to-end view asks whether the question was answered.
+    """
+    from dce.grade import score_final_paragraph
+
+    answer = (
+        "The fee rule ID=398 already has a rate of 99, so changing the "
+        "relative fee to 99 produces no change.\n\n0.00000000000000"
+    )
+    assert not score(answer, "0.00000000000000")
+    assert score_final_paragraph(answer, "0.00000000000000")
+
+
+def test_score_final_paragraph_grades_only_the_final_paragraph():
+    """Extraction, not a search: a value that appears in the working but is
+    not what the model finally answered earns nothing. Otherwise any answer
+    that lists candidates on the way would be credited with the right one.
+    """
+    from dce.grade import score_final_paragraph
+
+    answer = "Candidates were Rafa_AI and Crossfit_Hanna.\n\nCrossfit_Hanna"
+    assert not score_final_paragraph(answer, "Rafa_AI")
+
+
+def test_score_final_paragraph_adds_nothing_to_a_single_block_answer():
+    """With one paragraph there is nothing to extract, so the official
+    verdict on the whole message already is the end-to-end verdict. Returning
+    False here, rather than re-scoring the same text, keeps a row with no
+    stored answer from being graded against no gold -- `score("", "")` is
+    True under DABStep's rules.
+    """
+    from dce.grade import score_final_paragraph
+
+    assert not score_final_paragraph("", "")
+    assert not score_final_paragraph("42", "42")

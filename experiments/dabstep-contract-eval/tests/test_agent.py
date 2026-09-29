@@ -37,6 +37,7 @@ ROW_KWARGS: dict[str, Any] = dict(
     forced_answer=False,
     trace_path=None,
     reasoning_tokens=0,
+    reasoning_chars=0,
     in_tok=30_000,
     out_tok=2_000,
     cached_tok=0,
@@ -1483,6 +1484,83 @@ def test_the_anthropic_route_fails_loudly_on_missing_gateway_credentials(
     a `construction_error` row and the circuit breaker trips after five — not
     fall back to a default provider that would quietly send this key-bearing
     traffic somewhere else.
+    """
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+
+    with pytest.raises(KeyError):
+        agent._default_agent_factory(
+            model=model_id, system_prompt="s", tools=[], retries=1
+        )
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_openai"]
+)
+def test_the_vllm_route_sends_temperature_and_thinking_where_they_survive(
+    model_id, monkeypatch
+):
+    """This route's two model-specific settings, and the reason each sits where
+    it does.
+
+    `temperature` is in `extra_body` and NOT in `ModelSettings`, for the reason
+    the OpenRouter factory documents at length: pydantic-ai silently STRIPS
+    `ModelSettings(temperature=...)` for a model whose profile has reasoning
+    enabled, and with thinking on this model reasons. A settings-level
+    temperature would therefore be inert -- present in the object this test
+    inspects, absent from the request that is actually sent -- which is exactly
+    the bug that made every earlier sweep run at the provider's default
+    sampling while believing itself pinned at 0.
+
+    `enable_thinking` is in `extra_body` because it is a vLLM chat-template
+    argument with no `ModelSettings` field at all. The gateway's own model
+    config pins it false, so sending it is what makes the setting ours rather
+    than the gateway's.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-key-never-called")
+
+    built = agent._default_agent_factory(
+        model=model_id, system_prompt="s", tools=[], retries=1
+    )
+    settings = built.model_settings or {}
+    body = settings["extra_body"]
+
+    assert body["temperature"] == 0.0
+    assert "temperature" not in settings
+    assert body["chat_template_kwargs"] == {
+        "enable_thinking": agent.QWEN_ENABLE_THINKING
+    }
+
+    # BOTH determinism controls are available on this route, which is the one
+    # thing it does better than `claudesonnet5` -- whose Bedrock backend
+    # rejects `seed` outright. `seed` survives the sampling strip, so unlike
+    # temperature it belongs in settings.
+    assert settings["seed"] == 0
+
+    # None of OpenRouter's endpoint-pinning vocabulary: this gateway does not
+    # understand `provider.order` and would ignore it, and an ignored pin that
+    # looks like a pin is worse than none.
+    assert "provider" not in body
+    assert "reasoning" not in body
+
+    # The controls that keep the arm comparison honest are NOT route-specific
+    # and must not drift between the three factories.
+    assert settings["max_tokens"] == agent.MAX_OUTPUT_TOKENS_PER_REQUEST
+    assert settings["timeout"] == 300
+
+
+@pytest.mark.parametrize(
+    "model_id", [m for m, s in MODELS.items() if s.route == "litellm_openai"]
+)
+def test_the_vllm_route_fails_loudly_on_missing_gateway_credentials(
+    model_id, monkeypatch
+):
+    """Same contract as the Anthropic route: a missing key must raise at
+    construction, where `run_task` turns it into a free `construction_error`
+    row and the circuit breaker trips after five -- not fall back to a default
+    provider, which for `OpenAIProvider` would mean sending this traffic to
+    api.openai.com with whatever `OPENAI_API_KEY` happened to be set.
     """
     monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)

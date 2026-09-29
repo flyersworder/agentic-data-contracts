@@ -1,5 +1,5 @@
 import pytest
-from dce.agent import REASONING_EFFORT, reasoning_effort_for
+from dce.agent import QWEN_ENABLE_THINKING, REASONING_EFFORT, reasoning_effort_for
 from dce.pricing import MODELS, cost
 
 
@@ -10,23 +10,32 @@ def test_every_model_is_a_pinned_snapshot():
         "z-ai/glm-5.3-flash",
         "openai/gpt-5.6-sol",
         "claudesonnet5",
+        "qwen3.6-27b",
+        "qwen3.8-27b",
     }
 
 
 def test_only_openrouter_models_carry_an_openrouter_endpoint_pin():
-    """`claudesonnet5` is not an OpenRouter model, and the difference is not
-    cosmetic: its `provider_tag` names the upstream the enterprise gateway
-    resolves its alias to, and nothing sends that tag on the wire. The
-    OpenRouter specs' `provider_tag` IS the pin, enforced per request; this
-    one is a record of what the alias meant when it was read. Asserting the
-    two are the same kind of thing would be the sort of quiet fiction the
-    module docstring warns about.
+    """The gateway models are not OpenRouter models, and the difference is
+    not cosmetic: their `provider_tag` names the upstream the enterprise gateway
+    resolves each alias to, and nothing sends that tag on the wire. The
+    OpenRouter specs' `provider_tag` IS the pin, enforced per request; theirs
+    is a record of what the alias meant when it was read. Asserting the two are
+    the same kind of thing would be the sort of quiet fiction the module
+    docstring warns about.
+
+    Pinning this roster by ROUTE rather than by count is what makes a new model
+    a deliberate act: adding one on an existing route still has to be named
+    here, and adding one on a NEW route fails until the route itself is
+    accounted for -- which is how `litellm_openai` was forced to declare
+    itself rather than inheriting the OpenRouter assumptions by default.
     """
     by_route = {}
     for spec in MODELS.values():
         by_route.setdefault(spec.route, []).append(spec.id)
-    assert set(by_route) == {"openrouter", "litellm_anthropic"}
+    assert set(by_route) == {"openrouter", "litellm_anthropic", "litellm_openai"}
     assert by_route["litellm_anthropic"] == ["claudesonnet5"]
+    assert by_route["litellm_openai"] == ["qwen3.6-27b", "qwen3.8-27b"]
     assert len(by_route["openrouter"]) == 4
 
 
@@ -112,8 +121,29 @@ def test_cached_tokens_cannot_produce_a_negative_or_inflated_price():
 
 
 def test_cache_read_is_cheaper_than_fresh_input_for_every_pinned_model():
+    """A cache tier must be a DISCOUNT where one exists, and must be absent
+    where it does not.
+
+    The strict inequality this test used to make for every model is
+    unsatisfiable for `qwen3.6-27b`, and widening it to `<=` would have been
+    the wrong fix: that would also pass for a model whose real cache discount
+    had been mistyped as equal to its input rate, which is the exact bug this
+    test exists to catch. So the two cases are separated. A model with a cache
+    tier must price it strictly below fresh input; a model with NO cache tier
+    (self-hosted vLLM behind the gateway reports `cache_read_input_token_cost:
+    null`, and never reports `cached_tokens` at all) must price BOTH sides at
+    zero, so `cost()` cannot apply a phantom discount to a cache read that can
+    never be reported in the first place.
+    """
     for spec in MODELS.values():
-        assert spec.price_cached < spec.price_in, spec.id
+        if spec.price_in == 0.0:
+            assert spec.price_cached == 0.0, spec.id
+            # And the priced consequence, not merely the declaration: an
+            # all-cached call and an all-fresh call must cost the same, because
+            # for this model they ARE the same.
+            assert cost(spec.id, 1_000, 0, 1_000) == cost(spec.id, 1_000, 0, 0)
+        else:
+            assert spec.price_cached < spec.price_in, spec.id
 
 
 def test_unknown_model_raises_rather_than_guessing():
@@ -132,12 +162,26 @@ def test_reasoning_effort_is_an_explicit_value_not_a_provider_default():
 def test_every_route_really_sends_the_effort_its_rows_claim():
     """The stamp records the control that was applied, so every route has to
     actually apply it. They use different parameters to do so — OpenRouter's
-    `reasoning.effort` in `extra_body`, Anthropic's `anthropic_effort` — and
-    the per-route factory tests assert each one goes out. This asserts the
-    stamp agrees with them.
+    `reasoning.effort` in `extra_body`, Anthropic's `anthropic_effort`, vLLM's
+    `chat_template_kwargs.enable_thinking` — and the per-route factory tests
+    assert each one goes out. This asserts the stamp agrees with them.
+
+    `litellm_openai` is deliberately NOT stamped `REASONING_EFFORT`. Its knob
+    is a boolean, not a graded scale, so there is no "medium" for it to be set
+    to; stamping one would record a control that was never applied. The stamp
+    has to be able to say that, and an analysis grouping by `reasoning_effort`
+    has to see this model as its own group rather than pooled with the graded
+    five.
     """
     for spec in MODELS.values():
-        assert reasoning_effort_for(spec.id) == REASONING_EFFORT, spec.id
+        stamp = reasoning_effort_for(spec.id)
+        if spec.route == "litellm_openai":
+            assert stamp == (
+                "on:enable_thinking" if QWEN_ENABLE_THINKING else "off:enable_thinking"
+            ), spec.id
+            assert stamp != REASONING_EFFORT, spec.id
+        else:
+            assert stamp == REASONING_EFFORT, spec.id
 
     # An unpinned id must not raise: this runs on `_priced_fallback_row`'s
     # non-raising path, the same contract `_spec_field` documents.

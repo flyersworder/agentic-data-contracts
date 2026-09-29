@@ -382,6 +382,27 @@ def _scored(rows: list[dict]) -> list[dict]:
     return [row for row in rows if row.get("verdict") in ANSWER_VERDICTS]
 
 
+def _as_e2e(rows: list[dict]) -> list[dict]:
+    """`rows` under the END-TO-END view: an `incorrect` row whose answer
+    states the gold as its final paragraph becomes `correct`.
+
+    The official verdict grades the whole final message, so it also asks
+    whether the model obeyed "the answer alone"; this view asks only whether
+    the question was answered (see `dce.grade.score_final_paragraph`). It
+    upgrades and never downgrades, and harness failures pass through
+    untouched, so every SCORED/STRICT rule above applies to it unchanged.
+    """
+    from dce.grade import score_final_paragraph
+
+    return [
+        {**row, "verdict": "correct"}
+        if row.get("verdict") == "incorrect"
+        and score_final_paragraph(row.get("answer"), row.get("gold", ""))
+        else row
+        for row in rows
+    ]
+
+
 def _is_ungolded(row: dict) -> bool:
     """This row's task had no gold to score against.
 
@@ -484,6 +505,9 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
     strict_n = len(graded_rows)
     failures = _failure_counts(graded_rows)
     failure_rate = sum(failures.values()) / strict_n if strict_n else 0.0
+    # Same denominators as the official views: `_as_e2e` only relabels
+    # `incorrect` rows, so neither `scored_n` nor `strict_n` can move.
+    e2e_ok = sum(row.get("verdict") == "correct" for row in _as_e2e(graded_rows))
     return {
         "scored_ok": scored_ok,
         "scored_n": scored_n,
@@ -491,6 +515,9 @@ def _summarize(rows: list[dict], raw_rows: list[dict]) -> dict:
         "strict_ok": strict_ok,
         "strict_n": strict_n,
         "strict_ci": wilson(strict_ok, strict_n),
+        "e2e_ok": e2e_ok,
+        "e2e_scored_ci": wilson(e2e_ok, scored_n),
+        "e2e_strict_ci": wilson(e2e_ok, strict_n),
         "failures": failures,
         "failure_rate": failure_rate,
         "ungolded_n": len(ungolded_rows),
@@ -558,6 +585,8 @@ def _governance_counts(rows: list[dict]) -> dict | None:
 def _format_summary(label: str, summary: dict) -> str:
     s_lo, s_hi = summary["scored_ci"]
     t_lo, t_hi = summary["strict_ci"]
+    es_lo, es_hi = summary["e2e_scored_ci"]
+    et_lo, et_hi = summary["e2e_strict_ci"]
     flag = "  [HARNESS-LIMITED]" if summary["harness_limited"] else ""
     failures = summary["failures"]
     strict_n = summary["strict_n"] or 1  # rate display only; counts are exact
@@ -609,6 +638,10 @@ def _format_summary(label: str, summary: dict) -> str:
         f"[{t_lo:.3f},{t_hi:.3f}]   "
         f"cost final=${summary['usd_final']:.2f} "
         f"billed=${summary['usd_total_billed']:.2f}{flag}\n"
+        f"{'':16s} e2e scored {summary['e2e_ok']:4d}/{summary['scored_n']:<4d} "
+        f"[{es_lo:.3f},{es_hi:.3f}]   "
+        f"e2e strict {summary['e2e_ok']:4d}/{summary['strict_n']:<4d} "
+        f"[{et_lo:.3f},{et_hi:.3f}]   (answer in the final paragraph)\n"
         f"{'':16s} failures ({summary['failure_rate']:.0%} of rows): "
         f"{fail_str}\n"
         f"{'':16s} db_corrupted: true={corruption['corrupted']} "
@@ -655,13 +688,22 @@ def _strict_bools(rows: list[dict], arm: str) -> dict[str, bool]:
 
 
 def _mcnemar_lines(rows: list[dict], left_arm: str, right_arm: str) -> list[str]:
-    """SCORED and STRICT McNemar for `left_arm` vs `right_arm`, one line
+    """SCORED and STRICT McNemar for `left_arm` vs `right_arm`, on the
+    official verdicts and again on the end-to-end ones (`_as_e2e`), one line
     each, discordant count and (gated) low-power warning inline on every
     line.
     """
     lines: list[str] = []
-    for view_name, bools in (("scored", _scored_bools), ("strict", _strict_bools)):
-        result = mcnemar(bools(rows, left_arm), bools(rows, right_arm))
+    pair_rows = [row for row in rows if row.get("arm") in (left_arm, right_arm)]
+    e2e_rows = _as_e2e(pair_rows)
+    views = (
+        ("scored", pair_rows, _scored_bools),
+        ("strict", pair_rows, _strict_bools),
+        ("e2e scored", e2e_rows, _scored_bools),
+        ("e2e strict", e2e_rows, _strict_bools),
+    )
+    for view_name, view_rows, bools in views:
+        result = mcnemar(bools(view_rows, left_arm), bools(view_rows, right_arm))
         warn = (
             f"  [LOW POWER: non-significant with only "
             f"{result['discordant']} discordant pairs -- "
@@ -670,7 +712,7 @@ def _mcnemar_lines(rows: list[dict], left_arm: str, right_arm: str) -> list[str]
             else ""
         )
         lines.append(
-            f"  McNemar ({view_name:6s}) {left_arm} vs {right_arm}: "
+            f"  McNemar ({view_name:10s}) {left_arm} vs {right_arm}: "
             f"p={result['p_value']:.4f} n_paired={result['n_paired']} "
             f"discordant={result['discordant']} "
             f"({right_arm}_only={result['b_only']}, "
@@ -837,15 +879,18 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
             graded_arm_rows = _graded(arm_rows)
             scored_by_level = accuracy_by(_scored(graded_arm_rows), "level")
             strict_by_level = accuracy_by(graded_arm_rows, "level")
+            e2e_by_level = accuracy_by(_as_e2e(graded_arm_rows), "level")
             for level in sorted(set(scored_by_level) | set(strict_by_level)):
                 s_ok, s_n = scored_by_level.get(level, (0, 0))
                 t_ok, t_n = strict_by_level.get(level, (0, 0))
+                e_ok, _ = e2e_by_level.get(level, (0, 0))
                 s_lo, s_hi = wilson(s_ok, s_n)
                 t_lo, t_hi = wilson(t_ok, t_n)
                 lines.append(
                     f"    level={level:6s} "
                     f"scored {s_ok:3d}/{s_n:<3d} [{s_lo:.3f},{s_hi:.3f}]   "
-                    f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]"
+                    f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]   "
+                    f"e2e scored {e_ok:3d}/{s_n}"
                 )
 
         lines.extend(_unequal_task_set_warning(subset, model))

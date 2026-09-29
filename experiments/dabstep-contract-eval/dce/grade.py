@@ -84,3 +84,43 @@ def score(predicted: str, gold: str) -> bool:
     by different rules.
     """
     return bool(_OFFICIAL(predicted, gold))
+
+
+_PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+
+
+def final_paragraph(text: str | None) -> str:
+    """The last non-empty paragraph of `text` (blocks split on blank lines).
+
+    Extraction only -- never a grading rule. `score_final_paragraph` hands
+    what this returns to the same official scorer, so the end-to-end view
+    differs from the official one in WHICH text is graded, not in how.
+    """
+    blocks = [b.strip() for b in _PARAGRAPH_BREAK.split(str(text or ""))]
+    blocks = [b for b in blocks if b]
+    return blocks[-1] if blocks else ""
+
+
+def score_final_paragraph(answer: str | None, gold: str) -> bool:
+    """True when the final paragraph of a multi-paragraph `answer` matches
+    `gold` under DABStep's own rules.
+
+    The end-to-end question -- did the model answer the business question --
+    as opposed to the benchmark's, which also requires the final message to
+    be the answer alone. Measured on Qwen 3.8: it states the exact value as
+    its last paragraph after its working, against a prompt that forbids
+    working, and the official scorer marks that wrong. Of the answers this
+    rule would credit, every miss that still contained the gold inspected on
+    2026-09-25 was genuinely wrong (extra list items, precision), so it does
+    not credit what a strict reader would reject.
+
+    A single-paragraph answer returns False: there is nothing to extract,
+    the official verdict already is the end-to-end verdict, and re-scoring
+    would grade a missing answer against a missing gold -- `score("", "")`
+    is True upstream.
+    """
+    text = str(answer or "").strip()
+    final = final_paragraph(text)
+    if not final or final == text:
+        return False
+    return score(final, gold)

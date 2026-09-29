@@ -77,7 +77,7 @@ remains") and moves the target from the 2026-11-01 cycle to **2026-12-01**
 (abstract due **2026-11-25**). Volume 20 stays open monthly until 2027-03-01,
 so the extra month costs nothing.
 
-**What to run.** Every arm, on three models reached through the company's
+**What to run.** Every arm, on two models reached through the company's
 self-hosted LiteLLM gateway (the same route as `claudesonnet5`; see
 "`claudesonnet5` — the enterprise gateway route" in the
 [eval README](../../experiments/dabstep-contract-eval/README.md)). The
@@ -87,12 +87,12 @@ question, not on every model:
 | Model | k | Why |
 |---|---|---|
 | Claude Sonnet 5 | 3 | Replicates run D on the claim that most needs it. The scaffolding step (`schema_only` vs `contract_hollow`, +15.1 pp on 78 discordant pairs) is decisive only on sol and Sonnet 5, and 78 is below the ~94-flip noise floor measured on glm. Bedrock rejects any temperature but 1, so this is also the unpinned run that FINDINGS names as needing a flip rate most. Run D, on an older commit, adds a near-replicate. |
-| Qwen 3.6 27B | 3 | Same size class as MotherDuck's local Qwen3.8 27B (`motherduck-local`), so our contract can be compared against their semantic layer on nearly the same model, not just by citing their number. It is a different Qwen version, so say so. Also gives stability on an open-weight model. |
-| GPT-5.6 luna | 1 | Breadth only: one more model next to sol on the GPT-5.6 tier ladder. Like sol it probably cannot pin temperature; the smoke test will show. |
+| Qwen 3.8 27B | 3 | Stability on an open-weight, self-hosted model, which both determinism controls reach (`temperature=0` and `seed=0` are accepted). Changed from Qwen 3.6 on 2026-09-24, before any 3.8 run: see "Panel revision" in [`../paper-plan.md`](../paper-plan.md). It is also the model in MotherDuck's local report (`motherduck-local`), but that is context, not the reason, and the paper does not set the two numbers against each other. |
 
-GPT-5.6 terra is left out: the four existing k=1 models and luna already
-cover breadth. 401 tasks x 4 arms x (3 + 3 + 1) runs is about 11.2k agent
-runs. If Sonnet 5's cost matters, its k=3 can be cut to the `schema_only`
+GPT-5.6 luna and terra are left out: the five families already measured
+cover breadth, and each extra model adds a row to every table of a
+submission that is already 12 pages. 401 tasks x 4 arms x (3 + 3) runs is
+about 9.6k agent runs. If Sonnet 5's cost matters, its k=3 can be cut to the `schema_only`
 and `contract_hollow` arms, which carry the claim it replicates.
 
 **Rules for the panel.**
@@ -122,15 +122,16 @@ and `contract_hollow` arms, which carry the claim it replicates.
    wording of the acknowledgment. This touches how much of the pilot can be
    disclosed (see Paper 2 in `../paper-plan.md`).
 2. **Public model ids.** EA&B requires "all experimental data and related
-   software must be available". Confirm luna is a public GPT-5.6 model
-   served unmodified, and name every model by its public id. Each
+   software must be available". Confirm the gateway serves Qwen 3.8 27B
+   as the public checkpoint (it is served at FP8, confirmed 2026-09-25), and
+   name every model by its public id. Each
    needs an entry in `dce/pricing.py`, which rejects any id it does not list,
    and `--max-spend` is required even when the gateway bills the company.
 3. **Smoke test**: `--n 12` per model through the gateway to check
    throughput, rate limits and parameter handling (temperature, reasoning
-   effort). The Sonnet 5 route needed special handling for both, and GPT-5.6
-   through LiteLLM will probably need its own. Throughput decides whether
-   12-01 is realistic.
+   effort). The Sonnet 5 route needed special handling for both; Qwen 3.8
+   uses the Qwen 3.6 route unchanged. Throughput decides whether 12-01 is
+   realistic.
 
 **Not in this panel.**
 

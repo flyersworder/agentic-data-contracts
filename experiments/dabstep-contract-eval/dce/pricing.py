@@ -22,12 +22,13 @@ So `provider_tag` and the three prices belong to one another and must move
 together; changing the pin without repricing silently corrupts every `usd` in a
 results file. `tests/test_pricing.py` asserts they stay consistent.
 
-NOT EVERY MODEL HERE IS AN OPENROUTER MODEL. `claudesonnet5` is served by
-an enterprise LiteLLM gateway over Anthropic's own Messages API, and
-`ModelSpec.route` says which of the two wire protocols a spec needs. Everything
-above about pinning still applies to it, but the pin is weaker and the reasons
-differ — see that entry's own comment rather than assuming the OpenRouter
-reasoning transfers.
+NOT EVERY MODEL HERE IS AN OPENROUTER MODEL. Two are served by an enterprise
+LiteLLM gateway instead, on two DIFFERENT wire protocols —
+`claudesonnet5` over Anthropic's own Messages API, `qwen3.6-27b` over the
+OpenAI-compatible one — and `ModelSpec.route` says which a spec needs.
+Everything above about pinning still applies to both, but both pins are weaker
+than an OpenRouter one and they are weak for different reasons; read each
+entry's own comment rather than assuming the OpenRouter reasoning transfers.
 """
 
 from __future__ import annotations
@@ -62,9 +63,13 @@ class ModelSpec:
     #: original route (OpenAI-compatible chat completions through
     #: `OpenRouterProvider`, with the endpoint pin in `extra_body`);
     #: `"litellm_anthropic"` is Anthropic's own Messages API fronted by an
-    #: an enterprise-internal LiteLLM gateway, which is a different wire protocol,
-    #: not merely a different base URL. Defaulted so the four OpenRouter specs
-    #: above read exactly as they did before this field existed.
+    #: enterprise-internal LiteLLM gateway, which is a different wire protocol,
+    #: not merely a different base URL; `"litellm_openai"` is that same gateway's
+    #: OpenAI-compatible route, which IS the same wire protocol as
+    #: `"openrouter"` but reached through a different provider and with none of
+    #: OpenRouter's endpoint-pinning vocabulary available. Defaulted so the four
+    #: OpenRouter specs above read exactly as they did before this field
+    #: existed.
     route: str = "openrouter"
 
 
@@ -206,6 +211,90 @@ MODELS: dict[str, ModelSpec] = {
             supports_temperature=False,
             role="frontier_subset",
             route="litellm_anthropic",
+        ),
+        # ALSO NOT AN OPENROUTER MODEL, AND NOT THE SAME ROUTE AS THE ONE
+        # ABOVE. Qwen3.6-27B self-hosted on vLLM in-house and reached
+        # through the same production LiteLLM gateway, but over its
+        # OpenAI-compatible `/v1/chat/completions` route rather than
+        # Anthropic's Messages API. Added to answer a question the other five
+        # cannot: every model measured so far is a commercial frontier or
+        # near-frontier model, so "the contract arm wins on every model" was
+        # only ever tested where the model was strong. A 27B open-weights
+        # model served on our own hardware is the case that matters
+        # operationally — it is what a cost-constrained deployment would
+        # actually run.
+        #
+        # THE PIN IS THE WEAKEST OF ANY MODEL HERE, and measurably so. The
+        # gateway alias fans out across THREE vLLM replicas which are NOT
+        # running the same build: three consecutive requests on 2026-09-04
+        # reported `system_fingerprint` of `vllm-0.22.1-tp4-efbb389f`,
+        # `vllm-0.26.0-tp4-41646db4` and `vllm-0.26.0-tp4-34e424af`. That is
+        # the same per-request fan-out this module's docstring describes for
+        # OpenRouter — except OpenRouter gives us `provider.order` +
+        # `allow_fallbacks: false` to pin it and fail loudly, and this route
+        # gives us nothing. `provider_tag` therefore records the gateway's
+        # `litellm_params.model` and pins nothing on the wire, exactly as the
+        # `claudesonnet5` entry's does. `system_fingerprint` IS returned per
+        # response, so which replica served a row is knowable — it is simply
+        # not controllable.
+        #
+        # Prices are the gateway's OWN metering, read from `/v1/model/info` on
+        # 2026-09-04: input is genuinely metered at $0.00 (self-hosted, no
+        # per-token input charge configured) and output at $0.13205/MTok.
+        # `price_cached` is 0.0 because there IS no cache tier — the gateway
+        # reports `cache_read_input_token_cost: null`, vLLM's prefix cache is
+        # not surfaced as `cached_tokens`, and so every row's `cached_tokens`
+        # is an honest 0 rather than an unreported discount. Note the
+        # consequence for `test_cache_read_is_cheaper_than_fresh_input`: a
+        # no-cache route cannot satisfy a STRICT inequality, and the test was
+        # widened rather than this priced with a fictional cache rate.
+        #
+        # `supports_temperature=True`, and unlike `claudesonnet5` this is not a
+        # partial claim: vLLM accepts BOTH `temperature=0` and `seed=0`
+        # (verified live, HTTP 200 on each). Both of this harness's determinism
+        # controls are therefore available here — this model is the MORE
+        # reproducible of the two gateway models, not the less.
+        ModelSpec(
+            "qwen3.6-27b",
+            provider_tag="hosted_vllm/qwen3.6-27b",
+            quantization="unknown",
+            price_in=0.0,
+            price_out=0.13205,
+            price_cached=0.0,
+            supports_temperature=True,
+            role="open_weights_self_hosted",
+            route="litellm_openai",
+        ),
+        # Qwen3.8-27B, self-hosted on vLLM behind the same gateway and route as
+        # `qwen3.6-27b`, whose caveats all apply. It is the model MotherDuck's
+        # local-model report ran (`motherduck-local` in the paper's refs), so
+        # it is the candidate that would put their number and ours on the
+        # same model -- though they ran it at 4-bit, and this deployment is
+        # FP8. The gateway's API does not report quantization; FP8 was
+        # confirmed out of band on 2026-09-25, after the panel commit was
+        # fixed, so the field below stays "unknown" to match what every panel
+        # row records.
+        #
+        # Prices are the gateway's own metering, read from `/model/info` on
+        # 2026-09-24, and identical to `qwen3.6-27b`'s: input $0.00, output
+        # $0.13205/MTok, no cache tier.
+        #
+        # `supports_temperature=True`, verified live the same day: HTTP 200
+        # on `temperature=0` with `seed=0`. The gateway lists two deployments
+        # for this alias, both on H100 GPUs; four consecutive requests all
+        # reported `system_fingerprint` `vllm-0.28.0-tp4-2a8529a2`, so the
+        # fan-out that `qwen3.6-27b` shows across builds was not observed
+        # here -- which four requests cannot rule out.
+        ModelSpec(
+            "qwen3.8-27b",
+            provider_tag="hosted_vllm/qwen3.8-27b",
+            quantization="unknown",
+            price_in=0.0,
+            price_out=0.13205,
+            price_cached=0.0,
+            supports_temperature=True,
+            role="open_weights_self_hosted",
+            route="litellm_openai",
         ),
     )
 }

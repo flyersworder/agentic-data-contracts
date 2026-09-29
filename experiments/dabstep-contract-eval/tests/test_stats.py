@@ -870,3 +870,61 @@ def test_an_ungolded_only_arm_does_not_trip_the_unequal_task_set_warning(tmp_pat
     _write(path, rows)
 
     assert "did NOT see the same task set" not in report(path)
+
+
+# ── end-to-end view ─────────────────────────────────────────────────────────
+
+
+def _answered(task_id, arm, verdict, answer, gold, **kw):
+    return {**_row(task_id, arm, verdict, **kw), "answer": answer, "gold": gold}
+
+
+def test_e2e_view_credits_an_answer_stated_after_its_working(tmp_path):
+    """Both views are printed: the official verdict stays as recorded, and
+    the end-to-end line counts a final-paragraph answer the official scorer
+    rejected because working came first.
+    """
+    rows = [
+        _answered("t1", PRIMARY_RIGHT_ARM, "incorrect", "It is 24 x 2.\n\n48", "48"),
+        _answered("t2", PRIMARY_RIGHT_ARM, "correct", "7", "7"),
+        _answered("t3", PRIMARY_RIGHT_ARM, "incorrect", "Working.\n\n5", "6"),
+        _row("t4", PRIMARY_RIGHT_ARM, "error"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    text = report(path)
+
+    contract_line = next(
+        line for line in text.splitlines() if line.startswith(PRIMARY_RIGHT_ARM)
+    )
+    assert "scored    1/3" in contract_line
+    # e2e: t1 and t2 right, t3 still wrong; the error row stays out of the
+    # scored view and counts as wrong in the strict view, as it does above.
+    assert "e2e scored    2/3" in text
+    assert "e2e strict    2/4" in text
+
+
+def test_e2e_mcnemar_is_printed_beside_the_official_views(tmp_path):
+    """The paired test must be available on the end-to-end verdicts too, or
+    the headline comparison could only be read under the official scorer.
+    """
+    rows = [
+        _answered("t1", PRIMARY_LEFT_ARM, "incorrect", "5", "48"),
+        _answered("t1", PRIMARY_RIGHT_ARM, "incorrect", "Work.\n\n48", "48"),
+    ]
+    path = tmp_path / "results.jsonl"
+    _write(path, rows)
+
+    pair = f"{PRIMARY_LEFT_ARM} vs {PRIMARY_RIGHT_ARM}"
+    lines = [
+        line
+        for line in report(path).splitlines()
+        if "McNemar (" in line and pair in line
+    ]
+
+    e2e = [line for line in lines if "e2e" in line]
+    assert len(e2e) == 2  # scored and strict, as for the official verdicts
+    assert all("discordant=1" in line for line in e2e)
+    official = [line for line in lines if "e2e" not in line]
+    assert all("discordant=0" in line for line in official)

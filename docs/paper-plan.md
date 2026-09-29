@@ -306,6 +306,88 @@ the arm contrast and says so); the executable metric layer (deferred by
 design, see *What is distinctive here*); a second benchmark (none has
 DABStep's documentation-bound difficulty).
 
+## Panel revision: Qwen 3.8 replaces Qwen 3.6 (2026-09-24)
+
+**Recorded before any Qwen 3.8 run.** The k=3 gateway panel in
+[`paper/README.md`](paper/README.md) named Qwen 3.6 27B. It now names
+**Qwen 3.8 27B, k=3, all four arms, three fresh runs.** GPT-5.6 luna is
+dropped from the panel.
+
+**Why.** A four-arm, 401-task Qwen 3.6 sweep already exists
+(`results/qwen-full.jsonl`). It cannot be repeated on the stack that produced
+it. On 2026-09-04, the day before that sweep ran, the `qwen3.6-27b` alias
+fanned out across vLLM builds 0.22.1 and 0.26.0. On 2026-09-24, 20 of 20
+requests were served by a single 0.28.0 build, and the traces do not record
+which build served which request. A repeat today would mix sampling variance
+with a serving-stack change, which is the one thing the repeats exist to
+exclude. Since fresh runs are needed either way, the panel moves to the
+current model. `qwen3.8-27b` accepts `temperature=0` and `seed=0` (verified
+live), so both determinism controls are available.
+
+**What this is not.** Not a choice made on results: no Qwen 3.8 contract-arm
+row exists as this is written, and the 3.6 sweep's outcome plays no part in
+the reason above. Not a MotherDuck comparison: 3.8 is the model in
+`motherduck-local`, which is context, not the reason. The positioning section
+of this plan still applies, and the paper does not set the two numbers
+against each other.
+
+**Disclosure.** The Qwen 3.6 sweep ships with the artifacts. The paper's
+artifact section or appendix says in one line that it exists, that its
+serving stack was replaced before repeats could run, and that the panel
+therefore uses 3.8. It does not enter the main tables.
+
+**Consequences.**
+
+- The panel runs on one commit at `v0.53.0` or later, as `paper/README.md`
+  specifies. No existing row counts as a panel repeat. Run D and the Qwen 3.6
+  sweep are near-replicates, like run E.
+- Reasoning tokens: Qwen 3.8's deployment reports them, on every panel row,
+  so the paper uses its own counts. Qwen 3.6's deployment did not, so its
+  figures are estimated from reasoning text at 3.73 characters per token
+  (corrected from 2.72 on 2026-09-24; no reported figure had used the old
+  value). The same method gave 3.87 for 3.8 beforehand, and 3.8's reported
+  counts over repeat 1 give 4.00, so the estimate is within 3%.
+- Quantization: the Qwen 3.8 deployment is FP8, confirmed 2026-09-25; the
+  gateway's API does not report it. Panel rows record `quantization` as
+  `unknown` because the panel commit predates the confirmation, so the paper
+  states FP8 from this note, not from the rows. MotherDuck ran the same model
+  at 4-bit, so the two numbers differ in quantization as well as harness.
+- Deployment: the gateway serves the Qwen 3.8 alias from two vLLM
+  deployments, both on H100 GPUs, and requests sampled on 2026-09-24 all
+  reported the same build (`vllm-0.28.0-tp4`). Hardware is therefore
+  constant across the panel's Qwen rows.
+- Timeouts: each model request has a 300 s timeout, and at ~36 tok/s any
+  single Qwen 3.8 turn longer than ~11k tokens hits it. Repeat 1's first
+  pass ended 38 of 1,604 runs (2.4%) with `error: Request timed out`, unevenly
+  across arms (hollow 15, schema-only 10, manual 9, contract 4); the Qwen 3.6
+  sweep had 36 (hollow 19, schema-only 16, manual 0, contract 1). Changing
+  the timeout would change the panel commit, so it stays. Each repeat
+  instead gets one `--retry error` pass on the same commit, and the paper
+  reports the per-arm timeout rate that remains alongside both SCORED
+  accuracy (timeouts excluded) and STRICT accuracy (timeouts counted wrong).
+  Because the weaker arms time out more, STRICT widens the contract arm's
+  lead slightly, so SCORED is the conservative headline.
+- No SQL time limit: neither the harness nor the library bounds query run
+  time (the library's `max_query_time_seconds` is declared but unenforced,
+  upstream issue #114). In repeat 1's retry pass one model-written query ran
+  for over 35 minutes and the job was deleted by hand; the two runs it held
+  (task 2711, contract and hollow) keep their first-pass timeout rows. Each
+  repeat is checked for hung workers near its end, and the harness limit is
+  added only after the panel, so all three repeats run the same code.
+  Repeat 1 final, after retries: 9 harness failures left in 1,604 runs.
+- Answer format and the end-to-end score: Qwen 3.8 often states its working
+  and then the exact answer as its last paragraph, against a prompt that asks
+  for the answer alone. DABStep's scorer grades the whole message and marks
+  those wrong, which read as 3.8 scoring far below 3.6 (contract 48.6% vs
+  76.5%). The paper cares whether the business question was answered, so
+  `dce.stats` also reports an END-TO-END (e2e) view: the official scorer
+  applied to the final paragraph of a multi-paragraph answer, upgrading and
+  never downgrading. Both are reported; e2e is the one the argument rests on.
+  Repeat 1 before retries, e2e scored: contract 67.0%, manual 49.9%, hollow
+  30.8%, schema-only 28.5%; it moves Qwen 3.6 by at most one point. The prompt
+  is not changed mid-panel. An independent judge audit of the rows the two
+  views disagree on is planned separately.
+
 ## The pro sweep: design
 
 ### Which model

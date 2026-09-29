@@ -973,6 +973,10 @@ def _construction_error_row(
         "quantization": _spec_field(model, "quantization"),
         "reasoning_effort": reasoning_effort_for(model),
         "reasoning_tokens": 0,
+        # Zero, and true: a construction error means no model call was
+        # made, so no reasoning was produced. Present because every row
+        # shape carries the same keys.
+        "reasoning_chars": 0,
         "input_tokens": 0,
         "output_tokens": 0,
         "cached_tokens": 0,

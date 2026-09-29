@@ -25,3 +25,6 @@ results/*.jsonl.lock
 # un-anchored rule silently keeps a 450-task results file out of git while
 # its own comment above claims submissions derive from tracked rows.
 /submission*.jsonl
+
+# local gateway credentials
+.env

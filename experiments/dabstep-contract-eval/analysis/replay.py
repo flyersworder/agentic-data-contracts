@@ -108,9 +108,9 @@ def cells(rows: list) -> list[str]:
 def sql_statements(path: Path) -> list[str]:
     """Every SQL string the agent submitted, in order.
 
-    `clauses.sql_of` concatenates these for text matching; replaying needs them
-    separable, and needs the malformed ones dropped rather than kept — an
-    argument blob that would not parse as JSON will not parse as SQL either.
+    `clauses.submitted_sql` keeps malformed ones for text matching; replaying
+    needs them dropped rather than kept — an argument blob that would not
+    parse as JSON will not parse as SQL either.
     """
     out: list[str] = []
     for message in json.load(gzip.open(path)):

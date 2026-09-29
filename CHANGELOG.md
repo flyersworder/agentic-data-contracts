@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.56.0] - 2026-09-29
+
+### Added
+
+- **`{{ metric:NAME }}` in a verified example runs the metric's own SQL.** Before this, no code path executed a metric's `sql_expression`; it reached the agent only through `lookup_metric`. A certified example repeated the metric's logic in SQL written by hand, so editing the metric changed no certified answer. In the DABStep eval, a contract whose fee-rule predicate was valid SQL but wrong in meaning passed every structural check, and gpt-6-sol answered 1 of 37 hard fee tasks with it (37/37 with the correct predicate, 15/37 with no domain knowledge). `validate_examples(..., semantic_source=source)` now expands each placeholder to `(<sql_expression>\n)`. The parentheses keep a top-level `OR` in the metric from binding to the example's `AND`, and the newline keeps a trailing `--` comment in the metric from commenting out the closing parenthesis. Expansion is plain text substitution before any `sql_normalizer`. The Validator, the EXPLAIN dry-run (including the parse fallback) and `check_example_answers` all get the expanded text, so a certified answer moves when the metric does, and the metric's SQL is now checked against the contract's table rules. (#122)
+- **`ExampleResult.sql` and `ExampleResult.metrics`.** `sql` holds the validated text and `metrics` the referenced metric names. `check_example_answers` executes `sql`, or `example.sql` when `sql` is `None`, as it is on a result built by hand. `ExampleAnswerResult.metrics` carries the names forward. All three fields are appended at the end, so existing positional construction keeps working.
+- **`ExampleAnswerReport.covered_metrics` and `.uncovered_metrics(source)`.** A metric counts as covered when a row that references it asserts an answer and matches. Coverage counts references: a placeholder inside a comment or string literal still counts. A row that references a metric but asserts no answer is never executed, so it covers nothing.
+
+### Changed
+
+- **`{{` is now reserved in verified-example SQL.** Every row is expanded before any is validated. `validate_examples` raises `ValueError` naming the row when a placeholder cannot expand faithfully: an unknown metric, an empty `sql_expression`, a metric that declares `filters` (expanding the expression alone would drop them), any metric from a `DbtSource` or `CubeSource` (both keep a metric's aggregation and filters outside `sql_expression`, and MetricFlow filters are Jinja), a placeholder inside a metric's expression (expansion is a single pass), a placeholder with no `semantic_source`, or any other `{{`, including one inside a string literal. **This changes behaviour** for a corpus with a row containing `{{`: such a row used to be validated as written.
+
 ## [0.55.0] - 2026-09-28
 
 ### Changed

@@ -10,6 +10,7 @@ for usage and the boundary rationale.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -55,6 +56,10 @@ _KNOWN_KEYS = frozenset(
 
 _DEFAULT_REL_TOL = 1e-9
 _DEFAULT_ABS_TOL = 0.0
+
+# The lookarounds leave `{{{ metric:x }}}` unmatched, so its `{{` is caught as
+# an unrecognized placeholder instead of expanding to `{(...)}`.
+_METRIC_REF = re.compile(r"(?<!\{)\{\{\s*metric:\s*([^\s{}]+)\s*\}\}(?!\})")
 
 
 def _numeric(raw: Any, field_name: str, *, allow_negative: bool = True) -> float | None:
@@ -340,6 +345,13 @@ class ExampleResult:
     successful sqlglot parse). ``engine_checked`` is True when EXPLAIN ran. So a
     trusted pass is ``status == "valid"``; ``"unverified"`` rows are plannable
     but require human judgement.
+
+    ``sql`` is the text that was validated: ``example.sql`` with every
+    ``{{ metric:NAME }}`` expanded. ``check_example_answers`` executes it, so
+    what executes is what was validated. ``None`` (a result built by hand)
+    means ``example.sql``. ``metrics`` names the metrics the row referenced,
+    in first-reference order. Both are appended, for the reason
+    ``VerifiedExample`` gives.
     """
 
     example: VerifiedExample
@@ -348,6 +360,8 @@ class ExampleResult:
     warnings: list[str] = field(default_factory=list)
     contract_checked: bool = False
     engine_checked: bool = False
+    sql: str | None = None
+    metrics: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -447,6 +461,9 @@ class ExampleAnswerResult:
     For a breakdown mismatch, ``abs_diff`` and ``rel_diff`` stay ``None``
     because there is no single numeric diff — ``row_differences`` carries
     the differences instead.
+
+    ``metrics`` is carried over from the validated row: the metrics whose
+    ``sql_expression`` this execution ran.
     """
 
     example: VerifiedExample
@@ -462,6 +479,7 @@ class ExampleAnswerResult:
     expected_rows: list[list[Any]] | None = None
     actual_row_count: int | None = None
     row_differences: list[str] = field(default_factory=list)
+    metrics: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -505,6 +523,27 @@ class ExampleAnswerReport:
         consumer wanting the laxer view meanwhile tests ``mismatches`` directly.
         """
         return bool(self.results) and all(r.status == "match" for r in self.results)
+
+    @property
+    def covered_metrics(self) -> list[str]:
+        """Metrics referenced by a row that asserted an answer and matched.
+
+        Sorted. Only a ``match`` counts: a mismatch already fails the gate,
+        and a row that referenced a metric without asserting an answer was
+        never executed, so it certified nothing about the metric. Coverage
+        counts references, not what the engine evaluated: expansion is
+        textual, so a placeholder inside a comment or string literal counts.
+        """
+        return sorted(
+            {m for r in self.results if r.status == "match" for m in r.metrics}
+        )
+
+    def uncovered_metrics(self, semantic_source: SemanticSource) -> list[str]:
+        """Metrics in *semantic_source* that no certified answer covers. Sorted."""
+        covered = set(self.covered_metrics)
+        return sorted(
+            m.name for m in semantic_source.get_metrics() if m.name not in covered
+        )
 
     def summary(self) -> str:
         """A compact markdown report, suitable for an MR comment.
@@ -557,6 +596,87 @@ _PARSE_FALLBACK_CAVEAT = (
 )
 
 
+def _expand_metric_refs(
+    example: VerifiedExample,
+    label: str,
+    semantic_source: SemanticSource | None,
+) -> tuple[str, list[str]]:
+    """Expand each ``{{ metric:NAME }}`` in *example* to ``(<sql_expression>\n)``.
+
+    Textual, and before any ``sql_normalizer``: both texts are engine-native,
+    and templating is the only route for a dialect sqlglot cannot emit. The
+    parentheses keep a metric's top-level ``OR`` from rebinding against the
+    example's ``AND``. One pass, no recursion.
+
+    Every way the expansion could certify something other than the metric
+    raises ``ValueError`` naming the row: an unknown metric, an empty
+    expression, a metric that declares ``filters`` (the expression alone
+    would drop them), any metric from a ``DbtSource`` or ``CubeSource`` (both
+    keep aggregation and filters outside the expression), a placeholder
+    inside a metric's expression, any ``{{`` left over, or a placeholder with
+    no source to expand it from. ``{{`` is therefore reserved in example SQL,
+    string literals included.
+    """
+    names = list(dict.fromkeys(_METRIC_REF.findall(example.sql)))
+    if names and semantic_source is None:
+        raise ValueError(
+            f"example {label!r} references metric {names[0]!r}, but no "
+            "semantic_source was given to expand it from"
+        )
+    # Imported here: adapters.base -> validation -> semantic -> adapters.base.
+    from agentic_data_contracts.semantic.cube import CubeSource
+    from agentic_data_contracts.semantic.dbt import DbtSource
+
+    if isinstance(semantic_source, (DbtSource, CubeSource)):
+        # Both keep a metric's aggregation (`agg`, `type: sum`) and filters
+        # beside its expression -- MetricFlow's filters are Jinja, not SQL --
+        # so the expression alone is never the metric, filters or not.
+        raise ValueError(
+            f"example {label!r} references metric {names[0]!r} from a "
+            f"{type(semantic_source).__name__}, whose sql_expression omits the "
+            "metric's aggregation and filters; placeholders need a source "
+            "whose sql_expression is the whole metric (YamlSource, OssieSource)"
+        )
+    expressions: dict[str, str] = {}
+    for name in names:
+        assert semantic_source is not None  # refused above
+        metric = semantic_source.get_metric(name)
+        if metric is None:
+            raise ValueError(f"example {label!r} references unknown metric {name!r}")
+        expression = metric.sql_expression.strip()
+        if not expression:
+            raise ValueError(
+                f"example {label!r} references metric {name!r}, whose "
+                "sql_expression is empty"
+            )
+        if metric.filters:
+            raise ValueError(
+                f"example {label!r} references metric {name!r}, which declares "
+                f"filters {metric.filters!r}: expanding its sql_expression "
+                "alone would drop them and certify a different quantity. Write "
+                "the metric's SQL out in this example instead."
+            )
+        if "{{" in expression:
+            raise ValueError(
+                f"example {label!r} references metric {name!r}, whose "
+                "sql_expression contains '{{': metric placeholders expand in "
+                "one pass and do not nest"
+            )
+        expressions[name] = expression
+    # The newline keeps a trailing `--` comment in the expression from
+    # swallowing the closing paren, as ``sensitivity._inject`` does for shadows.
+    sql = _METRIC_REF.sub(lambda m: f"({expressions[m.group(1)]}\n)", example.sql)
+    # Checked on the example's own text, not the expansion: an expression was
+    # refused above for carrying `{{`, so any left over here is the example's.
+    leftover = _METRIC_REF.sub("", example.sql)
+    if "{{" in leftover:
+        raise ValueError(
+            f"example {label!r} has an unrecognized placeholder: '{{{{' is "
+            "reserved for '{{ metric:NAME }}'"
+        )
+    return sql, names
+
+
 def validate_examples(
     examples: Iterable[VerifiedExample],
     contract: DataContract,
@@ -579,7 +699,21 @@ def validate_examples(
     ``unverified`` result (engine-plannable, policy-unchecked) so a
     contract-unmodelable dialect (e.g. Denodo/VDP) is surfaced for human triage
     rather than silently refused. ``unverified`` never counts toward ``ok``.
+
+    **Metric placeholders.** ``{{ metric:NAME }}`` in an example's SQL expands
+    to that metric's ``sql_expression`` from *semantic_source*, parenthesized,
+    so a certified answer executes the contract's current definition and moves
+    when the metric is edited. The example binds every alias the expression
+    reads. Every row is expanded before any is validated, and a placeholder
+    that cannot expand faithfully raises ``ValueError`` naming the row (see
+    ``_expand_metric_refs``) — a malformed corpus, not a per-row verdict. The
+    expanded text is what the Validator, EXPLAIN and ``check_example_answers``
+    all see; it is recorded as ``ExampleResult.sql``.
     """
+    expanded = [
+        (example, *_expand_metric_refs(example, _label(example, i), semantic_source))
+        for i, example in enumerate(examples)
+    ]
     validators: dict[str | None, Validator] = {}
 
     def _validator_for(principal: str | None) -> Validator:
@@ -595,27 +729,29 @@ def validate_examples(
         return validators[principal]
 
     results: list[ExampleResult] = []
-    for example in examples:
+    for example, sql, metrics in expanded:
         try:
-            vr = _validator_for(example.principal).validate(example.sql)
-            results.append(_to_result(example, vr, explain_adapter))
+            vr = _validator_for(example.principal).validate(sql)
+            result = _to_result(example, sql, vr, explain_adapter)
         except Exception as exc:  # noqa: BLE001 — batch resilience
             # A misbehaving adapter (a Layer-2 or decision-B EXPLAIN that raises
             # instead of returning schema_valid=False) or any other unexpected
             # error degrades THIS example to "unchecked" — one bad example must
             # never abort validation of the rest of the corpus.
-            results.append(
-                ExampleResult(
-                    example=example,
-                    status="unchecked",
-                    reasons=[f"validation error: {exc}"],
-                )
+            result = ExampleResult(
+                example=example,
+                status="unchecked",
+                reasons=[f"validation error: {exc}"],
             )
+        result.sql = sql
+        result.metrics = metrics
+        results.append(result)
     return ExampleValidationReport(results=results)
 
 
 def _to_result(
     example: VerifiedExample,
+    sql: str,
     vr: ValidationResult,
     explain_adapter: ExplainAdapter | None,
 ) -> ExampleResult:
@@ -664,7 +800,7 @@ def _to_result(
     # parser — ask it directly. Verifies plannability, NOT contract policy. A
     # raise here (a thin adapter that does not wrap driver errors) is caught by
     # validate_examples' per-example guard and degraded to "unchecked".
-    explain_result = explain_adapter.explain(example.sql)
+    explain_result = explain_adapter.explain(sql)
     if explain_result.schema_valid:
         # Engine vouches for plannability, but the static contract checks never
         # ran (no AST) — its own status, never counted as a trusted "valid".
@@ -730,12 +866,14 @@ def check_example_answers(
             results.append(
                 _check_one(
                     example,
+                    row.sql if row.sql is not None else example.sql,
                     _label(example, index),
                     adapter=adapter,
                     dialect=effective_dialect,
                     sql_normalizer=sql_normalizer,
                     rel_tol=row_rel_tol,
                     abs_tol=row_abs_tol,
+                    metrics=row.metrics,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — batch resilience
@@ -752,6 +890,7 @@ def check_example_answers(
                     abs_tol=row_abs_tol,
                     reason=f"answer check error: {exc}",
                     label=_label(example, index),
+                    metrics=list(row.metrics),
                 )
             )
     return ExampleAnswerReport(results=results)
@@ -759,6 +898,7 @@ def check_example_answers(
 
 def _check_one(
     example: VerifiedExample,
+    sql: str,
     label: str,
     *,
     adapter: DatabaseAdapter,
@@ -766,6 +906,7 @@ def _check_one(
     abs_tol: float,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
+    metrics: list[str] | None = None,
 ) -> ExampleAnswerResult:
     expected = example.expected
     expected_rows = example.expected_rows
@@ -780,13 +921,12 @@ def _check_one(
             rel_tol=rel_tol,
             abs_tol=abs_tol,
             label=label,
+            metrics=list(metrics or []),
             **kw,
         )
 
     if not example.time_scoped:
-        normalized = (
-            sql_normalizer.normalize_sql(example.sql) if sql_normalizer else example.sql
-        )
+        normalized = sql_normalizer.normalize_sql(sql) if sql_normalizer else sql
         # parse_one is annotated to return the `Expr` base; every node it
         # actually builds is an `Expression`, which is what validation/ takes.
         statement = cast(
@@ -803,7 +943,7 @@ def _check_one(
             )
 
     if expected_rows is not None:
-        result = adapter.execute(example.sql)
+        result = adapter.execute(sql)
         comparison = compare_rows(
             expected_rows,
             result.columns,
@@ -823,7 +963,7 @@ def _check_one(
 
     assert expected is not None  # expected_rows handled above; only expected remains
 
-    actual, reason = _scalar(adapter, example.sql, label)
+    actual, reason = _scalar(adapter, sql, label)
     if actual is None:
         return _make("error", reason=reason)
     diff, rel_diff, matched = _compare(actual, expected, rel_tol, abs_tol)

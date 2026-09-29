@@ -52,18 +52,79 @@ SQL_TOOLS = frozenset({"run_query", "inspect_query", "execute_sql"})
 # permissive: the question is whether the agent expressed the idea at all, so a
 # detector that demands the contract's exact phrasing would measure copying
 # rather than use.
+#
+# Permissive is not the same as blind, and two of the first versions were each.
+# `natural_month` and `monthly_aggregate` recognised only the contract's own
+# spelling (`make_date`, `day_of_year - 1`, `date_trunc ... GROUP BY`), so an
+# agent that scoped a query to October as `day_of_year BETWEEN 274 AND 304` and
+# summed the merchant's volume there -- the same idea, written by hand -- read
+# as never having had it. `fraud_volume` matched any mention of the flag, so a
+# fraud rate counted in TRANSACTIONS, the wrong rule, read as the right one.
+# The first error flattered the contract arm, the second every other arm.
+# Checked by hand on Qwen 3.8 and gpt-6-sol traces: 20 of 20 sampled
+# month-range matches name the task's own calendar month; 10 of 10 sampled
+# fraud rejections count transactions; and 10 of 10 fresh fraud matches weight
+# by euro volume, after the FROM anchor below removed the two false positives
+# an earlier sample found.
+_Q = r"(?:\w+\.)?"
+_EUR = _Q + r"eur_amount"
+_FLAG = _Q + r"has_fraudulent_dispute"
 CLAUSES: dict[str, str] = {
     "null_wildcard": r"IS\s+NULL\s+OR",
     "emptylist_wildcard": r"(len|array_length|cardinality)\s*\([^)]*\)\s*=\s*0",
     "capture_delay_band": r"'(<3|3-5|>5)'",
     "monthly_aggregate": r"(date_trunc|month)\b[\s\S]{0,400}?GROUP\s+BY",
     "natural_month": r"day_of_year\s*-\s*1|make_date",
-    "fraud_volume": r"has_fraudulent_dispute",
+    "fraud_volume": "|".join(
+        [
+            _EUR + r"\s*\)\s*FILTER\s*\(\s*WHERE[^)]*?" + _FLAG,
+            _FLAG + r"[^;]{0,80}?\bTHEN\s+" + _EUR,
+            r"\bIF\s*\(\s*" + _FLAG + r"\s*,\s*" + _EUR,
+            _EUR + r"\s*\*\s*(?:CAST\s*\(\s*)?" + _FLAG,
+            _FLAG + r"(?:\s*::\s*\w+|\s+AS\s+\w+\s*\))?\s*\*\s*" + _EUR,
+            # A separate numerator query: SUM(eur_amount) ... FROM ... WHERE flag.
+            # Anchored after FROM so `COUNT(*) FILTER (WHERE flag)` beside an
+            # unrelated SUM(eur_amount) does not qualify.
+            r"SUM\s*\(\s*"
+            + _EUR
+            + r"\s*\)[^;]*?\bFROM\b[^;]*?\b(?:WHERE|AND)\s+"
+            + _FLAG
+            + r"\b(?!\s*(?:THEN|,|\)))",
+        ]
+    ),
 }
 
+# The 2023 calendar months as `day_of_year` ranges (not a leap year).
+MONTH_STARTS = (1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335)
+MONTH_ENDS = (31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365)
+_DAY_RANGE = re.compile(
+    r"day_of_year\s+BETWEEN\s+(\d+)\s+AND\s+(\d+)"
+    r"|day_of_year\s*>=\s*(\d+)\s+AND\s+(?:\w+\.)?day_of_year\s*(<=?)\s*(\d+)",
+    re.I,
+)
+_VOLUME = re.compile(r"SUM\s*\(\s*" + _EUR + r"\s*\)", re.I)
 
-def sql_of(path: Path) -> str:
-    """Every SQL string the agent submitted, concatenated.
+
+def names_a_month(stmt: str) -> bool:
+    """True if `stmt` restricts `day_of_year` to exactly one calendar month.
+
+    A range that merely overlaps a month is not a month: only the exact
+    boundaries count, so a 30-day rolling window never qualifies.
+    """
+    for m in _DAY_RANGE.finditer(stmt):
+        if m.group(1):
+            lo, hi = int(m.group(1)), int(m.group(2))
+        else:
+            lo, hi = int(m.group(3)), int(m.group(5))
+            if m.group(4) == "<":
+                hi -= 1
+        if (lo, hi) in zip(MONTH_STARTS, MONTH_ENDS):
+            return True
+    return False
+
+
+def submitted_sql(path: Path) -> list[str]:
+    """Every SQL string the agent submitted, in order.
 
     A model sometimes emits tool-call arguments that are not valid JSON. The
     raw string is kept in that case rather than dropped: the clause detectors
@@ -87,11 +148,24 @@ def sql_of(path: Path) -> str:
                     continue
             if isinstance(args, dict) and args.get("sql"):
                 out.append(str(args["sql"]))
-    return "\n".join(out)
+    return out
 
 
-def clauses_in(sql: str) -> set[str]:
-    return {n for n, rx in CLAUSES.items() if re.search(rx, sql, re.I)}
+def clauses_in(statements: list[str]) -> set[str]:
+    """The clauses expressed anywhere in `statements`, each matched within ONE
+    statement: a pattern allowed to run across two queries would pair a month
+    from one with a GROUP BY from the next."""
+    found = {
+        n
+        for n, rx in CLAUSES.items()
+        if any(re.search(rx, s, re.I) for s in statements)
+    }
+    for s in statements:
+        if names_a_month(s):
+            found.add("natural_month")
+            if _VOLUME.search(s):
+                found.add("monthly_aggregate")
+    return found
 
 
 def trace_for(run: Path, task_id: str, arm: str) -> Path | None:
@@ -130,7 +204,7 @@ def collect(run: Path, results: Path) -> tuple[str, dict]:
         if path is None:
             stats["missing"] += 1
             continue
-        got = len(clauses_in(sql_of(path)))
+        got = len(clauses_in(submitted_sql(path)))
         for key in (stats["by_arm"][arm], stats["by_arm_verdict"][arm, r["verdict"]]):
             key["n"] += 1
             key["clauses"] += got

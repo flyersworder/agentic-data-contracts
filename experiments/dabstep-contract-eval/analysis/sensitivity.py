@@ -4,7 +4,7 @@
 appear in it. `analysis/counterfactuals.py` reads the answer and asks which
 named convention would produce it. Both are text instruments, and within the
 `contract` arm both are null: attempts that got the task right and attempts
-that got it wrong look the same (`clauses.py --within`, every Fisher p >= 0.54;
+that got it wrong look the same (`clauses.py --within`, every Fisher p >= 0.46;
 a smell detector for band literals, p ~ 1 on all four models).
 
 This module reads BEHAVIOUR instead. It mutates the data in a way the contract

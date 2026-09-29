@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.57.0] - 2026-09-29
+
+### Fixed
+
+- **`DbtSource` returned no SQL for any metric in a real dbt manifest.** It read `type_params.measure.expr` and a top-level `filters` list. Real MetricFlow manifests have neither. In the standard spec a metric's measure is only a reference, and its `expr` and `agg` are on a semantic model's measure; in the dbt 1.12 spec they are in `type_params.expr` and `metric_aggregation_params`; filters are Jinja (`{{ Dimension('order__status') }} = 'completed'`). So on a real project, `lookup_metric` returned each metric's name and description with an empty `sql_expression`, no filters and no `source_model`. The test fixture had been written by hand, mixing the pre-1.6 `dbt_metrics` format with MetricFlow's, so it hid this. Tables and relationships, read from `nodes`, were unaffected. (#123)
+- **`DbtSource` now combines each metric into one expression, for both specs.**
+  - The aggregation wraps the measure's expression, and filters become conditions inside the aggregate: `SUM(CASE WHEN status = 'completed' THEN amount END)`, the same result as a `WHERE` clause.
+  - A filter is translated only when it is a plain `Dimension` reference to a non-time dimension of the metric's own semantic model. MetricFlow truncates a time dimension to its grain before comparing it, so comparing the raw column would give a different count.
+  - `count` compiles to `SUM(CASE WHEN <e> IS NOT NULL THEN 1 ELSE 0 END)`, as MetricFlow compiles it, so a filtered count that matches no rows is NULL, not 0. `fill_nulls_with` becomes `COALESCE(<expr>, <value>)`.
+  - Metrics from pre-1.6 `dbt_metrics` manifests (`calculation_method`) keep the `filters` and `model` they had before. They are marked `untranslated` and their SQL is not assembled.
+  - `source_model` comes from the semantic model's table.
+  - Checked against dbt's own `osi_document.json`: every metric without a filter returns the same value.
+- **`CubeSource` returned a measure's `sql` without its aggregation or filters.** A standard Cube measure (`sql: amount`, `type: sum`) reached the agent as `amount`. The measure is now combined the same way as a dbt metric, with `{CUBE}`, `${CUBE}` and `{dimension}` references resolved to this cube's columns.
+
+- **`DbtSource` listed an aliased model under its model name instead of its table name.** A dbt `alias` sets the physical table's name, which is the only name a query can use. Tables and relationship endpoints now use the alias when one is set, matching the `source_model` that metrics take from the semantic model. Unaliased models are unchanged, because their alias and name are equal.
+
+### Added
+
+- **`MetricDefinition.untranslated`: why a source couldn't express a metric as one SQL expression.** When it is set, `sql_expression` is empty, and `lookup_metric` passes the reason to the agent. The source doesn't emit SQL that would compute something else. It is set for:
+  - dbt ratio, derived, cumulative and conversion metrics;
+  - `percentile` and `median`;
+  - semi-additive measures;
+  - dbt filters that need a join, a time grain, an `Entity` or a `Metric`, or that compare a time dimension;
+  - pre-1.6 `dbt_metrics` metrics;
+  - Cube references to another cube, another measure or a `case:` dimension;
+  - Cube multi-stage measures and filters with no `sql`;
+  - `count_distinct_approx`, `running_total` and `rolling_window`;
+  - filtered `number` measures and measures with no `type`.
+
+  `dump_semantic_source` writes the field only when it is set, and `YamlSource` reads it back, so frozen contracts keep their digests.
+
+### Changed
+
+- **`{{ metric:NAME }}` placeholders now work for dbt and Cube metrics.** 0.56.0 refused every metric from these two sources. Now only a metric marked `untranslated` is refused, and the error gives the source's reason.
+- **What `lookup_metric` returns for dbt and Cube users has changed**, from an empty or partial expression to the whole metric, or to an `untranslated` reason. An agent that received `amount` from a Cube revenue measure now receives `SUM(amount)`.
+- **A Cube schema that writes the aggregate into `sql` as well as `type`** (`sql: "SUM(amount)"`, `type: sum`) now assembles to `SUM(SUM(amount))`, which the engine rejects. Cube would reject it too: write `sql: amount`.
+
+### Internal
+
+- `tests/fixtures/dbt_metricflow/` is a dbt project covering both specs. `dbt_metricflow_manifest.json` is its `dbt parse` output, trimmed by `scripts/trim_dbt_manifest.py`, and `dbt_metricflow_osi_document.json` is dbt's own compiled export, used as a test oracle.
+
 ## [0.56.0] - 2026-09-29
 
 ### Added

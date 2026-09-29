@@ -1,0 +1,2723 @@
+{
+ "metadata": {
+  "adapter_type": "duckdb",
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+  "dbt_version": "1.12.5",
+  "env": {},
+  "generated_at": "2026-09-29T19:27:31.677201Z",
+  "invocation_id": "7a29511b-77c0-47cb-80e3-248c85a3fb25",
+  "invocation_started_at": "2026-09-29T19:07:21.060777+00:00",
+  "project_id": "13a8c3c06e66adaf590b1575f6951088",
+  "project_name": "metricflow_probe",
+  "quoting": {
+   "column": null,
+   "database": true,
+   "identifier": true,
+   "schema": true
+  },
+  "run_started_at": "2026-09-29T19:07:21.060900+00:00",
+  "send_anonymous_usage_stats": true,
+  "user_id": null
+ },
+ "metrics": {
+  "metric.metricflow_probe.amount_default_expr": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.625057,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "amount_default_expr"
+   ],
+   "group": null,
+   "label": "Amount",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "amount_default_expr",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "amount"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "amount"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.amount_default_expr",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.average_order": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.624042,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "average_order"
+   ],
+   "group": null,
+   "label": "Average order",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "average_order",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "avg_amount"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "avg_amount"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.average_order",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.balance": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6257339,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.accounts"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "balance"
+   ],
+   "group": null,
+   "label": "Balance",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "balance",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "closing_balance"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "closing_balance"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.balance",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.completed_orders": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6262789,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "completed_orders"
+   ],
+   "group": null,
+   "label": "Completed orders",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "completed_orders",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_count"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_count"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.completed_orders",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.completed_paid_total": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710051.834432,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.payments"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ Dimension('payment__status') }} = 'completed'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "completed_paid_total"
+   ],
+   "group": null,
+   "label": "completed_paid_total",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "completed_paid_total",
+   "original_file_path": "models/latest_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "latest_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": "amount",
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [],
+    "is_private": false,
+    "join_to_timespine": false,
+    "measure": null,
+    "metric_aggregation_params": {
+     "agg": "sum",
+     "agg_params": {
+      "percentile": null,
+      "use_approximate_percentile": false,
+      "use_discrete_percentile": false
+     },
+     "agg_time_dimension": "paid_at",
+     "non_additive_dimension": null,
+     "semantic_model": "payments"
+    },
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.completed_paid_total",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.completed_revenue": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6260219,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "Revenue from completed orders",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "completed_revenue"
+   ],
+   "group": null,
+   "label": "Completed revenue",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "completed_revenue",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": {
+       "where_filters": [
+        {
+         "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+        }
+       ]
+      },
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": {
+      "where_filters": [
+       {
+        "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+       }
+      ]
+     },
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.completed_revenue",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.customers_ordering": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.623661,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "customers_ordering"
+   ],
+   "group": null,
+   "label": "Customers ordering",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "customers_ordering",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "unique_customers"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "unique_customers"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.customers_ordering",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.eu_revenue": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.626818,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ Dimension('customer__region') }} = 'EU'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "eu_revenue"
+   ],
+   "group": null,
+   "label": "EU revenue",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "eu_revenue",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.eu_revenue",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.fee": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710051.834479,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.payments"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "fee"
+   ],
+   "group": null,
+   "label": "fee",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "fee",
+   "original_file_path": "models/latest_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "latest_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [],
+    "is_private": false,
+    "join_to_timespine": false,
+    "measure": null,
+    "metric_aggregation_params": {
+     "agg": "sum",
+     "agg_params": {
+      "percentile": null,
+      "use_approximate_percentile": false,
+      "use_discrete_percentile": false
+     },
+     "agg_time_dimension": "paid_at",
+     "non_additive_dimension": null,
+     "semantic_model": "payments"
+    },
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.fee",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.jan_revenue": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6270862,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ TimeDimension('order__ordered_at', 'month') }} = '2026-01-01'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "jan_revenue"
+   ],
+   "group": null,
+   "label": "January revenue",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "jan_revenue",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.jan_revenue",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.large_paid_orders": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.626564,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "large_paid_orders"
+   ],
+   "group": null,
+   "label": "Large paid orders",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "large_paid_orders",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": {
+       "where_filters": [
+        {
+         "where_sql_template": "{{ Dimension('order__is_large') }} = true"
+        }
+       ]
+      },
+      "join_to_timespine": false,
+      "name": "paid_orders"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": {
+      "where_filters": [
+       {
+        "where_sql_template": "{{ Dimension('order__is_large') }} = true"
+       }
+      ]
+     },
+     "join_to_timespine": false,
+     "name": "paid_orders"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.large_paid_orders",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.largest_order": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.624363,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "largest_order"
+   ],
+   "group": null,
+   "label": "Largest order",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "largest_order",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "max_amount"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "max_amount"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.largest_order",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.order_value": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.628085,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "metric.metricflow_probe.revenue",
+     "metric.metricflow_probe.orders_placed"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "order_value"
+   ],
+   "group": null,
+   "label": "Order value",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "order_value",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "ratio",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": {
+     "alias": null,
+     "filter": null,
+     "name": "orders_placed",
+     "offset_to_grain": null,
+     "offset_window": null
+    },
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     },
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_count"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": null,
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": {
+     "alias": null,
+     "filter": null,
+     "name": "revenue",
+     "offset_to_grain": null,
+     "offset_window": null
+    },
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.order_value",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.orders_placed": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6233118,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "orders_placed"
+   ],
+   "group": null,
+   "label": "Orders placed",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "orders_placed",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_count"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_count"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.orders_placed",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.orders_since_mid_jan": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710019.56367,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": {
+    "where_filters": [
+     {
+      "where_sql_template": "{{ Dimension('order__ordered_at') }} >= '2026-01-15'"
+     }
+    ]
+   },
+   "fqn": [
+    "metricflow_probe",
+    "orders_since_mid_jan"
+   ],
+   "group": null,
+   "label": "Orders since mid January",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "orders_since_mid_jan",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_count"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_count"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.orders_since_mid_jan",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.p90_order": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.625391,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "p90_order"
+   ],
+   "group": null,
+   "label": "P90 order",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "p90_order",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "p90_amount"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "p90_amount"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.p90_order",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.paid_order_count": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.6246998,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "paid_order_count"
+   ],
+   "group": null,
+   "label": "Paid orders",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "paid_order_count",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "paid_orders"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "paid_orders"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.paid_order_count",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.paid_total": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710051.834365,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.payments"
+    ]
+   },
+   "description": "Sum of payments",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "paid_total"
+   ],
+   "group": null,
+   "label": "paid_total",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "paid_total",
+   "original_file_path": "models/latest_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "latest_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": "amount",
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [],
+    "is_private": false,
+    "join_to_timespine": false,
+    "measure": null,
+    "metric_aggregation_params": {
+     "agg": "sum",
+     "agg_params": {
+      "percentile": null,
+      "use_approximate_percentile": false,
+      "use_discrete_percentile": false
+     },
+     "agg_time_dimension": "paid_at",
+     "non_additive_dimension": null,
+     "semantic_model": "payments"
+    },
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.paid_total",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.refunded_revenue_or_zero": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710019.563155,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "refunded_revenue_or_zero"
+   ],
+   "group": null,
+   "label": "Refunded revenue (zero when none)",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "refunded_revenue_or_zero",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": 0,
+      "filter": {
+       "where_filters": [
+        {
+         "where_sql_template": "{{ Dimension('order__status') }} = 'refunded'"
+        }
+       ]
+      },
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": 0,
+     "filter": {
+      "where_filters": [
+       {
+        "where_sql_template": "{{ Dimension('order__status') }} = 'refunded'"
+       }
+      ]
+     },
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.refunded_revenue_or_zero",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.revenue": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {
+     "domains": [
+      "revenue"
+     ],
+     "indicator_kind": "lagging",
+     "tier": [
+      "north_star"
+     ]
+    }
+   },
+   "created_at": 1790708841.622853,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "Sum of order amounts",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "revenue"
+   ],
+   "group": null,
+   "label": "Revenue",
+   "meta": {
+    "domains": [
+     "revenue"
+    ],
+    "indicator_kind": "lagging",
+    "tier": [
+     "north_star"
+    ]
+   },
+   "metadata": null,
+   "metrics": [],
+   "name": "revenue",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "simple",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.revenue",
+   "unrendered_config": {
+    "meta": {
+     "domains": [
+      "revenue"
+     ],
+     "indicator_kind": "lagging",
+     "tier": [
+      "north_star"
+     ]
+    }
+   }
+  },
+  "metric.metricflow_probe.revenue_less_largest": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.628544,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "metric.metricflow_probe.revenue",
+     "metric.metricflow_probe.largest_order"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "revenue_less_largest"
+   ],
+   "group": null,
+   "label": "Revenue less largest order",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "revenue_less_largest",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "derived",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": null,
+    "denominator": null,
+    "expr": "revenue - largest_order",
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     },
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "max_amount"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": null,
+    "metric_aggregation_params": null,
+    "metrics": [
+     {
+      "alias": null,
+      "filter": null,
+      "name": "revenue",
+      "offset_to_grain": null,
+      "offset_window": null
+     },
+     {
+      "alias": null,
+      "filter": null,
+      "name": "largest_order",
+      "offset_to_grain": null,
+      "offset_window": null
+     }
+    ],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.revenue_less_largest",
+   "unrendered_config": {}
+  },
+  "metric.metricflow_probe.running_revenue": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.628883,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "semantic_model.metricflow_probe.orders"
+    ]
+   },
+   "description": "",
+   "filter": null,
+   "fqn": [
+    "metricflow_probe",
+    "running_revenue"
+   ],
+   "group": null,
+   "label": "Running revenue",
+   "meta": {},
+   "metadata": null,
+   "metrics": [],
+   "name": "running_revenue",
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "refs": [],
+   "resource_type": "metric",
+   "sources": [],
+   "tags": [],
+   "time_granularity": null,
+   "type": "cumulative",
+   "type_params": {
+    "conversion_type_params": null,
+    "cumulative_type_params": {
+     "grain_to_date": null,
+     "metric": null,
+     "period_agg": "first",
+     "window": null
+    },
+    "denominator": null,
+    "expr": null,
+    "fill_nulls_with": null,
+    "grain_to_date": null,
+    "input_measures": [
+     {
+      "alias": null,
+      "fill_nulls_with": null,
+      "filter": null,
+      "join_to_timespine": false,
+      "name": "order_total"
+     }
+    ],
+    "is_private": null,
+    "join_to_timespine": false,
+    "measure": {
+     "alias": null,
+     "fill_nulls_with": null,
+     "filter": null,
+     "join_to_timespine": false,
+     "name": "order_total"
+    },
+    "metric_aggregation_params": null,
+    "metrics": [],
+    "numerator": null,
+    "window": null
+   },
+   "unique_id": "metric.metricflow_probe.running_revenue",
+   "unrendered_config": {}
+  }
+ },
+ "nodes": {
+  "model.metricflow_probe.accounts": {
+   "access": "protected",
+   "alias": "accounts",
+   "build_path": null,
+   "checksum": {
+    "checksum": "b5649a5a5a2280b2db46f763828ef3b4b8d96459f8a6edb5911a08427064f687",
+    "name": "sha256"
+   },
+   "columns": {},
+   "compiled_path": null,
+   "config": {
+    "access": "protected",
+    "alias": null,
+    "batch_size": null,
+    "begin": null,
+    "column_types": {},
+    "concurrent_batches": null,
+    "contract": {
+     "alias_types": true,
+     "enforced": false
+    },
+    "database": null,
+    "docs": {
+     "node_color": null,
+     "show": true
+    },
+    "enabled": true,
+    "event_time": null,
+    "freshness": null,
+    "full_refresh": null,
+    "grants": {},
+    "group": null,
+    "incremental_strategy": null,
+    "latest_version_pointer": {
+     "alias": null,
+     "enabled": null
+    },
+    "lookback": 1,
+    "materialized": "view",
+    "meta": {},
+    "on_configuration_change": "apply",
+    "on_error": null,
+    "on_schema_change": "ignore",
+    "packages": [],
+    "persist_docs": {},
+    "post-hook": [],
+    "pre-hook": [],
+    "quoting": {},
+    "schema": null,
+    "static_analysis": null,
+    "tags": [],
+    "unique_key": null
+   },
+   "constraints": [],
+   "contract": {
+    "alias_types": true,
+    "checksum": null,
+    "enforced": false
+   },
+   "created_at": 1790708841.5287502,
+   "database": "memory",
+   "depends_on": {
+    "macros": [],
+    "nodes": []
+   },
+   "deprecation_date": null,
+   "description": "",
+   "doc_blocks": [],
+   "docs": {
+    "node_color": null,
+    "show": true
+   },
+   "fqn": [
+    "metricflow_probe",
+    "accounts"
+   ],
+   "functions": [],
+   "group": null,
+   "language": "sql",
+   "latest_version": null,
+   "meta": {},
+   "metrics": [],
+   "name": "accounts",
+   "original_file_path": "models/accounts.sql",
+   "package_name": "metricflow_probe",
+   "patch_path": null,
+   "path": "accounts.sql",
+   "primary_key": [],
+   "raw_code": "select 1 as account_id, 100.0 as balance, date '2026-01-01' as snapshot_at",
+   "refs": [],
+   "relation_name": "\"memory\".\"main\".\"accounts\"",
+   "resource_type": "model",
+   "schema": "main",
+   "sources": [],
+   "tags": [],
+   "time_spine": null,
+   "unique_id": "model.metricflow_probe.accounts",
+   "unrendered_config": {},
+   "version": null
+  },
+  "model.metricflow_probe.customers": {
+   "access": "protected",
+   "alias": "customers",
+   "build_path": null,
+   "checksum": {
+    "checksum": "4703637d85e8e65a71eed8a1c977463d3d036fbedb10ae780652f0ddef173cf9",
+    "name": "sha256"
+   },
+   "columns": {},
+   "compiled_path": null,
+   "config": {
+    "access": "protected",
+    "alias": null,
+    "batch_size": null,
+    "begin": null,
+    "column_types": {},
+    "concurrent_batches": null,
+    "contract": {
+     "alias_types": true,
+     "enforced": false
+    },
+    "database": null,
+    "docs": {
+     "node_color": null,
+     "show": true
+    },
+    "enabled": true,
+    "event_time": null,
+    "freshness": null,
+    "full_refresh": null,
+    "grants": {},
+    "group": null,
+    "incremental_strategy": null,
+    "latest_version_pointer": {
+     "alias": null,
+     "enabled": null
+    },
+    "lookback": 1,
+    "materialized": "view",
+    "meta": {},
+    "on_configuration_change": "apply",
+    "on_error": null,
+    "on_schema_change": "ignore",
+    "packages": [],
+    "persist_docs": {},
+    "post-hook": [],
+    "pre-hook": [],
+    "quoting": {},
+    "schema": null,
+    "static_analysis": null,
+    "tags": [],
+    "unique_key": null
+   },
+   "constraints": [],
+   "contract": {
+    "alias_types": true,
+    "checksum": null,
+    "enforced": false
+   },
+   "created_at": 1790708841.538015,
+   "database": "memory",
+   "depends_on": {
+    "macros": [],
+    "nodes": []
+   },
+   "deprecation_date": null,
+   "description": "",
+   "doc_blocks": [],
+   "docs": {
+    "node_color": null,
+    "show": true
+   },
+   "fqn": [
+    "metricflow_probe",
+    "customers"
+   ],
+   "functions": [],
+   "group": null,
+   "language": "sql",
+   "latest_version": null,
+   "meta": {},
+   "metrics": [],
+   "name": "customers",
+   "original_file_path": "models/customers.sql",
+   "package_name": "metricflow_probe",
+   "patch_path": null,
+   "path": "customers.sql",
+   "primary_key": [],
+   "raw_code": "select 1 as customer_id, 'EU' as region",
+   "refs": [],
+   "relation_name": "\"memory\".\"main\".\"customers\"",
+   "resource_type": "model",
+   "schema": "main",
+   "sources": [],
+   "tags": [],
+   "time_spine": null,
+   "unique_id": "model.metricflow_probe.customers",
+   "unrendered_config": {},
+   "version": null
+  },
+  "model.metricflow_probe.metricflow_time_spine": {
+   "access": "protected",
+   "alias": "metricflow_time_spine",
+   "build_path": null,
+   "checksum": {
+    "checksum": "208902d477b20a891ecb3a24506f7b69c6e089a498f22d0048818b0a51f8a2fe",
+    "name": "sha256"
+   },
+   "columns": {
+    "date_day": {
+     "config": {
+      "meta": {},
+      "tags": []
+     },
+     "constraints": [],
+     "data_type": null,
+     "description": "",
+     "dimension": null,
+     "doc_blocks": [],
+     "entity": null,
+     "granularity": "day",
+     "meta": {},
+     "name": "date_day",
+     "quote": null,
+     "tags": []
+    }
+   },
+   "compiled_path": null,
+   "config": {
+    "access": "protected",
+    "alias": null,
+    "batch_size": null,
+    "begin": null,
+    "column_types": {},
+    "concurrent_batches": null,
+    "contract": {
+     "alias_types": true,
+     "enforced": false
+    },
+    "database": null,
+    "docs": {
+     "node_color": null,
+     "show": true
+    },
+    "enabled": true,
+    "event_time": null,
+    "freshness": null,
+    "full_refresh": null,
+    "grants": {},
+    "group": null,
+    "incremental_strategy": null,
+    "latest_version_pointer": {
+     "alias": null,
+     "enabled": null
+    },
+    "lookback": 1,
+    "materialized": "view",
+    "meta": {},
+    "on_configuration_change": "apply",
+    "on_error": null,
+    "on_schema_change": "ignore",
+    "packages": [],
+    "persist_docs": {},
+    "post-hook": [],
+    "pre-hook": [],
+    "quoting": {},
+    "schema": null,
+    "static_analysis": null,
+    "tags": [],
+    "unique_key": null
+   },
+   "constraints": [],
+   "contract": {
+    "alias_types": true,
+    "checksum": null,
+    "enforced": false
+   },
+   "created_at": 1790708841.598648,
+   "database": "memory",
+   "depends_on": {
+    "macros": [],
+    "nodes": []
+   },
+   "deprecation_date": null,
+   "description": "",
+   "doc_blocks": [],
+   "docs": {
+    "node_color": null,
+    "show": true
+   },
+   "fqn": [
+    "metricflow_probe",
+    "metricflow_time_spine"
+   ],
+   "functions": [],
+   "group": null,
+   "language": "sql",
+   "latest_version": null,
+   "meta": {},
+   "metrics": [],
+   "name": "metricflow_time_spine",
+   "original_file_path": "models/metricflow_time_spine.sql",
+   "package_name": "metricflow_probe",
+   "patch_path": "metricflow_probe://models/legacy_spec.yml",
+   "path": "metricflow_time_spine.sql",
+   "primary_key": [],
+   "raw_code": "select cast(range as date) as date_day\nfrom range(date '2026-01-01', date '2026-12-31', interval 1 day)",
+   "refs": [],
+   "relation_name": "\"memory\".\"main\".\"metricflow_time_spine\"",
+   "resource_type": "model",
+   "schema": "main",
+   "sources": [],
+   "tags": [],
+   "time_spine": {
+    "custom_granularities": [],
+    "standard_granularity_column": "date_day"
+   },
+   "unique_id": "model.metricflow_probe.metricflow_time_spine",
+   "unrendered_config": {},
+   "version": null
+  },
+  "model.metricflow_probe.orders": {
+   "access": "protected",
+   "alias": "orders",
+   "build_path": null,
+   "checksum": {
+    "checksum": "70e72850fcd7fe199f4cc50430e54659a3035722fdba4afddb401c1b1791ac04",
+    "name": "sha256"
+   },
+   "columns": {},
+   "compiled_path": null,
+   "config": {
+    "access": "protected",
+    "alias": null,
+    "batch_size": null,
+    "begin": null,
+    "column_types": {},
+    "concurrent_batches": null,
+    "contract": {
+     "alias_types": true,
+     "enforced": false
+    },
+    "database": null,
+    "docs": {
+     "node_color": null,
+     "show": true
+    },
+    "enabled": true,
+    "event_time": null,
+    "freshness": null,
+    "full_refresh": null,
+    "grants": {},
+    "group": null,
+    "incremental_strategy": null,
+    "latest_version_pointer": {
+     "alias": null,
+     "enabled": null
+    },
+    "lookback": 1,
+    "materialized": "view",
+    "meta": {},
+    "on_configuration_change": "apply",
+    "on_error": null,
+    "on_schema_change": "ignore",
+    "packages": [],
+    "persist_docs": {},
+    "post-hook": [],
+    "pre-hook": [],
+    "quoting": {},
+    "schema": null,
+    "static_analysis": null,
+    "tags": [],
+    "unique_key": null
+   },
+   "constraints": [],
+   "contract": {
+    "alias_types": true,
+    "checksum": null,
+    "enforced": false
+   },
+   "created_at": 1790708841.53887,
+   "database": "memory",
+   "depends_on": {
+    "macros": [],
+    "nodes": []
+   },
+   "deprecation_date": null,
+   "description": "",
+   "doc_blocks": [],
+   "docs": {
+    "node_color": null,
+    "show": true
+   },
+   "fqn": [
+    "metricflow_probe",
+    "orders"
+   ],
+   "functions": [],
+   "group": null,
+   "language": "sql",
+   "latest_version": null,
+   "meta": {},
+   "metrics": [],
+   "name": "orders",
+   "original_file_path": "models/orders.sql",
+   "package_name": "metricflow_probe",
+   "patch_path": null,
+   "path": "orders.sql",
+   "primary_key": [],
+   "raw_code": "select 1 as order_id, 1 as customer_id, 10.0 as amount, 'completed' as status,\n       true as is_paid, date '2026-01-01' as ordered_at",
+   "refs": [],
+   "relation_name": "\"memory\".\"main\".\"orders\"",
+   "resource_type": "model",
+   "schema": "main",
+   "sources": [],
+   "tags": [],
+   "time_spine": null,
+   "unique_id": "model.metricflow_probe.orders",
+   "unrendered_config": {},
+   "version": null
+  },
+  "model.metricflow_probe.payments": {
+   "access": "protected",
+   "alias": "payments",
+   "build_path": null,
+   "checksum": {
+    "checksum": "b5fa5333ab9eff588bd903d27c8d49898342644d594a81658cfe0f820e7f6797",
+    "name": "sha256"
+   },
+   "columns": {
+    "paid_at": {
+     "config": {
+      "meta": {},
+      "tags": []
+     },
+     "constraints": [],
+     "data_type": null,
+     "description": "",
+     "dimension": {
+      "config": {},
+      "description": "",
+      "is_partition": false,
+      "label": null,
+      "name": "paid_at",
+      "type": "time",
+      "validity_params": null
+     },
+     "doc_blocks": [],
+     "entity": null,
+     "granularity": "day",
+     "meta": {},
+     "name": "paid_at",
+     "quote": null,
+     "tags": []
+    },
+    "payment_id": {
+     "config": {
+      "meta": {},
+      "tags": []
+     },
+     "constraints": [],
+     "data_type": null,
+     "description": "",
+     "dimension": null,
+     "doc_blocks": [],
+     "entity": {
+      "config": {},
+      "description": "",
+      "label": null,
+      "name": "payment",
+      "type": "primary"
+     },
+     "granularity": null,
+     "meta": {},
+     "name": "payment_id",
+     "quote": null,
+     "tags": []
+    },
+    "status": {
+     "config": {
+      "meta": {},
+      "tags": []
+     },
+     "constraints": [],
+     "data_type": null,
+     "description": "",
+     "dimension": {
+      "config": {},
+      "description": "",
+      "is_partition": false,
+      "label": null,
+      "name": "status",
+      "type": "categorical",
+      "validity_params": null
+     },
+     "doc_blocks": [],
+     "entity": null,
+     "granularity": null,
+     "meta": {},
+     "name": "status",
+     "quote": null,
+     "tags": []
+    }
+   },
+   "compiled_path": null,
+   "config": {
+    "access": "protected",
+    "alias": null,
+    "batch_size": null,
+    "begin": null,
+    "column_types": {},
+    "concurrent_batches": null,
+    "contract": {
+     "alias_types": true,
+     "enforced": false
+    },
+    "database": null,
+    "docs": {
+     "node_color": null,
+     "show": true
+    },
+    "enabled": true,
+    "event_time": null,
+    "freshness": null,
+    "full_refresh": null,
+    "grants": {},
+    "group": null,
+    "incremental_strategy": null,
+    "latest_version_pointer": {
+     "alias": null,
+     "enabled": null
+    },
+    "lookback": 1,
+    "materialized": "view",
+    "meta": {},
+    "on_configuration_change": "apply",
+    "on_error": null,
+    "on_schema_change": "ignore",
+    "packages": [],
+    "persist_docs": {},
+    "post-hook": [],
+    "pre-hook": [],
+    "quoting": {},
+    "schema": null,
+    "static_analysis": null,
+    "tags": [],
+    "unique_key": null
+   },
+   "constraints": [],
+   "contract": {
+    "alias_types": true,
+    "checksum": null,
+    "enforced": false
+   },
+   "created_at": 1790710051.829833,
+   "database": "memory",
+   "depends_on": {
+    "macros": [],
+    "nodes": []
+   },
+   "deprecation_date": null,
+   "description": "",
+   "doc_blocks": [],
+   "docs": {
+    "node_color": null,
+    "show": true
+   },
+   "fqn": [
+    "metricflow_probe",
+    "payments"
+   ],
+   "functions": [],
+   "group": null,
+   "language": "sql",
+   "latest_version": null,
+   "meta": {},
+   "metrics": [],
+   "name": "payments",
+   "original_file_path": "models/payments.sql",
+   "package_name": "metricflow_probe",
+   "patch_path": "metricflow_probe://models/latest_spec.yml",
+   "path": "payments.sql",
+   "primary_key": [],
+   "raw_code": "select 1 as payment_id, 10.0 as amount, 1.5 as fee, 'completed' as status,\n       date '2026-01-01' as paid_at",
+   "refs": [],
+   "relation_name": "\"memory\".\"main\".\"payments\"",
+   "resource_type": "model",
+   "schema": "main",
+   "sources": [],
+   "tags": [],
+   "time_spine": null,
+   "unique_id": "model.metricflow_probe.payments",
+   "unrendered_config": {},
+   "version": null
+  }
+ },
+ "semantic_models": {
+  "semantic_model.metricflow_probe.accounts": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.649663,
+   "defaults": {
+    "agg_time_dimension": "snapshot_at"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.metricflow_probe.accounts"
+    ]
+   },
+   "description": null,
+   "dimensions": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": null,
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "snapshot_at",
+     "type": "time",
+     "type_params": {
+      "time_granularity": "day",
+      "validity_params": null
+     }
+    }
+   ],
+   "entities": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "description": null,
+     "expr": "account_id",
+     "label": null,
+     "name": "account",
+     "role": null,
+     "type": "primary"
+    }
+   ],
+   "fqn": [
+    "metricflow_probe",
+    "accounts"
+   ],
+   "group": null,
+   "label": null,
+   "measures": [
+    {
+     "agg": "sum",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "balance",
+     "label": null,
+     "name": "closing_balance",
+     "non_additive_dimension": {
+      "name": "snapshot_at",
+      "window_choice": "max",
+      "window_groupings": []
+     }
+    }
+   ],
+   "metadata": null,
+   "model": "ref('accounts')",
+   "name": "accounts",
+   "node_relation": {
+    "alias": "accounts",
+    "database": "memory",
+    "relation_name": "\"memory\".\"main\".\"accounts\"",
+    "schema_name": "main"
+   },
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "primary_entity": null,
+   "refs": [
+    {
+     "name": "accounts",
+     "package": null,
+     "version": null
+    }
+   ],
+   "resource_type": "semantic_model",
+   "unique_id": "semantic_model.metricflow_probe.accounts",
+   "unrendered_config": {}
+  },
+  "semantic_model.metricflow_probe.customers": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.648572,
+   "defaults": null,
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.metricflow_probe.customers"
+    ]
+   },
+   "description": null,
+   "dimensions": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": null,
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "region",
+     "type": "categorical",
+     "type_params": null
+    }
+   ],
+   "entities": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "description": null,
+     "expr": "customer_id",
+     "label": null,
+     "name": "customer",
+     "role": null,
+     "type": "primary"
+    }
+   ],
+   "fqn": [
+    "metricflow_probe",
+    "customers"
+   ],
+   "group": null,
+   "label": null,
+   "measures": [],
+   "metadata": null,
+   "model": "ref('customers')",
+   "name": "customers",
+   "node_relation": {
+    "alias": "customers",
+    "database": "memory",
+    "relation_name": "\"memory\".\"main\".\"customers\"",
+    "schema_name": "main"
+   },
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "primary_entity": null,
+   "refs": [
+    {
+     "name": "customers",
+     "package": null,
+     "version": null
+    }
+   ],
+   "resource_type": "semantic_model",
+   "unique_id": "semantic_model.metricflow_probe.customers",
+   "unrendered_config": {}
+  },
+  "semantic_model.metricflow_probe.orders": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790708841.647905,
+   "defaults": {
+    "agg_time_dimension": "ordered_at"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.metricflow_probe.orders"
+    ]
+   },
+   "description": null,
+   "dimensions": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": null,
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "status",
+     "type": "categorical",
+     "type_params": null
+    },
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": null,
+     "expr": "amount > 100",
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "is_large",
+     "type": "categorical",
+     "type_params": null
+    },
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": null,
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "ordered_at",
+     "type": "time",
+     "type_params": {
+      "time_granularity": "day",
+      "validity_params": null
+     }
+    }
+   ],
+   "entities": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "description": null,
+     "expr": "order_id",
+     "label": null,
+     "name": "order",
+     "role": null,
+     "type": "primary"
+    },
+    {
+     "config": {
+      "meta": {}
+     },
+     "description": null,
+     "expr": "customer_id",
+     "label": null,
+     "name": "customer",
+     "role": null,
+     "type": "foreign"
+    }
+   ],
+   "fqn": [
+    "metricflow_probe",
+    "orders"
+   ],
+   "group": null,
+   "label": null,
+   "measures": [
+    {
+     "agg": "sum",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "amount",
+     "label": null,
+     "name": "order_total",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "count",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "order_id",
+     "label": null,
+     "name": "order_count",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "count_distinct",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "customer_id",
+     "label": null,
+     "name": "unique_customers",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "average",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "amount",
+     "label": null,
+     "name": "avg_amount",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "max",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "amount",
+     "label": null,
+     "name": "max_amount",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "sum_boolean",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "is_paid",
+     "label": null,
+     "name": "paid_orders",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "sum",
+     "agg_params": null,
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": null,
+     "label": null,
+     "name": "amount",
+     "non_additive_dimension": null
+    },
+    {
+     "agg": "percentile",
+     "agg_params": {
+      "percentile": 0.9,
+      "use_approximate_percentile": false,
+      "use_discrete_percentile": false
+     },
+     "agg_time_dimension": null,
+     "config": {
+      "meta": {}
+     },
+     "create_metric": false,
+     "description": null,
+     "expr": "amount",
+     "label": null,
+     "name": "p90_amount",
+     "non_additive_dimension": null
+    }
+   ],
+   "metadata": null,
+   "model": "ref('orders')",
+   "name": "orders",
+   "node_relation": {
+    "alias": "orders",
+    "database": "memory",
+    "relation_name": "\"memory\".\"main\".\"orders\"",
+    "schema_name": "main"
+   },
+   "original_file_path": "models/legacy_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "legacy_spec.yml",
+   "primary_entity": null,
+   "refs": [
+    {
+     "name": "orders",
+     "package": null,
+     "version": null
+    }
+   ],
+   "resource_type": "semantic_model",
+   "unique_id": "semantic_model.metricflow_probe.orders",
+   "unrendered_config": {}
+  },
+  "semantic_model.metricflow_probe.payments": {
+   "config": {
+    "enabled": true,
+    "group": null,
+    "meta": {}
+   },
+   "created_at": 1790710051.832266,
+   "defaults": {
+    "agg_time_dimension": "paid_at"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.metricflow_probe.payments"
+    ]
+   },
+   "description": "",
+   "dimensions": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": "",
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "status",
+     "type": "categorical",
+     "type_params": null
+    },
+    {
+     "config": {
+      "meta": {}
+     },
+     "datatype": null,
+     "description": "",
+     "expr": null,
+     "is_partition": false,
+     "label": null,
+     "metadata": null,
+     "name": "paid_at",
+     "type": "time",
+     "type_params": {
+      "time_granularity": "day",
+      "validity_params": null
+     }
+    }
+   ],
+   "entities": [
+    {
+     "config": {
+      "meta": {}
+     },
+     "description": "",
+     "expr": "payment_id",
+     "label": null,
+     "name": "payment",
+     "role": null,
+     "type": "primary"
+    }
+   ],
+   "fqn": [
+    "metricflow_probe",
+    "payments"
+   ],
+   "group": null,
+   "label": null,
+   "measures": [],
+   "metadata": null,
+   "model": "ref('payments')",
+   "name": "payments",
+   "node_relation": {
+    "alias": "payments",
+    "database": "memory",
+    "relation_name": "\"memory\".\"main\".\"payments\"",
+    "schema_name": "main"
+   },
+   "original_file_path": "models/latest_spec.yml",
+   "package_name": "metricflow_probe",
+   "path": "latest_spec.yml",
+   "primary_entity": null,
+   "refs": [
+    {
+     "name": "payments",
+     "package": null,
+     "version": null
+    }
+   ],
+   "resource_type": "semantic_model",
+   "unique_id": "semantic_model.metricflow_probe.payments",
+   "unrendered_config": {}
+  }
+ }
+}

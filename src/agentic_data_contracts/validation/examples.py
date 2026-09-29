@@ -611,8 +611,8 @@ def _expand_metric_refs(
     Every way the expansion could certify something other than the metric
     raises ``ValueError`` naming the row: an unknown metric, an empty
     expression, a metric that declares ``filters`` (the expression alone
-    would drop them), any metric from a ``DbtSource`` or ``CubeSource`` (both
-    keep aggregation and filters outside the expression), a placeholder
+    would drop them), a metric its source marked ``untranslated`` (a dbt ratio,
+    a filter needing a join), a placeholder
     inside a metric's expression, any ``{{`` left over, or a placeholder with
     no source to expand it from. ``{{`` is therefore reserved in example SQL,
     string literals included.
@@ -623,26 +623,18 @@ def _expand_metric_refs(
             f"example {label!r} references metric {names[0]!r}, but no "
             "semantic_source was given to expand it from"
         )
-    # Imported here: adapters.base -> validation -> semantic -> adapters.base.
-    from agentic_data_contracts.semantic.cube import CubeSource
-    from agentic_data_contracts.semantic.dbt import DbtSource
-
-    if names and isinstance(semantic_source, (DbtSource, CubeSource)):
-        # Both keep a metric's aggregation (`agg`, `type: sum`) and filters
-        # beside its expression -- MetricFlow's filters are Jinja, not SQL --
-        # so the expression alone is never the metric, filters or not.
-        raise ValueError(
-            f"example {label!r} references metric {names[0]!r} from a "
-            f"{type(semantic_source).__name__}, whose sql_expression omits the "
-            "metric's aggregation and filters; placeholders need a source "
-            "whose sql_expression is the whole metric (YamlSource, OssieSource)"
-        )
     expressions: dict[str, str] = {}
     for name in names:
         assert semantic_source is not None  # refused above
         metric = semantic_source.get_metric(name)
         if metric is None:
             raise ValueError(f"example {label!r} references unknown metric {name!r}")
+        if metric.untranslated:
+            raise ValueError(
+                f"example {label!r} references metric {name!r}, which its "
+                f"source could not express as one SQL expression: "
+                f"{metric.untranslated}"
+            )
         expression = metric.sql_expression.strip()
         if not expression:
             raise ValueError(

@@ -1,0 +1,29 @@
+# The latest (1.12+) spec: the semantic model nests under the model, and
+# `type: simple` metrics carry agg/expr directly instead of measures.
+models:
+  - name: payments
+    semantic_model:
+      enabled: true
+    agg_time_dimension: paid_at
+    columns:
+      - name: payment_id
+        entity: {type: primary, name: payment}
+      - name: status
+        dimension: {type: categorical}
+      - name: paid_at
+        granularity: day
+        dimension: {type: time}
+    metrics:
+      - name: paid_total
+        description: Sum of payments
+        type: simple
+        agg: sum
+        expr: amount
+      - name: completed_paid_total
+        type: simple
+        agg: sum
+        expr: amount
+        filter: "{{ Dimension('payment__status') }} = 'completed'"
+      - name: fee
+        type: simple
+        agg: sum

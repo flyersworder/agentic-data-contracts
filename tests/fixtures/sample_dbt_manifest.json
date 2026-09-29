@@ -31,22 +31,194 @@
   },
   "metrics": {
     "metric.project.total_revenue": {
-      "unique_id": "metric.project.total_revenue",
-      "name": "total_revenue",
-      "label": "Total Revenue",
+      "config": {
+        "enabled": true,
+        "group": null,
+        "meta": {}
+      },
+      "created_at": 1790708841.6260219,
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "semantic_model.metricflow_probe.orders"
+        ]
+      },
       "description": "Sum of all completed order amounts",
+      "filter": null,
+      "fqn": [
+        "metricflow_probe",
+        "completed_revenue"
+      ],
+      "group": null,
+      "label": "Total Revenue",
+      "meta": {},
+      "metadata": null,
+      "metrics": [],
+      "name": "total_revenue",
+      "original_file_path": "models/legacy_spec.yml",
+      "package_name": "project",
+      "path": "legacy_spec.yml",
+      "refs": [],
+      "resource_type": "metric",
+      "sources": [],
+      "tags": [],
+      "time_granularity": null,
       "type": "simple",
       "type_params": {
+        "conversion_type_params": null,
+        "cumulative_type_params": null,
+        "denominator": null,
+        "expr": null,
+        "fill_nulls_with": null,
+        "grain_to_date": null,
+        "input_measures": [
+          {
+            "alias": null,
+            "fill_nulls_with": null,
+            "filter": {
+              "where_filters": [
+                {
+                  "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+                }
+              ]
+            },
+            "join_to_timespine": false,
+            "name": "total_amount"
+          }
+        ],
+        "is_private": null,
+        "join_to_timespine": false,
         "measure": {
-          "name": "total_amount",
-          "expr": "SUM(amount)",
-          "filter": "status = 'completed'"
-        }
+          "alias": null,
+          "fill_nulls_with": null,
+          "filter": {
+            "where_filters": [
+              {
+                "where_sql_template": "{{ Dimension('order__status') }} = 'completed'"
+              }
+            ]
+          },
+          "join_to_timespine": false,
+          "name": "total_amount"
+        },
+        "metric_aggregation_params": null,
+        "metrics": [],
+        "numerator": null,
+        "window": null
       },
+      "unique_id": "metric.project.total_revenue",
+      "unrendered_config": {}
+    }
+  },
+  "semantic_models": {
+    "semantic_model.project.orders": {
+      "config": {
+        "enabled": true,
+        "group": null,
+        "meta": {}
+      },
+      "created_at": 1790708841.647905,
+      "defaults": {
+        "agg_time_dimension": "ordered_at"
+      },
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "model.metricflow_probe.orders"
+        ]
+      },
+      "description": null,
+      "dimensions": [
+        {
+          "config": {
+            "meta": {}
+          },
+          "datatype": null,
+          "description": null,
+          "expr": null,
+          "is_partition": false,
+          "label": null,
+          "metadata": null,
+          "name": "status",
+          "type": "categorical",
+          "type_params": null
+        },
+        {
+          "config": {
+            "meta": {}
+          },
+          "datatype": null,
+          "description": null,
+          "expr": null,
+          "is_partition": false,
+          "label": null,
+          "metadata": null,
+          "name": "ordered_at",
+          "type": "time",
+          "type_params": {
+            "time_granularity": "day",
+            "validity_params": null
+          }
+        }
+      ],
+      "entities": [
+        {
+          "config": {
+            "meta": {}
+          },
+          "description": null,
+          "expr": "id",
+          "label": null,
+          "name": "order",
+          "role": null,
+          "type": "primary"
+        }
+      ],
+      "fqn": [
+        "metricflow_probe",
+        "orders"
+      ],
+      "group": null,
+      "label": null,
+      "measures": [
+        {
+          "agg": "sum",
+          "agg_params": null,
+          "agg_time_dimension": null,
+          "config": {
+            "meta": {}
+          },
+          "create_metric": false,
+          "description": null,
+          "expr": "amount",
+          "label": null,
+          "name": "total_amount",
+          "non_additive_dimension": null
+        }
+      ],
+      "metadata": null,
       "model": "ref('orders')",
-      "filters": [
-        {"field": "status", "operator": "=", "value": "'completed'"}
-      ]
+      "name": "orders",
+      "node_relation": {
+        "alias": "orders",
+        "schema_name": "analytics",
+        "database": "db",
+        "relation_name": "\"db\".\"analytics\".\"orders\""
+      },
+      "original_file_path": "models/legacy_spec.yml",
+      "package_name": "project",
+      "path": "legacy_spec.yml",
+      "primary_entity": null,
+      "refs": [
+        {
+          "name": "orders",
+          "package": null,
+          "version": null
+        }
+      ],
+      "resource_type": "semantic_model",
+      "unique_id": "semantic_model.project.orders",
+      "unrendered_config": {}
     }
   }
 }

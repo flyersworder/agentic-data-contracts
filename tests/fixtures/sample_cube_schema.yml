@@ -4,7 +4,7 @@ cubes:
     description: "One row per order, not per shipped item."
     measures:
       - name: total_revenue
-        sql: "SUM(amount)"
+        sql: amount
         type: sum
         description: "Total revenue from all orders"
     dimensions:

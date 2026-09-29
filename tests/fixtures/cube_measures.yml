@@ -1,0 +1,82 @@
+# Cube's documented measure conventions (cube.dev data-modeling reference):
+# `sql` is the per-row expression, `type` is the aggregation, `filters` are
+# conditions, and `{CUBE}` / `{member}` are Cube's own references.
+cubes:
+  - name: orders
+    sql_table: main.orders
+    dimensions:
+      - {name: status, sql: status, type: string}
+      - {name: is_large, sql: "{CUBE}.amount > 100", type: boolean}
+      - {name: region, sql: "{customers}.region", type: string}
+      - name: size_band
+        type: string
+        case:
+          when:
+            - {sql: "{CUBE}.amount > 100", label: large}
+          else: {label: small}
+    measures:
+      - {name: count, type: count}
+      - {name: counted_ids, sql: id, type: count}
+      - {name: revenue, sql: amount, type: sum}
+      - {name: revenue_qualified, sql: "{CUBE}.amount", type: sum}
+      - {name: revenue_legacy_syntax, sql: "${CUBE}.amount", type: sum}
+      - {name: customers_ordering, sql: customer_id, type: count_distinct}
+      - {name: average_order, sql: amount, type: avg}
+      - {name: largest_order, sql: amount, type: max}
+      - {name: smallest_order, sql: amount, type: min}
+      - {name: margin, sql: "SUM(amount) - SUM(cost)", type: number}
+      - name: completed_count
+        type: count
+        filters:
+          - sql: "{CUBE}.status = 'completed'"
+      - name: large_completed_revenue
+        sql: amount
+        type: sum
+        filters:
+          - sql: "{CUBE}.status = 'completed'"
+          - sql: "{is_large}"
+      - name: completed_status_revenue
+        sql: amount
+        type: sum
+        filters:
+          - sql: "{CUBE.status} = 'completed'"
+      # Untranslatable: each needs a join, a window, other measures or
+      # dialect-specific SQL.
+      - name: conversion
+        sql: "1.0 * {completed_count} / {count}"
+        type: number
+      - {name: approx_customers, sql: customer_id, type: count_distinct_approx}
+      - name: rolling_revenue
+        sql: amount
+        type: sum
+        rolling_window: {trailing: 7 day}
+      - name: eu_revenue
+        sql: amount
+        type: sum
+        filters:
+          - sql: "{region} = 'EU'"
+      - name: filtered_margin
+        sql: "SUM(amount) - SUM(cost)"
+        type: number
+        filters:
+          - sql: "{CUBE}.status = 'completed'"
+      - {name: running, sql: amount, type: running_total}
+      - {name: untyped, sql: "SUM(amount)"}
+      - name: filter_without_sql
+        sql: amount
+        type: sum
+        filters:
+          - {}
+      - name: by_band
+        sql: amount
+        type: sum
+        filters:
+          - sql: "{size_band} = 'large'"
+      - name: multi_stage_revenue
+        sql: amount
+        type: sum
+        multi_stage: true
+        time_shift:
+          - {interval: 1 year, type: prior}
+      - {name: blank_sql, sql: "  ", type: sum}
+      - {name: blank_count, sql: "", type: count}

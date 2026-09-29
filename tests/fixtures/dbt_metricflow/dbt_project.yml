@@ -1,0 +1,12 @@
+# Source of tests/fixtures/dbt_metricflow_manifest.json, so the fixture is a
+# manifest dbt actually produced rather than a hand-written approximation.
+# Regenerate after editing (any dbt-core >= 1.12 with dbt-duckdb):
+#   dbt parse --project-dir tests/fixtures/dbt_metricflow \
+#     --profiles-dir tests/fixtures/dbt_metricflow
+#   uv run python scripts/trim_dbt_manifest.py \
+#     tests/fixtures/dbt_metricflow/target/manifest.json \
+#     tests/fixtures/dbt_metricflow_manifest.json
+name: metricflow_probe
+version: "1.0"
+profile: metricflow_probe
+model-paths: ["models"]

@@ -93,6 +93,12 @@ class MetricDefinition:
     decompositions: list[Decomposition] = field(default_factory=list)
     drill_by: list[DrillDimension] = field(default_factory=list)
     sensitivity: list[SensitivityProperty] = field(default_factory=list)
+    # Why a source could not express this metric as one self-contained
+    # ``sql_expression`` (a join, a time grain, a window, dialect-specific
+    # SQL), with ``sql_expression`` then left empty. None means the expression
+    # is the whole metric. Set by the dbt and Cube sources, whose metrics are
+    # assembled from parts; an empty expression with no reason is a bug.
+    untranslated: str | None = None
 
 
 @dataclass
@@ -717,6 +723,8 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
         # pre-0.28 format, so a frozen contract's ``contract_digest`` is stable
         # across the upgrade, and it matches the omit-when-empty convention the
         # tools layer already uses (``_metric_details``).
+        if m.untranslated is not None:
+            data["untranslated"] = m.untranslated
         if m.decompositions:
             decompositions: list[dict[str, Any]] = []
             for d in m.decompositions:

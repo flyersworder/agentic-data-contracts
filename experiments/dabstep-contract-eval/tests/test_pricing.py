@@ -12,6 +12,7 @@ def test_every_model_is_a_pinned_snapshot():
         "claudesonnet5",
         "qwen3.6-27b",
         "qwen3.8-27b",
+        "gpt-6-sol",
     }
 
 
@@ -33,9 +34,15 @@ def test_only_openrouter_models_carry_an_openrouter_endpoint_pin():
     by_route = {}
     for spec in MODELS.values():
         by_route.setdefault(spec.route, []).append(spec.id)
-    assert set(by_route) == {"openrouter", "litellm_anthropic", "litellm_openai"}
+    assert set(by_route) == {
+        "openrouter",
+        "litellm_anthropic",
+        "litellm_openai",
+        "litellm_responses",
+    }
     assert by_route["litellm_anthropic"] == ["claudesonnet5"]
     assert by_route["litellm_openai"] == ["qwen3.6-27b", "qwen3.8-27b"]
+    assert by_route["litellm_responses"] == ["gpt-6-sol"]
     assert len(by_route["openrouter"]) == 4
 
 

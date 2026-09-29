@@ -67,7 +67,9 @@ class ModelSpec:
     #: not merely a different base URL; `"litellm_openai"` is that same gateway's
     #: OpenAI-compatible route, which IS the same wire protocol as
     #: `"openrouter"` but reached through a different provider and with none of
-    #: OpenRouter's endpoint-pinning vocabulary available. Defaulted so the four
+    #: OpenRouter's endpoint-pinning vocabulary available; `"litellm_responses"`
+    #: is the gateway's OpenAI Responses API, for a model that cannot combine
+    #: tools and reasoning on chat completions. Defaulted so the four
     #: OpenRouter specs above read exactly as they did before this field
     #: existed.
     route: str = "openrouter"
@@ -295,6 +297,34 @@ MODELS: dict[str, ModelSpec] = {
             supports_temperature=True,
             role="open_weights_self_hosted",
             route="litellm_openai",
+        ),
+        # GPT-6 sol, served from Azure behind the same gateway, and the one
+        # model on a FOURTH route: the Responses API. Measured 2026-09-29,
+        # Azure rejects function tools combined with `reasoning_effort` on
+        # `/v1/chat/completions` ("use /v1/responses or set reasoning_effort
+        # to 'none'"), and this harness needs both. On `/v1/responses` the
+        # pair works, with reasoning tokens and a reasoning summary reported.
+        # See `dce.agent._litellm_responses_agent`.
+        #
+        # Prices are the gateway's own metering from `/model/info` the same
+        # day: $2.00 / $10.00 per MTok, $0.20 cache read.
+        #
+        # `supports_temperature=False`: HTTP 400 on `temperature=0` ("Only the
+        # default (1) value is supported"), and the Responses API takes no
+        # `seed`. Like `claudesonnet5`, this model has neither determinism
+        # control, so its repeats measure run-to-run variation at the model's
+        # own sampling. The gateway alias is the only pin, as for the other
+        # gateway models.
+        ModelSpec(
+            "gpt-6-sol",
+            provider_tag="azure/gpt-6-sol",
+            quantization="unknown",
+            price_in=2.00,
+            price_out=10.00,
+            price_cached=0.20,
+            supports_temperature=False,
+            role="frontier_panel",
+            route="litellm_responses",
         ),
     )
 }

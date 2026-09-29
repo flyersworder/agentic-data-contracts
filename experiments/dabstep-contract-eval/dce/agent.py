@@ -1309,6 +1309,85 @@ def _litellm_openai_agent(*, model: str, system_prompt: str, tools: list, retrie
     )
 
 
+#: The model whose pydantic-ai profile the Responses route borrows.
+#:
+#: The eval's pinned pydantic-ai predates `gpt-6-sol` and infers a profile for
+#: the name with NO reasoning support, which would drop
+#: `openai_reasoning_effort` and mishandle the encrypted reasoning carried
+#: between turns -- silently, since the request still succeeds. GPT-5.6 is the
+#: nearest family the pinned version knows, and a live two-turn tool run with
+#: its profile kept reasoning tokens, a reasoning summary and the encrypted
+#: reasoning across turns (2026-09-29). Upgrading pydantic-ai instead would
+#: move the lock this experiment pins.
+RESPONSES_PROFILE_MODEL: str = "gpt-5.6-sol"
+
+
+def _litellm_responses_agent(
+    *, model: str, system_prompt: str, tools: list, retries: int
+):
+    """Build the agent for a `route="litellm_responses"` model.
+
+    A FOURTH ROUTE, forced by the provider rather than chosen. `gpt-6-sol` on
+    Azure rejects function tools combined with `reasoning_effort` on
+    `/v1/chat/completions`; this harness needs both, and `/v1/responses`
+    accepts them. So it runs on `OpenAIResponsesModel` through the same gateway
+    and credentials as the other two gateway routes.
+
+    What goes out, each verified against the live gateway:
+
+    * `openai_reasoning_effort=REASONING_EFFORT`, the same "medium" as the
+      graded models. The Responses API takes it natively; on chat completions
+      the gateway rejected it without `allowed_openai_params`.
+    * `openai_reasoning_summary="detailed"`, so traces keep reasoning text and
+      not only an encrypted blob.
+    * `openai_store=False`: nothing is stored on Azure, and the encrypted
+      reasoning is replayed in the request history instead.
+    * `cache: {"no-cache": true}` in `extra_body`. The gateway replays
+      identical requests from its own response cache, so a repeat's first turn
+      could otherwise be an earlier repeat's response rather than a new sample.
+
+    Not sent: `temperature` (only 1 is accepted) and `seed` (no such field in
+    the Responses API). The shared controls -- `retries`, `max_tokens`,
+    `timeout` -- are held identical to every other route.
+    """
+    from httpx2 import AsyncClient
+    from pydantic_ai import Agent
+    from pydantic_ai.models.openai import (
+        OpenAIResponsesModel,
+        OpenAIResponsesModelSettings,
+    )
+    from pydantic_ai.profiles.openai import openai_model_profile
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    base_url = os.environ["LITELLM_BASE_URL"]
+    api_key = os.environ["LITELLM_MASTER_KEY"]
+
+    return Agent(
+        OpenAIResponsesModel(
+            model,
+            provider=OpenAIProvider(
+                base_url=f"{base_url.rstrip('/')}/v1",
+                api_key=api_key,
+                # Same CA setup as the other gateway routes; see README.
+                http_client=AsyncClient(timeout=300),
+            ),
+            profile=openai_model_profile(RESPONSES_PROFILE_MODEL),
+        ),
+        system_prompt=system_prompt,
+        tools=tools,
+        # Identical to every other route -- a confound control.
+        retries=retries,
+        model_settings=OpenAIResponsesModelSettings(
+            timeout=300,
+            max_tokens=MAX_OUTPUT_TOKENS_PER_REQUEST,
+            openai_reasoning_effort=REASONING_EFFORT,
+            openai_reasoning_summary="detailed",
+            openai_store=False,
+            extra_body={"cache": {"no-cache": True}},
+        ),
+    )
+
+
 def _default_agent_factory(
     *, model: str, system_prompt: str, tools: list, retries: int
 ):
@@ -1324,6 +1403,10 @@ def _default_agent_factory(
         )
     if spec.route == "litellm_openai":
         return _litellm_openai_agent(
+            model=model, system_prompt=system_prompt, tools=tools, retries=retries
+        )
+    if spec.route == "litellm_responses":
+        return _litellm_responses_agent(
             model=model, system_prompt=system_prompt, tools=tools, retries=retries
         )
     return Agent(

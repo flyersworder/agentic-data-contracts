@@ -262,9 +262,10 @@ same 24,177 characters of prose that lift glm by 9 points and deepseek by 20
 lift Sonnet 5 by less than one; the contract carrying the same knowledge lifts
 it by 45.5. This is the sharpest instance in any run of the delivery result:
 possession of the rule is identical in the two arms and the outcome differs by
-a factor of three. The behavioural check below agrees — Sonnet 5's
-`manual_prompt` writes all six of the contract's load-bearing clauses on 4% of
-the tasks that need them, its contract arm on 55%.
+a factor of three. The behavioural check below does not sharpen this: Sonnet
+5's `manual_prompt` writes all six of the contract's load-bearing clauses on
+45% of the tasks that need them (`schema_only` 25%, contract 75%), so the prose
+moves the SQL further than it moves the score.
 
 ## The contract's advantage does not shrink monotonically with capability
 
@@ -454,9 +455,8 @@ what the contract carries is almost fully recovered. The corresponding
 behavioural measure agrees: sol's contract arm writes all six of the macro's
 clauses 98% of the time (see below). Run D puts a fourth point on the curve,
 between the flash models and sol: 26.1 pp. Ordered by bare-schema accuracy the
-gap is monotone across all four — 39.2, 37.3, 26.1, 5.1 — while the clause
-measure is 55% on Sonnet 5, between glm's 39% and sol's 98% but below
-deepseek's 65%: the two measures agree in direction, not in order.
+gap is monotone across all four — 39.2, 37.3, 26.1, 5.1 — and so, with a tie,
+is the clause measure: 47%, 75%, 75% and 98%.
 
 **Where reasoning is needed on top of the semantics, capability helps less —
 and run D complicates the picture.** The `derived` bucket moves 45.9% → 46.5%
@@ -621,65 +621,101 @@ asks a prior question: do the contract's clauses appear in the query at all?
 Six detectors, one per load-bearing clause of the compiled macro — the
 NULL-wildcard disjunct, the empty-list wildcard, the capture-delay band
 mapping, a per-merchant monthly aggregate, the natural-month reconstruction,
-and fraud measured on `has_fraudulent_dispute`. They are deliberately
-permissive: the question is whether the agent expressed the idea, so a detector
-demanding the contract's exact phrasing would measure copying rather than use.
-The comparison is restricted to the families that join payments to fees, so
-**every row compared needs all six**.
+and fraud weighted by euro volume. They are deliberately permissive: the
+question is whether the agent expressed the idea, so a detector demanding the
+contract's exact phrasing would measure copying rather than use. Each clause
+must be expressed within one submitted statement. The comparison is restricted
+to the families that join payments to fees, so **every row compared needs all
+six**.
 
 | | glm (97 tasks) | | ds-flash (69 tasks) | | sonnet5 (97 tasks) | | sol (97 tasks) | |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | | mean /6 | all 6 | mean /6 | all 6 | mean /6 | all 6 | mean /6 | all 6 |
-| schema_only | 2.92 | 7% | 3.07 | 4% | 3.15 | 3% | 3.61 | 8% |
-| contract_hollow | 3.86 | 14% | 3.17 | 4% | 3.34 | 4% | 3.84 | 8% |
-| manual_prompt | 3.41 | 3% | 3.48 | 9% | 3.41 | 4% | 3.55 | 4% |
-| **contract** | **5.05** | **39%** | **5.36** | **65%** | **4.96** | **55%** | **5.94** | **98%** |
+| schema_only | 2.96 | 0% | 3.58 | 7% | 4.57 | 25% | 4.87 | 36% |
+| contract_hollow | 3.93 | 7% | 3.86 | 7% | 4.70 | 37% | 4.86 | 33% |
+| manual_prompt | 4.47 | 30% | 4.93 | 38% | 4.99 | 45% | 5.19 | 52% |
+| **contract** | **5.25** | **47%** | **5.54** | **75%** | **5.43** | **75%** | **5.94** | **98%** |
 
-`contract` vs `manual_prompt`, Fisher exact on wrote-all-six: **p = 2×10⁻¹⁰**
-(glm), **3×10⁻¹²** (ds-flash), **9×10⁻¹⁶** (Sonnet 5), **2×10⁻⁴⁷** (sol);
-against `schema_only`, p = 1×10⁻⁷, 7×10⁻¹⁵, 1×10⁻¹⁶ and 1×10⁻⁴².
+`contract` vs `manual_prompt`, Fisher exact on wrote-all-six: **p = 0.018**
+(glm), **1×10⁻⁵** (ds-flash), **3×10⁻⁵** (Sonnet 5), **4×10⁻¹⁵** (sol);
+against `schema_only`, p = 2×10⁻¹⁷, 5×10⁻¹⁷, 2×10⁻¹² and 2×10⁻²².
 
-**This is the delivery result made behavioural rather than inferred, and it
-holds on every model.** `manual_prompt` is handed the same knowledge, as
-prose, in its system prompt. It writes all six clauses 3%, 9%, 4% and 4% of
-the time; the contract arm writes them 39%, 65%, 55% and **98%**. The
-knowledge is possessed in both arms and expressed in only one, which is what
-"delivery matters as much as possession" has until now been asserting from
-accuracy alone.
+**Correction (2026-09-29).** An earlier version of this table put
+`manual_prompt` at 3%, 9%, 4% and 4% and the contract arm at 39%, 65%, 55% and
+98%, and argued from it that prose never reaches the SQL. Two of the six
+detectors were wrong. `natural_month` and `monthly_aggregate` recognised only
+the contract's own spelling (`make_date`, `day_of_year - 1`,
+`date_trunc ... GROUP BY`), so an agent that scoped a query to October as
+`day_of_year BETWEEN 274 AND 304` and summed the merchant's volume there read
+as never having had the idea. They now also accept a `day_of_year` range that
+is exactly one 2023 calendar month. `fraud_volume` matched any mention of
+`has_fraudulent_dispute`, so a fraud rate counted in transactions — the wrong
+rule — read as the right one. It now requires the share to be weighted by
+`eur_amount`. The month error hid nearly the whole effect: in the three
+non-contract arms the two month clauses rose from 7–32% to 41–95%, while
+the fraud fix lowered `schema_only` and `contract_hollow` (to 2–74%) and left
+`manual_prompt` and `contract` unchanged. The first table is withdrawn. The
+arXiv v1 paper quotes it (intro and `tab:clauses`), and needs revising.
 
-Note what does *not* move: `manual_prompt` writes no more of the contract's
-clauses on a frontier model than on a weak one (3%, 9%, 4%, 4%), while the
-contract arm reaches 55–98% on the two strongest. Capability does not, on its own, make a model extract
-structure from prose. It makes a model much better at *using* structure it is
-handed — which is the same asymmetry the derivation-gap collapse shows.
+**The delivery result survives behaviourally, much reduced.** `manual_prompt`
+is handed the same knowledge, as prose, in its system prompt. It writes all
+six clauses 30%, 38%, 45% and 52% of the time; the contract arm writes them
+47%, 75%, 75% and **98%**. The contract arm leads on every model, but on glm
+the margin is 17 points and p = 0.018, not the order-of-magnitude gap the
+first detectors reported.
+
+**Capability does move it.** The earlier claim that `manual_prompt` writes no
+more clauses on a frontier model than on a weak one is reversed: it rises
+from 30% on glm to 52% on sol, and `schema_only`, which has no manual at all,
+rises from 0% to 36%. A stronger model extracts more of the structure from
+prose, and infers some of it from the schema and the task. The contract's
+margin over prose is 17 points on glm, 37 on ds-flash, 30 on Sonnet 5 and 46
+on sol, where the contract arm is at ceiling: capability raises both arms
+rather than closing the gap.
+
+Most of the remaining gap is one clause. Per clause, `manual_prompt` against
+`contract`:
+
+| clause | glm | ds-flash | sonnet5 | sol |
+|---|---:|---:|---:|---:|
+| NULL wildcard | 90 / 98 | 91 / 97 | 92 / 93 | 96 / 100 |
+| empty-list wildcard | 74 / 98 | 72 / 97 | 77 / 93 | 85 / 100 |
+| capture-delay band | **57 / 93** | **58 / 91** | **58 / 88** | **57 / 100** |
+| monthly aggregate | 67 / 49 | 91 / 83 | 91 / 82 | 94 / 98 |
+| natural month | 68 / 90 | 88 / 94 | 89 / 95 | 94 / 98 |
+| fraud by volume | 92 / 97 | 91 / 91 | 93 / 93 | 94 / 98 |
+
+The capture-delay band mapping sits at 57–58% for the prose arm on all four
+models, capability notwithstanding, against 88–100% for the contract. The
+empty-list wildcard is the other consistent gap. The month and fraud clauses,
+which the first detectors credited to the contract alone, are expressed
+about as often from prose.
 
 **What it does not measure.** Clause presence says nothing about whether an
 attempt succeeds. Within any arm, attempts that got the task right and
 attempts that got it wrong write the same clauses — on all four models, every
-Fisher p ≥ 0.14 (`--within` prints this). `contract_hollow` makes the point
-concretely: on glm it writes more clauses than `manual_prompt` (14% vs 3%) and
-still scores at the bare-schema floor. The measure captures whether the
-contract's vocabulary reaches the query, not whether the query is any good.
+Fisher p ≥ 0.077 (`--within` prints this). Sonnet 5 makes the point
+concretely: its `manual_prompt` writes all six on 45% of these tasks against
+`schema_only`'s 25%, yet scores no better on the hard split (79 against 76 of
+332). The measure captures whether the contract's vocabulary reaches the
+query, not whether the query is any good.
 
 **A confound worth recording, because the uncontrolled version is seductive.**
 Pooling across families, contract-arm attempts that wrote the NULL-wildcard
 clause were correct 90% of the time against 23% for those that did not — a
-+67 pp effect, with similar gaps for four other clauses. It is an artifact.
++67 pp effect, with similar gaps for four other clauses (measured with the
+first detectors; the NULL-wildcard detector is unchanged). It is an artifact.
 Different families require different clauses, so "wrote the clause" partly
 encodes "drew an easier family". Restricting to a single required-clause set,
 as the table above does, removes the confound and the entire within-arm effect
 disappears. Only the between-arm comparison holds tasks constant.
-
-One arm-level figure does not replicate and should not be leaned on: glm's
-`contract_hollow` writes more clauses than its `manual_prompt`, and ds-flash's
-does not.
 
 ### No static property of the query predicts derivation correctness — but a behavioural one does
 
 Two independent text instruments now read agents' SQL, and **both are null
 inside the `contract` arm**. `analysis/clauses.py --within` asks whether the
 contract's clauses are present: correct and incorrect attempts write the same
-ones, every Fisher p ≥ 0.14. A second detector, built afterwards, asks the
+ones, every Fisher p ≥ 0.46. A second detector, built afterwards, asks the
 opposite question — is a *specific wrong construction* present? Its four
 patterns (a band column compared to a string literal, a `capture_delay` band
 pasted as a literal, the natural month as a hand-computed `day_of_year BETWEEN`
@@ -1618,7 +1654,7 @@ group. That rule needs SQL content to separate an arm's right attempts from its
 wrong ones — and [the within-arm null](#does-the-contracts-vocabulary-reach-the-sql-a-behavioural-check)
 is exactly the measurement that it does not, on tasks holding the required
 clause set constant: correct and incorrect attempts write the same clauses, at
-`p` between 0.14 and 1 on every arm and model. The contract arm sharpens it
+`p` between 0.077 and 1 on every arm and model. The contract arm sharpens it
 further — on sol it writes all six required clauses on **98%** of those tasks
 and is still wrong on 22.9% of its rows overall, so method uniformity is near
 total while a quarter of the answers are wrong. A minority-of-method rule has

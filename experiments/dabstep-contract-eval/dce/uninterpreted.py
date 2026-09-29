@@ -19,9 +19,11 @@ what it leaves open. This arm keeps the delivery and removes the resolution:
 WHAT IS REMOVED, EXACTLY.
   1. Every `INTERPRETATION:` sentence, from the marker to the end of its
      metric description. The manual's own words before it stay.
-  2. The empty-list wildcard in prose: "Empty or null means all" in the
-     list-typed `fees` column descriptions becomes the manual's "Null means
-     all".
+  2. The wildcard sentence of the three list-typed `fees` column
+     descriptions ("Empty or null means all ..."), dropped whole. The manual
+     states its null rule once, in its Notes, and never per column; the
+     contract keeps that statement where the manual has it, in the fees
+     domain text and in `fee_rule_matches_transaction`'s description.
   3. The SQL of `fee_rule_matches_transaction`, emptied as `dce.hollow`
      empties every metric's, and the fees domain's sentence saying that
      metric "states this predicate as SQL" reworded to match. Its description
@@ -38,6 +40,16 @@ the empty list one way or the other, so there is no neutral version to keep.
 Emptying it leaves the agent where `manual_prompt` stands -- the manual's rule
 in words, the data to work out how it is encoded -- while keeping every other
 thing the contract delivers.
+
+WHY 2 DROPS THE SENTENCE RATHER THAN REWORDING IT. The second version
+(commit 7785733) reworded it to "Null means all ...", the manual's rule in
+the manual's sense. Its first run showed why that is not neutral either:
+`describe_table` puts the sentence beside the data, three times, and
+gpt-6-sol looked at the list columns on 85 of 97 hard fee tasks, saw the
+empty lists and concluded that no rule applies on 83 -- against 9 for
+`manual_prompt`, which reads the same rule once, in the manual's Notes. The
+arm would have measured where the rule is repeated, not whether it is
+resolved.
 
 WHAT IS KEPT, AND WHY. The two band tie-breaks lose their sentences but keep
 their SQL: a CASE must return one band for a boundary value, so there is no
@@ -68,6 +80,7 @@ _STATES_AS_SQL = re.compile(
     r"(`fee_rule_matches_transaction` )states this predicate\s+as SQL"
 )
 _LIST_FIELDS = ("aci", "account_type", "merchant_category_code")
+_WILDCARD_SENTENCE = re.compile(r"\s*Empty or null means all [^.]*\.")
 
 
 def uninterpret_contract(raw: dict[str, Any]) -> dict[str, Any]:
@@ -92,8 +105,8 @@ def uninterpret_semantic(raw: dict[str, Any]) -> dict[str, Any]:
             continue
         for column in table.get("columns", []):
             if column.get("name") in _LIST_FIELDS and "description" in column:
-                column["description"] = column["description"].replace(
-                    "Empty or null means", "Null means"
+                column["description"] = _WILDCARD_SENTENCE.sub(
+                    "", column["description"]
                 )
     return raw
 

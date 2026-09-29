@@ -316,7 +316,7 @@ tables:
     type: VARCHAR[]
     description: List of account types the rule applies to (R Enterprise-Retail, D
       Enterprise-Digital, H Enterprise-Hospitality, F Platform-Franchise, S Platform-SaaS,
-      O Other). Null means all account types.
+      O Other).
   - name: capture_delay
     type: VARCHAR
     description: 'Days allowed between authorization and settlement: ''<3'' (before
@@ -337,7 +337,7 @@ tables:
   - name: merchant_category_code
     type: BIGINT[]
     description: List of merchant category codes the rule covers (manual 3), e.g.
-      [8062, 8011, 8021]. Null means all MCCs.
+      [8062, 8011, 8021].
   - name: is_credit
     type: BOOLEAN
     description: True if the rule applies for credit transactions; credit is typically
@@ -345,7 +345,7 @@ tables:
   - name: aci
     type: VARCHAR[]
     description: List of Authorization Characteristics Indicator values the rule covers
-      (manual 4). Null means all ACIs.
+      (manual 4).
   - name: fixed_amount
     type: DOUBLE
     description: Fixed amount of the fee in euros per transaction, for the given rule.

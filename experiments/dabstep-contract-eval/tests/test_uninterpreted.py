@@ -75,6 +75,26 @@ def test_the_empty_list_wildcard_is_gone_from_code_and_prose():
         assert "Empty" not in column.get("description", ""), column["name"]
 
 
+def test_list_columns_state_no_wildcard_rule_at_all():
+    """Not reworded to "Null means all": the manual never states its rule per
+    column, and repeating it beside the data is itself a treatment."""
+    real_c, real_s = _load(REAL)
+    _, us = _load(UNINTERPRETED)
+    real_fees = {
+        c["name"]: c
+        for t in real_s["tables"]
+        if t["table"] == "fees"
+        for c in t["columns"]
+    }
+    fees = next(t for t in us["tables"] if t["table"] == "fees")
+    for column in fees["columns"]:
+        if column["name"] not in LIST_FIELDS:
+            continue
+        assert "means all" not in column["description"], column["name"]
+        real = real_fees[column["name"]]["description"]
+        assert real.startswith(column["description"].rstrip(".")), column["name"]
+
+
 def test_the_matching_predicate_keeps_its_words_but_loses_its_sql():
     """Any SQL for this predicate must decide the empty list, so none is
     given; the manual's own statement of the rule stays."""

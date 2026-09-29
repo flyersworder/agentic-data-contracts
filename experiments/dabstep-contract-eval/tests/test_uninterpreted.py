@@ -75,17 +75,23 @@ def test_the_empty_list_wildcard_is_gone_from_code_and_prose():
         assert "Empty" not in column.get("description", ""), column["name"]
 
 
-def test_list_fields_keep_the_manuals_null_wildcard():
-    """Reverted to the manual's reading, not deleted: a rule with a NULL list
-    still applies to everything, as the manual says."""
+def test_the_matching_predicate_keeps_its_words_but_loses_its_sql():
+    """Any SQL for this predicate must decide the empty list, so none is
+    given; the manual's own statement of the rule stays."""
     _, us = _load(UNINTERPRETED)
-    sql = next(
-        m["sql_expression"]
-        for m in us["metrics"]
-        if m["name"] == "fee_rule_matches_transaction"
+    metric = next(
+        m for m in us["metrics"] if m["name"] == "fee_rule_matches_transaction"
     )
-    for field in LIST_FIELDS:
-        assert f"f.{field} IS NULL OR list_contains(f.{field}," in " ".join(sql.split())
+    assert metric["sql_expression"] == ""
+    assert "applies to all possible values of that field" in metric["description"]
+
+
+def test_the_contract_no_longer_claims_that_sql_exists():
+    uc, _ = _load(UNINTERPRETED)
+    fees = next(d for d in uc["semantic"]["domains"] if d["name"] == "fees")
+    text = " ".join(fees["description"].split())
+    assert "states this predicate as SQL" not in text
+    assert "`fee_rule_matches_transaction` names this predicate" in text
 
 
 def test_nothing_else_differs():
@@ -95,9 +101,12 @@ def test_nothing_else_differs():
     uc, us = _load(UNINTERPRETED)
 
     assert uc["name"] == f"{real_c['name']}-uninterpreted"
-    expected_c = copy.deepcopy(real_c)
-    expected_c["name"] = uc["name"]
-    assert uc == expected_c
+    assert uc == uninterpreted.uninterpret_contract(copy.deepcopy(real_c))
+    for domain, real_domain in zip(
+        uc["semantic"]["domains"], real_c["semantic"]["domains"], strict=True
+    ):
+        if domain["name"] != "fees":
+            assert domain == real_domain, domain["name"]
 
     expected_s = uninterpreted.uninterpret_semantic(copy.deepcopy(real_s))
     assert us == expected_s

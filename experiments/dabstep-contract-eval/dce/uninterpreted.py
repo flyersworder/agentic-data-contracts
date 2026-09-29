@@ -19,10 +19,25 @@ what it leaves open. This arm keeps the delivery and removes the resolution:
 WHAT IS REMOVED, EXACTLY.
   1. Every `INTERPRETATION:` sentence, from the marker to the end of its
      metric description. The manual's own words before it stay.
-  2. The empty-list wildcard, in code and prose: the `OR len(f.<field>) = 0`
-     disjuncts, and "Empty or null means all" in the list-typed `fees`
-     column descriptions, both reverted to the manual's literal "null means
-     all" -- not deleted, so a NULL list still matches everything.
+  2. The empty-list wildcard in prose: "Empty or null means all" in the
+     list-typed `fees` column descriptions becomes the manual's "Null means
+     all".
+  3. The SQL of `fee_rule_matches_transaction`, emptied as `dce.hollow`
+     empties every metric's, and the fees domain's sentence saying that
+     metric "states this predicate as SQL" reworded to match. Its description
+     -- the manual's own statement of the rule -- stays.
+
+WHY 3 EMPTIES THE SQL RATHER THAN REWRITING IT. The first version of this arm
+(commit fb2579c) reverted the SQL to the manual's literal reading, dropping
+only the `OR len(f.<field>) = 0` disjuncts. That is not an unresolved
+contract; it is a contract asserting a wrong rule. The list-typed fields are
+never NULL in the annexed data, so the literal predicate matches almost no
+rule, and gpt-6-sol trusted it: 1 of 37 hard fee tasks right, against 15 for
+`schema_only`, which is told nothing. Any SQL for this predicate must decide
+the empty list one way or the other, so there is no neutral version to keep.
+Emptying it leaves the agent where `manual_prompt` stands -- the manual's rule
+in words, the data to work out how it is encoded -- while keeping every other
+thing the contract delivers.
 
 WHAT IS KEPT, AND WHY. The two band tie-breaks lose their sentences but keep
 their SQL: a CASE must return one band for a boundary value, so there is no
@@ -47,12 +62,21 @@ SOURCE_DIR = Path(__file__).parent.parent / "contract"
 UNINTERPRETED_DIR = Path(__file__).parent.parent / "contract_uninterpreted"
 
 MARKER = "INTERPRETATION:"
-_EMPTY_LIST_WILDCARD = re.compile(r"\s+OR\s+len\(f\.\w+\)\s*=\s*0")
+#: The one metric whose SQL cannot be written without deciding the empty list.
+UNRESOLVABLE_METRIC = "fee_rule_matches_transaction"
+_STATES_AS_SQL = re.compile(
+    r"(`fee_rule_matches_transaction` )states this predicate\s+as SQL"
+)
 _LIST_FIELDS = ("aci", "account_type", "merchant_category_code")
 
 
 def uninterpret_contract(raw: dict[str, Any]) -> dict[str, Any]:
     raw["name"] = f"{raw['name']}-uninterpreted"
+    for domain in raw.get("semantic", {}).get("domains", []):
+        if "description" in domain:
+            domain["description"] = _STATES_AS_SQL.sub(
+                r"\1names this predicate", domain["description"]
+            )
     return raw
 
 
@@ -61,10 +85,8 @@ def uninterpret_semantic(raw: dict[str, Any]) -> dict[str, Any]:
         desc = metric.get("description", "")
         if MARKER in desc:
             metric["description"] = desc[: desc.index(MARKER)].rstrip() + "\n"
-        if "sql_expression" in metric:
-            metric["sql_expression"] = _EMPTY_LIST_WILDCARD.sub(
-                "", metric["sql_expression"]
-            )
+        if metric.get("name") == UNRESOLVABLE_METRIC:
+            metric["sql_expression"] = ""
     for table in raw.get("tables", []):
         if table.get("table") != "fees":
             continue

@@ -39,16 +39,7 @@ metrics:
     hold.
 
     '
-  sql_expression: "(f.card_scheme IS NULL OR f.card_scheme = p.card_scheme) AND (f.is_credit\
-    \ IS NULL OR f.is_credit = p.is_credit) AND (f.aci IS NULL OR list_contains(f.aci,\
-    \ p.aci)) AND (f.intracountry IS NULL\n     OR (f.intracountry = 1) = (p.issuing_country\
-    \ = p.acquirer_country))\nAND (f.account_type IS NULL\n     OR list_contains(f.account_type,\
-    \ m.account_type))\nAND (f.merchant_category_code IS NULL\n     OR list_contains(f.merchant_category_code,\
-    \ m.merchant_category_code))\nAND (f.capture_delay IS NULL\n     OR f.capture_delay\
-    \ = CASE\n          WHEN m.capture_delay IN ('immediate', 'manual') THEN m.capture_delay\n\
-    \          WHEN TRY_CAST(m.capture_delay AS INTEGER) < 3 THEN '<3'\n         \
-    \ WHEN TRY_CAST(m.capture_delay AS INTEGER) BETWEEN 3 AND 5 THEN '3-5'\n     \
-    \     WHEN TRY_CAST(m.capture_delay AS INTEGER) > 5 THEN '>5'\n        END)\n"
+  sql_expression: ''
   source_model: main.fees
   domains:
   - fees

@@ -63,13 +63,13 @@ semantic:
       \ means the rule applies for every ACI. A fee rule therefore matches a transaction\
       \ when *every* non-null field of the rule agrees with the transaction (or with\
       \ its merchant, or with that merchant's month). The metric `fee_rule_matches_transaction`\
-      \ states this predicate as SQL; `fee_rule_matches_merchant_month` states the\
-      \ two fields (monthly_volume, monthly_fraud_level) that depend on the merchant's\
-      \ month rather than on the single transaction.\nMonthly volumes and rates are\
-      \ computed always in natural months (e.g. January, February), starting always\
-      \ on day 1 and ending on the last natural day of the month (28 for February,\
-      \ 30 or 31 otherwise).\nFixed amount and transaction values are given in the\
-      \ same currency, typically euros.\nThe manual states the *format* of `capture_delay`,\
+      \ names this predicate; `fee_rule_matches_merchant_month` states the two fields\
+      \ (monthly_volume, monthly_fraud_level) that depend on the merchant's month\
+      \ rather than on the single transaction.\nMonthly volumes and rates are computed\
+      \ always in natural months (e.g. January, February), starting always on day\
+      \ 1 and ending on the last natural day of the month (28 for February, 30 or\
+      \ 31 otherwise).\nFixed amount and transaction values are given in the same\
+      \ currency, typically euros.\nThe manual states the *format* of `capture_delay`,\
       \ `monthly_volume` and `monthly_fraud_level` bands but never says whether a\
       \ value sitting exactly on a shared band boundary belongs to the lower or the\
       \ upper band; it says only \"between A and B\". That gap is in the source material,\

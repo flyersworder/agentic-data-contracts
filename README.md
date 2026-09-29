@@ -1192,6 +1192,26 @@ Row identity is inferred from the cells themselves, not declared: a non-numeric 
 
 A certified answer of "no rows" — the shape of every data-quality invariant ("no orders without a tenant", "no negative amounts") — is written with `expected`, not `expected_rows: []` (which is rejected as almost certainly a mistake, not a valid assertion): `SELECT COUNT(*) FROM ... WHERE ...` with `expected: 0`.
 
+**`{{ metric:NAME }}`: certifying the metric's own SQL.** A certified example written in plain SQL repeats the metric's logic by hand, so editing the metric changes no certified answer. The metric's `sql_expression` never runs anywhere: it reaches the agent only through `lookup_metric`, and the agent uses it as given. A placeholder makes the example execute the contract's *current* definition instead:
+
+```yaml
+- id: rules-matching-one-payment
+  sql: >
+    SELECT count(*)
+    FROM payments p
+    JOIN merchant_data m ON m.merchant = p.merchant
+    CROSS JOIN fees f
+    WHERE p.psp_reference = 12345
+      AND {{ metric:fee_rule_matches_transaction }}
+  expected: 57
+```
+
+Pass the contract's semantic source to `validate_examples(..., semantic_source=source)`. Each placeholder expands to `(<sql_expression>\n)` before anything else sees the SQL. The parentheses keep a metric's top-level `OR` from binding to the example's `AND`, and the newline keeps a trailing `--` comment in the metric from commenting out the closing parenthesis. The Validator, the EXPLAIN dry-run and `check_example_answers` all get the expanded text, which is recorded as `ExampleResult.sql`, so the metric's SQL is also checked against the contract's table rules. The example binds every table alias the expression reads (`p`, `m`, `f` above). When someone edits the metric, the certified answer moves and the row turns `mismatch`.
+
+Expansion is plain text substitution, applied before any `sql_normalizer`, so it works for dialects sqlglot can parse but cannot emit. Every row is expanded before any is validated. A placeholder that cannot expand faithfully raises `ValueError` naming the row: an unknown metric, an empty `sql_expression`, a placeholder with no `semantic_source`, a placeholder inside a metric's own expression (expansion is a single pass), or any other `{{` in the SQL. `{{` is reserved in example SQL, including inside string literals. **A metric that declares `filters` is refused too**: expanding its `sql_expression` alone would drop the filters and certify a different quantity. Write that metric's SQL out in full in the example instead. **Placeholders are refused for every metric from a `DbtSource` or `CubeSource`**, whether or not it declares filters. Both keep a metric's aggregation (`agg`, `type: sum`) and its filters outside `sql_expression`, and MetricFlow filters are Jinja, not SQL, so the expression on its own is never the whole metric. Placeholders work with `YamlSource` and `OssieSource`, where `sql_expression` is the complete metric SQL the author wrote.
+
+`answers.covered_metrics` lists the metrics referenced by a row that asserted an answer and matched. `answers.uncovered_metrics(source)` lists the rest, i.e. the metrics no certified example tests. A row that references a metric but asserts no answer is validated but never executed, so it does not count as coverage. Coverage counts references, not what the engine ran: a placeholder inside a SQL comment or string literal is still expanded and still counts, so keep placeholders in live SQL.
+
 Its sibling `reconcile_decomposition(...)` applies the same CI-first, contract-relative spirit to a metric's declared arithmetic identity, executing the `decompositions` above against live data to assert the identity still holds within tolerance. Its default `rel_tol=1e-4` assumes the operands are exact — see [operand units and precision](#metric-decomposition-and-drill-dimensions) when one of them is a rounded percentage or carries limited decimals.
 
 `attribute_change(...)` applies a declared convention to measured values —

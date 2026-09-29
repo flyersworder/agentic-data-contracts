@@ -100,13 +100,33 @@ from pydantic_ai import Tool
 
 from agentic_data_contracts.adapters.base import QueryResult
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
-from dce.frozen import load_contract, load_hollow_contract
+from dce.frozen import (
+    load_contract,
+    load_hollow_contract,
+    load_uninterpreted_contract,
+)
 
 ARMS: tuple[str, ...] = (
     "schema_only",
     "manual_prompt",
     "contract",
     "contract_hollow",
+)
+
+#: Arms run on purpose, one model at a time, and never by default. Kept out of
+#: `ARMS` so that a sweep without `--arms`, and every report on the four-arm
+#: ablation, stay exactly what they were.
+#:
+#: `contract_uninterpreted` is the fifth arm the paper's Threats section names:
+#: the contract with its `INTERPRETATION` clauses stripped and the empty-list
+#: wildcard reverted to the manual's reading (`dce.uninterpreted`).
+EXTRA_ARMS: tuple[str, ...] = ("contract_uninterpreted",)
+ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
+
+#: Every arm built through `_governed_tools`, and so carrying a contract, a
+#: session and the governed-tool counters.
+GOVERNED_ARMS: frozenset[str] = frozenset(
+    {"contract", "contract_hollow", "contract_uninterpreted"}
 )
 
 # A harness property, not a contract limit: `semantic.limits.max_rows` is not
@@ -481,12 +501,16 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
-    if arm in ("contract", "contract_hollow"):
+    if arm in GOVERNED_ARMS:
         # IDENTICAL EXCEPT FOR THE CONTRACT OBJECT. The procedural sentence
         # below is the thing `contract_hollow` exists to control for, so it is
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
-        contract = load_contract() if arm == "contract" else load_hollow_contract()
+        contract = {
+            "contract": load_contract,
+            "contract_hollow": load_hollow_contract,
+            "contract_uninterpreted": load_uninterpreted_contract,
+        }[arm]()
         tools, session, adapter = _governed_tools(db_path, contract=contract)
         prompt = (
             f"{BASE_PROMPT}\n\n"
@@ -497,4 +521,4 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         return ArmSetup(prompt, tools, session, adapter)
 
-    raise ValueError(f"unknown arm: {arm!r}; expected one of {ARMS}")
+    raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")

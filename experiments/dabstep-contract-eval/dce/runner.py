@@ -324,7 +324,7 @@ from dce.agent import (
     reasoning_effort_for,
     run_task,
 )
-from dce.arms import ARMS, check_and_restore, make_working_copy
+from dce.arms import ALL_ARMS, ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.grade import active_scorer
@@ -1870,8 +1870,8 @@ def main() -> None:
     args = parser.parse_args()
 
     for arm in args.arms:
-        if arm not in ARMS:
-            raise SystemExit(f"unknown arm: {arm!r}; expected one of {ARMS}")
+        if arm not in ALL_ARMS:
+            raise SystemExit(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
     for model in args.models:
         if model not in MODELS:
             raise SystemExit(f"unpinned or unknown model: {model}")

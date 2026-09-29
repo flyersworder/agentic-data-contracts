@@ -18,6 +18,13 @@ CONTRACT_PATH = Path(__file__).parent.parent / "contract" / "contract.yml"
 #: `CONTRACT_PATH` by `dce.hollow`; see that module for what is removed and why.
 HOLLOW_CONTRACT_PATH = Path(__file__).parent.parent / "contract_hollow" / "contract.yml"
 
+#: Arm C with its own reading of the manual removed -- the control that
+#: separates DELIVERY of what the manual states from RESOLUTION of what it
+#: leaves open. Generated from `CONTRACT_PATH` by `dce.uninterpreted`.
+UNINTERPRETED_CONTRACT_PATH = (
+    Path(__file__).parent.parent / "contract_uninterpreted" / "contract.yml"
+)
+
 
 @lru_cache(maxsize=1)
 def load_contract() -> DataContract:
@@ -29,9 +36,18 @@ def load_hollow_contract() -> DataContract:
     return DataContract.from_yaml(HOLLOW_CONTRACT_PATH)
 
 
+@lru_cache(maxsize=1)
+def load_uninterpreted_contract() -> DataContract:
+    return DataContract.from_yaml(UNINTERPRETED_CONTRACT_PATH)
+
+
 def digest() -> str:
     return contract_digest(load_contract())
 
 
 def hollow_digest() -> str:
     return contract_digest(load_hollow_contract())
+
+
+def uninterpreted_digest() -> str:
+    return contract_digest(load_uninterpreted_contract())

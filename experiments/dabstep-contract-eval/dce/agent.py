@@ -37,7 +37,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dce.arms import build_arm
-from dce.frozen import digest, hollow_digest
+from dce.frozen import digest, hollow_digest, uninterpreted_digest
 from dce.grade import _clean, active_scorer, score
 from dce.pricing import MODELS, cost
 from dce.trace import write_trace
@@ -245,7 +245,11 @@ def arm_digest(arm: str) -> str:
     no contract at all and keep the real digest as a record of which frozen
     experiment they belong to.
     """
-    return hollow_digest() if arm == "contract_hollow" else digest()
+    if arm == "contract_hollow":
+        return hollow_digest()
+    if arm == "contract_uninterpreted":
+        return uninterpreted_digest()
+    return digest()
 
 
 def _tool_call_names(messages: list) -> list[str]:

@@ -2033,3 +2033,13 @@ def test_run_task_still_grades_a_task_whose_gold_is_the_empty_string(
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] in {"correct", "incorrect"}
+
+
+def test_each_governed_arm_is_stamped_with_the_contract_it_loads():
+    from dce.frozen import digest, hollow_digest, uninterpreted_digest
+
+    assert agent.arm_digest("contract") == digest()
+    assert agent.arm_digest("contract_hollow") == hollow_digest()
+    assert agent.arm_digest("contract_uninterpreted") == uninterpreted_digest()
+    assert len({digest(), hollow_digest(), uninterpreted_digest()}) == 3
+    assert agent.arm_digest("schema_only") == digest()

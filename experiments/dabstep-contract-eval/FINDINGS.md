@@ -356,6 +356,92 @@ the bare baseline leads. A template no arm solves is a property
 of the benchmark, not a weakness of any arm — recorded because a per-arm
 reading of that bucket alone would have looked like a contract failure.
 
+## Knowledge or delivery? The one fact the contract adds, measured (gpt-6-sol)
+
+The comparison with `manual_prompt` is meant to hold knowledge fixed and vary
+delivery. On one point it does not. The manual says a null fee field "applies
+to all possible values of that field"; the annexed `fees` data never uses null
+for its list-typed fields (`account_type`, `aci`, `merchant_category_code`) and
+stores "all" as an empty list instead -- 720 of 1,000 rules for `account_type`,
+none of them null. The contract's author took that from the data and built it
+into `fee_rule_matches_transaction`. The contract's six other `INTERPRETATION`
+clauses cannot change an answer: four apply definitions the manual gives, and
+the two band tie-breaks decide boundaries that none of the 60 merchant-months
+in the data sits on.
+
+`manual_resolved` is `manual_prompt` plus `DATA_NOTE` (`dce/arms.py`): that
+fact, once, in words, no SQL. Both arms then know the same things. The plan --
+arm text, k=3, endpoints, how each outcome reads, and that the note is never
+reworded -- was committed in `d5f0e45` before its first run. Each run pairs by
+task with the matching gpt-6-sol panel repeat; the panel ran a day earlier on
+the same deployment, and the harness between the two commits differs only in
+the plumbing for the extra arms.
+
+| arm | r1 | r2 | r3 | mean |
+|---|---:|---:|---:|---:|
+| contract | 325 | 326 | 324 | 81.0% |
+| **manual_resolved** | **304** | **309** | **317** | **77.3%** |
+| manual_prompt | 264 | 258 | 261 | 65.1% |
+| schema_only | 176 | 181 | 178 | 44.5% |
+| contract_hollow | 150 | 155 | 145 | 37.4% |
+
+Official and end-to-end scores are identical for these runs. Over the three
+repeats `contract` leads `manual_prompt` by 192 task-runs; the note alone
+recovers **147 (77%)** and delivery accounts for the remaining **45 (23%)**.
+Both halves hold at the task level, scoring each task 0-3 over the repeats
+and applying a sign test: `manual_resolved` beats `manual_prompt` on 90 tasks
+and loses on 28 (p = 9e-9), and loses to `contract` on 55 and beats it on 16
+(p = 4e-6). Per repeat, the contract's lead is significant in r1 (32 vs 11
+discordant, p = 0.002) and r2 (25 vs 8, p = 0.005) but not r3 (19 vs 12,
+p = 0.28): real, and modest.
+
+Where each half acts (correct of 60 task-runs; the year family has 15):
+
+| family | manual_prompt | manual_resolved | contract |
+|---|---:|---:|---:|
+| avg_fee_account | 1 | 60 | 60 |
+| fee_ids_by_at_aci | 12 | 60 | 60 |
+| avg_fee_account_mcc | 29 | 60 | 60 |
+| total_fees_month | 38 | 40 | 60 |
+| total_fees_day | 52 | 45 | 60 |
+| total_fees_year | 10 | 10 | 15 |
+
+Families that need only the right set of rules reach the contract with the
+fact alone. The total-fee families -- matching per transaction, the monthly
+bands, then the fee formula summed -- do not move with the fact and are where
+the contract's ready-made definitions win. That is the "right time" effect,
+now measured with knowledge held equal, on one model. Whether the split
+depends on capability is the next measurement.
+
+### The subtraction attempts, and what they show instead
+
+The first design removed the reading from the contract rather than adding it
+to the manual (`contract_uninterpreted`, `dce/uninterpreted.py`). Three
+versions each turned out to state a reading of their own, found only after a
+run:
+
+| version | what it did | runs | correct | hard fee | "no rule applies" |
+|---|---|---|---:|---:|---:|
+| v1 `fb2579c` | matching SQL rewritten to null-only | 1 | 116 | 2/97 | 82 |
+| v2 `7785733` | SQL emptied; columns say "Null means all" | 1 | 138 | 3/97 | 83 |
+| v3 `f0d41e6` | column sentences dropped | 2 | 150, 153 | 14, 13/97 | 72, 72 |
+
+For comparison, `manual_prompt` gives 7-9 "no rule applies" answers per
+repeat on the same 97 tasks. v3 still failed because the contract's own
+prose -- "every *non-null* field of the rule agrees" -- states the literal rule
+precisely, and a contract cannot be emptied of a reading its text was written
+around. Adding the fact to a document that never held it leaves nothing
+behind, so the design was replaced rather than revised a fourth time.
+
+The runs are kept as an exploratory result, not as a control: **given the
+manual's rule in the contract's words and no resolution, gpt-6-sol trusts the
+contract over data it can see** -- traces count the empty lists explicitly and
+then reject them -- while `manual_prompt`, reading the same rule once, often
+checks. A contract's authority is also what makes a wrong one costly, which is
+the case for checking a metric's semantics against certified answers:
+`analysis/certify_metrics.py` passes the frozen contract on 40 of 40 fee-ID
+examples, fails v1 on 40 of 40, and refuses v2/v3's empty SQL.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

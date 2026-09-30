@@ -1308,6 +1308,13 @@ def _litellm_openai_agent(*, model: str, system_prompt: str, tools: list, retrie
                 # which also records why this is sent explicitly instead of
                 # being left to the gateway's own pin.
                 "chat_template_kwargs": {"enable_thinking": QWEN_ENABLE_THINKING},
+                # The gateway replays identical requests from its response
+                # cache. At temperature 0 and seed 0 a new run's first request
+                # matches an earlier run's byte for byte, so without this a
+                # "new" sample could be the old one. The Qwen 3.8 panel was
+                # checked and was not affected (no response id shared across
+                # repeats); later runs send it rather than rely on that.
+                "cache": {"no-cache": True},
             },
         ),
     )

@@ -953,6 +953,31 @@ def test_the_fifth_arm_is_compared_only_where_it_ran(tmp_path):
     assert "contract_uninterpreted" not in report(four)
 
 
+def test_manual_resolved_is_compared_with_both_its_neighbours(tmp_path):
+    """`manual_resolved` sits between `manual_prompt` (same delivery, one fact
+    fewer) and `contract` (same fact, delivered as a contract), so a report
+    that has all three pairs it against both."""
+    model = "gpt-6-sol"
+    rows = [
+        _row("t1", "manual_prompt", "incorrect", model=model),
+        _row("t1", "manual_resolved", "correct", model=model),
+        _row("t1", "contract", "correct", model=model),
+        _row("t2", "manual_prompt", "correct", model=model),
+        _row("t2", "manual_resolved", "correct", model=model),
+        _row("t2", "contract", "incorrect", model=model),
+    ]
+    path = tmp_path / "resolved.jsonl"
+    _write(path, rows)
+    lines = report(path).splitlines()
+    for pair in ("manual_prompt vs manual_resolved", "manual_resolved vs contract"):
+        found = [ln for ln in lines if pair in ln]
+        assert found and all("n_paired=2 discordant=1" in ln for ln in found), pair
+
+    alone = tmp_path / "alone.jsonl"
+    _write(alone, [_row("t1", "manual_resolved", "correct", model=model)])
+    assert "manual_prompt vs manual_resolved" not in report(alone)
+
+
 def test_the_fifth_arm_reports_the_governed_tool_counters(tmp_path):
     row = _row("t1", "contract_uninterpreted", "correct", model="gpt-6-sol")
     row.update(inspect_rejections=2, enforcement_blocks=1, retry_prompts=0)

@@ -904,6 +904,10 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
                 lines.append(f"  McNemar {left} vs {ARM_C}: see PRIMARY section above")
                 continue
             lines.extend(_mcnemar_lines(subset, left, ARM_C))
+        # `manual_resolved` is `manual_prompt` plus one fact, so the other
+        # half of its reading is the pair against the arm without it.
+        if {"manual_resolved", ARM_B} <= present:
+            lines.extend(_mcnemar_lines(subset, ARM_B, "manual_resolved"))
 
     return "\n".join(lines)
 

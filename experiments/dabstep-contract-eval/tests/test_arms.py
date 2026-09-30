@@ -11,6 +11,7 @@ import pytest
 from dce.arms import (
     ALL_ARMS,
     ARMS,
+    DATA_NOTE,
     EXTRA_ARMS,
     build_arm,
     check_and_restore,
@@ -54,9 +55,34 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
     """`contract_uninterpreted` is run on purpose, one model at a time. Adding
     it to `ARMS` would silently make every default sweep a five-arm sweep and
     add a fifth arm to every existing report's comparisons."""
-    assert EXTRA_ARMS == ("contract_uninterpreted",)
+    assert EXTRA_ARMS == ("contract_uninterpreted", "manual_resolved")
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
+
+
+def test_manual_resolved_is_the_manual_prompt_plus_the_data_note(db):
+    """The one difference from `manual_prompt` is the fact the contract's
+    author took from the data. Anything else would be a second treatment."""
+    manual = build_arm("manual_prompt", db, DOCS)
+    resolved = build_arm("manual_resolved", db, DOCS)
+    assert resolved.system_prompt == (
+        f"{manual.system_prompt}\n\n## Data note\n\n{DATA_NOTE}"
+    )
+    assert [t.name for t in resolved.tools] == [t.name for t in manual.tools]
+    assert resolved.session is None
+
+
+def test_the_data_note_states_the_fact_and_no_sql():
+    """The fact is what the contract knows and the manual does not. SQL for
+    it is part of what the contract delivers, so the note carries none."""
+    note = " ".join(DATA_NOTE.split())
+    for field in ("account_type", "aci", "merchant_category_code"):
+        assert f"`{field}`" in note
+    assert "never null" in note
+    assert "empty list" in note
+    assert "applies to all values" in note
+    assert "len(" not in note
+    assert "SELECT" not in note.upper()
 
 
 def test_the_fifth_arm_differs_from_the_contract_arm_only_in_its_contract(db):

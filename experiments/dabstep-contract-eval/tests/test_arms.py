@@ -8,7 +8,15 @@ from types import SimpleNamespace
 
 import duckdb
 import pytest
-from dce.arms import ARMS, build_arm, check_and_restore, make_working_copy
+from dce.arms import (
+    ALL_ARMS,
+    ARMS,
+    DATA_NOTE,
+    EXTRA_ARMS,
+    build_arm,
+    check_and_restore,
+    make_working_copy,
+)
 from pydantic_ai import ModelRetry
 
 DOCS = {"manual": "FEE RULE ALPHA: match on card_scheme.", "payments_readme": "cols"}
@@ -41,6 +49,57 @@ def test_three_arms_with_the_spec_names():
         "contract",
         "contract_hollow",
     )
+
+
+def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
+    """`contract_uninterpreted` is run on purpose, one model at a time. Adding
+    it to `ARMS` would silently make every default sweep a five-arm sweep and
+    add a fifth arm to every existing report's comparisons."""
+    assert EXTRA_ARMS == ("contract_uninterpreted", "manual_resolved")
+    assert ALL_ARMS == ARMS + EXTRA_ARMS
+    assert not set(EXTRA_ARMS) & set(ARMS)
+
+
+def test_manual_resolved_is_the_manual_prompt_plus_the_data_note(db):
+    """The one difference from `manual_prompt` is the fact the contract's
+    author took from the data. Anything else would be a second treatment."""
+    manual = build_arm("manual_prompt", db, DOCS)
+    resolved = build_arm("manual_resolved", db, DOCS)
+    assert resolved.system_prompt == (
+        f"{manual.system_prompt}\n\n## Data note\n\n{DATA_NOTE}"
+    )
+    assert [t.name for t in resolved.tools] == [t.name for t in manual.tools]
+    assert resolved.session is None
+
+
+def test_the_data_note_states_the_fact_and_no_sql():
+    """The fact is what the contract knows and the manual does not. SQL for
+    it is part of what the contract delivers, so the note carries none."""
+    note = " ".join(DATA_NOTE.split())
+    for field in ("account_type", "aci", "merchant_category_code"):
+        assert f"`{field}`" in note
+    assert "never null" in note
+    assert "empty list" in note
+    assert "applies to all values" in note
+    assert "len(" not in note
+    assert "SELECT" not in note.upper()
+
+
+def test_the_fifth_arm_differs_from_the_contract_arm_only_in_its_contract(db):
+    """Same tools, same procedural instruction; the prompt differs only where
+    the contract's rendering does."""
+    from dce.frozen import load_contract, load_uninterpreted_contract
+
+    real = build_arm("contract", db, DOCS)
+    fifth = build_arm("contract_uninterpreted", db, DOCS)
+    assert [t.name for t in fifth.tools] == [t.name for t in real.tools]
+    assert fifth.session is not None
+    shared = real.system_prompt.replace(load_contract().to_system_prompt(), "")
+    fifth_shared = fifth.system_prompt.replace(
+        load_uninterpreted_contract().to_system_prompt(), ""
+    )
+    assert shared == fifth_shared
+    assert "INTERPRETATION" not in fifth.system_prompt
 
 
 def test_max_rows_stays_small_enough_not_to_poison_the_context():

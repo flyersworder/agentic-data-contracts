@@ -100,13 +100,53 @@ from pydantic_ai import Tool
 
 from agentic_data_contracts.adapters.base import QueryResult
 from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
-from dce.frozen import load_contract, load_hollow_contract
+from dce.frozen import (
+    load_contract,
+    load_hollow_contract,
+    load_uninterpreted_contract,
+)
 
 ARMS: tuple[str, ...] = (
     "schema_only",
     "manual_prompt",
     "contract",
     "contract_hollow",
+)
+
+#: Arms run on purpose, one model at a time, and never by default. Kept out of
+#: `ARMS` so that a sweep without `--arms`, and every report on the four-arm
+#: ablation, stay exactly what they were.
+#:
+#: `contract_uninterpreted` is the fifth arm the paper's Threats section names:
+#: the contract with its `INTERPRETATION` clauses stripped and the empty-list
+#: wildcard reverted to the manual's reading (`dce.uninterpreted`).
+#:
+#: `manual_resolved` is `manual_prompt` plus `DATA_NOTE`, the one fact the
+#: contract's author took from the data rather than from the manual. It gives
+#: both arms the same knowledge, so what separates it from `contract` is
+#: delivery alone.
+EXTRA_ARMS: tuple[str, ...] = ("contract_uninterpreted", "manual_resolved")
+ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
+
+#: What the contract knows that the manual does not. The manual says a null
+#: field applies to all values; the annexed `fees` data never uses null for its
+#: list-typed fields and stores "all" as an empty list instead (720 of 1,000
+#: rules for `account_type`). The contract states this as an INTERPRETATION of
+#: `fee_rule_matches_transaction` and builds it into that metric's SQL. The note
+#: carries the fact only, once, in words: writing the SQL for it is part of what
+#: the contract delivers, and repeating it is a treatment of its own (see
+#: `dce.uninterpreted`). Fixed before the arm's first run; never reworded after.
+DATA_NOTE = (
+    "In the `fees` table, the list-typed fields `account_type`, `aci` and "
+    "`merchant_category_code` are never null. A rule that applies to all values "
+    "of such a field stores an empty list instead. Treat an empty list the way "
+    "the manual treats null: the rule applies to all values of that field."
+)
+
+#: Every arm built through `_governed_tools`, and so carrying a contract, a
+#: session and the governed-tool counters.
+GOVERNED_ARMS: frozenset[str] = frozenset(
+    {"contract", "contract_hollow", "contract_uninterpreted"}
 )
 
 # A harness property, not a contract limit: `semantic.limits.max_rows` is not
@@ -474,19 +514,25 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
     if arm == "schema_only":
         return ArmSetup(BASE_PROMPT, _ungoverned_tools(db_path), None)
 
-    if arm == "manual_prompt":
+    if arm in ("manual_prompt", "manual_resolved"):
         prompt = (
             f"{BASE_PROMPT}\n\n## Domain manual\n\n{docs['manual']}\n\n"
             f"## Payments table reference\n\n{docs['payments_readme']}"
         )
+        if arm == "manual_resolved":
+            prompt += f"\n\n## Data note\n\n{DATA_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
-    if arm in ("contract", "contract_hollow"):
+    if arm in GOVERNED_ARMS:
         # IDENTICAL EXCEPT FOR THE CONTRACT OBJECT. The procedural sentence
         # below is the thing `contract_hollow` exists to control for, so it is
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
-        contract = load_contract() if arm == "contract" else load_hollow_contract()
+        contract = {
+            "contract": load_contract,
+            "contract_hollow": load_hollow_contract,
+            "contract_uninterpreted": load_uninterpreted_contract,
+        }[arm]()
         tools, session, adapter = _governed_tools(db_path, contract=contract)
         prompt = (
             f"{BASE_PROMPT}\n\n"
@@ -497,4 +543,4 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         return ArmSetup(prompt, tools, session, adapter)
 
-    raise ValueError(f"unknown arm: {arm!r}; expected one of {ARMS}")
+    raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")

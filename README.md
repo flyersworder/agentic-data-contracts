@@ -946,7 +946,7 @@ When a `SemanticSource` is passed to the `Validator`, declared relationships are
 
 | Check | Trigger | Warning |
 |-------|---------|---------|
-| **Join-key correctness** | Agent joins on wrong columns for a declared relationship | "uses `email` but declared relationship specifies `customer_id → id`" |
+| **Join-key correctness** | Agent joins on columns that match no declared relationship for the table pair (one pair may declare several) | "uses `orders.email`, `customers.email` but declared relationship specifies `orders.customer_id` -> `customers.id`" |
 | **Required-filter missing** | Join has `required_filter` but WHERE clause doesn't include it | "has required filter `status != 'cancelled'` but query does not filter on: status" |
 | **Fan-out risk** | Aggregation (SUM, COUNT, etc.) across a `one_to_many` join | "Results may be inflated by row multiplication" |
 

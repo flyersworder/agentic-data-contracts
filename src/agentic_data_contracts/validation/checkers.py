@@ -889,7 +889,8 @@ class RelationshipChecker:
             key_fwd = (from_table, to_table)
             key_rev = (to_table, from_table)
             result.setdefault(key_fwd, []).append(rel)
-            result.setdefault(key_rev, []).append(rel)
+            if key_rev != key_fwd:  # a self-referencing edge has one key
+                result.setdefault(key_rev, []).append(rel)
         return result
 
     @staticmethod
@@ -980,18 +981,35 @@ class RelationshipChecker:
                 if rels is None:
                     continue
 
-                for rel in rels:
-                    _, from_col = self._parse_ref(rel.from_)
-                    _, to_col = self._parse_ref(rel.to)
-                    correct = {l_col, r_col} == {from_col, to_col}
-                    if not correct:
-                        warnings.append(
-                            f"Join `{l_table}` -> `{r_table}` uses columns "
-                            f"`{l_col}`, `{r_col}` but declared relationship "
-                            f"specifies `{from_col}` -> `{to_col}`"
-                        )
-                    else:
-                        matched_rels.append(rel)
+                # A pair may declare several edges (an ID bridge, a role-playing
+                # dimension); the join is correct if it matches any one of them.
+                # Compare (table, column) so that edges with the same column
+                # names on swapped sides stay distinct.
+                declared = [
+                    (rel, self._parse_ref(rel.from_), self._parse_ref(rel.to))
+                    for rel in rels
+                ]
+                used = {(l_table, l_col), (r_table, r_col)}
+                matching = [rel for rel, frm, to in declared if used == {frm, to}]
+                if matching:
+                    matched_rels.extend(matching)
+                    continue
+                # Name tables as well as columns: matching depends on both, and
+                # the agent can only correct a join it can see the sides of.
+                options = " or ".join(
+                    f"`{frm[0]}.{frm[1]}` -> `{to[0]}.{to[1]}`"
+                    for _, frm, to in declared
+                )
+                noun = (
+                    "relationship specifies"
+                    if len(declared) == 1
+                    else "relationships specify"
+                )
+                warnings.append(
+                    f"Join `{l_table}` -> `{r_table}` uses "
+                    f"`{l_table}.{l_col}`, `{r_table}.{r_col}` "
+                    f"but declared {noun} {options}"
+                )
 
         # Check required_filter for matched relationships
         warnings.extend(self._check_required_filters(ast, matched_rels))

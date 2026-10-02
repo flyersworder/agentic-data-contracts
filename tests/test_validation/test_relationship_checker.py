@@ -142,6 +142,129 @@ class TestJoinKeyCorrectness:
         assert warnings == []
 
 
+class TestMultipleRelationshipsPerPair:
+    """A table pair may declare several edges; a join matching any one is correct.
+
+    Regression for #126: the checker used to warn once per declared edge the
+    join did not use, so a correct join was always told it was wrong.
+    """
+
+    @staticmethod
+    def _checker(legacy_filter: str | None = None) -> RelationshipChecker:
+        return RelationshipChecker(
+            [
+                Relationship(
+                    from_="analytics.id_map.legacy_id",
+                    to="analytics.products.product_id",
+                    type="one_to_one",
+                    required_filter=legacy_filter,
+                ),
+                Relationship(
+                    from_="analytics.id_map.current_id",
+                    to="analytics.products.product_id",
+                    type="many_to_one",
+                ),
+            ]
+        )
+
+    @staticmethod
+    def _join(on: str) -> exp.Expression:
+        return _parse(
+            f"SELECT p.name FROM analytics.id_map m JOIN analytics.products p ON {on}"
+        )
+
+    def test_first_edge_no_warning(self) -> None:
+        warnings = self._checker().check_joins(self._join("m.legacy_id = p.product_id"))
+        assert warnings == []
+
+    def test_second_edge_no_warning(self) -> None:
+        warnings = self._checker().check_joins(
+            self._join("m.current_id = p.product_id")
+        )
+        assert warnings == []
+
+    def test_undeclared_columns_one_warning_listing_every_edge(self) -> None:
+        warnings = self._checker().check_joins(self._join("m.legacy_id = p.name"))
+        assert len(warnings) == 1
+        assert "`id_map.legacy_id` -> `products.product_id`" in warnings[0]
+        assert "`id_map.current_id` -> `products.product_id`" in warnings[0]
+
+    def test_required_filter_follows_the_edge_used(self) -> None:
+        """Only the matched edge's required_filter applies, not its sibling's."""
+        checker = self._checker(legacy_filter="m.is_active = TRUE")
+        assert checker.check_joins(self._join("m.current_id = p.product_id")) == []
+        warnings = checker.check_joins(self._join("m.legacy_id = p.product_id"))
+        assert len(warnings) == 1
+        assert "is_active" in warnings[0]
+
+    def test_edges_with_swapped_column_names_match_by_table(self) -> None:
+        """`a.id -> b.ref` and `b.id -> a.ref` share column names; a join on one
+        must not also match the other and inherit its filter and fan-out checks.
+        """
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.a.id",
+                    to="s.b.ref",
+                    type="one_to_many",
+                    required_filter="b.active = TRUE",
+                ),
+                Relationship(from_="s.b.id", to="s.a.ref", type="many_to_one"),
+            ]
+        )
+        ast = _parse("SELECT COUNT(*) FROM s.a a JOIN s.b b ON b.id = a.ref")
+        assert checker.check_joins(ast) == []
+
+    def test_self_join_edge_listed_once(self) -> None:
+        """A self-referencing edge is indexed under one key, not twice."""
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.employees.manager_id",
+                    to="s.employees.id",
+                    required_filter="m.active = TRUE",
+                )
+            ]
+        )
+        sql = "SELECT 1 FROM s.employees e JOIN s.employees m ON {on}"
+        wrong = checker.check_joins(_parse(sql.format(on="e.name = m.id")))
+        assert len(wrong) == 1
+        assert wrong[0].count("`employees.manager_id` -> `employees.id`") == 1
+        unfiltered = checker.check_joins(_parse(sql.format(on="e.manager_id = m.id")))
+        assert len(unfiltered) == 1
+        assert "active" in unfiltered[0]
+
+    def test_columns_on_the_wrong_tables_warn(self) -> None:
+        """Right column names, wrong sides: `o.id = c.customer_id` is not the
+        declared `orders.customer_id -> customers.id`.
+        """
+        checker = RelationshipChecker(
+            [Relationship(from_="s.orders.customer_id", to="s.customers.id")]
+        )
+        ast = _parse(
+            "SELECT o.id FROM s.orders o JOIN s.customers c ON o.id = c.customer_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        # Tables are named, so the agent can see which side each column is on.
+        assert "uses `orders.id`, `customers.customer_id`" in warnings[0]
+        assert "`orders.customer_id` -> `customers.id`" in warnings[0]
+
+    def test_swapped_edges_listed_distinctly(self) -> None:
+        """`a.id -> b.ref` and `b.id -> a.ref` must not both read `id` -> `ref`."""
+        checker = RelationshipChecker(
+            [
+                Relationship(from_="s.a.id", to="s.b.ref"),
+                Relationship(from_="s.b.id", to="s.a.ref"),
+            ]
+        )
+        warnings = checker.check_joins(
+            _parse("SELECT 1 FROM s.a a JOIN s.b b ON a.ref = b.ref")
+        )
+        assert len(warnings) == 1
+        assert "`a.id` -> `b.ref` or `b.id` -> `a.ref`" in warnings[0]
+
+
 class TestRequiredFilterEnforcement:
     """Tests that the checker warns when a required_filter is missing."""
 

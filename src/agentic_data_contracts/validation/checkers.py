@@ -885,14 +885,16 @@ class _JoinEquality:
     """One join condition: ``left`` and ``right`` are (table, column)."""
 
     scope: int  # id() of the enclosing SELECT
-    left: tuple[str, str]
-    right: tuple[str, str]
+    refs: frozenset[str]  # the two table references, as aliased in the query
+    left: _Ref
+    right: _Ref
     node: exp.EQ | None  # None for a USING column
     on: exp.Expression | None  # the ON clause it was read from, if any
 
     @property
     def pair(self) -> tuple[int, frozenset[str]]:
-        return self.scope, frozenset((self.left[0], self.right[0]))
+        """The joined references; `c1` and `c2` over one table stay apart."""
+        return self.scope, self.refs
 
 
 class RelationshipChecker:
@@ -992,9 +994,17 @@ class RelationshipChecker:
         alias_map: dict[str, str],
         scope: int,
         on: exp.Expression | None,
+        where_refs: tuple[set[str], set[str]] | None = None,
     ) -> Iterator[_JoinEquality]:
         """Equalities in ``predicate`` that relate a column of one table
-        reference to a column of another."""
+        reference to a column of another.
+
+        For a WHERE, ``where_refs`` is its SELECT's (local, unjoined)
+        references: an equality joins two local references, one of them
+        comma or CROSS joined. Otherwise it is a filter: a correlation with
+        an outer query (an EXISTS cannot fan out), or a comparison between
+        tables already joined by ON.
+        """
         for eq in RelationshipChecker._equalities(predicate):
             left = RelationshipChecker._join_key(eq.left)
             right = RelationshipChecker._join_key(eq.right)
@@ -1005,8 +1015,13 @@ class RelationshipChecker:
             # compares two columns of the same row.
             if not l_ref or not r_ref or l_ref == r_ref:
                 continue
+            if where_refs is not None:
+                local, unjoined = where_refs
+                if not {l_ref, r_ref} <= local or not {l_ref, r_ref} & unjoined:
+                    continue
             yield _JoinEquality(
                 scope=scope,
+                refs=frozenset((l_ref, r_ref)),
                 left=(alias_map.get(l_ref, l_ref), left.name.lower()),
                 right=(alias_map.get(r_ref, r_ref), right.name.lower()),
                 node=eq,
@@ -1018,8 +1033,7 @@ class RelationshipChecker:
         ast: exp.Expression, alias_map: dict[str, str]
     ) -> list[_JoinEquality]:
         """Every join condition in the query: ON and USING clauses, and
-        equalities between two tables in WHERE (comma joins, or join
-        conditions written there).
+        equalities in WHERE that join comma or CROSS joined tables.
         """
         found: list[_JoinEquality] = []
         for join in ast.find_all(exp.Join):
@@ -1043,16 +1057,52 @@ class RelationshipChecker:
                 for ident in using_clause:
                     col = ident.name.lower()
                     found.extend(
-                        _JoinEquality(scope, (other, col), (joined, col), None, None)
+                        _JoinEquality(
+                            scope,
+                            frozenset((other, joined)),
+                            (other, col),
+                            (joined, col),
+                            None,
+                            None,
+                        )
                         for other in others
                     )
         for where in ast.find_all(exp.Where):
+            select = where.parent_select
+            if select is None:
+                continue
             found.extend(
                 RelationshipChecker._key_equalities(
-                    where.this, alias_map, id(where.parent_select), None
+                    where.this,
+                    alias_map,
+                    id(select),
+                    None,
+                    RelationshipChecker._where_join_refs(select),
                 )
             )
         return found
+
+    @staticmethod
+    def _where_join_refs(select: exp.Select) -> tuple[set[str], set[str]]:
+        """(references a SELECT introduces, those joined with no ON / USING)."""
+
+        def names(source: Any) -> set[str]:
+            if not isinstance(source, exp.Expression):
+                return set()
+            found = {source.alias_or_name.lower()}
+            if isinstance(source, exp.Table):
+                found.add(source.name.lower())
+            return found - {""}
+
+        from_clause = select.args.get("from_")
+        local = names(from_clause.this) if from_clause is not None else set()
+        unjoined: set[str] = set()
+        for join in select.args.get("joins") or []:
+            refs = names(join.this)
+            local |= refs
+            if join.args.get("on") is None and not join.args.get("using"):
+                unjoined |= refs
+        return local, unjoined
 
     def check_joins(self, ast: exp.Expression) -> list[str]:
         """Check all JOINs in the AST against declared relationships.
@@ -1113,10 +1163,10 @@ class RelationshipChecker:
                 f"but declared {noun} {options}"
             )
 
-        # Check required_filter for matched relationships. A key equality
-        # binds a column to another table's column, not to a value, so it
-        # never counts as the filter.
-        key_nodes = frozenset(id(e.node) for e in equalities if e.node is not None)
+        # Check required_filter for matched relationships. A matched key
+        # equality binds a column to the other table's key, not to a value,
+        # so it never counts as the filter.
+        key_nodes = frozenset(id(eq.node) for _, eq in matched if eq.node is not None)
         warnings.extend(self._check_required_filters(ast, matched, key_nodes))
 
         # Check fan-out risk for one_to_many matched relationships

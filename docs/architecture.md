@@ -492,11 +492,11 @@ When a `SemanticSource` is passed to the `Validator`, the `RelationshipChecker` 
 
 | Check | What it validates |
 |---|---|
-| `RelationshipChecker` (join-key) | Join columns match declared `from`/`to` references; per SELECT and table pair, one matching equality makes the others extra conditions |
-| `RelationshipChecker` (required-filter) | `required_filter` column present, with a non-tautological predicate, in WHERE or in the ON clause of a join that matched the relationship; join-key equalities never count as the filter |
+| `RelationshipChecker` (join-key) | Join columns match declared `from`/`to` references; per SELECT and pair of table references, one matching equality makes the others extra conditions |
+| `RelationshipChecker` (required-filter) | `required_filter` column present, with a non-tautological predicate, in WHERE or in the ON clause of a join that matched the relationship; the matched join-key equality never counts as the filter |
 | `RelationshipChecker` (fan-out) | No aggregation across `one_to_many` joins |
 
-Join conditions are read from `ON` and `USING` clauses and from two-table equalities in `WHERE`, following AND / OR only (an equality inside a function, CASE or NOT is not a join condition). Each side is reduced to its key column by `_join_key`: parentheses and casts are stripped, and any other expression is keyed on its column if it reads exactly one. An equality whose sides use the same table reference compares two columns of one row and is not a join.
+Join conditions are read from `ON` and `USING` clauses, and from `WHERE` equalities between two references the same SELECT introduces, one of them comma or `CROSS` joined (`_where_join_refs`). A correlation with an outer query is not a join, so an `EXISTS` semi-join draws no fan-out warning, and neither is a comparison between tables already joined by `ON`. Equalities are read following AND / OR only (an equality inside a function, CASE or NOT is not a join condition). Each side is reduced to its key column by `_join_key`: parentheses and casts are stripped, and any other expression is keyed on its column if it reads exactly one. An equality whose sides use the same table reference compares two columns of one row and is not a join.
 
 All relationship checks produce **warnings only** — they never block queries. Undeclared joins (table pairs with no relationship definition) are silently ignored.
 

@@ -142,6 +142,62 @@ class TestJoinKeyCorrectness:
         assert warnings == []
 
 
+class TestMultipleRelationshipsPerPair:
+    """A table pair may declare several edges; a join matching any one is correct.
+
+    Regression for #126: the checker used to warn once per declared edge the
+    join did not use, so a correct join was always told it was wrong.
+    """
+
+    @staticmethod
+    def _checker(legacy_filter: str | None = None) -> RelationshipChecker:
+        return RelationshipChecker(
+            [
+                Relationship(
+                    from_="analytics.id_map.legacy_id",
+                    to="analytics.products.product_id",
+                    type="one_to_one",
+                    required_filter=legacy_filter,
+                ),
+                Relationship(
+                    from_="analytics.id_map.current_id",
+                    to="analytics.products.product_id",
+                    type="many_to_one",
+                ),
+            ]
+        )
+
+    @staticmethod
+    def _join(on: str) -> exp.Expression:
+        return _parse(
+            f"SELECT p.name FROM analytics.id_map m JOIN analytics.products p ON {on}"
+        )
+
+    def test_first_edge_no_warning(self) -> None:
+        warnings = self._checker().check_joins(self._join("m.legacy_id = p.product_id"))
+        assert warnings == []
+
+    def test_second_edge_no_warning(self) -> None:
+        warnings = self._checker().check_joins(
+            self._join("m.current_id = p.product_id")
+        )
+        assert warnings == []
+
+    def test_undeclared_columns_one_warning_listing_every_edge(self) -> None:
+        warnings = self._checker().check_joins(self._join("m.legacy_id = p.name"))
+        assert len(warnings) == 1
+        assert "`legacy_id` -> `product_id`" in warnings[0]
+        assert "`current_id` -> `product_id`" in warnings[0]
+
+    def test_required_filter_follows_the_edge_used(self) -> None:
+        """Only the matched edge's required_filter applies, not its sibling's."""
+        checker = self._checker(legacy_filter="m.is_active = TRUE")
+        assert checker.check_joins(self._join("m.current_id = p.product_id")) == []
+        warnings = checker.check_joins(self._join("m.legacy_id = p.product_id"))
+        assert len(warnings) == 1
+        assert "is_active" in warnings[0]
+
+
 class TestRequiredFilterEnforcement:
     """Tests that the checker warns when a required_filter is missing."""
 

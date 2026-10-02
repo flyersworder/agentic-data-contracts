@@ -980,18 +980,32 @@ class RelationshipChecker:
                 if rels is None:
                     continue
 
-                for rel in rels:
-                    _, from_col = self._parse_ref(rel.from_)
-                    _, to_col = self._parse_ref(rel.to)
-                    correct = {l_col, r_col} == {from_col, to_col}
-                    if not correct:
-                        warnings.append(
-                            f"Join `{l_table}` -> `{r_table}` uses columns "
-                            f"`{l_col}`, `{r_col}` but declared relationship "
-                            f"specifies `{from_col}` -> `{to_col}`"
-                        )
-                    else:
-                        matched_rels.append(rel)
+                # A pair may declare several edges (an ID bridge, a role-playing
+                # dimension); the join is correct if it matches any one of them.
+                declared = [
+                    (rel, self._parse_ref(rel.from_)[1], self._parse_ref(rel.to)[1])
+                    for rel in rels
+                ]
+                matching = [
+                    rel
+                    for rel, from_col, to_col in declared
+                    if {l_col, r_col} == {from_col, to_col}
+                ]
+                if matching:
+                    matched_rels.extend(matching)
+                    continue
+                options = " or ".join(
+                    f"`{from_col}` -> `{to_col}`" for _, from_col, to_col in declared
+                )
+                noun = (
+                    "relationship specifies"
+                    if len(declared) == 1
+                    else "relationships specify"
+                )
+                warnings.append(
+                    f"Join `{l_table}` -> `{r_table}` uses columns "
+                    f"`{l_col}`, `{r_col}` but declared {noun} {options}"
+                )
 
         # Check required_filter for matched relationships
         warnings.extend(self._check_required_filters(ast, matched_rels))

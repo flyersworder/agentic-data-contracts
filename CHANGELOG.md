@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.57.1] - 2026-10-02
+
+### Fixed
+
+- **`RelationshipChecker` warned on a correct join when a table pair declared more than one relationship.** It checked each declared edge on its own and warned for every edge the join did not use, so a join on one of the declared edges was always told it was wrong, naming the other edge. `run_query` passes these warnings to the agent, so an agent following the semantic layer could be pushed onto the other edge. Two edges between one pair of tables is a normal shape: an ID bridge (`legacy_id` / `current_id` -> the same key) or a role-playing dimension (`ship_date` / `order_date` -> `dates.date`). A join now passes if it matches any declared edge, and only that edge's `required_filter` and fan-out checks apply. A join that matches none gets one warning listing every declared option. The single-edge warning text is unchanged. (#126)
+
 ## [0.57.0] - 2026-09-29
 
 ### Fixed

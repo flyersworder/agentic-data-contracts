@@ -186,8 +186,8 @@ class TestMultipleRelationshipsPerPair:
     def test_undeclared_columns_one_warning_listing_every_edge(self) -> None:
         warnings = self._checker().check_joins(self._join("m.legacy_id = p.name"))
         assert len(warnings) == 1
-        assert "`legacy_id` -> `product_id`" in warnings[0]
-        assert "`current_id` -> `product_id`" in warnings[0]
+        assert "`id_map.legacy_id` -> `products.product_id`" in warnings[0]
+        assert "`id_map.current_id` -> `products.product_id`" in warnings[0]
 
     def test_required_filter_follows_the_edge_used(self) -> None:
         """Only the matched edge's required_filter applies, not its sibling's."""
@@ -229,7 +229,7 @@ class TestMultipleRelationshipsPerPair:
         sql = "SELECT 1 FROM s.employees e JOIN s.employees m ON {on}"
         wrong = checker.check_joins(_parse(sql.format(on="e.name = m.id")))
         assert len(wrong) == 1
-        assert wrong[0].count("`manager_id` -> `id`") == 1
+        assert wrong[0].count("`employees.manager_id` -> `employees.id`") == 1
         unfiltered = checker.check_joins(_parse(sql.format(on="e.manager_id = m.id")))
         assert len(unfiltered) == 1
         assert "active" in unfiltered[0]
@@ -246,7 +246,23 @@ class TestMultipleRelationshipsPerPair:
         )
         warnings = checker.check_joins(ast)
         assert len(warnings) == 1
-        assert "`customer_id` -> `id`" in warnings[0]
+        # Tables are named, so the agent can see which side each column is on.
+        assert "uses `orders.id`, `customers.customer_id`" in warnings[0]
+        assert "`orders.customer_id` -> `customers.id`" in warnings[0]
+
+    def test_swapped_edges_listed_distinctly(self) -> None:
+        """`a.id -> b.ref` and `b.id -> a.ref` must not both read `id` -> `ref`."""
+        checker = RelationshipChecker(
+            [
+                Relationship(from_="s.a.id", to="s.b.ref"),
+                Relationship(from_="s.b.id", to="s.a.ref"),
+            ]
+        )
+        warnings = checker.check_joins(
+            _parse("SELECT 1 FROM s.a a JOIN s.b b ON a.ref = b.ref")
+        )
+        assert len(warnings) == 1
+        assert "`a.id` -> `b.ref` or `b.id` -> `a.ref`" in warnings[0]
 
 
 class TestRequiredFilterEnforcement:

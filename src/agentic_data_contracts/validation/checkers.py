@@ -994,8 +994,11 @@ class RelationshipChecker:
                 if matching:
                     matched_rels.extend(matching)
                     continue
+                # Name tables as well as columns: matching depends on both, and
+                # the agent can only correct a join it can see the sides of.
                 options = " or ".join(
-                    f"`{frm[1]}` -> `{to[1]}`" for _, frm, to in declared
+                    f"`{frm[0]}.{frm[1]}` -> `{to[0]}.{to[1]}`"
+                    for _, frm, to in declared
                 )
                 noun = (
                     "relationship specifies"
@@ -1003,8 +1006,9 @@ class RelationshipChecker:
                     else "relationships specify"
                 )
                 warnings.append(
-                    f"Join `{l_table}` -> `{r_table}` uses columns "
-                    f"`{l_col}`, `{r_col}` but declared {noun} {options}"
+                    f"Join `{l_table}` -> `{r_table}` uses "
+                    f"`{l_table}.{l_col}`, `{r_table}.{r_col}` "
+                    f"but declared {noun} {options}"
                 )
 
         # Check required_filter for matched relationships

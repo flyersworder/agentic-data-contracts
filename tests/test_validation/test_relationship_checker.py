@@ -793,3 +793,33 @@ class TestJoinShapes:
         warnings = self._checker().check_joins(ast)
         assert len(warnings) == 1
         assert "does not filter on: source_type" in warnings[0]
+
+    @pytest.mark.parametrize(
+        "from_join",
+        [
+            "analytics.links l LEFT JOIN analytics.items i",
+            "analytics.items i RIGHT JOIN analytics.links l",
+            "analytics.links l FULL OUTER JOIN analytics.items i",
+        ],
+    )
+    def test_filter_in_on_on_preserved_side_is_not_accepted(
+        self, from_join: str
+    ) -> None:
+        """An ON condition on a table whose rows an outer join keeps removes
+        nothing: every `links` row is still counted."""
+        ast = _parse(
+            f"SELECT COUNT(*) FROM {from_join}"
+            f" ON l.source_id = i.item_id AND l.{self._FILTER}"
+        )
+        warnings = self._checker().check_joins(ast)
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+
+    def test_filter_in_right_join_on_on_null_supplying_side_is_accepted(
+        self,
+    ) -> None:
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.links l RIGHT JOIN analytics.items i"
+            f" ON l.source_id = i.item_id AND l.{self._FILTER}"
+        )
+        assert self._checker().check_joins(ast) == []

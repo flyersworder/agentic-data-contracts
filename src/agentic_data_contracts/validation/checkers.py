@@ -87,20 +87,34 @@ def _within(node: Any, skip: frozenset[int]) -> bool:
 
 
 def _bound_columns_in(
-    predicate: exp.Expression, skip: frozenset[int] = frozenset()
+    predicate: exp.Expression,
+    skip: frozenset[int] = frozenset(),
+    counts: Callable[[exp.Column], bool] | None = None,
 ) -> set[str]:
-    """`extract_bound_columns` for one predicate, ignoring nodes in ``skip``."""
+    """`extract_bound_columns` for one predicate, ignoring nodes in ``skip``.
+
+    With ``counts``, only the columns it accepts can be bound; the others
+    still count as the other side of a comparison.
+    """
+
+    def names(side: Any, only_counted: bool) -> set[str]:
+        return {
+            c.name.lower()
+            for c in side.find_all(exp.Column)
+            if not only_counted or counts is None or counts(c)
+        }
+
     bound: set[str] = set()
     for node in predicate.find_all(*_BINARY_COMPARISONS):
         if not isinstance(node, exp.Binary) or _within(node, skip):
             continue
-        left_cols = {c.name.lower() for c in node.left.find_all(exp.Column)}
-        right_cols = {c.name.lower() for c in node.right.find_all(exp.Column)}
-        bound |= left_cols - right_cols
-        bound |= right_cols - left_cols
+        bound |= names(node.left, True) - names(node.right, False)
+        bound |= names(node.right, True) - names(node.left, False)
     for in_node in predicate.find_all(exp.In):
         this = in_node.this
         if not isinstance(this, exp.Column) or _within(in_node, skip):
+            continue
+        if counts is not None and not counts(this):
             continue
         col_name = this.name.lower()
         other_cols: set[str] = set()
@@ -115,6 +129,8 @@ def _bound_columns_in(
         this = between.this
         if not isinstance(this, exp.Column) or _within(between, skip):
             continue
+        if counts is not None and not counts(this):
+            continue
         col_name = this.name.lower()
         other_cols = set()
         for key in ("low", "high"):
@@ -126,6 +142,8 @@ def _bound_columns_in(
     for is_node in predicate.find_all(exp.Is):
         this = is_node.this
         if not isinstance(this, exp.Column) or _within(is_node, skip):
+            continue
+        if counts is not None and not counts(this):
             continue
         col_name = this.name.lower()
         other = is_node.expression
@@ -890,6 +908,8 @@ class _JoinEquality:
     right: _Ref
     node: exp.EQ | None  # None for a USING column
     on: exp.Expression | None  # the ON clause it was read from, if any
+    # References whose columns in ``on`` remove rows; None means all of them.
+    on_refs: frozenset[str] | None = None
 
     @property
     def pair(self) -> tuple[int, frozenset[str]]:
@@ -995,6 +1015,7 @@ class RelationshipChecker:
         scope: int,
         on: exp.Expression | None,
         where_refs: tuple[set[str], set[str]] | None = None,
+        on_refs: frozenset[str] | None = None,
     ) -> Iterator[_JoinEquality]:
         """Equalities in ``predicate`` that relate a column of one table
         reference to a column of another.
@@ -1026,6 +1047,7 @@ class RelationshipChecker:
                 right=(alias_map.get(r_ref, r_ref), right.name.lower()),
                 node=eq,
                 on=on,
+                on_refs=on_refs,
             )
 
     @staticmethod
@@ -1042,7 +1064,11 @@ class RelationshipChecker:
             if on_clause is not None:
                 found.extend(
                     RelationshipChecker._key_equalities(
-                        on_clause, alias_map, scope, on_clause
+                        on_clause,
+                        alias_map,
+                        scope,
+                        on_clause,
+                        on_refs=RelationshipChecker._on_filter_refs(join),
                     )
                 )
                 continue
@@ -1083,17 +1109,54 @@ class RelationshipChecker:
         return found
 
     @staticmethod
+    def _source_names(source: Any) -> set[str]:
+        """The names a FROM / JOIN source can be referred to by."""
+        if not isinstance(source, exp.Expression):
+            return set()
+        found = {source.alias_or_name.lower()}
+        if isinstance(source, exp.Table):
+            found.add(source.name.lower())
+        return found - {""}
+
+    @staticmethod
+    def _on_filter_refs(join: exp.Join) -> frozenset[str] | None:
+        """References whose columns in this join's ON clause remove rows.
+
+        None means every reference: an inner or SEMI join drops rows that
+        fail the condition. An outer join keeps its preserved side's rows
+        whatever ON says, so only the side it null-extends is filtered: the
+        joined table for LEFT, the tables before it for RIGHT, neither for
+        FULL. An ANTI join keeps exactly the rows that fail, so nothing is.
+        """
+        side, kind = join.side.upper(), join.kind.upper()
+        if kind == "SEMI":
+            return None
+        if kind == "ANTI" or side == "FULL":
+            return frozenset()
+        joined = RelationshipChecker._source_names(join.this)
+        if side == "LEFT":
+            return frozenset(joined)
+        if side == "RIGHT":
+            select = join.parent_select
+            if select is None:
+                return frozenset()
+            from_clause = select.args.get("from_")
+            earlier = (
+                RelationshipChecker._source_names(from_clause.this)
+                if from_clause is not None
+                else set()
+            )
+            for other in select.args.get("joins") or []:
+                if other is join:
+                    break
+                earlier |= RelationshipChecker._source_names(other.this)
+            return frozenset(earlier)
+        return None
+
+    @staticmethod
     def _where_join_refs(select: exp.Select) -> tuple[set[str], set[str]]:
         """(references a SELECT introduces, those joined with no ON / USING)."""
-
-        def names(source: Any) -> set[str]:
-            if not isinstance(source, exp.Expression):
-                return set()
-            found = {source.alias_or_name.lower()}
-            if isinstance(source, exp.Table):
-                found.add(source.name.lower())
-            return found - {""}
-
+        names = RelationshipChecker._source_names
         from_clause = select.args.get("from_")
         local = names(from_clause.this) if from_clause is not None else set()
         unjoined: set[str] = set()
@@ -1258,18 +1321,29 @@ class RelationshipChecker:
 
     @staticmethod
     def _filter_columns(
-        predicates: Sequence[exp.Expression], skip: frozenset[int]
+        predicates: Sequence[tuple[exp.Expression, frozenset[str] | None]],
+        skip: frozenset[int],
     ) -> tuple[set[str], set[str]]:
-        """(present, bound) columns of ``predicates``, ignoring nodes in ``skip``."""
+        """(present, bound) columns of ``predicates``, ignoring nodes in ``skip``.
+
+        Each predicate comes with the references whose columns count (None
+        for all of them); an unqualified column counts only under None.
+        """
         present: set[str] = set()
         bound: set[str] = set()
-        for predicate in predicates:
+        for predicate, refs in predicates:
+
+            def counts(c: exp.Column, refs: frozenset[str] | None = refs) -> bool:
+                return refs is None or c.table.lower() in refs
+
             present |= {
                 c.name.lower()
                 for c in predicate.find_all(exp.Column)
-                if not _within(c, skip)
+                if not _within(c, skip) and counts(c)
             }
-            bound |= _bound_columns_in(predicate, skip)
+            bound |= _bound_columns_in(
+                predicate, skip, None if refs is None else counts
+            )
         return present, bound
 
     @staticmethod
@@ -1282,19 +1356,20 @@ class RelationshipChecker:
         missing or appears only in trivially-true predicates.
 
         The filter may be in WHERE or in the ON clause of a join that matched
-        the relationship: for an outer join, ON is where it belongs.
+        the relationship: for an outer join, ON is where it belongs, but only
+        on the side the join null-extends (``_on_filter_refs``).
         """
         warnings: list[str] = []
         where_present, where_bound = RelationshipChecker._filter_columns(
-            [w.this for w in ast.find_all(exp.Where)], key_nodes
+            [(w.this, None) for w in ast.find_all(exp.Where)], key_nodes
         )
-        ons: dict[int, dict[int, exp.Expression]] = {}
+        ons: dict[int, dict[int, tuple[exp.Expression, frozenset[str] | None]]] = {}
         rels: dict[int, Relationship] = {}
         for rel, eq in matched:
             rels.setdefault(id(rel), rel)
             rel_ons = ons.setdefault(id(rel), {})
             if eq.on is not None:
-                rel_ons[id(eq.on)] = eq.on
+                rel_ons[id(eq.on)] = (eq.on, eq.on_refs)
 
         for rel_id, rel in rels.items():
             if rel.required_filter is None:

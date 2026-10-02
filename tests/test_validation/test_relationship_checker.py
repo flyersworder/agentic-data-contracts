@@ -197,6 +197,57 @@ class TestMultipleRelationshipsPerPair:
         assert len(warnings) == 1
         assert "is_active" in warnings[0]
 
+    def test_edges_with_swapped_column_names_match_by_table(self) -> None:
+        """`a.id -> b.ref` and `b.id -> a.ref` share column names; a join on one
+        must not also match the other and inherit its filter and fan-out checks.
+        """
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.a.id",
+                    to="s.b.ref",
+                    type="one_to_many",
+                    required_filter="b.active = TRUE",
+                ),
+                Relationship(from_="s.b.id", to="s.a.ref", type="many_to_one"),
+            ]
+        )
+        ast = _parse("SELECT COUNT(*) FROM s.a a JOIN s.b b ON b.id = a.ref")
+        assert checker.check_joins(ast) == []
+
+    def test_self_join_edge_listed_once(self) -> None:
+        """A self-referencing edge is indexed under one key, not twice."""
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.employees.manager_id",
+                    to="s.employees.id",
+                    required_filter="m.active = TRUE",
+                )
+            ]
+        )
+        sql = "SELECT 1 FROM s.employees e JOIN s.employees m ON {on}"
+        wrong = checker.check_joins(_parse(sql.format(on="e.name = m.id")))
+        assert len(wrong) == 1
+        assert wrong[0].count("`manager_id` -> `id`") == 1
+        unfiltered = checker.check_joins(_parse(sql.format(on="e.manager_id = m.id")))
+        assert len(unfiltered) == 1
+        assert "active" in unfiltered[0]
+
+    def test_columns_on_the_wrong_tables_warn(self) -> None:
+        """Right column names, wrong sides: `o.id = c.customer_id` is not the
+        declared `orders.customer_id -> customers.id`.
+        """
+        checker = RelationshipChecker(
+            [Relationship(from_="s.orders.customer_id", to="s.customers.id")]
+        )
+        ast = _parse(
+            "SELECT o.id FROM s.orders o JOIN s.customers c ON o.id = c.customer_id"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "`customer_id` -> `id`" in warnings[0]
+
 
 class TestRequiredFilterEnforcement:
     """Tests that the checker warns when a required_filter is missing."""

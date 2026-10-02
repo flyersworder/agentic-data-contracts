@@ -889,7 +889,8 @@ class RelationshipChecker:
             key_fwd = (from_table, to_table)
             key_rev = (to_table, from_table)
             result.setdefault(key_fwd, []).append(rel)
-            result.setdefault(key_rev, []).append(rel)
+            if key_rev != key_fwd:  # a self-referencing edge has one key
+                result.setdefault(key_rev, []).append(rel)
         return result
 
     @staticmethod
@@ -982,20 +983,19 @@ class RelationshipChecker:
 
                 # A pair may declare several edges (an ID bridge, a role-playing
                 # dimension); the join is correct if it matches any one of them.
+                # Compare (table, column) so that edges with the same column
+                # names on swapped sides stay distinct.
                 declared = [
-                    (rel, self._parse_ref(rel.from_)[1], self._parse_ref(rel.to)[1])
+                    (rel, self._parse_ref(rel.from_), self._parse_ref(rel.to))
                     for rel in rels
                 ]
-                matching = [
-                    rel
-                    for rel, from_col, to_col in declared
-                    if {l_col, r_col} == {from_col, to_col}
-                ]
+                used = {(l_table, l_col), (r_table, r_col)}
+                matching = [rel for rel, frm, to in declared if used == {frm, to}]
                 if matching:
                     matched_rels.extend(matching)
                     continue
                 options = " or ".join(
-                    f"`{from_col}` -> `{to_col}`" for _, from_col, to_col in declared
+                    f"`{frm[1]}` -> `{to[1]}`" for _, frm, to in declared
                 )
                 noun = (
                     "relationship specifies"

@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.59.0] - 2026-10-02
+
+### Fixed
+
+- **`RelationshipChecker` only recognised a join written as `JOIN ... ON col = col`.** A key wrapped in a cast (`CAST(i.item_id AS VARCHAR)`, `i.item_id::VARCHAR`, `TRY_CAST`), in parentheses, or in a single-column expression (`LOWER(x)`, `TRIM(x)`, `COALESCE(x, '')`, `x + 0`), and a join written in `WHERE` (`FROM a, b WHERE a.x = b.y`), matched no declared relationship, so its `required_filter`, join-key and fan-out checks were all skipped. This mattered most where the cast is mandatory: a VARCHAR relation table joined to an INT key is rejected by some engines (Denodo among them), so the only join that runs was the one never checked. Parentheses and casts are now stripped; any other expression is keyed on its column when it reads exactly one; two-table equalities in `WHERE` are join conditions too. An expression over several columns, or a subquery, is still not a key. (#128)
+- **A `required_filter` written in the join's `ON` clause was reported as missing.** Only `WHERE` was read. For an outer join the `ON` clause is the right place for it: in `WHERE` it turns the outer join into an inner one. The filter is now accepted in the `ON` clause of a join that matched the relationship, with the same check for trivially true predicates (`col = col`). A join-key equality never counts as the filter: `l.source_id = i.item_id` binds `item_id` to another column, not to a value.
+- **An extra equality beside a correct join key was reported as a wrong key.** `ON o.customer_id = c.id AND o.region = c.region` warned that the join "uses `orders.region`, `customers.region`". Equalities are now judged per SELECT and table pair: once one matches a declared edge, the others are extra conditions. A pair with no matching equality still gets a warning for each one.
+- **An equality between two columns of one table reference is no longer read as a join.** `WHERE e.manager_id = e.id` compares two columns of one row; it matched a declared self-referencing edge.
+
+### Changed
+
+- **Equalities nested inside a function, `CASE` or `NOT` in an `ON` clause are no longer read as join conditions.** Only equalities combined by `AND` / `OR` are; a subquery's own `WHERE` is read as its own predicate.
+
 ## [0.58.0] - 2026-10-02
 
 ### Fixed

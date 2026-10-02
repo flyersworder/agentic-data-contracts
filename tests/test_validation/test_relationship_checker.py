@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import cast
 
+import pytest
 import sqlglot
 from sqlglot import exp
 
@@ -544,3 +545,281 @@ class TestFanOutDetection:
         warnings = checker.check_joins(ast)
         assert len(warnings) == 1
         assert "one_to_many" in warnings[0]
+
+
+class TestJoinShapes:
+    """A join is recognised whatever its shape, and a required filter is found
+    wherever it is written.
+
+    Regression for #128: only `JOIN ... ON col = col` was recognised, so a cast
+    or wrapped key, or a join written in WHERE, skipped every check; a
+    required filter in the ON clause was reported as missing.
+    """
+
+    _FILTER = "source_type = 'item'"
+
+    @classmethod
+    def _checker(cls, required_filter: str | None = _FILTER) -> RelationshipChecker:
+        return RelationshipChecker(
+            [
+                Relationship(
+                    from_="analytics.links.source_id",
+                    to="analytics.items.item_id",
+                    type="many_to_one",
+                    required_filter=required_filter,
+                )
+            ]
+        )
+
+    @staticmethod
+    def _join(on: str, where: str = "") -> exp.Expression:
+        sql = f"SELECT COUNT(*) FROM analytics.links l JOIN analytics.items i ON {on}"
+        return _parse(f"{sql} WHERE {where}" if where else sql)
+
+    @pytest.mark.parametrize(
+        "on",
+        [
+            "l.source_id = CAST(i.item_id AS VARCHAR)",
+            "l.source_id = TRY_CAST(i.item_id AS VARCHAR)",
+            "l.source_id = i.item_id::VARCHAR",
+            "(l.source_id) = (i.item_id)",
+            "LOWER(l.source_id) = i.item_id",
+            "TRIM(l.source_id) = i.item_id",
+            "COALESCE(l.source_id, '') = i.item_id",
+            "l.source_id + 0 = i.item_id",
+        ],
+    )
+    def test_wrapped_key_is_recognised(self, on: str) -> None:
+        warnings = self._checker().check_joins(self._join(on))
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+
+    def test_wrapped_key_on_undeclared_column_warns(self) -> None:
+        warnings = self._checker().check_joins(
+            self._join("l.target_id = CAST(i.item_id AS VARCHAR)")
+        )
+        assert len(warnings) == 1
+        assert "uses `links.target_id`, `items.item_id`" in warnings[0]
+
+    def test_expression_over_several_columns_is_not_a_key(self) -> None:
+        """`CONCAT(i.a, i.b)` has no single column to match, so it is skipped."""
+        warnings = self._checker().check_joins(
+            self._join("l.source_id = CONCAT(i.prefix, i.item_id)")
+        )
+        assert warnings == []
+
+    def test_subquery_is_not_a_key(self) -> None:
+        warnings = self._checker().check_joins(
+            self._join("l.source_id = (SELECT MAX(x.item_id) FROM analytics.items x)")
+        )
+        assert warnings == []
+
+    def test_comma_join_is_recognised(self) -> None:
+        sql = (
+            "SELECT COUNT(*) FROM analytics.links l, analytics.items i"
+            " WHERE l.source_id = i.item_id"
+        )
+        warnings = self._checker().check_joins(_parse(sql))
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+        assert self._checker().check_joins(_parse(f"{sql} AND {self._FILTER}")) == []
+
+    def test_comma_join_on_undeclared_column_warns(self) -> None:
+        warnings = self._checker().check_joins(
+            _parse(
+                "SELECT COUNT(*) FROM analytics.links l, analytics.items i"
+                " WHERE l.target_id = i.item_id"
+            )
+        )
+        assert len(warnings) == 1
+        assert "uses `links.target_id`, `items.item_id`" in warnings[0]
+
+    def test_equality_within_one_table_is_not_a_join(self) -> None:
+        """`e.manager_id = e.id` compares two columns of one row."""
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.employees.manager_id",
+                    to="s.employees.id",
+                    required_filter="active = TRUE",
+                )
+            ]
+        )
+        ast = _parse("SELECT 1 FROM s.employees e WHERE e.manager_id = e.id")
+        assert checker.check_joins(ast) == []
+
+    def test_required_filter_in_on_clause_is_accepted(self) -> None:
+        on = f"l.source_id = i.item_id AND l.{self._FILTER}"
+        assert self._checker().check_joins(self._join(on)) == []
+
+    def test_required_filter_in_left_join_on_clause_is_accepted(self) -> None:
+        """For an outer join the ON clause is where the filter belongs."""
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.items i"
+            " LEFT JOIN analytics.links l"
+            f" ON l.source_id = i.item_id AND l.{self._FILTER}"
+        )
+        assert self._checker().check_joins(ast) == []
+
+    def test_required_filter_in_another_join_on_clause_is_not_accepted(
+        self,
+    ) -> None:
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.links l"
+            " JOIN analytics.items i ON l.source_id = i.item_id"
+            f" JOIN analytics.tags t ON t.item_id = i.item_id AND l.{self._FILTER}"
+        )
+        warnings = self._checker().check_joins(ast)
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+
+    def test_tautology_in_on_clause_warns(self) -> None:
+        on = "l.source_id = i.item_id AND l.source_type = l.source_type"
+        warnings = self._checker().check_joins(self._join(on))
+        assert len(warnings) == 1
+        assert "trivially satisfied" in warnings[0]
+
+    def test_join_key_does_not_satisfy_a_filter_on_itself(self) -> None:
+        """The key equality binds `item_id` to the other table, not to a value."""
+        warnings = self._checker("item_id > 0").check_joins(
+            self._join("l.source_id = i.item_id")
+        )
+        assert len(warnings) == 1
+        assert "does not filter on: item_id" in warnings[0]
+
+    def test_extra_on_equality_beside_declared_key_no_warning(self) -> None:
+        """A second equality is an extra join condition, not a wrong key."""
+        on = f"l.source_id = i.item_id AND l.region = i.region AND l.{self._FILTER}"
+        assert self._checker().check_joins(self._join(on)) == []
+
+    def test_extra_where_equality_beside_declared_key_no_warning(self) -> None:
+        ast = self._join(
+            "l.source_id = i.item_id", where=f"l.region = i.region AND l.{self._FILTER}"
+        )
+        assert self._checker().check_joins(ast) == []
+
+    def test_declared_key_in_subquery_does_not_excuse_outer_wrong_key(
+        self,
+    ) -> None:
+        ast = self._join(
+            "l.target_id = i.item_id",
+            where=(
+                "l.id IN (SELECT l2.id FROM analytics.links l2"
+                " JOIN analytics.items i2 ON l2.source_id = i2.item_id"
+                f" WHERE l2.{self._FILTER})"
+                f" AND l.{self._FILTER}"
+            ),
+        )
+        warnings = self._checker().check_joins(ast)
+        assert len(warnings) == 1
+        assert "uses `links.target_id`, `items.item_id`" in warnings[0]
+
+    def test_correlated_subquery_equality_is_not_a_join(self) -> None:
+        """`o2.region = c.region` compares a value with the outer row."""
+        checker = RelationshipChecker(
+            [Relationship(from_="s.orders.customer_id", to="s.customers.id")]
+        )
+        ast = _parse(
+            "SELECT o.id FROM s.orders o JOIN s.customers c ON o.customer_id = c.id"
+            " WHERE o.amount > (SELECT AVG(o2.amount) FROM s.orders o2"
+            " WHERE o2.region = c.region)"
+        )
+        assert checker.check_joins(ast) == []
+
+    def test_exists_semi_join_has_no_fan_out(self) -> None:
+        checker = RelationshipChecker(
+            [
+                Relationship(
+                    from_="s.customers.id",
+                    to="s.orders.customer_id",
+                    type="one_to_many",
+                )
+            ]
+        )
+        ast = _parse(
+            "SELECT COUNT(*) FROM s.customers c WHERE EXISTS"
+            " (SELECT 1 FROM s.orders o WHERE o.customer_id = c.id)"
+        )
+        assert checker.check_joins(ast) == []
+
+    def test_where_equality_between_on_joined_tables_is_not_a_join(self) -> None:
+        """Tables joined by ON have their join; a WHERE equality is a filter."""
+        checker = RelationshipChecker(
+            [
+                Relationship(from_="s.orders.customer_id", to="s.customers.id"),
+                Relationship(from_="s.orders.store_id", to="s.stores.id"),
+                Relationship(from_="s.customers.home_store_id", to="s.stores.id"),
+            ]
+        )
+        ast = _parse(
+            "SELECT COUNT(*) FROM s.orders o"
+            " JOIN s.customers c ON o.customer_id = c.id"
+            " JOIN s.stores s ON o.store_id = s.id WHERE s.country = c.country"
+        )
+        assert checker.check_joins(ast) == []
+
+    @pytest.mark.parametrize(
+        "where",
+        ["l.source_type = i.kind", "l.source_type = t.code AND t.name = 'Item'"],
+    )
+    def test_filter_compared_with_another_column_counts(self, where: str) -> None:
+        """Only the matched key equality is excluded from the filter columns."""
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.links l"
+            " JOIN analytics.items i ON l.source_id = i.item_id"
+            " JOIN analytics.types t ON t.id = i.type_id"
+            f" WHERE {where}"
+        )
+        assert self._checker().check_joins(ast) == []
+
+    def test_wrong_key_on_second_reference_of_a_table_warns(self) -> None:
+        """A correct join to `c1` does not excuse a wrong one to `c2`."""
+        checker = RelationshipChecker(
+            [Relationship(from_="s.orders.customer_id", to="s.customers.id")]
+        )
+        ast = _parse(
+            "SELECT 1 FROM s.orders o JOIN s.customers c1 ON o.customer_id = c1.id"
+            " JOIN s.customers c2 ON o.email = c2.email"
+        )
+        warnings = checker.check_joins(ast)
+        assert len(warnings) == 1
+        assert "uses `orders.email`, `customers.email`" in warnings[0]
+
+    def test_cross_join_condition_in_where_is_recognised(self) -> None:
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.links l CROSS JOIN analytics.items i"
+            " WHERE l.source_id = i.item_id"
+        )
+        warnings = self._checker().check_joins(ast)
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+
+    @pytest.mark.parametrize(
+        "from_join",
+        [
+            "analytics.links l LEFT JOIN analytics.items i",
+            "analytics.items i RIGHT JOIN analytics.links l",
+            "analytics.links l FULL OUTER JOIN analytics.items i",
+        ],
+    )
+    def test_filter_in_on_on_preserved_side_is_not_accepted(
+        self, from_join: str
+    ) -> None:
+        """An ON condition on a table whose rows an outer join keeps removes
+        nothing: every `links` row is still counted."""
+        ast = _parse(
+            f"SELECT COUNT(*) FROM {from_join}"
+            f" ON l.source_id = i.item_id AND l.{self._FILTER}"
+        )
+        warnings = self._checker().check_joins(ast)
+        assert len(warnings) == 1
+        assert "does not filter on: source_type" in warnings[0]
+
+    def test_filter_in_right_join_on_on_null_supplying_side_is_accepted(
+        self,
+    ) -> None:
+        ast = _parse(
+            "SELECT COUNT(*) FROM analytics.links l RIGHT JOIN analytics.items i"
+            f" ON l.source_id = i.item_id AND l.{self._FILTER}"
+        )
+        assert self._checker().check_joins(ast) == []

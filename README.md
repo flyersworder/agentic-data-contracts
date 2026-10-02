@@ -946,9 +946,11 @@ When a `SemanticSource` is passed to the `Validator`, declared relationships are
 
 | Check | Trigger | Warning |
 |-------|---------|---------|
-| **Join-key correctness** | Agent joins on columns that match no declared relationship for the table pair (one pair may declare several) | "uses `orders.email`, `customers.email` but declared relationship specifies `orders.customer_id` -> `customers.id`" |
-| **Required-filter missing** | Join has `required_filter` but WHERE clause doesn't include it | "has required filter `status != 'cancelled'` but query does not filter on: status" |
+| **Join-key correctness** | Agent joins on columns that match no declared relationship for the table pair (one pair may declare several); extra equalities beside a matching key are fine | "uses `orders.email`, `customers.email` but declared relationship specifies `orders.customer_id` -> `customers.id`" |
+| **Required-filter missing** | Join has `required_filter` but neither WHERE nor that join's ON clause includes it (the join key itself does not count; in an outer join's ON, only the null-extended side counts) | "has required filter `status != 'cancelled'` but query does not filter on: status" |
 | **Fan-out risk** | Aggregation (SUM, COUNT, etc.) across a `one_to_many` join | "Results may be inflated by row multiplication" |
+
+A join is recognised in `JOIN ... ON`, `USING`, or in `WHERE` for a comma or `CROSS` join. A `WHERE` equality between tables already joined by `ON`, or one that correlates a subquery with its outer query, is a filter, not a join. A key may be wrapped: parentheses and casts (`CAST(i.item_id AS VARCHAR)`, `i.item_id::VARCHAR`) are seen through, and an expression over exactly one column (`LOWER(x)`, `COALESCE(x, '')`) is keyed on that column. An expression over several columns, or a subquery, is not a join key.
 
 All relationship checks are **advisory only** (warnings, never blocks). Undeclared joins are silently ignored — the checker only validates relationships you've explicitly defined.
 

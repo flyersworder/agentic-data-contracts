@@ -410,8 +410,8 @@ Families that need only the right set of rules reach the contract with the
 fact alone. The total-fee families -- matching per transaction, the monthly
 bands, then the fee formula summed -- do not move with the fact and are where
 the contract's ready-made definitions win. That is the "right time" effect,
-now measured with knowledge held equal, on one model. Whether the split
-depends on capability is the next measurement.
+now measured with knowledge held equal, on one model. The next section
+asks whether the split depends on capability.
 
 ### The subtraction attempts, and what they show instead
 
@@ -441,6 +441,81 @@ checks. A contract's authority is also what makes a wrong one costly, which is
 the case for checking a metric's semantics against certified answers:
 `analysis/certify_metrics.py` passes the frozen contract on 40 of 40 fee-ID
 examples, fails v1 on 40 of 40, and refuses v2/v3's empty SQL.
+
+## Knowledge or delivery, on a weaker model (Qwen 3.8)
+
+The same three arms on `qwen3.8-27b`, k=3, at `f8c4e32`. The plan and a
+prediction were fixed in that commit before the first run: the note would
+recover a smaller share of the manual-to-contract gap than on gpt-6-sol,
+because Qwen's `manual_prompt` already failed fee tasks for more than the
+missing fact. Unlike the gpt-6-sol runs, the three arms run together in each
+repeat and pair within it. Scores are end-to-end strict (official alongside):
+
+| arm | r1 | r2 | r3 | mean | official (r1/r2/r3) |
+|---|---:|---:|---:|---:|---|
+| contract | 267 | 269 | 263 | 66.4% | 206 / 188 / 201 |
+| **manual_resolved** | **226** | **221** | **223** | **55.7%** | 165 / 159 / 155 |
+| manual_prompt | 190 | 194 | 196 | 48.2% | 128 / 147 / 140 |
+
+The note recovers **41%** of the gap (47 / 36 / 40% per repeat), against 77%
+on gpt-6-sol, so the prediction holds. Task-level sign tests over the three
+repeats: `manual_resolved` beats `manual_prompt` on 66 tasks and loses on 31
+(p = 5e-4); `contract` beats `manual_resolved` on 104 and loses on 69
+(p = 0.01). Each repeat had one `--retry error` pass. Errors before / after
+it (manual, resolved, contract): r1 7/20/6 to 1/7/1, r2 4/19/3 to 1/2/0, r3
+4/7/4 to 0/0/0. Dropping the 11 tasks with an error left in any arm gives a
+47% share.
+
+**The share is the wrong summary here: it nets out two effects that point in
+opposite directions.** Split the tasks the way the gpt-6-sol table does
+(correct task-runs over three repeats):
+
+| tasks | n | model | manual_prompt | manual_resolved | contract |
+|---|---:|---|---:|---:|---:|
+| rule-set families (`avg_fee_account`, `_mcc`, `fee_ids_by_at_aci`) | 180 | gpt-6-sol | 42 | 180 | 180 |
+| | | Qwen 3.8 | 50 | **155** | **74** |
+| total-fee families (`total_fees_day/_month/_year`) | 135 | gpt-6-sol | 100 | 95 | 135 |
+| | | Qwen 3.8 | 5 | 1 | 134 |
+| everything else | 888 | gpt-6-sol | 641 | 655 | 660 |
+| | | Qwen 3.8 | 525 | 514 | 591 |
+
+- **The note acts in the same place on both models**: the rule-set families,
+  and nowhere else. On Qwen it wins 48 of those 60 tasks and loses 2
+  (p = 2e-12).
+- **On Qwen the prose note beats the contract on the tasks the fact is about**
+  -- 45 tasks to 1 (p = 1e-12). The contract carries the fact inside
+  `fee_rule_matches_transaction`, a predicate over a transaction and its
+  merchant. These questions ask about a hypothetical transaction, so the
+  predicate cannot be used as written and has to be adapted. gpt-6-sol adapts
+  it every time. Qwen reads the metric, then often writes
+  `list_contains(account_type, 'H')` -- the literal rule the manual states.
+  The last query of a run treats the empty list as "all" in 116 of 180
+  `manual_resolved` runs, against 71 in the contract arm and 42 in
+  `manual_prompt`.
+- **The contract's whole lead on Qwen comes from places the note cannot
+  reach**: the total-fee families (134 of 135 against 1, 45 tasks to 0), where
+  the ready-made definitions do the composition, and the rest of the
+  benchmark (591 against 514; 58 tasks to 24, p = 2e-4).
+
+So the decomposition does depend on capability, though not as a smaller share
+of the same gap. A fact stated once in prose reaches a weaker model better
+than the same fact written into SQL that has to be adapted. Definitions that
+apply as written help the weaker model far more, on the tasks they fit. On
+gpt-6-sol the two effects line up: the contract's lead is mostly the fact. On
+Qwen they come apart, and the contract gets less out of its own fact than the
+note does.
+
+The prediction's stated reason also checks out, though one alternative
+explanation does not. Qwen's `manual_prompt` finds the empty-list reading on
+its own about as often as gpt-6-sol's does: some query in the run handles
+empty lists in 56% vs 60% of fee-family task-runs. When it does, though, it
+is right 28% of the time against gpt-6-sol's 76%. Qwen fails after the
+matching, not for want of the fact. That detector is a regular expression
+over each run's SQL (`len(col) = 0`, `col = []` and similar, on the three
+list columns), so treat these rates as approximate.
+
+Every number in this section and the gpt-6-sol one comes from
+`uv run python analysis/knowledge_delivery.py`.
 
 ## The contract compiles, so the residual gap is derivation, not information
 

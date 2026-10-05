@@ -39,6 +39,17 @@ panel repeat of the same index. See FINDINGS.md, *Knowledge or delivery?*
 The three `gpt6-fifth*` versions are an exploratory record, not a control;
 **do not pool them with each other or report them as one arm.**
 
+## `qwen38-resolved-r{1,2,3}.jsonl` -- three arms, the Qwen 3.8 replication
+
+`manual_prompt`, `manual_resolved` and `contract` on `qwen3.8-27b`, 401 golded
+tasks, at `f8c4e32`. Unlike the gpt-6-sol files above, each repeat holds all
+three arms and pairs within itself; do not pair them with the
+`qwen38-panel-rN` files, which predate the 0.55.0 query bounds and the
+response-cache bypass. Each file is the main sweep followed by one
+`--retry error` pass, so a retried (task, arm) has two rows; the loaders keep
+the last. r2's retry pass hung on one run and was stopped, so that run stays
+an error. See FINDINGS.md, *Knowledge or delivery, on a weaker model*.
+
 ## `smoke12-pre-fixes.jsonl` — VOID, kept as evidence
 
 Three rows (task 1712, all arms, `z-ai/glm-5.3-flash`) from the first smoke

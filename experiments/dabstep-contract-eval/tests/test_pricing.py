@@ -13,6 +13,7 @@ def test_every_model_is_a_pinned_snapshot():
         "qwen3.6-27b",
         "qwen3.8-27b",
         "gpt-6-sol",
+        "gpt-6-luna",
     }
 
 
@@ -42,7 +43,7 @@ def test_only_openrouter_models_carry_an_openrouter_endpoint_pin():
     }
     assert by_route["litellm_anthropic"] == ["claudesonnet5"]
     assert by_route["litellm_openai"] == ["qwen3.6-27b", "qwen3.8-27b"]
-    assert by_route["litellm_responses"] == ["gpt-6-sol"]
+    assert by_route["litellm_responses"] == ["gpt-6-sol", "gpt-6-luna"]
     assert len(by_route["openrouter"]) == 4
 
 

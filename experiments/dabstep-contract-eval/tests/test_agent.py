@@ -1544,6 +1544,12 @@ def test_the_vllm_route_sends_temperature_and_thinking_where_they_survive(
     assert "provider" not in body
     assert "reasoning" not in body
 
+    # The gateway's response cache, bypassed as on the Responses route. At
+    # temperature 0 and seed 0 a new run's first request is byte-identical to
+    # an earlier run's, so a replay would pass off the old response as a new
+    # sample -- here more than anywhere.
+    assert body["cache"] == {"no-cache": True}
+
     # The controls that keep the arm comparison honest are NOT route-specific
     # and must not drift between the three factories.
     assert settings["max_tokens"] == agent.MAX_OUTPUT_TOKENS_PER_REQUEST
@@ -1584,8 +1590,8 @@ def test_the_responses_route_sends_effort_summary_and_bypasses_the_gateway_cache
     /v1/responses or set reasoning_effort to 'none'"), and this harness needs
     both. On `/v1/responses` the same pair works.
 
-    `cache: {"no-cache": true}` is the one setting no other route sends, and
-    the one a repeat depends on: the gateway replays identical requests from
+    `cache: {"no-cache": true}` is the setting a repeat depends on (the
+    `litellm_openai` route sends it too): the gateway replays identical requests from
     its own response cache (measured: the same "random" number, 0.05 s, a
     cache-key header), so without it a repeat's first turn could be a replay of
     an earlier repeat's rather than a new sample.
@@ -2033,3 +2039,14 @@ def test_run_task_still_grades_a_task_whose_gold_is_the_empty_string(
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] in {"correct", "incorrect"}
+
+
+def test_each_governed_arm_is_stamped_with_the_contract_it_loads():
+    from dce.frozen import digest, hollow_digest, uninterpreted_digest
+
+    assert agent.arm_digest("contract") == digest()
+    assert agent.arm_digest("contract_hollow") == hollow_digest()
+    assert agent.arm_digest("contract_uninterpreted") == uninterpreted_digest()
+    assert agent.arm_digest("manual_resolved") == digest()
+    assert len({digest(), hollow_digest(), uninterpreted_digest()}) == 3
+    assert agent.arm_digest("schema_only") == digest()

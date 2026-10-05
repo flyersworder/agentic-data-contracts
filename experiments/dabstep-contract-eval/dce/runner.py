@@ -324,7 +324,7 @@ from dce.agent import (
     reasoning_effort_for,
     run_task,
 )
-from dce.arms import ARMS, check_and_restore, make_working_copy
+from dce.arms import ALL_ARMS, ARMS, check_and_restore, make_working_copy
 from dce.data import DATASET_REVISION
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.grade import active_scorer
@@ -368,6 +368,11 @@ MAX_CONSTRUCTION_ATTEMPTS: int = 2
 #: `MAX_CONSTRUCTION_ATTEMPTS`'s own comment for the precise relationship
 #: the two constants are required to keep.
 CIRCUIT_BREAKER_THRESHOLD: int = 5
+
+#: Attempts a unit gets under `sweep(retry_pass=True)`: the first, and one
+#: retry. Counted over the unit's whole history (see `completed_keys`), so a
+#: restart during the pass cannot hand anything a third.
+RETRY_PASS_ATTEMPTS: int = 2
 
 #: Rows between snapshots of the results file. Insurance against the losses
 #: `fsync` cannot cover — operator error, a bad disk, a bug that truncates
@@ -563,7 +568,10 @@ def _construction_error_state(
 
 
 def completed_keys(
-    path: Path, *, retry_verdicts: tuple[str, ...] = ()
+    path: Path,
+    *,
+    retry_verdicts: tuple[str, ...] = (),
+    max_attempts: int | None = None,
 ) -> set[tuple[str, str, str]]:
     """(task_id, arm, model) triples a resumed sweep should skip.
 
@@ -595,15 +603,28 @@ def completed_keys(
         to "done" like any completed row.
       * No verdict at all (an older/foreign row shape) — also treated as
         done, matching this function's pre-verdict-aware behaviour.
+
+    `max_attempts` bounds `retry_verdicts`: a key already holding that many
+    rows with a retried verdict is done. Lifetime rows, not trailing ones --
+    unlike the construction cap, the point is that a restart must not grant
+    a unit another attempt. `None` keeps `--retry` unbounded, as it was.
     """
     last_verdict, trailing_counts = _construction_error_state(path)
+    retried: dict[tuple[str, str, str], int] = {}
+    if max_attempts is not None:
+        for row in _read_rows(path):
+            if row.get("verdict") in retry_verdicts:
+                key = (row["task_id"], row["arm"], row["model"])
+                retried[key] = retried.get(key, 0) + 1
     done: set[tuple[str, str, str]] = set()
     for key, verdict in last_verdict.items():
         if verdict == "construction_error":
             if trailing_counts[key] >= MAX_CONSTRUCTION_ATTEMPTS:
                 done.add(key)  # retries exhausted: terminal, stop retrying
             continue
-        if verdict in retry_verdicts:
+        if verdict in retry_verdicts and (
+            max_attempts is None or retried.get(key, 0) < max_attempts
+        ):
             continue
         done.add(key)
     return done
@@ -1436,6 +1457,7 @@ def sweep(
     retry_verdicts: tuple[str, ...] = (),
     trace_dir: Path | None = None,
     workers: int = 1,
+    retry_pass: bool = False,
 ) -> SweepResult:
     """Run every not-yet-completed (task, arm, model) triple, appending one
     JSON row per unit of work to `out`, until the next task's reservation
@@ -1456,6 +1478,15 @@ def sweep(
     work is network I/O inside `run_sync`, and one shared file handle plus
     one shared spend ledger is a far smaller surface to get right than the
     same state split across processes.
+
+    `retry_pass` runs the `--retry error` pass that used to be run by hand,
+    once the first pass has finished cleanly: every unit whose latest row is
+    an `error` gets one more attempt, at most `RETRY_PASS_ATTEMPTS` in all.
+    Deferred rather than immediate because the errors it exists for -- request
+    timeouts on a shared deployment -- come in bursts, and an immediate retry
+    lands in the same burst. The failed row stays in `out`; the retry is
+    appended and `latest_rows` takes it. Skipped after a capped, broken or
+    leaked first pass, which has not finished its own work.
     """
     if workers < 1:
         raise ValueError(f"workers must be at least 1, got {workers}")
@@ -1466,20 +1497,29 @@ def sweep(
     # of the other's live DuckDB connection. See `dce/lockfile.py` — the
     # failure was reproduced, and the results file gives no sign of it.
     with sweep_lock(out):
-        return _sweep_locked(
-            tasks,
-            arms,
-            models,
-            golds,
+        common = dict(
             out=out,
             db_path=db_path,
             docs=docs,
             max_spend=max_spend,
             golds_hash=golds_hash,
             run_task_fn=run_task_fn,
-            retry_verdicts=retry_verdicts,
             trace_dir=trace_dir,
             workers=workers,
+        )
+        result = _sweep_locked(
+            tasks, arms, models, golds, retry_verdicts=retry_verdicts, **common
+        )
+        if not retry_pass or _exit_code_for(result) != 0:
+            return result
+        return _sweep_locked(
+            tasks,
+            arms,
+            models,
+            golds,
+            retry_verdicts=("error",),
+            max_attempts=RETRY_PASS_ATTEMPTS,
+            **common,
         )
 
 
@@ -1498,9 +1538,10 @@ def _sweep_locked(
     retry_verdicts: tuple[str, ...],
     trace_dir: Path | None,
     workers: int,
+    max_attempts: int | None = None,
 ) -> SweepResult:
     """`sweep`'s body, with the single-instance lock already held."""
-    done = completed_keys(out, retry_verdicts=retry_verdicts)
+    done = completed_keys(out, retry_verdicts=retry_verdicts, max_attempts=max_attempts)
     todo = pending(tasks, arms, models, done)
     by_id = {t["task_id"]: t for t in tasks}
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1867,11 +1908,19 @@ def main() -> None:
         f"automatically, up to {MAX_CONSTRUCTION_ATTEMPTS} trailing "
         "attempts, regardless of this flag)",
     )
+    parser.add_argument(
+        "--retry-pass",
+        action="store_true",
+        help="when the sweep finishes cleanly, give every unit whose latest "
+        "row is an 'error' one more attempt, at the end rather than "
+        f"interleaved; at most {RETRY_PASS_ATTEMPTS} attempts per unit, "
+        "restarts included. The failed rows are kept.",
+    )
     args = parser.parse_args()
 
     for arm in args.arms:
-        if arm not in ARMS:
-            raise SystemExit(f"unknown arm: {arm!r}; expected one of {ARMS}")
+        if arm not in ALL_ARMS:
+            raise SystemExit(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
     for model in args.models:
         if model not in MODELS:
             raise SystemExit(f"unpinned or unknown model: {model}")
@@ -1937,6 +1986,7 @@ def main() -> None:
         retry_verdicts=(args.retry,) if args.retry else (),
         trace_dir=trace_dir,
         workers=args.workers,
+        retry_pass=args.retry_pass,
     )
     # Real dollars, not the guard ledger — see the module docstring's
     # SEPARATE REAL SPEND FROM GUARD SPEND section.

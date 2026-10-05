@@ -135,6 +135,22 @@ def test_completed_keys_retries_error_rows_only_when_requested(tmp_path: Path):
     assert completed_keys(path, retry_verdicts=("error",)) == set()
 
 
+def test_completed_keys_bounds_retries_by_attempts_when_asked(tmp_path: Path):
+    """`max_attempts` counts a key's rows with a retried verdict over its
+    whole history, so a restart cannot retry the same unit again: one error
+    is retried, a second is final."""
+    path = tmp_path / "r.jsonl"
+    err = {"task_id": "1", "arm": "contract", "model": "m", "verdict": "error"}
+    path.write_text(json.dumps(err) + "\n")
+    assert completed_keys(path, retry_verdicts=("error",), max_attempts=2) == set()
+    path.write_text(json.dumps(err) + "\n" + json.dumps(err) + "\n")
+    assert completed_keys(path, retry_verdicts=("error",), max_attempts=2) == {
+        ("1", "contract", "m")
+    }
+    # Unbounded without it, as `--retry error` always was.
+    assert completed_keys(path, retry_verdicts=("error",)) == set()
+
+
 def test_completed_keys_treats_hit_limit_and_scoring_error_as_terminal(tmp_path: Path):
     path = tmp_path / "r.jsonl"
     path.write_text(
@@ -2474,6 +2490,126 @@ def test_sweep_releases_the_lock_so_a_restart_can_resume(tmp_path: Path):
         )
     assert not lock_path_for(out).exists()
     assert len(out.read_text().splitlines()) == 3
+
+
+def _flaky_row(fail_first: set, usd: float = 0.001):
+    """A run that errors on its first attempt at each task in `fail_first`
+    and succeeds afterwards; returns the fake and its call log."""
+    calls: list[str] = []
+
+    def fake_run(task, arm, model, *a, **k):
+        tid = task["task_id"]
+        verdict = "error" if tid in fail_first and tid not in calls else "correct"
+        calls.append(tid)
+        return {
+            "task_id": tid,
+            "arm": arm,
+            "model": model,
+            "usd": usd,
+            "usd_guard": usd,
+            "verdict": verdict,
+        }
+
+    return fake_run, calls
+
+
+def test_the_retry_pass_retries_each_error_once_at_the_end(tmp_path: Path):
+    """The pass `--retry error` used to be run by hand, run by the sweep
+    itself: after every unit has had its first attempt, never interleaved."""
+    out = tmp_path / "r.jsonl"
+    fake_run, calls = _flaky_row({"2"})
+    sweep(
+        _numbered_tasks(3),
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(3)},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=fake_run,
+        retry_pass=True,
+    )
+    assert calls == ["0", "1", "2", "2"]
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    # The failed row stays on disk; the retry is appended and wins.
+    assert [r["verdict"] for r in rows if r["task_id"] == "2"] == ["error", "correct"]
+    assert {r["task_id"]: r["verdict"] for r in latest_rows(out)}["2"] == "correct"
+
+
+def test_the_retry_pass_never_retries_a_unit_twice(tmp_path: Path):
+    """A unit that errors again stays an error, and a restarted sweep does
+    not give it a third attempt."""
+    out = tmp_path / "r.jsonl"
+    calls: list[str] = []
+
+    def always_fails(task, arm, model, *a, **k):
+        calls.append(task["task_id"])
+        return {
+            "task_id": task["task_id"],
+            "arm": arm,
+            "model": model,
+            "usd": 0.001,
+            "usd_guard": 0.001,
+            "verdict": "error",
+        }
+
+    for _ in range(2):
+        sweep(
+            TASKS,
+            ("schema_only",),
+            (GLM,),
+            {"1": "g"},
+            out=out,
+            db_path=_make_pristine(tmp_path),
+            docs={},
+            max_spend=100.0,
+            golds_hash="h",
+            run_task_fn=always_fails,
+            retry_pass=True,
+        )
+    assert calls == ["1", "1"]
+
+
+def test_no_retry_pass_unless_asked(tmp_path: Path):
+    out = tmp_path / "r.jsonl"
+    fake_run, calls = _flaky_row({"0"})
+    sweep(
+        _numbered_tasks(2),
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(2)},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=100.0,
+        golds_hash="h",
+        run_task_fn=fake_run,
+    )
+    assert calls == ["0", "1"]
+
+
+def test_no_retry_pass_after_a_truncated_sweep(tmp_path: Path):
+    """A sweep stopped by the spend cap has not finished its first pass;
+    retrying now would spend the headroom the unfinished units need."""
+    out = tmp_path / "r.jsonl"
+    fake_run, calls = _flaky_row({"0"}, usd=_CALL_USD)
+    result = sweep(
+        _numbered_tasks(10),
+        ("schema_only",),
+        (GLM,),
+        {str(i): "g" for i in range(10)},
+        out=out,
+        db_path=_make_pristine(tmp_path),
+        docs={},
+        max_spend=_budget_for_exactly_two_calls(GLM),
+        golds_hash="h",
+        run_task_fn=fake_run,
+        retry_pass=True,
+    )
+    assert result.truncated is True
+    assert calls == ["0", "1"]
 
 
 def test_every_row_is_fsynced_before_the_next_one_is_written(

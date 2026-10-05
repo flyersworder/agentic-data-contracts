@@ -928,3 +928,59 @@ def test_e2e_mcnemar_is_printed_beside_the_official_views(tmp_path):
     assert all("discordant=1" in line for line in e2e)
     official = [line for line in lines if "e2e" not in line]
     assert all("discordant=0" in line for line in official)
+
+
+def test_the_fifth_arm_is_compared_only_where_it_ran(tmp_path):
+    """`contract_uninterpreted` is an extra arm: a report on a run that has it
+    pairs it against the contract arm, and a report on the four-arm panel is
+    unchanged -- no empty `n_paired=0` line for an arm that never ran."""
+    model = "gpt-6-sol"
+    rows = [
+        _row("t1", "contract", "correct", model=model),
+        _row("t1", "contract_uninterpreted", "incorrect", model=model),
+        _row("t2", "contract", "correct", model=model),
+        _row("t2", "contract_uninterpreted", "correct", model=model),
+    ]
+    path = tmp_path / "fifth.jsonl"
+    _write(path, rows)
+    lines = [
+        ln for ln in report(path).splitlines() if "contract_uninterpreted vs" in ln
+    ]
+    assert lines and all("n_paired=2 discordant=1" in ln for ln in lines)
+
+    four = tmp_path / "four.jsonl"
+    _write(four, [_row("t1", "contract", "correct", model=model)])
+    assert "contract_uninterpreted" not in report(four)
+
+
+def test_manual_resolved_is_compared_with_both_its_neighbours(tmp_path):
+    """`manual_resolved` sits between `manual_prompt` (same delivery, one fact
+    fewer) and `contract` (same fact, delivered as a contract), so a report
+    that has all three pairs it against both."""
+    model = "gpt-6-sol"
+    rows = [
+        _row("t1", "manual_prompt", "incorrect", model=model),
+        _row("t1", "manual_resolved", "correct", model=model),
+        _row("t1", "contract", "correct", model=model),
+        _row("t2", "manual_prompt", "correct", model=model),
+        _row("t2", "manual_resolved", "correct", model=model),
+        _row("t2", "contract", "incorrect", model=model),
+    ]
+    path = tmp_path / "resolved.jsonl"
+    _write(path, rows)
+    lines = report(path).splitlines()
+    for pair in ("manual_prompt vs manual_resolved", "manual_resolved vs contract"):
+        found = [ln for ln in lines if pair in ln]
+        assert found and all("n_paired=2 discordant=1" in ln for ln in found), pair
+
+    alone = tmp_path / "alone.jsonl"
+    _write(alone, [_row("t1", "manual_resolved", "correct", model=model)])
+    assert "manual_prompt vs manual_resolved" not in report(alone)
+
+
+def test_the_fifth_arm_reports_the_governed_tool_counters(tmp_path):
+    row = _row("t1", "contract_uninterpreted", "correct", model="gpt-6-sol")
+    row.update(inspect_rejections=2, enforcement_blocks=1, retry_prompts=0)
+    path = tmp_path / "fifth.jsonl"
+    _write(path, [row])
+    assert "inspect_rejections=2" in report(path)

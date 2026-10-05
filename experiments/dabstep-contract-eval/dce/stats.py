@@ -155,7 +155,7 @@ from pathlib import Path
 
 from scipy.stats import binomtest
 
-from dce.arms import ARMS
+from dce.arms import ARMS, EXTRA_ARMS, GOVERNED_ARMS
 from dce.runner import _read_rows, latest_rows
 
 #: Verdicts where the model produced a graded answer.
@@ -574,7 +574,7 @@ def _governance_counts(rows: list[dict]) -> dict | None:
     separation, so gating them to arm C dropped them from every report.
     """
     arms = {row.get("arm") for row in rows}
-    if not rows or not arms <= {ARM_C, ARM_D}:
+    if not rows or not arms <= GOVERNED_ARMS:
         return None
     return {
         key: sum(row.get(key, 0) or 0 for row in rows)
@@ -895,11 +895,19 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
 
         lines.extend(_unequal_task_set_warning(subset, model))
 
-        for left in COMPARISON_ARMS:
+        # An extra arm is compared only where it ran, so a four-arm report
+        # carries no empty line for an arm that was never part of it.
+        present = {row.get("arm") for row in subset}
+        extra = tuple(a for a in EXTRA_ARMS if a in present)
+        for left in COMPARISON_ARMS + extra:
             if model == PRIMARY_MODEL and left == PRIMARY_LEFT_ARM:
                 lines.append(f"  McNemar {left} vs {ARM_C}: see PRIMARY section above")
                 continue
             lines.extend(_mcnemar_lines(subset, left, ARM_C))
+        # `manual_resolved` is `manual_prompt` plus one fact, so the other
+        # half of its reading is the pair against the arm without it.
+        if {"manual_resolved", ARM_B} <= present:
+            lines.extend(_mcnemar_lines(subset, ARM_B, "manual_resolved"))
 
     return "\n".join(lines)
 

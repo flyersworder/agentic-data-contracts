@@ -1,0 +1,7 @@
+{
+  "shop_1": "SELECT c.name, SUM(o.amount) AS revenue FROM customers c JOIN orders o ON o.custid = c.custid WHERE o.status = 'shipped' GROUP BY c.name ORDER BY revenue DESC",
+  "shop_2": "SELECT c.name, SUM(o.amount) AS revenue FROM customers c JOIN orders o ON o.custid = c.custid WHERE o.status = 'shipped' GROUP BY c.name ORDER BY revenue ASC",
+  "shop_3": "SELECT COUNT(*) FROM customers WHERE tier = 'gold'",
+  "shop_4": "SELECT SUM(qty) / COUNT(*) FROM orders",
+  "shop_5": "SELECT amount FROM orders ORDER BY amount DESC"
+}

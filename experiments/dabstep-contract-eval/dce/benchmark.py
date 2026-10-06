@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 #: contract's lead that is knowledge rather than delivery.
 ROLES: tuple[str, ...] = ("baseline", "manual", "manual_plus", "contract")
 
-BENCHMARK_NAMES: tuple[str, ...] = ("dabstep",)
+BENCHMARK_NAMES: tuple[str, ...] = ("dabstep", "livesqlbench")
 
 #: What a row with no `benchmark` field is: every row written before the
 #: field existed is a DABStep row.
@@ -101,6 +101,10 @@ def benchmark_class(name: str) -> type[Benchmark]:
         from dce.benchmarks.dabstep import DABStep
 
         return DABStep
+    if name == "livesqlbench":
+        from dce.benchmarks.livesqlbench import LiveSQLBench
+
+        return LiveSQLBench
     raise ValueError(f"unknown benchmark: {name!r}; expected one of {BENCHMARK_NAMES}")
 
 

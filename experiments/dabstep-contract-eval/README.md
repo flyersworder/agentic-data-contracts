@@ -216,6 +216,7 @@ uv run python -m dce.stats results/smoke12.jsonl
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--benchmark` | `dabstep` | Which benchmark to run; `dabstep` is currently the only one. `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of `n` golded tasks, proportional across `level`. |
 | `--arms` | all three | Any subset of `schema_only manual_prompt contract`. |
@@ -227,6 +228,13 @@ uv run python -m dce.stats results/smoke12.jsonl
 | `--ungolded` | `skip` | What to do with the 49 tasks that have no reconstructed gold. `skip` is every scoring sweep. `run` answers them **unscored** (`verdict: ungraded`) — only a [leaderboard submission](#leaderboard-submission) needs it. |
 | `--workers` | `1` | Task groups to run concurrently, each on its own working copy. See [Unattended runs](deploy/README.md) before raising it. |
 | `--retry` | none | `error` or `post_run_error` — also re-run rows with that verdict on resume. Both already cost money, which is why neither is retried by default. `construction_error` rows are retried automatically (twice, then given up on loudly). |
+
+The harness talks to a benchmark only through the protocol in
+`dce/benchmark.py`. The arm machinery every benchmark shares (the bounded
+adapter, the tool sets, the working-copy discipline) is in `dce/tools.py`,
+and everything DABStep-specific (arms, prompts, golds, grading) is in
+`dce/benchmarks/dabstep.py`; `dce/arms.py` re-exports both for older
+imports.
 
 **Runs are resumable and resumption is automatic**: re-run the identical
 command and every completed `(task, arm, model)` is skipped. `--max-spend` is

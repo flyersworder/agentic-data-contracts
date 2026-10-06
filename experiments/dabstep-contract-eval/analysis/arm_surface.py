@@ -25,14 +25,16 @@ PRISTINE = ROOT / "data" / "dabstep.duckdb"
 
 
 def _builder():
-    """`(arms, build)`, where `build(arm, db)` returns an `ArmSetup`."""
-    from dce.arms import ALL_ARMS, build_arm
+    """`(arms, build)`, where `build(arm, db)` returns an `ArmSetup`. Built
+    through `DABStep.build_arm`, the path the runner takes."""
+    from dce.benchmarks.dabstep import DABStep, load_docs
 
-    docs = {
-        "manual": (CONTEXT / "manual.md").read_text(encoding="utf-8"),
-        "payments_readme": (CONTEXT / "payments-readme.md").read_text(encoding="utf-8"),
-    }
-    return ALL_ARMS, lambda arm, db: build_arm(arm, db, docs)
+    bench = DABStep(db=PRISTINE, golds={}, golds_hash="", docs=load_docs(CONTEXT))
+    task = DABStep.task({"task_id": "0", "question": "", "level": "hard"})
+    return (
+        DABStep.arms + DABStep.extra_arms,
+        lambda arm, db: bench.build_arm(arm, task, db),
+    )
 
 
 def surface(setup) -> dict:

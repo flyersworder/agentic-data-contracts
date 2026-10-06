@@ -3,7 +3,8 @@
 `manual_resolved` is `manual_prompt` plus the one fact the contract took from
 the data (the list-typed `fees` fields store "all" as an empty list). This
 script reproduces the numbers in FINDINGS.md, *Knowledge or delivery?* and the
-two replications after it, for all three models:
+two replications after it, for all three models; `--benchmark livesqlbench`
+reads LiveSQLBench's runs the same way:
 
 1. accuracy per repeat and the share of the manual -> contract gap the note
    recovers (end-to-end strict, the headline score);
@@ -225,6 +226,21 @@ def dabstep_empty_list(model: str, per_repeat: dict, arms: tuple[str, ...]) -> N
         )
 
 
+#: LiveSQLBench's runs, one file per model and repeat. The run commit fixes
+#: these names; until then the entry exists so the analysis is written
+#: before the data.
+LSB_RUNS = {
+    "gpt-6-sol": lambda i: [f"livesqlbench/sol-r{i}"],
+    "qwen3.8-27b": lambda i: [f"livesqlbench/qwen38-r{i}"],
+    "gpt-6-luna": lambda i: [f"livesqlbench/luna-r{i}"],
+}
+
+
+def lsb_group(row: dict) -> str:
+    """The pre-registered secondary split (spec, Part 4)."""
+    return "high_level" if row.get("high_level") else "standard"
+
+
 CONFIG = {
     "dabstep": {
         "runs": DABSTEP_RUNS,
@@ -234,6 +250,21 @@ CONFIG = {
         "roles": ("manual", "manual_plus", "contract"),
         "pairs": (("manual_plus", "manual"), ("contract", "manual_plus")),
         "subset": None,
+    },
+    "livesqlbench": {
+        "runs": LSB_RUNS,
+        "group": lsb_group,
+        "groups": ("high_level", "standard"),
+        "extra": None,
+        "roles": ("manual", "manual_plus", "contract"),
+        # Part 4's three sign tests: what the compiler added, delivery, and
+        # the contract against no knowledge at all.
+        "pairs": (
+            ("manual_plus", "manual"),
+            ("contract", "manual_plus"),
+            ("contract", "baseline"),
+        ),
+        "subset": "primary",
     },
 }
 

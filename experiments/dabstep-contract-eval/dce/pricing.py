@@ -326,6 +326,26 @@ MODELS: dict[str, ModelSpec] = {
             role="frontier_panel",
             route="litellm_responses",
         ),
+        # GPT-6 luna, the small tier of gpt-6-sol's family, on the same
+        # deployment and route. It is here to vary capability while holding
+        # vendor, family, API route and sampling fixed: gpt-6-sol vs Qwen 3.8
+        # changes all of those at once. Probed live 2026-10-05: function tools
+        # with `reasoning: {effort: medium}` work on `/v1/responses`, reasoning
+        # tokens are reported, and `temperature` is rejected outright
+        # ("Unsupported parameter"), so it samples at its default like
+        # gpt-6-sol. Prices are the gateway's `/model/info` the same day:
+        # $0.10 / $0.50 per MTok, $0.01 cache read.
+        ModelSpec(
+            "gpt-6-luna",
+            provider_tag="azure/gpt-6-luna",
+            quantization="unknown",
+            price_in=0.10,
+            price_out=0.50,
+            price_cached=0.01,
+            supports_temperature=False,
+            role="capability_control",
+            route="litellm_responses",
+        ),
     )
 }
 

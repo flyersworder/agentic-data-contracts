@@ -517,6 +517,70 @@ list columns), so treat these rates as approximate.
 Every number in this section and the gpt-6-sol one comes from
 `uv run python analysis/knowledge_delivery.py`.
 
+## Knowledge or delivery, on a smaller model of the same family (gpt-6-luna)
+
+Qwen 3.8 differs from gpt-6-sol in vendor, family, API route and sampling as
+well as capability. `gpt-6-luna` is the small tier of gpt-6-sol's family, on
+the same deployment and Responses route with temperature at its default, so it
+varies capability alone. Same three arms, k=3, pairing within each repeat, at
+`54636a3`; plan and two predictions fixed in that commit. No run errored, so
+the retry pass had nothing to do and there is no sensitivity analysis.
+Official and end-to-end strict agree on every run:
+
+| arm | r1 | r2 | r3 | mean |
+|---|---:|---:|---:|---:|
+| **contract** | **323** | **328** | **325** | **81.1%** |
+| manual_resolved | 238 | 240 | 229 | 58.8% |
+| manual_prompt | 188 | 176 | 181 | 45.3% |
+
+**With the contract, the small model scores what the large one does**: 81.1%
+against gpt-6-sol's 81.0%. With the manual it is 20 points behind (45.3%
+against 65.1%), slightly below Qwen 3.8. The 61 easy-task runs per arm are
+right in every arm; the whole spread is in the hard tasks.
+
+The note recovers **38%** of the gap (37 / 42 / 33% per repeat).
+`manual_resolved` beats `manual_prompt` on 110 tasks and loses on 30
+(p = 6e-12); `contract` beats `manual_resolved` on 147 and loses on 10
+(p = 2e-32). Prediction (1), a share between Qwen's 41% and gpt-6-sol's 77%,
+**fails**: the share falls with capability and does not stop at Qwen's level.
+
+| tasks | n | model | manual_prompt | manual_resolved | contract |
+|---|---:|---|---:|---:|---:|
+| rule-set families | 180 | gpt-6-sol | 42 | 180 | 180 |
+| | | gpt-6-luna | 23 | 131 | **175** |
+| | | Qwen 3.8 | 50 | 155 | 74 |
+| total-fee families | 135 | gpt-6-sol | 100 | 95 | 135 |
+| | | gpt-6-luna | 18 | 37 | 134 |
+| | | Qwen 3.8 | 5 | 1 | 134 |
+| everything else | 888 | gpt-6-sol | 641 | 655 | 660 |
+| | | gpt-6-luna | 504 | 539 | **667** |
+| | | Qwen 3.8 | 525 | 514 | 591 |
+
+- **Prediction (2) holds.** On the rule-set families the contract does not
+  fall short of the note, as it does on Qwen; it is ahead, 28 tasks to 1
+  (p = 1e-7). gpt-6-luna adapts `fee_rule_matches_transaction` to the
+  hypothetical transaction: the last query treats the empty list as "all" in
+  173 of 180 contract runs, against 163 for the note and 71 on Qwen's
+  contract arm. As the plan said, a sol-like result here points to something
+  specific to Qwen rather than to capability.
+- **The note helps more broadly than on either other model**: the total-fee
+  families (37 against 18, 20 tasks to 5, p = 0.004) and the rest (539
+  against 504, 44 to 24, p = 0.02), not only the rule-set families.
+- **Most of the contract's lead is outside the fee families.** On the 888
+  remaining task-runs the contract beats the note on 76 tasks and loses on 9
+  (p = 2e-14), and lands at gpt-6-sol's level (667 against 660). On gpt-6-sol
+  the same comparison is 23 to 16 (p = 0.34). The gain is broad: 464 against
+  390 on the 675 task-runs with no fee family, and 50 against 8 on
+  `avg_fee_credit`.
+
+So across the three models the one fact explains less of the contract's lead
+the weaker the model, and the definitions that apply as written explain more.
+Within one family, the contract closes the capability gap on this benchmark
+entirely, while the manual leaves the small model 20 points behind. Without
+the fact, gpt-6-luna's `manual_prompt` handles empty lists in some query of
+48% of fee-family task-runs and is right 25% of the time when it does --
+Qwen-like, not sol-like (56% / 28% and 60% / 76%).
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

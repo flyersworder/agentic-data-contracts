@@ -66,3 +66,22 @@ def test_a_failing_init_sql_closes_the_connection_and_raises(db, monkeypatch):
     assert len(opened) == 1
     with pytest.raises(duckdb.ConnectionException):
         opened[0].execute("SELECT 1")
+
+
+def test_governed_arm_is_base_procedure_then_contract(tmp_path):
+    from dce.frozen import load_contract
+    from dce.tools import CONTRACT_PROCEDURE, governed_arm
+
+    db = tmp_path / "d.duckdb"
+    duckdb.connect(str(db)).close()
+    contract = load_contract()
+    setup = governed_arm("BASE", db, contract)
+    try:
+        assert setup.system_prompt == (
+            f"BASE\n\n{CONTRACT_PROCEDURE}\n\n{contract.to_system_prompt()}"
+        )
+        assert "inspect_query" in CONTRACT_PROCEDURE
+        assert setup.session is not None and setup.adapter is not None
+        assert "lookup_metric" in [t.name for t in setup.tools]
+    finally:
+        setup.close()

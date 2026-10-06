@@ -25,7 +25,7 @@ from dce.frozen import (
     uninterpreted_digest,
 )
 from dce.golds import PLURALITY_THRESHOLD, VERIFIED_WRONG_GOLDS, golds_sha256
-from dce.tools import ArmSetup, _governed_tools, _ungoverned_tools
+from dce.tools import ArmSetup, _ungoverned_tools, governed_arm
 
 #: Where `dce.prepare` puts the vendor's context files; relative to the
 #: experiment directory, as the runner's other default paths are.
@@ -100,20 +100,13 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         # below is the thing `contract_hollow` exists to control for, so it is
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
+        # The procedural sentence is `dce.tools.CONTRACT_PROCEDURE`.
         contract = {
             "contract": load_contract,
             "contract_hollow": load_hollow_contract,
             "contract_uninterpreted": load_uninterpreted_contract,
         }[arm]()
-        tools, session, adapter = _governed_tools(db_path, contract=contract)
-        prompt = (
-            f"{BASE_PROMPT}\n\n"
-            "A data contract governs this database. Look up the domain and the "
-            "metrics that apply before writing SQL, and validate every query "
-            "with inspect_query before running it.\n\n"
-            f"{contract.to_system_prompt()}"
-        )
-        return ArmSetup(prompt, tools, session, adapter)
+        return governed_arm(BASE_PROMPT, db_path, contract)
 
     raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
 

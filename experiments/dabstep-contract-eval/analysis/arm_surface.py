@@ -4,7 +4,7 @@ The equivalence check for the Benchmark refactor: run it before the
 refactor and after, and diff the two outputs. Every arm is built on its own
 throwaway copy of the database, never on `data/dabstep.duckdb` itself (see
 `dce.tools`' module docstring for why an arm must not open the pristine
-file).
+file). Pass arm names to dump only those.
 
 Run:  uv run python analysis/arm_surface.py > arm_surface.json
 """
@@ -53,6 +53,10 @@ def surface(setup) -> dict:
 
 def main() -> None:
     arms, build = _builder()
+    # Named arms only, when given: an arm whose artifact does not exist yet
+    # (`contract_compiled` before the compile commit) cannot be built.
+    if len(sys.argv) > 1:
+        arms = tuple(a for a in arms if a in sys.argv[1:])
     out = {}
     with tempfile.TemporaryDirectory() as tmp:
         for arm in arms:

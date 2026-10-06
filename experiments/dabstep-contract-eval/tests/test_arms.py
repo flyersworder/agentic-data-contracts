@@ -195,7 +195,7 @@ def test_all_three_arms_share_one_process_without_connection_conflict(db):
 
 
 def test_row_cap_parity_between_ungoverned_and_governed_arms(db, monkeypatch):
-    import dce.arms as arms_mod
+    import dce.tools as arms_mod
 
     monkeypatch.setattr(arms_mod, "MAX_ROWS", 5)
 
@@ -273,7 +273,7 @@ def test_csv_rendering_survives_a_comma_bearing_cell(db):
 
 
 def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
-    import dce.arms as arms_mod
+    import dce.tools as arms_mod
 
     monkeypatch.setattr(arms_mod, "MAX_ROWS", 3)
 
@@ -303,7 +303,7 @@ def test_truncation_marker_present_when_a_result_is_cut(db, monkeypatch):
 
 
 def test_every_arm_gets_the_same_marker(db, monkeypatch):
-    import dce.arms as arms_mod
+    import dce.tools as arms_mod
 
     monkeypatch.setattr(arms_mod, "MAX_ROWS", 3)
     con = duckdb.connect(str(db))
@@ -334,7 +334,7 @@ def test_every_arm_gets_the_same_marker(db, monkeypatch):
 def test_execute_sql_is_bounded_in_time(db, monkeypatch):
     import time
 
-    import dce.arms as arms_mod
+    import dce.tools as arms_mod
 
     monkeypatch.setattr(arms_mod, "HARNESS_QUERY_SECONDS", 0.3)
     setup = build_arm("schema_only", db, DOCS)

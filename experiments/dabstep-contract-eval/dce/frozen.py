@@ -57,3 +57,20 @@ def uninterpreted_digest() -> str:
 def load_contract_at(path: Path) -> DataContract:
     """A compiled contract, by path (`contracts/<benchmark>/...`)."""
     return DataContract.from_yaml(path)
+
+
+#: DABStep's contract compiled by `dce.compile` from the same two documents
+#: (spec, Part 5). Written by the compile commit; `DABStep.check_arms` stops
+#: a sweep that asks for `contract_compiled` before it exists.
+COMPILED_CONTRACT_PATH = (
+    Path(__file__).parent.parent / "contracts" / "dabstep" / "contract.yml"
+)
+
+
+def load_compiled_contract() -> DataContract:
+    # Read at call time, so a test can point it elsewhere.
+    return load_contract_at(COMPILED_CONTRACT_PATH)
+
+
+def compiled_digest() -> str:
+    return contract_digest(load_compiled_contract())

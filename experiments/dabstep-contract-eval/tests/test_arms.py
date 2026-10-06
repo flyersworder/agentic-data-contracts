@@ -55,7 +55,11 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
     """`contract_uninterpreted` is run on purpose, one model at a time. Adding
     it to `ARMS` would silently make every default sweep a five-arm sweep and
     add a fifth arm to every existing report's comparisons."""
-    assert EXTRA_ARMS == ("contract_uninterpreted", "manual_resolved")
+    assert EXTRA_ARMS == (
+        "contract_uninterpreted",
+        "manual_resolved",
+        "contract_compiled",
+    )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
 

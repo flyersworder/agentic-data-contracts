@@ -21,8 +21,10 @@ from dce.compile.entries import KBEntry
 from dce.compile.inputs import CompileInputs
 from dce.data import DATASET_REVISION
 from dce.frozen import (
+    compiled_digest,
     digest,
     hollow_digest,
+    load_compiled_contract,
     load_contract,
     load_hollow_contract,
     load_uninterpreted_contract,
@@ -54,7 +56,15 @@ ARMS: tuple[str, ...] = (
 #: contract's author took from the data rather than from the manual. It gives
 #: both arms the same knowledge, so what separates it from `contract` is
 #: delivery alone.
-EXTRA_ARMS: tuple[str, ...] = ("contract_uninterpreted", "manual_resolved")
+#:
+#: `contract_compiled` is `contract` with the contract `dce.compile` produced
+#: from the same two documents in place of the hand-authored one (spec, Part
+#: 5): it separates how a contract was made from which benchmark it runs on.
+EXTRA_ARMS: tuple[str, ...] = (
+    "contract_uninterpreted",
+    "manual_resolved",
+    "contract_compiled",
+)
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
 #: What the contract knows that the manual does not. The manual says a null
@@ -75,7 +85,7 @@ DATA_NOTE = (
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
 #: session and the governed-tool counters.
 GOVERNED_ARMS: frozenset[str] = frozenset(
-    {"contract", "contract_hollow", "contract_uninterpreted"}
+    {"contract", "contract_hollow", "contract_uninterpreted", "contract_compiled"}
 )
 
 BASE_PROMPT = (
@@ -109,6 +119,7 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
             "contract": load_contract,
             "contract_hollow": load_hollow_contract,
             "contract_uninterpreted": load_uninterpreted_contract,
+            "contract_compiled": load_compiled_contract,
         }[arm]()
         return governed_arm(BASE_PROMPT, db_path, contract)
 
@@ -130,6 +141,8 @@ def arm_digest(arm: str) -> str:
         return hollow_digest()
     if arm == "contract_uninterpreted":
         return uninterpreted_digest()
+    if arm == "contract_compiled":
+        return compiled_digest()
     return digest()
 
 
@@ -440,8 +453,21 @@ class DABStep:
         return _clean(answer)
 
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
-        # Every DABStep arm's artifact is committed; see Task 11.
-        return None
+        if "contract_compiled" not in arms:
+            return
+        from dce import frozen
+
+        if not frozen.COMPILED_CONTRACT_PATH.is_file():
+            raise SystemExit(
+                f"no compiled contract at {frozen.COMPILED_CONTRACT_PATH}; run "
+                "`python -m dce.compile --benchmark dabstep` first"
+            )
+        try:
+            frozen.load_compiled_contract()
+        except Exception as exc:
+            raise SystemExit(
+                f"the compiled DABStep contract does not load: {exc}"
+            ) from exc
 
     def golds_hash(self) -> str:
         return self._golds_hash

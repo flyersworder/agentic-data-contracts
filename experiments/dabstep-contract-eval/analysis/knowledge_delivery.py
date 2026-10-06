@@ -17,6 +17,11 @@ gpt-6-sol's arms come from two files per repeat (the panel and the one-arm
 `gpt6-resolved` run); Qwen 3.8 and gpt-6-luna ran all three arms in one file
 per repeat.
 
+The decomposition reads arms by role (`manual`, `manual_plus`, `contract`;
+see `dce.benchmark.ROLES`), as the benchmark names them, so another
+benchmark needs only its own `CONFIG` entry: its runs, how a row maps to a
+group, and the groups. The empty-list section is DABStep's own.
+
 Run:  uv run python analysis/knowledge_delivery.py
 """
 
@@ -36,11 +41,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from counterfactuals import family_of  # noqa: E402
+from dce.benchmark import benchmark_class  # noqa: E402
 from dce.stats import _as_e2e, _graded, load  # noqa: E402
 
-ARMS = ("manual_prompt", "manual_resolved", "contract")
 REPEATS = (1, 2, 3)
-MODELS = {
+DABSTEP_RUNS = {
     "gpt-6-sol": lambda i: [f"gpt6-panel-r{i}", f"gpt6-resolved-r{i}"],
     "qwen3.8-27b": lambda i: [f"qwen38-resolved-r{i}"],
     "gpt-6-luna": lambda i: [f"luna-resolved-r{i}"],
@@ -59,20 +64,27 @@ EMPTY_LIST = re.compile(
 FAMILY = family_of()
 
 
-def group(task_id: str) -> str:
-    family = FAMILY.get(str(task_id))
+def dabstep_group(row: dict) -> str:
+    family = FAMILY.get(str(row["task_id"]))
     if family in RULE_SET:
         return "rule-set"
     return "total-fee" if family in TOTAL_FEE else "rest"
 
 
-def rows(model: str, repeat: int) -> list[dict]:
+def arms_of(name: str) -> tuple[str, str, str]:
+    """(manual, manual_plus, contract), the three roles the decomposition
+    reads, as this benchmark names its arms."""
+    roles = benchmark_class(name).roles
+    return roles["manual"], roles["manual_plus"], roles["contract"]
+
+
+def rows(name: str, model: str, repeat: int, arms: tuple[str, ...]) -> list[dict]:
     """End-to-end rows of the three arms for one repeat, with their trace dir."""
     out = []
-    for name in MODELS[model](repeat):
-        for row in _as_e2e(_graded(load(ROOT / "results" / f"{name}.jsonl"))):
-            if row["arm"] in ARMS:
-                out.append({**row, "_traces": ROOT / "traces" / name})
+    for stem in CONFIG[name]["runs"][model](repeat):
+        for row in _as_e2e(_graded(load(ROOT / "results" / f"{stem}.jsonl"))):
+            if row["arm"] in arms:
+                out.append({**row, "_traces": ROOT / "traces" / stem})
     return out
 
 
@@ -105,41 +117,45 @@ def sign_test(better: int, worse: int) -> str:
     return f"{better} vs {worse}, p={p:.2g}"
 
 
-def report(model: str) -> None:
+def report(name: str, model: str) -> None:
+    manual, plus, contract = arms = arms_of(name)
+    group = CONFIG[name]["group"]
     print(f"== {model}")
-    per_repeat = {i: rows(model, i) for i in REPEATS}
+    per_repeat = {i: rows(name, model, i, arms) for i in REPEATS}
 
     totals: Counter[str] = Counter()
     for i, repeat_rows in per_repeat.items():
         correct = Counter(r["arm"] for r in repeat_rows if r["verdict"] == "correct")
         totals.update(correct)
-        lead = correct["contract"] - correct["manual_prompt"]
-        note = correct["manual_resolved"] - correct["manual_prompt"]
+        lead = correct[contract] - correct[manual]
+        note = correct[plus] - correct[manual]
         share = f"{note / lead:.0%}" if lead else "-"
         print(
             f"r{i}  "
-            + "  ".join(f"{a} {correct[a]}" for a in ARMS)
+            + "  ".join(f"{a} {correct[a]}" for a in arms)
             + f"  share {share}"
         )
-    n = len(per_repeat[1]) // len(ARMS)
-    lead = totals["contract"] - totals["manual_prompt"]
-    note = totals["manual_resolved"] - totals["manual_prompt"]
+    n = len(per_repeat[1]) // len(arms)
+    lead = totals[contract] - totals[manual]
+    note = totals[plus] - totals[manual]
     print(
         f"k={len(REPEATS)} "
-        + "  ".join(f"{a} {totals[a] / (n * len(REPEATS)):.1%}" for a in ARMS)
+        + "  ".join(f"{a} {totals[a] / (n * len(REPEATS)):.1%}" for a in arms)
         + f"  share {note}/{lead} = {note / lead:.0%}"
     )
 
     # Each task scored 0-3 over the repeats, per arm.
     score: dict[str, Counter[str]] = defaultdict(Counter)
     by_group: dict[str, Counter[str]] = defaultdict(Counter)
+    group_of_task: dict[str, str] = {}
     for repeat_rows in per_repeat.values():
         for r in repeat_rows:
             ok = r["verdict"] == "correct"
             score[r["arm"]][r["task_id"]] += ok
-            by_group[group(r["task_id"])][r["arm"]] += ok
-    tasks = set(score["contract"])
-    pairs = (("manual_resolved", "manual_prompt"), ("contract", "manual_resolved"))
+            group_of_task[r["task_id"]] = group(r)
+            by_group[group(r)][r["arm"]] += ok
+    tasks = set(score[contract])
+    pairs = ((plus, manual), (contract, plus))
 
     def sign(a: str, b: str, among: set[str]) -> str:
         better = sum(score[a][t] > score[b][t] for t in among)
@@ -149,24 +165,31 @@ def report(model: str) -> None:
     for a, b in pairs:
         print(f"sign {a} vs {b}: {sign(a, b, tasks)}")
 
-    print("group      task-runs  " + "  ".join(ARMS))
-    for g in GROUPS:
-        among = {t for t in tasks if group(t) == g}
+    print("group      task-runs  " + "  ".join(arms))
+    for g in CONFIG[name]["groups"]:
+        among = {t for t in tasks if group_of_task[t] == g}
         runs = len(among) * len(REPEATS)
         print(
             f"{g:10s} {runs:9d}  "
-            + "  ".join(f"{by_group[g][a]:>{len(a)}d}" for a in ARMS)
+            + "  ".join(f"{by_group[g][a]:>{len(a)}d}" for a in arms)
         )
         for a, b in pairs:
             print(f"{'':12s}sign {a} vs {b}: {sign(a, b, among)}")
 
-    # Empty list read as "all", fee families only.
+    extra = CONFIG[name]["extra"]
+    if extra is not None:
+        extra(model, per_repeat, arms)
+    print()
+
+
+def dabstep_empty_list(model: str, per_repeat: dict, arms: tuple[str, ...]) -> None:
+    """Empty list read as "all", fee families only."""
     print("fee families: some query / last query treats the empty list as 'all'")
-    for arm in ARMS:
+    for arm in arms:
         c: Counter[str] = Counter()
         for repeat_rows in per_repeat.values():
             for r in repeat_rows:
-                if r["arm"] != arm or group(r["task_id"]) == "rest":
+                if r["arm"] != arm or dabstep_group(r) == "rest":
                     continue
                 sql = queries(r)
                 ok = r["verdict"] == "correct"
@@ -174,7 +197,7 @@ def report(model: str) -> None:
                 c["runs"] += 1
                 c["any"] += any_hit
                 c["any_ok"] += any_hit and ok
-                if group(r["task_id"]) == "rule-set":
+                if dabstep_group(r) == "rule-set":
                     c["rule_runs"] += 1
                     c["rule_last"] += bool(sql) and bool(EMPTY_LIST.search(sql[-1]))
         if not c["runs"]:
@@ -185,12 +208,26 @@ def report(model: str) -> None:
             f" correct when any {right};"
             f" rule-set last query {c['rule_last']}/{c['rule_runs']}"
         )
-    print()
+
+
+CONFIG = {
+    "dabstep": {
+        "runs": DABSTEP_RUNS,
+        "group": dabstep_group,
+        "groups": GROUPS,
+        "extra": dabstep_empty_list,
+    },
+}
 
 
 def main() -> None:
-    for model in MODELS:
-        report(model)
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="knowledge_delivery")
+    parser.add_argument("--benchmark", choices=sorted(CONFIG), default="dabstep")
+    name = parser.parse_args().benchmark
+    for model in CONFIG[name]["runs"]:
+        report(name, model)
 
 
 if __name__ == "__main__":

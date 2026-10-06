@@ -222,7 +222,7 @@ and the audit records both rounds.
 The run commit fixes, before the first full run:
 
 - task sets (309 primary, 72 order-only), k=3, the four arms, the three
-  models, three arms pairing within each repeat;
+  models, the four arms pairing within each repeat;
 - primary measure: end-to-end strict accuracy on the primary set; task-level
   sign tests over the three repeats for `manual_prompt` vs `manual_compiled`
   and `manual_compiled` vs `contract`, and `contract` vs `schema_only`;

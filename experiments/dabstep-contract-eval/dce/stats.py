@@ -152,6 +152,7 @@ sane default rather than raise mid-report.
 
 from __future__ import annotations
 
+import itertools
 from collections import defaultdict
 from math import sqrt
 from pathlib import Path
@@ -764,11 +765,15 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     ]
 
 
-def _benchmark_for(rows: list[dict]):
+def _benchmark_for(rows: list[dict], raw_rows: list[dict] | tuple = ()):
     """The one benchmark class `rows` belong to. A file mixing benchmarks has
     no single set of arms or roles to compare, so it is refused rather than
-    reported as if it had."""
-    names = {benchmark_of(row) for row in rows} or {DABStep.name}
+    reported as if it had. Superseded rows (`raw_rows`) count too: the file
+    is what is being reported, and a foreign row hidden behind a later one
+    with the same key is still a foreign row."""
+    names = {benchmark_of(row) for row in itertools.chain(rows, raw_rows)} or {
+        DABStep.name
+    }
     if len(names) > 1:
         raise SystemExit(
             f"rows from more than one benchmark ({sorted(names)}); "
@@ -777,11 +782,83 @@ def _benchmark_for(rows: list[dict]):
     return benchmark_class(names.pop())
 
 
+def _secondary_lines(rows, raw_rows, bench, heading: str) -> list[str]:
+    """Per model: every arm's summary and strata, the lopsided-arms warning,
+    and the pairwise tests. `heading` is the Markdown level of each model's
+    title (`##`, or `###` inside a subset section)."""
+    lines: list[str] = []
+    for model in sorted({row.get("model", "unknown") for row in rows}):
+        lines.append(f"\n{heading} {model}")
+        model_rows = [row for row in rows if row.get("model") == model]
+        raw_model_rows = [row for row in raw_rows if row.get("model") == model]
+
+        for arm in sorted({str(row.get("arm") or "unknown") for row in model_rows}):
+            arm_rows = [
+                row for row in model_rows if str(row.get("arm") or "unknown") == arm
+            ]
+            raw_arm_rows = [
+                row for row in raw_model_rows if str(row.get("arm") or "unknown") == arm
+            ]
+            lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
+
+            # `_graded` here too: this breakdown does not go through
+            # `_summarize`, so it is a second STRICT denominator. Without it
+            # the header line prints `strict 1/1` and the level line right
+            # beneath prints `strict 1/3` off the same rows. Strata are the
+            # rows' `group`, which is `level` on a row written before
+            # `group` existed (`dce.benchmark.group_of`).
+            graded_arm_rows = [
+                {**row, "group": group_of(row)} for row in _graded(arm_rows)
+            ]
+            scored_by_level = accuracy_by(_scored(graded_arm_rows), "group")
+            strict_by_level = accuracy_by(graded_arm_rows, "group")
+            e2e_by_level = accuracy_by(_as_e2e(graded_arm_rows), "group")
+            for level in sorted(set(scored_by_level) | set(strict_by_level)):
+                s_ok, s_n = scored_by_level.get(level, (0, 0))
+                t_ok, t_n = strict_by_level.get(level, (0, 0))
+                e_ok, _ = e2e_by_level.get(level, (0, 0))
+                s_lo, s_hi = wilson(s_ok, s_n)
+                t_lo, t_hi = wilson(t_ok, t_n)
+                lines.append(
+                    f"    {bench.group_label}={level:6s} "
+                    f"scored {s_ok:3d}/{s_n:<3d} [{s_lo:.3f},{s_hi:.3f}]   "
+                    f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]   "
+                    f"e2e scored {e_ok:3d}/{s_n}"
+                )
+
+        lines.extend(_unequal_task_set_warning(model_rows, model))
+
+        # An extra arm is compared only where it ran, so a four-arm report
+        # carries no empty line for an arm that was never part of it.
+        present = {row.get("arm") for row in model_rows}
+        # Without a `contract` role (LiveSQLBench until PR C) there is
+        # nothing to compare each arm against; the summaries stand alone.
+        contract = bench.roles.get("contract")
+        if contract is not None:
+            comparison = tuple(a for a in bench.arms if a != contract)
+            extra = tuple(a for a in bench.extra_arms if a in present)
+            for left in comparison + extra:
+                if bench.primary and (model, left) == bench.primary[:2]:
+                    lines.append(
+                        f"  McNemar {left} vs {contract}: see PRIMARY section above"
+                    )
+                    continue
+                lines.extend(_mcnemar_lines(model_rows, left, contract))
+        # The `manual_plus` arm (`manual_resolved` on DABStep) is the manual
+        # plus what the contract knows, so the other half of its reading is
+        # the pair against the arm without it.
+        manual, plus = bench.roles.get("manual"), bench.roles.get("manual_plus")
+        if manual and plus and {manual, plus} <= present:
+            lines.extend(_mcnemar_lines(model_rows, manual, plus))
+
+    return lines
+
+
 def report(path: Path, *, rescore_stale: bool = True) -> str:
     rows = load(path)
     raw_rows = _raw_rows(path)
     lines: list[str] = []
-    bench = _benchmark_for(rows)
+    bench = _benchmark_for(rows, raw_rows)
     excluded = bench.excluded_tasks
 
     # Tasks whose gold is verified wrong are dropped before anything is
@@ -793,8 +870,8 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
         rows = [r for r in rows if r.get("task_id") not in excluded]
         raw_rows = [r for r in raw_rows if r.get("task_id") not in excluded]
         lines.append(
-            f"NOTE: dropped {len(dropped)} task(s) with a verified-wrong gold "
-            f"({', '.join(dropped)}) -- see dce.golds.VERIFIED_WRONG_GOLDS."
+            f"NOTE: dropped {len(dropped)} task(s) {bench.excluded_reason} "
+            f"({', '.join(dropped)}) -- see {bench.excluded_source}."
         )
 
     stale = stale_scorer_rows(rows)
@@ -803,13 +880,32 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
             f"{n} row(s) by {name!r}" for name, n in sorted(stale.items())
         )
         if rescore_stale:
-            rows = rescore(rows)
-            lines.append(
-                f"NOTE: {detail} were graded by a scorer other than the one "
-                f"installed now ({bench.scorer()!r}); every answered row has "
-                "been RE-GRADED from its stored answer and gold. Pass "
-                "rescore_stale=False to report the stored verdicts verbatim."
+            answered = [r for r in rows if r.get("verdict") in ANSWER_VERDICTS]
+            rescored = rescore(rows)
+            # `rescore` hands back the same object for a row it could not
+            # re-grade (its benchmark keeps no gold in the row), so identity
+            # counts the rows that really were re-graded.
+            regraded = sum(
+                1
+                for before, after in zip(rows, rescored, strict=True)
+                if before is not after and before.get("verdict") in ANSWER_VERDICTS
             )
+            rows = rescored
+            if regraded == len(answered):
+                lines.append(
+                    f"NOTE: {detail} were graded by a scorer other than the one "
+                    f"installed now ({bench.scorer()!r}); every answered row has "
+                    "been RE-GRADED from its stored answer and gold. Pass "
+                    "rescore_stale=False to report the stored verdicts verbatim."
+                )
+            else:
+                lines.append(
+                    f"NOTE: {detail} were graded by a scorer other than the one "
+                    f"installed now ({bench.scorer()!r}); {regraded} of "
+                    f"{len(answered)} answered row(s) were RE-GRADED from their "
+                    "stored answer and gold, and the rest keep their recorded "
+                    "verdicts: this benchmark cannot re-grade from a stored row."
+                )
         else:
             lines.append(
                 f"WARNING: {detail}, not the installed {bench.scorer()!r}. "
@@ -831,7 +927,7 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
         _, primary_left, primary_right = bench.primary
         lines.append(
             f"{primary_left} vs {primary_right} on {primary_model}, "
-            "paired McNemar, reconstructed-gold task set"
+            f"paired McNemar, {bench.task_set_label}"
         )
         primary_rows = [row for row in rows if row.get("model") == primary_model]
         if not primary_rows:
@@ -868,67 +964,25 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
 
     # --- SECONDARY / EXPLORATORY: everything else --------------------------
     lines.append("\n# SECONDARY / EXPLORATORY (not pre-registered)")
-    for model in sorted({row.get("model", "unknown") for row in rows}):
-        lines.append(f"\n## {model}")
-        subset = [row for row in rows if row.get("model") == model]
-        raw_subset = [row for row in raw_rows if row.get("model") == model]
-
-        for arm in sorted({str(row.get("arm") or "unknown") for row in subset}):
-            arm_rows = [
-                row for row in subset if str(row.get("arm") or "unknown") == arm
-            ]
-            raw_arm_rows = [
-                row for row in raw_subset if str(row.get("arm") or "unknown") == arm
-            ]
-            lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
-
-            # `_graded` here too: this breakdown does not go through
-            # `_summarize`, so it is a second STRICT denominator. Without it
-            # the header line prints `strict 1/1` and the level line right
-            # beneath prints `strict 1/3` off the same rows. Strata are the
-            # rows' `group`, which is `level` on a row written before
-            # `group` existed (`dce.benchmark.group_of`).
-            graded_arm_rows = [
-                {**row, "group": group_of(row)} for row in _graded(arm_rows)
-            ]
-            scored_by_level = accuracy_by(_scored(graded_arm_rows), "group")
-            strict_by_level = accuracy_by(graded_arm_rows, "group")
-            e2e_by_level = accuracy_by(_as_e2e(graded_arm_rows), "group")
-            for level in sorted(set(scored_by_level) | set(strict_by_level)):
-                s_ok, s_n = scored_by_level.get(level, (0, 0))
-                t_ok, t_n = strict_by_level.get(level, (0, 0))
-                e_ok, _ = e2e_by_level.get(level, (0, 0))
-                s_lo, s_hi = wilson(s_ok, s_n)
-                t_lo, t_hi = wilson(t_ok, t_n)
-                lines.append(
-                    f"    {bench.group_label}={level:6s} "
-                    f"scored {s_ok:3d}/{s_n:<3d} [{s_lo:.3f},{s_hi:.3f}]   "
-                    f"strict {t_ok:3d}/{t_n:<3d} [{t_lo:.3f},{t_hi:.3f}]   "
-                    f"e2e scored {e_ok:3d}/{s_n}"
+    present = {row.get("subset") for row in rows} - {None}
+    if bench.subsets and present:
+        # Declared order first (the pre-registered subset leads), then any
+        # subset a row carries that the benchmark does not declare.
+        order = [s for s in bench.subsets if s in present] + sorted(
+            present - set(bench.subsets)
+        )
+        for subset in order:
+            lines.append(f"\n## subset: {subset}")
+            lines.extend(
+                _secondary_lines(
+                    [r for r in rows if r.get("subset") == subset],
+                    [r for r in raw_rows if r.get("subset") == subset],
+                    bench,
+                    "###",
                 )
-
-        lines.extend(_unequal_task_set_warning(subset, model))
-
-        # An extra arm is compared only where it ran, so a four-arm report
-        # carries no empty line for an arm that was never part of it.
-        present = {row.get("arm") for row in subset}
-        contract = bench.roles["contract"]
-        comparison = tuple(a for a in bench.arms if a != contract)
-        extra = tuple(a for a in bench.extra_arms if a in present)
-        for left in comparison + extra:
-            if bench.primary and (model, left) == bench.primary[:2]:
-                lines.append(
-                    f"  McNemar {left} vs {contract}: see PRIMARY section above"
-                )
-                continue
-            lines.extend(_mcnemar_lines(subset, left, contract))
-        # The `manual_plus` arm (`manual_resolved` on DABStep) is the manual
-        # plus what the contract knows, so the other half of its reading is
-        # the pair against the arm without it.
-        manual, plus = bench.roles.get("manual"), bench.roles.get("manual_plus")
-        if manual and plus and {manual, plus} <= present:
-            lines.extend(_mcnemar_lines(subset, manual, plus))
-
+            )
+    else:
+        lines.extend(_secondary_lines(rows, raw_rows, bench, "##"))
     return "\n".join(lines)
 
 

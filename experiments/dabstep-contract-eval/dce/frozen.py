@@ -6,7 +6,7 @@ against git history rather than merely promised in prose.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 from agentic_data_contracts import DataContract, contract_digest
@@ -51,3 +51,9 @@ def hollow_digest() -> str:
 
 def uninterpreted_digest() -> str:
     return contract_digest(load_uninterpreted_contract())
+
+
+@cache
+def load_contract_at(path: Path) -> DataContract:
+    """A compiled contract, by path (`contracts/<benchmark>/...`)."""
+    return DataContract.from_yaml(path)

@@ -6,8 +6,8 @@ files. The public task file and each database's KB, column meanings and DDL
 come from the Hugging Face dataset `birdsql/livesqlbench-base-full-v1`, laid
 out under `LSB_DATA/hf-full-v1/`. `prep/livesqlbench/` rebuilds the rest.
 
-Tasks are the frozen Query tasks: 309 `primary` and 72 `order_only`, each a
-`subset`; the 30 excluded tasks are never loaded. Every arm's system prompt
+Tasks are the frozen Query tasks: 302 `primary` and 73 `order_only`, each a
+`subset`; the 36 excluded tasks are never loaded. Every arm's system prompt
 carries the database's DDL and column meanings, so the arms differ only in
 how the KB reaches the agent; until the compiler lands (PR C) the arms are
 `schema_only` and `manual_prompt`. All their DuckDB connections, and the

@@ -195,10 +195,10 @@ no new analysis code.
 PR A's reviews found no change in DABStep behaviour. Each of these is a
 gap in what PR B needs from the interface:
 
-- **Task sets.** LiveSQLBench reports 309 primary and 72 order-only tasks
+- **Task sets.** LiveSQLBench reports 302 primary and 73 order-only tasks
   separately, with primary accuracy as the main measure. The split lives
   only in `row_fields` (`set`), which `dce.stats` must not read, so it
-  pools all 381. Either the protocol gains a task-set notion that
+  pools all 375. Either the protocol gains a task-set notion that
   `dce.stats` stratifies by, or `knowledge_delivery.py` owns the split and
   this spec says so.
 - **The `baseline` role is unread.** Nothing reads `baseline`, though it is
@@ -273,11 +273,23 @@ under `prep/livesqlbench/`, reading from and writing to `LSB_DATA` only.
 
 ### Task set
 
-From `tasks_frozen_full_v1.json`: 309 primary tasks and 72 order-only tasks
-run in the same sweep, 381 in all; `Task.group` = database name;
+From `tasks_frozen_full_v1.json`: 302 primary tasks and 73 order-only tasks
+run in the same sweep, 375 in all; `Task.group` = database name;
 `Task.subset` = the task's set (`primary` or `order_only`);
-`row_fields` = `{"db", "high_level", "order"}`. The 30 excluded tasks
-are never run. `Task.group` is written to each row as `group`.
+`row_fields` = `{"db", "high_level", "order"}`. The 36 excluded tasks
+are never run.
+
+The set was re-frozen on 2026-10-06, when the gold-through-grader check
+found 7 of the first freeze's 381 golds not grading correct. The re-freeze
+excludes any task whose gold SQL reads the clock (`CURRENT_DATE`, `NOW()`,
+...): its PostgreSQL gold was frozen on one day and is wrong on the next
+(two already were). It pins sqlglot to 30.19.0, the version whose
+translations the first freeze used. It also needs 20 of 20 reproductions,
+not 5 of 5, under the grader's own connection settings. Against the first
+freeze: six tasks are excluded as time-dependent (five of them had been
+graded), one is excluded as non-reproducible, and two ordered tasks with
+ties move to order-only. All 375 golds then grade correct, over four
+repeats. `Task.group` is written to each row as `group`.
 `Task.prompt` is the task's `query` followed by one fixed
 instruction: end the answer with the final SQL in a ```sql block, which must
 run on this DuckDB database.
@@ -394,7 +406,7 @@ and the audit records both rounds.
 
 The run commit fixes, before the first full run:
 
-- task sets (309 primary, 72 order-only), k=3, the four arms, the three
+- task sets (302 primary, 73 order-only), k=3, the four arms, the three
   models, the four arms pairing within each repeat;
 - primary measure: end-to-end strict accuracy on the primary set; task-level
   sign tests over the three repeats for `manual_prompt` vs `manual_compiled`

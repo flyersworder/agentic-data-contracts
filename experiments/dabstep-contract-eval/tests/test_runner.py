@@ -1315,6 +1315,19 @@ def test_safe_json_dumps_survives_a_non_str_dict_key():
     assert parsed["arm"] == "contract"
 
 
+def test_safe_json_dumps_envelope_writes_subset_only_when_the_row_has_one():
+    # As task_row_fields: a row with no subset (every DABStep row) keeps its
+    # keys, so the envelope must not add `subset: null`.
+    bad_key = {(1, 2): "bad key"}
+    parsed = json.loads(_safe_json_dumps({"task_id": "1", **bad_key}))
+    assert "unserializable_row" in parsed
+    assert "subset" not in parsed
+    parsed = json.loads(
+        _safe_json_dumps({"task_id": "1", "subset": "primary", **bad_key})
+    )
+    assert parsed["subset"] == "primary"
+
+
 def test_safe_json_dumps_survives_a_circular_reference():
     row: dict = {"task_id": "1", "verdict": "correct"}
     row["self"] = row

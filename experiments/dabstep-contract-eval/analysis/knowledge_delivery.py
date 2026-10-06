@@ -83,7 +83,7 @@ def arms_of(name: str) -> dict[str, str]:
 
 
 def rows(name: str, model: str, repeat: int, arms: tuple[str, ...]) -> list[dict]:
-    """End-to-end rows of the three arms for one repeat, with their trace dir."""
+    """End-to-end rows of `arms` for one repeat, with their trace dir."""
     bench = benchmark_class(name)
     subset = CONFIG[name]["subset"]
     out = []
@@ -130,13 +130,17 @@ def report(name: str, model: str) -> None:
     by_role = arms_of(name)
     manual, plus, contract = (by_role[r] for r in CONFIG[name]["roles"])
     arms = (manual, plus, contract)
+    # Every arm a sign test reads, not just the three printed: a pair naming
+    # a fourth role (`baseline`) would otherwise score that arm 0 everywhere.
+    loaded = tuple(dict.fromkeys(by_role.values()))
     group = CONFIG[name]["group"]
     print(f"== {model}")
-    per_repeat = {i: rows(name, model, i, arms) for i in REPEATS}
+    per_repeat = {i: rows(name, model, i, loaded) for i in REPEATS}
 
     totals: Counter[str] = Counter()
     for i, repeat_rows in per_repeat.items():
         correct = Counter(r["arm"] for r in repeat_rows if r["verdict"] == "correct")
+        correct = Counter({a: correct[a] for a in arms})
         totals.update(correct)
         lead = correct[contract] - correct[manual]
         note = correct[plus] - correct[manual]
@@ -146,7 +150,7 @@ def report(name: str, model: str) -> None:
             + "  ".join(f"{a} {correct[a]}" for a in arms)
             + f"  share {share}"
         )
-    n = len(per_repeat[1]) // len(arms)
+    n = sum(r["arm"] == contract for r in per_repeat[1])
     lead = totals[contract] - totals[manual]
     note = totals[plus] - totals[manual]
     print(

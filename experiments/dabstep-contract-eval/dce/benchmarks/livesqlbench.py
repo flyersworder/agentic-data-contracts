@@ -11,9 +11,8 @@ Tasks are the frozen Query tasks: 302 `primary` and 73 `order_only`, each a
 carries the database's DDL and column meanings, so the arms differ only in
 how the KB reaches the agent; until the compiler lands (PR C) the arms are
 `schema_only` and `manual_prompt`. All their DuckDB connections, and the
-grader's, run PostgreSQL's NULL ordering and integer division
-(`lsb_grade.PG_COMPAT`), because the gold came from PostgreSQL; the agents'
-connections also have no file access (`AGENT_INIT_SQL`).
+grader's, run PostgreSQL's NULL ordering and integer division, because the
+gold came from PostgreSQL, and have no file access (`lsb_grade.SAFE_INIT_SQL`).
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from pathlib import Path
 
 from dce.benchmark import Grade, Task
 from dce.benchmarks.lsb_grade import (
-    PG_COMPAT,
+    SAFE_INIT_SQL,
     extract_sql,
     gold_digest,
     grade_answer,
@@ -38,13 +37,12 @@ DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
 
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
-SCORER = "lsb-soft-ex-duckdb/1"
+SCORER = "lsb-soft-ex-duckdb/2"
 
-#: Every agent connection: PostgreSQL semantics, and no file access. The
-#: gold results sit beside the databases in LSB_DATA, and DuckDB's file
-#: functions (`read_text`, `read_json`, `glob`) would read them from inside
-#: an agent's query.
-AGENT_INIT_SQL: tuple[str, ...] = (*PG_COMPAT, "SET enable_external_access = false")
+#: Every agent connection: the grader's own settings (`SAFE_INIT_SQL`), so
+#: an agent explores the database under exactly the rules its answer is
+#: graded by, with no file access to the gold beside it.
+AGENT_INIT_SQL: tuple[str, ...] = SAFE_INIT_SQL
 
 BASE_PROMPT = (
     "You are a data analyst answering questions over a DuckDB database.\n"
@@ -225,11 +223,15 @@ class LiveSQLBench:
         return ArmSetup(prompt, _ungoverned_tools(db, init_sql=AGENT_INIT_SQL), None)
 
     def arm_digest(self, arm: str, task: Task) -> str:
-        # The knowledge this experiment is about, for the task's database:
-        # the KB file every arm's knowledge comes from (none, prose, or --
-        # in PR C -- compiled).
+        # Every file the arm's prompt is built from, for the task's database,
+        # so a re-downloaded schema or KB cannot change an arm unrecorded.
         name = task.meta["db"]
-        return _sha256(self._db_dir(name) / f"{name}_kb.jsonl")
+        files = [f"{name}_schema.txt", f"{name}_column_meaning_base.json"]
+        if arm == "manual_prompt":
+            files.append(f"{name}_kb.jsonl")
+        folder = self._db_dir(name)
+        joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
+        return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     def _gold_rows(self, task: Task):
         return self._gold[task.task_id]["rows"]

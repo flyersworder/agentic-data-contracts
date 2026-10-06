@@ -925,18 +925,26 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
         lines.append(f"(none pre-registered for {bench.name})")
     else:
         _, primary_left, primary_right = bench.primary
+        # A benchmark with subsets pre-registers the first one; the others
+        # are reported only below.
+        pool, raw_pool = rows, raw_rows
+        scope = ""
+        if bench.subsets:
+            pool = [r for r in rows if r.get("subset") == bench.subsets[0]]
+            raw_pool = [r for r in raw_rows if r.get("subset") == bench.subsets[0]]
+            scope = f", subset {bench.subsets[0]}"
         lines.append(
             f"{primary_left} vs {primary_right} on {primary_model}, "
-            f"paired McNemar, {bench.task_set_label}"
+            f"paired McNemar, {bench.task_set_label}{scope}"
         )
-        primary_rows = [row for row in rows if row.get("model") == primary_model]
+        primary_rows = [row for row in pool if row.get("model") == primary_model]
         if not primary_rows:
             lines.append(f"(no rows for {primary_model})")
         else:
             primary_summaries = {}
             for arm in (primary_left, primary_right):
-                arm_rows = slice_of(rows, primary_model, arm)
-                raw_arm_rows = slice_of(raw_rows, primary_model, arm)
+                arm_rows = slice_of(pool, primary_model, arm)
+                raw_arm_rows = slice_of(raw_pool, primary_model, arm)
                 summary = _summarize(arm_rows, raw_arm_rows)
                 primary_summaries[arm] = summary
                 lines.append(_format_summary(arm, summary))
@@ -966,6 +974,12 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
     lines.append("\n# SECONDARY / EXPLORATORY (not pre-registered)")
     present = {row.get("subset") for row in rows} - {None}
     if bench.subsets and present:
+        unscoped = sum(1 for row in rows if row.get("subset") is None)
+        if unscoped:
+            lines.append(
+                f"WARNING: {unscoped} row(s) carry no subset and are in no "
+                "section below."
+            )
         # Declared order first (the pre-registered subset leads), then any
         # subset a row carries that the benchmark does not declare.
         order = [s for s in bench.subsets if s in present] + sorted(

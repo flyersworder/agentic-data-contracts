@@ -10,6 +10,7 @@ from dce.benchmarks.livesqlbench import (
     BASE_PROMPT,
     SCORER,
     LiveSQLBench,
+    _sha256,
     render_column_meanings,
     render_manual,
 )
@@ -198,14 +199,25 @@ def test_gold_ref_golds_hash_normalize_and_scorer(bench, data):
     assert LiveSQLBench.e2e_correct({"answer": "x"}) is False
 
 
-def test_arm_digest_is_the_databases_kb_file(bench, data):
-    import hashlib
+def test_arm_digest_covers_every_file_the_arms_prompt_is_built_from(bench, data):
+    folder = data / "hf-full-v1" / "shop"
+    task = _task(bench, "shop_1")
+    before = {arm: bench.arm_digest(arm, task) for arm in bench.arms}
+    assert before["schema_only"] != before["manual_prompt"]
 
-    kb = (data / "hf-full-v1" / "shop" / "shop_kb.jsonl").read_bytes()
-    assert (
-        bench.arm_digest("manual_prompt", _task(bench, "shop_1"))
-        == hashlib.sha256(kb).hexdigest()
-    )
+    kb = folder / "shop_kb.jsonl"
+    kb.write_text(kb.read_text() + "\n")
+    _sha256.cache_clear()
+    assert bench.arm_digest("schema_only", task) == before["schema_only"]
+    assert bench.arm_digest("manual_prompt", task) != before["manual_prompt"]
+
+    for name in ("shop_schema.txt", "shop_column_meaning_base.json"):
+        changed = {arm: bench.arm_digest(arm, task) for arm in bench.arms}
+        path = folder / name
+        path.write_text(path.read_text() + "\n")
+        _sha256.cache_clear()
+        for arm in bench.arms:
+            assert bench.arm_digest(arm, task) != changed[arm], (name, arm)
 
 
 def test_a_missing_database_file_stops_loading_by_name(data):

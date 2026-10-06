@@ -15,8 +15,17 @@ was frozen (every frozen task's own gold SQL passes through this module):
 * JSON values: DuckDB returns JSON as text, PostgreSQL as parsed objects,
   so text that parses as a JSON object or array is parsed first.
 * Numbers: the engines' float arithmetic differs in the last bits, which
-  can flip the two-place rounding of large values, so numbers compare with
-  rel_tol 1e-5 / abs_tol 0.011 after rounding.
+  can flip the two-place rounding, so numbers compare within one rounding
+  step (abs_tol 0.011) after rounding, plus rel_tol 1e-9 for values too
+  large for two places to be representable. Integers that differ by one
+  never match below 1e9.
+* Nested dates: upstream normalises a top-level date but not one inside a
+  list or struct, which then fails to serialise. A nested date becomes the
+  same `YYYY-MM-DD` text, and any other value JSON cannot hold its `str()`.
+
+The grader's connection has no file access, as an agent's has none: the
+gold results sit beside the databases, and an answer's SQL must not read
+them or write anywhere.
 
 Failure categories, all graded incorrect: `no_sql` (no block), `sql_error`
 (DuckDB refused or failed the query), `timeout` and `too_large` (more than
@@ -33,6 +42,8 @@ import math
 import re
 import threading
 import time
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -53,6 +64,12 @@ PG_COMPAT: tuple[str, ...] = (
     "SET default_null_order = 'nulls_last_on_asc_first_on_desc'",
     "SET integer_division = true",
 )
+
+#: Every connection that runs an agent's SQL, during its session or when
+#: grading its answer: PostgreSQL semantics, and no file access. The gold
+#: results sit beside the databases, and DuckDB's file functions
+#: (`read_text`, `read_json`, `glob`) and `COPY ... TO` would reach them.
+SAFE_INIT_SQL: tuple[str, ...] = (*PG_COMPAT, "SET enable_external_access = false")
 
 #: The candidate's time limit, the same as an agent's own queries get
 #: (`dce.tools.HARNESS_QUERY_SECONDS`).
@@ -90,6 +107,19 @@ def clean(sqls: list[str]) -> list[str]:
     return remove_round(remove_distinct(remove_comments(list(sqls))))
 
 
+def _jsonable(value):
+    # Inside a list or struct, as upstream's json.dumps will need it.
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    if value is None or isinstance(value, (str, int, float, Decimal)):
+        return value
+    return str(value)
+
+
 def normalise(rows) -> list[tuple]:
     parsed = []
     for row in rows:
@@ -100,15 +130,20 @@ def normalise(rows) -> list[tuple]:
                     value = json.loads(value)
                 except ValueError:
                     pass
+            if isinstance(value, (dict, list, tuple)):
+                value = _jsonable(value)
             new.append(value)
         parsed.append(tuple(new))
     return [tuple(r) for r in preprocess_results(parsed)]
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _close(a, b) -> bool:
-    numeric = (int, float)
-    if isinstance(a, numeric) and isinstance(b, numeric) and not isinstance(a, bool):
-        return math.isclose(a, b, rel_tol=1e-5, abs_tol=0.011)
+    if _is_number(a) and _is_number(b):
+        return math.isclose(a, b, rel_tol=1e-9, abs_tol=0.011)
     return str(a) == str(b)
 
 
@@ -120,7 +155,9 @@ def _rows_close(left: list[tuple], right: list[tuple]) -> bool:
 
 
 def _key(row: tuple) -> tuple:
-    return tuple(str(v) for v in row)
+    # Numbers by value, so a value one rounding step off sorts beside its
+    # gold; anything else by its text.
+    return tuple((0, v, "") if _is_number(v) else (1, 0, str(v)) for v in row)
 
 
 def matches(gold: list[tuple], got: list[tuple], ordered: bool) -> bool:
@@ -147,7 +184,7 @@ def gold_digest(rows) -> str:
 def connect_readonly(db_path: Path, *, memory_limit: str | None = HARNESS_MEMORY_LIMIT):
     con = duckdb.connect(str(db_path), read_only=True)
     try:
-        for statement in PG_COMPAT:
+        for statement in SAFE_INIT_SQL:
             con.execute(statement)
         if memory_limit is not None:
             con.execute("SET memory_limit = ?", [memory_limit])

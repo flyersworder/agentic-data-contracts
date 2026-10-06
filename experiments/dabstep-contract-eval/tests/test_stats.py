@@ -1092,6 +1092,49 @@ def test_each_subset_is_reported_in_its_own_section_in_declared_order(
     assert "McNemar" not in text
 
 
+def test_the_primary_comparison_reads_only_the_pre_registered_subset(
+    tmp_path, monkeypatch
+):
+    import dce.stats as stats_module
+
+    bench = _bench_like(
+        subsets=("primary", "order_only"),
+        primary=(PRIMARY_MODEL, "manual_prompt", "contract"),
+    )
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", "manual_prompt", "incorrect"), "subset": "primary"},
+            {**_row("t1", "contract", "correct"), "subset": "primary"},
+            {**_row("t2", "manual_prompt", "correct"), "subset": "order_only"},
+            {**_row("t2", "contract", "incorrect"), "subset": "order_only"},
+        ],
+    )
+    text = report(path)
+    primary = text[: text.index("# SECONDARY")]
+    assert "subset primary" in primary
+    assert "manual_prompt    scored    0/1" in primary
+    assert "(contract_only=1, manual_prompt_only=0)" in primary
+
+
+def test_rows_without_a_subset_are_counted_not_silently_dropped(tmp_path, monkeypatch):
+    import dce.stats as stats_module
+
+    bench = _bench_like(subsets=("primary", "order_only"), primary=None)
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", "manual_prompt", "correct"), "subset": "primary"},
+            _row("t2", "manual_prompt", "correct"),
+        ],
+    )
+    assert "WARNING: 1 row(s) carry no subset" in report(path)
+
+
 def test_a_benchmark_mixed_in_only_among_superseded_rows_is_still_refused(tmp_path):
     path = tmp_path / "r.jsonl"
     _write(

@@ -168,3 +168,52 @@ def test_the_time_limit_covers_normalising_the_result(db, monkeypatch):
         _answer("SELECT 1"), db_path=db, gold_rows=[[1]], ordered=False, seconds=0.2
     )
     assert grade == Grade("incorrect", failure="timeout")
+
+
+def test_the_grader_has_no_file_access(db, tmp_path):
+    # The gold results sit beside the databases; an answer must not read them,
+    # nor write anywhere on the grading host.
+    secret = tmp_path / "gold.json"
+    secret.write_text('[{"x": 42}]')
+    read = _answer(f"SELECT x FROM read_json_auto('{secret}')")
+    assert grade_answer(read, db_path=db, gold_rows=[[42]], ordered=False) == Grade(
+        "incorrect", failure="sql_error"
+    )
+    out = tmp_path / "written.csv"
+    write = _answer(f"COPY (SELECT 1) TO '{out}'; SELECT 42")
+    assert (
+        grade_answer(write, db_path=db, gold_rows=[[42]], ordered=False).failure
+        == "sql_error"
+    )
+    assert not out.exists()
+
+
+def test_integers_compare_exactly():
+    assert matches([(100000,)], [(100001,)], ordered=False) is False
+    assert matches([(100000,)], [(100000,)], ordered=False) is True
+
+
+def test_the_tolerance_is_one_rounding_step_not_a_relative_band():
+    # A last-bit difference can flip the two-place rounding: one step passes.
+    assert matches([(0.13,)], [(0.12,)], ordered=True) is True
+    assert matches([(123456789012.35,)], [(123456789012.34,)], ordered=True) is True
+    # A large value off by more than one step does not, int or float.
+    assert matches([(1000000.0,)], [(1000009,)], ordered=True) is False
+    assert matches([(12345.67,)], [(12345.79,)], ordered=False) is False
+
+
+def test_unordered_rows_pair_numbers_by_value_not_by_their_text():
+    # As text, 10.0 sorts before 5.0 but 9.99 after it: pairing by text would
+    # set 10.0 against 5.0 and fail an answer one rounding step away.
+    assert matches([(10.0,), (5.0,)], [(9.99,), (5.0,)], ordered=False) is True
+
+
+def test_a_nested_date_is_graded_not_raised(db):
+    got = _answer("SELECT [DATE '2024-01-02'], {'d': DATE '2024-01-03'}")
+    gold = [['["2024-01-02"]', '{"d": "2024-01-03"}']]
+    assert grade_answer(got, db_path=db, gold_rows=gold, ordered=False) == Grade(
+        "correct"
+    )
+    assert grade_answer(
+        got, db_path=db, gold_rows=[["x", "y"]], ordered=False
+    ) == Grade("incorrect")

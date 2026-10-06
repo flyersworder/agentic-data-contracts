@@ -963,12 +963,18 @@ def _safe_json_dumps(row: dict) -> str:
         envelope["level"] = str(row.get("level", "unknown"))
     except Exception:
         envelope["level"] = "unknown"
-    for key in ("benchmark", "group", "subset"):
+    for key in ("benchmark", "group"):
         try:
             value = row.get(key)
             envelope[key] = None if value is None else str(value)
         except Exception:
             envelope[key] = None
+    try:
+        # Written only when set, as `task_row_fields` does.
+        if row.get("subset") is not None:
+            envelope["subset"] = str(row["subset"])
+    except Exception:
+        pass
     corrupted = row.get("db_corrupted")
     envelope["db_corrupted"] = corrupted if isinstance(corrupted, bool) else None
     model = row.get("model")

@@ -2,6 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
+import dce.benchmarks.livesqlbench as livesqlbench_module
 import duckdb
 import pytest
 from dce.benchmark import Benchmark, Grade, benchmark_class
@@ -40,7 +41,16 @@ def data(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def bench(data: Path) -> LiveSQLBench:
-    return LiveSQLBench.from_data(data)
+    """The fixture with the shop contract compiled (by a scripted model), so
+    every arm, the compiled ones included, can be built."""
+    from dce.compile.run import compile_database
+
+    from tests.test_compile_run import shop_driver
+
+    contracts = data.parent / "contracts"
+    inputs = livesqlbench_module.compile_inputs(data, "shop")
+    compile_database(inputs, contracts / "shop", shop_driver([]), spend_cap=10.0)
+    return LiveSQLBench.from_data(data, contracts=contracts)
 
 
 def _task(bench, task_id):
@@ -53,10 +63,20 @@ def test_registered_and_satisfies_the_protocol(bench):
 
 
 def test_class_attributes(bench):
-    assert LiveSQLBench.arms == ("schema_only", "manual_prompt")
+    assert LiveSQLBench.arms == (
+        "schema_only",
+        "manual_prompt",
+        "manual_compiled",
+        "contract",
+    )
     assert LiveSQLBench.extra_arms == ()
-    assert LiveSQLBench.governed_arms == frozenset()
-    assert LiveSQLBench.roles == {"baseline": "schema_only", "manual": "manual_prompt"}
+    assert LiveSQLBench.governed_arms == frozenset({"contract"})
+    assert LiveSQLBench.roles == {
+        "baseline": "schema_only",
+        "manual": "manual_prompt",
+        "manual_plus": "manual_compiled",
+        "contract": "contract",
+    }
     assert LiveSQLBench.primary is None
     assert LiveSQLBench.group_label == "db"
     assert LiveSQLBench.subsets == ("primary", "order_only")
@@ -145,10 +165,10 @@ def test_the_arms_tools_run_with_postgres_semantics(bench, data):
     assert execute.function("SELECT 7 / 2 AS x").splitlines() == ["x", "3"]
 
 
-def test_an_unknown_or_contract_arm_raises(bench, data):
+def test_an_unknown_arm_raises(bench, data):
     with pytest.raises(ValueError, match="unknown arm"):
         bench.build_arm(
-            "contract", _task(bench, "shop_1"), data / "duckdb" / "shop.duckdb"
+            "contract_hollow", _task(bench, "shop_1"), data / "duckdb" / "shop.duckdb"
         )
 
 
@@ -279,18 +299,110 @@ def test_an_agent_cannot_read_files_beside_the_database(bench, data):
     gold = data / "gold_results_full_v1.json"
     for arm in LiveSQLBench.arms:
         setup = bench.build_arm(arm, task, data / "duckdb" / "shop.duckdb")
-        execute = next(t for t in setup.tools if t.name == "execute_sql")
-        # An error message echoes the query, so check for what the file
-        # holds (a task id, a gold value) or, for glob, a file name.
-        for sql, leak in (
-            (f"SELECT content FROM read_text('{gold}')", "Bob"),
-            (f"SELECT * FROM read_json_auto('{gold}')", "shop_1"),
-            (f"SELECT * FROM glob('{data}/*')", "gold_results"),
-        ):
-            out = execute.function(sql)
-            assert leak not in out, (arm, sql, out)
-        # ... while the database itself still answers.
-        assert execute.function("SELECT count(*) AS n FROM orders").splitlines() == [
-            "n",
-            "5",
-        ]
+        try:
+            if setup.adapter is not None:
+                # A governed arm's tools need a run context; they all query
+                # through this adapter's connection, so it is what is checked.
+                def execute(sql, adapter=setup.adapter):
+                    try:
+                        return str(adapter.execute_limited(sql, 50).rows)
+                    except Exception as exc:
+                        return f"ERROR: {exc}"
+
+                count = ["[(5,)]"]
+            else:
+                tool = next(t for t in setup.tools if t.name == "execute_sql")
+                execute = tool.function
+                count = ["n", "5"]
+            # An error message echoes the query, so check for what the file
+            # holds (a task id, a gold value) or, for glob, a file name.
+            for sql, leak in (
+                (f"SELECT content FROM read_text('{gold}')", "Bob"),
+                (f"SELECT * FROM read_json_auto('{gold}')", "shop_1"),
+                (f"SELECT * FROM glob('{data}/*')", "gold_results"),
+            ):
+                out = execute(sql)
+                assert leak not in out, (arm, sql, out)
+            # ... while the database itself still answers.
+            assert execute("SELECT count(*) AS n FROM orders").splitlines() == count
+        finally:
+            setup.close()
+
+
+def _compiled(lsb_data, tmp_path):
+    """The shop fixture compiled with a scripted model, as Task 8's test does."""
+    from dce.compile.run import compile_database
+
+    from tests.test_compile_run import shop_driver
+
+    contracts = tmp_path / "contracts"
+    inputs = livesqlbench_module.compile_inputs(lsb_data, "shop")
+    compile_database(inputs, contracts / "shop", shop_driver([]), spend_cap=10.0)
+    return LiveSQLBench.from_data(lsb_data, contracts=contracts), contracts
+
+
+def test_manual_compiled_is_the_manual_then_the_compiled_definitions(
+    lsb_data, tmp_path
+):
+    from dce.compile.emit import render_compiled
+
+    bench, contracts = _compiled(lsb_data, tmp_path)
+    task = _task(bench, "shop_1")
+    db = lsb_data / "duckdb" / "shop.duckdb"
+    manual = bench.build_arm("manual_prompt", task, db)
+    compiled = bench.build_arm("manual_compiled", task, db)
+    assert compiled.system_prompt == (
+        manual.system_prompt
+        + "\n\n## Compiled definitions\n\n"
+        + render_compiled(contracts / "shop")
+    )
+    assert "SUM(CASE WHEN status = 'shipped' THEN amount END)" in compiled.system_prompt
+    assert [t.name for t in compiled.tools] == [t.name for t in manual.tools]
+
+
+def test_the_contract_arm_is_context_procedure_contract_over_governed_tools(
+    lsb_data, tmp_path
+):
+    from dce.frozen import load_contract_at
+    from dce.tools import CONTRACT_PROCEDURE
+
+    bench, contracts = _compiled(lsb_data, tmp_path)
+    task = _task(bench, "shop_4")
+    db = lsb_data / "duckdb" / "shop.duckdb"
+    schema_only = bench.build_arm("schema_only", task, db)
+    setup = bench.build_arm("contract", task, db)
+    try:
+        contract = load_contract_at(contracts / "shop" / "contract.yml")
+        assert setup.system_prompt == (
+            f"{schema_only.system_prompt}\n\n{CONTRACT_PROCEDURE}\n\n"
+            f"{contract.to_system_prompt()}"
+        )
+        assert "## Knowledge base" not in setup.system_prompt
+        names = [t.name for t in setup.tools]
+        assert "lookup_metric" in names and "run_query" in names
+        # PG_COMPAT reaches the governed connection too.
+        result = setup.adapter.execute_limited("SELECT 7 / 2 AS x", 5)
+        assert [tuple(r) for r in result.rows] == [(3,)]
+    finally:
+        setup.close()
+
+
+def test_compiled_arms_digest_the_contract(lsb_data, tmp_path):
+    bench, _ = _compiled(lsb_data, tmp_path)
+    task = _task(bench, "shop_1")
+    digests = {arm: bench.arm_digest(arm, task) for arm in LiveSQLBench.arms}
+    assert len(set(digests.values())) == 4
+
+
+def test_check_arms_names_databases_without_a_compiled_contract(lsb_data, tmp_path):
+    bench = LiveSQLBench.from_data(lsb_data, contracts=tmp_path / "none")
+    tasks = bench.tasks()
+    bench.check_arms(("schema_only", "manual_prompt"), tasks)  # nothing compiled needed
+    with pytest.raises(SystemExit, match=r"\['shop'\]"):
+        bench.check_arms(("contract",), tasks)
+    broken = tmp_path / "broken" / "shop"
+    broken.mkdir(parents=True)
+    (broken / "contract.yml").write_text("name: [", encoding="utf-8")
+    bench = LiveSQLBench.from_data(lsb_data, contracts=tmp_path / "broken")
+    with pytest.raises(SystemExit, match="does not load"):
+        bench.check_arms(("manual_compiled",), tasks)

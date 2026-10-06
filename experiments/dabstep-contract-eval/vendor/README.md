@@ -49,3 +49,25 @@ materially more lenient in ways that will matter more over 450 tasks than over
 precision of the two values, single-word subset matching, and a
 `SequenceMatcher` ratio above 0.95 for strings — so no FINDINGS number may be
 computed with the fallback.
+
+## `livesqlbench_test_utils.py`
+
+Six of LiveSQLBench's official Soft-EX helpers, so that a LiveSQLBench answer
+is normalised by the same rules as the benchmark's own evaluation.
+
+- **Source:** `https://github.com/bird-bench/livesqlbench`,
+  `evaluation/src/test_utils.py`
+- **Upstream commit:** `5aab9623d6ce58d32e252f8c307f08fbcbdf4a70`
+- **Licence:** MIT, `Copyright (c) 2024 bird_sql`, reproduced in the file
+  header.
+- **What is kept:** `process_decimals_recursive`, `preprocess_results`,
+  `remove_distinct`, `remove_comments`, `remove_round_functions` and
+  `remove_round`, byte for byte, plus the standard-library imports they need,
+  and nothing else. `tests/test_vendored_lsb.py` asserts each function's
+  sha256.
+
+### Why it is vendored rather than depended on
+
+The grader must apply the official Soft-EX normalisation, and the upstream
+module cannot be imported without a PostgreSQL driver and the benchmark's own
+database helpers, none of which grading on DuckDB uses.

@@ -14,11 +14,13 @@ was frozen (every frozen task's own gold SQL passes through this module):
 
 * JSON values: DuckDB returns JSON as text, PostgreSQL as parsed objects,
   so text that parses as a JSON object or array is parsed first.
-* Numbers: the engines' float arithmetic differs in the last bits, which
-  can flip the two-place rounding, so numbers compare within one rounding
-  step (abs_tol 0.011) after rounding, plus rel_tol 1e-9 for values too
-  large for two places to be representable. Integers that differ by one
-  never match below 1e9.
+* Numbers: the engines' float arithmetic differs, which can flip the
+  two-place rounding, so numbers compare within one rounding step
+  (abs_tol 0.011) after rounding. A pair of floats also gets rel_tol 1e-5:
+  the engines sum in different orders, and on the frozen golds that drift
+  reaches 3.7e-6 relative (6.78 at 1.5e9), past one step -- six golds failed
+  their own grading without it. When either side is an integer, only the
+  rounding step applies, so integers that differ by one never match.
 * Nested dates: upstream normalises a top-level date but not one inside a
   list or struct, which then fails to serialise. A nested date becomes the
   same `YYYY-MM-DD` text, and any other value JSON cannot hold its `str()`.
@@ -143,7 +145,9 @@ def _is_number(value) -> bool:
 
 def _close(a, b) -> bool:
     if _is_number(a) and _is_number(b):
-        return math.isclose(a, b, rel_tol=1e-9, abs_tol=0.011)
+        # The relative band is for float drift; a count or an id is exact.
+        both_floats = isinstance(a, float) and isinstance(b, float)
+        return math.isclose(a, b, rel_tol=1e-5 if both_floats else 0.0, abs_tol=0.011)
     return str(a) == str(b)
 
 

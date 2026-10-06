@@ -37,7 +37,7 @@ DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
 
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
-SCORER = "lsb-soft-ex-duckdb/2"
+SCORER = "lsb-soft-ex-duckdb/3"
 
 #: Every agent connection: the grader's own settings (`SAFE_INIT_SQL`), so
 #: an agent explores the database under exactly the rules its answer is

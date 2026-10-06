@@ -193,13 +193,24 @@ def test_integers_compare_exactly():
     assert matches([(100000,)], [(100000,)], ordered=False) is True
 
 
-def test_the_tolerance_is_one_rounding_step_not_a_relative_band():
+def test_the_tolerance_is_one_rounding_step_and_a_float_drift_band():
     # A last-bit difference can flip the two-place rounding: one step passes.
     assert matches([(0.13,)], [(0.12,)], ordered=True) is True
     assert matches([(123456789012.35,)], [(123456789012.34,)], ordered=True) is True
-    # A large value off by more than one step does not, int or float.
+    # A large value off by more than one step does not when either side is
+    # an integer ...
     assert matches([(1000000.0,)], [(1000009,)], ordered=True) is False
-    assert matches([(12345.67,)], [(12345.79,)], ordered=False) is False
+    # ... nor a float pair outside the drift band.
+    assert matches([(12345.67,)], [(12346.0,)], ordered=False) is False
+
+
+def test_float_pairs_absorb_the_measured_engine_drift():
+    """PostgreSQL and DuckDB sum floats in different orders. Measured on the
+    frozen golds: up to 3.7e-6 relative (0.5 at 1.9e5, 6.78 at 1.5e9), past
+    one rounding step. Six golds failed their own grading without this."""
+    assert matches([(1510000000.12,)], [(1510000006.9,)], ordered=True) is True
+    assert matches([(190000.25,)], [(190000.75,)], ordered=True) is True
+    assert matches([(190000.25,)], [(190003.0,)], ordered=True) is False
 
 
 def test_unordered_rows_pair_numbers_by_value_not_by_their_text():

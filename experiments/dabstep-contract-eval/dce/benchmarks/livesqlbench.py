@@ -12,7 +12,8 @@ carries the database's DDL and column meanings, so the arms differ only in
 how the KB reaches the agent; until the compiler lands (PR C) the arms are
 `schema_only` and `manual_prompt`. All their DuckDB connections, and the
 grader's, run PostgreSQL's NULL ordering and integer division
-(`lsb_grade.PG_COMPAT`), because the gold came from PostgreSQL.
+(`lsb_grade.PG_COMPAT`), because the gold came from PostgreSQL; the agents'
+connections also have no file access (`AGENT_INIT_SQL`).
 """
 
 from __future__ import annotations
@@ -38,6 +39,12 @@ DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
 SCORER = "lsb-soft-ex-duckdb/1"
+
+#: Every agent connection: PostgreSQL semantics, and no file access. The
+#: gold results sit beside the databases in LSB_DATA, and DuckDB's file
+#: functions (`read_text`, `read_json`, `glob`) would read them from inside
+#: an agent's query.
+AGENT_INIT_SQL: tuple[str, ...] = (*PG_COMPAT, "SET enable_external_access = false")
 
 BASE_PROMPT = (
     "You are a data analyst answering questions over a DuckDB database.\n"
@@ -215,7 +222,7 @@ class LiveSQLBench:
             prompt += "\n\n## Knowledge base\n\n" + render_manual(entries)
         else:
             raise ValueError(f"unknown arm: {arm!r}; expected one of {self.arms}")
-        return ArmSetup(prompt, _ungoverned_tools(db, init_sql=PG_COMPAT), None)
+        return ArmSetup(prompt, _ungoverned_tools(db, init_sql=AGENT_INIT_SQL), None)
 
     def arm_digest(self, arm: str, task: Task) -> str:
         # The knowledge this experiment is about, for the task's database:

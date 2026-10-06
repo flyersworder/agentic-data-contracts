@@ -258,3 +258,27 @@ def test_no_gold_reaches_a_row(bench, data, tmp_path):
     assert row["benchmark"] == "livesqlbench" and row["subset"] == "primary"
     assert len(row["gold"]) == 64
     assert "Bob" not in json.dumps({k: v for k, v in row.items() if k != "answer"})
+
+
+def test_an_agent_cannot_read_files_beside_the_database(bench, data):
+    """The gold results sit one directory above the database, and DuckDB's
+    file functions would otherwise read them from inside an agent's query."""
+    task = _task(bench, "shop_1")
+    gold = data / "gold_results_full_v1.json"
+    for arm in LiveSQLBench.arms:
+        setup = bench.build_arm(arm, task, data / "duckdb" / "shop.duckdb")
+        execute = next(t for t in setup.tools if t.name == "execute_sql")
+        # An error message echoes the query, so check for what the file
+        # holds (a task id, a gold value) or, for glob, a file name.
+        for sql, leak in (
+            (f"SELECT content FROM read_text('{gold}')", "Bob"),
+            (f"SELECT * FROM read_json_auto('{gold}')", "shop_1"),
+            (f"SELECT * FROM glob('{data}/*')", "gold_results"),
+        ):
+            out = execute.function(sql)
+            assert leak not in out, (arm, sql, out)
+        # ... while the database itself still answers.
+        assert execute.function("SELECT count(*) AS n FROM orders").splitlines() == [
+            "n",
+            "5",
+        ]

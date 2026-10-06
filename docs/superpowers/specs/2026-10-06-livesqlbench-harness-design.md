@@ -33,7 +33,8 @@ privately held gold answers.
 ## Order of work
 
 1. **PR A: the Benchmark refactor.** DABStep is the only implementation.
-   No behaviour change, verified by the equivalence checks below.
+   Includes making stats and analysis role-driven. No behaviour change,
+   verified by the equivalence checks below.
 2. **PR B: the LiveSQLBench implementation and the compiler code.** Tested
    on a synthetic fixture database and KB; no real gold in the repo.
 3. **Compile commit.** The 22 frozen contracts, the compile log, the audit.
@@ -68,6 +69,7 @@ class Benchmark(Protocol):
     name: str
     arms: tuple[str, ...]  # run when --arms is not given
     extra_arms: tuple[str, ...]  # run only when named
+    roles: dict[str, str]  # analysis role -> arm name (see below)
 
     def tasks(self) -> list[Task]: ...
     def pristine_db(self, task: Task) -> Path: ...
@@ -100,15 +102,42 @@ class Benchmark(Protocol):
   `benchmark.row_fields(task)` plus `benchmark=benchmark.name`. The model
   factories, retry and forced-final-answer logic are untouched.
 - `dce/runner.py`: `--benchmark {dabstep,livesqlbench}`, default `dabstep`.
-  Working copies are keyed by (worker, pristine database), created lazily
-  and reused; `check_and_restore` runs after every task as now.
-  `_stratified_sample` and the stats' per-stratum lines use `Task.group`.
+  Each worker holds one working copy, created lazily; `check_and_restore`
+  runs after every task as now. `_stratified_sample` uses `Task.group`.
+  The queue is ordered by `Task.group`, so a worker keeps
+  one working copy and re-copies only when the database changes; disk use
+  stays fixed however many databases a benchmark has. DABStep has one
+  database, so its scheduling is unchanged.
 - `dce/arms.py` stays as a thin re-export so existing imports and tests keep
   working.
 
-The `benchmark` row field is the one addition to a DABStep row. Readers
-treat a missing `benchmark` as `dabstep`, so all committed results load
-unchanged.
+### Rows
+
+Two fields are added to every new row: `benchmark` and `group` (the task's
+`Task.group`). Readers treat a missing `benchmark` as `dabstep` and a
+missing `group` as the row's `level`, so all committed results load
+unchanged. Stats and analysis read only these generic fields, never a
+benchmark's own `row_fields`.
+
+### Analysis by role
+
+`dce.stats` and `analysis/knowledge_delivery.py` stop naming arms. Each
+benchmark maps roles to its arms, and the analysis works on roles:
+
+| role | DABStep | LiveSQLBench |
+|---|---|---|
+| `baseline` | (none) | `schema_only` |
+| `manual` | `manual_prompt` | `manual_prompt` |
+| `manual_plus` | `manual_resolved` | `manual_compiled` |
+| `contract` | `contract` | `contract` |
+
+Both take `--benchmark` (default `dabstep`), print per-`group` strata, and
+compute the share decomposition, (manual_plus - manual) / (contract -
+manual), from the roles. A role a benchmark lacks is skipped. Comparisons
+DABStep reports beyond these roles (the hollow and uninterpreted arms, the
+contract vs each other arm) stay as they are, driven by `arms` and
+`extra_arms`. A third benchmark then needs a module and a roles table, and
+no new analysis code.
 
 ### Equivalence checks (gate for merging PR A)
 
@@ -116,11 +145,11 @@ unchanged.
 2. For every DABStep arm, the system prompt and the tool names, descriptions
    and JSON schemas are byte-identical before and after: a script dumps them
    at the pre-refactor commit and at the PR head and diffs the dumps.
-3. `dce.stats` and `analysis/knowledge_delivery.py` produce identical output
-   over every committed results file.
+3. `dce.stats` and `analysis/knowledge_delivery.py`, now role-driven,
+   produce identical output over every committed results file.
 4. A 12-task stratified smoke on `gpt-6-luna`, three arms, completes with
-   rows whose fields, apart from the new `benchmark` field and run-specific
-   values, match the pre-refactor smoke's schema.
+   rows whose fields, apart from the new `benchmark` and `group` fields and
+   run-specific values, match the pre-refactor smoke's schema.
 
 ## Part 2: the LiveSQLBench implementation (PR B)
 
@@ -133,45 +162,68 @@ KB, column meanings and DDL come from the Hugging Face dataset
 `birdsql/livesqlbench-base-full-v1`; the compile commit records its
 revision. The prep scripts from `~/data/livesqlbench/prep/` (DuckDB
 conversion, gold execution, task freezing, translation checks) are committed
-under `lsb/prep/`, reading from and writing to `LSB_DATA` only.
+under `prep/livesqlbench/`, reading from and writing to `LSB_DATA` only.
 
 ### Task set
 
 From `tasks_frozen_full_v1.json`: 309 primary tasks and 72 order-only tasks
 run in the same sweep, 381 in all; `Task.group` = database name;
 `row_fields` = `{"db", "set", "high_level", "order"}`. The 30 excluded tasks
-are never run. `Task.prompt` is the task's `query` followed by one fixed
+are never run. `Task.group` is written to each row as `group`.
+`Task.prompt` is the task's `query` followed by one fixed
 instruction: end the answer with the final SQL in a ```sql block, which must
 run on this DuckDB database.
 
 ### Compiler
 
-`uv run python -m dce.lsb.compile --db <name> | --all`, run once.
+The compiler is benchmark-agnostic and lives in `dce/compile/`. Its input
+is a neutral list of KB entries (`id`, `kind`, `name`, `text`, `children`)
+plus the DDL, the column meanings and a DuckDB file; each benchmark supplies
+a small adapter that produces this list. LiveSQLBench's adapter, in
+`dce/benchmarks/livesqlbench.py`, reads `*_kb.jsonl` and maps
+`calculation_knowledge`, `domain_knowledge` and `value_illustration` to the
+neutral kinds `calculation`, `predicate` and `illustration`. Any later
+benchmark with written documentation can reuse the compiler through its own
+adapter.
+
+`uv run python -m dce.compile --benchmark livesqlbench --db <name> | --all`,
+run once.
 
 - Inputs, and the only files the script opens: the database's
   `*_kb.jsonl`, `*_column_meaning_base.json`, `*_schema.txt`, and its DuckDB
   file (read-only, with `PG_COMPAT`). A test asserts that the compiler's
   file accesses never touch the task, gold or test-case files.
-- Order: KB entries topologically by `children_knowledge`, so a parent's SQL
-  can reference its children's metrics.
+- Order: entries topologically by `children`, so a parent's SQL can
+  reference its children's metrics.
+- Resumable: each finished entry is appended to the compile log at once; a
+  rerun reads the log, skips entries already done and continues, so a crash
+  at the fifteenth database costs only the entry in progress.
 - Model: `claude-sonnet-5` with two tools: `run_sql` (read-only, capped at 50
   rows, every call logged) and `submit_entry`. Temperature 0 where the route
   accepts it.
 - Mapping:
-  - `calculation_knowledge` -> metric, `sql_expression` computing the value,
+  - `calculation` -> metric, `sql_expression` computing the value,
     `source_model` the table it is computed over;
-  - `domain_knowledge` -> metric whose `sql_expression` is a boolean
-    predicate (the precedent is DABStep's `fee_rule_matches_transaction`);
-  - `value_illustration` -> prose on the table or column it describes;
+  - `predicate` -> metric whose `sql_expression` is a boolean predicate (the
+    precedent is DABStep's `fee_rule_matches_transaction`);
+  - `illustration` -> prose on the table or column it describes;
   - every metric's `description` contains the KB entry's description and
     definition verbatim, and names its children.
 - Validation: each metric's SQL must execute over its source table
   (`SELECT <expr> FROM <source> LIMIT 5`, or the predicate in a `WHERE`).
   Up to 3 attempts; an entry that still fails is kept as prose with
   `untranslated` set to the last error.
-- Output: `lsb/contracts/<db>/contract.yml` and `semantic.yml`, a compile log
-  (`lsb/contracts/<db>/compile-log.jsonl.gz`: every model turn and query),
-  and a per-database digest used by `arm_digest`.
+- Output: `contracts/livesqlbench/<db>/contract.yml` and `semantic.yml`, a
+  compile log (`contracts/livesqlbench/<db>/compile-log.jsonl.gz`: every
+  model turn and query), and a per-database digest used by `arm_digest`.
+
+### Layout
+
+New benchmarks keep their files under their own name: contracts in
+`contracts/<benchmark>/`, results in `results/<benchmark>/`, traces in
+`traces/<benchmark>/`. DABStep's existing `contract/`, `results/` and
+`traces/` paths stay where they are, since FINDINGS.md and README.md cite
+them.
 
 ### Arms
 
@@ -250,14 +302,17 @@ the updated experiment `uv.lock`.
 ## Testing
 
 - PR A: the equivalence checks above, plus unit tests for the registry,
-  per-(worker, database) working copies and the adapter's `init_sql` hook.
+  the role mapping (including a missing role), the `group`/`level` fallback,
+  per-worker working copies re-copied on a database change, the queue's
+  ordering by group, and the adapter's `init_sql` hook.
 - PR B, test-first, on `tests/fixtures/lsb/`: a two-table DuckDB fixture, a
   six-entry KB with one parent-child pair, and hand-written gold results.
   Covered: task loading and prompt text, each arm's prompt and tools, SQL
   extraction, Soft-EX grading including order and the failure categories,
-  `gold_ref` never exposing the gold, the compiler's topological order,
-  validation and prose fallback (with a stubbed model), and the compiler's
-  file-access restriction.
+  `gold_ref` never exposing the gold, the KB adapter's mapping to neutral
+  entries, the compiler's topological order, validation and prose fallback
+  (with a stubbed model), resuming from a partial compile log, and the
+  compiler's file-access restriction.
 
 ## Out of scope
 

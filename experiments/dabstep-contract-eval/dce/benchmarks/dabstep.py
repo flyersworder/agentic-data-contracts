@@ -10,6 +10,7 @@ commands in README.md and FINDINGS.md keep working.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -257,6 +258,10 @@ class DABStep:
     #: Golds verified wrong cannot be answered correctly by construction;
     #: the analysis drops their tasks before counting anything.
     excluded_tasks = frozenset(VERIFIED_WRONG_GOLDS)
+    subsets: tuple[str, ...] = ()
+    task_set_label = "reconstructed-gold task set"
+    excluded_reason = "with a verified-wrong gold"
+    excluded_source = "dce.golds.VERIFIED_WRONG_GOLDS"
 
     def __init__(
         self,
@@ -295,6 +300,37 @@ class DABStep:
             golds_hash=golds_hash,
             docs=load_docs(context_dir),
             records=records,
+        )
+
+    @classmethod
+    def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--db", type=Path, default=Path("data/dabstep.duckdb"), help="(dabstep)"
+        )
+        parser.add_argument(
+            "--golds", type=Path, default=Path("data/golds.json"), help="(dabstep)"
+        )
+        parser.add_argument(
+            "--tasks", type=Path, default=Path("data/tasks.json"), help="(dabstep)"
+        )
+        parser.add_argument(
+            "--ungolded",
+            choices=UNGOLDED_MODES,
+            default="skip",
+            help=(
+                "(dabstep) what to do with tasks that have no reconstructed "
+                "gold: skip them (default, every scoring sweep) or run them "
+                "unscored, which a leaderboard submission needs"
+            ),
+        )
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> DABStep:
+        return cls.from_files(
+            db=args.db,
+            golds_path=args.golds,
+            tasks_path=args.tasks,
+            ungolded=args.ungolded,
         )
 
     @staticmethod

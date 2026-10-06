@@ -928,7 +928,7 @@ def _safe_json_dumps(row: dict) -> str:
         envelope["level"] = str(row.get("level", "unknown"))
     except Exception:
         envelope["level"] = "unknown"
-    for key in ("benchmark", "group"):
+    for key in ("benchmark", "group", "subset"):
         try:
             value = row.get(key)
             envelope[key] = None if value is None else str(value)
@@ -1001,6 +1001,7 @@ def _construction_error_row(
             "task_id": task.task_id,
             "benchmark": benchmark.name,
             "group": task.group,
+            **({"subset": task.subset} if task.subset is not None else {}),
         }
     return {
         **task_fields,

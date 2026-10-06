@@ -158,3 +158,54 @@ def test_from_files_selects_golded_tasks_and_reads_the_docs(tmp_path: Path):
 def test_unknown_arm_raises(tmp_path: Path):
     with pytest.raises(ValueError, match="unknown arm"):
         _bench().build_arm("nope", DABStep.task(RECORD), tmp_path / "d.duckdb")
+
+
+def test_dabstep_report_labels_and_no_subsets():
+    assert DABStep.subsets == ()
+    assert DABStep.task_set_label == "reconstructed-gold task set"
+    assert DABStep.excluded_reason == "with a verified-wrong gold"
+    assert DABStep.excluded_source == "dce.golds.VERIFIED_WRONG_GOLDS"
+
+
+def test_dabstep_builds_from_its_own_command_line_flags(tmp_path: Path, monkeypatch):
+    import argparse
+
+    from dce.golds import golds_sha256
+
+    golds = {"1": "a"}
+    (tmp_path / "golds.json").write_text(
+        json.dumps(
+            {
+                "revision": DATASET_REVISION,
+                "threshold": PLURALITY_THRESHOLD,
+                "golds": golds,
+                "golds_sha256": golds_sha256(golds),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "tasks.json").write_text(
+        json.dumps([{"task_id": "1", "question": "q", "level": "easy"}]),
+        encoding="utf-8",
+    )
+    ctx = tmp_path / "data" / "hf" / "data" / "context"
+    ctx.mkdir(parents=True)
+    (ctx / "manual.md").write_text("M", encoding="utf-8")
+    (ctx / "payments-readme.md").write_text("R", encoding="utf-8")
+
+    parser = argparse.ArgumentParser()
+    DABStep.add_arguments(parser)
+    args = parser.parse_args(
+        [
+            "--db",
+            str(tmp_path / "d.duckdb"),
+            "--golds",
+            str(tmp_path / "golds.json"),
+            "--tasks",
+            str(tmp_path / "tasks.json"),
+        ]
+    )
+    assert args.ungolded == "skip"
+    monkeypatch.chdir(tmp_path)  # CONTEXT_DIR is relative to the experiment directory
+    bench = DABStep.from_args(args)
+    assert [t.task_id for t in bench.tasks()] == ["1"]

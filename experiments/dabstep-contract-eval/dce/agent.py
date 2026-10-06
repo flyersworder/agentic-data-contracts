@@ -36,9 +36,7 @@ from decimal import Decimal
 from importlib.metadata import version
 from pathlib import Path
 
-from dce.arms import build_arm
-from dce.benchmarks.dabstep import arm_digest
-from dce.grade import _clean, active_scorer, score
+from dce.benchmark import Benchmark, Task
 from dce.pricing import MODELS, cost
 from dce.trace import write_trace
 
@@ -688,9 +686,21 @@ def _token_budget_usd(model: str) -> float:
 WORST_CASE_TOKEN_BUDGET_USD: float = max(_token_budget_usd(m) for m in MODELS)
 
 
+def task_row_fields(task: Task, benchmark: Benchmark) -> dict:
+    """The fields that place a row: its task, the benchmark's own task
+    fields (`level` on DABStep), then `benchmark` and `group`. In that order,
+    so a DABStep row's leading keys read as they always have."""
+    return {
+        "task_id": task.task_id,
+        **benchmark.row_fields(task),
+        "benchmark": benchmark.name,
+        "group": task.group,
+    }
+
+
 def build_result_row(
     *,
-    task: dict,
+    task_fields: dict,
     arm: str,
     model: str,
     answer: str,
@@ -712,10 +722,12 @@ def build_result_row(
     request_limit: int,
     token_cap: int,
     golds_hash: str,
+    contract_digest: str,
+    scorer: str,
+    failure: str | None = None,
 ) -> dict:
-    return {
-        "task_id": task["task_id"],
-        "level": task.get("level", "unknown"),
+    row = {
+        **task_fields,
         "arm": arm,
         "model": model,
         "answer": answer,
@@ -802,18 +814,24 @@ def build_result_row(
         # actually bound (`tool_calls_limit`, `request_limit`, or this one)
         # without re-deriving it by hand.
         "token_cap": token_cap,
-        "contract_digest": arm_digest(arm),
+        "contract_digest": contract_digest,
         "golds_hash": golds_hash,
-        # WHICH scorer produced `verdict`. `dce.grade` prefers DABStep's
+        # WHICH scorer produced `verdict`, as the benchmark names it. On
+        # DABStep, `dce.grade` prefers DABStep's
         # official `question_scorer` when `dabstep_benchmark` is importable
         # and falls back to its own normalizer otherwise; that decision is
         # made by whatever is installed at import time, so without this
         # field a mid-experiment install would re-grade later rows under
         # different rules with nothing in the results file to show it.
-        "scorer": active_scorer(),
+        "scorer": scorer,
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
     }
+    if failure is not None:
+        # Grading-side failure category (e.g. LiveSQLBench's `no_sql`).
+        # Added only when present, so a DABStep row's key set is unchanged.
+        row["failure"] = failure
+    return row
 
 
 class AgentConstructionError(RuntimeError):
@@ -935,11 +953,13 @@ def reasoning_effort_for(model: str) -> str:
 
 def _priced_fallback_row(
     *,
-    task: dict,
+    task_fields: dict,
     arm: str,
     model: str,
     gold: str | None,
     golds_hash: str,
+    contract_digest: str,
+    scorer: str,
     usage,
     verdict: str,
     note: str,
@@ -979,8 +999,7 @@ def _priced_fallback_row(
             # might still be it.
             usd = WORST_CASE_TOKEN_BUDGET_USD
     return {
-        "task_id": task["task_id"],
-        "level": task.get("level", "unknown"),
+        **task_fields,
         "arm": arm,
         "model": model,
         "answer": "",
@@ -1020,12 +1039,12 @@ def _priced_fallback_row(
         "retry_prompts": 0,
         "request_limit": REQUEST_LIMIT,
         "token_cap": TOKEN_BUDGET,
-        "contract_digest": arm_digest(arm),
+        "contract_digest": contract_digest,
         "golds_hash": golds_hash,
         # The scorer in force for this process — see `build_result_row`.
         # Present on every row shape so the analysis has one uniform
         # column rather than a field that appears only on some rows.
-        "scorer": active_scorer(),
+        "scorer": scorer,
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
         "note": note,
@@ -1473,14 +1492,12 @@ def _default_agent_factory(
 
 
 def run_task(
-    task: dict,
+    task: Task,
     arm: str,
     model: str,
+    benchmark: Benchmark,
     db_path: Path,
-    docs: dict[str, str],
-    gold: str | None,
     *,
-    golds_hash: str,
     max_tool_calls: int = MAX_TOOL_CALLS,
     # No longer drives the real runaway guard (see `TOKEN_BUDGET`'s
     # module-level comment — deriving that guard from a dollar figure was
@@ -1502,8 +1519,23 @@ def run_task(
     )
     from pydantic_ai.usage import RunUsage, UsageLimits
 
+    # Every value a row carries about its task and its provenance, computed
+    # BEFORE anything opens a connection or calls a model: a benchmark method
+    # that raises here is a construction failure -- free, and retried as one
+    # -- not a bookkeeping failure on a row that has already spent money.
     try:
-        setup = build_arm(arm, db_path, docs)
+        provenance = dict(
+            task_fields=task_row_fields(task, benchmark),
+            gold=benchmark.gold_ref(task),
+            golds_hash=benchmark.golds_hash(),
+            contract_digest=benchmark.arm_digest(arm, task),
+            scorer=benchmark.scorer(),
+        )
+    except Exception as exc:
+        raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
+
+    try:
+        setup = benchmark.build_arm(arm, task, db_path)
     except Exception as exc:
         # `build_arm` failing is the OTHER construction-class failure,
         # alongside the agent-factory call below: nothing billable has
@@ -1544,9 +1576,7 @@ def run_task(
             # happened yet, so this is genuinely free to retry.
             raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
 
-        prompt = (
-            f"{task['question']}\n\nAnswer guidelines: {task.get('guidelines', '')}"
-        )
+        prompt = task.prompt
         limits = UsageLimits(
             # THE uniform iteration control across arms — see `dce/arms.py`'s
             # module docstring. `total_tokens_limit`/`cost_limit` below are
@@ -1685,7 +1715,7 @@ def run_task(
         # `dce/trace.py`'s FAILURE POLICY.
         trace_path = write_trace(
             trace_dir,
-            task_id=str(task["task_id"]),
+            task_id=str(task.task_id),
             arm=arm,
             model=model,
             messages=list(messages),
@@ -1722,40 +1752,30 @@ def run_task(
             # false positive.
             enforcement_blocks = getattr(setup.session, "retries", 0)
 
-            # Scored only if the model call itself completed — scoring a
-            # cap trip or a mid-run error against `gold` would
-            # misrepresent a harness artifact as a graded attempt. Kept
-            # out of the try/except above (Important 3): `score` raising
-            # must not overwrite a good `answer` with an exception text
-            # and relabel it `error` — a scoring failure gets its own
-            # verdict instead, and the real answer this run produced is
-            # preserved either way.
+            # Graded only if the model call itself completed — grading a
+            # cap trip or a mid-run error would misrepresent a harness
+            # artifact as a graded attempt. Kept out of the try/except above
+            # (Important 3): a grader raising must not overwrite a good
+            # `answer` with an exception text and relabel it `error` — a
+            # grading failure gets its own verdict instead, and the real
+            # answer this run produced is preserved either way. A task with
+            # no gold is the benchmark's call (`DABStep.grade` returns
+            # `ungraded`), never a wrong answer.
+            failure = None
             if verdict == "unset":
-                if gold is None:
-                    # No gold EXISTS for this task (49 of DABStep's 450 are
-                    # unreconstructable -- see `dce.golds`). Not a scoring
-                    # failure and not a wrong answer: scoring it against the
-                    # `""` a plain `dict.get` would hand back marks every one
-                    # of them `incorrect` and feeds them straight into
-                    # `dce.stats`' accuracy denominators. `ungraded` is in
-                    # neither ANSWER_VERDICTS nor HARNESS_VERDICTS, so no
-                    # accuracy or failure-rate arithmetic can reach it.
-                    verdict = "ungraded"
-                else:
-                    try:
-                        verdict = "correct" if score(answer, gold) else "incorrect"
-                    except Exception:
-                        verdict = "scoring_error"
+                try:
+                    grade = benchmark.grade(task, answer)
+                    verdict, failure = grade.verdict, grade.failure
+                except Exception:
+                    verdict = "scoring_error"
 
-            answer_normalized = _clean(answer)
+            answer_normalized = benchmark.normalize(answer)
 
             row = build_result_row(
-                task=task,
                 arm=arm,
                 model=model,
                 answer=answer,
                 answer_normalized=answer_normalized,
-                gold=gold,
                 verdict=verdict,
                 forced_answer=forced_answer,
                 trace_path=trace_path,
@@ -1771,15 +1791,14 @@ def run_task(
                 retry_prompts=retry_prompts,
                 request_limit=REQUEST_LIMIT,
                 token_cap=token_cap,
-                golds_hash=golds_hash,
+                failure=failure,
+                **provenance,
             )
         except Exception as exc:
             row = _priced_fallback_row(
-                task=task,
                 arm=arm,
                 model=model,
-                gold=gold,
-                golds_hash=golds_hash,
+                **provenance,
                 usage=usage,
                 verdict="post_run_error",
                 note=f"{type(exc).__name__}: {exc}",

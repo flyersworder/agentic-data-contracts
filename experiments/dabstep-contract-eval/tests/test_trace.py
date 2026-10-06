@@ -135,6 +135,9 @@ def test_an_oversized_trace_is_marked_truncated_not_silently_short(
 def test_run_task_stamps_the_trace_path_on_the_row(tmp_path: Path):
     """The row is the claim; `trace_path` is the pointer to its evidence."""
     from dce.agent import run_task
+    from dce.benchmarks.dabstep import DABStep
+
+    from tests.test_agent import _bench
 
     class Fake:
         def run_sync(self, *a, usage=None, **k):
@@ -147,13 +150,18 @@ def test_run_task_stamps_the_trace_path_on_the_row(tmp_path: Path):
             return R()
 
     row = run_task(
-        {"task_id": "1480", "question": "q", "guidelines": "g", "level": "hard"},
+        DABStep.task(
+            {"task_id": "1480", "question": "q", "guidelines": "g", "level": "hard"}
+        ),
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="h",
+            docs={"manual": "m", "payments_readme": "r"},
+            task_id="1480",
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="h",
         agent_factory=lambda **_: Fake(),
         trace_dir=tmp_path / "traces",
     )
@@ -169,6 +177,9 @@ def test_run_task_stamps_the_trace_path_on_the_row(tmp_path: Path):
 def test_a_row_still_lands_when_tracing_is_impossible(tmp_path: Path):
     """The guarantee that matters: a paid row survives a broken trace dir."""
     from dce.agent import run_task
+    from dce.benchmarks.dabstep import DABStep
+
+    from tests.test_agent import _bench
 
     class Fake:
         def run_sync(self, *a, usage=None, **k):
@@ -183,13 +194,18 @@ def test_a_row_still_lands_when_tracing_is_impossible(tmp_path: Path):
     blocked = tmp_path / "afile"
     blocked.write_text("not a directory")
     row = run_task(
-        {"task_id": "1", "question": "q", "guidelines": "g", "level": "hard"},
+        DABStep.task(
+            {"task_id": "1", "question": "q", "guidelines": "g", "level": "hard"}
+        ),
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="h",
+            docs={"manual": "m", "payments_readme": "r"},
+            task_id="1",
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="h",
         agent_factory=lambda **_: Fake(),
         trace_dir=blocked / "sub",
     )

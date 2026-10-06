@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any
 
 import dce.agent as agent
+import dce.benchmarks.dabstep as dabstep_module
+import dce.grade as grade_module
 import duckdb
 import pytest
 from dce.agent import (
@@ -17,6 +19,7 @@ from dce.agent import (
     build_result_row,
     run_task,
 )
+from dce.benchmarks.dabstep import DABStep
 from dce.pricing import MODELS
 
 TASK = {
@@ -26,8 +29,32 @@ TASK = {
     "level": "hard",
 }
 
+DOCS = {"manual": "m", "payments_readme": "r"}
+TASK_OBJ = DABStep.task(TASK)
+
+
+def _bench(
+    gold: str | None = "0.12",
+    golds_hash: str = "deadbeef",
+    docs=DOCS,
+    task_id: str = TASK["task_id"],
+) -> DABStep:
+    """A DABStep holding one gold (or none) for one task, with no files read."""
+    golds = {} if gold is None else {task_id: gold}
+    return DABStep(
+        db=Path("unused.duckdb"), golds=golds, golds_hash=golds_hash, docs=docs
+    )
+
+
+TASK_FIELDS = {
+    "task_id": "7",
+    "level": "hard",
+    "benchmark": "dabstep",
+    "group": "hard",
+}
+
 ROW_KWARGS: dict[str, Any] = dict(
-    task=TASK,
+    task_fields=TASK_FIELDS,
     arm="contract",
     model="deepseek/deepseek-v4-pro-0813",
     answer="0.12",
@@ -49,6 +76,8 @@ ROW_KWARGS: dict[str, Any] = dict(
     request_limit=50,
     token_cap=732_000,
     golds_hash="deadbeef",
+    contract_digest="cd",
+    scorer="official",
 )
 
 
@@ -266,13 +295,15 @@ def test_run_task_records_a_cap_trip_as_hit_limit_not_incorrect(tmp_path: Path):
             raise UsageLimitExceeded("tool call limit")
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Exploded(),
     )
     # A cap trip is a harness artifact. Scoring it as a wrong answer would let
@@ -303,13 +334,15 @@ def test_run_task_scores_the_final_message(tmp_path: Path):
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "correct"
@@ -327,25 +360,26 @@ def test_run_task_gives_a_scoring_failure_its_own_verdict_without_touching_the_a
     bug indistinguishable from the model actually failing. It gets its own
     `scoring_error` verdict, and the real answer survives.
     """
-    import dce.agent as agent_module
 
     def _boom(_predicted, _gold):
         raise ValueError("scorer exploded")
 
-    monkeypatch.setattr(agent_module, "score", _boom)
+    monkeypatch.setattr(grade_module, "score", _boom)
 
     class Fake:
         def run_sync(self, *a, usage=None, **k):
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "scoring_error"
@@ -363,22 +397,23 @@ def test_run_task_raises_agent_construction_error_when_build_arm_fails(
     deserves identical free-to-retry treatment, not a raw exception type
     that `dce.runner.sweep`'s narrowed `except AgentConstructionError`
     would fail to catch."""
-    import dce.agent as agent_module
 
     def exploding_build_arm(*a, **k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(agent_module, "build_arm", exploding_build_arm)
+    monkeypatch.setattr(dabstep_module, "build_arm", exploding_build_arm)
 
     with pytest.raises(AgentConstructionError):
         run_task(
-            TASK,
+            TASK_OBJ,
             "schema_only",
             "z-ai/glm-5.3-flash",
+            _bench(
+                gold="0.12",
+                golds_hash="deadbeef",
+                docs={"manual": "m", "payments_readme": "r"},
+            ),
             tmp_path / "x.duckdb",
-            {"manual": "m", "payments_readme": "r"},
-            gold="0.12",
-            golds_hash="deadbeef",
         )
 
 
@@ -396,13 +431,15 @@ def test_run_task_raises_agent_construction_error_when_the_factory_fails(
 
     with pytest.raises(AgentConstructionError):
         run_task(
-            TASK,
+            TASK_OBJ,
             "schema_only",
             "z-ai/glm-5.3-flash",
+            _bench(
+                gold="0.12",
+                golds_hash="deadbeef",
+                docs={"manual": "m", "payments_readme": "r"},
+            ),
             tmp_path / "x.duckdb",
-            {"manual": "m", "payments_readme": "r"},
-            gold="0.12",
-            golds_hash="deadbeef",
             agent_factory=exploding_factory,
         )
 
@@ -434,13 +471,15 @@ def test_run_task_recovers_a_priced_row_when_the_post_call_tail_raises(
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "post_run_error"
@@ -463,7 +502,6 @@ def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
     be open, which `dce.runner.sweep`'s subsequent `check_and_restore`
     call cannot validly run against (see `dce/arms.py`'s CALL ORDER) —
     `close_error` on the row is what lets the runner see that."""
-    import dce.agent as agent_module
 
     class _ExplodingCloseSetup:
         system_prompt = "p"
@@ -474,7 +512,7 @@ def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
             raise RuntimeError("close exploded")
 
     monkeypatch.setattr(
-        agent_module, "build_arm", lambda *a, **k: _ExplodingCloseSetup()
+        dabstep_module, "build_arm", lambda *a, **k: _ExplodingCloseSetup()
     )
 
     class Fake:
@@ -482,13 +520,15 @@ def test_run_task_survives_a_setup_close_failure(tmp_path: Path, monkeypatch):
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "correct"
@@ -502,13 +542,15 @@ def test_run_task_does_not_stamp_close_error_when_close_succeeds(tmp_path: Path)
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert "close_error" not in row
@@ -522,7 +564,9 @@ def test_priced_fallback_row_prices_normally_when_possible():
     usage.input_tokens = 100
     usage.output_tokens = 10
     row = _priced_fallback_row(
-        task=TASK,
+        task_fields=TASK_FIELDS,
+        contract_digest="cd",
+        scorer="official",
         arm="contract",
         model="z-ai/glm-5.3-flash",
         gold="g",
@@ -553,7 +597,9 @@ def test_priced_fallback_row_never_raises_even_for_an_unknown_model():
     usage.input_tokens = 100
     usage.output_tokens = 10
     row = _priced_fallback_row(
-        task=TASK,
+        task_fields=TASK_FIELDS,
+        contract_digest="cd",
+        scorer="official",
         arm="contract",
         model="not-a-pinned-model",
         gold="g",
@@ -584,13 +630,15 @@ def test_run_task_threads_the_effective_cap_into_the_agent_factory(tmp_path: Pat
         return Fake()
 
     run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         max_tool_calls=50,
         agent_factory=factory,
     )
@@ -616,13 +664,15 @@ def test_run_task_sizes_usage_limits_as_a_runaway_guard_not_a_dollar_budget(
 
     for model in ("z-ai/glm-5.3-flash", "openai/gpt-5.6-sol"):
         run_task(
-            TASK,
+            TASK_OBJ,
             "contract",
             model,
+            _bench(
+                gold="0.12",
+                golds_hash="deadbeef",
+                docs={"manual": "m", "payments_readme": "r"},
+            ),
             tmp_path / "x.duckdb",
-            {"manual": "m", "payments_readme": "r"},
-            gold="0.12",
-            golds_hash="deadbeef",
             agent_factory=lambda **_: Fake(),
         )
         limits = seen["limits"]
@@ -640,13 +690,15 @@ def test_run_task_stamps_the_golds_hash_it_was_given(tmp_path: Path):
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="a1b2c3",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="a1b2c3",
         agent_factory=lambda **_: Fake(),
     )
     assert row["golds_hash"] == "a1b2c3"
@@ -847,13 +899,11 @@ def test_run_task_records_the_tool_call_sequence_from_a_real_agent_run(
         ("run_query", {"sql": "SELECT psp_reference FROM main.payments"}),
     ]
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(gold="0.12", golds_hash="deadbeef", docs={}),
         contract_db,
-        {},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=_function_agent_factory(steps),
     )
     assert row["tool_calls"] == [
@@ -872,13 +922,11 @@ def test_run_task_records_the_tool_call_sequence_from_a_real_agent_run(
 def test_run_task_pins_the_real_inspect_query_rejection_payload(contract_db: Path):
     steps = [("inspect_query", {"sql": "SELECT * FROM main.payments"})]
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(gold="0.12", golds_hash="deadbeef", docs={}),
         contract_db,
-        {},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=_function_agent_factory(steps),
     )
     assert row["inspect_rejections"] == 1
@@ -897,13 +945,11 @@ def test_run_task_records_enforcement_blocks_separately_from_inspect_rejections(
         ("run_query", {"sql": "SELECT psp_reference FROM main.payments"}),  # ok
     ]
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(gold="0.12", golds_hash="deadbeef", docs={}),
         contract_db,
-        {},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=_function_agent_factory(steps),
     )
     assert row["verdict"] == "correct"
@@ -942,13 +988,11 @@ def test_run_task_recovers_tokens_and_transcript_after_a_real_cap_trip(
         return Agent(FunctionModel(fn), tools=tools, retries=retries)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(gold="0.12", golds_hash="deadbeef", docs={}),
         contract_db,
-        {},
-        gold="0.12",
-        golds_hash="deadbeef",
         max_tool_calls=2,
         agent_factory=factory,
     )
@@ -1260,13 +1304,15 @@ def test_run_task_forces_an_answer_after_a_cap_trip_and_scores_it(tmp_path: Path
     try:
         agent._trim_dangling_tool_calls = lambda _m: forced_history
         row = run_task(
-            TASK,
+            TASK_OBJ,
             "contract",
             "z-ai/glm-5.3-flash",
+            _bench(
+                gold="0.12",
+                golds_hash="h",
+                docs={"manual": "m", "payments_readme": "r"},
+            ),
             tmp_path / "x.duckdb",
-            {"manual": "m", "payments_readme": "r"},
-            gold="0.12",
-            golds_hash="h",
             agent_factory=lambda **_: CapThenAnswer(),
         )
     finally:
@@ -1298,13 +1344,13 @@ def test_run_task_keeps_hit_limit_when_the_forcing_turn_produces_nothing(
             raise RuntimeError("forcing turn also failed")
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12", golds_hash="h", docs={"manual": "m", "payments_readme": "r"}
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="h",
         agent_factory=lambda **_: CapThenFail(),
     )
     assert row["verdict"] == "hit_limit"
@@ -1320,7 +1366,9 @@ def test_every_row_shape_carries_forced_answer():
 
     real = build_result_row(**ROW_KWARGS)
     fallback = _priced_fallback_row(
-        task=TASK,
+        task_fields=TASK_FIELDS,
+        contract_digest="cd",
+        scorer="official",
         arm="contract",
         model="z-ai/glm-5.3-flash",
         gold="g",
@@ -1330,7 +1378,11 @@ def test_every_row_shape_carries_forced_answer():
         note="x",
     )
     construction = _construction_error_row(
-        TASK, "contract", "z-ai/glm-5.3-flash", "g", "h", RuntimeError("boom")
+        TASK_OBJ,
+        "contract",
+        "z-ai/glm-5.3-flash",
+        _bench(gold="g", golds_hash="h"),
+        RuntimeError("boom"),
     )
     for row in (real, fallback, construction):
         assert "forced_answer" in row
@@ -1374,13 +1426,13 @@ def test_forcing_turn_survives_a_real_cap_trip_end_to_end(contract_db: Path):
         return Agent(FunctionModel(fn), tools=tools, retries=retries)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="12.91", golds_hash="h", docs={"manual": "m", "payments_readme": "r"}
+        ),
         contract_db,
-        {"manual": "m", "payments_readme": "r"},
-        gold="12.91",
-        golds_hash="h",
         max_tool_calls=3,
         agent_factory=factory,
     )
@@ -1685,7 +1737,9 @@ def test_every_row_shape_records_the_endpoint_actually_pinned():
     rows = [
         build_result_row(**ROW_KWARGS),
         _priced_fallback_row(
-            task=TASK,
+            task_fields=TASK_FIELDS,
+            contract_digest="cd",
+            scorer="official",
             arm="contract",
             model="z-ai/glm-5.3-flash",
             gold="g",
@@ -1695,7 +1749,11 @@ def test_every_row_shape_records_the_endpoint_actually_pinned():
             note="x",
         ),
         _construction_error_row(
-            TASK, "contract", "z-ai/glm-5.3-flash", "g", "h", RuntimeError("boom")
+            TASK_OBJ,
+            "contract",
+            "z-ai/glm-5.3-flash",
+            _bench(gold="g", golds_hash="h"),
+            RuntimeError("boom"),
         ),
     ]
     for row in rows:
@@ -1812,13 +1870,15 @@ def test_output_cap_death_is_forced_like_any_other_cap_trip(tmp_path, monkeypatc
 
     monkeypatch.setattr(agent, "_force_final_answer", lambda *a, **k: "0.12")
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Exploded(),
     )
     assert row["forced_answer"] is True
@@ -1840,13 +1900,15 @@ def test_genuine_model_misbehaviour_still_records_an_error(tmp_path, monkeypatch
 
     monkeypatch.setattr(agent, "_force_final_answer", lambda *a, **k: "0.12")
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Exploded(),
     )
     assert row["verdict"] == "error"
@@ -1884,13 +1946,15 @@ def test_a_rate_limited_request_is_retried_not_recorded(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent.time, "sleep", lambda s: None)
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Throttled(),
     )
     assert calls["n"] == 3, "should have retried twice, then succeeded"
@@ -1909,13 +1973,15 @@ def test_a_persistent_rate_limit_still_terminates(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent.time, "sleep", lambda s: None)
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: AlwaysThrottled(),
     )
     assert calls["n"] == agent.RATE_LIMIT_RETRIES + 1
@@ -1934,13 +2000,15 @@ def test_a_non_429_transport_error_is_not_retried(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent.time, "sleep", lambda s: None)
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "schema_only",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="0.12",
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="0.12",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: BadRequest(),
     )
     assert calls["n"] == 1
@@ -1990,25 +2058,26 @@ def test_run_task_leaves_a_task_with_no_gold_ungraded(tmp_path: Path, monkeypatc
     `gold=None` is the explicit "no gold exists" signal: the answer is
     recorded, `score` is never called, and the verdict is `ungraded`.
     """
-    import dce.agent as agent_module
 
     def _must_not_run(_predicted, _gold):
         raise AssertionError("score() must not be called when there is no gold")
 
-    monkeypatch.setattr(agent_module, "score", _must_not_run)
+    monkeypatch.setattr(grade_module, "score", _must_not_run)
 
     class Fake:
         def run_sync(self, *a, usage=None, **k):
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold=None,
+            golds_hash="deadbeef",
+            docs={"manual": "m", "payments_readme": "r"},
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold=None,
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] == "ungraded"
@@ -2029,24 +2098,104 @@ def test_run_task_still_grades_a_task_whose_gold_is_the_empty_string(
             return _fake_result("0.12", usage)
 
     row = run_task(
-        TASK,
+        TASK_OBJ,
         "contract",
         "z-ai/glm-5.3-flash",
+        _bench(
+            gold="", golds_hash="deadbeef", docs={"manual": "m", "payments_readme": "r"}
+        ),
         tmp_path / "x.duckdb",
-        {"manual": "m", "payments_readme": "r"},
-        gold="",
-        golds_hash="deadbeef",
         agent_factory=lambda **_: Fake(),
     )
     assert row["verdict"] in {"correct", "incorrect"}
 
 
-def test_each_governed_arm_is_stamped_with_the_contract_it_loads():
-    from dce.frozen import digest, hollow_digest, uninterpreted_digest
+def test_rows_carry_benchmark_and_group_after_the_dabstep_fields(tmp_path: Path):
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
 
-    assert agent.arm_digest("contract") == digest()
-    assert agent.arm_digest("contract_hollow") == hollow_digest()
-    assert agent.arm_digest("contract_uninterpreted") == uninterpreted_digest()
-    assert agent.arm_digest("manual_resolved") == digest()
-    assert len({digest(), hollow_digest(), uninterpreted_digest()}) == 3
-    assert agent.arm_digest("schema_only") == digest()
+    row = run_task(
+        TASK_OBJ,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        _bench(),
+        tmp_path / "x.duckdb",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert list(row)[:5] == ["task_id", "level", "benchmark", "group", "arm"]
+    assert row["benchmark"] == "dabstep" and row["group"] == "hard"
+    assert "failure" not in row  # DABStep never reports one
+
+
+def test_a_grader_failure_category_is_recorded_on_the_row(tmp_path: Path):
+    from dce.benchmark import Grade
+
+    class Failing(DABStep):
+        def grade(self, task, answer):
+            return Grade("incorrect", failure="no_sql")
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("text", usage)
+
+    bench = Failing(db=Path("u"), golds={"7": "g"}, golds_hash="h", docs=DOCS)
+    row = run_task(
+        TASK_OBJ,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        bench,
+        tmp_path / "x.duckdb",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] == "incorrect" and row["failure"] == "no_sql"
+
+
+def test_a_grader_that_raises_is_a_scoring_error(tmp_path: Path):
+    class Raising(DABStep):
+        def grade(self, task, answer):
+            raise RuntimeError("grader down")
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    bench = Raising(db=Path("u"), golds={"7": "0.12"}, golds_hash="h", docs=DOCS)
+    row = run_task(
+        TASK_OBJ,
+        "schema_only",
+        "z-ai/glm-5.3-flash",
+        bench,
+        tmp_path / "x.duckdb",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["verdict"] == "scoring_error"
+    assert row["answer"] == "0.12"
+
+
+def test_a_provenance_failure_is_a_free_construction_error(tmp_path: Path):
+    built = []
+
+    class Broken(DABStep):
+        def arm_digest(self, arm, task):
+            raise OSError("contract file unreadable")
+
+        def build_arm(self, arm, task, db):
+            built.append(arm)
+            return super().build_arm(arm, task, db)
+
+    def factory(**_):
+        raise AssertionError("no agent may be built after a provenance failure")
+
+    bench = Broken(db=Path("u"), golds={"7": "g"}, golds_hash="h", docs=DOCS)
+    with pytest.raises(AgentConstructionError, match="unreadable"):
+        run_task(
+            TASK_OBJ,
+            "schema_only",
+            "z-ai/glm-5.3-flash",
+            bench,
+            tmp_path / "x.duckdb",
+            agent_factory=factory,
+        )
+    # Before `build_arm`, so no connection was opened that could leak.
+    assert built == []

@@ -216,12 +216,12 @@ uv run python -m dce.stats results/smoke12.jsonl
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--benchmark` | `dabstep` | Which benchmark to run; `dabstep` is currently the only one. `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's. |
+| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data` is LiveSQLBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
-| `--n` | `0` (all) | Stratified sample of `n` golded tasks, proportional across `level`. |
-| `--arms` | all three | Any subset of `schema_only manual_prompt contract`. |
+| `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
+| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted` and `manual_resolved` run only when named. LiveSQLBench: `schema_only manual_prompt`. |
 | `--models` | `z-ai/glm-5.3-flash` | Any subset of the pinned ids in `dce/pricing.py`. An unpinned id is rejected. |
-| `--out` | `results/results.jsonl` | One JSON row per `(task, arm, model)`. Appended to, never rewritten. |
+| `--out` | `results/results.jsonl` (DABStep), `results/<benchmark>/results.jsonl` otherwise | One JSON row per `(task, arm, model)`. Appended to, never rewritten. A file holds one benchmark's rows; pointing a sweep at another benchmark's file is refused. |
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |
 | `--golds` | `data/golds.json` | The gold envelope. Its `revision`, `threshold` and content hash are all checked. |
 | `--tasks` | `data/tasks.json` | Task list; filtered by `--ungolded`. |
@@ -268,6 +268,39 @@ first paid session:
 git add results/smoke12.jsonl
 git commit -m "smoke run"
 ```
+
+## LiveSQLBench
+
+The second benchmark is LiveSQLBench Base-Full-v1, ported to DuckDB. Its
+private data lives outside the repository, in `LSB_DATA` (default
+`~/data/livesqlbench`): the 22 DuckDB files, the gold SQL, the frozen gold
+results and the frozen task set. None of it is ever committed, and a result
+row carries `gold`, the sha256 of the gold result, never the gold itself.
+The public task file and each database's KB, column meanings and DDL sit
+under `LSB_DATA/hf-full-v1/`. [`prep/livesqlbench/README.md`](prep/livesqlbench/README.md)
+says how each file is built and checked.
+
+```bash
+set -a; . "$LENS_ENV_FILE"; set +a
+uv run python -m dce.runner --benchmark livesqlbench --n 12 \
+  --arms schema_only manual_prompt --models gpt-6-luna --max-spend 15 \
+  --out results/livesqlbench/smoke.jsonl
+uv run python -m dce.stats results/livesqlbench/smoke.jsonl
+```
+
+Results and traces default to `results/livesqlbench/` and
+`traces/livesqlbench/`. The agent ends its answer with its final SQL in a
+```` ```sql ```` block. The grader runs that last block on a read-only copy of
+the database, with PostgreSQL's NULL ordering and integer division, and
+compares the result with the frozen PostgreSQL gold by the official Soft-EX
+rules ([`dce/benchmarks/lsb_grade.py`](dce/benchmarks/lsb_grade.py)).
+
+The task set has 302 `primary` tasks and 73 `order_only` tasks, whose gold
+reproduces in DuckDB only as a set. `dce.stats` reports the two subsets in
+separate sections, and `primary` is the pre-registered measure. The arms are
+`schema_only` and `manual_prompt`, the KB as a prose manual; both carry the
+database's DDL and column meanings. `manual_compiled` and `contract` arrive
+with the compiler.
 
 ## Arms
 

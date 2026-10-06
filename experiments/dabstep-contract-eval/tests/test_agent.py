@@ -2223,3 +2223,14 @@ def test_a_provenance_failure_is_a_free_construction_error(tmp_path: Path):
         )
     # Before `build_arm`, so no connection was opened that could leak.
     assert built == []
+
+
+def test_a_subset_is_stamped_after_group_and_only_when_set():
+    import dataclasses
+
+    from dce.agent import task_row_fields
+
+    plain = task_row_fields(TASK_OBJ, _bench())
+    assert "subset" not in plain
+    tagged = task_row_fields(dataclasses.replace(TASK_OBJ, subset="primary"), _bench())
+    assert list(tagged)[-1] == "subset" and tagged["subset"] == "primary"

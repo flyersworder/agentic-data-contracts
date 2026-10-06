@@ -1,0 +1,6 @@
+{"id": 1, "knowledge": "Customer Tier", "description": "The loyalty tiers customers belong to.", "definition": "Values are 'gold' and 'silver'.", "type": "value_illustration", "children_knowledge": -1}
+{"id": 2, "knowledge": "Shipped Order", "description": "An order that has left the warehouse.", "definition": "An order whose status is 'shipped'.", "type": "domain_knowledge", "children_knowledge": -1}
+{"id": 3, "knowledge": "Shipped Revenue", "description": "Revenue a customer has realised.", "definition": "The sum of amount over the customer's Shipped Orders.", "type": "calculation_knowledge", "children_knowledge": [2]}
+{"id": 4, "knowledge": "Basket Size", "description": "Items per order.", "definition": "Total qty divided by the number of orders, in integer division.", "type": "calculation_knowledge", "children_knowledge": -1}
+{"id": 5, "knowledge": "Gold Customer", "description": "A customer in the top tier.", "definition": "A customer whose tier is 'gold'.", "type": "domain_knowledge", "children_knowledge": [1]}
+{"id": 6, "knowledge": "Order Status", "description": "The lifecycle states of an order.", "definition": "Values are 'pending', 'shipped' and 'returned'.", "type": "value_illustration", "children_knowledge": -1}

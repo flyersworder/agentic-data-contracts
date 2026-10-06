@@ -1,0 +1,8 @@
+{
+  "shop_1": {"db": "shop", "order": true, "set": "primary", "via": "as_is"},
+  "shop_2": {"db": "shop", "order": true, "set": "order_only", "via": "as_is"},
+  "shop_3": {"db": "shop", "order": false, "set": "primary", "via": "as_is"},
+  "shop_4": {"db": "shop", "order": false, "set": "primary", "via": "as_is"},
+  "shop_5": {"db": "shop", "order": true, "set": "primary", "via": "as_is"},
+  "shop_6": {"db": "shop", "order": false, "set": "excluded", "via": "as_is"}
+}

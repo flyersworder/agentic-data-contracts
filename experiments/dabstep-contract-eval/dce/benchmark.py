@@ -11,10 +11,14 @@ resolve a row's benchmark (`benchmark_class(benchmark_of(row))`) without
 loading golds or tasks. The three static hooks at the end exist for the same
 reason: re-grading and the end-to-end view work from a stored row, and the
 analysis must not import any one benchmark's scorer to do it.
+`add_arguments`/`from_args` let `dce.runner` build whichever benchmark
+`--benchmark` names; each adds only its own flags, so flag names must not
+collide across benchmarks.
 """
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +34,7 @@ if TYPE_CHECKING:
 #: contract's lead that is knowledge rather than delivery.
 ROLES: tuple[str, ...] = ("baseline", "manual", "manual_plus", "contract")
 
-BENCHMARK_NAMES: tuple[str, ...] = ("dabstep",)
+BENCHMARK_NAMES: tuple[str, ...] = ("dabstep", "livesqlbench")
 
 #: What a row with no `benchmark` field is: every row written before the
 #: field existed is a DABStep row.
@@ -43,6 +47,7 @@ class Task:
     prompt: str  # the full user message
     group: str  # stratum for smoke sampling and per-group stats
     meta: Mapping[str, Any] = field(default_factory=dict)
+    subset: str | None = None  # a separately reported task set, if any
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,15 @@ class Benchmark(Protocol):
     primary: tuple[str, str, str] | None
     group_label: str
     excluded_tasks: frozenset[str]
+    subsets: tuple[str, ...]  # separately reported task sets, pre-registered first
+    task_set_label: str  # how the report names the task set it scores
+    excluded_reason: str  # why `excluded_tasks` are dropped, for the report
+    excluded_source: str  # where the excluded list is kept
+
+    @classmethod
+    def add_arguments(cls, parser: argparse.ArgumentParser) -> None: ...
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> Benchmark: ...
 
     def tasks(self) -> list[Task]: ...
     def pristine_db(self, task: Task) -> Path: ...
@@ -87,6 +101,10 @@ def benchmark_class(name: str) -> type[Benchmark]:
         from dce.benchmarks.dabstep import DABStep
 
         return DABStep
+    if name == "livesqlbench":
+        from dce.benchmarks.livesqlbench import LiveSQLBench
+
+        return LiveSQLBench
     raise ValueError(f"unknown benchmark: {name!r}; expected one of {BENCHMARK_NAMES}")
 
 

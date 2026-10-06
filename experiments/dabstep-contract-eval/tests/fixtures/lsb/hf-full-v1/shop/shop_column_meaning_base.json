@@ -1,0 +1,12 @@
+{
+  "shop|customers|custid": "Customer identifier.",
+  "shop|customers|name": "Customer display name.",
+  "shop|customers|tier": "Loyalty tier.",
+  "shop|customers|joined": "Date the customer joined.",
+  "shop|orders|orderid": "Order identifier.",
+  "shop|orders|custid": "The ordering customer.",
+  "shop|orders|amount": "Order value; null when not yet priced.",
+  "shop|orders|qty": "Items in the order.",
+  "shop|orders|status": "Order lifecycle state.",
+  "shop|orders|details": {"column_meaning": "JSON column with order extras.", "fields_meaning": {"gift": "BOOLEAN. Whether the order is a gift."}}
+}

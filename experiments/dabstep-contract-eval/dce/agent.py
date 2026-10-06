@@ -690,12 +690,17 @@ def task_row_fields(task: Task, benchmark: Benchmark) -> dict:
     """The fields that place a row: its task, the benchmark's own task
     fields (`level` on DABStep), then `benchmark` and `group`. In that order,
     so a DABStep row's leading keys read as they always have."""
-    return {
+    fields = {
         "task_id": task.task_id,
         **benchmark.row_fields(task),
         "benchmark": benchmark.name,
         "group": task.group,
     }
+    # A separately reported task set (LiveSQLBench's primary / order-only).
+    # Absent rather than null when unset, so a DABStep row's keys are unchanged.
+    if task.subset is not None:
+        fields["subset"] = task.subset
+    return fields
 
 
 def build_result_row(

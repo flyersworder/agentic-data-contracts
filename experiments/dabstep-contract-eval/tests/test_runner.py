@@ -1315,6 +1315,19 @@ def test_safe_json_dumps_survives_a_non_str_dict_key():
     assert parsed["arm"] == "contract"
 
 
+def test_safe_json_dumps_envelope_writes_subset_only_when_the_row_has_one():
+    # As task_row_fields: a row with no subset (every DABStep row) keeps its
+    # keys, so the envelope must not add `subset: null`.
+    bad_key = {(1, 2): "bad key"}
+    parsed = json.loads(_safe_json_dumps({"task_id": "1", **bad_key}))
+    assert "unserializable_row" in parsed
+    assert "subset" not in parsed
+    parsed = json.loads(
+        _safe_json_dumps({"task_id": "1", "subset": "primary", **bad_key})
+    )
+    assert parsed["subset"] == "primary"
+
+
 def test_safe_json_dumps_survives_a_circular_reference():
     row: dict = {"task_id": "1", "verdict": "correct"}
     row["self"] = row
@@ -2892,3 +2905,126 @@ def test_a_benchmark_that_cannot_stamp_provenance_records_a_construction_error(
     assert row["contract_digest"] == "unavailable"
     assert row["gold"] == "g" and row["group"] == "hard"
     assert "unreadable" in row["error"]
+
+
+def test_stratified_sample_gives_exactly_n_over_many_groups():
+    """22 databases, `--n 12`: rounding each group's share gave 22 tasks or
+    none; the largest-remainder rule gives 12, one from each of the 12
+    groups with the largest remainders."""
+    records = [
+        {"task_id": f"{g}_{i}", "question": "q", "level": f"db{g:02d}"}
+        for g in range(22)
+        for i in range(10 + g % 7)
+    ]
+    for n in (1, 5, 12, 22, 30, 100):
+        sampled = _stratified_sample(_tasks(records), n)
+        assert len(sampled) == n
+    picked = _stratified_sample(_tasks(records), 12)
+    assert len({t.group for t in picked}) == 12
+
+
+def test_stratified_sample_matches_rounding_on_two_groups_without_a_tie():
+    """DABStep's two levels: largest remainder and rounding agree except on
+    an exact .5 tie, where rounding returned n - 1 or n + 1 tasks."""
+    records = [
+        {"task_id": str(i), "question": "q", "level": "hard" if i < 336 else "easy"}
+        for i in range(406)
+    ]
+    for n in range(1, 60):
+        hard, easy = n * 336 / 406, n * 70 / 406
+        if hard % 1 == 0.5:
+            continue
+        picked = _stratified_sample(_tasks(records), n)
+        assert sum(t.group == "hard" for t in picked) == round(hard)
+        assert sum(t.group == "easy" for t in picked) == round(easy)
+
+
+def test_default_results_and_traces_are_scoped_by_benchmark():
+    from dce.runner import default_out, default_trace_dir
+
+    assert default_out("dabstep") == Path("results/results.jsonl")
+    assert default_out("livesqlbench") == Path("results/livesqlbench/results.jsonl")
+    assert default_trace_dir("dabstep", Path("results/x.jsonl")) == Path("traces/x")
+    assert default_trace_dir(
+        "livesqlbench", Path("results/livesqlbench/smoke.jsonl")
+    ) == Path("traces/livesqlbench/smoke")
+
+
+def test_a_results_file_of_another_benchmark_is_refused_before_any_task(
+    tmp_path: Path,
+):
+    out = tmp_path / "r.jsonl"
+    out.write_text(
+        json.dumps({"task_id": "9", "arm": "a", "model": GLM, "verdict": "correct"})
+        + "\n",
+        encoding="utf-8",
+    )  # no `benchmark` field: a DABStep row
+
+    class Other(DABStep):
+        name = "other"
+
+    calls = []
+
+    def fake_run(task, arm, model, *a, **k):
+        calls.append(task.task_id)
+        return _ok_row(task, arm, model)
+
+    bench = Other(db=_make_pristine(tmp_path), golds={}, golds_hash="h", docs={})
+    with pytest.raises(SystemExit, match="dabstep"):
+        sweep(
+            _tasks(TASKS),
+            ("schema_only",),
+            (GLM,),
+            bench,
+            out=out,
+            max_spend=5.0,
+            run_task_fn=fake_run,
+        )
+    assert calls == []
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+
+
+def test_a_results_subdirectory_does_not_block_a_resume_or_the_next_sweep(
+    tmp_path: Path,
+):
+    """`results/<benchmark>/` is where every benchmark but DABStep writes.
+    Its first, untracked results file must not block its own resume (git
+    collapses an untracked directory to one line), and the snapshot it leaves
+    must not block the next sweep (the ignore patterns must reach it)."""
+    repo = tmp_path / "repo"
+    experiment = repo / "e"
+    (experiment / "results" / "livesqlbench").mkdir(parents=True)
+    gitignore = Path(__file__).resolve().parents[1] / ".gitignore"
+    (experiment / ".gitignore").write_text(
+        gitignore.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (experiment / "README").write_text("x", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+
+    smoke = experiment / "results" / "livesqlbench" / "smoke.jsonl"
+    smoke.write_text("{}\n", encoding="utf-8")
+    snapshot_path_for(smoke).write_text("{}\n", encoding="utf-8")
+    assert_clean_tree(out=smoke, repo_root=repo)  # the resume
+
+    _git(repo, "add", str(smoke))
+    _git(repo, "commit", "-q", "-m", "smoke")
+    full = experiment / "results" / "livesqlbench" / "full.jsonl"
+    assert_clean_tree(out=full, repo_root=repo)  # the next sweep

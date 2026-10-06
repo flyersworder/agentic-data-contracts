@@ -152,6 +152,7 @@ sane default rather than raise mid-report.
 
 from __future__ import annotations
 
+import itertools
 from collections import defaultdict
 from math import sqrt
 from pathlib import Path
@@ -764,11 +765,15 @@ def _unequal_task_set_warning(rows: list[dict], model: str) -> list[str]:
     ]
 
 
-def _benchmark_for(rows: list[dict]):
+def _benchmark_for(rows: list[dict], raw_rows: list[dict] | tuple = ()):
     """The one benchmark class `rows` belong to. A file mixing benchmarks has
     no single set of arms or roles to compare, so it is refused rather than
-    reported as if it had."""
-    names = {benchmark_of(row) for row in rows} or {DABStep.name}
+    reported as if it had. Superseded rows (`raw_rows`) count too: the file
+    is what is being reported, and a foreign row hidden behind a later one
+    with the same key is still a foreign row."""
+    names = {benchmark_of(row) for row in itertools.chain(rows, raw_rows)} or {
+        DABStep.name
+    }
     if len(names) > 1:
         raise SystemExit(
             f"rows from more than one benchmark ({sorted(names)}); "
@@ -777,108 +782,22 @@ def _benchmark_for(rows: list[dict]):
     return benchmark_class(names.pop())
 
 
-def report(path: Path, *, rescore_stale: bool = True) -> str:
-    rows = load(path)
-    raw_rows = _raw_rows(path)
+def _secondary_lines(rows, raw_rows, bench, heading: str) -> list[str]:
+    """Per model: every arm's summary and strata, the lopsided-arms warning,
+    and the pairwise tests. `heading` is the Markdown level of each model's
+    title (`##`, or `###` inside a subset section)."""
     lines: list[str] = []
-    bench = _benchmark_for(rows)
-    excluded = bench.excluded_tasks
-
-    # Tasks whose gold is verified wrong are dropped before anything is
-    # counted. They cannot be answered correctly by construction, so leaving
-    # them in depresses every arm and adds noise to the paired comparison --
-    # and penalises hardest the arms most likely to reach the true value.
-    dropped = sorted({r["task_id"] for r in rows if r.get("task_id") in excluded})
-    if dropped:
-        rows = [r for r in rows if r.get("task_id") not in excluded]
-        raw_rows = [r for r in raw_rows if r.get("task_id") not in excluded]
-        lines.append(
-            f"NOTE: dropped {len(dropped)} task(s) with a verified-wrong gold "
-            f"({', '.join(dropped)}) -- see dce.golds.VERIFIED_WRONG_GOLDS."
-        )
-
-    stale = stale_scorer_rows(rows)
-    if stale:
-        detail = ", ".join(
-            f"{n} row(s) by {name!r}" for name, n in sorted(stale.items())
-        )
-        if rescore_stale:
-            rows = rescore(rows)
-            lines.append(
-                f"NOTE: {detail} were graded by a scorer other than the one "
-                f"installed now ({bench.scorer()!r}); every answered row has "
-                "been RE-GRADED from its stored answer and gold. Pass "
-                "rescore_stale=False to report the stored verdicts verbatim."
-            )
-        else:
-            lines.append(
-                f"WARNING: {detail}, not the installed {bench.scorer()!r}. "
-                "Verdicts below are as recorded and are NOT comparable with "
-                "rows graded by the current scorer."
-            )
-    if lines:
-        lines.append("")
-
-    def slice_of(pool: list[dict], model: str, arm: str) -> list[dict]:
-        return [r for r in pool if r.get("model") == model and r.get("arm") == arm]
-
-    # --- PRIMARY: the one pre-registered, confirmatory test ---------------
-    lines.append("# PRIMARY (pre-registered)")
-    primary_model = bench.primary[0] if bench.primary else None
-    if bench.primary is None:
-        lines.append(f"(none pre-registered for {bench.name})")
-    else:
-        _, primary_left, primary_right = bench.primary
-        lines.append(
-            f"{primary_left} vs {primary_right} on {primary_model}, "
-            "paired McNemar, reconstructed-gold task set"
-        )
-        primary_rows = [row for row in rows if row.get("model") == primary_model]
-        if not primary_rows:
-            lines.append(f"(no rows for {primary_model})")
-        else:
-            primary_summaries = {}
-            for arm in (primary_left, primary_right):
-                arm_rows = slice_of(rows, primary_model, arm)
-                raw_arm_rows = slice_of(raw_rows, primary_model, arm)
-                summary = _summarize(arm_rows, raw_arm_rows)
-                primary_summaries[arm] = summary
-                lines.append(_format_summary(arm, summary))
-            lines.extend(_mcnemar_lines(primary_rows, primary_left, primary_right))
-            # Scoped to the two arms this test actually pairs: a lopsided third
-            # arm is a secondary-section problem, but a lopsided B/C pair
-            # undermines the one pre-registered result.
-            lines.extend(
-                _unequal_task_set_warning(
-                    [
-                        row
-                        for row in primary_rows
-                        if row.get("arm") in (primary_left, primary_right)
-                    ],
-                    primary_model,
-                )
-            )
-            if any(s["harness_limited"] for s in primary_summaries.values()):
-                lines.append(
-                    "  NOTE: at least one arm above has a harness-failure rate "
-                    f">= {HARNESS_FAILURE_RATE_THRESHOLD:.0%} -- that arm's "
-                    "number is harness-limited, not a clean read on the arm "
-                    "itself. FINDINGS.md must say so."
-                )
-
-    # --- SECONDARY / EXPLORATORY: everything else --------------------------
-    lines.append("\n# SECONDARY / EXPLORATORY (not pre-registered)")
     for model in sorted({row.get("model", "unknown") for row in rows}):
-        lines.append(f"\n## {model}")
-        subset = [row for row in rows if row.get("model") == model]
-        raw_subset = [row for row in raw_rows if row.get("model") == model]
+        lines.append(f"\n{heading} {model}")
+        model_rows = [row for row in rows if row.get("model") == model]
+        raw_model_rows = [row for row in raw_rows if row.get("model") == model]
 
-        for arm in sorted({str(row.get("arm") or "unknown") for row in subset}):
+        for arm in sorted({str(row.get("arm") or "unknown") for row in model_rows}):
             arm_rows = [
-                row for row in subset if str(row.get("arm") or "unknown") == arm
+                row for row in model_rows if str(row.get("arm") or "unknown") == arm
             ]
             raw_arm_rows = [
-                row for row in raw_subset if str(row.get("arm") or "unknown") == arm
+                row for row in raw_model_rows if str(row.get("arm") or "unknown") == arm
             ]
             lines.append(_format_summary(arm, _summarize(arm_rows, raw_arm_rows)))
 
@@ -907,28 +826,177 @@ def report(path: Path, *, rescore_stale: bool = True) -> str:
                     f"e2e scored {e_ok:3d}/{s_n}"
                 )
 
-        lines.extend(_unequal_task_set_warning(subset, model))
+        lines.extend(_unequal_task_set_warning(model_rows, model))
 
         # An extra arm is compared only where it ran, so a four-arm report
         # carries no empty line for an arm that was never part of it.
-        present = {row.get("arm") for row in subset}
-        contract = bench.roles["contract"]
-        comparison = tuple(a for a in bench.arms if a != contract)
-        extra = tuple(a for a in bench.extra_arms if a in present)
-        for left in comparison + extra:
-            if bench.primary and (model, left) == bench.primary[:2]:
-                lines.append(
-                    f"  McNemar {left} vs {contract}: see PRIMARY section above"
-                )
-                continue
-            lines.extend(_mcnemar_lines(subset, left, contract))
+        present = {row.get("arm") for row in model_rows}
+        # Without a `contract` role (LiveSQLBench until PR C) there is
+        # nothing to compare each arm against; the summaries stand alone.
+        contract = bench.roles.get("contract")
+        if contract is not None:
+            comparison = tuple(a for a in bench.arms if a != contract)
+            extra = tuple(a for a in bench.extra_arms if a in present)
+            for left in comparison + extra:
+                if bench.primary and (model, left) == bench.primary[:2]:
+                    lines.append(
+                        f"  McNemar {left} vs {contract}: see PRIMARY section above"
+                    )
+                    continue
+                lines.extend(_mcnemar_lines(model_rows, left, contract))
         # The `manual_plus` arm (`manual_resolved` on DABStep) is the manual
         # plus what the contract knows, so the other half of its reading is
         # the pair against the arm without it.
         manual, plus = bench.roles.get("manual"), bench.roles.get("manual_plus")
         if manual and plus and {manual, plus} <= present:
-            lines.extend(_mcnemar_lines(subset, manual, plus))
+            lines.extend(_mcnemar_lines(model_rows, manual, plus))
 
+    return lines
+
+
+def report(path: Path, *, rescore_stale: bool = True) -> str:
+    rows = load(path)
+    raw_rows = _raw_rows(path)
+    lines: list[str] = []
+    bench = _benchmark_for(rows, raw_rows)
+    excluded = bench.excluded_tasks
+
+    # Tasks whose gold is verified wrong are dropped before anything is
+    # counted. They cannot be answered correctly by construction, so leaving
+    # them in depresses every arm and adds noise to the paired comparison --
+    # and penalises hardest the arms most likely to reach the true value.
+    dropped = sorted({r["task_id"] for r in rows if r.get("task_id") in excluded})
+    if dropped:
+        rows = [r for r in rows if r.get("task_id") not in excluded]
+        raw_rows = [r for r in raw_rows if r.get("task_id") not in excluded]
+        lines.append(
+            f"NOTE: dropped {len(dropped)} task(s) {bench.excluded_reason} "
+            f"({', '.join(dropped)}) -- see {bench.excluded_source}."
+        )
+
+    stale = stale_scorer_rows(rows)
+    if stale:
+        detail = ", ".join(
+            f"{n} row(s) by {name!r}" for name, n in sorted(stale.items())
+        )
+        if rescore_stale:
+            answered = [r for r in rows if r.get("verdict") in ANSWER_VERDICTS]
+            rescored = rescore(rows)
+            # `rescore` hands back the same object for a row it could not
+            # re-grade (its benchmark keeps no gold in the row), so identity
+            # counts the rows that really were re-graded.
+            regraded = sum(
+                1
+                for before, after in zip(rows, rescored, strict=True)
+                if before is not after and before.get("verdict") in ANSWER_VERDICTS
+            )
+            rows = rescored
+            if regraded == len(answered):
+                lines.append(
+                    f"NOTE: {detail} were graded by a scorer other than the one "
+                    f"installed now ({bench.scorer()!r}); every answered row has "
+                    "been RE-GRADED from its stored answer and gold. Pass "
+                    "rescore_stale=False to report the stored verdicts verbatim."
+                )
+            else:
+                lines.append(
+                    f"NOTE: {detail} were graded by a scorer other than the one "
+                    f"installed now ({bench.scorer()!r}); {regraded} of "
+                    f"{len(answered)} answered row(s) were RE-GRADED from their "
+                    "stored answer and gold, and the rest keep their recorded "
+                    "verdicts: this benchmark cannot re-grade from a stored row."
+                )
+        else:
+            lines.append(
+                f"WARNING: {detail}, not the installed {bench.scorer()!r}. "
+                "Verdicts below are as recorded and are NOT comparable with "
+                "rows graded by the current scorer."
+            )
+    if lines:
+        lines.append("")
+
+    def slice_of(pool: list[dict], model: str, arm: str) -> list[dict]:
+        return [r for r in pool if r.get("model") == model and r.get("arm") == arm]
+
+    # --- PRIMARY: the one pre-registered, confirmatory test ---------------
+    lines.append("# PRIMARY (pre-registered)")
+    primary_model = bench.primary[0] if bench.primary else None
+    if bench.primary is None:
+        lines.append(f"(none pre-registered for {bench.name})")
+    else:
+        _, primary_left, primary_right = bench.primary
+        # A benchmark with subsets pre-registers the first one; the others
+        # are reported only below.
+        pool, raw_pool = rows, raw_rows
+        scope = ""
+        if bench.subsets:
+            pool = [r for r in rows if r.get("subset") == bench.subsets[0]]
+            raw_pool = [r for r in raw_rows if r.get("subset") == bench.subsets[0]]
+            scope = f", subset {bench.subsets[0]}"
+        lines.append(
+            f"{primary_left} vs {primary_right} on {primary_model}, "
+            f"paired McNemar, {bench.task_set_label}{scope}"
+        )
+        primary_rows = [row for row in pool if row.get("model") == primary_model]
+        if not primary_rows:
+            lines.append(f"(no rows for {primary_model})")
+        else:
+            primary_summaries = {}
+            for arm in (primary_left, primary_right):
+                arm_rows = slice_of(pool, primary_model, arm)
+                raw_arm_rows = slice_of(raw_pool, primary_model, arm)
+                summary = _summarize(arm_rows, raw_arm_rows)
+                primary_summaries[arm] = summary
+                lines.append(_format_summary(arm, summary))
+            lines.extend(_mcnemar_lines(primary_rows, primary_left, primary_right))
+            # Scoped to the two arms this test actually pairs: a lopsided third
+            # arm is a secondary-section problem, but a lopsided B/C pair
+            # undermines the one pre-registered result.
+            lines.extend(
+                _unequal_task_set_warning(
+                    [
+                        row
+                        for row in primary_rows
+                        if row.get("arm") in (primary_left, primary_right)
+                    ],
+                    primary_model,
+                )
+            )
+            if any(s["harness_limited"] for s in primary_summaries.values()):
+                lines.append(
+                    "  NOTE: at least one arm above has a harness-failure rate "
+                    f">= {HARNESS_FAILURE_RATE_THRESHOLD:.0%} -- that arm's "
+                    "number is harness-limited, not a clean read on the arm "
+                    "itself. FINDINGS.md must say so."
+                )
+
+    # --- SECONDARY / EXPLORATORY: everything else --------------------------
+    lines.append("\n# SECONDARY / EXPLORATORY (not pre-registered)")
+    present = {row.get("subset") for row in rows} - {None}
+    if bench.subsets and present:
+        unscoped = sum(1 for row in rows if row.get("subset") is None)
+        if unscoped:
+            lines.append(
+                f"WARNING: {unscoped} row(s) carry no subset and are in no "
+                "section below."
+            )
+        # Declared order first (the pre-registered subset leads), then any
+        # subset a row carries that the benchmark does not declare.
+        order = [s for s in bench.subsets if s in present] + sorted(
+            present - set(bench.subsets)
+        )
+        for subset in order:
+            lines.append(f"\n## subset: {subset}")
+            lines.extend(
+                _secondary_lines(
+                    [r for r in rows if r.get("subset") == subset],
+                    [r for r in raw_rows if r.get("subset") == subset],
+                    bench,
+                    "###",
+                )
+            )
+    else:
+        lines.extend(_secondary_lines(rows, raw_rows, bench, "##"))
     return "\n".join(lines)
 
 

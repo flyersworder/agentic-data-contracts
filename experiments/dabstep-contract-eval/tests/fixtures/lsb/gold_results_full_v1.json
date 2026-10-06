@@ -1,0 +1,8 @@
+{
+  "shop_1": {"db": "shop", "order": true, "rows": [["Bob", 200.0], ["Ann", 120.5], ["Cy", 15.25]]},
+  "shop_2": {"db": "shop", "order": true, "rows": [["Cy", 15.25], ["Ann", 120.5], ["Bob", 200.0]]},
+  "shop_3": {"db": "shop", "order": false, "rows": [[2]]},
+  "shop_4": {"db": "shop", "order": false, "rows": [[2]]},
+  "shop_5": {"db": "shop", "order": true, "rows": [[null], [200.0], [120.5], [80.0], [15.25]]},
+  "shop_6": {"db": "shop", "order": false, "rows": [[1]]}
+}

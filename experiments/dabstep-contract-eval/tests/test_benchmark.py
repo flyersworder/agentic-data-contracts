@@ -66,3 +66,8 @@ def test_a_missing_role_is_refused_by_name():
     # DABStep has no `baseline` role: `schema_only` is an arm, not a role.
     with pytest.raises(SystemExit, match="baseline"):
         role_arms(DABStep, "baseline", "contract")
+
+
+def test_a_task_has_no_subset_unless_given():
+    assert Task("1", "q", "g").subset is None
+    assert Task("1", "q", "g", subset="primary").subset == "primary"

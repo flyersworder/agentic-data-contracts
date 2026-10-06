@@ -1,0 +1,18 @@
+CREATE TABLE "customers" (
+custid bigint NOT NULL,
+name text NOT NULL,
+tier text NOT NULL,
+joined date NOT NULL,
+    PRIMARY KEY (custid)
+);
+
+CREATE TABLE "orders" (
+orderid bigint NOT NULL,
+custid bigint NOT NULL,
+amount double precision,
+qty integer NOT NULL,
+status text NOT NULL,
+details jsonb,
+    PRIMARY KEY (orderid),
+    FOREIGN KEY (custid) REFERENCES customers(custid)
+);

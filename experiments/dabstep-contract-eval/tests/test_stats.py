@@ -1054,3 +1054,134 @@ def test_a_benchmark_without_a_manual_plus_or_primary_still_reports(
     assert "(none pre-registered for dabstep)" in text
     assert "vs manual_resolved" not in text
     assert "manual_prompt vs contract" in text
+
+
+def _bench_like(**attrs):
+    from dce.benchmarks.dabstep import DABStep
+
+    return type("Bench", (DABStep,), attrs)
+
+
+def test_each_subset_is_reported_in_its_own_section_in_declared_order(
+    tmp_path, monkeypatch
+):
+    import dce.stats as stats_module
+
+    bench = _bench_like(
+        subsets=("primary", "order_only"),
+        roles={"baseline": "schema_only", "manual": "manual_prompt"},
+        primary=None,
+    )
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", "schema_only", "correct"), "subset": "order_only"},
+            {**_row("t2", "schema_only", "incorrect"), "subset": "primary"},
+            {**_row("t2", "manual_prompt", "correct"), "subset": "primary"},
+        ],
+    )
+    text = report(path)
+    assert text.index("## subset: primary") < text.index("## subset: order_only")
+    primary = text[
+        text.index("## subset: primary") : text.index("## subset: order_only")
+    ]
+    assert "schema_only" in primary and "manual_prompt" in primary
+    # No `contract` role, so no pairwise comparison against it.
+    assert "McNemar" not in text
+
+
+def test_the_primary_comparison_reads_only_the_pre_registered_subset(
+    tmp_path, monkeypatch
+):
+    import dce.stats as stats_module
+
+    bench = _bench_like(
+        subsets=("primary", "order_only"),
+        primary=(PRIMARY_MODEL, "manual_prompt", "contract"),
+    )
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", "manual_prompt", "incorrect"), "subset": "primary"},
+            {**_row("t1", "contract", "correct"), "subset": "primary"},
+            {**_row("t2", "manual_prompt", "correct"), "subset": "order_only"},
+            {**_row("t2", "contract", "incorrect"), "subset": "order_only"},
+        ],
+    )
+    text = report(path)
+    primary = text[: text.index("# SECONDARY")]
+    assert "subset primary" in primary
+    assert "manual_prompt    scored    0/1" in primary
+    assert "(contract_only=1, manual_prompt_only=0)" in primary
+
+
+def test_rows_without_a_subset_are_counted_not_silently_dropped(tmp_path, monkeypatch):
+    import dce.stats as stats_module
+
+    bench = _bench_like(subsets=("primary", "order_only"), primary=None)
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", "manual_prompt", "correct"), "subset": "primary"},
+            _row("t2", "manual_prompt", "correct"),
+        ],
+    )
+    assert "WARNING: 1 row(s) carry no subset" in report(path)
+
+
+def test_a_benchmark_mixed_in_only_among_superseded_rows_is_still_refused(tmp_path):
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            {**_row("t1", PRIMARY_LEFT_ARM, "correct"), "benchmark": "other"},
+            _row("t1", PRIMARY_LEFT_ARM, "correct"),  # same key, supersedes it
+        ],
+    )
+    with pytest.raises(SystemExit, match="more than one benchmark"):
+        report(path)
+
+
+def test_the_regrade_note_counts_only_the_rows_actually_regraded(tmp_path, monkeypatch):
+    import dce.stats as stats_module
+
+    bench = _bench_like(
+        scorer=staticmethod(lambda: "new-scorer"),
+        rescore=staticmethod(lambda row: None),
+    )
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(path, [{**_row("t1", PRIMARY_LEFT_ARM, "correct"), "scorer": "old"}])
+    text = report(path)
+    assert "0 of 1 answered row(s) were RE-GRADED" in text
+    assert "every answered row has been RE-GRADED" not in text
+
+
+def test_the_excluded_task_note_names_the_benchmarks_reason(tmp_path, monkeypatch):
+    import dce.stats as stats_module
+
+    bench = _bench_like(
+        excluded_tasks=frozenset({"t1"}),
+        excluded_reason="whose gold failed to reproduce",
+        excluded_source="the freeze verdicts",
+    )
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: bench)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            _row("t1", PRIMARY_LEFT_ARM, "correct"),
+            _row("t2", PRIMARY_LEFT_ARM, "correct"),
+        ],
+    )
+    text = report(path)
+    assert (
+        "NOTE: dropped 1 task(s) whose gold failed to reproduce (t1) "
+        "-- see the freeze verdicts." in text
+    )

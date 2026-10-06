@@ -150,9 +150,10 @@ def select_tasks(tasks: list[dict], golds: dict, ungolded: str = "skip") -> list
     right for the ablation and wrong for a leaderboard submission, which is
     graded on all 450 by DABStep's own withheld answers.
 
-    `ungolded="run"` admits them. They are still not scored — `_run_group`
-    passes `None` rather than `""`, and `run_task` records `ungraded` — so
-    admitting them cannot move an accuracy figure, only fill in answers.
+    `ungolded="run"` admits them. They are still not scored —
+    `DABStep.gold_ref` returns `None` rather than `""`, and `DABStep.grade`
+    records `ungraded` — so admitting them cannot move an accuracy figure,
+    only fill in answers.
     """
     if ungolded not in UNGOLDED_MODES:
         raise ValueError(f"ungolded must be one of {UNGOLDED_MODES}, got {ungolded!r}")

@@ -42,7 +42,7 @@ from dce.trace import write_trace
 
 # A harness cap, not a contract limit — applied identically to every arm so
 # no arm gets more iterations than another (see the retries note below, and
-# `dce/arms.py`'s module docstring on why that symmetry matters).
+# `dce/tools.py`'s module docstring on why that symmetry matters).
 #: OpenRouter's `reasoning.effort`, sent explicitly rather than inherited.
 #:
 #: F3's real lesson applied to a second knob: an unset parameter is not a
@@ -85,7 +85,7 @@ REQUEST_LIMIT: int = 50
 # N2's fix: `total_tokens_limit` is only checked BETWEEN requests, so nothing
 # by itself stops one enormous single request. Demonstrated overshoot before
 # these existed: a 10,000-row `payments` result serialising to ~429k tokens
-# (see `dce/arms.py`'s `MAX_ROWS`, since lowered to 1,000 for the same
+# (see `dce/tools.py`'s `MAX_ROWS`, since lowered to 1,000 for the same
 # reason) became the next request's input in full, costing ~$0.86 on
 # `gpt-5.6-sol` alone — $1.80 total against a $0.25 cap that request never
 # got a chance to enforce because it only fires between requests, not within
@@ -204,7 +204,7 @@ MAX_ARM_FLOOR: int = 6_100
 # guard uniform in tokens is still non-uniform in iterations whenever growth
 # differs by arm.
 #
-# Two changes restore the intended property. `dce/arms.py`'s `MAX_ROWS` (cut
+# Two changes restore the intended property. `dce/tools.py`'s `MAX_ROWS` (cut
 # 1,000 -> 50) attacks arm C's growth at its root, and 12x here — the worst
 # observed 7.54x with a 1.6x margin — sizes the guard so it cannot bind before
 # `tool_calls_limit` does for any arm. `tool_calls_limit` is once again the
@@ -535,7 +535,7 @@ def _inspect_rejections(messages: list) -> int:
             # rejected" here would delete the library's own headline metric
             # without a trace, so only a genuine parse failure is tolerated
             # (an inspect_query response is not always bare JSON in general,
-            # see `_append_truncation_marker` in `dce/arms.py` for the sibling
+            # see `_append_truncation_marker` in `dce/tools.py` for the sibling
             # case on `run_query`), and everything else propagates.
             try:
                 data = json.loads(content)
@@ -835,8 +835,10 @@ def build_result_row(
 
 
 class AgentConstructionError(RuntimeError):
-    """Raised by `run_task` only when CONSTRUCTION failed — either
-    `build_arm` (`dce/arms.py`) or the `agent_factory`/
+    """Raised by `run_task` only when CONSTRUCTION failed — the
+    benchmark's row provenance (`gold_ref`, `arm_digest`, `golds_hash`,
+    `scorer`, `row_fields`), its `build_arm` (DABStep's is in
+    `dce/benchmarks/dabstep.py`), or the `agent_factory`/
     `_default_agent_factory` call (e.g. a missing `OPENROUTER_API_KEY`) —
     before any billable model call was made.
 
@@ -1547,7 +1549,7 @@ def run_task(
         # step is what raises, there is no `ArmSetup` yet to call
         # `.close()` on, and that connection can leak. This is the one
         # construction-class failure this module cannot currently close
-        # cleanly; fixing it would mean making `dce/arms.py`'s own
+        # cleanly; fixing it would mean making `dce/tools.py`'s own
         # construction self-cleaning on partial failure, out of scope
         # here.
         raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
@@ -1578,7 +1580,7 @@ def run_task(
 
         prompt = task.prompt
         limits = UsageLimits(
-            # THE uniform iteration control across arms — see `dce/arms.py`'s
+            # THE uniform iteration control across arms — see `dce/tools.py`'s
             # module docstring. `total_tokens_limit`/`cost_limit` below are
             # runaway guards, not budgets, and must stay loose enough never
             # to bind before this one does in normal operation.
@@ -1608,7 +1610,7 @@ def run_task(
             # builds, so an oversized request is still sent and billed once
             # before this stops the run — it prevents a SECOND one, not the
             # first one's cost. Real protection against the first oversized
-            # request is `dce/arms.py`'s `MAX_ROWS` (cut from 10,000 to
+            # request is `dce/tools.py`'s `MAX_ROWS` (cut from 10,000 to
             # 1,000 for exactly this reason).
             per_request_input_tokens_limit=PER_REQUEST_INPUT_TOKEN_CAP,
         )
@@ -1740,12 +1742,12 @@ def run_task(
             retry_prompts = _retry_prompt_count(messages)
             # Read before `setup.close()` (in `finally`, below) even though
             # `ContractSession.retries` is a plain int attribute unaffected
-            # by the connection's lifecycle — matching `dce/arms.py`'s CALL
+            # by the connection's lifecycle — matching `dce/tools.py`'s CALL
             # ORDER discipline of treating "read everything, then close" as
             # the one safe sequence rather than relying on which specific
             # reads happen to be connection-independent today.
             # `ArmSetup.session` is typed `object | None` (see
-            # `dce/arms.py`), so this reads it dynamically rather than
+            # `dce/tools.py`), so this reads it dynamically rather than
             # narrowing on `is not None` — a plain `object` has no
             # `.retries` either way, and `getattr` gives the same "0 for
             # schema_only/manual_prompt" result without a type-checker
@@ -1808,11 +1810,11 @@ def run_task(
         # Arm C's adapter holds a live DuckDB connection open for the arm's
         # whole lifetime. It MUST be closed here — on every path, including
         # the error and cap-trip paths above — before the runner's
-        # post-task integrity check (`dce.arms.check_and_restore`): DuckDB
+        # post-task integrity check (`dce.tools.check_and_restore`): DuckDB
         # keeps mutations in a `.wal` sidecar while the connection is open,
         # so a check performed against a live connection is not a valid
         # check and its repair is not guaranteed to survive the connection's
-        # later close. See `dce/arms.py`'s module docstring, CALL ORDER.
+        # later close. See `dce/tools.py`'s module docstring, CALL ORDER.
         #
         # Guarded, not bare: a close failure here must not replace whatever
         # `row`/exception the `try` above already produced — the money is
@@ -1821,7 +1823,7 @@ def run_task(
         # connection did not actually close, `dce.runner.sweep`'s
         # subsequent `check_and_restore` call runs against what may still
         # be a live connection — exactly the "not a valid check" case
-        # `dce/arms.py`'s CALL ORDER section warns about. Stamping
+        # `dce/tools.py`'s CALL ORDER section warns about. Stamping
         # `close_error` onto the row (when one exists) is what lets the
         # runner see that and refuse to trust that task's integrity result,
         # instead of silently misattributing a leaked connection's own

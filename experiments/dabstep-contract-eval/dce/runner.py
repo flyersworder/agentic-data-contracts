@@ -114,7 +114,7 @@ NOT cover):
 
   * WORKING COPY, ALWAYS. Arms `schema_only` and `manual_prompt` are
     ungoverned — nothing stops either from issuing `DROP TABLE` against
-    whatever file it is pointed at (see `dce/arms.py`'s module docstring,
+    whatever file it is pointed at (see `dce/tools.py`'s module docstring,
     CALL ORDER). `sweep` makes exactly one working copy per process
     (`make_working_copy`) and hands every arm the *copy*, never the
     pristine file, then runs `check_and_restore` after each task — once
@@ -140,7 +140,7 @@ NOT cover):
     `run_task`'s `setup.close()` runs inside its own `try/except`, so a
     close failure there no longer replaces a good row — but it must not be
     SILENT either: if the connection did not actually close, this sweep's
-    `check_and_restore` call is not a valid check (see `dce/arms.py`'s CALL
+    `check_and_restore` call is not a valid check (see `dce/tools.py`'s CALL
     ORDER — a check against a live connection can report a repair that
     does not survive that connection's later checkpoint-on-close). Worse,
     a live leaked connection can keep mutating the SAME working copy

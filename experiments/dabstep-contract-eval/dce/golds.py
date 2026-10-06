@@ -45,7 +45,7 @@ def golds_sha256(golds: dict[str, str]) -> str:
 
     THE HASH THAT WAS MISSING. `dce.prepare.write_golds` stored only
     `manifest_sha256`, a fingerprint of the SUBMISSION CORPUS, and
-    `dce.runner._load_golds` stamped that into every result row as
+    `dce.benchmarks.dabstep._load_golds` stamped that into every result row as
     `golds_hash`. Two gold sets reconstructed from the same corpus at
     different plurality thresholds differ in CONTENT while carrying an
     IDENTICAL `manifest_sha256` — and that is not a hypothetical: Ruling 8

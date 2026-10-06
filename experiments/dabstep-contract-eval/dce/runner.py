@@ -324,8 +324,14 @@ from dce.agent import (
     run_task,
     task_row_fields,
 )
-from dce.benchmark import BENCHMARK_NAMES, Benchmark, Task, benchmark_class
-from dce.benchmarks.dabstep import UNGOLDED_MODES, DABStep
+from dce.benchmark import (
+    BENCHMARK_NAMES,
+    DEFAULT_BENCHMARK,
+    Benchmark,
+    Task,
+    benchmark_class,
+    benchmark_of,
+)
 from dce.lockfile import lock_path_for, sweep_lock
 from dce.pricing import MODELS
 from dce.tools import _wal_path, check_and_restore, make_working_copy
@@ -725,6 +731,35 @@ def pending(tasks, arms, models, done) -> list[tuple[str, str, str]]:
         for model in models
         if (task.task_id, arm, model) not in done
     ]
+
+
+def default_out(name: str) -> Path:
+    """DABStep keeps its historical default; every other benchmark writes
+    under `results/<name>/`, so two benchmarks never share a default file."""
+    if name == DEFAULT_BENCHMARK:
+        return Path("results/results.jsonl")
+    return Path("results") / name / "results.jsonl"
+
+
+def default_trace_dir(name: str, out: Path) -> Path:
+    """Off the results filename, so two sweeps writing different results
+    files cannot interleave their transcripts; under `traces/<name>/` for
+    every benchmark but DABStep, whose `traces/<stem>/` FINDINGS.md cites."""
+    if name == DEFAULT_BENCHMARK:
+        return Path("traces") / out.stem
+    return Path("traces") / name / out.stem
+
+
+def _assert_one_benchmark(out: Path, name: str) -> None:
+    """A results file belongs to one benchmark. Appending another's rows
+    would pay for runs that `dce.stats` then refuses to report, and resume
+    would skip any task whose id happens to collide."""
+    others = sorted({benchmark_of(row) for row in _read_rows(out)} - {name})
+    if others:
+        raise SystemExit(
+            f"{out} already holds rows from {others}, not {name!r}; a results "
+            "file belongs to one benchmark -- pass a different --out"
+        )
 
 
 def snapshot_path_for(out: Path) -> Path:
@@ -1534,6 +1569,7 @@ def sweep(
     # of the other's live DuckDB connection. See `dce/lockfile.py` — the
     # failure was reproduced, and the results file gives no sign of it.
     with sweep_lock(out):
+        _assert_one_benchmark(out, benchmark.name)
         common = dict(
             out=out,
             max_spend=max_spend,
@@ -1644,8 +1680,8 @@ def _sweep_locked(
 
 
 def _stratified_sample(tasks: list[Task], n: int) -> list[Task]:
-    """`n` tasks split across groups (DABStep's `level`) in population
-    proportion, so a smoke
+    """`n` tasks split across groups (DABStep's `level`) by the
+    largest-remainder rule, so a smoke
     run always reads on every stratum instead of however the input happened
     to be ordered.
 
@@ -1660,11 +1696,24 @@ def _stratified_sample(tasks: list[Task], n: int) -> list[Task]:
     for task in tasks:
         by_group.setdefault(task.group, []).append(task)
     total = len(tasks)
+    # Largest remainder: every group gets the floor of its share, and the
+    # tasks left over go to the largest fractional parts (first-seen group
+    # first on a tie). Rounding each share instead gave 22 tasks or none for
+    # `--n 12` over LiveSQLBench's 22 databases, and n - 1 or n + 1 on any
+    # exact .5 tie. On DABStep's two levels the two rules agree everywhere
+    # else, so its smoke samples are unchanged.
+    quotas = {group: n * len(members) / total for group, members in by_group.items()}
+    counts = {group: math.floor(quota) for group, quota in quotas.items()}
+    first_seen = {group: index for index, group in enumerate(by_group)}
+    leftover = n - sum(counts.values())
+    by_remainder = sorted(
+        by_group, key=lambda g: (-(quotas[g] - counts[g]), first_seen[g])
+    )
+    for group in by_remainder[:leftover]:
+        counts[group] += 1
     sampled: list[Task] = []
-    for group in by_group.values():
-        share = len(group) / total
-        k = round(n * share)
-        sampled.extend(group[:k])
+    for group, members in by_group.items():
+        sampled.extend(members[: counts[group]])
     return sampled
 
 
@@ -1797,24 +1846,13 @@ def main() -> None:
     )
     parser.add_argument("--models", nargs="+", default=["z-ai/glm-5.3-flash"])
     parser.add_argument("--max-spend", type=float, required=True)
-    parser.add_argument("--out", type=Path, default=Path("results/results.jsonl"))
     parser.add_argument(
-        "--db", type=Path, default=Path("data/dabstep.duckdb"), help="(dabstep)"
-    )
-    parser.add_argument(
-        "--golds", type=Path, default=Path("data/golds.json"), help="(dabstep)"
-    )
-    parser.add_argument(
-        "--tasks", type=Path, default=Path("data/tasks.json"), help="(dabstep)"
-    )
-    parser.add_argument(
-        "--ungolded",
-        choices=UNGOLDED_MODES,
-        default="skip",
+        "--out",
+        type=Path,
+        default=None,
         help=(
-            "what to do with tasks that have no reconstructed gold: "
-            "skip them (default, every scoring sweep) or run them "
-            "unscored, which a leaderboard submission needs"
+            "default: results/results.jsonl for dabstep, "
+            "results/<benchmark>/results.jsonl otherwise"
         ),
     )
     parser.add_argument(
@@ -1823,7 +1861,8 @@ def main() -> None:
         default=None,
         help=(
             "Directory for full per-run transcripts (default: "
-            "traces/<out-stem>/). Pass --no-traces to switch them off. A "
+            "traces/<out-stem>/ for dabstep, traces/<benchmark>/<out-stem>/ "
+            "otherwise). Pass --no-traces to switch them off. A "
             "result row records THAT a run failed; only a trace records why."
         ),
     )
@@ -1864,7 +1903,12 @@ def main() -> None:
         f"interleaved; at most {RETRY_PASS_ATTEMPTS} attempts per unit, "
         "restarts included. The failed rows are kept.",
     )
+    # Each benchmark adds its own flags (DABStep's --db/--golds/--tasks/
+    # --ungolded, LiveSQLBench's --lsb-data); `from_args` reads only its own.
+    for name in BENCHMARK_NAMES:
+        benchmark_class(name).add_arguments(parser)
     args = parser.parse_args()
+    out = args.out or default_out(args.benchmark)
 
     # Arm names are class attributes, so they are checked here, before the
     # tree check and before any data file is read -- the order this ran in
@@ -1883,7 +1927,7 @@ def main() -> None:
     # on the library under test, and that pin is only truthful on a clean
     # tree. `out` (this sweep's own results file) is exempt — see
     # `assert_clean_tree`'s docstring.
-    assert_clean_tree(out=args.out)
+    assert_clean_tree(out=out)
 
     if args.workers < 1:
         raise SystemExit(f"--workers must be at least 1, got {args.workers}")
@@ -1909,12 +1953,7 @@ def main() -> None:
             "until the first observations tighten the reserve"
         )
 
-    benchmark = DABStep.from_files(
-        db=args.db,
-        golds_path=args.golds,
-        tasks_path=args.tasks,
-        ungolded=args.ungolded,
-    )
+    benchmark = spec.from_args(args)
     # Resolve the scorer now: it is imported lazily, and a missing one found
     # mid-sweep turns every task into a `construction_error` row until the
     # circuit breaker trips, instead of one clear error before any spend.
@@ -1923,10 +1962,10 @@ def main() -> None:
     if args.n:
         tasks = _stratified_sample(tasks, args.n)
 
-    # Default the trace directory off the results filename, so two sweeps
-    # writing different results files cannot interleave their transcripts.
     trace_dir = (
-        None if args.no_traces else (args.traces or Path("traces") / args.out.stem)
+        None
+        if args.no_traces
+        else (args.traces or default_trace_dir(args.benchmark, out))
     )
 
     result = sweep(
@@ -1934,7 +1973,7 @@ def main() -> None:
         arms,
         tuple(args.models),
         benchmark,
-        out=args.out,
+        out=out,
         max_spend=args.max_spend,
         retry_verdicts=(args.retry,) if args.retry else (),
         trace_dir=trace_dir,
@@ -1969,7 +2008,7 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    gave_up = gave_up_keys(args.out)
+    gave_up = gave_up_keys(out)
     if gave_up:
         print(
             f"WARNING: {len(gave_up)} unit(s) gave up after "

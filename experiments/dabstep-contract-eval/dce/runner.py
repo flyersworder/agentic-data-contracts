@@ -325,8 +325,7 @@ from dce.agent import (
     run_task,
 )
 from dce.arms import ALL_ARMS, ARMS, check_and_restore, make_working_copy
-from dce.data import DATASET_REVISION
-from dce.golds import PLURALITY_THRESHOLD, golds_sha256
+from dce.benchmarks.dabstep import UNGOLDED_MODES, _load_golds, select_tasks
 from dce.grade import active_scorer
 from dce.lockfile import lock_path_for, sweep_lock
 from dce.pricing import MODELS
@@ -1637,101 +1636,6 @@ def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
         k = round(n * share)
         sampled.extend(group[:k])
     return sampled
-
-
-#: How `select_tasks` treats a task with no reconstructed gold.
-#: `"skip"` is every scoring sweep: unscoreable tasks are not run.
-#: `"run"` is a leaderboard submission, which needs an answer for all 450.
-UNGOLDED_MODES: tuple[str, ...] = ("skip", "run")
-
-
-def select_tasks(tasks: list[dict], golds: dict, ungolded: str = "skip") -> list[dict]:
-    """The tasks a sweep will run, given the golds it can score against.
-
-    This used to be an inline comprehension in `main`, and it silently
-    decided something load-bearing: 49 of DABStep's 450 tasks have no
-    reconstructable gold (`dce.golds`), so a scored sweep runs 401. That is
-    right for the ablation and wrong for a leaderboard submission, which is
-    graded on all 450 by DABStep's own withheld answers.
-
-    `ungolded="run"` admits them. They are still not scored — `_run_group`
-    passes `None` rather than `""`, and `run_task` records `ungraded` — so
-    admitting them cannot move an accuracy figure, only fill in answers.
-    """
-    if ungolded not in UNGOLDED_MODES:
-        raise ValueError(f"ungolded must be one of {UNGOLDED_MODES}, got {ungolded!r}")
-    if ungolded == "run":
-        return list(tasks)
-    return [t for t in tasks if t["task_id"] in golds]
-
-
-def _load_golds(path: Path) -> tuple[dict[str, str], str]:
-    """Read the golds envelope and return (task_id -> answer map, gold hash).
-
-    `data/golds.json` is an envelope
-    (`{"revision", "threshold", "count", "golds", "submissions_expected",
-    "submissions_consumed", "manifest_sha256"}`), not a bare mapping — the
-    task -> answer map lives under `"golds"`. Reading it as a bare mapping
-    would silently iterate its handful of envelope keys instead of ~406
-    tasks; checked explicitly here (raising `SystemExit`, not letting a
-    bare mapping fail later with `KeyError('revision')`) so that mistake is
-    loud and immediate instead of a confusing crash deep in the sweep.
-
-    The `revision` check is what catches a smoke run and a full sweep being
-    scored against two different ground-truth snapshots on the DATASET
-    axis. The `threshold` check is its counterpart on the RECONSTRUCTION
-    axis: Ruling 8 requires re-running `dce.prepare` at 0.60 / 0.75 / 0.90
-    to publish the sensitivity table, and `data/golds.json` is gitignored,
-    so an in-place overwrite at another threshold would otherwise be
-    invisible to the sweep, to git, and to the results file alike.
-
-    `golds_hash` — stamped into EVERY result row — is
-    `dce.golds.golds_sha256`, a fingerprint of the gold mapping itself. It
-    used to be `manifest_sha256`, which fingerprints the SUBMISSION CORPUS:
-    identical across two gold sets that differ in every answer, because
-    they were reconstructed from the same corpus. The stored value is
-    verified against a recomputation here rather than trusted, so a
-    hand-edited envelope (hash kept, answers changed) is caught too; an
-    envelope written before this field existed is simply hashed on the fly.
-    `manifest_sha256` stays in the envelope — it still records which corpus
-    was consumed, which is a different and also-necessary fact.
-    """
-    envelope = json.loads(path.read_text())
-    if (
-        not isinstance(envelope, dict)
-        or "golds" not in envelope
-        or "revision" not in envelope
-    ):
-        raise SystemExit(
-            f"{path} does not look like a golds envelope (expected top-level "
-            '"revision" and "golds" keys) — passed the bare task->answer '
-            "mapping instead of the envelope it lives under?"
-        )
-    if envelope["revision"] != DATASET_REVISION:
-        raise SystemExit(
-            f"golds revision {envelope['revision']!r} does not match "
-            f"dce.data.DATASET_REVISION {DATASET_REVISION!r}; refusing to "
-            "score a sweep against a different dataset snapshot than the "
-            "one golds.json was reconstructed from"
-        )
-    if envelope.get("threshold") != PLURALITY_THRESHOLD:
-        raise SystemExit(
-            f"golds threshold {envelope.get('threshold')!r} does not match "
-            f"dce.golds.PLURALITY_THRESHOLD {PLURALITY_THRESHOLD!r}; this "
-            "golds.json was reconstructed under a different consensus rule "
-            "(a sensitivity run, most likely — see Ruling 8). Re-run "
-            "`python -m dce.prepare` to restore the primary gold set before "
-            "scoring anything against it"
-        )
-    computed = golds_sha256(envelope["golds"])
-    stored = envelope.get("golds_sha256")
-    if stored is not None and stored != computed:
-        raise SystemExit(
-            f"golds.json's stored golds_sha256 {stored!r} does not match the "
-            f"hash of the golds it contains ({computed!r}) — the file has "
-            "been edited since it was written; refusing to score against it"
-        )
-    return envelope["golds"], computed
 
 
 def _find_repo_root(cwd: Path | None = None) -> Path:

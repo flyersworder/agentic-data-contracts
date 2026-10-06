@@ -37,7 +37,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from dce.arms import build_arm
-from dce.frozen import digest, hollow_digest, uninterpreted_digest
+from dce.benchmarks.dabstep import arm_digest
 from dce.grade import _clean, active_scorer, score
 from dce.pricing import MODELS, cost
 from dce.trace import write_trace
@@ -232,24 +232,6 @@ TOKEN_BUDGET: int = REQUEST_BUDGET * MAX_ARM_FLOOR * GROWTH
 # runaway-guard budget in a single step, rather than being allowed to
 # consume the whole thing (or more, pre-N2) at once.
 PER_REQUEST_INPUT_TOKEN_CAP: int = TOKEN_BUDGET // 4
-
-
-def arm_digest(arm: str) -> str:
-    """The digest of the contract artifact `arm` actually loads.
-
-    `contract_hollow` loads the mechanically derived hollow contract, so its
-    rows must be pinned to `hollow_digest()`. Stamping `digest()` on every row
-    regardless -- which this harness did for runs A, B and C -- leaves arm D's
-    rows carrying tamper-evidence for a file that arm never read, which is the
-    one provenance claim the stamp exists to support. The ungoverned arms load
-    no contract at all and keep the real digest as a record of which frozen
-    experiment they belong to.
-    """
-    if arm == "contract_hollow":
-        return hollow_digest()
-    if arm == "contract_uninterpreted":
-        return uninterpreted_digest()
-    return digest()
 
 
 def _tool_call_names(messages: list) -> list[str]:

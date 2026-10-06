@@ -20,7 +20,8 @@ per repeat.
 The decomposition reads arms by role (`manual`, `manual_plus`, `contract`;
 see `dce.benchmark.ROLES`), as the benchmark names them, so another
 benchmark needs only its own `CONFIG` entry: its runs, how a row maps to a
-group, and the groups. The empty-list section is DABStep's own.
+group, the groups, the roles it prints, the role pairs it sign-tests, and the
+subset it reads. The empty-list section is DABStep's own.
 
 Run:  uv run python analysis/knowledge_delivery.py
 """
@@ -71,22 +72,28 @@ def dabstep_group(row: dict) -> str:
     return "total-fee" if family in TOTAL_FEE else "rest"
 
 
-def arms_of(name: str) -> tuple[str, str, str]:
-    """(manual, manual_plus, contract), the three roles the decomposition
-    reads, as this benchmark names its arms."""
-    manual, plus, contract = role_arms(
-        benchmark_class(name), "manual", "manual_plus", "contract"
-    )
-    return manual, plus, contract
+def arms_of(name: str) -> dict[str, str]:
+    """role -> arm, for every role this benchmark's report reads. A role the
+    benchmark lacks stops the report by name (`role_arms`): a skipped role
+    would silently drop a pre-registered comparison."""
+    needed = list(CONFIG[name]["roles"])
+    for pair in CONFIG[name]["pairs"]:
+        needed.extend(r for r in pair if r not in needed)
+    return dict(zip(needed, role_arms(benchmark_class(name), *needed), strict=True))
 
 
 def rows(name: str, model: str, repeat: int, arms: tuple[str, ...]) -> list[dict]:
     """End-to-end rows of the three arms for one repeat, with their trace dir."""
+    bench = benchmark_class(name)
+    subset = CONFIG[name]["subset"]
     out = []
     for stem in CONFIG[name]["runs"][model](repeat):
         for row in _as_e2e(_graded(load(ROOT / "results" / f"{stem}.jsonl"))):
-            if row["arm"] in arms:
-                out.append({**row, "_traces": ROOT / "traces" / stem})
+            if row["arm"] not in arms or row["task_id"] in bench.excluded_tasks:
+                continue
+            if subset is not None and row.get("subset") != subset:
+                continue
+            out.append({**row, "_traces": ROOT / "traces" / stem})
     return out
 
 
@@ -120,7 +127,9 @@ def sign_test(better: int, worse: int) -> str:
 
 
 def report(name: str, model: str) -> None:
-    manual, plus, contract = arms = arms_of(name)
+    by_role = arms_of(name)
+    manual, plus, contract = (by_role[r] for r in CONFIG[name]["roles"])
+    arms = (manual, plus, contract)
     group = CONFIG[name]["group"]
     print(f"== {model}")
     per_repeat = {i: rows(name, model, i, arms) for i in REPEATS}
@@ -157,7 +166,7 @@ def report(name: str, model: str) -> None:
             group_of_task[r["task_id"]] = group(r)
             by_group[group(r)][r["arm"]] += ok
     tasks = set(score[contract])
-    pairs = ((plus, manual), (contract, plus))
+    pairs = tuple((by_role[a], by_role[b]) for a, b in CONFIG[name]["pairs"])
 
     def sign(a: str, b: str, among: set[str]) -> str:
         better = sum(score[a][t] > score[b][t] for t in among)
@@ -218,6 +227,9 @@ CONFIG = {
         "group": dabstep_group,
         "groups": GROUPS,
         "extra": dabstep_empty_list,
+        "roles": ("manual", "manual_plus", "contract"),
+        "pairs": (("manual_plus", "manual"), ("contract", "manual_plus")),
+        "subset": None,
     },
 }
 

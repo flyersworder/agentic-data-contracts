@@ -2968,3 +2968,50 @@ def test_a_results_file_of_another_benchmark_is_refused_before_any_task(
             run_task_fn=fake_run,
         )
     assert calls == []
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+
+
+def test_a_results_subdirectory_does_not_block_a_resume_or_the_next_sweep(
+    tmp_path: Path,
+):
+    """`results/<benchmark>/` is where every benchmark but DABStep writes.
+    Its first, untracked results file must not block its own resume (git
+    collapses an untracked directory to one line), and the snapshot it leaves
+    must not block the next sweep (the ignore patterns must reach it)."""
+    repo = tmp_path / "repo"
+    experiment = repo / "e"
+    (experiment / "results" / "livesqlbench").mkdir(parents=True)
+    gitignore = Path(__file__).resolve().parents[1] / ".gitignore"
+    (experiment / ".gitignore").write_text(
+        gitignore.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (experiment / "README").write_text("x", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+
+    smoke = experiment / "results" / "livesqlbench" / "smoke.jsonl"
+    smoke.write_text("{}\n", encoding="utf-8")
+    snapshot_path_for(smoke).write_text("{}\n", encoding="utf-8")
+    assert_clean_tree(out=smoke, repo_root=repo)  # the resume
+
+    _git(repo, "add", str(smoke))
+    _git(repo, "commit", "-q", "-m", "smoke")
+    full = experiment / "results" / "livesqlbench" / "full.jsonl"
+    assert_clean_tree(out=full, repo_root=repo)  # the next sweep

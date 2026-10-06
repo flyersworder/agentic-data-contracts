@@ -1775,8 +1775,19 @@ def assert_clean_tree(
         root = root or _find_repo_root()
 
         def run() -> str:
+            # Every untracked file by name: by default git collapses a wholly
+            # untracked directory (a new `results/<benchmark>/`) to one line,
+            # which never equals the exempt `out`.
             return subprocess.check_output(
-                ["git", "-C", str(root), "status", "--porcelain"], text=True
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=all",
+                ],
+                text=True,
             )
 
     lines = [line for line in run().splitlines() if line.strip()]

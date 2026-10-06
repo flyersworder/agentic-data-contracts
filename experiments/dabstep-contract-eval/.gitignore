@@ -10,8 +10,9 @@ __pycache__/
 # dirty for the NEXT sweep, whose --out is a different file and which
 # therefore does not exempt them: measured, a completed run's leftover
 # snapshot blocked the next model's sweep from starting at all.
-results/*.jsonl.snapshot
-results/*.jsonl.lock
+# At every depth: benchmarks other than DABStep write `results/<name>/`.
+results/**/*.jsonl.snapshot
+results/**/*.jsonl.lock
 
 # A built submission file. Not ignored, it makes the tree dirty for the NEXT
 # runner invocation -- `assert_clean_tree` exempts only that sweep's own

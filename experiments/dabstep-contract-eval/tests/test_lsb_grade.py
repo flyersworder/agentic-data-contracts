@@ -135,3 +135,36 @@ def test_gold_digest_is_stable_and_does_not_contain_the_values():
     assert digest == gold_digest([["Ann", 120.5]])
     assert digest != gold_digest([["Ann", 120.51]])
     assert len(digest) == 64 and "Ann" not in digest
+
+
+def test_a_result_past_the_row_cap_is_too_large_not_fetched_in_full(db, monkeypatch):
+    import dce.benchmarks.lsb_grade as lsb_grade
+
+    monkeypatch.setattr(lsb_grade, "MAX_ROWS", 50)
+    grade = grade_answer(
+        _answer("SELECT * FROM range(1000)"), db_path=db, gold_rows=[[1]], ordered=False
+    )
+    assert grade == Grade("incorrect", failure="too_large")
+    # At the cap is still graded.
+    assert grade_answer(
+        _answer("SELECT * FROM range(50)"),
+        db_path=db,
+        gold_rows=[[i] for i in range(50)],
+        ordered=False,
+    ) == Grade("correct")
+
+
+def test_the_time_limit_covers_normalising_the_result(db, monkeypatch):
+    import time
+
+    import dce.benchmarks.lsb_grade as lsb_grade
+
+    def slow(rows):
+        time.sleep(0.5)
+        return [tuple(r) for r in rows]
+
+    monkeypatch.setattr(lsb_grade, "normalise", slow)
+    grade = grade_answer(
+        _answer("SELECT 1"), db_path=db, gold_rows=[[1]], ordered=False, seconds=0.2
+    )
+    assert grade == Grade("incorrect", failure="timeout")

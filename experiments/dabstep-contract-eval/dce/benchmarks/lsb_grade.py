@@ -19,7 +19,8 @@ was frozen (every frozen task's own gold SQL passes through this module):
   rel_tol 1e-5 / abs_tol 0.011 after rounding.
 
 Failure categories, all graded incorrect: `no_sql` (no block), `sql_error`
-(DuckDB refused or failed the query) and `timeout`. Any other exception --
+(DuckDB refused or failed the query), `timeout` and `too_large` (more than
+`MAX_ROWS` rows). Any other exception --
 a missing database file, say -- propagates, and `run_task` records a
 `scoring_error`, never a silent `incorrect`.
 """
@@ -31,6 +32,7 @@ import json
 import math
 import re
 import threading
+import time
 from pathlib import Path
 
 import duckdb
@@ -56,11 +58,22 @@ PG_COMPAT: tuple[str, ...] = (
 #: (`dce.tools.HARNESS_QUERY_SECONDS`).
 GRADE_SECONDS: float = 120
 
+#: The most rows a candidate may return. The largest gold result is 17,840
+#: rows; past this cap the answer cannot be the gold, and fetching it would
+#: hold Python objects the DuckDB memory limit does not bound (measured: a
+#: 9M-row cartesian answer reached 3.1 GB).
+MAX_ROWS = 200_000
+_FETCH_CHUNK = 10_000
+
 _SQL_BLOCK = re.compile(r"```sql[ \t]*\r?\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 class GradeTimeout(Exception):
     """The candidate query ran past its time limit and was interrupted."""
+
+
+class GradeTooLarge(Exception):
+    """The candidate query returned more than `MAX_ROWS` rows."""
 
 
 def extract_sql(answer: str | None) -> str | None:
@@ -146,20 +159,33 @@ def connect_readonly(db_path: Path, *, memory_limit: str | None = HARNESS_MEMORY
 
 def run_sql(con, sqls: list[str], *, seconds: float) -> list[tuple]:
     """Run `sqls` in order and return the last one's rows, normalised. A
-    `threading.Timer` interrupts the connection at `seconds`; the result is
-    fetched in full, since the grader compares every row."""
+    `threading.Timer` interrupts the connection at `seconds`, and the same
+    deadline covers normalising, which is Python-side work the interrupt
+    cannot reach. Rows are fetched in chunks, so a result past `MAX_ROWS`
+    stops there rather than being held in full."""
+    deadline = time.monotonic() + seconds
     timer = threading.Timer(seconds, con.interrupt)
     timer.start()
     try:
         result = None
         for sql in sqls:
             result = con.execute(sql)
-        rows = result.fetchall() if result is not None else []
+        rows: list = []
+        while result is not None:
+            chunk = result.fetchmany(_FETCH_CHUNK)
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(rows) > MAX_ROWS:
+                raise GradeTooLarge(f"more than {MAX_ROWS} rows")
     except duckdb.InterruptException as exc:
         raise GradeTimeout(f"interrupted after {seconds}s") from exc
     finally:
         timer.cancel()
-    return normalise(rows)
+    normalised = normalise(rows)
+    if time.monotonic() > deadline:
+        raise GradeTimeout(f"normalising ran past {seconds}s")
+    return normalised
 
 
 def grade_answer(
@@ -173,6 +199,8 @@ def grade_answer(
         got = run_sql(con, clean([sql]), seconds=seconds)
     except GradeTimeout:
         return Grade("incorrect", failure="timeout")
+    except GradeTooLarge:
+        return Grade("incorrect", failure="too_large")
     except duckdb.Error:
         return Grade("incorrect", failure="sql_error")
     finally:

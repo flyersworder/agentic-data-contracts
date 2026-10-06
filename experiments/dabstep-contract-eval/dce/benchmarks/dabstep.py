@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 from dce.benchmark import Grade, Task
+from dce.compile.db import CompileDB
+from dce.compile.entries import KBEntry
+from dce.compile.inputs import CompileInputs
 from dce.data import DATASET_REVISION
 from dce.frozen import (
     digest,
@@ -223,6 +227,68 @@ def _load_golds(path: Path) -> tuple[dict[str, str], str]:
             "been edited since it was written; refusing to score against it"
         )
     return envelope["golds"], computed
+
+
+#: A numbered heading at any level: "## 5. Fees", "###  5.1 Best",
+#: "#### 5.1.2. Choosing", "# 5.1.3 Processing" (the manual's levels are
+#: inconsistent; its numbers are not). Unnumbered headings stay inside the
+#: numbered section above them.
+_SECTION = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s+(\S.*?)\s*$")
+
+
+def manual_sections(manual: str) -> list[KBEntry]:
+    """`manual.md` as neutral entries of kind `section`: the text before
+    the first numbered heading (title and contents), then one entry per
+    numbered heading, each holding its text verbatim."""
+    lines = manual.splitlines()
+    starts = [i for i, line in enumerate(lines) if _SECTION.match(line)]
+    entries = []
+    head = "\n".join(lines[: starts[0] if starts else len(lines)]).strip()
+    if head:
+        title = next(
+            (line.lstrip("#").strip() for line in lines if line.startswith("#")),
+            "Preamble",
+        )
+        entries.append(KBEntry(0, "section", title, head))
+    for n, (start, end) in enumerate(
+        zip(starts, starts[1:] + [len(lines)], strict=True), start=1
+    ):
+        match = _SECTION.match(lines[start])
+        assert match is not None
+        text = "\n".join(lines[start:end]).strip()
+        entries.append(KBEntry(n, "section", f"{match[1]} {match[2]}", text))
+    return entries
+
+
+def compile_inputs(
+    context_dir: Path = CONTEXT_DIR, db: Path = Path("data/dabstep.duckdb")
+) -> CompileInputs:
+    """DABStep's compiler inputs (spec, Part 5): the manual split into
+    sections, `payments-readme.md` as the column meanings, the database.
+    Never `tasks.json` or `golds.json`."""
+    manual_path = context_dir / "manual.md"
+    readme_path = context_dir / "payments-readme.md"
+    readme = readme_path.read_text(encoding="utf-8").strip()
+    cdb = CompileDB(db)
+    try:
+        ddl = cdb.ddl()
+    finally:
+        cdb.close()
+    return CompileInputs(
+        benchmark="dabstep",
+        db_name="dabstep",
+        entries=tuple(manual_sections(manual_path.read_text(encoding="utf-8"))),
+        ddl=ddl,
+        column_meanings=readme,
+        dialect_note="DuckDB's own semantics apply.",
+        db_path=db,
+        init_sql=(),
+        sources=(manual_path, readme_path, db),
+        out_subdir="dabstep",
+        # The readme documents payments.csv; the compiled contract carries
+        # it on that table, as the hand-authored one carries it in prose.
+        table_descriptions={"payments": readme},
+    )
 
 
 def load_docs(context_dir: Path = CONTEXT_DIR) -> dict[str, str]:

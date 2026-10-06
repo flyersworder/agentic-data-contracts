@@ -26,11 +26,14 @@ from pathlib import Path
 
 from dce.benchmark import Grade, Task
 from dce.benchmarks.lsb_grade import (
+    PG_COMPAT,
     SAFE_INIT_SQL,
     extract_sql,
     gold_digest,
     grade_answer,
 )
+from dce.compile.entries import KBEntry
+from dce.compile.inputs import CompileInputs
 from dce.tools import ArmSetup, _ungoverned_tools
 
 DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
@@ -59,20 +62,23 @@ ANSWER_INSTRUCTION = (
 )
 
 
+def _meaning_text(value) -> str:
+    if isinstance(value, dict):
+        text = str(value.get("column_meaning", "")).strip()
+        fields = value.get("fields_meaning")
+        if fields:
+            text += " Fields: " + json.dumps(fields, ensure_ascii=False)
+        return text
+    return str(value).strip()
+
+
 def render_column_meanings(meanings: dict) -> str:
     """One line per column, `- table.column: meaning`, in the file's order. A
     JSON column's meaning is an object; its field meanings follow as JSON."""
     lines = []
     for key, value in meanings.items():
         _, table, column = key.split("|", 2)
-        if isinstance(value, dict):
-            text = str(value.get("column_meaning", "")).strip()
-            fields = value.get("fields_meaning")
-            if fields:
-                text += " Fields: " + json.dumps(fields, ensure_ascii=False)
-        else:
-            text = str(value).strip()
-        lines.append(f"- {table}.{column}: {text}")
+        lines.append(f"- {table}.{column}: {_meaning_text(value)}")
     return "\n".join(lines)
 
 
@@ -96,6 +102,61 @@ def _read_jsonl(path: Path) -> list[dict]:
 @cache
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+#: LiveSQLBench's KB types as the compiler's neutral kinds (spec, Compiler).
+KIND_BY_TYPE: dict[str, str] = {
+    "calculation_knowledge": "calculation",
+    "domain_knowledge": "predicate",
+    "value_illustration": "illustration",
+}
+
+#: How the compiler is told the database's dialect switches.
+DIALECT_NOTE = "The database sorts NULLs and divides integers as PostgreSQL does."
+
+
+def compile_inputs(data: Path, db: str) -> CompileInputs:
+    """The compiler's inputs for one database: its KB, column meanings, DDL
+    and DuckDB file, and nothing else (no task, gold or test-case file)."""
+    folder = data / "hf-full-v1" / db
+    kb_path = folder / f"{db}_kb.jsonl"
+    meanings_path = folder / f"{db}_column_meaning_base.json"
+    schema_path = folder / f"{db}_schema.txt"
+    db_path = data / "duckdb" / f"{db}.duckdb"
+    entries = []
+    for raw in _read_jsonl(kb_path):
+        children = raw.get("children_knowledge")
+        entries.append(
+            KBEntry(
+                id=int(raw["id"]),
+                kind=KIND_BY_TYPE[raw["type"]],
+                name=str(raw["knowledge"]),
+                text=f"{raw['description']}\n\n{raw['definition']}",
+                # -1 in the file means no children.
+                children=tuple(int(c) for c in children)
+                if isinstance(children, list)
+                else (),
+            )
+        )
+    meanings = json.loads(meanings_path.read_text(encoding="utf-8"))
+    return CompileInputs(
+        benchmark="livesqlbench",
+        db_name=db,
+        entries=tuple(entries),
+        ddl=schema_path.read_text(encoding="utf-8").strip(),
+        column_meanings=render_column_meanings(meanings),
+        dialect_note=DIALECT_NOTE,
+        db_path=db_path,
+        init_sql=PG_COMPAT,
+        sources=(kb_path, meanings_path, schema_path, db_path),
+        out_subdir=f"livesqlbench/{db}",
+        column_descriptions={
+            (key.split("|", 2)[1].lower(), key.split("|", 2)[2].lower()): (
+                _meaning_text(value)
+            )
+            for key, value in meanings.items()
+        },
+    )
 
 
 class LiveSQLBench:

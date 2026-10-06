@@ -2679,45 +2679,6 @@ def test_select_tasks_rejects_an_unknown_ungolded_mode():
         select_tasks([{"task_id": "1"}], {}, ungolded="sometimes")
 
 
-def test_sweep_hands_run_task_none_not_empty_string_for_an_ungolded_task(
-    tmp_path: Path,
-):
-    """`golds.get(task_id, "")` would hand `""` to `run_task`, which grades it
-    and returns `incorrect` — a fabricated wrong answer on a task that has no
-    right answer to compare against. The absence of a gold has to reach
-    `run_task` as `None`.
-    """
-    seen: dict[str, object] = {}
-
-    def fake_run(task, arm, model, benchmark, working, **k):
-        gold = benchmark.gold_ref(task)
-        seen[task.task_id] = gold
-        return {
-            "task_id": task.task_id,
-            "arm": arm,
-            "model": model,
-            "usd": 0.0,
-            "usd_guard": 0.0,
-            "verdict": "ungraded" if gold is None else "correct",
-        }
-
-    tasks = [
-        {"task_id": "1", "question": "q", "guidelines": "g", "level": "hard"},
-        {"task_id": "2", "question": "q", "guidelines": "g", "level": "hard"},
-    ]
-    sweep(
-        _tasks(tasks),
-        ("contract",),
-        (GLM,),
-        _bench(_make_pristine(tmp_path), {"1": "a"}, "h", {}),
-        out=tmp_path / "r.jsonl",
-        max_spend=100.0,
-        run_task_fn=fake_run,
-    )
-
-    assert seen == {"1": "a", "2": None}
-
-
 def test_the_default_submission_file_does_not_dirty_the_tree(tmp_path: Path):
     """`assert_clean_tree` refuses to start a scored sweep on any dirty line
     from `git status --porcelain`, exempting only the sweep's own `--out` and

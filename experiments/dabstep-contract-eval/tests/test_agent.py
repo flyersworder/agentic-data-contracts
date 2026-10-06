@@ -704,6 +704,30 @@ def test_run_task_stamps_the_golds_hash_it_was_given(tmp_path: Path):
     assert row["golds_hash"] == "a1b2c3"
 
 
+@pytest.mark.parametrize(
+    "arm", ["contract", "contract_hollow", "contract_uninterpreted", "schema_only"]
+)
+def test_run_task_stamps_the_digest_of_the_contract_its_arm_loads(
+    tmp_path: Path, arm: str
+):
+    """The stamp is the provenance claim for arm D: a `contract_hollow` row
+    must carry the hollow contract's digest, not the real one."""
+
+    class Fake:
+        def run_sync(self, *a, usage=None, **k):
+            return _fake_result("0.12", usage)
+
+    row = run_task(
+        TASK_OBJ,
+        arm,
+        "z-ai/glm-5.3-flash",
+        _bench(),
+        tmp_path / "x.duckdb",
+        agent_factory=lambda **_: Fake(),
+    )
+    assert row["contract_digest"] == dabstep_module.arm_digest(arm)
+
+
 # ── _tool_call_names / _inspect_rejections / _retry_prompt_count ───────────
 #
 # Unit-level, against plain duck-typed message/part objects — no Agent, no

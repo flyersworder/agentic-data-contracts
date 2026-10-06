@@ -87,6 +87,9 @@ def test_each_governed_arm_is_stamped_with_the_contract_it_loads():
     assert arm_digest("contract_uninterpreted") == uninterpreted_digest()
     assert arm_digest("manual_resolved") == digest()
     assert arm_digest("schema_only") == digest()
+    # Three artifacts, three stamps: if two collapsed, a row could not say
+    # which contract its arm read.
+    assert len({digest(), hollow_digest(), uninterpreted_digest()}) == 3
 
 
 def test_build_arm_matches_the_module_function(tmp_path: Path):

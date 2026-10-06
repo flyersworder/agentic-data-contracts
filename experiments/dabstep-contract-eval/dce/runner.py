@@ -1914,6 +1914,10 @@ def main() -> None:
         tasks_path=args.tasks,
         ungolded=args.ungolded,
     )
+    # Resolve the scorer now: it is imported lazily, and a missing one found
+    # mid-sweep turns every task into a `construction_error` row until the
+    # circuit breaker trips, instead of one clear error before any spend.
+    benchmark.scorer()
     tasks = benchmark.tasks()
     if args.n:
         tasks = _stratified_sample(tasks, args.n)

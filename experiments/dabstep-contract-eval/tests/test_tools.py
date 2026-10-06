@@ -46,8 +46,23 @@ def test_ungoverned_execute_sql_runs_init_sql(db):
     assert out.splitlines() == ["h", "3"]
 
 
-def test_a_failing_init_sql_closes_the_connection_and_raises(db):
+def test_a_failing_init_sql_closes_the_connection_and_raises(db, monkeypatch):
+    # Capture the connection the half-built adapter opened: reconnecting to
+    # the file proves nothing, since DuckDB lets a second in-process
+    # connection open while the first is still live.
+    import agentic_data_contracts.adapters.duckdb as adapter_module
+
+    opened = []
+    real_connect = duckdb.connect
+
+    def recording_connect(*args, **kwargs):
+        con = real_connect(*args, **kwargs)
+        opened.append(con)
+        return con
+
+    monkeypatch.setattr(adapter_module.duckdb, "connect", recording_connect)
     with pytest.raises(duckdb.Error):
         _BoundedDuckDBAdapter(db, init_sql=("SET no_such_setting = 1",))
-    # The file is not left locked by a half-built adapter.
-    duckdb.connect(str(db)).close()
+    assert len(opened) == 1
+    with pytest.raises(duckdb.ConnectionException):
+        opened[0].execute("SELECT 1")

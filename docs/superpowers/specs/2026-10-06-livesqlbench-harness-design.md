@@ -58,36 +58,58 @@ class Task:
     task_id: str
     prompt: str  # the full user message
     group: str  # stratum for smoke sampling and per-group stats
-    meta: dict  # benchmark-specific, read only by the benchmark
+    meta: Mapping[str, Any]  # benchmark-specific, read only by the benchmark
 
 
 @dataclass(frozen=True)
-class Verdict:
+class Grade:
     verdict: str  # "correct" | "incorrect" | "ungraded"
-    gold_ref: str | None  # what the row stores in its `gold` field
-    answer_normalized: str
-    failure: str | None  # grading-side failure category, if any
+    failure: str | None = None  # grading-side failure category, if any
 
 
 class Benchmark(Protocol):
+    # Class attributes: read by the runner and by the analysis, which
+    # needs no data files to read them.
     name: str
     arms: tuple[str, ...]  # run when --arms is not given
     extra_arms: tuple[str, ...]  # run only when named
-    roles: dict[str, str]  # analysis role -> arm name (see below)
+    governed_arms: frozenset[str]  # arms that carry a contract and session
+    roles: Mapping[str, str]  # analysis role -> arm name (see below)
+    primary: tuple[str, str, str] | None  # pre-registered (model, left, right)
+    group_label: str  # how the per-group lines name the stratum
+    excluded_tasks: frozenset[str]  # dropped before anything is counted
 
     def tasks(self) -> list[Task]: ...
     def pristine_db(self, task: Task) -> Path: ...
     def build_arm(self, arm: str, task: Task, db: Path) -> ArmSetup: ...
     def arm_digest(self, arm: str, task: Task) -> str: ...
-    def grade(self, task: Task, answer: str, db: Path) -> Verdict: ...
+    def gold_ref(self, task: Task) -> str | None: ...  # the row's `gold`
+    def grade(self, task: Task, answer: str) -> Grade: ...
+    def normalize(self, answer: str) -> str: ...  # the row's `answer_normalized`
     def golds_hash(self) -> str: ...
     def row_fields(self, task: Task) -> dict: ...
+
+    # Row-level hooks the analysis calls, so it never imports a scorer.
+    @staticmethod
+    def scorer() -> str: ...  # the grading rules in force, stamped per row
+    @staticmethod
+    def rescore(row: dict) -> str | None: ...  # verdict from the stored row, or None
+    @staticmethod
+    def e2e_correct(row: dict) -> bool: ...  # an incorrect row the e2e view upgrades
 ```
+
+`gold_ref`, `normalize` and the provenance fields are separate from
+`grade` because rows that are never graded (a cap trip, a construction
+error, a failed bookkeeping tail) carry them too. A grader that raises gives
+a `scoring_error` row, as now; it is never recorded as `incorrect`. A
+registry, `benchmark_class(name)`, returns the class, and the analysis
+resolves each row's class from its `benchmark` field.
 
 ### What moves where
 
-- `dce/benchmark.py`: `Task`, `Verdict`, `Benchmark`, and a registry
-  (`get_benchmark(name)`).
+- `dce/benchmark.py`: `Task`, `Grade`, `Benchmark`, the registry
+  (`benchmark_class(name)`) and the row readers `benchmark_of(row)` and
+  `group_of(row)`.
 - `dce/tools.py` (shared arm building): `ArmSetup`, `_ungoverned_tools`,
   `_governed_tools`, `_BoundedDuckDBAdapter`, `_append_truncation_marker`,
   `MAX_ROWS`, `make_working_copy`, `check_and_restore`. The adapter gains an
@@ -102,13 +124,14 @@ class Benchmark(Protocol):
   working.
 - `dce/agent.py`: `run_task(task, arm, model, benchmark, db, ...)`. It calls
   `benchmark.build_arm`, sends `task.prompt`, grades through
-  `benchmark.grade`, and builds the row from the `Verdict` plus
-  `benchmark.row_fields(task)` plus `benchmark=benchmark.name`. The model
+  `benchmark.grade`, and builds the row from the `Grade`, `gold_ref`,
+  `normalize`, `arm_digest`, `golds_hash`, `scorer` and
+  `row_fields(task)`, plus `benchmark` and `group`. The model
   factories, retry and forced-final-answer logic are untouched.
 - `dce/runner.py`: `--benchmark {dabstep,livesqlbench}`, default `dabstep`.
   Each worker holds one working copy, created lazily; `check_and_restore`
   runs after every task as now. `_stratified_sample` uses `Task.group`.
-  The queue is ordered by `Task.group`, so a worker keeps
+  The queue is ordered, stably, by pristine database, so a worker keeps
   one working copy and re-copies only when the database changes; disk use
   stays fixed however many databases a benchmark has. DABStep has one
   database, so its scheduling is unchanged.
@@ -135,7 +158,9 @@ benchmark maps roles to its arms, and the analysis works on roles:
 | `manual_plus` | `manual_resolved` | `manual_compiled` |
 | `contract` | `contract` | `contract` |
 
-Both take `--benchmark` (default `dabstep`), print per-`group` strata, and
+`dce.stats` reads the benchmark from the rows (a file mixing two is
+refused); `knowledge_delivery.py` takes `--benchmark` (default `dabstep`),
+since it reads several files. Both print per-`group` strata and
 compute the share decomposition, (manual_plus - manual) / (contract -
 manual), from the roles. A role a benchmark lacks is skipped. Comparisons
 DABStep reports beyond these roles (the hollow and uninterpreted arms, the
@@ -367,15 +392,15 @@ The run commit's pre-registration states these limits in the same words.
   free retries for construction failures.
 - A run that leaves its working database modified: the existing
   restore-and-flag (`db_corrupted`).
-- Grading failures: the categories above; a grader exception is an
-  `ungraded` row with the exception recorded, never a silent `incorrect`.
+- Grading failures: the categories above; a grader exception is a
+  `scoring_error` row, as on DABStep, never a silent `incorrect`.
 
 ## Testing
 
 - PR A: the equivalence checks above, plus unit tests for the registry,
   the role mapping (including a missing role), the `group`/`level` fallback,
   per-worker working copies re-copied on a database change, the queue's
-  ordering by group, and the adapter's `init_sql` hook.
+  ordering by pristine database, and the adapter's `init_sql` hook.
 - PR B, test-first, on `tests/fixtures/lsb/`: a two-table DuckDB fixture, a
   six-entry KB with one parent-child pair, and hand-written gold results.
   Covered: task loading and prompt text, each arm's prompt and tools, SQL

@@ -41,7 +41,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from counterfactuals import family_of  # noqa: E402
-from dce.benchmark import benchmark_class  # noqa: E402
+from dce.benchmark import benchmark_class, role_arms  # noqa: E402
 from dce.stats import _as_e2e, _graded, load  # noqa: E402
 
 REPEATS = (1, 2, 3)
@@ -74,8 +74,10 @@ def dabstep_group(row: dict) -> str:
 def arms_of(name: str) -> tuple[str, str, str]:
     """(manual, manual_plus, contract), the three roles the decomposition
     reads, as this benchmark names its arms."""
-    roles = benchmark_class(name).roles
-    return roles["manual"], roles["manual_plus"], roles["contract"]
+    manual, plus, contract = role_arms(
+        benchmark_class(name), "manual", "manual_plus", "contract"
+    )
+    return manual, plus, contract
 
 
 def rows(name: str, model: str, repeat: int, arms: tuple[str, ...]) -> list[dict]:

@@ -46,3 +46,23 @@ def test_group_falls_back_to_level_when_absent_or_null():
     # read as the level, not as a `None` stratum.
     assert group_of({"group": None, "level": "easy"}) == "easy"
     assert group_of({}) == "unknown"
+
+
+def test_role_arms_names_the_arms_a_benchmark_gives_its_roles():
+    from dce.benchmark import role_arms
+    from dce.benchmarks.dabstep import DABStep
+
+    assert role_arms(DABStep, "manual", "manual_plus", "contract") == (
+        "manual_prompt",
+        "manual_resolved",
+        "contract",
+    )
+
+
+def test_a_missing_role_is_refused_by_name():
+    from dce.benchmark import role_arms
+    from dce.benchmarks.dabstep import DABStep
+
+    # DABStep has no `baseline` role: `schema_only` is an arm, not a role.
+    with pytest.raises(SystemExit, match="baseline"):
+        role_arms(DABStep, "baseline", "contract")

@@ -2838,8 +2838,18 @@ def test_one_working_copy_per_worker_recopied_on_a_database_change(tmp_path: Pat
     assert _working_db_path(dbs["b"]).exists()
 
 
-def test_switching_databases_removes_the_old_copys_wal(tmp_path: Path):
+def test_switching_databases_removes_the_old_copys_wal(tmp_path: Path, monkeypatch):
     dbs = {"a": _make_pristine(tmp_path, "a.db"), "b": _make_pristine(tmp_path, "b.db")}
+    # The integrity check would itself delete a sidecar it finds after the
+    # task; stubbed to a clean verdict so that only the worker's switch can
+    # remove it, which is the code this test pins.
+    from dce.tools import IntegrityCheck
+
+    monkeypatch.setattr(
+        runner_module,
+        "check_and_restore",
+        lambda working, pristine: IntegrityCheck(False, "p", "w", False),
+    )
 
     def fake_run(task, arm, model, benchmark, db_path, **k):
         if task.task_id == "1":
@@ -2887,3 +2897,37 @@ def test_a_single_database_keeps_task_order(tmp_path: Path):
         run_task_fn=fake_run,
     )
     assert seen == ["0", "1", "2", "3"]
+
+
+def test_a_benchmark_that_cannot_stamp_provenance_records_a_construction_error(
+    tmp_path: Path,
+):
+    """`run_task` turns a provenance failure into `AgentConstructionError`;
+    the runner's construction row must then not call the same broken method
+    again and crash the sweep. The row lands, free, like any construction
+    error."""
+    from dce.agent import run_task
+
+    class Broken(DABStep):
+        def arm_digest(self, arm, task):
+            raise OSError("contract file unreadable")
+
+    bench = Broken(
+        db=_make_pristine(tmp_path), golds={"1": "g"}, golds_hash="h", docs={}
+    )
+    out = tmp_path / "r.jsonl"
+    sweep(
+        _tasks(TASKS),
+        ("schema_only",),
+        (GLM,),
+        bench,
+        out=out,
+        max_spend=5.0,
+        run_task_fn=run_task,
+    )
+    (row,) = latest_rows(out)
+    assert row["verdict"] == "construction_error"
+    assert row["usd"] == 0.0
+    assert row["contract_digest"] == "unavailable"
+    assert row["gold"] == "g" and row["group"] == "hard"
+    assert "unreadable" in row["error"]

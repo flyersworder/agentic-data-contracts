@@ -1026,3 +1026,31 @@ def test_the_dabstep_constants_still_name_the_same_arms():
         "contract_hollow",
     )
     assert COMPARISON_ARMS == ("schema_only", "manual_prompt", "contract_hollow")
+
+
+def test_a_benchmark_without_a_manual_plus_or_primary_still_reports(
+    tmp_path, monkeypatch
+):
+    """A role a benchmark lacks is skipped, and so is a primary comparison it
+    never pre-registered -- neither is an error."""
+    import dce.stats as stats_module
+    from dce.benchmarks.dabstep import DABStep
+
+    class Bare(DABStep):
+        roles = {"manual": "manual_prompt", "contract": "contract"}
+        primary = None
+
+    monkeypatch.setattr(stats_module, "benchmark_class", lambda name: Bare)
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            _row("t1", "manual_prompt", "incorrect"),
+            _row("t1", "manual_resolved", "correct"),
+            _row("t1", "contract", "correct"),
+        ],
+    )
+    text = report(path)
+    assert "(none pre-registered for dabstep)" in text
+    assert "vs manual_resolved" not in text
+    assert "manual_prompt vs contract" in text

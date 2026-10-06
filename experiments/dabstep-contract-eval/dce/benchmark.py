@@ -101,3 +101,16 @@ def group_of(row: Mapping) -> str:
     if group is None:
         group = row.get("level", "unknown")
     return group
+
+
+def role_arms(benchmark: type[Benchmark], *roles: str) -> tuple[str, ...]:
+    """The arms `benchmark` gives `roles`, in that order. An analysis that
+    needs a role the benchmark does not define cannot run on it, so it stops
+    with the role's name rather than a bare `KeyError`."""
+    missing = [role for role in roles if role not in benchmark.roles]
+    if missing:
+        raise SystemExit(
+            f"{benchmark.name} defines no arm for role(s) {missing}; "
+            f"its roles are {dict(benchmark.roles)}"
+        )
+    return tuple(benchmark.roles[role] for role in roles)

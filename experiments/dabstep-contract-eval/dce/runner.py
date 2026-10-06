@@ -951,6 +951,15 @@ def _safe_json_dumps(row: dict) -> str:
         return json.dumps({"unserializable_row": "<could not stringify row>"})
 
 
+def _or_default(fn, default):
+    """`fn()`, or `default` when it raises. For the construction row only:
+    see the note in `_construction_error_row`."""
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
 def _construction_error_row(
     task: Task,
     arm: str,
@@ -979,13 +988,27 @@ def _construction_error_row(
     spend, which is exactly the "spent is no longer an accounting figure"
     bug this split fixes.
     """
+    # Every benchmark call is guarded. `run_task` raises
+    # `AgentConstructionError` precisely when one of these same methods
+    # failed, so calling them bare here would re-raise that failure and
+    # crash the sweep instead of landing the free row it is owed. A value
+    # that cannot be computed is stamped "unavailable" (or `None` for the
+    # gold), which reads as unknown rather than as a real digest or gold.
+    try:
+        task_fields = task_row_fields(task, benchmark)
+    except Exception:
+        task_fields = {
+            "task_id": task.task_id,
+            "benchmark": benchmark.name,
+            "group": task.group,
+        }
     return {
-        **task_row_fields(task, benchmark),
+        **task_fields,
         "arm": arm,
         "model": model,
         "answer": "",
         "answer_normalized": "",
-        "gold": benchmark.gold_ref(task),
+        "gold": _or_default(lambda: benchmark.gold_ref(task), None),
         "verdict": "construction_error",
         # Always False: no model call ever happened on this path, so there was
         # nothing for the forcing turn to force. Present so every row in a
@@ -1013,12 +1036,14 @@ def _construction_error_row(
         "retry_prompts": 0,
         "request_limit": 0,
         "token_cap": 0,
-        "contract_digest": benchmark.arm_digest(arm, task),
-        "golds_hash": benchmark.golds_hash(),
+        "contract_digest": _or_default(
+            lambda: benchmark.arm_digest(arm, task), "unavailable"
+        ),
+        "golds_hash": _or_default(benchmark.golds_hash, "unavailable"),
         # The scorer in force for this process — see
         # `dce.agent.build_result_row`. Nothing was scored here (no call
         # was ever made), but the column stays uniform across row shapes.
-        "scorer": benchmark.scorer(),
+        "scorer": _or_default(benchmark.scorer, "unavailable"),
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
         "error": f"{type(exc).__name__}: {exc}",

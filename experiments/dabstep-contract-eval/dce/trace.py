@@ -43,7 +43,7 @@ import json
 import re
 from pathlib import Path
 
-#: Cap on one serialised transcript before gzip. `dce.arms.MAX_ROWS` (50)
+#: Cap on one serialised transcript before gzip. `dce.tools.MAX_ROWS` (50)
 #: already bounds the biggest single tool return, so this is a backstop
 #: against a pathological run rather than a routine truncation — it fires,
 #: if ever, on the runs least worth reading in full anyway. A truncated trace

@@ -192,7 +192,7 @@ def _golds_path(data: Path, threshold: float) -> Path:
     module is EXPECTED to be re-run at non-primary thresholds — and
     `data/` is gitignored, so an in-place overwrite would leave no trace
     anywhere for a later sweep to notice. Sensitivity runs therefore write
-    beside the primary file rather than over it. `dce.runner._load_golds`
+    beside the primary file rather than over it. `dce.benchmarks.dabstep._load_golds`
     refuses a non-primary threshold as a second line of defence; this is
     the first.
     """

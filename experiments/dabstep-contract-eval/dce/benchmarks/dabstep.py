@@ -439,6 +439,10 @@ class DABStep:
 
         return _clean(answer)
 
+    def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
+        # Every DABStep arm's artifact is committed; see Task 11.
+        return None
+
     def golds_hash(self) -> str:
         return self._golds_hash
 

@@ -315,6 +315,10 @@ class LiveSQLBench:
         # The SQL the grader ran, so a verdict can be re-checked from the row.
         return extract_sql(answer) or ""
 
+    def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
+        # Neither arm reads a compiled artifact yet.
+        return None
+
     def golds_hash(self) -> str:
         digests = {
             task["instance_id"]: gold_digest(self._gold[task["instance_id"]]["rows"])

@@ -2,8 +2,8 @@
 
 `manual_resolved` is `manual_prompt` plus the one fact the contract took from
 the data (the list-typed `fees` fields store "all" as an empty list). This
-script reproduces the numbers in FINDINGS.md, *Knowledge or delivery?* and
-*... on a weaker model*, for both models:
+script reproduces the numbers in FINDINGS.md, *Knowledge or delivery?* and the
+two replications after it, for all three models:
 
 1. accuracy per repeat and the share of the manual -> contract gap the note
    recovers (end-to-end strict, the headline score);
@@ -14,7 +14,8 @@ script reproduces the numbers in FINDINGS.md, *Knowledge or delivery?* and
    The detector is a regular expression, so its rates are approximate.
 
 gpt-6-sol's arms come from two files per repeat (the panel and the one-arm
-`gpt6-resolved` run); Qwen 3.8 ran all three arms in one file per repeat.
+`gpt6-resolved` run); Qwen 3.8 and gpt-6-luna ran all three arms in one file
+per repeat.
 
 Run:  uv run python analysis/knowledge_delivery.py
 """
@@ -42,6 +43,7 @@ REPEATS = (1, 2, 3)
 MODELS = {
     "gpt-6-sol": lambda i: [f"gpt6-panel-r{i}", f"gpt6-resolved-r{i}"],
     "qwen3.8-27b": lambda i: [f"qwen38-resolved-r{i}"],
+    "gpt-6-luna": lambda i: [f"luna-resolved-r{i}"],
 }
 RULE_SET = {"avg_fee_account", "avg_fee_account_mcc", "fee_ids_by_at_aci"}
 TOTAL_FEE = {"total_fees_day", "total_fees_month", "total_fees_year"}

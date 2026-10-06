@@ -50,6 +50,14 @@ response-cache bypass. Each file is the main sweep followed by one
 the last. r2's retry pass hung on one run and was stopped, so that run stays
 an error. See FINDINGS.md, *Knowledge or delivery, on a weaker model*.
 
+## `luna-resolved-r{1,2,3}.jsonl` -- three arms, the gpt-6-luna replication
+
+`manual_prompt`, `manual_resolved` and `contract` on `gpt-6-luna`, 401 golded
+tasks, at `54636a3`. Laid out like the Qwen 3.8 files: each repeat holds all
+three arms and pairs within itself. Each sweep ran with `--retry-pass`, but no
+run errored, so every file has exactly one row per (task, arm). See
+FINDINGS.md, *Knowledge or delivery, on a smaller model of the same family*.
+
 ## `smoke12-pre-fixes.jsonl` — VOID, kept as evidence
 
 Three rows (task 1712, all arms, `z-ai/glm-5.3-flash`) from the first smoke

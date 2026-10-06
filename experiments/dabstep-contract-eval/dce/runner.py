@@ -320,15 +320,15 @@ from dce.agent import (
     _commit_sha,
     _spec_field,
     _token_budget_usd,
-    arm_digest,
     reasoning_effort_for,
     run_task,
+    task_row_fields,
 )
-from dce.arms import ALL_ARMS, ARMS, check_and_restore, make_working_copy
-from dce.benchmarks.dabstep import UNGOLDED_MODES, _load_golds, select_tasks
-from dce.grade import active_scorer
+from dce.benchmark import BENCHMARK_NAMES, Benchmark, Task, benchmark_class
+from dce.benchmarks.dabstep import UNGOLDED_MODES, DABStep
 from dce.lockfile import lock_path_for, sweep_lock
 from dce.pricing import MODELS
+from dce.tools import _wal_path, check_and_restore, make_working_copy
 
 #: A reservation must never be read as "this call is free." Observed `usd`
 #: can legitimately be 0.0 (a `hit_limit`/`error` row that made no billable
@@ -719,11 +719,11 @@ def pending(tasks, arms, models, done) -> list[tuple[str, str, str]]:
     a paired per-task comparison possible without dropping a lopsided group.
     """
     return [
-        (task["task_id"], arm, model)
+        (task.task_id, arm, model)
         for task in tasks
         for arm in arms
         for model in models
-        if (task["task_id"], arm, model) not in done
+        if (task.task_id, arm, model) not in done
     ]
 
 
@@ -928,6 +928,12 @@ def _safe_json_dumps(row: dict) -> str:
         envelope["level"] = str(row.get("level", "unknown"))
     except Exception:
         envelope["level"] = "unknown"
+    for key in ("benchmark", "group"):
+        try:
+            value = row.get(key)
+            envelope[key] = None if value is None else str(value)
+        except Exception:
+            envelope[key] = None
     corrupted = row.get("db_corrupted")
     envelope["db_corrupted"] = corrupted if isinstance(corrupted, bool) else None
     model = row.get("model")
@@ -946,18 +952,17 @@ def _safe_json_dumps(row: dict) -> str:
 
 
 def _construction_error_row(
-    task: dict,
+    task: Task,
     arm: str,
     model: str,
-    gold: str | None,
-    golds_hash: str,
+    benchmark: Benchmark,
     exc: AgentConstructionError,
 ) -> dict:
     """A row with the same shape `dce.agent.build_result_row` produces, for
     a task that never got far enough to build one — `run_task` raised
     `dce.agent.AgentConstructionError` (e.g. a missing `OPENROUTER_API_KEY`)
     before any model call was made. Everything `sweep` actually knows is
-    filled in (`level` matters: `accuracy_by(rows, "level")` needs it on
+    filled in (`level` and `group` matter: `accuracy_by(rows, "level")` needs it on
     every row, not just the ones that ran); only the token/turn fields,
     which have no meaningful value for a call that never happened, are
     zeroed.
@@ -975,13 +980,12 @@ def _construction_error_row(
     bug this split fixes.
     """
     return {
-        "task_id": task["task_id"],
-        "level": task.get("level", "unknown"),
+        **task_row_fields(task, benchmark),
         "arm": arm,
         "model": model,
         "answer": "",
         "answer_normalized": "",
-        "gold": gold,
+        "gold": benchmark.gold_ref(task),
         "verdict": "construction_error",
         # Always False: no model call ever happened on this path, so there was
         # nothing for the forcing turn to force. Present so every row in a
@@ -1009,12 +1013,12 @@ def _construction_error_row(
         "retry_prompts": 0,
         "request_limit": 0,
         "token_cap": 0,
-        "contract_digest": arm_digest(arm),
-        "golds_hash": golds_hash,
+        "contract_digest": benchmark.arm_digest(arm, task),
+        "golds_hash": benchmark.golds_hash(),
         # The scorer in force for this process — see
         # `dce.agent.build_result_row`. Nothing was scored here (no call
         # was ever made), but the column stays uniform across row shapes.
-        "scorer": active_scorer(),
+        "scorer": benchmark.scorer(),
         "commit_sha": _commit_sha(),
         "adc_version": version("agentic-data-contracts"),
         "error": f"{type(exc).__name__}: {exc}",
@@ -1273,12 +1277,10 @@ def _run_group(
     ledger: _SweepLedger,
     *,
     by_id: dict,
-    golds: dict,
-    docs,
-    golds_hash: str,
+    benchmark: Benchmark,
     run_task_fn,
     trace_dir: Path | None,
-    db_path: Path,
+    pristine: Path,
 ) -> None:
     """Run every (arm, model) unit of ONE task against ONE worker's working
     copy. Lifted verbatim out of `sweep`'s inner loop; the only changes are
@@ -1286,21 +1288,13 @@ def _run_group(
     flag instead of `break`ing a loop the caller no longer owns.
     """
     for task_id, arm, model in group:
-        # `.get` WITHOUT a default: a task carrying no reconstructed gold
-        # must reach `run_task` as `None`, which it records `ungraded`.
-        # A `""` default would be scored instead, manufacturing an
-        # `incorrect` verdict on a task that has no right answer to
-        # compare against — and that verdict counts. See `select_tasks`.
-        gold = golds.get(task_id)
         try:
             row = run_task_fn(
                 by_id[task_id],
                 arm,
                 model,
+                benchmark,
                 working,
-                docs,
-                gold,
-                golds_hash=golds_hash,
                 trace_dir=trace_dir,
             )
         except AgentConstructionError as exc:
@@ -1309,9 +1303,7 @@ def _run_group(
             # anything else is a real bug and stops the sweep loudly rather
             # than silently treating a possibly-billable failure as a free
             # construction error.
-            row = _construction_error_row(
-                by_id[task_id], arm, model, gold, golds_hash, exc
-            )
+            row = _construction_error_row(by_id[task_id], arm, model, benchmark, exc)
 
         # INVARIANT (see module docstring): `row` now exists and is priced.
         # Every failure between here and `ledger.record` is COLLECTED onto
@@ -1342,7 +1334,7 @@ def _run_group(
             )
         else:
             try:
-                integrity = check_and_restore(working, db_path)
+                integrity = check_and_restore(working, pristine)
                 row["db_corrupted"] = integrity.corrupted
             except Exception as exc:
                 row["db_corrupted"] = None
@@ -1397,7 +1389,8 @@ def _worker(
     work_q,
     ledger: _SweepLedger,
     *,
-    db_path: Path,
+    benchmark: Benchmark,
+    by_id: dict,
     **group_kwargs,
 ) -> None:
     """One worker thread: pull task groups until the queue is empty or the
@@ -1415,8 +1408,18 @@ def _worker(
 
     Created lazily, on this worker's first group, so a `--workers 8` run over
     two remaining units does not copy the database eight times.
+
+    ONE COPY PER WORKER, WHATEVER THE NUMBER OF DATABASES. A benchmark with
+    many databases (LiveSQLBench has 22) would otherwise leave a copy of
+    each beside its pristine file for every worker. The queue arrives
+    ordered by database (`_sweep_locked`), so a worker re-copies only when
+    the database changes, and removes the copy it is leaving -- and its
+    `.wal` sidecar, which would otherwise replay onto whatever is copied to
+    that path next (see `make_working_copy`). A one-database benchmark never
+    switches, so DABStep's copy is made once and left on disk, as before.
     """
     working: Path | None = None
+    working_for: Path | None = None
     try:
         while not ledger.stop.is_set():
             try:
@@ -1427,11 +1430,24 @@ def _worker(
             if amount is None:
                 return
             try:
-                if working is None:
+                pristine = benchmark.pristine_db(by_id[task_id])
+                if working is None or working_for != pristine:
+                    if working is not None:
+                        _wal_path(working).unlink(missing_ok=True)
+                        working.unlink(missing_ok=True)
                     working = make_working_copy(
-                        db_path, _working_db_path(db_path, index)
+                        pristine, _working_db_path(pristine, index)
                     )
-                _run_group(group, working, ledger, db_path=db_path, **group_kwargs)
+                    working_for = pristine
+                _run_group(
+                    group,
+                    working,
+                    ledger,
+                    by_id=by_id,
+                    benchmark=benchmark,
+                    pristine=pristine,
+                    **group_kwargs,
+                )
             finally:
                 ledger.release(amount)
     except BaseException as exc:  # noqa: BLE001 - re-raised by `sweep`
@@ -1445,13 +1461,10 @@ def sweep(
     tasks,
     arms,
     models,
-    golds,
+    benchmark: Benchmark,
     *,
     out: Path,
-    db_path: Path,
-    docs,
     max_spend: float,
-    golds_hash: str,
     run_task_fn=run_task,
     retry_verdicts: tuple[str, ...] = (),
     trace_dir: Path | None = None,
@@ -1463,10 +1476,9 @@ def sweep(
     would push spend past `max_spend`, or `CIRCUIT_BREAKER_THRESHOLD`
     consecutive construction failures signal a systemic problem.
 
-    `db_path` is the pristine database; it is never opened directly here or
-    handed to `run_task_fn` — see the module docstring. `golds` is the plain
-    `task_id -> answer` mapping (callers reading the on-disk envelope must
-    unwrap it first; see `_load_golds`).
+    `benchmark.pristine_db(task)` is each task's pristine database; it is
+    never opened directly here or handed to `run_task_fn` — see the module
+    docstring. Golds, prompts and grading are the benchmark's.
 
     `workers` task groups run concurrently, each on its OWN working copy of
     the database. The unit of dispatch is the whole task group (every arm x
@@ -1498,16 +1510,13 @@ def sweep(
     with sweep_lock(out):
         common = dict(
             out=out,
-            db_path=db_path,
-            docs=docs,
             max_spend=max_spend,
-            golds_hash=golds_hash,
             run_task_fn=run_task_fn,
             trace_dir=trace_dir,
             workers=workers,
         )
         result = _sweep_locked(
-            tasks, arms, models, golds, retry_verdicts=retry_verdicts, **common
+            tasks, arms, models, benchmark, retry_verdicts=retry_verdicts, **common
         )
         if not retry_pass or _exit_code_for(result) != 0:
             return result
@@ -1515,7 +1524,7 @@ def sweep(
             tasks,
             arms,
             models,
-            golds,
+            benchmark,
             retry_verdicts=("error",),
             max_attempts=RETRY_PASS_ATTEMPTS,
             **common,
@@ -1526,13 +1535,10 @@ def _sweep_locked(
     tasks,
     arms,
     models,
-    golds,
+    benchmark: Benchmark,
     *,
     out: Path,
-    db_path: Path,
-    docs,
     max_spend: float,
-    golds_hash: str,
     run_task_fn,
     retry_verdicts: tuple[str, ...],
     trace_dir: Path | None,
@@ -1541,8 +1547,12 @@ def _sweep_locked(
 ) -> SweepResult:
     """`sweep`'s body, with the single-instance lock already held."""
     done = completed_keys(out, retry_verdicts=retry_verdicts, max_attempts=max_attempts)
+    # Stable, so a one-database benchmark keeps its task order exactly; a
+    # many-database one has each database's tasks contiguous, which is what
+    # lets a worker keep a single working copy (see `_worker`).
+    tasks = sorted(tasks, key=lambda task: str(benchmark.pristine_db(task)))
     todo = pending(tasks, arms, models, done)
-    by_id = {t["task_id"]: t for t in tasks}
+    by_id = {t.task_id: t for t in tasks}
     out.parent.mkdir(parents=True, exist_ok=True)
 
     spent = spent_so_far(out)
@@ -1575,19 +1585,12 @@ def _sweep_locked(
             max_spend=max_spend,
             out=out,
         )
-        group_kwargs = dict(
-            by_id=by_id,
-            golds=golds,
-            docs=docs,
-            golds_hash=golds_hash,
-            run_task_fn=run_task_fn,
-            trace_dir=trace_dir,
-        )
+        group_kwargs = dict(run_task_fn=run_task_fn, trace_dir=trace_dir)
         threads = [
             threading.Thread(
                 target=_worker,
                 args=(i, work_q, ledger),
-                kwargs={"db_path": db_path, **group_kwargs},
+                kwargs={"benchmark": benchmark, "by_id": by_id, **group_kwargs},
                 name=f"dce-sweep-{i}",
             )
             for i in range(workers)
@@ -1614,8 +1617,9 @@ def _sweep_locked(
     )
 
 
-def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
-    """`n` tasks split across `level`s in population proportion, so a smoke
+def _stratified_sample(tasks: list[Task], n: int) -> list[Task]:
+    """`n` tasks split across groups (DABStep's `level`) in population
+    proportion, so a smoke
     run always reads on every stratum instead of however the input happened
     to be ordered.
 
@@ -1626,12 +1630,12 @@ def _stratified_sample(tasks: list[dict], n: int) -> list[dict]:
     """
     if n <= 0 or n >= len(tasks):
         return tasks
-    by_level: dict[str, list[dict]] = {}
+    by_group: dict[str, list[Task]] = {}
     for task in tasks:
-        by_level.setdefault(task.get("level", "unknown"), []).append(task)
+        by_group.setdefault(task.group, []).append(task)
     total = len(tasks)
-    sampled: list[dict] = []
-    for group in by_level.values():
+    sampled: list[Task] = []
+    for group in by_group.values():
         share = len(group) / total
         k = round(n * share)
         sampled.extend(group[:k])
@@ -1756,13 +1760,27 @@ def _worst_case_task_group_usd(arms, models) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="dce.runner")
     parser.add_argument("--n", type=int, default=0, help="0 = all tasks")
-    parser.add_argument("--arms", nargs="+", default=list(ARMS))
+    parser.add_argument(
+        "--benchmark",
+        choices=BENCHMARK_NAMES,
+        default="dabstep",
+        help="which benchmark to run (default dabstep)",
+    )
+    parser.add_argument(
+        "--arms", nargs="+", default=None, help="default: the benchmark's arms"
+    )
     parser.add_argument("--models", nargs="+", default=["z-ai/glm-5.3-flash"])
     parser.add_argument("--max-spend", type=float, required=True)
     parser.add_argument("--out", type=Path, default=Path("results/results.jsonl"))
-    parser.add_argument("--db", type=Path, default=Path("data/dabstep.duckdb"))
-    parser.add_argument("--golds", type=Path, default=Path("data/golds.json"))
-    parser.add_argument("--tasks", type=Path, default=Path("data/tasks.json"))
+    parser.add_argument(
+        "--db", type=Path, default=Path("data/dabstep.duckdb"), help="(dabstep)"
+    )
+    parser.add_argument(
+        "--golds", type=Path, default=Path("data/golds.json"), help="(dabstep)"
+    )
+    parser.add_argument(
+        "--tasks", type=Path, default=Path("data/tasks.json"), help="(dabstep)"
+    )
     parser.add_argument(
         "--ungolded",
         choices=UNGOLDED_MODES,
@@ -1822,9 +1840,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    for arm in args.arms:
-        if arm not in ALL_ARMS:
-            raise SystemExit(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
+    # Arm names are class attributes, so they are checked here, before the
+    # tree check and before any data file is read -- the order this ran in
+    # when the arms were DABStep's module constants.
+    spec = benchmark_class(args.benchmark)
+    arms = tuple(args.arms) if args.arms else spec.arms
+    known = spec.arms + spec.extra_arms
+    for arm in arms:
+        if arm not in known:
+            raise SystemExit(f"unknown arm: {arm!r}; expected one of {known}")
     for model in args.models:
         if model not in MODELS:
             raise SystemExit(f"unpinned or unknown model: {model}")
@@ -1838,11 +1862,11 @@ def main() -> None:
     if args.workers < 1:
         raise SystemExit(f"--workers must be at least 1, got {args.workers}")
 
-    worst_group = _worst_case_task_group_usd(args.arms, args.models)
+    worst_group = _worst_case_task_group_usd(arms, args.models)
     admits = int(args.max_spend // worst_group) if worst_group > 0 else 0
     print(
         f"reserve ceiling ${worst_group:.2f}/task-group "
-        f"({len(args.arms)} arms x {args.models}); ${args.max_spend:.2f} cap "
+        f"({len(arms)} arms x {args.models}); ${args.max_spend:.2f} cap "
         f"admits up to {admits} worst-case task-group(s) before the first "
         "observation tightens it"
     )
@@ -1859,17 +1883,15 @@ def main() -> None:
             "until the first observations tighten the reserve"
         )
 
-    golds, golds_hash = _load_golds(args.golds)
-    tasks = select_tasks(
-        json.loads(args.tasks.read_text()), golds, ungolded=args.ungolded
+    benchmark = DABStep.from_files(
+        db=args.db,
+        golds_path=args.golds,
+        tasks_path=args.tasks,
+        ungolded=args.ungolded,
     )
+    tasks = benchmark.tasks()
     if args.n:
         tasks = _stratified_sample(tasks, args.n)
-
-    docs = {
-        "manual": Path("data/hf/data/context/manual.md").read_text(),
-        "payments_readme": Path("data/hf/data/context/payments-readme.md").read_text(),
-    }
 
     # Default the trace directory off the results filename, so two sweeps
     # writing different results files cannot interleave their transcripts.
@@ -1879,14 +1901,11 @@ def main() -> None:
 
     result = sweep(
         tasks,
-        tuple(args.arms),
+        arms,
         tuple(args.models),
-        golds,
+        benchmark,
         out=args.out,
-        db_path=args.db,
-        docs=docs,
         max_spend=args.max_spend,
-        golds_hash=golds_hash,
         retry_verdicts=(args.retry,) if args.retry else (),
         trace_dir=trace_dir,
         workers=args.workers,

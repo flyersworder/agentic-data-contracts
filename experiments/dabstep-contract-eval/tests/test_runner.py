@@ -13,6 +13,8 @@ from dce.agent import (
     _token_budget_usd,
     build_result_row,
 )
+from dce.benchmark import Task
+from dce.benchmarks.dabstep import DABStep, _load_golds
 from dce.data import DATASET_REVISION
 from dce.golds import PLURALITY_THRESHOLD, golds_sha256
 from dce.lockfile import SweepLockedError, lock_path_for, sweep_lock
@@ -23,7 +25,6 @@ from dce.runner import (
     SweepResult,
     _construction_error_row,
     _exit_code_for,
-    _load_golds,
     _next_reserve,
     _pessimistic_usd,
     _priced_or_pessimistic,
@@ -45,6 +46,21 @@ from dce.runner import (
 )
 
 TASKS = [{"task_id": "1", "question": "q", "guidelines": "g", "level": "hard"}]
+
+
+def _tasks(records) -> list[Task]:
+    """DABStep tasks from plain records; `question` defaults so that the
+    id-only records several tests use still build."""
+    return [DABStep.task({"question": "q", **r}) for r in records]
+
+
+def _bench(
+    db_path: Path, golds: dict | None = None, golds_hash: str = "h", docs=None
+) -> DABStep:
+    return DABStep(
+        db=db_path, golds=golds or {}, golds_hash=golds_hash, docs=docs or {}
+    )
+
 
 # A real pinned model id is required everywhere a test goes through `sweep`:
 # `_next_reserve`'s floor comes from `dce.agent._token_budget_usd(model)`,
@@ -276,13 +292,13 @@ def test_spent_so_far_tolerates_missing_or_null_usd(tmp_path: Path):
 
 def test_pending_skips_completed_work():
     done = {("1", "schema_only", "m")}
-    todo = pending(TASKS, ("schema_only", "contract"), ("m",), done)
+    todo = pending(_tasks(TASKS), ("schema_only", "contract"), ("m",), done)
     assert todo == [("1", "contract", "m")]
 
 
 def test_pending_groups_consecutive_triples_by_task_id():
     tasks = [{"task_id": str(i)} for i in range(5)]
-    todo = pending(tasks, ("schema_only", "contract"), ("m1", "m2"), set())
+    todo = pending(_tasks(tasks), ("schema_only", "contract"), ("m1", "m2"), set())
     task_id_sequence = [t[0] for t in todo]
     # Every task_id's triples must be contiguous: task-major order, not
     # arm-major — collapsing consecutive repeats must reproduce every
@@ -384,9 +400,9 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
     calls = []
 
     def fake_run(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.40,
@@ -402,15 +418,12 @@ def test_sweep_stops_before_exceeding_max_spend(tmp_path: Path):
     db_path = _make_pristine(tmp_path)
     max_spend = _budget_for_exactly_two_calls(GLM)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        golds,
+        _bench(db_path, golds, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=db_path,
-        docs={},
         max_spend=max_spend,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     # Derived from the floor rather than hardcoded, so a change to
@@ -430,7 +443,7 @@ def test_sweep_appends_rows_that_can_be_resumed(tmp_path: Path):
 
     def fake_run(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -440,15 +453,12 @@ def test_sweep_appends_rows_that_can_be_resumed(tmp_path: Path):
 
     db_path = _make_pristine(tmp_path)
     sweep(
-        TASKS,
+        _tasks(TASKS),
         ("contract",),
         (GLM,),
-        {"1": "g"},
+        _bench(db_path, {"1": "g"}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     assert completed_keys(out) == {("1", "contract", GLM)}
@@ -463,9 +473,9 @@ def test_sweep_seeds_spent_from_existing_rows_across_resumes(tmp_path: Path):
     calls = []
 
     def fake_run(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.40,
@@ -484,15 +494,12 @@ def test_sweep_seeds_spent_from_existing_rows_across_resumes(tmp_path: Path):
 
     for _ in range(4):  # four separate "process" invocations
         sweep(
-            tasks,
+            _tasks(tasks),
             ("schema_only",),
             (GLM,),
-            golds,
+            _bench(db_path, golds, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=max_spend,
-            golds_hash="h",
             run_task_fn=fake_run,
         )
 
@@ -516,7 +523,7 @@ def test_sweep_reserves_the_whole_task_group_before_starting_it(tmp_path: Path):
     def fake_run(task, arm, model, *a, **k):
         calls.append(arm)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -527,15 +534,12 @@ def test_sweep_reserves_the_whole_task_group_before_starting_it(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        TASKS,
+        _tasks(TASKS),
         ("schema_only", "contract"),
         (GLM,),
-        {"1": "g"},
+        _bench(db_path, {"1": "g"}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=0.30,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     assert calls == []
@@ -552,10 +556,10 @@ def test_sweep_never_opens_the_pristine_db(tmp_path: Path):
     pristine file."""
     seen_db_paths = []
 
-    def fake_run(task, arm, model, db_path, docs, gold, **k):
+    def fake_run(task, arm, model, benchmark, db_path, **k):
         seen_db_paths.append(db_path)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -566,15 +570,12 @@ def test_sweep_never_opens_the_pristine_db(tmp_path: Path):
     pristine = _make_pristine(tmp_path)
     pristine_bytes_before = pristine.read_bytes()
     sweep(
-        TASKS,
+        _tasks(TASKS),
         ("contract",),
         (GLM,),
-        {"1": "g"},
+        _bench(pristine, {"1": "g"}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=pristine,
-        docs={},
         max_spend=1.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
 
@@ -590,10 +591,10 @@ def test_sweep_records_corruption_and_continues(tmp_path: Path):
     """An ungoverned arm mutating the warehouse is a governance finding to
     record, not a crash that loses the evidence."""
 
-    def fake_run_that_corrupts(task, arm, model, db_path, docs, gold, **k):
+    def fake_run_that_corrupts(task, arm, model, benchmark, db_path, **k):
         db_path.write_bytes(b"corrupted-by-the-arm")
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -608,15 +609,12 @@ def test_sweep_records_corruption_and_continues(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(3)},
+        _bench(db_path, {str(i): "g" for i in range(3)}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=10.0,
-        golds_hash="h",
         run_task_fn=fake_run_that_corrupts,
     )
     rows = [json.loads(line) for line in out.read_text().splitlines()]
@@ -632,11 +630,11 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     calls = []
 
     def flaky_run(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
-        if task["task_id"] == "0":
+        calls.append(task.task_id)
+        if task.task_id == "0":
             raise AgentConstructionError("missing OPENROUTER_API_KEY")
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -651,15 +649,12 @@ def test_sweep_guards_construction_failures_and_continues(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(2)},
+        _bench(db_path, {str(i): "g" for i in range(2)}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=10.0,
-        golds_hash="h",
         run_task_fn=flaky_run,
     )
     rows = [json.loads(line) for line in out.read_text().splitlines()]
@@ -691,7 +686,7 @@ def test_sweep_gives_up_after_max_construction_attempts_across_resumes(
     calls = []
 
     def always_fails(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         raise AgentConstructionError("missing OPENROUTER_API_KEY")
 
     out = tmp_path / "r.jsonl"
@@ -699,15 +694,12 @@ def test_sweep_gives_up_after_max_construction_attempts_across_resumes(
 
     for _ in range(MAX_CONSTRUCTION_ATTEMPTS + 2):  # more resumes than the cap allows
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=always_fails,
         )
 
@@ -731,15 +723,12 @@ def test_sweep_lets_a_real_bug_in_run_task_fn_propagate(tmp_path: Path):
     db_path = _make_pristine(tmp_path)
     with pytest.raises(TypeError):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=1.0,
-            golds_hash="h",
             run_task_fn=buggy_run,
         )
     assert out.read_text() == ""  # nothing written; the bug surfaced, not swallowed
@@ -755,7 +744,7 @@ def test_sweep_normalizes_and_writes_the_row_when_usd_is_missing(tmp_path: Path)
 
     def unpriced_run(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "verdict": "correct",
@@ -765,15 +754,12 @@ def test_sweep_normalizes_and_writes_the_row_when_usd_is_missing(tmp_path: Path)
     db_path = _make_pristine(tmp_path)
     with pytest.raises(ValueError):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=1.0,
-            golds_hash="h",
             run_task_fn=unpriced_run,
         )
     rows = [json.loads(line) for line in out.read_text().splitlines()]
@@ -795,15 +781,12 @@ def test_sweep_with_no_pending_work_skips_the_working_copy(tmp_path: Path):
         raise AssertionError("run_task_fn must not be called when nothing is pending")
 
     result = sweep(
-        TASKS,
+        _tasks(TASKS),
         ("contract",),
         (GLM,),
-        {"1": "g"},
+        _bench(db_path, {"1": "g"}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1.0,
-        golds_hash="h",
         run_task_fn=fail_if_called,
     )
     assert result.truncated is False
@@ -815,7 +798,14 @@ def test_sweep_with_no_pending_work_skips_the_working_copy(tmp_path: Path):
 
 def test_construction_error_row_has_build_result_row_shape():
     real_row = build_result_row(
-        task=TASKS[0],
+        task_fields={
+            "task_id": "1",
+            "level": "hard",
+            "benchmark": "dabstep",
+            "group": "hard",
+        },
+        contract_digest="cd",
+        scorer="official",
         arm="contract",
         model=GLM,
         answer="a",
@@ -839,11 +829,10 @@ def test_construction_error_row_has_build_result_row_shape():
         golds_hash="h",
     )
     error_row = _construction_error_row(
-        TASKS[0],
+        _tasks(TASKS)[0],
         "contract",
         GLM,
-        "g",
-        "h",
+        _bench(Path("unused"), {"1": "g"}, "h"),
         AgentConstructionError("missing OPENROUTER_API_KEY"),
     )
     assert set(real_row.keys()) <= set(error_row.keys())
@@ -862,15 +851,15 @@ def test_stratified_sample_covers_every_level_in_proportion():
     tasks = [{"task_id": str(i), "level": "hard"} for i in range(8)] + [
         {"task_id": f"e{i}", "level": "easy"} for i in range(2)
     ]
-    sampled = _stratified_sample(tasks, 5)
-    levels = [t["level"] for t in sampled]
+    sampled = _stratified_sample(_tasks(tasks), 5)
+    levels = [t.group for t in sampled]
     assert levels.count("hard") == 4
     assert levels.count("easy") == 1
     assert len(sampled) == 5
 
 
 def test_stratified_sample_returns_everything_when_n_is_not_smaller():
-    tasks = [{"task_id": str(i), "level": "hard"} for i in range(3)]
+    tasks = _tasks([{"task_id": str(i), "level": "hard"} for i in range(3)])
     assert _stratified_sample(tasks, 10) == tasks
     assert _stratified_sample(tasks, 0) == tasks
 
@@ -1056,7 +1045,7 @@ def test_write_side_repairs_a_torn_tail_before_two_resumes_append(
     out = tmp_path / "r.jsonl"
     out.write_text(_row("1") + "\n" + _row("2") + "\n" + '{"task_id": "3", "usd')
 
-    def _tasks(*ids: str) -> list[dict]:
+    def _records(*ids: str) -> list[dict]:
         return [
             {"task_id": tid, "question": "q", "guidelines": "g", "level": "hard"}
             for tid in ids
@@ -1066,9 +1055,9 @@ def test_write_side_repairs_a_torn_tail_before_two_resumes_append(
     calls: list[str] = []
 
     def fake_run(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.02,
@@ -1079,18 +1068,15 @@ def test_write_side_repairs_a_torn_tail_before_two_resumes_append(
     # Resume 1: task "3" was never actually completed (its only row was
     # torn), so it is the next -- and only -- pending unit, and it must be
     # PAID and LAND, not silently eaten by the torn line.
-    tasks = _tasks("1", "2", "3")
+    tasks = _records("1", "2", "3")
     golds = {t["task_id"]: "g" for t in tasks}
     sweep(
-        tasks,
+        _tasks(tasks),
         ("contract",),
         (GLM,),
-        golds,
+        _bench(db_path, golds, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=10.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     assert calls == ["3"]
@@ -1101,18 +1087,15 @@ def test_write_side_repairs_a_torn_tail_before_two_resumes_append(
     # Resume 2: task "4" is the next pending unit. This call must not
     # re-brick the file the way the original bug did by pushing the
     # still-corrupt merged line off the tail.
-    tasks = _tasks("1", "2", "3", "4")
+    tasks = _records("1", "2", "3", "4")
     golds = {t["task_id"]: "g" for t in tasks}
     sweep(
-        tasks,
+        _tasks(tasks),
         ("contract",),
         (GLM,),
-        golds,
+        _bench(db_path, golds, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=10.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     assert calls == ["3", "4"]
@@ -1436,7 +1419,7 @@ def test_sweep_reports_a_ledger_that_separates_real_spend_from_guard_spend(
         if attempt["n"] == 1:
             raise AgentConstructionError("transient")
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -1448,15 +1431,12 @@ def test_sweep_reports_a_ledger_that_separates_real_spend_from_guard_spend(
     db_path = _make_pristine(tmp_path)
     for _ in range(2):  # two separate invocations: fail, then succeed
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=flaky_then_succeeds,
         )
 
@@ -1534,7 +1514,7 @@ def test_sweep_circuit_breaker_stops_immediately_on_systemic_failure(
     calls = []
 
     def always_fails(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         raise AgentConstructionError("missing OPENROUTER_API_KEY")
 
     tasks = [
@@ -1544,15 +1524,12 @@ def test_sweep_circuit_breaker_stops_immediately_on_systemic_failure(
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(50)},
+        _bench(db_path, {str(i): "g" for i in range(50)}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1000.0,  # generous: the circuit breaker must fire first
-        golds_hash="h",
         run_task_fn=always_fails,
     )
     assert result.circuit_broken is True
@@ -1590,15 +1567,12 @@ def test_circuit_breaker_fires_before_any_key_is_given_up(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        golds,
+        _bench(db_path, golds, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1000.0,
-        golds_hash="h",
         run_task_fn=always_fails,
     )
     assert result.circuit_broken is True
@@ -1616,12 +1590,12 @@ def test_sweep_circuit_breaker_resets_on_a_non_construction_error_row(
     calls = []
 
     def mostly_fails_but_not_consecutively(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         # Every third task succeeds, breaking up any run of consecutive
         # construction errors before it can reach the threshold.
-        if int(task["task_id"]) % 3 == 2:
+        if int(task.task_id) % 3 == 2:
             return {
-                "task_id": task["task_id"],
+                "task_id": task.task_id,
                 "arm": arm,
                 "model": model,
                 "usd": 0.01,
@@ -1637,15 +1611,12 @@ def test_sweep_circuit_breaker_resets_on_a_non_construction_error_row(
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(12)},
+        _bench(db_path, {str(i): "g" for i in range(12)}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1000.0,
-        golds_hash="h",
         run_task_fn=mostly_fails_but_not_consecutively,
     )
     assert result.circuit_broken is False
@@ -1666,7 +1637,7 @@ def test_sweep_records_the_row_and_reraises_when_check_and_restore_fails(
 
     def fake_run(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 1.20,
@@ -1683,15 +1654,12 @@ def test_sweep_records_the_row_and_reraises_when_check_and_restore_fails(
     db_path = _make_pristine(tmp_path)
     with pytest.raises(PermissionError):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=10.0,
-            golds_hash="h",
             run_task_fn=fake_run,
         )
 
@@ -1713,9 +1681,9 @@ def test_sweep_twenty_resumes_advance_the_cap_when_check_and_restore_fails(
     calls = []
 
     def fake_run(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 1.20,
@@ -1739,15 +1707,12 @@ def test_sweep_twenty_resumes_advance_the_cap_when_check_and_restore_fails(
     for _ in range(20):
         try:
             sweep(
-                tasks,
+                _tasks(tasks),
                 ("schema_only",),
                 (GLM,),
-                golds,
+                _bench(db_path, golds, "h", {}),
                 out=out,
-                db_path=db_path,
-                docs={},
                 max_spend=1.00,
-                golds_hash="h",
                 run_task_fn=fake_run,
             )
         except PermissionError:
@@ -1776,7 +1741,7 @@ def test_sweep_distrusts_the_integrity_check_when_close_error_is_present(
 
     def fake_run_with_close_error(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -1788,15 +1753,12 @@ def test_sweep_distrusts_the_integrity_check_when_close_error_is_present(
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     sweep(
-        TASKS,
+        _tasks(TASKS),
         ("contract",),
         (GLM,),
-        {"1": "g"},
+        _bench(db_path, {"1": "g"}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1.0,
-        golds_hash="h",
         run_task_fn=fake_run_with_close_error,
     )
     rows = [json.loads(line) for line in out.read_text().splitlines()]
@@ -1819,16 +1781,16 @@ def test_sweep_stops_entirely_on_a_leaked_connection_not_just_that_row(
     calls = []
 
     def fake_run_first_task_leaks(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         row = {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
             "usd_guard": 0.01,
             "verdict": "correct",
         }
-        if task["task_id"] == "0":
+        if task.task_id == "0":
             row["close_error"] = "RuntimeError: close exploded"
         return row
 
@@ -1839,15 +1801,12 @@ def test_sweep_stops_entirely_on_a_leaked_connection_not_just_that_row(
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(5)},
+        _bench(db_path, {str(i): "g" for i in range(5)}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=fake_run_first_task_leaks,
     )
     assert calls == ["0"]  # every later task was never even attempted
@@ -1875,7 +1834,7 @@ def test_sweep_falls_back_to_repr_for_a_non_serializable_field(tmp_path: Path):
 
     def fake_run_with_bad_field(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.01,
@@ -1887,15 +1846,12 @@ def test_sweep_falls_back_to_repr_for_a_non_serializable_field(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     db_path = _make_pristine(tmp_path)
     sweep(
-        TASKS,
+        _tasks(TASKS),
         ("contract",),
         (GLM,),
-        {"1": "g"},
+        _bench(db_path, {"1": "g"}, "h", {}),
         out=out,
-        db_path=db_path,
-        docs={},
         max_spend=1.0,
-        golds_hash="h",
         run_task_fn=fake_run_with_bad_field,
     )
     text = out.read_text()
@@ -2022,15 +1978,12 @@ def test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write(
     ctx = pytest.raises(Exception) if expect_exception else contextlib.nullcontext()
     with ctx:
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("contract",),
             (GLM,),
-            {"1": "g"},
+            _bench(db_path, {"1": "g"}, "h", {}),
             out=out,
-            db_path=db_path,
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=fake_run,
         )
 
@@ -2069,7 +2022,7 @@ def test_sweep_lands_the_row_no_matter_what_fails_between_return_and_write(
 
 def _fast_row(task, arm, model, *a, **k):
     return {
-        "task_id": task["task_id"],
+        "task_id": task.task_id,
         "arm": arm,
         "model": model,
         "usd": 0.001,
@@ -2093,15 +2046,12 @@ def test_sweep_at_one_worker_writes_rows_in_pending_order(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     tasks = _numbered_tasks(4)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only", "contract"),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=_fast_row,
     )
     rows = [json.loads(line) for line in out.read_text().splitlines()]
@@ -2128,15 +2078,12 @@ def test_sweep_runs_groups_concurrently_when_workers_exceeds_one(tmp_path: Path)
 
     tasks = _numbered_tasks(3)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only", "contract"),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=blocking_row,
         workers=3,
     )
@@ -2159,7 +2106,7 @@ def test_sweep_gives_each_worker_its_own_working_copy(tmp_path: Path):
     lock = threading.Lock()
     barrier = threading.Barrier(2, timeout=10)
 
-    def record_db(task, arm, model, db, *a, **k):
+    def record_db(task, arm, model, benchmark, db, *a, **k):
         with lock:
             seen.append(db)
         if arm == "schema_only":
@@ -2169,15 +2116,12 @@ def test_sweep_gives_each_worker_its_own_working_copy(tmp_path: Path):
     pristine = _make_pristine(tmp_path)
     tasks = _numbered_tasks(2)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(pristine, {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=pristine,
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=record_db,
         workers=2,
     )
@@ -2206,15 +2150,12 @@ def test_concurrent_writes_land_one_parseable_row_per_unit(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     tasks = _numbered_tasks(40)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only", "manual_prompt", "contract"),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=_fast_row,
         workers=8,
     )
@@ -2243,11 +2184,11 @@ def test_sweep_counts_in_flight_reservations_against_the_cap(tmp_path: Path):
 
     def blocking_row(task, arm, model, *a, **k):
         with lock:
-            calls.append(task["task_id"])
+            calls.append(task.task_id)
         started.release()
         release.wait(timeout=10)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": _CALL_USD,
@@ -2268,15 +2209,12 @@ def test_sweep_counts_in_flight_reservations_against_the_cap(tmp_path: Path):
     watcher = threading.Thread(target=unblock, daemon=True)
     watcher.start()
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=max_spend,
-        golds_hash="h",
         run_task_fn=blocking_row,
         workers=8,
     )
@@ -2302,15 +2240,12 @@ def test_sweep_stops_dispatching_new_groups_once_the_circuit_breaks(tmp_path: Pa
 
     tasks = _numbered_tasks(60)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=1_000_000.0,
-        golds_hash="h",
         run_task_fn=always_fails,
         workers=4,
     )
@@ -2332,7 +2267,7 @@ def test_sweep_reraises_a_worker_bug_after_the_pool_drains(tmp_path: Path):
     flight must still land before it surfaces."""
 
     def explodes_on_one_task(task, arm, model, *a, **k):
-        if task["task_id"] == "3":
+        if task.task_id == "3":
             raise RuntimeError("a real bug")
         return _fast_row(task, arm, model)
 
@@ -2340,15 +2275,14 @@ def test_sweep_reraises_a_worker_bug_after_the_pool_drains(tmp_path: Path):
     tasks = _numbered_tasks(8)
     with pytest.raises(RuntimeError, match="a real bug"):
         sweep(
-            tasks,
+            _tasks(tasks),
             ("schema_only",),
             (GLM,),
-            {t["task_id"]: "g" for t in tasks},
+            _bench(
+                _make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}
+            ),
             out=out,
-            db_path=_make_pristine(tmp_path),
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=explodes_on_one_task,
             workers=4,
         )
@@ -2360,15 +2294,12 @@ def test_sweep_reraises_a_worker_bug_after_the_pool_drains(tmp_path: Path):
 def test_sweep_rejects_a_nonsensical_worker_count(tmp_path: Path):
     with pytest.raises(ValueError, match="workers"):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("schema_only",),
             (GLM,),
-            {"1": "g"},
+            _bench(_make_pristine(tmp_path), {"1": "g"}, "h", {}),
             out=tmp_path / "r.jsonl",
-            db_path=_make_pristine(tmp_path),
-            docs={},
             max_spend=1.0,
-            golds_hash="h",
             run_task_fn=_fast_row,
             workers=0,
         )
@@ -2391,16 +2322,13 @@ def test_a_group_blocked_by_in_flight_reservations_waits_instead_of_truncating(
     tasks = _numbered_tasks(8)
     floor = _token_budget_usd(GLM)
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         # Room for two concurrent ceilings and nothing like eight.
         max_spend=2.5 * floor,
-        golds_hash="h",
         run_task_fn=_fast_row,
         workers=8,
     )
@@ -2420,7 +2348,7 @@ def test_the_budget_still_truncates_when_it_is_genuinely_exhausted(tmp_path: Pat
 
     def real_cost(task, arm, model, *a, **k):
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": _CALL_USD,
@@ -2429,15 +2357,12 @@ def test_the_budget_still_truncates_when_it_is_genuinely_exhausted(tmp_path: Pat
         }
 
     result = sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=max_spend,
-        golds_hash="h",
         run_task_fn=real_cost,
         workers=4,
     )
@@ -2458,15 +2383,12 @@ def test_sweep_refuses_to_start_while_another_holds_the_results_file(tmp_path: P
     with sweep_lock(out):
         with pytest.raises(SweepLockedError):
             sweep(
-                TASKS,
+                _tasks(TASKS),
                 ("schema_only",),
                 (GLM,),
-                {"1": "g"},
+                _bench(_make_pristine(tmp_path), {"1": "g"}, "h", {}),
                 out=out,
-                db_path=_make_pristine(tmp_path),
-                docs={},
                 max_spend=100.0,
-                golds_hash="h",
                 run_task_fn=_fast_row,
             )
     assert not out.exists(), "a refused sweep must not have written anything"
@@ -2476,15 +2398,12 @@ def test_sweep_releases_the_lock_so_a_restart_can_resume(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     for _ in range(3):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("schema_only",),
             (GLM,),
-            {"1": "g"},
+            _bench(_make_pristine(tmp_path), {"1": "g"}, "h", {}),
             out=out,
-            db_path=_make_pristine(tmp_path),
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=_fast_row,
             retry_verdicts=("correct",),
         )
@@ -2498,7 +2417,7 @@ def _flaky_row(fail_first: set, usd: float = 0.001):
     calls: list[str] = []
 
     def fake_run(task, arm, model, *a, **k):
-        tid = task["task_id"]
+        tid = task.task_id
         verdict = "error" if tid in fail_first and tid not in calls else "correct"
         calls.append(tid)
         return {
@@ -2519,15 +2438,12 @@ def test_the_retry_pass_retries_each_error_once_at_the_end(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     fake_run, calls = _flaky_row({"2"})
     sweep(
-        _numbered_tasks(3),
+        _tasks(_numbered_tasks(3)),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(3)},
+        _bench(_make_pristine(tmp_path), {str(i): "g" for i in range(3)}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=fake_run,
         retry_pass=True,
     )
@@ -2545,9 +2461,9 @@ def test_the_retry_pass_never_retries_a_unit_twice(tmp_path: Path):
     calls: list[str] = []
 
     def always_fails(task, arm, model, *a, **k):
-        calls.append(task["task_id"])
+        calls.append(task.task_id)
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.001,
@@ -2557,15 +2473,12 @@ def test_the_retry_pass_never_retries_a_unit_twice(tmp_path: Path):
 
     for _ in range(2):
         sweep(
-            TASKS,
+            _tasks(TASKS),
             ("schema_only",),
             (GLM,),
-            {"1": "g"},
+            _bench(_make_pristine(tmp_path), {"1": "g"}, "h", {}),
             out=out,
-            db_path=_make_pristine(tmp_path),
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=always_fails,
             retry_pass=True,
         )
@@ -2576,15 +2489,12 @@ def test_no_retry_pass_unless_asked(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     fake_run, calls = _flaky_row({"0"})
     sweep(
-        _numbered_tasks(2),
+        _tasks(_numbered_tasks(2)),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(2)},
+        _bench(_make_pristine(tmp_path), {str(i): "g" for i in range(2)}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
     assert calls == ["0", "1"]
@@ -2596,15 +2506,12 @@ def test_no_retry_pass_after_a_truncated_sweep(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     fake_run, calls = _flaky_row({"0"}, usd=_CALL_USD)
     result = sweep(
-        _numbered_tasks(10),
+        _tasks(_numbered_tasks(10)),
         ("schema_only",),
         (GLM,),
-        {str(i): "g" for i in range(10)},
+        _bench(_make_pristine(tmp_path), {str(i): "g" for i in range(10)}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=_budget_for_exactly_two_calls(GLM),
-        golds_hash="h",
         run_task_fn=fake_run,
         retry_pass=True,
     )
@@ -2625,15 +2532,12 @@ def test_every_row_is_fsynced_before_the_next_one_is_written(
     out = tmp_path / "r.jsonl"
     tasks = _numbered_tasks(5)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=_fast_row,
     )
     # One per row, plus the lockfile's own and any snapshot's.
@@ -2648,15 +2552,12 @@ def test_the_snapshot_is_always_a_complete_parseable_file(tmp_path: Path):
     out = tmp_path / "r.jsonl"
     tasks = _numbered_tasks(SNAPSHOT_EVERY_ROWS + 3)
     sweep(
-        tasks,
+        _tasks(tasks),
         ("schema_only",),
         (GLM,),
-        {t["task_id"]: "g" for t in tasks},
+        _bench(_make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}),
         out=out,
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=_fast_row,
         workers=4,
     )
@@ -2675,21 +2576,20 @@ def test_a_snapshot_exists_even_if_the_sweep_never_finishes(tmp_path: Path):
     tasks = _numbered_tasks(80)
 
     def explodes_late(task, arm, model, *a, **k):
-        if task["task_id"] == "70":
+        if task.task_id == "70":
             raise RuntimeError("machine trouble")
         return _fast_row(task, arm, model)
 
     with pytest.raises(RuntimeError):
         sweep(
-            tasks,
+            _tasks(tasks),
             ("schema_only",),
             (GLM,),
-            {t["task_id"]: "g" for t in tasks},
+            _bench(
+                _make_pristine(tmp_path), {t["task_id"]: "g" for t in tasks}, "h", {}
+            ),
             out=out,
-            db_path=_make_pristine(tmp_path),
-            docs={},
             max_spend=100.0,
-            golds_hash="h",
             run_task_fn=explodes_late,
         )
     snapshot = snapshot_path_for(out)
@@ -2748,7 +2648,7 @@ def test_select_tasks_skips_ungolded_tasks_by_default():
     """The scoring sweeps must keep their published task set exactly. A task
     with no reconstructed gold cannot be scored, so it is not run.
     """
-    from dce.runner import select_tasks
+    from dce.benchmarks.dabstep import select_tasks
 
     tasks = [{"task_id": "1"}, {"task_id": "2"}, {"task_id": "3"}]
     golds = {"1": "a", "3": "c"}
@@ -2760,7 +2660,7 @@ def test_select_tasks_run_admits_tasks_with_no_gold():
     """A leaderboard submission needs an answer for all 450 tasks, including
     the 49 no consensus rule could reconstruct.
     """
-    from dce.runner import select_tasks
+    from dce.benchmarks.dabstep import select_tasks
 
     tasks = [{"task_id": "1"}, {"task_id": "2"}, {"task_id": "3"}]
     golds = {"1": "a", "3": "c"}
@@ -2773,7 +2673,7 @@ def test_select_tasks_run_admits_tasks_with_no_gold():
 
 
 def test_select_tasks_rejects_an_unknown_ungolded_mode():
-    from dce.runner import select_tasks
+    from dce.benchmarks.dabstep import select_tasks
 
     with pytest.raises(ValueError, match="ungolded"):
         select_tasks([{"task_id": "1"}], {}, ungolded="sometimes")
@@ -2789,10 +2689,11 @@ def test_sweep_hands_run_task_none_not_empty_string_for_an_ungolded_task(
     """
     seen: dict[str, object] = {}
 
-    def fake_run(task, arm, model, working, docs, gold, **k):
-        seen[task["task_id"]] = gold
+    def fake_run(task, arm, model, benchmark, working, **k):
+        gold = benchmark.gold_ref(task)
+        seen[task.task_id] = gold
         return {
-            "task_id": task["task_id"],
+            "task_id": task.task_id,
             "arm": arm,
             "model": model,
             "usd": 0.0,
@@ -2805,15 +2706,12 @@ def test_sweep_hands_run_task_none_not_empty_string_for_an_ungolded_task(
         {"task_id": "2", "question": "q", "guidelines": "g", "level": "hard"},
     ]
     sweep(
-        tasks,
+        _tasks(tasks),
         ("contract",),
         (GLM,),
-        {"1": "a"},
+        _bench(_make_pristine(tmp_path), {"1": "a"}, "h", {}),
         out=tmp_path / "r.jsonl",
-        db_path=_make_pristine(tmp_path),
-        docs={},
         max_spend=100.0,
-        golds_hash="h",
         run_task_fn=fake_run,
     )
 
@@ -2863,3 +2761,129 @@ def test_the_default_submission_file_does_not_dirty_the_tree(tmp_path: Path):
         f"{in_results} is gitignored — an unanchored rule is swallowing a "
         "results file, which must stay tracked as evidence"
     )
+
+
+# ── benchmarks with several databases ────────────────────────────────────
+
+
+def test_stratified_sample_is_unchanged_by_the_move_to_group():
+    """`group` is DABStep's `level`, so a `--n` smoke picks the same tasks
+    in the same order it did before the refactor."""
+    records = [
+        {"task_id": str(i), "question": "q", "level": "easy" if i % 5 == 0 else "hard"}
+        for i in range(40)
+    ]
+    picked = [t.task_id for t in _stratified_sample(_tasks(records), 10)]
+    by_level: dict[str, list[str]] = {}
+    for r in records:
+        by_level.setdefault(r["level"], []).append(r["task_id"])
+    expected = []
+    for ids in by_level.values():
+        expected.extend(ids[: round(10 * len(ids) / len(records))])
+    assert picked == expected
+
+
+class _TwoDBs(DABStep):
+    """Tasks in group `a` read `a.db`, the rest `b.db`."""
+
+    def __init__(self, dbs: dict[str, Path]):
+        super().__init__(db=dbs["a"], golds={}, golds_hash="h", docs={})
+        self._dbs = dbs
+
+    def pristine_db(self, task):
+        return self._dbs[task.group]
+
+
+def _ok_row(task, arm, model):
+    return {
+        "task_id": task.task_id,
+        "arm": arm,
+        "model": model,
+        "usd": 0.01,
+        "usd_guard": 0.01,
+        "verdict": "correct",
+    }
+
+
+def test_one_working_copy_per_worker_recopied_on_a_database_change(tmp_path: Path):
+    dbs = {"a": _make_pristine(tmp_path, "a.db"), "b": _make_pristine(tmp_path, "b.db")}
+    dbs["b"].write_bytes(b"other-pristine")
+    seen = []
+
+    def fake_run(task, arm, model, benchmark, db_path, **k):
+        seen.append((task.task_id, db_path, db_path.read_bytes()))
+        return _ok_row(task, arm, model)
+
+    # Interleaved on purpose: the queue must group them by database.
+    records = [
+        {"task_id": "1", "question": "q", "level": "a"},
+        {"task_id": "2", "question": "q", "level": "b"},
+        {"task_id": "3", "question": "q", "level": "a"},
+    ]
+    sweep(
+        _tasks(records),
+        ("schema_only",),
+        (GLM,),
+        _TwoDBs(dbs),
+        out=tmp_path / "r.jsonl",
+        max_spend=5.0,
+        run_task_fn=fake_run,
+    )
+
+    assert [t for t, _, _ in seen] == ["1", "3", "2"]
+    assert seen[0][2] == seen[1][2] == b"pristine-bytes"
+    assert seen[2][2] == b"other-pristine"
+    # One copy on disk per worker: the `a` copy went when the worker moved on.
+    assert not _working_db_path(dbs["a"]).exists()
+    assert _working_db_path(dbs["b"]).exists()
+
+
+def test_switching_databases_removes_the_old_copys_wal(tmp_path: Path):
+    dbs = {"a": _make_pristine(tmp_path, "a.db"), "b": _make_pristine(tmp_path, "b.db")}
+
+    def fake_run(task, arm, model, benchmark, db_path, **k):
+        if task.task_id == "1":
+            # A stale sidecar left beside the `a` copy, as a killed run leaves.
+            db_path.with_name(db_path.name + ".wal").write_bytes(b"stale")
+        return _ok_row(task, arm, model)
+
+    records = [
+        {"task_id": "1", "question": "q", "level": "a"},
+        {"task_id": "2", "question": "q", "level": "b"},
+    ]
+    sweep(
+        _tasks(records),
+        ("schema_only",),
+        (GLM,),
+        _TwoDBs(dbs),
+        out=tmp_path / "r.jsonl",
+        max_spend=5.0,
+        run_task_fn=fake_run,
+    )
+    old = _working_db_path(dbs["a"])
+    assert not old.exists()
+    assert not old.with_name(old.name + ".wal").exists()
+
+
+def test_a_single_database_keeps_task_order(tmp_path: Path):
+    db = _make_pristine(tmp_path)
+    seen = []
+
+    def fake_run(task, arm, model, *a, **k):
+        seen.append(task.task_id)
+        return _ok_row(task, arm, model)
+
+    records = [
+        {"task_id": str(i), "question": "q", "level": lv}
+        for i, lv in enumerate(["hard", "easy", "hard", "easy"])
+    ]
+    sweep(
+        _tasks(records),
+        ("schema_only",),
+        (GLM,),
+        _bench(db),
+        out=tmp_path / "r.jsonl",
+        max_spend=5.0,
+        run_task_fn=fake_run,
+    )
+    assert seen == ["0", "1", "2", "3"]

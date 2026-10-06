@@ -28,6 +28,7 @@ privately held gold answers.
 | arms | `schema_only`, `manual_prompt`, `manual_compiled`, `contract` | `manual_compiled` holds the compiler's output constant and varies delivery only, answering "the compiler did the work" |
 | agent models | `gpt-6-sol`, `gpt-6-luna`, `qwen3.8-27b` | the DABStep anchor, its small tier, and the open-weights point |
 | repeats | k=3 | as on DABStep |
+| compiled contract on DABStep | a `contract_compiled` extra arm, compiled from `manual.md` and `payments-readme.md` by the same compiler | separates how the contract was made from which benchmark it runs on (see "What the design can and cannot claim") |
 | package rename | out of scope | a separate mechanical PR if wanted |
 
 ## Order of work
@@ -35,14 +36,17 @@ privately held gold answers.
 1. **PR A: the Benchmark refactor.** DABStep is the only implementation.
    Includes making stats and analysis role-driven. No behaviour change,
    verified by the equivalence checks below.
-2. **PR B: the LiveSQLBench implementation and the compiler code.** Tested
-   on a synthetic fixture database and KB; no real gold in the repo.
-3. **Compile commit.** The 22 frozen contracts, the compile log, the audit.
+2. **PR B: the LiveSQLBench implementation and the compiler code,** plus
+   DABStep's KB adapter and its `contract_compiled` extra arm. Tested on a
+   synthetic fixture database and KB; no real gold in the repo.
+3. **Compile commit.** The 22 frozen LiveSQLBench contracts and DABStep's
+   compiled contract, their compile logs, the audit.
 4. **Smoke.** 12 tasks stratified by database, four arms, `gpt-6-luna`.
 5. **Run commit.** The pre-registration (below); tagged, tag pushed upstream
    by the maintainer.
 6. **Runs.** One job per model, three repeats in sequence with
-   `--retry-pass`, as for the gpt-6-luna DABStep run.
+   `--retry-pass`, as for the gpt-6-luna DABStep run. The DABStep
+   compiled-contract run (Part 5) follows the LiveSQLBench runs.
 
 ## Part 1: the Benchmark protocol (PR A)
 
@@ -194,7 +198,8 @@ run once.
   file (read-only, with `PG_COMPAT`). A test asserts that the compiler's
   file accesses never touch the task, gold or test-case files.
 - Order: entries topologically by `children`, so a parent's SQL can
-  reference its children's metrics.
+  reference its children's metrics. An entry of kind `section` (DABStep,
+  Part 5) may yield several metrics or none.
 - Resumable: each finished entry is appended to the compile log at once; a
   rerun reads the log, skips entries already done and continues, so a crash
   at the fifteenth database costs only the entry in progress.
@@ -260,10 +265,17 @@ All arms' DuckDB connections run `PG_COMPAT`
 Committed with the contracts, before any agent run:
 
 - per database: entries by type, compiled vs prose-only, execution rate;
-- 30 metrics drawn with a fixed seed, each checked by hand against its KB
-  text (agrees / disagrees / unclear, with a note), listed so a reviewer can
-  repeat the check;
+- 30 LiveSQLBench metrics drawn with a fixed seed, each checked by hand
+  against its KB text (agrees / disagrees / unclear, with a note), listed so
+  a reviewer can repeat the check;
+- every metric of DABStep's compiled contract checked the same way against
+  `manual.md`, and set beside the hand-authored contract's metric of the
+  same name where one exists;
 - the compiler's total queries and cost.
+
+The audit's disagree rate is reported next to the agent results: it bounds
+how much of the contract's level is the compiler's error rather than
+delivery.
 
 The contracts are not edited after the audit. If the audit finds a
 systematic compiler fault, the compiler is fixed and everything recompiled,
@@ -290,6 +302,65 @@ per repeat). The compiler is a one-off of roughly $20-50.
 LiveSQLBench runs use the library at main (0.59.0); the run commit carries
 the updated experiment `uv.lock`.
 
+## Part 5: the compiled contract on DABStep
+
+DABStep's contract was authored once from `manual.md` and
+`payments-readme.md` and frozen before any task was read; LiveSQLBench's
+are compiled by an LLM. Without a bridge, any difference between the two
+benchmarks' results could come from either the benchmark or the authoring.
+This run supplies the bridge.
+
+- **Compile.** DABStep gains a KB adapter: `manual.md` split at its section
+  headings into neutral entries of kind `section` (the compiler decides per
+  section whether it yields metrics, predicates or prose; the LiveSQLBench
+  kinds fix this up front), with `payments-readme.md` as the column
+  meanings and `data/dabstep.duckdb` as the database. The compiler opens no
+  other file; the file-access test covers `tasks.json` and `golds.json`.
+  Output in `contracts/dabstep/`, frozen and audited in the compile commit.
+- **Arm.** `contract_compiled`: the `contract` arm's tools, procedural
+  sentence and `DATA_NOTE`, with the compiled contract in place of the
+  hand-authored one. An extra arm, so DABStep's defaults and the PR A
+  equivalence checks are unaffected.
+- **Run.** `contract` and `contract_compiled` together, all 450 tasks, k=3,
+  pairing within each repeat, on `gpt-6-sol` and `gpt-6-luna`. At the cost
+  per task-run above, about $100 and $10 over the three repeats.
+- **Measure.** End-to-end strict accuracy; task-level sign test of
+  `contract_compiled` vs `contract` over the three repeats; the same
+  rule-set / total-fee / rest groups as the gpt-6-luna section of
+  FINDINGS.md. Pre-registered in the same run commit as LiveSQLBench, with
+  its own written prediction.
+
+## What the design can and cannot claim
+
+- **Within a benchmark, arm comparisons are the claims.** `manual_compiled`
+  vs `contract` holds the compiler's output constant and varies delivery
+  only; `manual_prompt` vs `manual_compiled` measures what the compiler
+  added (resolved ambiguities, facts it learned from querying), the role
+  `manual_resolved` played on DABStep.
+- **LiveSQLBench results are conditional on the compiler.** The claim is
+  about a contract compiled once by `claude-sonnet-5` and frozen; a
+  different compiler or a human author could do better or worse. Compiler
+  errors reach `manual_compiled` and `contract` alike, so they do not bias
+  the delivery comparison, but they lower the contract's absolute level;
+  the audit's disagree rate is reported alongside.
+- **Across benchmarks, only the pattern is compared, never effect sizes.**
+  The benchmarks differ in more than their data (one database against 22,
+  free-form answers against SQL graded by Soft-EX, a few dense rules
+  against many small definitions), so absolute accuracies, gaps and shares
+  are not set side by side as if commensurable. The replicated claims are
+  directional: the contract beats the manual, most of the gap is delivery,
+  and the small model closes on the large one with the contract.
+- **Authoring is separated by Part 5, not assumed away.** If
+  `contract_compiled` matches `contract` on DABStep, a weaker LiveSQLBench
+  result points at the benchmark; if it falls short, the shortfall measures
+  what compiling costs, and the LiveSQLBench results are read with it.
+- **Provenance.** DABStep's contract provenance is self-attested.
+  LiveSQLBench's and DABStep's compiled contracts are checkable: the compile
+  log records every model turn and query, and a test shows the compiler
+  never opens a task, gold or test-case file.
+
+The run commit's pre-registration states these limits in the same words.
+
 ## Error handling
 
 - Agent and transport errors: the existing error rows, `--retry-pass`, and
@@ -309,8 +380,9 @@ the updated experiment `uv.lock`.
   six-entry KB with one parent-child pair, and hand-written gold results.
   Covered: task loading and prompt text, each arm's prompt and tools, SQL
   extraction, Soft-EX grading including order and the failure categories,
-  `gold_ref` never exposing the gold, the KB adapter's mapping to neutral
-  entries, the compiler's topological order, validation and prose fallback
+  `gold_ref` never exposing the gold, both KB adapters' mapping to neutral
+  entries (LiveSQLBench's entry types, DABStep's section split), the
+  `contract_compiled` arm differing from `contract` only in the contract, the compiler's topological order, validation and prose fallback
   (with a stubbed model), resuming from a partial compile log, and the
   compiler's file-access restriction.
 

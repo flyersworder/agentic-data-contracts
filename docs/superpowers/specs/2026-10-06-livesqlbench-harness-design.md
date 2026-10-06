@@ -160,9 +160,13 @@ benchmark maps roles to its arms, and the analysis works on roles:
 
 `dce.stats` reads the benchmark from the rows (a file mixing two is
 refused); `knowledge_delivery.py` takes `--benchmark` (default `dabstep`),
-since it reads several files. Both print per-`group` strata and
-compute the share decomposition, (manual_plus - manual) / (contract -
-manual), from the roles. A role a benchmark lacks is skipped. Comparisons
+since it reads several files. Both print per-`group` strata;
+`knowledge_delivery.py` also computes the share decomposition,
+(manual_plus - manual) / (contract - manual), from the roles (`dce.stats`
+does not, so its output stays identical for DABStep). An analysis that
+needs a role the benchmark lacks stops with the role's name
+(`role_arms`) rather than skipping it, since a skipped role would silently
+drop a pre-registered comparison. Comparisons
 DABStep reports beyond these roles (the hollow and uninterpreted arms, the
 contract vs each other arm) stay as they are, driven by `arms` and
 `extra_arms`. A third benchmark then needs a module and a roles table, and
@@ -179,6 +183,42 @@ no new analysis code.
 4. A 12-task stratified smoke on `gpt-6-luna`, three arms, completes with
    rows whose fields, apart from the new `benchmark` and `group` fields and
    run-specific values, match the pre-refactor smoke's schema.
+
+### Open for PR B (from PR A's review)
+
+PR A's reviews found no change in DABStep behaviour. Each of these is a
+gap in what PR B needs from the interface:
+
+- **Task sets.** LiveSQLBench reports 309 primary and 72 order-only tasks
+  separately, with primary accuracy as the main measure. The split lives
+  only in `row_fields` (`set`), which `dce.stats` must not read, so it
+  pools all 381. Either the protocol gains a task-set notion that
+  `dce.stats` stratifies by, or `knowledge_delivery.py` owns the split and
+  this spec says so.
+- **The `baseline` role is unread.** Nothing reads `baseline`, though it is
+  the role behind Part 4's pre-registered `contract` vs `schema_only` sign
+  test. `knowledge_delivery.py` hardcodes the pairs `(manual_plus, manual)`
+  and `(contract, manual_plus)`, and `dce.stats` indexes
+  `roles["contract"]`. That sign test needs a role-driven home, not new
+  per-benchmark analysis code. `knowledge_delivery.py` also needs a
+  `CONFIG` entry per benchmark, and ignores `excluded_tasks`. Today that
+  is harmless, because no excluded DABStep task is in its inputs.
+- **Smoke sampling.** `_stratified_sample` rounds each group to
+  `round(n * share)`. Over LiveSQLBench's 22 databases, `--n 12` gives 22
+  tasks or 10, never 12. It needs largest-remainder rounding, or a
+  per-group floor plus a cap.
+- **Results files are not benchmark-scoped.** `--out` defaults to
+  `results/results.jsonl` for every benchmark, and the runner never checks
+  the `benchmark` of rows already in the file. A LiveSQLBench run pointed
+  at a DABStep file appends and pays, and only `dce.stats` refuses it
+  later. Resume would also skip any colliding `task_id`. The runner
+  should refuse a file holding another benchmark's rows, and default to
+  `results/<benchmark>/`.
+- **Construction.** `main()` hardcodes `DABStep.from_files` and its flags,
+  and the protocol has no constructor hook.
+- **Report wording.** `dce.stats` says every answered row was "RE-GRADED",
+  which is false when `rescore` returns `None`. The "reconstructed-gold
+  task set" and `VERIFIED_WRONG_GOLDS` notes are DABStep text.
 
 ## Part 2: the LiveSQLBench implementation (PR B)
 

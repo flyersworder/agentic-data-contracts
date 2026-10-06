@@ -36,15 +36,21 @@ privately held gold answers.
 1. **PR A: the Benchmark refactor.** DABStep is the only implementation.
    Includes making stats and analysis role-driven. No behaviour change,
    verified by the equivalence checks below.
-2. **PR B: the LiveSQLBench implementation and the compiler code,** plus
-   DABStep's KB adapter and its `contract_compiled` extra arm. Tested on a
-   synthetic fixture database and KB; no real gold in the repo.
-3. **Compile commit.** The 22 frozen LiveSQLBench contracts and DABStep's
+2. **PR B: the LiveSQLBench benchmark.** Data loading, prompts, grading,
+   the two arms that need no contract (`schema_only`, `manual_prompt`), the
+   prep scripts, and the open items from PR A's review (below). Tested on a
+   synthetic fixture database and KB; no real gold in the repo. It ends
+   with a two-arm smoke on `gpt-6-luna`, which checks task loading,
+   prompts, grading and the dialect switches before any compile spend.
+3. **PR C: the compiler.** The benchmark-agnostic compiler, both KB
+   adapters, the `manual_compiled` and `contract` arms, and DABStep's
+   `contract_compiled` extra arm.
+4. **Compile commit.** The 22 frozen LiveSQLBench contracts and DABStep's
    compiled contract, their compile logs, the audit.
-4. **Smoke.** 12 tasks stratified by database, four arms, `gpt-6-luna`.
-5. **Run commit.** The pre-registration (below); tagged, tag pushed upstream
+5. **Smoke.** 12 tasks stratified by database, four arms, `gpt-6-luna`.
+6. **Run commit.** The pre-registration (below); tagged, tag pushed upstream
    by the maintainer.
-6. **Runs.** One job per model, three repeats in sequence with
+7. **Runs.** One job per model, three repeats in sequence with
    `--retry-pass`, as for the gpt-6-luna DABStep run. The DABStep
    compiled-contract run (Part 5) follows the LiveSQLBench runs.
 
@@ -220,6 +226,38 @@ gap in what PR B needs from the interface:
   which is false when `rescore` returns `None`. The "reconstructed-gold
   task set" and `VERIFIED_WRONG_GOLDS` notes are DABStep text.
 
+How PR B closes each:
+
+- **Task sets: a generic `subset`.** `Task` gains `subset: str | None`,
+  written to the row as `subset` only when set, so DABStep rows are
+  unchanged. A benchmark declares `subsets` (in report order, the
+  pre-registered one first). `dce.stats` reports each subset in its own
+  section when rows carry one, and `knowledge_delivery.py` reads one subset
+  per `CONFIG` entry. LiveSQLBench's subsets are `primary` and
+  `order_only`.
+- **Pairs by role.** `knowledge_delivery.py`'s sign-test pairs are a
+  per-benchmark list of role pairs in `CONFIG`; LiveSQLBench's adds
+  (`contract`, `baseline`). It drops `excluded_tasks` as `dce.stats` does.
+  `dce.stats` compares arms against the `contract` role when the benchmark
+  has one, and prints per-arm summaries only when it has not (LiveSQLBench
+  until PR C).
+- **Smoke sampling: largest remainder.** Each group gets the floor of its
+  share and the remaining tasks go to the largest remainders, so `--n 12`
+  over 22 databases gives 12 tasks. With DABStep's two levels this differs
+  from rounding only on an exact tie, where rounding gave the wrong count.
+- **Results scoped by benchmark.** The default `--out` is
+  `results/results.jsonl` for DABStep, as now, and
+  `results/<benchmark>/results.jsonl` otherwise; traces default to
+  `traces/<benchmark>/<stem>` likewise. The runner refuses an `--out`
+  holding another benchmark's rows before anything runs, and `dce.stats`
+  checks every raw row, not only the deduplicated ones.
+- **Construction.** The protocol gains the classmethods
+  `add_arguments(parser)` and `from_args(args)`; `main()` builds whichever
+  benchmark `--benchmark` names.
+- **Wording.** The task-set label and the excluded-task note become class
+  attributes (DABStep's text unchanged), and the re-grade note counts the
+  rows a benchmark could actually re-grade.
+
 ## Part 2: the LiveSQLBench implementation (PR B)
 
 ### Data, outside the repo
@@ -237,7 +275,8 @@ under `prep/livesqlbench/`, reading from and writing to `LSB_DATA` only.
 
 From `tasks_frozen_full_v1.json`: 309 primary tasks and 72 order-only tasks
 run in the same sweep, 381 in all; `Task.group` = database name;
-`row_fields` = `{"db", "set", "high_level", "order"}`. The 30 excluded tasks
+`Task.subset` = the task's set (`primary` or `order_only`);
+`row_fields` = `{"db", "high_level", "order"}`. The 30 excluded tasks
 are never run. `Task.group` is written to each row as `group`.
 `Task.prompt` is the task's `query` followed by one fixed
 instruction: end the answer with the final SQL in a ```sql block, which must
@@ -317,6 +356,11 @@ All arms' DuckDB connections run `PG_COMPAT`
 - It runs on a fresh read-only connection to the pristine database with
   `PG_COMPAT` and a statement time limit, and its result is compared with the
   frozen gold result by the existing Soft-EX logic (`lsb_grade.matches`).
+  The official helpers it relies on (comment, `DISTINCT` and `ROUND`
+  stripping, result normalisation) are vendored, under their MIT licence,
+  from `bird-bench/livesqlbench` at a recorded commit.
+- Checked before the smoke: every frozen task's own gold SQL, graded by
+  this code exactly as an agent's answer is, scores correct.
 - Primary tasks: order-sensitive where the task's `conditions.order` is true.
   Order-only tasks: order-insensitive, reported separately.
 - Failure categories, all graded incorrect: `no_sql`, `sql_error`,

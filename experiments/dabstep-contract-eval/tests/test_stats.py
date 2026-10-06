@@ -984,3 +984,45 @@ def test_the_fifth_arm_reports_the_governed_tool_counters(tmp_path):
     path = tmp_path / "fifth.jsonl"
     _write(path, [row])
     assert "inspect_rejections=2" in report(path)
+
+
+def test_a_file_mixing_two_benchmarks_is_refused(tmp_path):
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            _row("t1", PRIMARY_LEFT_ARM, "correct"),
+            {**_row("t2", PRIMARY_LEFT_ARM, "correct"), "benchmark": "other"},
+        ],
+    )
+    with pytest.raises(SystemExit, match="more than one benchmark"):
+        report(path)
+
+
+def test_strata_lines_read_group_and_fall_back_to_level(tmp_path):
+    path = tmp_path / "r.jsonl"
+    _write(
+        path,
+        [
+            # `group` wins over `level` when both are present ...
+            {**_row("t1", PRIMARY_LEFT_ARM, "correct", level="easy"), "group": "g1"},
+            # ... and a row written before `group` existed reads its level.
+            _row("t2", PRIMARY_LEFT_ARM, "incorrect", level="hard"),
+        ],
+    )
+    text = report(path)
+    assert "    level=g1 " in text
+    assert "    level=hard " in text
+    assert "    level=easy " not in text
+
+
+def test_the_dabstep_constants_still_name_the_same_arms():
+    from dce.stats import ARM_B, ARM_C, ARM_D, COMPARISON_ARMS
+
+    assert (ARM_A, ARM_B, ARM_C, ARM_D) == (
+        "schema_only",
+        "manual_prompt",
+        "contract",
+        "contract_hollow",
+    )
+    assert COMPARISON_ARMS == ("schema_only", "manual_prompt", "contract_hollow")

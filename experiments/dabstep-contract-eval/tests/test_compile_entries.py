@@ -54,3 +54,10 @@ def test_domains():
     assert (
         domain_of(_e(1, "section", name="5.1 Best Practices")) == "5_1_best_practices"
     )
+
+
+def test_a_suffixed_name_never_collides_with_a_natural_one():
+    entries = [_e(12, name="Foo"), _e(13, name="foo"), _e(20, name="Foo 12")]
+    names = metric_names(entries)
+    assert len(set(names.values())) == 3
+    assert names == metric_names(list(reversed(entries)))

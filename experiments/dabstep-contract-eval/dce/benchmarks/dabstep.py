@@ -463,7 +463,8 @@ class DABStep:
                 "`python -m dce.compile --benchmark dabstep` first"
             )
         try:
-            frozen.load_compiled_contract()
+            # `from_yaml` alone does not open `semantic.yml`; the digest does.
+            frozen.compiled_digest()
         except Exception as exc:
             raise SystemExit(
                 f"the compiled DABStep contract does not load: {exc}"

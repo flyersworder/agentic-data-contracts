@@ -257,3 +257,24 @@ def test_contract_compiled_is_checked_before_any_spend(tmp_path, monkeypatch):
     bench.check_arms(DABStep.arms, [])  # the default arms need nothing compiled
     with pytest.raises(SystemExit, match="dce.compile --benchmark dabstep"):
         bench.check_arms(("contract_compiled",), [])
+
+
+def test_contract_compiled_check_loads_the_semantic_source(tmp_path, monkeypatch):
+    import shutil
+
+    import dce.frozen as frozen
+    from dce.frozen import CONTRACT_PATH
+
+    stand_in = tmp_path / "contracts" / "dabstep"
+    shutil.copytree(CONTRACT_PATH.parent, stand_in)
+    (stand_in / "contract.yml").write_text(
+        (stand_in / "contract.yml")
+        .read_text(encoding="utf-8")
+        .replace("name: dabstep-payments", "name: dabstep-semantic-check"),
+        encoding="utf-8",
+    )
+    for semantic in stand_in.glob("semantic*.yml"):
+        semantic.unlink()
+    monkeypatch.setattr(frozen, "COMPILED_CONTRACT_PATH", stand_in / "contract.yml")
+    with pytest.raises(SystemExit, match="does not load"):
+        _bench(tmp=tmp_path).check_arms(("contract_compiled",), [])

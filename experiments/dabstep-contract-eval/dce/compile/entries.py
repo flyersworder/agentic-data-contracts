@@ -45,11 +45,16 @@ def metric_names(entries) -> dict[int, str]:
     slug of the entry's name; entries that share a slug ALL get `_<id>`,
     so no name depends on which entry happened to come first."""
     eligible = [e for e in entries if e.kind in ("calculation", "predicate")]
-    counts = Counter(slug(e.name) for e in eligible)
-    return {
-        e.id: slug(e.name) if counts[slug(e.name)] == 1 else f"{slug(e.name)}_{e.id}"
-        for e in eligible
-    }
+    names = {e.id: slug(e.name) for e in eligible}
+    # Repeat until unique: a suffixed name can meet a natural one ("Foo" as
+    # id 12 and "Foo 12" are both `foo_12`). Ids are unique, so it ends.
+    while True:
+        counts = Counter(names.values())
+        clashing = [i for i, name in names.items() if counts[name] > 1]
+        if not clashing:
+            return names
+        for i in clashing:
+            names[i] = f"{names[i]}_{i}"
 
 
 def compile_order(entries) -> list[KBEntry]:

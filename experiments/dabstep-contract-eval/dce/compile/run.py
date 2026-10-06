@@ -56,23 +56,28 @@ def _header(inputs: CompileInputs) -> dict:
     }
 
 
-def read_log(path: Path) -> tuple[dict | None, list[EntryRecord], bool]:
-    """(header, records, torn). Only the LAST line may be torn -- it is the
-    one a crash interrupts; a bad line anywhere else is corruption."""
+def _log_lines(path: Path) -> tuple[list[dict], bool]:
+    """Every line of a working log, and whether its last line was torn. Only
+    the LAST line may be torn -- it is the one a crash interrupts; a bad
+    line anywhere else is corruption."""
     lines = path.read_text(encoding="utf-8").splitlines()
-    header, records, torn = None, [], False
+    out = []
     for i, line in enumerate(lines):
         try:
-            data = json.loads(line)
+            out.append(json.loads(line))
         except json.JSONDecodeError:
             if i == len(lines) - 1:
-                torn = True
-                break
+                return out, True
             raise SystemExit(f"{path}: line {i + 1} is not JSON") from None
-        if data.get("type") == "header":
-            header = data
-        else:
-            records.append(EntryRecord.from_dict(data))
+    return out, False
+
+
+def read_log(path: Path) -> tuple[dict | None, list[EntryRecord], bool]:
+    """(header, records, torn). A `spend` line -- an entry whose model call
+    failed, billed but not finished -- is not a record: the entry reruns."""
+    lines, torn = _log_lines(path)
+    header = next((d for d in lines if d.get("type") == "header"), None)
+    records = [EntryRecord.from_dict(d) for d in lines if d.get("type") == "entry"]
     return header, records, torn
 
 
@@ -81,17 +86,22 @@ def _gz_records(path: Path) -> list[dict]:
     return [json.loads(line) for line in lines]
 
 
+def _usd(lines: list[dict]) -> float:
+    return sum(
+        (d.get("usage") or {}).get("usd") or 0.0
+        for d in lines
+        if d.get("type") in ("entry", "spend")
+    )
+
+
 def log_spend(directory: Path) -> float:
-    """What the logs under `directory` record as spent, finished or not."""
+    """What the logs under `directory` record as spent, finished or not,
+    failed entries included."""
     total = 0.0
     for path in directory.rglob(LOG):
-        total += sum(r.usage.get("usd") or 0.0 for r in read_log(path)[1])
+        total += _usd(_log_lines(path)[0])
     for path in directory.rglob(FINAL_LOG):
-        total += sum(
-            (r.get("usage") or {}).get("usd") or 0.0
-            for r in _gz_records(path)
-            if r.get("type") == "entry"
-        )
+        total += _usd(_gz_records(path))
     return total
 
 
@@ -111,10 +121,16 @@ def compile_database(
     spent: float = 0.0,
 ) -> tuple[str, float]:
     log, final = out_dir / LOG, out_dir / FINAL_LOG
+    header = _header(inputs)
     if final.exists() and not log.exists():
+        done = next((d for d in _gz_records(final) if d.get("type") == "header"), None)
+        if done is None or done["inputs"] != header["inputs"]:
+            raise SystemExit(
+                f"{final}: inputs changed since this database was compiled; "
+                "delete its directory to recompile"
+            )
         return "skipped", spent
     out_dir.mkdir(parents=True, exist_ok=True)
-    header = _header(inputs)
     records: list[EntryRecord] = []
     if log.exists():
         old, records, torn = read_log(log)
@@ -124,11 +140,11 @@ def compile_database(
                 "log to start over"
             )
         if torn:
-            # Rewrite without the torn line, so the next append starts clean.
+            # Rewrite without the torn line, so the next append starts clean;
+            # spend lines are kept, so a failed entry's cost is not forgotten.
             log.write_text(
                 "".join(
-                    json.dumps(d, ensure_ascii=False) + "\n"
-                    for d in [old] + [r.to_dict() for r in records]
+                    json.dumps(d, ensure_ascii=False) + "\n" for d in _log_lines(log)[0]
                 ),
                 encoding="utf-8",
             )
@@ -146,6 +162,19 @@ def compile_database(
             record = compile_entry(
                 entry, inputs, db, driver, prior=prior, tables=tables
             )
+            if record.usage.get("fatal"):
+                # The call failed outside the model (the gateway, say). Its
+                # cost is logged so the cap counts it, the entry is left to
+                # rerun, and the compile stops rather than burn the cap on a
+                # route that is down.
+                _append(
+                    log,
+                    {"type": "spend", "entry_id": entry.id, "usage": record.usage},
+                )
+                raise SystemExit(
+                    f"{inputs.db_name}: entry {entry.id} failed: "
+                    f"{record.usage.get('error')}; rerun to resume"
+                )
             _append(log, record.to_dict())
             prior[entry.id] = record
             spent += record.usage.get("usd") or 0.0
@@ -161,40 +190,52 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends
     money; tests replace it."""
-    from pydantic_ai import Tool
-    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai import Tool, capture_run_messages
+    from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
     from pydantic_ai.messages import ModelMessagesTypeAdapter
-    from pydantic_ai.usage import UsageLimits
+    from pydantic_ai.usage import RunUsage, UsageLimits
 
-    from dce.agent import _default_agent_factory
+    from dce import agent as agent_module
     from dce.pricing import cost
 
-    agent = _default_agent_factory(
+    agent = agent_module._default_agent_factory(
         model=COMPILER_MODEL,
         system_prompt=system_prompt,
         tools=[Tool(t) for t in tools],
         retries=MAX_ATTEMPTS + 2,
     )
-    try:
-        result = agent.run_sync(
-            user_prompt, usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT)
-        )
-    except UsageLimitExceeded as exc:
-        # The entry keeps whatever it submitted before the cap; its cost is
-        # unknown here, so it is recorded as such rather than as zero.
-        return DriverResult(messages=[], usage={"usd": None, "error": str(exc)})
-    usage = result.usage()
+    # Filled in place even when the run raises, as `dce.agent.run_task` relies
+    # on: an entry that loops to the request cap is the most expensive kind,
+    # and must not be counted as free.
+    usage = RunUsage()
+    error, fatal = None, False
+    with capture_run_messages() as messages:
+        try:
+            agent.run_sync(
+                user_prompt,
+                usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT),
+                usage=usage,
+            )
+        except (UsageLimitExceeded, UnexpectedModelBehavior) as exc:
+            # The model's own doing: the entry keeps whatever it submitted.
+            error = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:
+            # Anything else (the gateway, the network) stops the compile.
+            error, fatal = f"{type(exc).__name__}: {exc}", True
     in_tok = usage.input_tokens or 0
     out_tok = usage.output_tokens or 0
     cached = getattr(usage, "cache_read_tokens", 0) or 0
+    out = {
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cached_tokens": cached,
+        "usd": cost(COMPILER_MODEL, in_tok, out_tok, cached),
+    }
+    if error is not None:
+        out["error"] = error
+    if fatal:
+        out["fatal"] = True
     return DriverResult(
-        messages=ModelMessagesTypeAdapter.dump_python(
-            result.all_messages(), mode="json"
-        ),
-        usage={
-            "input_tokens": in_tok,
-            "output_tokens": out_tok,
-            "cached_tokens": cached,
-            "usd": cost(COMPILER_MODEL, in_tok, out_tok, cached),
-        },
+        messages=ModelMessagesTypeAdapter.dump_python(messages, mode="json"),
+        usage=out,
     )

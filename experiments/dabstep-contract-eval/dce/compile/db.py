@@ -23,6 +23,10 @@ QUERY_SECONDS = 60.0
 class CompileDB:
     def __init__(self, path: Path, *, init_sql: tuple[str, ...] = ()) -> None:
         self.path = path
+        # pydantic-ai runs a turn's tool calls in parallel threads, and a
+        # DuckDB connection holds one result at a time: without the lock one
+        # query reads another's rows, and the timer interrupts the wrong one.
+        self._lock = threading.Lock()
         self._con = duckdb.connect(str(path), read_only=True)
         try:
             for statement in (*init_sql, "SET enable_external_access = false"):
@@ -43,10 +47,12 @@ class CompileDB:
             timer.cancel()
 
     def tables(self) -> dict[str, list[tuple[str, str]]]:
-        rows = self._con.execute(
-            "SELECT table_name, column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = 'main' ORDER BY table_name, ordinal_position"
-        ).fetchall()
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT table_name, column_name, data_type "
+                "FROM information_schema.columns WHERE table_schema = 'main' "
+                "ORDER BY table_name, ordinal_position"
+            ).fetchall()
         out: dict[str, list[tuple[str, str]]] = {}
         for table, column, data_type in rows:
             out.setdefault(table, []).append((column, data_type))
@@ -62,9 +68,10 @@ class CompileDB:
 
     def run_sql(self, sql: str) -> str:
         try:
-            cursor = self._execute(sql)
-            columns = [d[0] for d in cursor.description or []]
-            rows = cursor.fetchmany(MAX_ROWS + 1)
+            with self._lock:
+                cursor = self._execute(sql)
+                columns = [d[0] for d in cursor.description or []]
+                rows = cursor.fetchmany(MAX_ROWS + 1)
         except duckdb.Error as exc:
             return f"ERROR: {exc}"
         buf = io.StringIO()
@@ -85,7 +92,8 @@ class CompileDB:
             else f"SELECT {expr} FROM {source} LIMIT 5"
         )
         try:
-            self._execute(sql).fetchall()
+            with self._lock:
+                self._execute(sql).fetchall()
         except duckdb.Error as exc:
             return str(exc)
         return None

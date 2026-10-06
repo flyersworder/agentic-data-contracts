@@ -205,3 +205,92 @@ def test_dabstep_compiles_without_opening_tasks_or_golds(tmp_path):
     assert not opened & {str(tmp_path / "tasks.json"), str(tmp_path / "golds.json")}
     contract = DataContract.from_yaml(tmp_path / "out" / "contract.yml")
     assert "1_fees" in contract.to_system_prompt()
+
+
+def _function_factory(fn):
+    from pydantic_ai import Agent
+    from pydantic_ai.models.function import FunctionModel
+
+    def factory(*, model, system_prompt, tools, retries):
+        return Agent(FunctionModel(fn), tools=tools, retries=retries)
+
+    return factory
+
+
+def _looping_model(messages, info):
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.usage import RequestUsage
+
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name="run_sql", args={"sql": "SELECT 1"})],
+        usage=RequestUsage(input_tokens=100_000, output_tokens=100),
+    )
+
+
+def test_an_entry_that_hits_the_request_cap_is_priced_not_free(monkeypatch):
+    import dce.agent
+
+    monkeypatch.setattr(
+        dce.agent, "_default_agent_factory", _function_factory(_looping_model)
+    )
+
+    def run_sql(sql: str) -> str:
+        """Run SQL."""
+        return "x\n1"
+
+    result = run_module.claude_driver(
+        system_prompt="s", user_prompt="u", tools=[run_sql]
+    )
+    assert result.usage["usd"] > 0 and "error" in result.usage
+    assert not result.usage.get("fatal")
+    assert result.messages  # the turns up to the cap are kept
+
+
+def test_a_transport_error_is_priced_and_marked_fatal(monkeypatch):
+    import dce.agent
+
+    def broken(messages, info):
+        raise RuntimeError("529 overloaded")
+
+    monkeypatch.setattr(dce.agent, "_default_agent_factory", _function_factory(broken))
+    result = run_module.claude_driver(system_prompt="s", user_prompt="u", tools=[])
+    assert result.usage["fatal"] and "529" in result.usage["error"]
+    assert result.usage["usd"] == 0.0
+
+
+def test_a_fatal_entry_logs_its_spend_stops_and_is_retried(lsb_data, tmp_path):
+    inputs = livesqlbench.compile_inputs(lsb_data, "shop")
+    out = tmp_path / "c"
+    calls: list = []
+    good = shop_driver(calls)
+
+    def flaky(*, system_prompt, user_prompt, tools):
+        if "## Entry: Shipped Order" in user_prompt and not flaky.failed:
+            flaky.failed = True
+            return DriverResult(
+                messages=[], usage={"usd": 0.4, "error": "529", "fatal": True}
+            )
+        return good(system_prompt=system_prompt, user_prompt=user_prompt, tools=tools)
+
+    flaky.failed = False
+    with pytest.raises(SystemExit, match="529"):
+        compile_database(inputs, out, flaky, spend_cap=10.0)
+    assert log_spend(out) == pytest.approx(0.25 + 0.4)
+    header, records, torn = read_log(out / LOG)
+    assert [r.entry_id for r in records] == [1]
+    status, spent = compile_database(inputs, out, flaky, spend_cap=10.0)
+    assert status == "done" and "Shipped Order" in calls
+    assert log_spend(out) == pytest.approx(1.5 + 0.4)
+
+
+def test_a_finished_database_whose_inputs_changed_is_refused(lsb_data, tmp_path):
+    inputs = livesqlbench.compile_inputs(lsb_data, "shop")
+    out = tmp_path / "c"
+    compile_database(inputs, out, shop_driver([]), spend_cap=10.0)
+    kb = lsb_data / "hf-full-v1" / "shop" / "shop_kb.jsonl"
+    kb.write_text(
+        kb.read_text(encoding="utf-8").replace("loyalty", "LOYALTY"), encoding="utf-8"
+    )
+    changed = livesqlbench.compile_inputs(lsb_data, "shop")
+    with pytest.raises(SystemExit, match="inputs changed"):
+        compile_database(changed, out, shop_driver([]), spend_cap=10.0)

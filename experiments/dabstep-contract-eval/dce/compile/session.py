@@ -15,6 +15,7 @@ The driver -- the model loop -- is injected. Tests script the tool calls;
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Literal
@@ -155,6 +156,9 @@ class _EntrySession:
             m["name"] for r in prior.values() for m in r.metrics
         }
         self.attempts = 0
+        # Parallel submit_entry calls (one turn, several tool calls) must not
+        # race the attempt count.
+        self._lock = threading.Lock()
         self.error: str | None = None
         self.accepted: dict | None = None
         self.queries: list[dict] = []
@@ -179,6 +183,12 @@ class _EntrySession:
 
     # -- the submission rule --------------------------------------------------
     def _submit(self, check: Callable[[], tuple[dict | None, str | None]]) -> str:
+        with self._lock:
+            return self._submit_locked(check)
+
+    def _submit_locked(
+        self, check: Callable[[], tuple[dict | None, str | None]]
+    ) -> str:
         if self.accepted is not None:
             return "Already recorded."
         if self.attempts >= MAX_ATTEMPTS:
@@ -334,7 +344,9 @@ class _EntrySession:
                         "description": text,
                         "sql_expression": "",
                         "source_model": "",
-                        "untranslated": self.error or "no submission",
+                        "untranslated": self.error
+                        or result.usage.get("error")
+                        or "no submission",
                     }
                 )
         elif entry.kind == "illustration":

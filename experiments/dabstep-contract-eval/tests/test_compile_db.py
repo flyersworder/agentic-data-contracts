@@ -48,3 +48,16 @@ def test_check_metric(db):
     assert db.check_metric("g = 1", "t", predicate=True) is None
     assert "nope" in db.check_metric("SUM(nope)", "t", predicate=False)
     assert db.check_metric("g +", "t", predicate=True) is not None
+
+
+def test_concurrent_queries_each_get_their_own_rows(db):
+    # pydantic-ai runs a turn's tool calls in parallel threads; the compiler's
+    # one connection must not hand one query another query's rows.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def ask(i):
+        return db.run_sql(f"SELECT {i} AS x FROM range(30)").splitlines()[1:]
+
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(ask, range(200)))
+    assert [r for i, r in enumerate(results) if r != [str(i)] * 30] == []

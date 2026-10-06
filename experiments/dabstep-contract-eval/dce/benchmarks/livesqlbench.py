@@ -356,23 +356,30 @@ class LiveSQLBench:
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
         if not {"manual_compiled", "contract"} & set(arms):
             return
-        missing = []
+        missing, broken = [], []
         for db in sorted({t.meta["db"] for t in tasks}):
             path = self._contract_dir(db) / "contract.yml"
             if not path.is_file():
                 missing.append(db)
                 continue
+            # Everything an arm reads at build time: `from_yaml` alone does
+            # not open `semantic.yml`; the digest and the appendix do.
             try:
-                self._contract(db)
+                contract_digest(self._contract(db))
+                if "manual_compiled" in arms:
+                    render_compiled(self._contract_dir(db))
             except Exception as exc:
-                raise SystemExit(
-                    f"compiled contract for {db} does not load: {exc}"
-                ) from exc
+                broken.append(
+                    f"compiled contract for {db} does not load: "
+                    f"{type(exc).__name__}: {exc}"
+                )
         if missing:
             raise SystemExit(
                 f"no compiled contract for {missing} under {self._contracts}; run "
                 "`python -m dce.compile --benchmark livesqlbench` first"
             )
+        if broken:
+            raise SystemExit("\n".join(broken))
 
     def golds_hash(self) -> str:
         digests = {

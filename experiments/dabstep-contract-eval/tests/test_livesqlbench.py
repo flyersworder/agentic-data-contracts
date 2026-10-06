@@ -406,3 +406,13 @@ def test_check_arms_names_databases_without_a_compiled_contract(lsb_data, tmp_pa
     bench = LiveSQLBench.from_data(lsb_data, contracts=tmp_path / "broken")
     with pytest.raises(SystemExit, match="does not load"):
         bench.check_arms(("manual_compiled",), tasks)
+
+
+def test_check_arms_loads_the_semantic_source_too(lsb_data, tmp_path):
+    bench, contracts = _compiled(lsb_data, tmp_path)
+    tasks = bench.tasks()
+    (contracts / "shop" / "semantic.yml").unlink()
+    with pytest.raises(SystemExit, match="shop"):
+        bench.check_arms(("contract",), tasks)
+    with pytest.raises(SystemExit, match="shop"):
+        bench.check_arms(("manual_compiled",), tasks)

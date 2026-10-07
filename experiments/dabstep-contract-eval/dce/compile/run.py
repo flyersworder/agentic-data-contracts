@@ -195,9 +195,10 @@ def compile_database(
 
 def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
     """Make a finished database recompile `entry_ids` and every entry built on
-    them, on the next `compile_database`. Their records become `spend` lines,
-    so what they cost still counts, and a `reopen` line records which entries
-    were redone and at what commit. Returns the reopened ids."""
+    them, on the next `compile_database`. Their records become `spend` lines
+    that keep the whole first try under `replaced`, so what it said and cost
+    stays in the log, and a `reopen` line records which entries were redone
+    and at what commit. Returns the reopened ids."""
     from dce.agent import _commit_sha
 
     final = out_dir / FINAL_LOG
@@ -214,7 +215,12 @@ def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
         grew = not parents <= ids
         ids |= parents
     lines = [
-        {"type": "spend", "entry_id": d["entry_id"], "usage": d["usage"]}
+        {
+            "type": "spend",
+            "entry_id": d["entry_id"],
+            "usage": d["usage"],
+            "replaced": {k: v for k, v in d.items() if k != "type"},
+        }
         if d.get("type") == "entry" and d["entry_id"] in ids
         else d
         for d in _gz_records(final)

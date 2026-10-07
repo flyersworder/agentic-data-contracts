@@ -164,6 +164,21 @@ def test_the_prompt_offers_cannot_encode_instead_of_a_placeholder(ctx):
     assert "cannot_encode" in system_prompt(inputs)
 
 
+def test_a_predicate_entry_that_assigns_labels_compiles_as_a_case(ctx):
+    inputs, db, tables, by_id = ctx
+    case = "CASE WHEN tier = 'gold' THEN 'Top' ELSE 'Other' END"
+    driver = scripted(
+        ("submit_entry", {"sql_expression": case, "source_model": "customers"}),
+        (
+            "submit_entry",
+            {"sql_expression": case, "source_model": "customers", "categorical": True},
+        ),
+    )
+    record = compile_entry(by_id[5], inputs, db, driver, prior={}, tables=tables)
+    assert driver.replies[0].startswith("ERROR") and driver.replies[1] == "Recorded."
+    assert record.status == "metric" and record.metrics[0]["sql_expression"] == case
+
+
 def test_an_unknown_source_table_is_an_error_not_a_metric(ctx):
     inputs, db, tables, by_id = ctx
     driver = scripted(

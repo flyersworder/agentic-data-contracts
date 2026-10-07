@@ -55,6 +55,9 @@ not hold, or describe an action, a schema feature or a value rather than a \
 computation or condition over its rows. Do not write a placeholder (a \
 constant, a guessed condition) for one: call submit_entry with an empty \
 sql_expression and source_model and the reason in cannot_encode.
+- A predicate entry that assigns labels (zones, tiers, categories) rather \
+than stating one yes/no condition: submit a CASE expression returning the \
+label, with categorical set to true.
 - run_sql is read-only and returns at most 50 rows.
 - Call submit_entry when you are done. If it returns an error, fix the \
 submission and call it again; you have {attempts} attempts. When it \
@@ -233,18 +236,22 @@ class _EntrySession:
                 source_model: str,
                 note: str = "",
                 cannot_encode: str = "",
+                categorical: bool = False,
             ) -> str:
                 """Submit this entry's metric: a SQL expression over one table, and
                 a note on anything you checked in the data to write it. If it
                 cannot be encoded over this database, say why in cannot_encode
-                and leave the SQL empty."""
+                and leave the SQL empty. categorical: the entry assigns labels,
+                and sql_expression is a CASE returning the label."""
 
                 def check():
                     if cannot_encode.strip():
                         reason = _one_paragraph(cannot_encode)
                         return {"untranslated": reason, "note": note}, None
                     accepted, error = self._metric(
-                        sql_expression, source_model, predicate=predicate
+                        sql_expression,
+                        source_model,
+                        predicate=predicate and not categorical,
                     )
                     return (accepted and {**accepted, "note": note}), error
 

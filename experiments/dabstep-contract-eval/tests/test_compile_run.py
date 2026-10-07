@@ -361,6 +361,17 @@ def test_reopen_recompiles_entries_and_their_parents_keeping_their_cost(
     # Shipped Revenue (3) is built on Shipped Order (2), so it goes too.
     assert reopen(out, inputs, [2]) == [2, 3]
     assert (out / LOG).exists() and not (out / FINAL_LOG).exists()
+    # The first try is kept whole, not only its cost.
+    replaced = [
+        d
+        for d in map(json.loads, (out / LOG).read_text().splitlines())
+        if d["type"] == "spend"
+    ]
+    assert [d["replaced"]["name"] for d in replaced] == [
+        "Shipped Order",
+        "Shipped Revenue",
+    ]
+    assert replaced[0]["replaced"]["metrics"][0]["sql_expression"]
     assert log_spend(tmp_path / "contracts") == pytest.approx(1.5)
     calls: list = []
     status, spent = compile_database(inputs, out, shop_driver(calls), spend_cap=10.0)

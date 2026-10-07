@@ -130,7 +130,19 @@ def _shape_error(expr: str, *, predicate: bool) -> str | None:
         return (
             "a metric must not use random() or uuid(): it gives a new answer each run"
         )
-    if predicate and not any(tree.find_all(exp.Column)):
+    if not isinstance(tree, exp.Select) or len(tree.expressions) != 1:
+        return "a metric is one expression"
+    [value] = tree.expressions
+    if not predicate and isinstance(
+        value.this if isinstance(value, exp.Cast) else value, exp.Null
+    ):
+        return (
+            "a calculation must not be NULL. If the entry cannot be encoded "
+            "over this database, use cannot_encode"
+        )
+    # Inside a call, sqlglot reads DuckDB's JSON arrow `col->'key'` as a
+    # lambda, so its column shows up as a lambda parameter.
+    if predicate and not any(tree.find_all(exp.Column, exp.Lambda)):
         return (
             "a predicate must read a column of the rows; this one reads no column. "
             "If the entry cannot be encoded over this database, use cannot_encode"

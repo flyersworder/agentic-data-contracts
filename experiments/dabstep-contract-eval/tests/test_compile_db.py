@@ -2,7 +2,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from dce.compile.db import MAX_ROWS, CompileDB
+from dce.compile.db import MAX_ROWS, CompileDB, _shape_error
 
 
 @pytest.fixture
@@ -86,3 +86,24 @@ def test_random_is_rejected_in_any_metric(db):
     ):
         error = db.check_metric(expr, "t", predicate=predicate)
         assert error is not None and "random" in error, expr
+
+
+def test_a_json_arrow_inside_a_function_still_reads_a_column(db):
+    # sqlglot parses `col->'key'` inside a call as a lambda, not a column.
+    expr = "COALESCE(CAST(id AS VARCHAR)->'a'->>'b', '') = ''"
+    assert "no column" not in (db.check_metric(expr, "t", predicate=True) or "")
+    expr = "COALESCE(j->'a'->>'b', '') IN ('', 'x')"
+    assert _shape_error(expr, predicate=True) is None
+
+
+def test_a_calculation_that_is_null_is_rejected(db):
+    for constant in ("NULL", "NULL::double", "CAST(NULL AS INTEGER)"):
+        error = db.check_metric(constant, "t", predicate=False)
+        assert error is not None and "NULL" in error, constant
+    assert db.check_metric("INTERVAL '5 minutes'", "t", predicate=False) is None
+
+
+def test_a_metric_is_one_expression(db):
+    error = db.check_metric("id, g", "t", predicate=False)
+    assert error is not None and "one expression" in error
+    assert _shape_error("1 UNION SELECT 2", predicate=False) is not None

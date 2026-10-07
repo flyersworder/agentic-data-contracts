@@ -3,6 +3,8 @@
     uv run python -m dce.compile --benchmark livesqlbench --db households --max-spend 5
     uv run python -m dce.compile --benchmark livesqlbench --all --max-spend 60
     uv run python -m dce.compile --benchmark dabstep --max-spend 10
+    uv run python -m dce.compile --benchmark livesqlbench --db households \
+        --recompile 12 31 --max-spend 60
 
 Output goes to `<out>/<benchmark>/[<db>/]`. `--max-spend` caps the spend
 recorded across every log under `<out>/<benchmark>/`, resumes included.
@@ -35,6 +37,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--out", type=Path, default=Path("contracts"))
     parser.add_argument("--max-spend", type=float, required=True)
+    parser.add_argument(
+        "--recompile",
+        type=int,
+        nargs="+",
+        default=None,
+        help="entry ids of one finished database to compile again, with "
+        "every entry built on them",
+    )
     args = parser.parse_args(argv)
 
     if args.benchmark == "livesqlbench":
@@ -53,6 +63,11 @@ def main(argv: list[str] | None = None) -> None:
 
         work = [dabstep_inputs()]
 
+    if args.recompile:
+        if args.all or len(work) != 1:
+            raise SystemExit("--recompile takes one database (--db NAME)")
+        ids = run_module.reopen(args.out / work[0].out_subdir, work[0], args.recompile)
+        print(f"{work[0].db_name}: recompiling entries {ids}")
     spent = run_module.log_spend(args.out / args.benchmark)
     for inputs in work:
         status, spent = run_module.compile_database(

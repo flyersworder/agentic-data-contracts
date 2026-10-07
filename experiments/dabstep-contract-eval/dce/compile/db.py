@@ -15,6 +15,8 @@ import threading
 from pathlib import Path
 
 import duckdb
+import sqlglot
+from sqlglot import exp
 
 MAX_ROWS = 50
 QUERY_SECONDS = 60.0
@@ -84,8 +86,14 @@ class CompileDB:
         return text
 
     def check_metric(self, expr: str, source: str, *, predicate: bool) -> str | None:
-        """None when the metric runs over `source`: a calculation as
-        `SELECT <expr> FROM <source>`, a predicate as a `WHERE` clause."""
+        """None when the metric runs over `source` (a calculation as
+        `SELECT <expr> FROM <source>`, a predicate as a `WHERE` clause that is
+        BOOLEAN) and has a metric's shape (`_shape_error`); else the error."""
+        return _shape_error(expr, predicate=predicate) or self._run_metric(
+            expr, source, predicate=predicate
+        )
+
+    def _run_metric(self, expr: str, source: str, *, predicate: bool) -> str | None:
         sql = (
             f"SELECT * FROM {source} WHERE {expr} LIMIT 5"
             if predicate
@@ -107,3 +115,24 @@ class CompileDB:
         if kind != "BOOLEAN":
             return f"a predicate must be a BOOLEAN condition; this is {kind}"
         return None
+
+
+def _shape_error(expr: str, *, predicate: bool) -> str | None:
+    """What makes a metric that runs still not a metric: a predicate that reads
+    no column (a constant, which the full compile used as a placeholder for
+    entries it could not encode) and a random draw. An expression sqlglot
+    cannot parse is left to DuckDB, which has already run it."""
+    try:
+        tree = sqlglot.parse_one(f"SELECT {expr}", read="duckdb")
+    except sqlglot.errors.ParseError:
+        return None
+    if any(tree.find_all(exp.Rand, exp.Uuid)):
+        return (
+            "a metric must not use random() or uuid(): it gives a new answer each run"
+        )
+    if predicate and not any(tree.find_all(exp.Column)):
+        return (
+            "a predicate must read a column of the rows; this one reads no column. "
+            "If the entry cannot be encoded over this database, use cannot_encode"
+        )
+    return None

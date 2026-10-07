@@ -17,14 +17,17 @@ import random
 from collections import Counter
 from pathlib import Path
 
-from dce.compile.run import FINAL_LOG, _gz_records
+from dce.compile.run import FINAL_LOG, _gz_records, _usd
 
 
-def _databases(bench_dir: Path) -> list[tuple[str, list[dict]]]:
+def _databases(bench_dir: Path) -> list[tuple[str, list[dict], float]]:
+    """(database, entry records, spend). The spend counts failed and redone
+    entries too, which have no record."""
     out = []
     for log in sorted(bench_dir.rglob(FINAL_LOG)):
-        records = [r for r in _gz_records(log) if r.get("type") == "entry"]
-        out.append((log.parent.name, records))
+        lines = _gz_records(log)
+        records = [r for r in lines if r.get("type") == "entry"]
+        out.append((log.parent.name, records, _usd(lines)))
     return out
 
 
@@ -33,7 +36,7 @@ def render(bench_dir: Path, *, n: int = 30, seed: int = 2026) -> str:
     kinds = [
         k
         for k in ("calculation", "predicate", "illustration", "section")
-        if any(r["kind"] == k for _, rs in dbs for r in rs)
+        if any(r["kind"] == k for _, rs, _ in dbs for r in rs)
     ]
     head = [
         "database",
@@ -55,7 +58,7 @@ def render(bench_dir: Path, *, n: int = 30, seed: int = 2026) -> str:
     totals: Counter = Counter()
     usd_total = 0.0
     sample_pool = []
-    for db, records in dbs:
+    for db, records, usd in dbs:
         by_kind = Counter(r["kind"] for r in records)
         status = Counter(r["status"] for r in records)
         metrics = sum(1 for r in records for m in r["metrics"] if m["sql_expression"])
@@ -68,7 +71,6 @@ def render(bench_dir: Path, *, n: int = 30, seed: int = 2026) -> str:
             else "-"
         )
         queries = sum(len(r["queries"]) for r in records)
-        usd = sum((r.get("usage") or {}).get("usd") or 0.0 for r in records)
         usd_total += usd
         row = [
             db,

@@ -7,7 +7,9 @@ over its source table, an illustration's target must exist -- and the model
 has `MAX_ATTEMPTS` tries. An entry that never validates is KEPT: a
 calculation or predicate becomes a metric with an empty `sql_expression`
 and `untranslated` set to the last error, so its KB text still reaches the
-contract arm (the library carries `untranslated` for exactly this).
+contract arm (the library carries `untranslated` for exactly this). So
+does one the model declares it cannot encode (`cannot_encode`), with its
+reason, instead of a placeholder that would pass the check.
 
 The driver -- the model loop -- is injected. Tests script the tool calls;
 `dce.compile.run.claude_driver` is the only code that spends money.
@@ -48,6 +50,11 @@ source_model; reach other tables through scalar subqueries.
 - Encode what the entry states. Where the data forces a choice the entry \
 does not make (how a value is stored, a JSON path, a unit), check it with \
 run_sql, encode it, and say so in `note`. Add nothing else.
+- Some entries cannot be encoded over this database: they need data it does \
+not hold, or describe an action, a schema feature or a value rather than a \
+computation or condition over its rows. Do not write a placeholder (a \
+constant, a guessed condition) for one: call submit_entry with an empty \
+sql_expression and source_model and the reason in cannot_encode.
 - run_sql is read-only and returns at most 50 rows.
 - Call submit_entry when you are done. If it returns an error, fix the \
 submission and call it again; you have {attempts} attempts. When it \
@@ -222,12 +229,20 @@ class _EntrySession:
             predicate = kind == "predicate"
 
             def submit_entry(
-                sql_expression: str, source_model: str, note: str = ""
+                sql_expression: str,
+                source_model: str,
+                note: str = "",
+                cannot_encode: str = "",
             ) -> str:
                 """Submit this entry's metric: a SQL expression over one table, and
-                a note on anything you checked in the data to write it."""
+                a note on anything you checked in the data to write it. If it
+                cannot be encoded over this database, say why in cannot_encode
+                and leave the SQL empty."""
 
                 def check():
+                    if cannot_encode.strip():
+                        reason = _one_paragraph(cannot_encode)
+                        return {"untranslated": reason, "note": note}, None
                     accepted, error = self._metric(
                         sql_expression, source_model, predicate=predicate
                     )
@@ -326,7 +341,18 @@ class _EntrySession:
                     + ", ".join(self._ref(c) for c in entry.children)
                     + "."
                 )
-            if got:
+            if got and "untranslated" in got:
+                status = "untranslated"
+                metrics.append(
+                    {
+                        "name": self.names[entry.id],
+                        "description": self._with_note(text, note),
+                        "sql_expression": "",
+                        "source_model": "",
+                        "untranslated": got["untranslated"],
+                    }
+                )
+            elif got:
                 status = "metric"
                 metrics.append(
                     {

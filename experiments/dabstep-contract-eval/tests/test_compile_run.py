@@ -7,7 +7,14 @@ import duckdb
 import pytest
 from dce.benchmarks import dabstep, livesqlbench
 from dce.compile import run as run_module
-from dce.compile.run import FINAL_LOG, LOG, compile_database, log_spend, read_log
+from dce.compile.run import (
+    FINAL_LOG,
+    LOG,
+    compile_database,
+    log_spend,
+    read_log,
+    reopen,
+)
 from dce.compile.session import DriverResult
 
 from agentic_data_contracts import DataContract
@@ -343,3 +350,55 @@ def test_a_finished_database_whose_inputs_changed_is_refused(lsb_data, tmp_path)
     changed = livesqlbench.compile_inputs(lsb_data, "shop")
     with pytest.raises(SystemExit, match="inputs changed"):
         compile_database(changed, out, shop_driver([]), spend_cap=10.0)
+
+
+def test_reopen_recompiles_entries_and_their_parents_keeping_their_cost(
+    lsb_data, tmp_path
+):
+    inputs = livesqlbench.compile_inputs(lsb_data, "shop")
+    out = tmp_path / "contracts" / inputs.out_subdir
+    compile_database(inputs, out, shop_driver([]), spend_cap=10.0)
+    # Shipped Revenue (3) is built on Shipped Order (2), so it goes too.
+    assert reopen(out, inputs, [2]) == [2, 3]
+    assert (out / LOG).exists() and not (out / FINAL_LOG).exists()
+    assert log_spend(tmp_path / "contracts") == pytest.approx(1.5)
+    calls: list = []
+    status, spent = compile_database(inputs, out, shop_driver(calls), spend_cap=10.0)
+    assert status == "done" and calls == ["Shipped Order", "Shipped Revenue"]
+    lines = [
+        json.loads(line)
+        for line in gzip.decompress((out / FINAL_LOG).read_bytes())
+        .decode("utf-8")
+        .splitlines()
+    ]
+    [marker] = [d for d in lines if d["type"] == "reopen"]
+    assert marker["entry_ids"] == [2, 3] and marker["commit_sha"]
+    assert log_spend(tmp_path / "contracts") == pytest.approx(2.0)
+    assert DataContract.from_yaml(out / "contract.yml")
+
+
+def test_reopen_refuses_an_unknown_entry_or_an_unfinished_database(lsb_data, tmp_path):
+    inputs = livesqlbench.compile_inputs(lsb_data, "shop")
+    out = tmp_path / "c"
+    with pytest.raises(SystemExit, match="not finished"):
+        reopen(out, inputs, [2])
+    compile_database(inputs, out, shop_driver([]), spend_cap=10.0)
+    with pytest.raises(SystemExit, match="no entry 99"):
+        reopen(out, inputs, [99])
+
+
+def test_the_cli_recompiles_named_entries_of_one_database(
+    lsb_data, tmp_path, monkeypatch
+):
+    from dce.compile.__main__ import main
+
+    calls: list = []
+    monkeypatch.setattr(run_module, "claude_driver", shop_driver(calls))
+    args = ["--benchmark", "livesqlbench", "--lsb-data", str(lsb_data)]
+    args += ["--out", str(tmp_path), "--max-spend", "10"]
+    main([*args, "--db", "shop"])
+    calls.clear()
+    main([*args, "--db", "shop", "--recompile", "2"])
+    assert calls == ["Shipped Order", "Shipped Revenue"]
+    with pytest.raises(SystemExit, match="one database"):
+        main([*args, "--all", "--recompile", "2"])

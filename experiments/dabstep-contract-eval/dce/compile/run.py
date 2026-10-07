@@ -193,6 +193,43 @@ def compile_database(
     return "done", spent
 
 
+def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
+    """Make a finished database recompile `entry_ids` and every entry built on
+    them, on the next `compile_database`. Their records become `spend` lines,
+    so what they cost still counts, and a `reopen` line records which entries
+    were redone and at what commit. Returns the reopened ids."""
+    from dce.agent import _commit_sha
+
+    final = out_dir / FINAL_LOG
+    if not final.exists() or (out_dir / LOG).exists():
+        raise SystemExit(f"{out_dir}: not finished; resume it instead")
+    by_id = {e.id: e for e in inputs.entries}
+    unknown = sorted(set(entry_ids) - set(by_id))
+    if unknown:
+        raise SystemExit(f"{inputs.db_name}: no entry {', '.join(map(str, unknown))}")
+    ids = set(entry_ids)
+    grew = True
+    while grew:
+        parents = {e.id for e in inputs.entries if ids & set(e.children)}
+        grew = not parents <= ids
+        ids |= parents
+    lines = [
+        {"type": "spend", "entry_id": d["entry_id"], "usage": d["usage"]}
+        if d.get("type") == "entry" and d["entry_id"] in ids
+        else d
+        for d in _gz_records(final)
+    ]
+    lines.append(
+        {"type": "reopen", "entry_ids": sorted(ids), "commit_sha": _commit_sha()}
+    )
+    (out_dir / LOG).write_text(
+        "".join(json.dumps(d, ensure_ascii=False) + "\n" for d in lines),
+        encoding="utf-8",
+    )
+    final.unlink()
+    return sorted(ids)
+
+
 def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResult:
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends

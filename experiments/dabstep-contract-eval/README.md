@@ -321,14 +321,19 @@ connection with no file access, at most 50 rows a query. It never opens a
 task, gold or test-case file; a test enforces it. Each KB entry, children
 first, becomes a metric whose SQL must run before it is accepted (3
 attempts; one that never runs is kept, with `untranslated` set) or prose on
-its table, column or domain. DABStep's manual is split at its numbered
+its table, column or domain. A predicate must be BOOLEAN and read a column,
+and no metric may use `random()`; an entry the database cannot answer is
+submitted as `cannot_encode` and kept, `untranslated` with the reason. DABStep's manual is split at its numbered
 headings, one entry per section.
 
 Output goes to `contracts/<benchmark>/<db>/`: `contract.yml`,
 `semantic.yml` and `compile-log.jsonl.gz`, every model turn and query.
 Every finished entry is logged at once, so after a crash or the
 `--max-spend` cap, rerunning the same command resumes: a finished database
-is skipped, and the cap counts what every log already records. The audit
+is skipped, and the cap counts what every log already records.
+`--db NAME --recompile ID...` compiles those entries of a finished database
+again, with every entry built on them; the log keeps what the first try
+cost and records the redo. The audit
 drafts per-database counts and a seeded sample of metrics; the verdicts
 are filled in by hand.
 

@@ -69,3 +69,20 @@ def test_concurrent_queries_each_get_their_own_rows(db):
     with ThreadPoolExecutor(8) as pool:
         results = list(pool.map(ask, range(200)))
     assert [r for i, r in enumerate(results) if r != [str(i)] * 30] == []
+
+
+def test_a_predicate_that_reads_no_column_is_rejected(db):
+    # A constant passes the BOOLEAN check but says nothing about the rows: the
+    # full compile turned entries it could not encode into FALSE and 1=0.
+    for constant in ("TRUE", "1=0", "NULL::boolean", "(SELECT 1) = 1"):
+        error = db.check_metric(constant, "t", predicate=True)
+        assert error is not None and "no column" in error, constant
+
+
+def test_random_is_rejected_in_any_metric(db):
+    for expr, predicate in (
+        ("random() < 0.5 AND g = 1", True),
+        ("id * random()", False),
+    ):
+        error = db.check_metric(expr, "t", predicate=predicate)
+        assert error is not None and "random" in error, expr

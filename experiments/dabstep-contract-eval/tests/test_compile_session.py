@@ -135,6 +135,35 @@ def test_no_submission_is_untranslated_too(ctx):
     assert record.metrics[0]["untranslated"] == "no submission"
 
 
+def test_an_entry_that_cannot_be_encoded_is_untranslated_with_the_reason(ctx):
+    inputs, db, tables, by_id = ctx
+    driver = scripted(
+        (
+            "submit_entry",
+            {
+                "sql_expression": "",
+                "source_model": "",
+                "cannot_encode": "the database records no budget",
+                "note": "Checked every column for cost or budget.",
+            },
+        )
+    )
+    record = compile_entry(by_id[5], inputs, db, driver, prior={}, tables=tables)
+    assert driver.replies == ["Recorded."]
+    assert record.status == "untranslated" and record.attempts == 1
+    [metric] = record.metrics
+    assert metric["sql_expression"] == "" and metric["source_model"] == ""
+    assert metric["untranslated"] == "the database records no budget"
+    assert metric["description"].endswith(
+        NOTE_MARKER + "Checked every column for cost or budget."
+    )
+
+
+def test_the_prompt_offers_cannot_encode_instead_of_a_placeholder(ctx):
+    inputs, *_ = ctx
+    assert "cannot_encode" in system_prompt(inputs)
+
+
 def test_an_unknown_source_table_is_an_error_not_a_metric(ctx):
     inputs, db, tables, by_id = ctx
     driver = scripted(

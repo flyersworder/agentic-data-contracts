@@ -179,6 +179,52 @@ def test_a_predicate_entry_that_assigns_labels_compiles_as_a_case(ctx):
     assert record.status == "metric" and record.metrics[0]["sql_expression"] == case
 
 
+def test_a_child_without_sql_reaches_the_prompt_as_its_kb_text(ctx):
+    # Gold Customer (5) builds on Customer Tier (1), an illustration: its
+    # definition must be shown, or the model guesses the tier values.
+    inputs, db, tables, by_id = ctx
+    driver = scripted()
+    compile_entry(by_id[5], inputs, db, driver, prior={}, tables=tables)
+    assert "Customer Tier: The loyalty tiers customers belong to." in driver.user_prompt
+    assert "Values are 'gold' and 'silver'." in driver.user_prompt
+
+
+def test_an_untranslated_child_reaches_the_prompt_with_its_reason(ctx):
+    inputs, db, tables, by_id = ctx
+    untranslated = EntryRecord(
+        2,
+        "predicate",
+        "Shipped Order",
+        "definitions",
+        "untranslated",
+        [
+            {
+                "name": "shipped_order",
+                "description": "d",
+                "sql_expression": "",
+                "source_model": "",
+                "untranslated": "no status column",
+            }
+        ],
+        [],
+        "",
+        1,
+        None,
+        [],
+        {},
+        [],
+    )
+    driver = scripted()
+    compile_entry(by_id[3], inputs, db, driver, prior={2: untranslated}, tables=tables)
+    assert "Shipped Order (not compiled: no status column)" in driver.user_prompt
+    assert "An order whose status is 'shipped'." in driver.user_prompt
+
+
+def test_the_prompt_forbids_an_arbitrary_limit_pick(ctx):
+    inputs, *_ = ctx
+    assert "LIMIT" in system_prompt(inputs)
+
+
 def test_an_unknown_source_table_is_an_error_not_a_metric(ctx):
     inputs, db, tables, by_id = ctx
     driver = scripted(

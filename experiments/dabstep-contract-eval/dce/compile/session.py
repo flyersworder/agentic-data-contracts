@@ -58,6 +58,10 @@ sql_expression and source_model and the reason in cannot_encode.
 - A predicate entry that assigns labels (zones, tiers, categories) rather \
 than stating one yes/no condition: submit a CASE expression returning the \
 label, with categorical set to true.
+- A scalar subquery must match one row. Check with run_sql that its join is \
+unique; never use LIMIT to pick one of several matches. If several rows \
+match, aggregate them or apply the selection rule the entry states; if it \
+states none, use cannot_encode.
 - run_sql is read-only and returns at most 50 rows.
 - Call submit_entry when you are done. If it returns an error, fix the \
 submission and call it again; you have {attempts} attempts. When it \
@@ -322,17 +326,30 @@ class _EntrySession:
         note = _one_paragraph(note)
         return f"{text}\n\n{NOTE_MARKER}{note}" if note else text
 
+    def _child_lines(self, child: int) -> list[str]:
+        """A child as the model needs it: its SQL when it compiled, else its KB
+        text (a definition kept as prose, or one the data could not support,
+        with the reason) -- without it the model guesses what the child says."""
+        record = self.prior.get(child)
+        metrics = record.metrics if record else []
+        lines = [
+            f"- {m['name']} over {m['source_model']}: {m['sql_expression']}"
+            for m in metrics
+            if m["sql_expression"]
+        ]
+        if lines:
+            return lines
+        kb = self.by_id[child]
+        reason = next((m["untranslated"] for m in metrics if m.get("untranslated")), "")
+        label = f"{kb.name} (not compiled: {reason})" if reason else kb.name
+        return [f"- {label}: {' '.join(kb.text.split())}"]
+
     def user_prompt(self) -> str:
         entry = self.entry
         parts = [INSTRUCTIONS[entry.kind], f"## Entry: {entry.name}\n\n{entry.text}"]
-        built = [
-            f"- {m['name']} over {m['source_model']}: {m['sql_expression']}"
-            for child in entry.children
-            for m in (self.prior[child].metrics if child in self.prior else [])
-            if m["sql_expression"]
-        ]
+        built = [line for child in entry.children for line in self._child_lines(child)]
         if built:
-            parts.append("## Compiled entries it builds on\n\n" + "\n".join(built))
+            parts.append("## Entries it builds on\n\n" + "\n".join(built))
         return "\n\n".join(parts)
 
     def record(self, result: DriverResult) -> EntryRecord:

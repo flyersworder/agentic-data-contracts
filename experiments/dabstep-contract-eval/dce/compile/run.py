@@ -14,6 +14,7 @@ import gzip
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from dce.compile.db import CompileDB
@@ -33,6 +34,12 @@ FINAL_LOG = "compile-log.jsonl.gz"
 #: Model requests per entry. An entry takes a handful (a few queries, one
 #: or two submissions); the cap stops a model that loops.
 COMPILE_REQUEST_LIMIT = 25
+#: The provider's "busy, try later" answers. Measured: two 503s from the
+#: compiler model in the first 20 minutes of the full compile, each stopping
+#: it. Retried with the sweep's 429 waits (`dce.agent.RATE_LIMIT_BACKOFF_S`);
+#: anything else still stops the compile.
+TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504, 529})
+TRANSIENT_BACKOFF_S: tuple[float, ...] = (20.0, 60.0, 180.0, 420.0)
 
 
 def _sha256(path: Path) -> str:
@@ -191,7 +198,11 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
     (route, reasoning effort and caching as for every agent run). Spends
     money; tests replace it."""
     from pydantic_ai import Tool, capture_run_messages
-    from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+    from pydantic_ai.exceptions import (
+        ModelHTTPError,
+        UnexpectedModelBehavior,
+        UsageLimitExceeded,
+    )
     from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -211,11 +222,21 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
     error, fatal = None, False
     with capture_run_messages() as messages:
         try:
-            agent.run_sync(
-                user_prompt,
-                usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT),
-                usage=usage,
-            )
+            # A retry re-runs the entry on the same session: a submission
+            # already accepted stays ("Already recorded."), and `usage` keeps
+            # what the failed attempt spent.
+            for wait in (*TRANSIENT_BACKOFF_S, None):
+                try:
+                    agent.run_sync(
+                        user_prompt,
+                        usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT),
+                        usage=usage,
+                    )
+                    break
+                except ModelHTTPError as exc:
+                    if wait is None or exc.status_code not in TRANSIENT_STATUS:
+                        raise
+                    time.sleep(wait)
         except (UsageLimitExceeded, UnexpectedModelBehavior) as exc:
             # The model's own doing: the entry keeps whatever it submitted.
             error = f"{type(exc).__name__}: {exc}"

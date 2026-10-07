@@ -258,6 +258,55 @@ def test_a_transport_error_is_priced_and_marked_fatal(monkeypatch):
     assert result.usage["usd"] == 0.0
 
 
+def _overloaded_then(answers: int, status: int):
+    """A model whose first `answers` requests fail with `status`, then
+    answers 'done'."""
+    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    def fn(messages, info):
+        fn.calls += 1
+        if fn.calls <= answers:
+            raise ModelHTTPError(status, "claudesonnet5", {"error": "overloaded"})
+        return ModelResponse(parts=[TextPart("done")])
+
+    fn.calls = 0
+    return fn
+
+
+def test_a_transient_provider_error_is_retried_not_fatal(monkeypatch):
+    import dce.agent
+
+    waits: list = []
+    monkeypatch.setattr(run_module.time, "sleep", waits.append)
+    model = _overloaded_then(2, 503)
+    monkeypatch.setattr(dce.agent, "_default_agent_factory", _function_factory(model))
+    result = run_module.claude_driver(system_prompt="s", user_prompt="u", tools=[])
+    assert "error" not in result.usage and not result.usage.get("fatal")
+    assert model.calls == 3 and len(waits) == 2
+
+
+def test_transient_errors_stop_after_the_last_backoff(monkeypatch):
+    import dce.agent
+
+    monkeypatch.setattr(run_module.time, "sleep", lambda s: None)
+    model = _overloaded_then(99, 529)
+    monkeypatch.setattr(dce.agent, "_default_agent_factory", _function_factory(model))
+    result = run_module.claude_driver(system_prompt="s", user_prompt="u", tools=[])
+    assert result.usage["fatal"] and "529" in result.usage["error"]
+    assert model.calls == len(run_module.TRANSIENT_BACKOFF_S) + 1
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    import dce.agent
+
+    monkeypatch.setattr(run_module.time, "sleep", lambda s: None)
+    model = _overloaded_then(99, 400)
+    monkeypatch.setattr(dce.agent, "_default_agent_factory", _function_factory(model))
+    result = run_module.claude_driver(system_prompt="s", user_prompt="u", tools=[])
+    assert result.usage["fatal"] and model.calls == 1
+
+
 def test_a_fatal_entry_logs_its_spend_stops_and_is_retried(lsb_data, tmp_path):
     inputs = livesqlbench.compile_inputs(lsb_data, "shop")
     out = tmp_path / "c"

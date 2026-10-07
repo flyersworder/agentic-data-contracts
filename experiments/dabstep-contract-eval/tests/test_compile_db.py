@@ -50,6 +50,14 @@ def test_check_metric(db):
     assert db.check_metric("g +", "t", predicate=True) is not None
 
 
+def test_predicate_must_be_a_condition(db):
+    # DuckDB coerces a number in WHERE, so a value (a KB entry that states
+    # a fee, not a condition) would otherwise pass as a predicate.
+    error = db.check_metric("id * 2", "t", predicate=True)
+    assert error is not None and "BOOLEAN" in error
+    assert db.check_metric("g = 1 AND id > 0", "t", predicate=True) is None
+
+
 def test_concurrent_queries_each_get_their_own_rows(db):
     # pydantic-ai runs a turn's tool calls in parallel threads; the compiler's
     # one connection must not hand one query another query's rows.

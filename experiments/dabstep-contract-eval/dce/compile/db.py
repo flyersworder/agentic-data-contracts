@@ -91,9 +91,19 @@ class CompileDB:
             if predicate
             else f"SELECT {expr} FROM {source} LIMIT 5"
         )
+        kind = "BOOLEAN"
         try:
             with self._lock:
                 self._execute(sql).fetchall()
+                if predicate:
+                    # DuckDB coerces a number in WHERE, so a value would
+                    # otherwise pass as a condition.
+                    row = self._execute(
+                        f"DESCRIBE SELECT {expr} FROM {source}"
+                    ).fetchone()
+                    kind = row[1] if row else kind
         except duckdb.Error as exc:
             return str(exc)
+        if kind != "BOOLEAN":
+            return f"a predicate must be a BOOLEAN condition; this is {kind}"
         return None

@@ -333,3 +333,13 @@ def test_records_round_trip_and_the_system_prompt_carries_the_context(ctx):
     prompt = system_prompt(inputs)
     assert inputs.ddl in prompt and inputs.column_meanings in prompt
     assert "PostgreSQL" in prompt and str(MAX_ATTEMPTS) in prompt
+
+
+def test_the_system_prompt_carries_the_whole_kb(ctx):
+    # An entry may use a term another entry defines without linking to it (the
+    # full compile refused SSF as undefined; KB entry 3 defines it).
+    inputs, *_ = ctx
+    prompt = system_prompt(inputs)
+    for entry in inputs.entries:
+        assert f"[{entry.id}] {entry.name}: " in prompt
+        assert " ".join(entry.text.split()) in prompt

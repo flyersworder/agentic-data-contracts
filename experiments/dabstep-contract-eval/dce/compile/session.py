@@ -74,6 +74,13 @@ returns "Recorded.", reply "done".
 ## Column meanings
 
 {meanings}
+
+## Knowledge base
+
+The whole documentation, for reference: an entry may use a term another entry \
+defines without naming it as a dependency. Compile only the entry you are given.
+
+{kb}
 """
 
 INSTRUCTIONS: dict[str, str] = {
@@ -149,6 +156,9 @@ def system_prompt(inputs: CompileInputs) -> str:
         attempts=MAX_ATTEMPTS,
         ddl=inputs.ddl,
         meanings=inputs.column_meanings or "(none)",
+        kb="\n".join(
+            f"[{e.id}] {e.name}: {' '.join(e.text.split())}" for e in inputs.entries
+        ),
     )
 
 

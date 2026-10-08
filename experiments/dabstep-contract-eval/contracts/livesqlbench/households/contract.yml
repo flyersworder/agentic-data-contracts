@@ -1,0 +1,92 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: households, compiler: claudesonnet5
+# inputs: households_kb.jsonl, households_column_meaning_base.json, households_schema.txt, households.duckdb
+version: '1.0'
+name: livesqlbench-households
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - amenities
+    - households
+    - infrastructure
+    - locations
+    - properties
+    - service_types
+    - transportation_assets
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Residential Zone Types: Illustrates the types of residential zones based on geographic classification.
+
+
+      Includes ''Urban'' (densely populated city areas), ''Suburban'' (residential outskirts), ''Rural''
+      (sparsely populated countryside), and ''Mixed'' (transitional areas). Null indicates unclassified
+      or pending zoning.
+
+
+      Compiler note: Checked households.loczone and locations.zonenum - both are numeric codes (e.g.,
+      315, 222, 332), not categorical labels like ''Urban''/''Suburban''/''Rural''/''Mixed''. No column
+      stores this classification scheme, so this entry cannot be mapped to any table/column.
+
+
+      Utility Access Level: Illustrates the level of utility connectivity available to households.
+
+
+      Includes ''Full'' (all utilities like water and cable available), ''Partial'' (some utilities available),
+      ''Basic'' (only essential utilities like water), and ''None'' (no utility access). Null indicates
+      unassessed connectivity.
+
+
+      Compiler note: No column stores "Utility Access Level" values; this is a derived/descriptive concept
+      (combining wateraccess and cablestatus) not present as actual stored data in any table/column.
+
+
+      Dwelling Condition Status: Illustrates the maintenance and condition categories of residential properties.
+
+
+      Includes ''Excellent'' (well-maintained), ''Good'' (minor repairs needed), ''Fair'' (moderate repairs
+      needed), ''Poor'' (significant repairs needed). Null indicates unassessed condition.
+
+
+      Compiler note: No column or table encodes a dwelling condition/maintenance status (Excellent/Good/Fair/Poor).
+      properties.dwelling_specs only has Dwelling_Class, Bath_Count, Room_Count - no condition field exists
+      anywhere in the schema.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

@@ -1,0 +1,1073 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: solar_panel, compiler: claudesonnet5
+# inputs: solar_panel_kb.jsonl, solar_panel_column_meaning_base.json, solar_panel_schema.txt, solar_panel.duckdb
+metrics:
+- name: specific_yield
+  description: 'Measures the energy output of a solar plant relative to its rated power capacity over
+    a period.
+
+
+    A measure of energy productivity, calculated as: $Y_{S} = \frac{E_{out}}{P_{rated}}$, where $E_{out}$
+    is the total energy yielded (in kWh) and $P_{rated}$ is the plant''s rated power capacity (in kW).
+
+
+    Compiler note: Specific Yield = energy_yield_kwh (from elec_perf_snapshot) / P_rated in kW. P_rated
+    obtained via plant_record.sitetie -> plants.cap_mw (MW), converted to kW by *1000. Joins snaplink->plant_record.snapkey->plants.sitekey
+    are unique (PK/FK).'
+  sql_expression: (elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::double precision / ((SELECT
+    p.cap_mw FROM plant_record pr JOIN plants p ON p.sitekey = pr.sitetie WHERE pr.snapkey = snaplink)
+    * 1000)
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: power_capacity_factor
+  description: 'Calculates the ratio of a plant''s actual energy output over a period to its potential
+    maximum output.
+
+
+    The ratio of the plant''s actual generated energy to its maximum possible energy output over the same
+    period, expressed as a percentage: $CF = \frac{E_{out}}{P_{rated} \times T_{period}} \times 100\%$,
+    where $T_{period}$ is the number of hours in the period.
+
+
+    Compiler note: Capacity factor is directly stored as energy_yield.capacity_factor_pct (percentage)
+    in the elec_perf_snapshot JSON; used as-is rather than recomputing from energy yield, rated power
+    and period hours.'
+  sql_expression: (elec_perf_snapshot->'energy_yield'->>'capacity_factor_pct')::double precision
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: soiling_loss_index
+  description: 'Quantifies the percentage of power loss due to the accumulation of dirt, dust, and other
+    particulates on panel surfaces.
+
+
+    The percentage reduction in power output caused by soiling. A value of 10% indicates that the current
+    power is 10% lower than it would be if the panels were perfectly clean.
+
+
+    Compiler note: Soiling Loss Index is directly stored as efficiency.soil_loss_pct in the elec_perf_snapshot
+    JSON, representing % power reduction due to soiling.'
+  sql_expression: (elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::double precision
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: thermal_loss_factor
+  description: 'Calculates the efficiency loss of a solar panel due to its operating temperature exceeding
+    the reference temperature.
+
+
+    The reduction in efficiency caused by cell temperature, calculated as: $L_{T} = (T_{cell} - T_{ref})
+    \times |\gamma|$, where $T_{cell}$ is the current cell temperature, $T_{ref}$ is the reference temperature
+    (typically 25°C), and $\gamma$ is the panel''s temperature coefficient of power.
+
+
+    Compiler note: Cell temp from env_snapshot.temperatures.cell_temp_c; reference temp fixed at 25°C;
+    temperature coefficient (gamma) taken from panel_models.tempcoeff via plants.modhook linked through
+    plant_record.sitetie, using absolute value as specified. Each snapref resolves to a unique panel model.'
+  sql_expression: ((env_snapshot->'temperatures'->>'cell_temp_c')::double precision - 25) * ABS((SELECT
+    pm.tempcoeff FROM panel_models pm WHERE pm.modkey = (SELECT p.modhook FROM plants p WHERE p.sitekey
+    = (SELECT pr.sitetie FROM plant_record pr WHERE pr.snapkey = environmental_conditions.snapref))))
+  source_model: main.environmental_conditions
+  domains:
+  - calculations
+- name: system_unavailability
+  description: 'Calculates the proportion of time a system is non-operational or in a state of failure.
+
+
+    The probability that a system will not be operational when needed, calculated using mean time to repair
+    (MTTR) and mean time between failures (MTBF): $U = \frac{MTTR}{MTBF + MTTR}$.
+
+
+    Compiler note: Direct computation using operational_metrics.mttrh (MTTR) and mtbfh (MTBF), both in
+    hours, per U = MTTR/(MTBF+MTTR).'
+  sql_expression: mttrh / (mtbfh + mttrh)
+  source_model: main.operational_metrics
+  domains:
+  - calculations
+- name: fill_factor_degradation
+  description: 'Measures the reduction in the IV curve''s fill factor from its initial value, indicating
+    a decline in solar cell quality.
+
+
+    The absolute difference between the initial fill factor and the current fill factor: $FF_{deg} = FF_{initial}
+    - FF_{now}$. A higher value indicates greater degradation.
+
+
+    Compiler note: Computed as fill_factor_initial - fill_factor_now from iv_curve JSON fields.'
+  sql_expression: (elec_perf_snapshot->'iv_curve'->>'fill_factor_initial')::double - (elec_perf_snapshot->'iv_curve'->>'fill_factor_now')::double
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: operational_expenditure_index
+  description: 'Provides a normalized measure of a plant''s total operational costs relative to its power
+    capacity.
+
+
+    An index representing the cost per unit of capacity, calculated as: $OEI = \frac{C_{maint} + C_{clean}
+    + C_{replace}}{P_{rated}}$, where C represents costs and $P_{rated}$ is the plant''s rated power.
+
+
+    Compiler note: OEI computed per snapshot: sums maintcost, cleancost, replcost from operational_metrics
+    and divides by the parent plant''s rated capacity (cap_mw), joined via plant_record.sitetie -> plants.cap_mw.
+    Each snapshot maps to exactly one plant.'
+  sql_expression: (maintcost + cleancost + replcost) / (SELECT p.cap_mw FROM plant_record pr JOIN plants
+    p ON pr.sitetie = p.sitekey WHERE pr.snapkey = operational_metrics.snapops)
+  source_model: main.operational_metrics
+  domains:
+  - calculations
+- name: annual_degradation_rate_adr
+  description: 'Calculates the average yearly percentage loss in a solar plant''s performance or efficiency
+    since its commissioning.
+
+
+    The annualized rate of performance loss, calculated as: $ADR = \frac{\text{Cumulative Degradation
+    Pct}}{\text{Age in Years}}$.
+
+
+    Compiler note: Cumulative Degradation Pct taken from elec_perf_snapshot.efficiency.cumulative_deg_pct.
+    Age in years computed as the difference between the snapshot''s plant_record.snapts and the plant''s
+    goliveon date (via plant_record.sitetie -> plants.goliveon), converted to years using 365.25-day years.
+    Joins are unique: snaplink/snapkey/sitekey are all primary keys.'
+  sql_expression: (elec_perf_snapshot->'efficiency'->>'cumulative_deg_pct')::double precision / (EXTRACT(EPOCH
+    FROM (( SELECT pr.snapts FROM plant_record pr WHERE pr.snapkey = snaplink ) - ( SELECT pl.goliveon
+    FROM plants pl JOIN plant_record pr2 ON pr2.sitetie = pl.sitekey WHERE pr2.snapkey = snaplink )))/
+    (365.25*86400))
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: system_availability
+  description: 'Calculates the proportion of time a system is operational and available to perform its
+    required function.
+
+
+    The probability that a system is operational, calculated as: $A = 1 - \text{System Unavailability}$.
+    A value of 99% implies the system is non-operational for 1% of the time.
+
+
+    Built on: system_unavailability.
+
+
+    Compiler note: System Availability = 1 - System Unavailability, where System Unavailability = mttrh/(mtbfh+mttrh),
+    per operational_metrics columns MTTRh and MTBFh.'
+  sql_expression: 1 - (mttrh / (mtbfh + mttrh))
+  source_model: main.operational_metrics
+  domains:
+  - calculations
+- name: performance_ratio_pr
+  description: 'Measures the overall efficiency of a solar plant by comparing its actual energy output
+    to its theoretically possible output under given climatic conditions.
+
+
+    A quality factor for a PV plant, calculated as the ratio of the final plant Specific Yield to the
+    reference yield from irradiance: $PR = \frac{\text{Specific Yield}}{H_{POA} / G_{ref}}$, where $H_{POA}$
+    is the total in-plane irradiance (in kWh/m²) and $G_{ref}$ is the reference irradiance (1 kW/m²).
+
+
+    Built on: specific_yield.
+
+
+    Compiler note: PR = Specific Yield (energy_yield_kwh / (cap_mw*1000), reusing specific_yield metric)
+    divided by reference yield H_POA/G_ref, where H_POA is taken as the plant''s poa_irr_w_m2 (from environmental_conditions,
+    joined 1:1 via plant_record.snapkey) converted to kW/m2 by dividing by 1000 (G_ref=1 kW/m2). Verified
+    environmental_conditions.snapref is unique per snaplink.'
+  sql_expression: ((elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::double precision / ((SELECT
+    p.cap_mw FROM plant_record pr JOIN plants p ON p.sitekey = pr.sitetie WHERE pr.snapkey = snaplink)
+    * 1000)) / (((SELECT (ec.env_snapshot->'irradiance'->>'poa_irr_w_m2')::double precision FROM environmental_conditions
+    ec WHERE ec.snapref = snaplink)) / 1000.0)
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: temperature_corrected_performance
+  description: 'Estimates the performance of a solar asset if thermal losses were eliminated.
+
+
+    The asset''s power output adjusted for temperature effects, providing a clearer view of performance
+    irrespective of thermal conditions. Calculated as: $P_{corrected} = \frac{P_{actual}}{1 - \text{Thermal
+    Loss Factor}}$.
+
+
+    Built on: thermal_loss_factor.
+
+
+    Compiler note: P_actual = power_now_w from elec_perf_snapshot.power. Thermal Loss Factor taken as
+    defined in its own entry (cell_temp_c - 25) * |tempcoeff|, joined via environmental_conditions.snapref
+    = electrical_performance.snaplink -> plant_record -> plants -> panel_models (all unique joins verified).
+    No additional unit conversion applied, matching the stated formula P_corrected = P_actual / (1 - Thermal
+    Loss Factor).'
+  sql_expression: "(elec_perf_snapshot->'power'->>'power_now_w')::double precision / (1 - (\n  (SELECT\
+    \ ((ec.env_snapshot->'temperatures'->>'cell_temp_c')::double precision - 25) * ABS((SELECT pm.tempcoeff\
+    \ FROM panel_models pm WHERE pm.modkey = (SELECT p.modhook FROM plants p WHERE p.sitekey = (SELECT\
+    \ pr.sitetie FROM plant_record pr WHERE pr.snapkey = ec.snapref))))\n   FROM environmental_conditions\
+    \ ec WHERE ec.snapref = electrical_performance.snaplink)\n))"
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: lifetime_revenue_loss_projection
+  description: 'Estimates the total potential revenue loss over a plant''s expected lifetime due to its
+    ongoing annual degradation.
+
+
+    A projection of future losses based on the Annual Degradation Rate (ADR). A simplified model is: $LRL
+    = \text{ADR} \times \text{Annual Energy Production} \times \text{Energy Price} \times \text{Remaining
+    Lifetime}$.
+
+
+    Built on: annual_degradation_rate_adr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Requires energy price and remaining lifetime assumptions, neither of which exist in the
+    database schema. Cannot be computed from available data.
+- name: inverter_efficiency_loss
+  description: 'Calculates the percentage of DC power that is lost as heat during the conversion to AC
+    power within the inverter.
+
+
+    The energy loss occurring within the inverter, calculated as: $L_{inv} = 100\% - E_{inv\%}$, where
+    $E_{inv\%}$ is the reported inverter efficiency percentage.
+
+
+    Compiler note: Inverter Efficiency Loss = 100 - inverter_eff_pct, extracted from JSONB field elec_perf_snapshot->inverter->inverter_eff_pct.'
+  sql_expression: 100 - (elec_perf_snapshot->'inverter'->>'inverter_eff_pct')::double precision
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: system_power_loss_ratio
+  description: 'Measures the proportion of power that is generated but lost within the system before reaching
+    the grid.
+
+
+    The ratio of power lost to the total power generated, calculated as: $R_{loss} = \frac{P_{loss}}{P_{output}
+    + P_{loss}}$.
+
+
+    Compiler note: Uses power.power_now_w as P_output and power.power_loss_w as P_loss from elec_perf_snapshot
+    JSONB; both fields may be NULL, yielding NULL ratio.'
+  sql_expression: (elec_perf_snapshot->'power'->>'power_loss_w')::numeric / (((elec_perf_snapshot->'power'->>'power_now_w')::numeric)
+    + ((elec_perf_snapshot->'power'->>'power_loss_w')::numeric))
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: voltage_degradation_factor
+  description: 'Quantifies the decline in a panel''s maximum power point voltage (Vmp) over time.
+
+
+    The fractional loss of voltage capability, calculated as: $V_{deg} = \frac{V_{initial} - V_{now}}{V_{initial}}$.
+
+
+    Compiler note: Uses iv_curve.vmp_initial_v and iv_curve.vmp_now_v from elec_perf_snapshot JSONB; computes
+    (Vinitial-Vnow)/Vinitial.'
+  sql_expression: ((elec_perf_snapshot->'iv_curve'->>'vmp_initial_v')::double precision - (elec_perf_snapshot->'iv_curve'->>'vmp_now_v')::double
+    precision) / (elec_perf_snapshot->'iv_curve'->>'vmp_initial_v')::double precision
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: current_degradation_factor
+  description: 'Quantifies the decline in a panel''s maximum power point current (Imp) over time.
+
+
+    The fractional loss of current-producing capability, calculated as: $I_{deg} = \frac{I_{initial} -
+    I_{now}}{I_{initial}}$.
+
+
+    Compiler note: Uses iv_curve.imp_initial_a and iv_curve.imp_now_a from elec_perf_snapshot JSON; computed
+    as (initial-now)/initial.'
+  sql_expression: (((elec_perf_snapshot->'iv_curve'->>'imp_initial_a')::double precision - (elec_perf_snapshot->'iv_curve'->>'imp_now_a')::double
+    precision) / (elec_perf_snapshot->'iv_curve'->>'imp_initial_a')::double precision)
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: effective_power_output
+  description: 'Calculates the net power delivered by the system after accounting for internal power losses.
+
+
+    The actual usable power from a system, derived from its gross output and its System Power Loss Ratio.
+    It is calculated as: $P_{eff} = P_{gross} \times (1 - \text{System Power Loss Ratio})$.
+
+
+    Built on: system_power_loss_ratio.
+
+
+    Compiler note: P_gross = power_now_w + power_loss_w (total generated power); System Power Loss Ratio
+    = power_loss_w / P_gross; P_eff = P_gross * (1 - ratio), which algebraically reduces to power_now_w.
+    Expressed via the full formula using the two fields from elec_perf_snapshot->''power''.'
+  sql_expression: (((elec_perf_snapshot->'power'->>'power_now_w')::numeric) + ((elec_perf_snapshot->'power'->>'power_loss_w')::numeric))
+    * (1 - ((elec_perf_snapshot->'power'->>'power_loss_w')::numeric) / (((elec_perf_snapshot->'power'->>'power_now_w')::numeric)
+    + ((elec_perf_snapshot->'power'->>'power_loss_w')::numeric)))
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: degradation_adjusted_capacity
+  description: 'Estimates the current effective power capacity of a plant, accounting for cumulative performance
+    degradation since it began operation.
+
+
+    The plant''s nameplate capacity adjusted for long-term wear and aging. The calculation is: $P_{adj}
+    = P_{rated} \times (1 - (\text{Annual Degradation Rate} \times \text{Age}))$.
+
+
+    Built on: annual_degradation_rate_adr.
+
+
+    Compiler note: P_rated taken as plants.cap_mw joined via plant_record on snaplink (unique join: plant_record.snapkey
+    -> plants.sitekey). Age in years computed identically to the ADR entry''s denominator (snapts - goliveon
+    in years), and ADR*Age simplifies algebraically to cumulative_deg_pct/100 fraction, but kept expanded
+    form per ADR definition using the same subqueries for consistency; verified join uniqueness via plant_record
+    PK/FK structure.'
+  sql_expression: "(SELECT pl.cap_mw FROM plant_record pr JOIN plants pl ON pr.sitetie = pl.sitekey WHERE\
+    \ pr.snapkey = snaplink) * (1 - (\n  ((elec_perf_snapshot->'efficiency'->>'cumulative_deg_pct')::double\
+    \ precision / (EXTRACT(EPOCH FROM (( SELECT pr.snapts FROM plant_record pr WHERE pr.snapkey = snaplink\
+    \ ) - ( SELECT pl.goliveon FROM plants pl JOIN plant_record pr2 ON pr2.sitetie = pl.sitekey WHERE\
+    \ pr2.snapkey = snaplink )))/ (365.25*86400)))\n  *\n  (EXTRACT(EPOCH FROM (( SELECT pr.snapts FROM\
+    \ plant_record pr WHERE pr.snapkey = snaplink ) - ( SELECT pl.goliveon FROM plants pl JOIN plant_record\
+    \ pr2 ON pr2.sitetie = pl.sitekey WHERE pr2.snapkey = snaplink )))/ (365.25*86400))\n))"
+  source_model: main.electrical_performance
+  domains:
+  - calculations
+- name: maintenance_cost_to_revenue_impact_ratio
+  description: 'Compares the cost of maintenance activities to the revenue lost during downtime for those
+    repairs.
+
+
+    A ratio indicating the financial efficiency of maintenance, calculated as $R_{M/R} = \frac{\text{Total
+    Maintenance Cost}}{\text{Total Revenue Loss}}$. A value < 1 suggests that the cost of repair was less
+    than the revenue saved by returning the system to operation.
+
+
+    Compiler note: revloss is stored as text with a leading ''$'' and thousands commas (e.g. "$13,375.59
+    "); stripped these and cast to double before dividing maintcost by it, per-row.'
+  sql_expression: maintcost / CAST(REPLACE(REPLACE(TRIM(revloss), '$', ''), ',', '') AS DOUBLE)
+  source_model: main.operational_metrics
+  domains:
+  - calculations
+- name: mean_repair_cost
+  description: 'Calculates the average cost associated with a single repair event.
+
+
+    The total maintenance cost divided by the number of failure events (which can be inferred from the
+    total operational time and MTBF). $C_{repair} = \frac{\text{Total Maintenance Cost}}{\text{Total Time}
+    / MTBF}$.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires "Total Time" (total operational time of the plant/asset over which
+    failures are counted), which is not present anywhere in the schema. operational_metrics only provides
+    MTBFh (mean time between failures) and MaintCost per snapshot, but no total elapsed/operational time
+    field exists to derive the number of failure events (Total Time / MTBF). Without this value the number
+    of failures cannot be computed, so Mean Repair Cost cannot be calculated over this database.
+- name: high_degradation_panel_model
+  description: 'Identifies a solar panel model that degrades at a faster rate than the industry average.
+
+
+    A panel model is considered to have high degradation if its officially specified annual power degradation
+    rate exceeds a certain threshold, for example, 0.7%.
+
+
+    Compiler note: DegYrRate is stored as a percentage value (e.g., 0.36, 0.88); threshold of 0.7% applied
+    directly to this column.'
+  sql_expression: degyrrate > 0.7
+  source_model: main.panel_models
+  domains:
+  - definitions
+- name: tracker_malfunction
+  description: 'Indicates that a solar tracking system is not functioning correctly and may be stuck,
+    in maintenance, or reporting an error.
+
+
+    A condition defined by the tracker''s operational state being ''Error'' or ''Maintenance'', indicating
+    it is not actively tracking the sun to optimize energy capture.
+
+
+    Compiler note: Checked tracker_state values in mech_health_snapshot JSON: ''Normal'', ''Maintenance'',
+    ''Error'' (and possibly ''Stow''). Condition true when tracker_state is ''Error'' or ''Maintenance''.'
+  sql_expression: mech_health_snapshot->'tracker'->>'tracker_state' IN ('Error', 'Maintenance')
+  source_model: main.mechanical_condition
+  domains:
+  - definitions
+- name: data_quality_concern
+  description: 'Flags a dataset or record when its quality score falls below an acceptable threshold,
+    suggesting the data may be unreliable.
+
+
+    A state triggered when a data quality assessment score is below a predefined minimum standard, for
+    instance, a score of less than 50 out of 100.
+
+
+    Compiler note: Data Quality Concern defined as dqscore < 50 (threshold given in definition), applied
+    over inspection.dqscore.'
+  sql_expression: dqscore < 50
+  source_model: main.inspection
+  domains:
+  - definitions
+- name: structural_integrity_warning
+  description: 'Indicates that the physical mounting or support structure of the equipment may be compromised.
+
+
+    A warning state is triggered if the reported status of a mounting structure is ''Unstable'' or ''Check
+    Required''.
+
+
+    Compiler note: Uses mount_cleaning.mount_structure_status field from mech_health_snapshot JSONB; triggers
+    warning when value is ''Unstable'' or ''Check Required''.'
+  sql_expression: mech_health_snapshot->'mount_cleaning'->>'mount_structure_status' IN ('Unstable', 'Check
+    Required')
+  source_model: main.mechanical_condition
+  domains:
+  - definitions
+- name: high_maintenance_priority
+  description: 'A flag indicating that an asset requires immediate or urgent maintenance attention.
+
+
+    A status assigned to an asset when its maintenance priority level is designated as ''High'', signifying
+    a need for prompt corrective action.
+
+
+    Compiler note: Direct check on alert.maintprio field equal to ''High''.'
+  sql_expression: maintprio = 'High'
+  source_model: main.alert
+  domains:
+  - definitions
+- name: high_replacement_priority
+  description: 'A flag indicating that a component or asset is recommended for immediate or urgent replacement.
+
+
+    A status assigned to an asset when its replacement priority level is designated as ''High'', signifying
+    that the component has reached the end of its life or is critically failing.
+
+
+    Compiler note: Flags rows where replacement priority column equals ''High''.'
+  sql_expression: replprio = 'High'
+  source_model: main.alert
+  domains:
+  - definitions
+- name: severe_soiling_condition
+  description: 'Indicates that panel surfaces are heavily soiled, causing a significant loss of energy
+    production.
+
+
+    A condition met when the Soiling Loss Index for a plant is greater than a significant threshold, for
+    example, 15%.
+
+
+    Built on: soiling_loss_index.
+
+
+    Compiler note: Uses soiling_loss_index = soil_loss_pct from elec_perf_snapshot.efficiency; threshold
+    >15% per definition.'
+  sql_expression: (elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::double precision > 15
+  source_model: main.electrical_performance
+  domains:
+  - definitions
+- name: high_environmental_risk_site
+  description: 'Identifies a plant located in an area with significant environmental challenges that could
+    impact performance or safety.
+
+
+    A classification assigned to a site based on its environmental risk tag being ''High''. This may be
+    due to factors like extreme weather, high pollution, or other external risks.
+
+
+    Compiler note: envtag directly stores the environmental risk classification; ''High'' matches the
+    defined threshold.'
+  sql_expression: envtag = 'High'
+  source_model: main.plants
+  domains:
+  - definitions
+- name: warranty_claim_risk
+  description: 'Indicates a high likelihood of future warranty claims based on past activity and current
+    status.
+
+
+    A risk level defined for plants that have a ''Claimed'' warranty status and have logged a high number
+    of claims (e.g., more than 2), suggesting recurring issues.
+
+
+    Compiler note: Encoded as warrstate=''Claimed'' AND warrclaims>2, using plants.warrstate and plants.warrclaims
+    directly.'
+  sql_expression: warrstate = 'Claimed' AND warrclaims > 2
+  source_model: main.plants
+  domains:
+  - definitions
+- name: critical_alert
+  description: 'An urgent notification indicating a severe issue that requires immediate maintenance and
+    potential component replacement.
+
+
+    A state is defined as a Critical Alert when an asset has both a High Maintenance Priority and a High
+    Replacement Priority.
+
+
+    Built on: high_maintenance_priority, high_replacement_priority.
+
+
+    Compiler note: Critical Alert = High Maintenance Priority (maintprio=''High'') AND High Replacement
+    Priority (replprio=''High''), both over alert table.'
+  sql_expression: maintprio = 'High' AND replprio = 'High'
+  source_model: main.alert
+  domains:
+  - definitions
+- name: electrical_integrity_failure
+  description: 'Indicates a failure in the fundamental electrical safety or operational components of
+    the system.
+
+
+    A failure state is declared if the electrical grounding status is ''Failed'' or if a critical component
+    like a bypass diode reports a non-normal status.
+
+
+    Compiler note: Uses grounding_status=''Failed'' OR bypass_diode_status not ''Normal'' (values seen:
+    Normal, Partial, Failed). NULL bypass_diode_status would not satisfy != ''Normal'' due to NULL semantics,
+    but no NULLs reported in data loss; treated as non-failure if NULL per standard SQL comparison.'
+  sql_expression: (mech_health_snapshot->'electrical_integrity'->>'grounding_status') = 'Failed' OR (mech_health_snapshot->'electrical_integrity'->>'bypass_diode_status')
+    != 'Normal'
+  source_model: main.mechanical_condition
+  domains:
+  - definitions
+- name: major_module_degradation
+  description: 'A composite indicator of severe physical aging and damage to solar modules.
+
+
+    A condition is met when multiple signs of severe physical wear are present, such as ''Severe'' busbar
+    corrosion, ''Major'' delamination, and a high count of microcracks (e.g., > 5).
+
+
+    Compiler note: Encoded as conjunction of all three stated signs: busbar_corrosion=''Severe'', delamination_status=''Major'',
+    and microcrack_count > 5, matching the JSON fields in module_surface.'
+  sql_expression: (mech_health_snapshot->'module_surface'->>'busbar_corrosion') = 'Severe' AND (mech_health_snapshot->'module_surface'->>'delamination_status')
+    = 'Major' AND (mech_health_snapshot->'module_surface'->>'microcrack_count')::int > 5
+  source_model: main.mechanical_condition
+  domains:
+  - definitions
+- name: underperforming_asset
+  description: 'An asset whose energy conversion efficiency is significantly below its expected benchmark.
+
+
+    An asset is classified as underperforming if its Performance Ratio (PR) falls below a minimum acceptable
+    threshold, such as 0.75.
+
+
+    Built on: performance_ratio_pr.
+
+
+    Compiler note: Underperforming = Performance Ratio (PR) < 0.75, using the given PR formula (specific
+    yield / reference yield from POA irradiance). Threshold per entry definition.'
+  sql_expression: (((elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::double precision / ((SELECT
+    p.cap_mw FROM plant_record pr JOIN plants p ON p.sitekey = pr.sitetie WHERE pr.snapkey = snaplink)
+    * 1000)) / (((SELECT (ec.env_snapshot->'irradiance'->>'poa_irr_w_m2')::double precision FROM environmental_conditions
+    ec WHERE ec.snapref = snaplink)) / 1000.0)) < 0.75
+  source_model: main.electrical_performance
+  domains:
+  - definitions
+- name: chronic_downtime_asset
+  description: 'An asset that suffers from frequent failures and low operational uptime.
+
+
+    An asset is classified as having chronic downtime if its System Availability is below a critical threshold,
+    for example, 95%.
+
+
+    Built on: system_availability.
+
+
+    Compiler note: System Availability = 1 - MTTRh/(MTBFh+MTTRh); Chronic Downtime Asset flagged when
+    this value is below 0.95 (95%).'
+  sql_expression: (1 - (mttrh / (mtbfh + mttrh))) < 0.95
+  source_model: main.operational_metrics
+  domains:
+  - definitions
+- name: high_cost_asset
+  description: 'An asset with operational expenditures that are excessively high relative to its capacity.
+
+
+    An asset is flagged as high-cost when its Operational Expenditure Index exceeds a predefined value,
+    indicating it is disproportionately expensive to run.
+
+
+    Built on: operational_expenditure_index.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition requires comparing the Operational Expenditure Index to "a predefined value"
+    but no numeric threshold is specified anywhere in the documentation (unlike other entries, e.g. High
+    Degradation Panel Model's 0.7% or Severe Soiling's 15%). Without a concrete threshold value, the condition
+    cannot be encoded.
+- name: critical_mechanical_health
+  description: 'Indicates that an asset is suffering from severe and concurrent mechanical failures.
+
+
+    A state of critical mechanical health is reached when there is an active Structural Integrity Warning
+    and a simultaneous Tracker Malfunction.
+
+
+    Built on: structural_integrity_warning, tracker_malfunction.
+
+
+    Compiler note: Combines Structural Integrity Warning and Tracker Malfunction predicates via AND, both
+    evaluated on mech_health_snapshot JSONB fields.'
+  sql_expression: (mech_health_snapshot->'mount_cleaning'->>'mount_structure_status' IN ('Unstable', 'Check
+    Required')) AND (mech_health_snapshot->'tracker'->>'tracker_state' IN ('Error', 'Maintenance'))
+  source_model: main.mechanical_condition
+  domains:
+  - definitions
+- name: accelerated_aging_asset
+  description: 'An asset showing signs of rapid performance decline and physical deterioration.
+
+
+    An asset is considered to be aging acceleratedly if it exhibits a high Annual Degradation Rate (ADR)
+    and also shows signs of Major Module Degradation.
+
+
+    Built on: annual_degradation_rate_adr, major_module_degradation.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires classifying ADR as "high" but gives no threshold or example value
+    for ADR (unlike other entries, e.g. High Degradation Panel Model, which specify an explicit example
+    threshold like 0.7%). Since the entry itself leaves the "high ADR" cutoff undefined, there is no non-arbitrary
+    value to encode, so this cannot be computed without inventing a threshold the entry does not state.
+- name: overdue_critical_maintenance
+  description: 'A high-priority maintenance task that has not been completed by its scheduled date.
+
+
+    A condition triggered when an inspection result is ''Major Issues'' and the corresponding maintenance
+    schedule status is ''Overdue''.
+
+
+    Compiler note: Encoded directly over inspection table rows: inspectres=''Major Issues'' and maintsched=''Overdue''.
+    No link to plant_record exists for inspection, so condition is evaluated per inspection record.'
+  sql_expression: inspectres = 'Major Issues' AND maintsched = 'Overdue'
+  source_model: main.inspection
+  domains:
+  - definitions
+- name: neglected_asset
+  description: 'An asset that is in a critical state but is not receiving the required attention, indicated
+    by data quality issues and overdue maintenance.
+
+
+    An asset is defined as neglected if it has an active Critical Alert, is subject to Overdue Critical
+    Maintenance, and also has a Data Quality Concern.
+
+
+    Built on: critical_alert, overdue_critical_maintenance, data_quality_concern.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The inspection table (holding inspectres, maintsched, dqscore) has no foreign key or shared
+    identifier linking it to alert or plant_record. Inspection rows are keyed only by inspectmode (a method
+    name, e.g. 'Visual', 'IR Thermal'), not by snapshot/asset. Since Overdue Critical Maintenance and
+    Data Quality Concern are defined over inspection, and Critical Alert is defined over alert (keyed
+    by snapshot), there is no join path to combine these three conditions for a single asset/row.
+- name: decommissioning_candidate
+  description: 'Identifies an asset that may be a candidate for retirement due to extremely poor performance,
+    high costs, and neglect.
+
+
+    A plant is flagged as a decommissioning candidate if it is classified as both a Neglected Asset and
+    a High-Cost Asset.
+
+
+    Built on: neglected_asset, high_cost_asset.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Neglected Asset and High-Cost Asset, both of which cannot be encoded (Neglected
+    Asset lacks a join path linking inspection to alert/plant_record; High-Cost Asset has no specified
+    threshold for the Operational Expenditure Index). Since both components are unencodable, Decommissioning
+    Candidate cannot be encoded either.
+tables:
+- schema: main
+  table: alert
+  columns:
+  - name: snapalrt
+    type: VARCHAR
+    description: TEXT. PK & FK → plant_record.SnapKey. Links to alert snapshot.
+  - name: alrtstate
+    type: VARCHAR
+    description: 'TEXT. Current alert status. NULL means the encoder does not report status or data are
+      missing. Possible values: Critical, Warning.'
+  - name: alrtcnt
+    type: VARCHAR
+    description: 'TEXT. Count of active alerts. Example: 6.0.'
+  - name: maintprio
+    type: VARCHAR
+    description: 'TEXT. Maintenance priority level. NULL means the encoder does not report status or data
+      are missing. Possible values: High, Low, Medium.'
+  - name: replprio
+    type: VARCHAR
+    description: 'TEXT. Replacement priority level. Possible values: High, Low, Medium.'
+- schema: main
+  table: electrical_performance
+  columns:
+  - name: snaplink
+    type: VARCHAR
+    description: TEXT. PK & FK → plant_record.SnapKey. Links to performance snapshot record.
+  - name: elec_perf_snapshot
+    type: JSON
+    description: 'JSONB column. Stores all IV-curve parameters, inverter & grid metrics, efficiency losses
+      and energy-yield KPIs captured for a single timestamp, so analytics engines can fetch the entire
+      electrical-health view from one JSONB column. Fields: {"efficiency": {"instant_eff_pct": "REAL.
+      Current operational efficiency percentage. Example: 18.54.", "eff_loss_pct": "REAL. Efficiency loss
+      since installation. Example: 2.32.", "cumulative_deg_pct": "REAL. Cumulative degradation percentage.
+      Example: 14.69.", "soil_loss_pct": "REAL. Power loss due to soiling. Example: 13.41.", "spectral_mismatch":
+      "TEXT. Specification mismatch factor. Example: 1.005."}, "power": {"power_now_w": "REAL. Current
+      power output in watts. NULL means the encoder does not report status or data are missing. Example:
+      554.51.", "power_loss_w": "REAL. Power loss since installation. NULL means the encoder does not
+      report status or data are missing. Example: 95.49."}, "iv_curve": {"isc_initial_a": "REAL. Initial
+      short-circuit current. Example: 9.09.", "isc_now_a": "REAL. Current short-circuit current. Example:
+      8.51.", "voc_initial_v": "REAL. Initial open-circuit voltage. NULL means the encoder does not report
+      status or data are missing. Example: 49.74.", "voc_now_v": "REAL. Current open-circuit voltage.
+      Example: 43.32.", "imp_initial_a": "REAL. Initial current at maximum power. Example: 9.17.", "imp_now_a":
+      "REAL. Current at maximum power. NULL means the encoder does not report status or data are missing.
+      Example: 7.21.", "vmp_initial_v": "REAL. Initial voltage at maximum power. Example: 38.48.", "vmp_now_v":
+      "REAL. Current voltage at maximum power. Example: 36.98.", "fill_factor_initial": "REAL. Initial
+      fill factor. Example: 0.773.", "fill_factor_now": "REAL. Current fill factor. Example: 0.71.", "series_res_ohm":
+      "TEXT. Series resistance in ohms. Example: 0.174.", "shunt_res_ohm": "REAL. Shunt resistance in
+      ohms. Example: 437.3."}, "inverter": {"inverter_eff_pct": "REAL. Inverter efficiency percentage.
+      Example: 98.43.", "power_factor": "REAL. Inverter power factor. NULL means the encoder does not
+      report status or data are missing. Example: 0.979.", "inverter_temp_c": "REAL. Inverter operating
+      temperature. Example: 49.1."}, "grid": {"grid_voltage_v": "REAL. Grid voltage measurement. NULL
+      means the encoder does not report status or data are missing. Example: 226.9.", "grid_frequency_hz":
+      "REAL. Grid frequency measurement. Example: 49.73.", "power_quality_idx": "REAL. Power quality index.
+      Example: 0.467.", "harmonic_distortion_pct": "REAL. Harmonic distortion percentage. Example: 4.01.",
+      "reactive_power_var": "REAL. Reactive power measurement. NULL means the encoder does not report
+      status or data are missing. Example: 33.0."}, "energy_yield": {"energy_yield_kwh": "REAL. Energy
+      yield in watt-hours. Example: 15.64.", "performance_ratio": "REAL. Performance ratio. NULL means
+      the encoder does not report status or data are missing. Example: 0.846.", "specific_yield_kwh_kw":
+      "REAL. Specific yield in kWh/kWp. Example: 5.18.", "capacity_factor_pct": "REAL. Capacity factor
+      percentage. Example: 27.47.", "availability_pct": "REAL. System availability percentage. Example:
+      97.73."}}
+
+
+      Power Factor: Illustrates the value of the power factor.
+
+
+      A dimensionless ratio ranging from -1 to 1 that represents the ratio of real power (doing work)
+      to apparent power (flowing in the circuit). A value of 1.0 indicates perfect efficiency, while a
+      value of 0.95 is typical for high-efficiency systems. Lower values indicate more reactive power,
+      which does not perform work.
+
+
+      Compiler note: Describes the meaning/range of the inverter.power_factor value stored in the elec_perf_snapshot
+      JSONB column (ratio from -1 to 1, 1.0 = perfect efficiency).
+
+
+      IV Curve Fill Factor: Illustrates the value of the IV curve fill factor.
+
+
+      A measure of the ''squareness'' of the current-voltage (IV) curve, indicating the quality of the
+      solar cell. It is the ratio of the maximum actual power to the theoretical maximum power. A higher
+      value (e.g., >0.8) indicates a higher quality cell with low internal power losses.
+
+
+      Compiler note: Describes the fill_factor_now/fill_factor_initial values stored in elec_perf_snapshot.iv_curve,
+      which quantify IV curve ''squareness'' (ratio of actual max power to theoretical max power).
+
+
+      Total Harmonic Distortion (THD): Illustrates the meaning of the Total Harmonic Distortion percentage.
+
+
+      A measurement of the harmonic distortion present in a signal, defined as the ratio of the sum of
+      the powers of all harmonic components to the power of the fundamental frequency. In power systems,
+      a low THD (e.g., <5%) is desirable for good power quality, while higher values can indicate potential
+      problems for connected equipment.
+
+
+      Compiler note: Describes the meaning of the harmonic_distortion_pct field nested under grid in elec_perf_snapshot
+      JSONB.'
+- schema: main
+  table: environmental_conditions
+  columns:
+  - name: snapref
+    type: VARCHAR
+    description: TEXT. PK & FK → plant_record.SnapKey. Links to environmental snapshot.
+  - name: env_snapshot
+    type: JSON
+    description: 'JSONB column. Bundles ambient weather, plane-of-array irradiance and soiling/atmospheric
+      conditions measured at the plant into one JSONB object for performance-normalisation models. Fields:
+      {"temperatures": {"cell_temp_c": "REAL. Solar cell temperature. NULL means the encoder does not
+      report status or data are missing. Example: 47.3.", "ambient_temp_c": "REAL. Ambient air temperature.
+      Example: 41.2."}, "irradiance": {"ghi_w_m2": "REAL. Solar irradiance measurement. NULL means the
+      encoder does not report status or data are missing. Example: 530.4.", "dni_w_m2": "REAL. Direct
+      irradiance measurement. Example: 169.3.", "dhi_w_m2": "REAL. Diffuse irradiance measurement. Example:
+      44.1.", "poa_irr_w_m2": "REAL. Plane-of-array irradiance. Example: 135.1."}, "atmospheric": {"relative_humidity_pct":
+      "REAL. Relative humidity percentage. Example: 76.1.", "air_pressure_hpa": "REAL. Atmospheric pressure
+      measurement. Example: 1099.2.", "uv_index": "REAL. UV index measurement. Example: 1.1.", "cloud_cover_pct":
+      "REAL. Cloud cover percentage. Example: 12.4.", "dust_density_kg_m3": "REAL. Dust density measurement.
+      Example: 0.056."}, "wind_rain_snow": {"wind_speed_m_s": "REAL. Wind speed measurement. Example:
+      11.6.", "wind_dir_deg": "REAL. Wind direction in degrees. Example: 249.3.", "rain_mm": "REAL. Rainfall
+      measurement in millimeters. Example: 41.3.", "snow_cover_pct": "REAL. Snow cover percentage. Example:
+      24.8."}}
+
+
+      UV Index: Illustrates the value of the UV Index.
+
+
+      An international standard measurement of the strength of the sunburn-producing ultraviolet (UV)
+      radiation at a particular place and time. The scale is open-ended, where 1-2 is Low, 3-5 is Moderate,
+      6-7 is High, 8-10 is Very High, and 11+ is Extreme.
+
+
+      Compiler note: Describes the uv_index field within env_snapshot JSON (atmospheric.uv_index), explaining
+      the UV Index scale categories.'
+- schema: main
+  table: inspection
+  columns:
+  - name: inspectmode
+    type: VARCHAR
+    description: 'TEXT. Inspection method used. Possible values: EL Imaging, IR Thermal, IV Curve, Visual.'
+  - name: inspectres
+    type: VARCHAR
+    description: 'TEXT. Inspection results summary. Possible values: Major Issues, Minor Issues, Pass.'
+  - name: inspectdt
+    type: DATE
+    description: 'DATE. Date of inspection. Example: 45528.'
+  - name: maintsched
+    type: VARCHAR
+    description: 'TEXT. Maintenance schedule status. Possible values: Delayed, On Schedule, Overdue.'
+  - name: dqscore
+    type: FLOAT
+    description: 'REAL. Data quality score. Example: 97.7.
+
+
+      Data Quality Score (DQS): Illustrates the meaning of a Data Quality Score.
+
+
+      A metric, typically on a scale of 0 to 100, that assesses the quality, completeness, and consistency
+      of a set of data. A score of 95-100 indicates high-quality data, while a score below 50 might suggest
+      the data is unreliable for analysis.
+
+
+      Compiler note: Describes the meaning/scale of inspection.dqscore (0-100 data quality score field).'
+- schema: main
+  table: mechanical_condition
+  columns:
+  - name: snapmk
+    type: VARCHAR
+    description: TEXT. PK & FK → plant_record.SnapKey. Links to mechanical condition snapshot.
+  - name: mech_health_snapshot
+    type: JSON
+    description: 'JSONB column. Captures tracker status, glass / back-sheet health, electrical connections
+      and cleaning history for a panel string or block at a given snapshot, allowing O&M teams to query
+      a single JSONB field for mechanical diagnostics. Fields: {"tracker": {"tracker_state": "TEXT. Tracking
+      system operational status. Possible values: Error, Maintenance, Normal.", "tracker_angle_deg": "REAL.
+      Tracking system deviation angle. Example: 20.5."}, "module_surface": {"backsheet_condition": "TEXT.
+      Backsheet material condition assessment. Possible values: Fair, Good, Poor.", "glass_condition":
+      "TEXT. Front glass condition assessment. Possible values: Clear, Damaged, Dusty.", "encapsulant_yellowing":
+      "TEXT. Encapsulant yellowing status. NULL means the encoder does not report status or data are missing.
+      Possible values: Mild, Severe.", "delamination_status": "TEXT. Delamination status. NULL means the
+      encoder does not report status or data are missing. Possible values: Major, Minor.", "busbar_corrosion":
+      "TEXT. Busbar corrosion status. NULL means the encoder does not report status or data are missing.
+      Possible values: Severe, Visible.", "hotspot_count": "BIGINT. Number of detected hot spots. NULL
+      means the encoder does not report status or data are missing. Example: 1.0.", "microcrack_count":
+      "BIGINT. Count of microcracks detected. Example: 7.0.", "snail_trail_severity": "TEXT. Snail trail
+      severity. NULL means the encoder does not report status or data are missing. Possible values: Heavy,
+      Light.", "pid_severity": "TEXT. Potential induced degradation severity. NULL means the encoder does
+      not report status or data are missing. Possible values: High, Low.", "lid_status": "TEXT. Light-induced
+      degradation status. Possible values: Ongoing, Stabilized, Unknown."}, "electrical_integrity": {"bypass_diode_status":
+      "TEXT. Bypass diode functionality status. Possible values: Failed, Normal, Partial.", "junction_box_condition":
+      "TEXT. Junction box condition assessment. Possible values: Fair, Good, Poor.", "cable_condition":
+      "TEXT. Cable condition assessment. NULL means the encoder does not report status or data are missing.
+      Possible values: Fair, Good, Poor.", "connector_condition": "TEXT. Connector condition assessment.
+      Possible values: Fair, Good, Poor.", "grounding_status": "TEXT. Grounding system status. Possible
+      values: Check Required, Failed, Normal."}, "mount_cleaning": {"mount_structure_status": "TEXT. Mounting
+      structure condition. Possible values: Check Required, Stable, Unstable.", "cleaning_cycle_days":
+      "BIGINT. Number of cleaning cycles performed. Example: 38.", "last_clean_date": "DATE. Date of last
+      cleaning. Example: 45671."}}
+
+
+      Tracker System State: Illustrates the different operational states for a solar tracker.
+
+
+      Describes the current status of the solar tracking system. Common states include: ''Normal'' (actively
+      tracking the sun), ''Maintenance'' (undergoing service), ''Error'' (malfunctioning), or ''Stow''
+      (locked in a safe, fixed position due to high winds).
+
+
+      Compiler note: Describes the tracker.tracker_state field within mech_health_snapshot JSON. Actual
+      data only contains ''Error'', ''Normal'', ''Maintenance'' (no ''Stow'' value observed).
+
+
+      Busbar Corrosion Severity: Illustrates the different levels of busbar corrosion on a solar module.
+
+
+      Describes the extent of corrosion on the metallic strips (busbars) that conduct electricity within
+      a solar panel. Levels can range from ''None'' to ''Light'' (minor discoloration), ''Visible'' (clear
+      corrosion affecting small areas), and ''Severe'' (widespread corrosion that can disrupt conductivity
+      and reduce power output).
+
+
+      Compiler note: Describes the busbar_corrosion field within module_surface of mech_health_snapshot
+      JSON (values observed: Visible, Severe, NULL).'
+- schema: main
+  table: operational_metrics
+  columns:
+  - name: snapops
+    type: VARCHAR
+    description: TEXT. PK & FK → plant_record.SnapKey. Links to operational metrics snapshot.
+  - name: mtbfh
+    type: FLOAT
+    description: 'REAL. Mean time between failures in hours. NULL means the encoder does not report status
+      or data are missing. Example: 3713.0.
+
+
+      Mean Time Between Failures (MTBF): Illustrates the meaning of the MTBF value.
+
+
+      A reliability metric that represents the average time a system operates before a failure occurs.
+      It is typically measured in hours. A high MTBF (e.g., >8000 hours) indicates a highly reliable system,
+      while a low MTBF (e.g., <1000 hours) indicates a system that fails frequently.
+
+
+      Compiler note: Describes meaning of MTBFh column (mean time between failures, hours) in operational_metrics.'
+  - name: mttrh
+    type: FLOAT
+    description: 'REAL. Mean time to repair in hours. Example: 8.8.'
+  - name: maintcost
+    type: FLOAT
+    description: 'REAL. Maintenance cost amount. Example: 178.82.'
+  - name: cleancost
+    type: FLOAT
+    description: 'REAL. Cleaning cost amount. Example: 1034.89.'
+  - name: replcost
+    type: FLOAT
+    description: 'REAL. Component replacement cost. Example: 31529.13.'
+  - name: revloss
+    type: VARCHAR
+    description: 'TEXT. Revenue loss amount. Example: 13375.59.'
+  - name: optpot
+    type: VARCHAR
+    description: 'TEXT. Optimization potential assessment. Possible values: High, Low, Medium.'
+- schema: main
+  table: panel_models
+  columns:
+  - name: modkey
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for the solar panel model. Example: Model-102.'
+  - name: makertag
+    type: VARCHAR
+    description: 'TEXT. Manufacturer of the solar panel. NULL means the encoder does not report status
+      or data are missing. Possible values: Canadian Solar, JA Solar, JinkoSolar, Longi, Trina.'
+  - name: pnlkind
+    type: VARCHAR
+    description: 'TEXT. Type of solar panel technology used. Possible values: Bifacial, HJT, Mono-PERC,
+      Poly-PERC, TOPCon.'
+  - name: rated_w
+    type: FLOAT
+    description: 'REAL. Maximum power output in watts under standard test conditions. Possible values:
+      450.0, 500.0, 550.0, 600.0, 650.0.'
+  - name: effpct
+    type: FLOAT
+    description: 'REAL. Percentage efficiency of energy conversion. Example: 20.86.'
+  - name: degyrrate
+    type: FLOAT
+    description: 'REAL. Annual power output degradation rate. Example: 0.36.'
+  - name: tempcoeff
+    type: FLOAT
+    description: 'REAL. Temperature coefficient of power. NULL means the encoder does not report status
+      or data are missing. Example: -0.389.
+
+
+      Temperature Coefficient of Power: Illustrates the value of a panel''s temperature coefficient.
+
+
+      Indicates how much a panel''s power output decreases for every degree Celsius increase in temperature
+      above a reference point (usually 25°C). A typical value is -0.39%/°C, meaning the power output drops
+      by 0.39% for each 1°C rise in temperature.
+
+
+      Compiler note: Describes the meaning/units of panel_models.tempCoeff (e.g. -0.389 %/°C), matching
+      the example value in the entry.'
+  - name: nomoptempc
+    type: VARCHAR
+    description: 'TEXT. Normal operating temperature range. Example: 45.7.
+
+
+      Nominal Operating Cell Temperature (NOCT): Illustrates the meaning of Nominal Operating Cell Temperature.
+
+
+      The temperature reached by open-circuited cells in a module under specific reference conditions
+      (800 W/m² irradiance, 20°C ambient temperature, 1 m/s wind speed). A typical NOCT is around 45°C.
+      It provides a more realistic measure of a panel''s operating temperature in the field than standard
+      test conditions.
+
+
+      Compiler note: NomOpTempC stores NOCT values (e.g., ''45.7 °C'') matching the described measurement
+      condition for nominal operating cell temperature.'
+- schema: main
+  table: plant_panel_model
+  columns:
+  - name: sitelink
+    type: VARCHAR
+    description: TEXT. FK → plants.SiteKey. Reference to associated solar plant.
+  - name: modlink
+    type: VARCHAR
+    description: TEXT. FK → panel_models.ModKey. Reference to panel model used.
+- schema: main
+  table: plant_record
+  columns:
+  - name: snapkey
+    type: VARCHAR
+    description: 'TEXT. Snapshot identifier. Unique ID for performance snapshot. Example: PV937101.'
+  - name: sitetie
+    type: VARCHAR
+    description: TEXT. FK → plants.SiteKey. Links to parent solar plant.
+  - name: snapts
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp when snapshot was taken. Example: 43315.51482.'
+- schema: main
+  table: plants
+  columns:
+  - name: sitekey
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for the solar power plant. Example: SP9227.'
+  - name: sitelabel
+    type: VARCHAR
+    description: 'TEXT. Name or description of the solar facility. Example: Solar Plant West Davidport.'
+  - name: cap_mw
+    type: FLOAT
+    description: 'REAL. Total installed capacity in megawatts. Example: 257.58.'
+  - name: goliveon
+    type: DATE
+    description: 'DATE. Date when the plant became operational. Example: 43159.'
+  - name: modhook
+    type: VARCHAR
+    description: TEXT. Foreign-key referencing panel_models.ModKey. Links to panel model details.
+  - name: tiltdeg
+    type: FLOAT
+    description: 'REAL. Angle of panel tilt from horizontal. Example: 1.2.'
+  - name: azmdeg
+    type: FLOAT
+    description: 'REAL. Panel orientation relative to true north. Example: 169.8.'
+  - name: recyclenote
+    type: VARCHAR
+    description: 'TEXT. Status of panel recycling program. NULL means the encoder does not report status
+      or data are missing. Possible values: Available, In Development.'
+  - name: docstate
+    type: VARCHAR
+    description: 'TEXT. Completeness status of plant documentation. Possible values: Complete, Missing,
+      Partial.'
+  - name: warrstate
+    type: VARCHAR
+    description: 'TEXT. Current status of equipment warranty. NULL means the encoder does not report status
+      or data are missing. Possible values: Active, Claimed, Expired.'
+  - name: warrclaims
+    type: BIGINT
+    description: 'BIGINT. Number of warranty claims made. NULL means the encoder does not report status
+      or data are missing. Possible values: 0.0, 1.0, 2.0, 3.0, 4.0, 5.0.'
+  - name: insurstate
+    type: VARCHAR
+    description: 'TEXT. Current insurance coverage status. Possible values: Covered, Expired, Partial.'
+  - name: complyflag
+    type: VARCHAR
+    description: 'TEXT. Compliance status with regulations. Possible values: Compliant, Non-Compliant,
+      Under Review.'
+  - name: envtag
+    type: VARCHAR
+    description: 'TEXT. Environmental impact classification. Possible values: High, Low, Medium.'

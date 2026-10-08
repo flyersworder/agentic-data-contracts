@@ -1,0 +1,1518 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: organ_transplant, compiler: claudesonnet5
+# inputs: organ_transplant_kb.jsonl, organ_transplant_column_meaning_base.json, organ_transplant_schema.txt, organ_transplant.duckdb
+metrics:
+- name: body_mass_index_bmi
+  description: 'Calculates a person''s body mass index from their weight and height.
+
+
+    BMI is calculated as weight in kilograms divided by the square of height in meters. Formula: $BMI
+    = \frac{weight_{kg}}{height_m^2}$
+
+
+    Compiler note: Computed as weight_kg divided by (height_cm/100)^2 to convert height to meters; verified
+    against stored bmi_val for close match.'
+  sql_expression: wt_kg / POWER(ht_cm / 100.0, 2)
+  source_model: main.recipients_demographics
+  domains:
+  - calculations
+- name: donor_recipient_age_difference
+  description: 'Calculates the absolute age difference between an organ donor and a recipient.
+
+
+    The absolute difference between the recipient''s age and the donor''s age. Formula: $|Age_{recipient}
+    - Age_{donor}|$.
+
+
+    Compiler note: Donor age stored as text like ''57 years, mature donor''; extracted leading integer
+    via split on space. Recipient age is smallint in recipients_demographics. Joined donor/recipient via
+    transplant_matching''s donor_ref_reg/recip_ref_reg (each a unique match to demographics/recipients_demographics
+    PK).'
+  sql_expression: ABS((SELECT age_count FROM recipients_demographics WHERE recip_registry = transplant_matching.recip_ref_reg)
+    - CAST(SPLIT_PART((SELECT age_count FROM demographics WHERE contrib_registry = transplant_matching.donor_ref_reg),
+    ' ', 1) AS INTEGER))
+  source_model: main.transplant_matching
+  domains:
+  - calculations
+- name: total_ischemia_time
+  description: 'Measures the total time an organ is without blood supply, from recovery to transplant.
+
+
+    The sum of the time from organ recovery to preservation and the time from preservation to transplant.
+    Formula: $T_{ischemia} = T_{cold} + T_{warm}$
+
+
+    Compiler note: Interpreted T_cold as the expected cold ischemia time (exp_isch_time, recovery to preservation)
+    and T_warm as the expected transport time (exp_time, preservation to transplant), both stored as text
+    with units suffix; extracted numeric minutes via regex and summed.'
+  sql_expression: CAST(regexp_extract(exp_isch_time, '\d+') AS INT) + CAST(regexp_extract(exp_time, '\d+')
+    AS INT)
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: estimated_glomerular_filtration_rate_egfr
+  description: 'Estimates the kidney''s filtration capacity, a key indicator of renal function.
+
+
+    A calculated rate based on serum creatinine level, age, and gender. A simplified estimation formula
+    is: $eGFR = 141 \times (\frac{Cr}{0.9})^{-0.411} \times 0.993^{Age}$ (for males, where Cr is serum
+    creatinine). The actual formula can be more complex.
+
+
+    Compiler note: Parsed numeric creatinine from don_crtn_val (e.g. ''1.62 mg/dL'') via regex, and numeric
+    age from demographics.age_count (e.g. ''57 years, mature donor'') via regex, joined by recov_don_registry
+    = contrib_registry (1:1 FK). Applied the male formula given in the definition (eGFR = 141*(Cr/0.9)^-0.411*0.993^Age);
+    the entry only specifies the formula for males and notes the actual formula can be more complex (e.g.
+    gender-adjusted), which is not encoded here.'
+  sql_expression: 141 * pow(CAST(regexp_extract(don_crtn_val, '[0-9.]+') AS DOUBLE) / 0.9, -0.411) * pow(0.993,
+    CAST(regexp_extract((SELECT d.age_count FROM demographics d WHERE d.contrib_registry = recov_don_registry),
+    '[0-9]+') AS DOUBLE))
+  source_model: main.function_and_recovery
+  domains:
+  - calculations
+- name: hla_mismatch_score
+  description: 'Quantifies the degree of immunological difference between a donor and recipient based
+    on Human Leukocyte Antigens (HLA).
+
+
+    A count of the mismatched HLA antigens (A, B, DR) between the donor and recipient. Formula: $S_{mismatch}
+    = \sum_{i \in \{A, B, DR\}} (HLA_i^{donor} \neq HLA_i^{recipient})$
+
+
+    Compiler note: Computed as sum of mismatches across HLA-A, HLA-B, HLA-DR loci only (DQ excluded per
+    formula), comparing donor''s hla_info table values to recipient''s hlaprofile JSON fields (Hla_A_Val,
+    Hla_B_Val, Hla_Dr_Val), joined via transplant_matching''s donor_ref_reg/recip_ref_reg which uniquely
+    match each donor/recipient PK.'
+  sql_expression: '(CASE WHEN (SELECT h.hla_a_val FROM hla_info h WHERE h.immu_don_registry = donor_ref_reg)
+    <> (SELECT (r.hlaprofile->>''Hla_A_Val'')::real FROM recipients_immunology r WHERE r.immu_recip_registry
+    = recip_ref_reg) THEN 1 ELSE 0 END)
+
+    + (CASE WHEN (SELECT h.hla_b_val FROM hla_info h WHERE h.immu_don_registry = donor_ref_reg) <> (SELECT
+    (r.hlaprofile->>''Hla_B_Val'')::real FROM recipients_immunology r WHERE r.immu_recip_registry = recip_ref_reg)
+    THEN 1 ELSE 0 END)
+
+    + (CASE WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry = donor_ref_reg) <> (SELECT
+    (r.hlaprofile->>''Hla_Dr_Val'')::real FROM recipients_immunology r WHERE r.immu_recip_registry = recip_ref_reg)
+    THEN 1 ELSE 0 END)'
+  source_model: main.transplant_matching
+  domains:
+  - calculations
+- name: recipient_wait_time_ratio
+  description: 'Calculates the ratio of a recipient''s waiting time to the average waiting time for their
+    specific organ and blood type.
+
+
+    The recipient''s wait time in days converted to years. Formula: $R_{wait} = \frac{T_{recipient_wait_days}}{365.0}$
+
+
+    Compiler note: wait_time stored as text like ''104 days''; extracted the leading numeric day count
+    and divided by 365.0 per the stated formula. Despite the entry''s description mentioning a ratio to
+    average wait time for organ/blood type, the formula given only computes wait time in years, so that
+    is what is encoded.'
+  sql_expression: CAST(split_part(wait_time, ' ', 1) AS DOUBLE) / 365.0
+  source_model: main.clinical
+  domains:
+  - calculations
+- name: size_compatibility_score
+  description: 'A score that assesses the physical size match between a donor and recipient, primarily
+    using Body Mass Index (BMI).
+
+
+    A score derived from the ratio of donor and recipient BMI. Formula: $S_{size} = 1 - |\frac{BMI_{donor}}{BMI_{recipient}}
+    - 1|$.
+
+
+    Built on: body_mass_index_bmi.
+
+
+    Compiler note: Donor BMI taken from demographics.physicalstats->>''Bmi_Value'' (cast to real), recipient
+    BMI from recipients_demographics.bmi_val. Joins via compatibility_metrics.donor_ref_reg -> demographics.contrib_registry
+    and recip_ref_reg -> recipients_demographics.recip_registry, both unique PKs.'
+  sql_expression: 1 - ABS( ((SELECT (physicalstats->>'Bmi_Value')::real FROM demographics d WHERE d.contrib_registry
+    = compatibility_metrics.donor_ref_reg) / (SELECT bmi_val FROM recipients_demographics r WHERE r.recip_registry
+    = compatibility_metrics.recip_ref_reg)) - 1 )
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: age_compatibility_score
+  description: 'A score evaluating the suitability of a donor''s age relative to the recipient''s, considering
+    the Donor-Recipient Age Difference.
+
+
+    A normalized score based on the Donor-Recipient Age Difference. Formula: $S_{age} = e^{-0.03 \times
+    |Age_{recipient} - Age_{donor}|}$, using a standard scaling factor.
+
+
+    Built on: donor_recipient_age_difference.
+
+
+    Compiler note: Uses donor_recipient_age_difference subquery pattern (recipient age_count minus donor
+    age parsed from leading integer in age_count text), applied in exponential decay formula with scaling
+    factor 0.03.'
+  sql_expression: EXP(-0.03 * ABS((SELECT age_count FROM recipients_demographics WHERE recip_registry
+    = transplant_matching.recip_ref_reg) - CAST(SPLIT_PART((SELECT age_count FROM demographics WHERE contrib_registry
+    = transplant_matching.donor_ref_reg), ' ', 1) AS INTEGER)))
+  source_model: main.transplant_matching
+  domains:
+  - calculations
+- name: logistical_feasibility_index
+  description: 'Calculates an index representing the logistical viability of a transplant, considering
+    distance and expected organ preservation time.
+
+
+    A score combining geographic distance and Total Ischemia Time. Formula: $I_{logistics} = (\frac{700}{Distance_{km}})
+    + (\frac{300}{T_{ischemia\_mins}})$
+
+
+    Built on: total_ischemia_time.
+
+
+    Compiler note: Distance is stored as ''X miles'' and ischemia/transport times as ''X minutes ...'';
+    extracted numeric values via regexp. Note: distance column is in miles though formula names it Distance_km;
+    no unit conversion is specified in the documentation so the raw stored numeric value is used as-is.
+    Total ischemia time is the sum of exp_isch_time and exp_time numeric values per the total_ischemia_time
+    definition.'
+  sql_expression: (700.0 / CAST(regexp_extract(distance, '\d+') AS INT)) + (300.0 / (CAST(regexp_extract(exp_isch_time,
+    '\d+') AS INT) + CAST(regexp_extract(exp_time, '\d+') AS INT)))
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: renal_function_score
+  description: 'A composite score to evaluate a donor''s kidney health based on key indicators.
+
+
+    A score calculated from the donor''s Estimated Glomerular Filtration Rate (eGFR) and serum creatinine
+    (Cr) level. Formula: $S_{renal} = (1.0 \times eGFR) - (10.0 \times Cr)$.
+
+
+    Built on: estimated_glomerular_filtration_rate_egfr.
+
+
+    Compiler note: Renal Function Score = eGFR - 10*Cr. Cr parsed as numeric prefix of don_crtn_val (e.g.
+    ''1.62 mg/dL''); donor age parsed as numeric prefix of demographics.age_count (e.g. ''57 years, mature
+    donor'') via scalar subquery matched 1:1 on contrib_registry PK. eGFR formula reuses the provided
+    estimated_glomerular_filtration_rate_egfr expression.'
+  sql_expression: (141 * pow(CAST(regexp_extract(don_crtn_val, '[0-9.]+') AS DOUBLE) / 0.9, -0.411) *
+    pow(0.993, CAST(regexp_extract((SELECT d.age_count FROM demographics d WHERE d.contrib_registry =
+    function_and_recovery.recov_don_registry), '[0-9]+') AS DOUBLE))) - (10.0 * CAST(regexp_extract(don_crtn_val,
+    '[0-9.]+') AS DOUBLE))
+  source_model: main.function_and_recovery
+  domains:
+  - calculations
+- name: immunological_compatibility_score
+  description: 'A comprehensive score assessing the immunological match, factoring in blood type and HLA
+    differences.
+
+
+    A weighted score based on ABO blood type compatibility status and the HLA Mismatch Score. Formula:
+    $S_{immune} = 0.6 \times I_{ABO} + 0.4 \times (1 - \frac{S_{mismatch}}{6})$, where $I_{ABO}$ is 1
+    for compatible, 0 otherwise.
+
+
+    Built on: hla_mismatch_score, abo_blood_type_compatibility.
+
+
+    Compiler note: Combines ABO Blood Type Compatibility (I_ABO: 1 if compatible per O-universal-donor/AB-universal-recipient/matching-type
+    rules, else 0) and HLA Mismatch Score (count of mismatches across A, B, DR loci between donor hla_info
+    and recipient hlaprofile JSON) using compatibility_metrics.donor_ref_reg/recip_ref_reg as the join
+    keys, since match_comp_registry corresponds 1:1 to transplant_matching.match_rec_registry.'
+  sql_expression: "0.6 * (CASE WHEN (\n    CASE\n      WHEN left((SELECT d.blood_class FROM demographics\
+    \ d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),2) = 'AB' THEN TRUE\n      WHEN\
+    \ left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\
+    \ = 'O' THEN TRUE\n      WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE r.recip_registry\
+    \ = compatibility_metrics.recip_ref_reg),2) = 'AB' THEN TRUE\n      WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),1)\
+    \ =\n           left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\
+    \ THEN TRUE\n      ELSE FALSE\n    END\n) THEN 1 ELSE 0 END)\n+ 0.4 * (1 - (\n    (CASE WHEN (SELECT\
+    \ h.hla_a_val FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg) <>\
+    \ (SELECT (r.hlaprofile->>'Hla_A_Val')::real FROM recipients_immunology r WHERE r.immu_recip_registry\
+    \ = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n  + (CASE WHEN (SELECT h.hla_b_val FROM\
+    \ hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_B_Val')::real\
+    \ FROM recipients_immunology r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg)\
+    \ THEN 1 ELSE 0 END)\n  + (CASE WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry\
+    \ = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_Dr_Val')::real FROM recipients_immunology\
+    \ r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n  ) / 6.0)"
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: quality_adjusted_life_year_qaly
+  description: 'A measure of disease burden, including both the quality and the quantity of life lived.
+
+
+    Calculated by multiplying the years of life by a quality-of-life score. Formula: $QALY = Years_{life}
+    \times Quality_{score}$'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires "Years of life" (a projected life expectancy/remaining years figure),
+    which is not present anywhere in the database. Tables only contain current ages (recipients_demographics.age_count,
+    demographics.age_count) and a quality-of-life score (risk_evaluation.qol_val), but no computed or
+    projected years-of-life value to multiply by the quality score.
+- name: cost_effectiveness_ratio_cer
+  description: 'Calculates the cost per unit of health outcome, often using Quality-Adjusted Life Year
+    (QALY).
+
+
+    The ratio of the net cost of an intervention to its net health gain. Formula: $CER = \frac{Cost_{net}}{QALY_{gained}}$
+
+
+    Built on: quality_adjusted_life_year_qaly.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CER requires QALY_gained, which depends on "Years of life" (projected remaining life expectancy).
+    This value is not present in the database - only current ages exist, no projected/remaining life expectancy
+    figures. Since QALY cannot be computed, CER = Cost_net / QALY_gained cannot be encoded either.
+- name: expected_graft_survival_egs_score
+  description: 'Predicts the probability of a transplanted organ functioning successfully over a specific
+    period.
+
+
+    A predictive score based on factors like the Immunological Compatibility Score and donor age. Formula:
+    $EGS = \frac{1}{1 + e^{-(-0.5 + 1.5 S_{immune} - 0.02 Age_{donor})}}$
+
+
+    Built on: immunological_compatibility_score.
+
+
+    Compiler note: EGS = 1/(1+exp(-(-0.5+1.5*S_immune-0.02*Age_donor))), reusing Immunological Compatibility
+    Score formula from compatibility_metrics; donor age parsed as leading integer from demographics.age_count
+    text (e.g. ''57 years, mature donor'' -> 57).'
+  sql_expression: "1.0 / (1.0 + exp(-(\n  -0.5\n  + 1.5 * (\n      0.6 * (CASE WHEN (\n          CASE\n\
+    \            WHEN left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),2)\
+    \ = 'AB' THEN TRUE\n            WHEN left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry\
+    \ = compatibility_metrics.donor_ref_reg),1) = 'O' THEN TRUE\n            WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),2)\
+    \ = 'AB' THEN TRUE\n            WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE\
+    \ r.recip_registry = compatibility_metrics.recip_ref_reg),1) =\n                 left((SELECT d.blood_class\
+    \ FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1) THEN TRUE\n\
+    \            ELSE FALSE\n          END\n      ) THEN 1 ELSE 0 END)\n      + 0.4 * (1 - (\n       \
+    \   (CASE WHEN (SELECT h.hla_a_val FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg)\
+    \ <> (SELECT (r.hlaprofile->>'Hla_A_Val')::real FROM recipients_immunology r WHERE r.immu_recip_registry\
+    \ = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n        + (CASE WHEN (SELECT h.hla_b_val\
+    \ FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_B_Val')::real\
+    \ FROM recipients_immunology r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg)\
+    \ THEN 1 ELSE 0 END)\n        + (CASE WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry\
+    \ = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_Dr_Val')::real FROM recipients_immunology\
+    \ r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n      \
+    \  ) / 6.0)\n  )\n  - 0.02 * (SELECT CAST(split_part(d.age_count, ' ', 1) AS INT) FROM demographics\
+    \ d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg)\n)))"
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: patient_urgency_score
+  description: 'A score that quantifies the urgency of a recipient''s need for a transplant.
+
+
+    A composite score based on the recipient''s medical urgency status and their Recipient Wait Time Ratio.
+    Formula: $S_{urgency} = 0.7 \times Status_{medical} + 0.3 \times R_{wait}$
+
+
+    Built on: recipient_wait_time_ratio, medical_urgency_status.
+
+
+    Compiler note: Combines medical_urgency_status mapping and recipient_wait_time_ratio (wait_time first
+    token parsed as days / 365).'
+  sql_expression: 0.7 * (CASE WHEN med_urgency = 'Status 1A' THEN 5 WHEN med_urgency = 'Status 1B' THEN
+    4 WHEN med_urgency IN ('Status 2','2') THEN 3 WHEN med_urgency IN ('Status 3','3') THEN 2 ELSE 1 END)
+    + 0.3 * (CAST(split_part(wait_time, ' ', 1) AS DOUBLE) / 365.0)
+  source_model: main.clinical
+  domains:
+  - calculations
+- name: center_performance_score
+  description: 'A score evaluating a transplant center''s performance based on its experience and patient
+    outcomes.
+
+
+    A weighted average of a center''s transplant volume and its post-transplant success rates. Formula:
+    $S_{center} = 0.6 \times V_{transplants} + 0.4 \times R_{success}$
+
+
+    Compiler note: Mapped V_transplants to cntr_vol_val (center volume score) and R_success to cntr_out_val
+    (center outcomes score), both present in risk_evaluation.'
+  sql_expression: 0.6 * cntr_vol_val + 0.4 * cntr_out_val
+  source_model: main.risk_evaluation
+  domains:
+  - calculations
+- name: surgical_risk_score
+  description: 'A score assessing the risk associated with the transplant surgery itself.
+
+
+    A composite score derived from the recipient''s comorbidities and the inherent complexity of the surgical
+    procedure. Formula: $S_{surgical} = 0.6 \times N_{comorbidities} + 0.4 \times C_{procedure}$, where
+    components are normalized.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires N_comorbidities (count of recipient comorbidities) and C_procedure
+    (surgical complexity) to be 'normalized', but the database/documentation gives no defined normalization
+    scheme (e.g., max comorbidity count or scale) to convert the raw comorbid_detail count into a normalized
+    component. surg_cmpl_val appears to already be a normalized complexity score, but without a defined
+    normalization for comorbidity count, the formula cannot be reliably encoded.
+- name: composite_allocation_score
+  description: 'A comprehensive score used to rank recipients for organ allocation, integrating multiple
+    key factors.
+
+
+    A weighted sum of the Patient Urgency Score, Immunological Compatibility Score, and Expected Graft
+    Survival (EGS) Score. Formula: $S_{allocation} = 0.5 S_{urgency} + 0.25 S_{immune} + 0.25 EGS$
+
+
+    Built on: patient_urgency_score, immunological_compatibility_score, expected_graft_survival_egs_score.
+
+
+    Compiler note: Composite = 0.5*patient_urgency_score (joined via clinical on recip_ref_reg, unique
+    per recipient; wait_time parsed as leading number of days) + 0.25*immunological_compatibility_score
+    + 0.25*expected_graft_survival_egs_score, reusing the sub-metrics'' definitions exactly as previously
+    encoded over compatibility_metrics/clinical/demographics/hla_info/recipients_immunology/recipients_demographics.
+    Recipients lacking a clinical row yield NULL urgency and hence NULL composite.'
+  sql_expression: "0.5 * (\n  (SELECT 0.7 * (CASE WHEN cl.med_urgency = 'Status 1A' THEN 5\n         \
+    \             WHEN cl.med_urgency = 'Status 1B' THEN 4\n                      WHEN cl.med_urgency\
+    \ IN ('Status 2','2') THEN 3\n                      WHEN cl.med_urgency IN ('Status 3','3') THEN 2\n\
+    \                      ELSE 1 END)\n          + 0.3 * (CAST(split_part(cl.wait_time, ' ', 1) AS DOUBLE)\
+    \ / 365.0)\n     FROM clinical cl WHERE cl.clin_recip_registry = compatibility_metrics.recip_ref_reg)\n\
+    )\n+ 0.25 * (\n  0.6 * (CASE WHEN (\n      CASE\n        WHEN left((SELECT d.blood_class FROM demographics\
+    \ d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),2) = 'AB' THEN TRUE\n        WHEN\
+    \ left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\
+    \ = 'O' THEN TRUE\n        WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE r.recip_registry\
+    \ = compatibility_metrics.recip_ref_reg),2) = 'AB' THEN TRUE\n        WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),1)\
+    \ =\n             left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\
+    \ THEN TRUE\n        ELSE FALSE\n      END\n  ) THEN 1 ELSE 0 END)\n  + 0.4 * (1 - (\n      (CASE\
+    \ WHEN (SELECT h.hla_a_val FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg)\
+    \ <> (SELECT (r.hlaprofile->>'Hla_A_Val')::real FROM recipients_immunology r WHERE r.immu_recip_registry\
+    \ = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n    + (CASE WHEN (SELECT h.hla_b_val\
+    \ FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_B_Val')::real\
+    \ FROM recipients_immunology r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg)\
+    \ THEN 1 ELSE 0 END)\n    + (CASE WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry\
+    \ = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_Dr_Val')::real FROM recipients_immunology\
+    \ r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n    ) /\
+    \ 6.0)\n)\n+ 0.25 * (\n  1.0 / (1.0 + exp(-(\n    -0.5\n    + 1.5 * (\n        0.6 * (CASE WHEN (\n\
+    \            CASE\n              WHEN left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry\
+    \ = compatibility_metrics.donor_ref_reg),2) = 'AB' THEN TRUE\n              WHEN left((SELECT d.blood_class\
+    \ FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1) = 'O' THEN\
+    \ TRUE\n              WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE r.recip_registry\
+    \ = compatibility_metrics.recip_ref_reg),2) = 'AB' THEN TRUE\n              WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),1)\
+    \ =\n                   left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry =\
+    \ compatibility_metrics.donor_ref_reg),1) THEN TRUE\n              ELSE FALSE\n            END\n \
+    \       ) THEN 1 ELSE 0 END)\n        + 0.4 * (1 - (\n            (CASE WHEN (SELECT h.hla_a_val FROM\
+    \ hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_A_Val')::real\
+    \ FROM recipients_immunology r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg)\
+    \ THEN 1 ELSE 0 END)\n          + (CASE WHEN (SELECT h.hla_b_val FROM hla_info h WHERE h.immu_don_registry\
+    \ = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_B_Val')::real FROM recipients_immunology\
+    \ r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n      \
+    \    + (CASE WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg)\
+    \ <> (SELECT (r.hlaprofile->>'Hla_Dr_Val')::real FROM recipients_immunology r WHERE r.immu_recip_registry\
+    \ = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n          ) / 6.0)\n    )\n    - 0.02\
+    \ * (SELECT CAST(split_part(d.age_count, ' ', 1) AS INT) FROM demographics d WHERE d.contrib_registry\
+    \ = compatibility_metrics.donor_ref_reg)\n  )))\n)"
+  source_model: main.compatibility_metrics
+  domains:
+  - calculations
+- name: resource_utilization_index
+  description: 'An index that estimates the expected consumption of medical resources for a transplant
+    case.
+
+
+    A calculated index based on the Surgical Risk Score and expected length of hospital stay. Formula:
+    $I_{resource} = S_{surgical} \times Days_{stay}$
+
+
+    Built on: surgical_risk_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Depends on Surgical Risk Score, which itself cannot be encoded because the normalization
+    scheme for N_comorbidities and C_procedure is not defined in the data/documentation. Also "expected
+    length of hospital stay" (Days_stay) has no corresponding column in the schema. Without both components
+    defined, this index cannot be computed.
+- name: readmission_risk_index
+  description: 'A predictive index for the likelihood of a patient being readmitted to the hospital post-transplant.
+
+
+    A risk index calculated from the number of pre-existing medical conditions and the Surgical Risk Score.
+    Formula: $I_{readmission} = 0.1 + (0.05 \times N_{conditions}) + (0.2 \times S_{surgical})$
+
+
+    Built on: surgical_risk_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric depends on Surgical Risk Score (S_surgical), which itself cannot be encoded
+    because the database/documentation gives no defined normalization scheme for N_comorbidities and C_procedure.
+    Since Readmission Risk Index requires this unencodable sub-component, it cannot be encoded either.
+- name: abo_blood_type_compatibility
+  description: 'Defines the rules for matching blood types between an organ donor and recipient to prevent
+    hyperacute rejection.
+
+
+    A fundamental matching rule where recipient blood type determines acceptable donor types. Type O is
+    the universal donor; Type AB is the universal recipient. Type A can receive from A and O. Type B can
+    receive from B and O.
+
+
+    Compiler note: ABO letter extracted from the leading token of demographics.blood_class (text like
+    ''O+ universal donor compatible'') via left(...,1) or left(...,2) for ''AB'', and from recipients_demographics.blood_class
+    directly (already clean ''A+'',''O-'' etc). Rule: O donor compatible with all; AB recipient accepts
+    all; A recipient accepts A or O; B recipient accepts B or O. Donor/recipient uniquely resolved via
+    FK to demographics/recipients_demographics by registry.'
+  sql_expression: "CASE\n  WHEN left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry\
+    \ = compatibility_metrics.donor_ref_reg),2) = 'AB'\n    THEN TRUE\n  WHEN left((SELECT d.blood_class\
+    \ FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1) = 'O'\n \
+    \   THEN TRUE\n  WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE r.recip_registry\
+    \ = compatibility_metrics.recip_ref_reg),2) = 'AB'\n    THEN TRUE\n  WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),1)\
+    \ =\n       left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\n\
+    \    THEN TRUE\n  ELSE FALSE\nEND"
+  source_model: main.compatibility_metrics
+  domains:
+  - definitions
+- name: cold_ischemia
+  description: 'The period during which a harvested organ is kept cold to preserve it, starting from when
+    its blood supply is cut off until it is transplanted.
+
+
+    A state of organ preservation where metabolic activity is slowed by cooling, typically to around 4°C,
+    to minimize tissue damage while outside the body. This is a critical factor in transplant success.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This describes a physical/process concept (organ preservation state via cooling) rather
+    than a boolean condition, computation, or stored value over any table's rows. No column captures temperature
+    or this preservation state; related fields like org_isch_time/org_presv_meth describe duration and
+    method text, not this definitional state.
+- name: human_leukocyte_antigen_hla_typing
+  description: 'The process of identifying specific HLA protein markers on a person''s cells to match
+    a donor with a recipient for transplantation.
+
+
+    A genetic test that identifies a person''s unique HLA markers. A closer HLA match between a donor
+    and recipient reduces the risk of the recipient''s immune system attacking, or rejecting, the transplanted
+    organ.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This describes a laboratory testing process (HLA typing) and a general qualitative statement
+    about match quality reducing rejection risk, not a boolean condition or computation over any table's
+    rows.
+- name: panel_reactive_antibody_pra
+  description: 'A test that measures the level of pre-existing antibodies in a recipient''s blood against
+    common HLA antigens, indicating their sensitization level.
+
+
+    A measure of a recipient''s sensitization to foreign HLA antigens, represented by the `pra_score`[cite:
+    36]. For matching purposes, a recipient with a `pra_score` of 80 or higher is defined as having a
+    ''high PRA score'', indicating a state of high immunological sensitization.
+
+
+    Built on: human_leukocyte_antigen_hla_typing.
+
+
+    Compiler note: High PRA score defined as pra_score >= 80, per definition.'
+  sql_expression: pra_score >= 80
+  source_model: main.recipients_immunology
+  domains:
+  - definitions
+- name: crossmatch_test
+  description: 'A final compatibility test performed just before transplant surgery to ensure the recipient
+    has no pre-formed antibodies against the specific donor''s tissues.
+
+
+    A laboratory test that directly mixes the recipient''s serum with the donor''s lymphocytes. A ''positive''
+    Crossmatch Test indicates the presence of donor-specific antibodies and is a contraindication to transplantation,
+    as it predicts immediate organ rejection.
+
+
+    Compiler note: Crossmatch positivity is stored in recipients_immunology.cross_result with values Negative/Pending/Positive;
+    a ''Positive'' result indicates donor-specific antibodies present (contraindication).'
+  sql_expression: cross_result = 'Positive'
+  source_model: main.recipients_immunology
+  domains:
+  - definitions
+- name: medical_urgency_status
+  description: 'A classification system used to prioritize patients on the transplant waiting list based
+    on their immediate need and risk of mortality.
+
+
+    A tiered system that reflects how critically ill a patient is. For calculation purposes, statuses
+    are mapped to numerical values: Status 1A is assigned a value of 5, Status 1B is 4, Status 2 is 3,
+    and Status 3 is 2. All other statuses are assigned a value of 1.
+
+
+    Compiler note: med_urgency values observed: ''Status 1A'',''Status 1B'',''Status 2'',''2'',''Status
+    3'',''3''. Mapped per definition: Status 1A=5, Status 1B=4, Status 2 (incl. noisy ''2'')=3, Status
+    3 (incl. noisy ''3'')=2, all else=1.'
+  sql_expression: CASE WHEN med_urgency = 'Status 1A' THEN 5 WHEN med_urgency = 'Status 1B' THEN 4 WHEN
+    med_urgency IN ('Status 2','2') THEN 3 WHEN med_urgency IN ('Status 3','3') THEN 2 ELSE 1 END
+  source_model: main.clinical
+  domains:
+  - definitions
+- name: donor_specific_antibodies_dsa
+  description: 'Antibodies in a recipient''s blood that are specifically directed against a particular
+    donor''s HLA antigens.
+
+
+    The presence of these antibodies is identified by a positive Crossmatch Test. They pose a significant
+    risk for antibody-mediated rejection of the transplanted organ.
+
+
+    Built on: human_leukocyte_antigen_hla_typing, crossmatch_test.
+
+
+    Compiler note: DSA presence is identified by a positive Crossmatch Test, encoded as cross_result =
+    ''Positive'' on recipients_immunology.'
+  sql_expression: cross_result = 'Positive'
+  source_model: main.recipients_immunology
+  domains:
+  - definitions
+- name: high_risk_donor
+  description: 'An organ donor who has a history of certain medical conditions or behaviors that may increase
+    the risk of disease transmission or poorer graft function in the recipient.
+
+
+    A donor category defined by criteria such as a history of communicable diseases (e.g., Hepatitis C,
+    HIV), malignancy, or high-risk social behaviors (e.g., intravenous drug use). The use of organs from
+    a High-Risk Donor requires careful evaluation and informed consent.
+
+
+    Compiler note: Encoded High-Risk Donor as: malignancy (med_history containing ''Cancer''), high-risk
+    social behavior (drug_cond = ''Current use, high risk assessment''), or communicable disease (Hepatitis
+    C or HIV positive status from viralstatinfo JSON). Hepatitis B not included per entry''s explicit
+    examples (Hepatitis C, HIV). Checked distinct values of med_history and drug_cond, and viralstatinfo
+    JSON structure to confirm field names/values.'
+  sql_expression: med_history LIKE '%Cancer%' OR drug_cond = 'Current use, high risk assessment' OR json_extract_string(viralstatinfo,
+    'Hcv_State') = 'Positive' OR json_extract_string(viralstatinfo, 'Hiv_State') = 'Positive'
+  source_model: main.medical_history
+  domains:
+  - definitions
+- name: graft_survival
+  description: 'Refers to the period of time a transplanted organ continues to function properly within
+    the recipient''s body.
+
+
+    A key outcome measure in transplantation. Successful Graft Survival means the organ is performing
+    its intended biological functions without signs of rejection or failure.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no table or column tracking post-transplant organ function, rejection,
+    or failure status over time. Graft Survival is an outcome measure requiring longitudinal clinical
+    follow-up data that is not present in this schema (which only covers pre-transplant matching, demographics,
+    risk scores, and administrative data).
+- name: immunological_sensitization
+  description: 'A state where a recipient has a high level of pre-formed antibodies, making it difficult
+    to find a compatible donor.
+
+
+    A clinical state where a recipient is considered highly sensitized to potential donors. This condition
+    is formally defined as having a Panel Reactive Antibody (PRA) score of 80 or greater. This high level
+    of sensitization significantly complicates the matching process by severely limiting the number of
+    compatible donors.
+
+
+    Built on: panel_reactive_antibody_pra.
+
+
+    Compiler note: Immunological Sensitization is defined as PRA score >= 80, applied directly on recipients_immunology.pra_score.'
+  sql_expression: pra_score >= 80
+  source_model: main.recipients_immunology
+  domains:
+  - definitions
+- name: static_cold_storage
+  description: 'The most common method of organ preservation, where the organ is flushed with a cold preservation
+    solution and stored on ice.
+
+
+    A preservation technique that relies on hypothermia to reduce the organ''s metabolic rate and oxygen
+    demand during transport, minimizing tissue damage during Cold Ischemia.
+
+
+    Built on: cold_ischemia.
+
+
+    Compiler note: Encoded as exact match on org_presv_meth value ''Static cold storage, standard preservation
+    method'', the only value in this column corresponding to the Static Cold Storage preservation technique.'
+  sql_expression: org_presv_meth = 'Static cold storage, standard preservation method'
+  source_model: main.function_and_recovery
+  domains:
+  - definitions
+- name: optimal_donor_recipient_match
+  description: 'An ideal pairing of a donor and recipient that meets a strict set of criteria to maximize
+    the probability of long-term transplant success.
+
+
+    An ideal match defined by meeting three specific, stringent criteria simultaneously: 1) Full ABO Blood
+    Type Compatibility. 2) An HLA Mismatch Score of exactly 0. 3) A Size Compatibility Score within the
+    inclusive range of [0.9, 1.1]. A pairing that satisfies all three conditions is classified as an Optimal
+    Donor-Recipient Match.
+
+
+    Built on: abo_blood_type_compatibility, hla_mismatch_score, size_compatibility_score.
+
+
+    Compiler note: Combines ABO compatibility (universal donor/recipient rules on blood_class), HLA Mismatch
+    Score computed as sum of mismatches on A/B/DR loci between hla_info and recipients_immunology.hlaprofile
+    (must equal 0), and Size Compatibility Score from donor/recipient BMI (physicalstats->>''Bmi_Value''
+    vs recipients_demographics.bmi_val) within [0.9,1.1]. All three subqueries verified unique per donor/recipient
+    via PK joins.'
+  sql_expression: "(\n  CASE\n    WHEN left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry\
+    \ = compatibility_metrics.donor_ref_reg),2) = 'AB' THEN TRUE\n    WHEN left((SELECT d.blood_class\
+    \ FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1) = 'O' THEN\
+    \ TRUE\n    WHEN left((SELECT r.blood_class FROM recipients_demographics r WHERE r.recip_registry\
+    \ = compatibility_metrics.recip_ref_reg),2) = 'AB' THEN TRUE\n    WHEN left((SELECT r.blood_class\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg),1)\
+    \ =\n         left((SELECT d.blood_class FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg),1)\
+    \ THEN TRUE\n    ELSE FALSE\n  END\n)\nAND\n(\n  (CASE WHEN (SELECT h.hla_a_val FROM hla_info h WHERE\
+    \ h.immu_don_registry = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_A_Val')::real\
+    \ FROM recipients_immunology r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg)\
+    \ THEN 1 ELSE 0 END)\n  + (CASE WHEN (SELECT h.hla_b_val FROM hla_info h WHERE h.immu_don_registry\
+    \ = compatibility_metrics.donor_ref_reg) <> (SELECT (r.hlaprofile->>'Hla_B_Val')::real FROM recipients_immunology\
+    \ r WHERE r.immu_recip_registry = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n  + (CASE\
+    \ WHEN (SELECT h.hla_dr_val FROM hla_info h WHERE h.immu_don_registry = compatibility_metrics.donor_ref_reg)\
+    \ <> (SELECT (r.hlaprofile->>'Hla_Dr_Val')::real FROM recipients_immunology r WHERE r.immu_recip_registry\
+    \ = compatibility_metrics.recip_ref_reg) THEN 1 ELSE 0 END)\n) = 0\nAND\n(\n  1 - ABS( ((SELECT (physicalstats->>'Bmi_Value')::real\
+    \ FROM demographics d WHERE d.contrib_registry = compatibility_metrics.donor_ref_reg) / (SELECT bmi_val\
+    \ FROM recipients_demographics r WHERE r.recip_registry = compatibility_metrics.recip_ref_reg)) -\
+    \ 1 )\n) BETWEEN 0.9 AND 1.1"
+  source_model: main.compatibility_metrics
+  domains:
+  - definitions
+- name: anoxia
+  description: 'A donor''s cause of death due to complete oxygen deprivation, which can affect organ quality.
+
+
+    A donor''s cause of death resulting from a complete lack of oxygen. [cite_start]Within the database,
+    this specific cause is recorded as ''Anoxia'' in the donor''s cause of death description (`don_co_desc`
+    [cite: 15]). This factor is critical for assessing the viability of oxygen-sensitive organs, such
+    as the heart and kidneys.
+
+
+    Compiler note: don_co_desc stores cause of death as a description string; ''Anoxia, oxygen deprivation
+    may affect organ quality'' is the exact value used for anoxia cases, matched via prefix.'
+  sql_expression: don_co_desc LIKE 'Anoxia%'
+  source_model: main.function_and_recovery
+  domains:
+  - definitions
+- name: comorbidity
+  description: 'The presence of one or more additional diseases or conditions co-occurring with a primary
+    disease or condition.
+
+
+    In transplantation, a recipient''s pre-existing conditions (e.g., diabetes, heart disease) are considered
+    comorbidities. They can increase the complexity and risk of the transplant procedure.
+
+
+    Compiler note: Comorbidity presence is encoded as the recipient having at least one recorded pre-existing
+    condition in comorbid_detail (a comma-separated list such as ''Diabetes,COPD''); NULL in this column
+    denotes incomplete/unavailable comorbidity assessment per documentation, not absence of comorbidities,
+    so presence is approximated by non-null value.'
+  sql_expression: comorbid_detail IS NOT NULL
+  source_model: main.clinical
+  domains:
+  - definitions
+- name: allocation_policy
+  description: 'The specific versioned set of rules governing organ distribution, used to prioritize recipients.
+
+
+    The precise set of rules used for organ distribution, identified by a unique version string in the
+    `allc_pol_vers` field, such as ''v2.7''[cite: 73]. Each policy embodies a strict hierarchy of rules.
+    As a formal example, a given policy stipulates that Medical Urgency Status is the primary sorting
+    criterion; for recipients with an identical urgency status, the one with a lower HLA Mismatch Score
+    receives higher priority.
+
+
+    Built on: medical_urgency_status, hla_mismatch_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes the Allocation Policy as a versioned, hierarchical set of sorting/prioritization
+    rules (identified by allc_pol_vers) used to rank recipients - it is a policy/ranking procedure, not
+    a yes/no condition or computation over rows of one table. It cannot be expressed as a boolean predicate
+    or scalar SQL expression.
+- name: informed_consent
+  description: 'The process by which a patient, after understanding the risks and benefits, voluntarily
+    agrees to a medical procedure.
+
+
+    A critical ethical and legal requirement in transplantation where the recipient (or their proxy) must
+    be fully informed about all aspects of the surgery, including the use of organs from a High-Risk Donor,
+    before giving permission.
+
+
+    Built on: high_risk_donor.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a legal/ethical process (informed consent) rather than a computable
+    condition over rows. While administrative_and_review.cons_stat_val records a consent status, the entry
+    itself defines a procedural requirement, not a boolean predicate derivable from data; no column encodes
+    "patient was informed about high-risk donor use" distinctly from general consent status.
+- name: regional_allocation_priority
+  description: 'A core principle within transplant allocation that prioritizes local matches to enhance
+    fairness and clinical outcomes.
+
+
+    A core rule embedded within an Allocation Policy that gives priority to recipients located in the
+    same geographic region as the donor. [cite_start]This principle is implemented by matching the donor''s
+    region with the recipient''s `allc_region`[cite: 72]. The primary goals are to ensure equitable organ
+    access for the local community and to improve medical outcomes by minimizing the Cold Ischemia time
+    associated with long-distance transport.
+
+
+    Built on: allocation_policy, cold_ischemia.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no field recording the donor's geographic region. demographics only stores
+    nation_ref (country name, e.g. 'Seychelles'), and allocation_details only stores the recipient's allc_region
+    (e.g. 'Region_9') with no corresponding donor region column to compare it against. Without a donor-side
+    region value, the "donor's region matches recipient's allc_region" condition cannot be computed over
+    any table in this database.
+- name: multi_organ_transplant
+  description: 'A complex surgical procedure where a recipient receives two or more organs from a single
+    donor.
+
+
+    A transplant involving multiple organs (e.g., heart-lung, kidney-pancreas). Prioritization and allocation
+    for these cases are highly complex, considering the significant need of the recipient and the impact
+    on the organ pool for other patients.
+
+
+    Compiler note: Encoded a multi-organ transplant as a match record whose donor-recipient pair (donor_ref_reg,
+    recip_ref_reg) appears with more than one distinct org_spec elsewhere in transplant_matching, i.e.
+    the same donor supplied multiple organ types to the same recipient. Verified such pairs exist (e.g.
+    D187713/R952254 with Pancreas and Liver).'
+  sql_expression: (SELECT count(DISTINCT tm2.org_spec) FROM transplant_matching tm2 WHERE tm2.donor_ref_reg
+    = transplant_matching.donor_ref_reg AND tm2.recip_ref_reg = transplant_matching.recip_ref_reg) > 1
+  source_model: main.transplant_matching
+  domains:
+  - definitions
+- name: post_transplant_monitoring
+  description: 'The ongoing medical surveillance of a recipient after receiving a transplant to ensure
+    graft survival and manage complications.
+
+
+    A comprehensive care plan that includes regular lab tests, imaging, and clinical assessments to monitor
+    organ function, detect early signs of rejection, and manage immunosuppressive medications.
+
+
+    Built on: graft_survival.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Post-Transplant Monitoring describes an ongoing clinical process (lab tests, imaging,
+    assessments) occurring after transplant, not a condition or computation over stored rows. The database
+    contains only pre-transplant matching, demographic, risk-scoring, and administrative data; it has
+    no table tracking post-transplant follow-up, monitoring events, or organ function over time, so this
+    cannot be encoded.
+- name: viral_infection_status
+  description: 'Screening of donors and recipients for key viral infections that can be transmitted or
+    reactivated during transplantation.
+
+
+    Testing for viruses such as Cytomegalovirus (CMV), Epstein-Barr Virus (EBV), and Hepatitis. The Viral
+    Infection Status of both donor and recipient is critical for assessing infection risk and planning
+    post-transplant prophylactic treatment.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a general concept (viral infection screening covering CMV, EBV, Hepatitis,
+    HIV for both donors and recipients) rather than a single boolean condition over one table's rows.
+    There is no single predicate implied; the data for this spans multiple fields across medical_history.viralstatinfo
+    (donor) and recipients_immunology (recipient, which only has CMV/EBV, not Hepatitis/HIV), with no
+    unified "status" value or threshold defined to encode as a yes/no condition.
+- name: comprehensive_match_quality_score
+  description: 'A holistic meta-score that aggregates various sub-scores to represent the overall quality
+    of a potential donor-recipient match.
+
+
+    A weighted composite index integrating multiple factors. The score is calculated as: $S_{match} =
+    0.4 S_{immune} + 0.2 S_{age} - 0.3 S_{surgical} + 0.1 I_{logistics}$, using the Immunological Compatibility
+    Score, Age Compatibility Score, Surgical Risk Score, and Logistical Feasibility Index.
+
+
+    Built on: immunological_compatibility_score, age_compatibility_score, surgical_risk_score, logistical_feasibility_index.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'This metric depends on the Surgical Risk Score (S_surgical), which cannot be encoded:
+    its formula requires N_comorbidities (count of recipient comorbidities) and C_procedure (surgical
+    complexity) to be "normalized", but no normalization scheme is defined for the comorbidity count component.
+    Since Comprehensive Match Quality Score requires -0.3*S_surgical as a term, it cannot be computed
+    either.'
+- name: antibody_mediated_rejection_amr_risk_stratification
+  description: 'A system for categorizing a recipient''s risk of developing antibody-mediated rejection
+    based on their immunological profile.
+
+
+    A risk classification system. For recipients who have a ''Positive'' crossmatch result, the ''High
+    Risk'' category is defined by meeting two concurrent criteria: having a Panel Reactive Antibody (PRA)
+    score of 80 or greater AND having a ''Positive'' donor-specific antibody (DSA) status. Recipients
+    not meeting these criteria are considered ''Standard Risk''.
+
+
+    Built on: donor_specific_antibodies_dsa, panel_reactive_antibody_pra, crossmatch_test.
+
+
+    Compiler note: AMR risk stratification applies only to recipients with Positive crossmatch result;
+    among those, High Risk requires PRA>=80 and DSA Positive, else Standard Risk. Rows without Positive
+    crossmatch are outside this classification''s defined scope, encoded as NULL.'
+  sql_expression: CASE WHEN cross_result = 'Positive' AND pra_score >= 80 AND dsa_state = 'Positive' THEN
+    'High Risk' WHEN cross_result = 'Positive' THEN 'Standard Risk' ELSE NULL END
+  source_model: main.recipients_immunology
+  domains:
+  - definitions
+- name: net_health_benefit_score
+  description: 'Calculates the overall expected health gain for a recipient from a transplant, balancing
+    survival benefits against procedural risks and quality of life.
+
+
+    A score representing the projected net outcome, calculated by offsetting the anticipated Quality-Adjusted
+    Life Year (QALY) gain with the risks. The formula is: $S_{NHB} = (EGS \times QALY_{gain}) - (S_{surgical}
+    \times 0.2)$, where EGS is the Expected Graft Survival score.
+
+
+    Built on: expected_graft_survival_egs_score, quality_adjusted_life_year_qaly, surgical_risk_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'This metric requires QALY_gain and S_surgical, both of which cannot be encoded over this
+    database (see their respective entries): QALY needs a "years of life" projection not present in the
+    data, and Surgical Risk Score needs a normalization scheme for comorbidity count that is not defined
+    anywhere in the documentation or data. Without these two components, the Net Health Benefit Score
+    formula (EGS × QALY_gain) − (S_surgical × 0.2) cannot be computed.'
+- name: marginal_donor_acceptance_criteria
+  description: 'A set of clinical guidelines for evaluating and accepting organs from donors who do not
+    meet ideal criteria but are not classified as standard High-Risk Donors.
+
+
+    A nuanced decision framework applied to ''extended criteria'' donors. These donors may exhibit factors
+    like advanced age (significant Donor-Recipient Age Difference), borderline organ function (sub-optimal
+    Renal Function Score), or certain comorbidities. Acceptance is based on a risk-benefit analysis, weighing
+    the organ''s imperfections against the recipient''s urgent medical need and the scarcity of ideal
+    organs.
+
+
+    Built on: high_risk_donor, renal_function_score, donor_recipient_age_difference.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition does not specify concrete thresholds or a precise rule for classifying
+    a donor as "marginal/extended criteria" - it only vaguely references factors like "advanced age",
+    "sub-optimal" renal function, or "certain comorbidities" without defining cutoffs, and states acceptance
+    is based on a qualitative "risk-benefit analysis" weighing organ imperfections against recipient urgency
+    and organ scarcity. This is a decision framework/action, not a computable condition over rows.
+- name: immunosuppression_protocol_tiers
+  description: 'Illustrates how a patient''s immunological risk profile dictates the intensity of the
+    required post-transplant immunosuppressive drug regimen.
+
+
+    A tiered therapeutic strategy based on risk. A patient with a high Immunological Compatibility Score
+    and low AMR risk (as per Antibody-Mediated Rejection (AMR) Risk Stratification) might receive a standard
+    ''Maintenance Therapy'' (e.g., a three-drug cocktail). Conversely, a patient with a low compatibility
+    score and high AMR risk would require aggressive ''Induction Therapy'' (e.g., using potent biologic
+    agents) followed by intensive maintenance.
+
+
+    Built on: antibody_mediated_rejection_amr_risk_stratification, immunological_compatibility_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a qualitative tiered therapeutic strategy (Maintenance vs Induction
+    Therapy) based on vague, undefined thresholds ("high" compatibility score, "low" AMR risk) rather
+    than a precise computable condition. It does not define numeric cutoffs for "high"/"low", and the
+    outcome is a drug regimen choice, not a boolean fact about the data. Cannot be encoded as a SQL predicate.
+tables:
+- schema: main
+  table: administrative_and_review
+  columns:
+  - name: adm_rev_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Administrative_and_Review(Adm_Rev_Registry),
+      FK to Transplant_Matching.
+  - name: exp_rev_stat_val
+    type: VARCHAR
+    description: 'TEXT. Expert review status value. **NULL means expert review is pending or not required.**
+      **DATA NOISE: Values have random case variations (lowercase, uppercase, mixed case).** Example:
+      RejECted.'
+  - name: exp_rev_notes
+    type: VARCHAR
+    description: 'TEXT. Expert review comments and notes. **NULL means expert review comments are not
+      provided or review is incomplete.** **DATA NOISE: Values have random case variations (lowercase,
+      uppercase, mixed case).** Example: accEptABlE mAtCH.'
+  - name: ec_appro_val
+    type: VARCHAR
+    description: 'TEXT. Ethics committee approval status. **NULL means ethics committee approval is pending
+      or not applicable.** **DATA NOISE: Values have random case variations (lowercase, uppercase, mixed
+      case).** Example: approved.'
+  - name: reg_comp_val
+    type: VARCHAR
+    description: 'TEXT. Regulatory compliance status assessment. **NULL means regulatory compliance review
+      is pending or incomplete.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: under review.'
+  - name: docu_stat_val
+    type: VARCHAR
+    description: 'TEXT. Documentation status completeness assessment. **NULL means documentation status
+      review is incomplete or pending.** **DATA NOISE: Values have random case variations (lowercase,
+      uppercase, mixed case).** Example: InCoMpLeTe.'
+  - name: cons_stat_val
+    type: VARCHAR
+    description: 'TEXT. Consent status from patient and family. **NULL means consent documentation is
+      incomplete or pending.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: OBTAINED.'
+  - name: fin_clear_val
+    type: VARCHAR
+    description: 'TEXT. Financial clearance status for transplant procedure. **NULL means financial clearance
+      is pending or under review.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: rejected.'
+  - name: ins_appro_val
+    type: VARCHAR
+    description: 'TEXT. Insurance approval status for transplant coverage. **NULL means insurance approval
+      is pending or under review.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: APPROVED.'
+  - name: coord_ref
+    type: VARCHAR
+    description: 'TEXT. Transplant coordinator identifier reference. Example: C7827.'
+  - name: surge_ref
+    type: VARCHAR
+    description: 'TEXT. Surgeon identifier reference. Example: S8696.'
+  - name: tx_cen_code
+    type: VARCHAR
+    description: 'TEXT. Transplant center identification code. Example: TC594.'
+  - name: rec_cen_code
+    type: VARCHAR
+    description: 'TEXT. Recovery center identification code. Example: RC386.'
+  - name: lab_ref
+    type: VARCHAR
+    description: 'TEXT. Laboratory identifier reference. Example: L445.'
+  - name: adm_don_ref
+    type: VARCHAR
+    description: TEXT. Administrative reference to donor record. FK to Demographics.
+  - name: adm_rec_ref
+    type: VARCHAR
+    description: TEXT. Administrative reference to recipient record. FK to Recipients_Demographics.
+- schema: main
+  table: allocation_details
+  columns:
+  - name: allc_match_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Allocation_Details(Allc_Match_Registry),
+      FK to Transplant_Matching.
+  - name: allc_seq_num
+    type: SMALLINT
+    description: 'SMALLINT. Sequence number in allocation ranking. Example: 24.'
+  - name: allc_region
+    type: VARCHAR
+    description: 'TEXT. Geographic region for organs allocation. Possible values: Region_1, Region_10,
+      Region_2, Region_3, Region_4, Region_5, Region_6, Region_7, Region_8, Region_9.'
+  - name: allc_pol_vers
+    type: VARCHAR
+    description: 'TEXT. Allocation policy version used. Example: v2.7.'
+  - name: donor_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to donor demographics record. FK to Demographics.
+  - name: recip_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to recipient demographics record. FK to Recipients_Demographics.
+- schema: main
+  table: clinical
+  columns:
+  - name: clin_recip_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to recipient demographics for clinical data. PK = Clinical(Clin_Recip_Registry),
+      FK to Recipients_Demographics.
+  - name: diag_detail
+    type: VARCHAR
+    description: 'TEXT. Primary diagnosis and medical condition requiring transplant. Possible values:
+      Acute failure, immediate transplant required.'
+  - name: wait_time
+    type: VARCHAR
+    description: 'TEXT. Number of days recipient has been on transplant waiting list. Example: 104 days'
+  - name: med_urgency
+    type: VARCHAR
+    description: 'TEXT. Medical urgency status classification for transplant priority. **DATA NOISE: ''Status
+      2'' partially replaced with ''2'', ''Status 3'' partially replaced with ''3'', etc.** Possible values:
+      2, 3, Status 1A, Status 1B, Status 2, Status 3.
+
+
+      Medical Urgency Tiers: Illustrates the hierarchy of transplant urgency statuses.
+
+
+      Patients are prioritized based on their risk of dying while on the waitlist. Status 1A is the highest
+      urgency, reserved for critically ill patients in the ICU. Status 1B is a lower, but still urgent,
+      category. Lower statuses (e.g., Status 2) are for more stable patients.
+
+
+      Compiler note: Explains the meaning/hierarchy of med_urgency status values (Status 1A highest, 1B
+      next, Status 2/3 lower) - a value explanation, not a new computation.'
+  - name: prev_tx_count
+    type: VARCHAR
+    description: 'TEXT. Number of previous transplants recipient has received. Possible values: 0 previous
+      transplants, first-time recipient.'
+  - name: dial_status
+    type: VARCHAR
+    description: 'TEXT. Current dialysis status and treatment regimen. **NULL means dialysis status is
+      not applicable or not documented.**. Possible values: Hemodialysis, standard renal replacement therapy.'
+  - name: dial_duration
+    type: VARCHAR
+    description: 'TEXT. Duration of dialysis treatment in months. Example: 45 months'
+  - name: comorbid_detail
+    type: VARCHAR
+    description: 'TEXT. Comorbid conditions and secondary medical issues. **NULL means comorbidity assessment
+      is incomplete or not available.**. Example: Hypertension,Heart Disease,Diabetes.'
+- schema: main
+  table: compatibility_metrics
+  columns:
+  - name: match_comp_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Compatibility_Metrics(Match_Comp_Registry),
+      FK to Transplant_Matching.
+  - name: hla_mis_count
+    type: BIGINT
+    description: 'BIGINT. Number of HLA antigen mismatches between donor and recipient. Possible values:
+      0'
+  - name: blood_compat
+    type: VARCHAR
+    description: 'TEXT. Blood type compatibility assessment result. **NULL means blood compatibility assessment
+      is pending or unavailable.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: incompatible.'
+  - name: distance
+    type: VARCHAR
+    description: 'TEXT. Geographic distance between donor and recipient in kilometers. Example: 1815 miles'
+  - name: exp_isch_time
+    type: VARCHAR
+    description: 'TEXT. Expected cold ischemia time in minutes. Example: 539 minutes ischemia.'
+  - name: exp_time
+    type: VARCHAR
+    description: 'TEXT. Expected transport time in minutes. Example: 45 minutes transport.'
+  - name: cost_est
+    type: VARCHAR
+    description: 'TEXT. Estimated cost for transplant procedure and logistics. Example: US$5210.53'
+  - name: donor_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to donor demographics record. FK to Demographics.
+  - name: recip_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to recipient demographics record. FK to Recipients_Demographics.
+  - name: compatscores
+    type: JSON
+    description: 'JSONB column. Aggregates compatibility scoring metrics including HLA, size, and age
+      compatibility assessments for donor-recipient matching. Fields: {"Hla_Score": "REAL. HLA compatibility
+      score based on antigen matching. Example: 0.522.", "Size_Score": "REAL. Size compatibility score
+      based on donor-recipient measurements. Example: 0.228.", "Age_Score": "REAL. Age compatibility score
+      for optimal matching. Example: 0.327."}'
+- schema: main
+  table: data_source_and_quality
+  columns:
+  - name: q_match_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Data_Source_and_Quality(Q_Match_Registry),
+      FK to Transplant_Matching.
+  - name: data_src_val
+    type: VARCHAR
+    description: 'TEXT. Data source identification and origin. **NULL means data source information is
+      not documented or unknown.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case).** Example: uNoS.'
+  - name: dq_score_val
+    type: FLOAT
+    description: 'REAL. Data quality assessment score. Example: 0.966.'
+  - name: dc_score_val
+    type: FLOAT
+    description: 'REAL. Data completeness assessment score. Example: 0.78.'
+  - name: verif_stat_val
+    type: VARCHAR
+    description: 'TEXT. Data verification status assessment. **NULL means data verification is pending
+      or not performed.** **DATA NOISE: Values have random case variations (lowercase, uppercase, mixed
+      case).** Example: verified.'
+  - name: last_up_ts
+    type: VARCHAR
+    description: 'TIMESTAMP. Timestamp of last data update. **DATA NOISE: Date format converted to yyyy/mm/dd.**
+      Possible values: 2025/02/19.'
+  - name: next_rev_dt
+    type: VARCHAR
+    description: 'DATE. Next scheduled review date for data validation. **DATA NOISE: Date format converted
+      to dd/mm/yyyy.** Example: 04/03/2025.'
+  - name: q_don_ref
+    type: VARCHAR
+    description: TEXT. Quality reference to donor demographics record. FK to Demographics.
+  - name: q_rec_ref
+    type: VARCHAR
+    description: TEXT. Quality reference to recipient demographics record. FK to Recipients_Demographics.
+- schema: main
+  table: demographics
+  columns:
+  - name: contrib_registry
+    type: VARCHAR
+    description: 'TEXT. Primary key uniquely identifying each organs donor in the transplant matching
+      system. PK = Demographics(Contrib_Registry). Example: D812743.'
+  - name: age_count
+    type: VARCHAR
+    description: 'TEXT. Donor''s age in years at time of organs recovery. Example: 57 years, mature donor.'
+  - name: blood_class
+    type: VARCHAR
+    description: 'TEXT. Donor''s ABO blood type classification for compatibility matching. Possible values:
+      AB- rare negative type.'
+  - name: nation_ref
+    type: VARCHAR
+    description: 'TEXT. Donor''s country of origin or nationality reference. Example: Seychelles.'
+  - name: physicalstats
+    type: JSON
+    description: 'JSONB column. Groups physical measurements and characteristics including height, weight,
+      BMI, and demographic information for donor assessment. Fields: {"Height_Cm": "SMALLINT. Donor''s
+      height measurement in centimeters. Example: 171.", "Weight_Kg": "SMALLINT. Donor''s weight measurement
+      in kilograms. Example: 55.", "Bmi_Value": "REAL. Donor''s calculated body mass index value. Example:
+      18.8.", "Gender_Type": "TEXT. Donor''s gender classification code. Possible values: F, M.", "Ethnicity":
+      "TEXT. Donor''s ethnic or racial background classification. Possible values: African, Asian, Caucasian,
+      Hispanic, Other."}'
+- schema: main
+  table: function_and_recovery
+  columns:
+  - name: recov_don_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to donor demographics for organs function data. PK = Function_and_Recovery(Recov_Don_Registry),
+      FK to Demographics.
+  - name: don_crtn_val
+    type: VARCHAR
+    description: 'TEXT. Donor''s serum creatinine level indicating kidney function. Example: 1.62 mg/dL.
+
+
+      Serum Creatinine Levels: Illustrates how serum creatinine levels reflect kidney function.
+
+
+      A waste product from muscle metabolism, cleared by the kidneys. Normal values are typically 0.7-1.3
+      mg/dL. A high value, such as 2.5 mg/dL, suggests impaired kidney function, which is a key component
+      of the Renal Function Score.
+
+
+      Compiler note: Describes interpretation of serum creatinine values (don_crtn_val, e.g. ''1.62 mg/dL'');
+      illustrative explanation only, not a separate computation.'
+  - name: don_gfr_val
+    type: VARCHAR
+    description: 'REAL. Donor''s glomerular filtration rate measuring kidney function. Example: 103.4
+      mL/min/1.73m².
+
+
+      Glomerular Filtration Rate (GFR) Values: Illustrates the stages of kidney function based on GFR
+      values.
+
+
+      GFR measures how well the kidneys are filtering blood. A GFR > 90 mL/min/1.73m² is considered normal.
+      A GFR of 30-59 indicates moderate kidney disease, and a GFR < 15 signifies kidney failure.
+
+
+      Compiler note: Describes interpretation ranges for GFR values stored in function_and_recovery.don_gfr_val
+      (donor glomerular filtration rate, text with unit mL/min/1.73m²). This is explanatory/illustrative
+      knowledge, not a computation or predicate to encode as SQL.'
+  - name: don_co_desc
+    type: VARCHAR
+    description: 'TEXT. Description of donor''s cause of death. Possible values: Anoxia, oxygen deprivation
+      may affect organ quality.'
+  - name: org_recov_dt
+    type: VARCHAR
+    description: 'TEXT. Date and time when organss were recovered from donor.** Possible values: 02-18-2025
+      HKT.'
+  - name: org_presv_meth
+    type: VARCHAR
+    description: 'TEXT. Method used for organs preservation during transport. Possible values: Static
+      cold storage, standard preservation method.'
+  - name: org_isch_time
+    type: VARCHAR
+    description: 'TEXT. Cold ischemia time in minutes from recovery to transplant. Example: 702 mins.'
+  - name: organfuncassess
+    type: JSON
+    description: 'JSONB column. Groups organ function assessment data including liver, cardiac, and pulmonary
+      function evaluations for multi-organ status review. Fields: {"Liv_Func": "TEXT. Assessment of donor''s
+      liver function status. Possible values: Mild, Moderate, Normal, Severe.", "Card_Func": "TEXT. Assessment
+      of donor''s cardiac function status. Possible values: Mild, Moderate, Normal, Severe.", "Pulm_Func":
+      "TEXT. Assessment of donor''s pulmonary function status. Possible values: Mild, Moderate, Normal,
+      Severe."}'
+- schema: main
+  table: hla_info
+  columns:
+  - name: immu_don_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to donor demographics for HLA typing data. PK = HLA_Info(Immu_Don_Registry),
+      FK to Demographics.
+  - name: hla_a_val
+    type: FLOAT
+    description: 'REAL. Donor''s HLA-A antigen typing value for immunological compatibility. Example:
+      89,11.'
+  - name: hla_b_val
+    type: FLOAT
+    description: 'REAL. Donor''s HLA-B antigen typing value for immunological compatibility. Example:
+      22,60.'
+  - name: hla_dr_val
+    type: FLOAT
+    description: 'REAL. Donor''s HLA-DR antigen typing value for immunological compatibility. Example:
+      59,9.'
+  - name: hla_dq_val
+    type: FLOAT
+    description: 'REAL. Donor''s HLA-DQ antigen typing value for immunological compatibility. Example:
+      8,1.'
+- schema: main
+  table: logistics
+  columns:
+  - name: log_match_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Logistics(Log_Match_Registry),
+      FK to Transplant_Matching.
+  - name: trans_method
+    type: VARCHAR
+    description: 'TEXT. Transportation method for organs delivery. Possible values: Charter Air, Commercial
+      Air, Ground, Helicopter.'
+  - name: don_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to donor demographics record. FK to Demographics.
+  - name: rec_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to recipient demographics record. FK to Recipients_Demographics.
+- schema: main
+  table: medical_history
+  columns:
+  - name: contrib_med_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to donor demographics record. PK = Medical_History(Contrib_Med_Registry),
+      FK to Demographics.
+  - name: med_history
+    type: VARCHAR
+    description: 'TEXT. Comprehensive medical history and conditions of the donor. **NULL means medical
+      history documentation is incomplete or unavailable.**. Example: None,Cancer,Heart Disease.'
+  - name: smk_cond
+    type: VARCHAR
+    description: 'TEXT. Donor''s smoking status and history. Possible values: Never smoked, optimal lung
+      condition.'
+  - name: alc_cond
+    type: VARCHAR
+    description: 'TEXT. Donor''s alcohol use status and history. **NULL means alcohol use history is not
+      documented or unknown.**. Possible values: Heavy use, liver function requires evaluation.'
+  - name: drug_cond
+    type: VARCHAR
+    description: 'TEXT. Donor''s drug use status and substance abuse history. **NULL means drug use history
+      is not documented or assessed.**. Possible values: Current use, high risk assessment.'
+  - name: viralstatinfo
+    type: JSON
+    description: 'JSONB column. Consolidates all viral infection status data including CMV, EBV, HBV,
+      HCV, and HIV test results for comprehensive infectious disease screening. Fields: {"Cmv_State":
+      "TEXT. Donor''s cytomegalovirus infection status. Possible values: Negative, Positive.", "Ebv_State":
+      "TEXT. Donor''s Epstein-Barr virus infection status. Possible values: Negative, Positive.", "Hbv_State":
+      "TEXT. Donor''s hepatitis B virus infection status. Possible values: Negative, Positive.", "Hcv_State":
+      "TEXT. Donor''s hepatitis C virus infection status. Possible values: Negative, Positive.", "Hiv_State":
+      "TEXT. Donor''s human immunodeficiency virus infection status. Possible values: Negative, Positive."}'
+- schema: main
+  table: recipients_demographics
+  columns:
+  - name: recip_registry
+    type: VARCHAR
+    description: 'TEXT. Primary key uniquely identifying each transplant recipient. PK = Recipients_Demographics(Recip_Registry).
+      Example: R947153.'
+  - name: age_count
+    type: SMALLINT
+    description: 'SMALLINT. Recipient''s age in years at time of transplant evaluation. Example: 57.'
+  - name: gend_type
+    type: VARCHAR
+    description: 'TEXT. Recipient''s gender classification code. Possible values: F, M.'
+  - name: blood_class
+    type: VARCHAR
+    description: 'TEXT. Recipient''s ABO blood type for compatibility matching. Possible values: A+, A-,
+      AB+, AB-, B+, B-, O+, O-.'
+  - name: ht_cm
+    type: SMALLINT
+    description: 'SMALLINT. Recipient''s height measurement in centimeters. Example: 171.'
+  - name: wt_kg
+    type: BIGINT
+    description: 'BIGINT. Recipient''s weight measurement in kilograms. Example: 55.'
+  - name: bmi_val
+    type: FLOAT
+    description: 'REAL. Recipient''s calculated body mass index value. Example: 18.8.'
+  - name: ethn_grp
+    type: VARCHAR
+    description: 'TEXT. Recipient''s ethnic or racial background classification. Possible values: African,
+      Asian, Caucasian, Hispanic, Other.'
+- schema: main
+  table: recipients_immunology
+  columns:
+  - name: immu_recip_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to recipient demographics for immunological data. PK = Recipients_Immunology(Immu_Recip_Registry),
+      FK to Recipients_Demographics.
+  - name: pra_score
+    type: FLOAT
+    description: 'REAL. Panel reactive antibody score indicating sensitization level. Example: 6.'
+  - name: dsa_state
+    type: VARCHAR
+    description: 'TEXT. Donor-specific antibody presence status. Possible values: Negative, Positive.'
+  - name: cross_result
+    type: VARCHAR
+    description: 'TEXT. Crossmatch test result for donor-recipient compatibility. Possible values: Negative,
+      Pending, Positive.
+
+
+      Crossmatch Results: Illustrates the critical outcomes of a crossmatch test.
+
+
+      A ''Negative'' result means no pre-formed donor-specific antibodies were detected, and the transplant
+      can proceed. A ''Positive'' result indicates the presence of these antibodies, making transplant
+      highly risky or contraindicated due to the high chance of hyperacute rejection.
+
+
+      Compiler note: Describes the meaning of ''Negative''/''Positive'' values in recipients_immunology.cross_result;
+      a values-explanation, not a new computation/condition.'
+  - name: cmv_state
+    type: VARCHAR
+    description: 'TEXT. Recipient''s cytomegalovirus infection status. Possible values: Negative, Positive.'
+  - name: ebv_state
+    type: VARCHAR
+    description: 'TEXT. Recipient''s Epstein-Barr virus infection status. Possible values: Negative, Positive.'
+  - name: func_status
+    type: VARCHAR
+    description: 'TEXT. Recipient''s functional status assessment. Possible values: Mild Impairment, Moderate
+      Impairment, Normal, Severe Impairment.'
+  - name: life_support
+    type: VARCHAR
+    description: 'TEXT. Life support requirements and status. **NULL means life support status is not
+      applicable or not documented.**. Possible values: ECMO, Mechanical Ventilation, VAD.'
+  - name: hlaprofile
+    type: JSON
+    description: 'JSONB column. Stores complete HLA typing profile including A, B, DR, and DQ values for
+      immunological compatibility matching. Fields: {"Hla_A_Val": "REAL. Recipient''s HLA-A antigen typing
+      value for compatibility matching. Example: 89,11.", "Hla_B_Val": "REAL. Recipient''s HLA-B antigen
+      typing value for compatibility matching. Example: 22,60.", "Hla_Dr_Val": "REAL. Recipient''s HLA-DR
+      antigen typing value for compatibility matching. Example: 59,9.", "Hla_Dq_Val": "REAL. Recipient''s
+      HLA-DQ antigen typing value for compatibility matching. Example: 8,1."}'
+- schema: main
+  table: risk_evaluation
+  columns:
+  - name: risk_eval_registry
+    type: VARCHAR
+    description: TEXT. Primary key linking to transplant matching record. PK = Risk_Evaluation(Risk_Eval_Registry),
+      FK to Transplant_Matching.
+  - name: org_qual_val
+    type: FLOAT
+    description: 'REAL. organs quality assessment score. Example: 0.964.'
+  - name: egs_val
+    type: FLOAT
+    description: 'REAL. Expected graft survival score. Example: 0.114.'
+  - name: eps_val
+    type: FLOAT
+    description: 'REAL. Expected patient survival score. Example: 0.352.'
+  - name: surg_cmpl_val
+    type: FLOAT
+    description: 'REAL. Surgical complexity assessment score. Example: 0.747.'
+  - name: surg_risk_val
+    type: FLOAT
+    description: 'REAL. Surgical risk assessment score. **NULL means surgical risk assessment is incomplete
+      or not performed.** **DATA NOISE: Random NULL values added to original data.** Example: 0.33.'
+  - name: res_avail_val
+    type: FLOAT
+    description: 'REAL. Resource availability score for transplant center. Example: 0.567.'
+  - name: cntr_exp_val
+    type: FLOAT
+    description: 'REAL. Transplant center experience score. Example: 0.215.'
+  - name: cntr_vol_val
+    type: FLOAT
+    description: 'REAL. Transplant center volume score. Example: 0.919.'
+  - name: cntr_out_val
+    type: FLOAT
+    description: 'REAL. Transplant center outcomes score. Example: 0.077.'
+  - name: qol_val
+    type: FLOAT
+    description: 'REAL. Quality of life assessment score. **NULL means quality of life assessment is not
+      completed or unavailable.** ** Example: 0.185.'
+  - name: cost_eff_val
+    type: FLOAT
+    description: 'REAL. Cost effectiveness assessment score. Example: 0.037.'
+  - name: alloc_prio_val
+    type: FLOAT
+    description: 'REAL. Allocation priority score for organs distribution. Example: 0.917.'
+  - name: donor_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to donor demographics record. FK to Demographics.
+  - name: recip_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to recipient demographics record. FK to Recipients_Demographics.
+  - name: riskmetrics
+    type: JSON
+    description: 'JSONB column. Combines multiple risk assessment scores including immunological, infection,
+      rejection, complication, readmission, and mortality risks. Fields: {"Immun_Risk": "REAL. Immunological
+      risk assessment score. Example: 0.607.", "Infect_Risk": "REAL. Infection risk assessment score.
+      Example: 0.48.", "Reject_Risk": "REAL. Rejection risk assessment score. Example: 0.527.", "Cmpl_Risk":
+      "REAL. Complication risk assessment score. Example: 0.349.", "Readmit_Risk": "REAL. Readmission
+      risk assessment score. Example: 0.747.", "Mort_Risk": "REAL. Mortality risk assessment score. Example:
+      0.674."}'
+  - name: cost_qaly
+    type: VARCHAR
+    description: 'TEXT. Cost effectiveness per quality-adjusted life year. Example: 45000 USD/QALY'
+  - name: resource_consumption
+    type: VARCHAR
+    description: 'TEXT. Medical resource usage rate. Example: 11.339999437332153 units/day'
+  - name: staff
+    type: VARCHAR
+    description: 'TEXT. Medical staff time requirement. Example: 15.46999979019165 hrs/case'
+- schema: main
+  table: transplant_matching
+  columns:
+  - name: match_rec_registry
+    type: VARCHAR
+    description: 'TEXT. Primary key uniquely identifying each transplant matching record. PK = Transplant_Matching(Match_Rec_Registry).
+      Example: TM113504.'
+  - name: created_ts
+    type: VARCHAR
+    description: 'TIMESTAMP. Timestamp when matching record was created. Example: 2025-02-19 08:31:22.330375.'
+  - name: donor_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to donor demographics record. FK to Demographics.
+  - name: recip_ref_reg
+    type: VARCHAR
+    description: TEXT. Reference to recipient demographics record. FK to Recipients_Demographics.
+  - name: org_spec
+    type: VARCHAR
+    description: 'TEXT. Specific organs type being matched for transplant. Possible values: Heart, Kidney,
+      Liver, Lung, Pancreas.'
+  - name: match_status
+    type: VARCHAR
+    description: 'TEXT. Current status of the matching process. Possible values: Completed, Failed, In
+      Progress, Matched, Pending.'
+  - name: score_val
+    type: FLOAT
+    description: 'REAL. Overall matching score for donor-recipient compatibility. Example: 0.005.'
+  - name: level_val
+    type: VARCHAR
+    description: 'TEXT. Matching level classification. Possible values: Acceptable, High Risk, Marginal,
+      Optimal.'
+  - name: alg_vers
+    type: VARCHAR
+    description: 'TEXT. Version of matching algorithm used. Example: v2.5.'
+  - name: run_registry
+    type: VARCHAR
+    description: 'TEXT. Matching run identifier for batch processing. Example: MR324767.'
+  - name: match_ts
+    type: VARCHAR
+    description: 'TIMESTAMP. Timestamp when matching algorithm was executed. ** Possible values: 2025.02.19
+      08:31:22.'
+  - name: dur_sec
+    type: BIGINT
+    description: 'BIGINT. Duration of matching process in seconds. Example: 128.'
+  - name: conf_val
+    type: FLOAT
+    description: 'REAL. Confidence value for matching result. Example: 0.056.'
+  - name: dss_val
+    type: FLOAT
+    description: 'REAL. Decision support system score. Example: 0.68.'

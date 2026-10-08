@@ -1,0 +1,87 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: fake_account, compiler: claudesonnet5
+# inputs: fake_account_kb.jsonl, fake_account_column_meaning_base.json, fake_account_schema.txt, fake_account.duckdb
+version: '1.0'
+name: livesqlbench-fake_account
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - account_clusters
+    - accounts
+    - behavioral_scores
+    - cluster_analysis
+    - content_activity
+    - interaction_metrics
+    - monitoring
+    - network_metrics
+    - platforms
+    - profiles
+    - risk_and_moderation
+    - security_sessions
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      bot-likely score: Illustrates bot likelihood scoring.
+
+
+      Ranges from 0 to 100. Scores above 70 strongly indicate bot behavior, while scores below 20 suggest
+      human-like behavior patterns.
+
+
+      Compiler note: behavioral_scores.behavioral_anomaly_scores.automation_spam.bot_likelihood is the
+      closest matching field semantically, but it is stored on a 0-1 scale (checked max ~0.998, typical
+      values like 0.203, 0.826), not 0-100 as this entry describes. Since the entry''s scale doesn''t
+      match the actual data representation, it cannot be encoded as describing this column.
+
+
+      review priority: A flag or status assigned to an account to indicate the need or priority level
+      for manual review.
+
+
+      A field in the `account` table set to a specific value like ''Review_Inactive_Trusted'' to signal
+      that an otherwise trusted account requires review due to prolonged inactivity.
+
+
+      Compiler note: The accounts table has no status/flag column for review priority (columns are acct_ref,
+      plt_key, OrigStamp, AGE_D, StateFlag, acct_form, VerifyMark, ProfileScore - none hold values like
+      ''Review_Inactive_Trusted''). This entry describes an action/flag value that would need to be written
+      to the schema, not a computable column or expression over existing data. Cannot encode.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

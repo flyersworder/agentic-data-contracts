@@ -1,0 +1,2186 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: mental_health, compiler: claudesonnet5
+# inputs: mental_health_kb.jsonl, mental_health_column_meaning_base.json, mental_health_schema.txt, mental_health.duckdb
+metrics:
+- name: average_phq_9_score_by_facility_apsf
+  description: "Calculates the average PHQ-9 depression score for patients assessed at a specific facility.\n\
+    \nAPSF = \frac{sum \text{Patient Health Questionnaire-9 scores}}{\text{Total number of assessments}}\
+    \ \text{ for a given facility.}\n\nCompiler note: Averaged phq9_scr from assessmentsymptomsandrisk\
+    \ joined to encounters via ab_ref, filtered by encounters.fac_id = facilities.fac_key (verified all\
+    \ fac_id values exist in facilities.fac_key). NULL phq9_scr values are ignored by AVG."
+  sql_expression: (SELECT AVG(asr.phq9_scr) FROM encounters e JOIN assessmentsymptomsandrisk asr ON asr.asr_key
+    = e.ab_ref WHERE e.fac_id = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: average_gad_7_score_by_facility_agsf
+  description: "Calculates the average GAD-7 anxiety score for patients assessed at a specific facility.\n\
+    \nAGSF = \frac{sum \text{Generalized Anxiety Disorder-7 scores}}{\text{Total number of assessments}}\
+    \ \text{ for a given facility.}\n\nCompiler note: AGSF computed as average GAD-7 score (gad7_scr)\
+    \ over assessments linked to a facility via encounters.fac_id = facilities.fac_key and encounters.ab_ref\
+    \ = assessmentsymptomsandrisk.asr_key (same key as assessmentbasics.ab_key). NULL gad7_scr values\
+    \ are excluded by AVG, consistent with 'assessments' meaning those with a recorded score."
+  sql_expression: (SELECT AVG(asr.gad7_scr) FROM encounters e JOIN assessmentsymptomsandrisk asr ON asr.asr_key
+    = e.ab_ref WHERE e.fac_id = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: treatment_adherence_rate_tar
+  description: "Measures the proportion of patients with high or medium treatment adherence at a facility.\n\
+    \nTAR = \frac{\text{Number of outcomes with Treatment Adherence of 'High', 'Medium', or 'Compliant'}}{\t\
+    ext{Total number of treatment outcomes}} \text{ for a given facility.}\n\nCompiler note: Tx_Adh is\
+    \ stored in treatmentoutcomes.txprogmet JSON; observed values are 'High','Medium','Low','Non-compliant'\
+    \ (no 'Compliant' value present, but included per spec). Facility link traced via treatmentoutcomes.tx_ref\
+    \ -> treatmentbasics.tx_key -> treatmentbasics.enc_ref -> encounters.enc_key -> encounters.fac_id\
+    \ = facilities.fac_key. Rate computed as correlated subquery per facility row."
+  sql_expression: (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))
+    AS DOUBLE PRECISION) / COUNT(*) FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key
+    JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: suicide_risk_prevalence_srp
+  description: "Calculates the percentage of assessments indicating high or severe suicide risk at a facility.\n\
+    \nSRP = \frac{\text{Number of assessments with a 'High' suicide risk}}{\text{Total number of assessments}}\
+    \ \times 100 \text{ for a given facility.}\n\nCompiler note: SRP computed per facility: percent of\
+    \ assessments (joined via encounters.ab_ref = assessmentsymptomsandrisk.asr_key, encounters.fac_id\
+    \ = facilities.fac_key) with suic_risk='High' out of all assessments at that facility. Returns NULL\
+    \ if facility has no assessments to avoid division by zero."
+  sql_expression: CASE WHEN (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref
+    = r.asr_key WHERE e.fac_id = facilities.fac_key) = 0 THEN NULL ELSE 100.0 * (SELECT COUNT(*) FROM
+    encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key
+    AND r.suic_risk = 'High') / (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON
+    e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key) END
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: therapy_engagement_score_tes
+  description: "Computes an average engagement score across therapy sessions.\n\nTES = \text{The average\
+    \ of engagement scores, where the score is 3 for 'High' engagement, 2 for 'Medium', and 1 for 'Low'.}\n\
+    \nCompiler note: th_eng also contains a 'Non-compliant' value not covered by the definition's three\
+    \ categories; it is excluded from the score mapping (treated as NULL and ignored by AVG), consistent\
+    \ with only High/Medium/Low being scored."
+  sql_expression: AVG(CASE th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)
+  source_model: main.treatmentbasics
+  domains:
+  - calculations
+- name: facility_resource_adequacy_index_frai
+  description: "Quantifies the adequacy of community resources available at a facility.\n\nFRAI = \text{The\
+    \ average of resource scores, where the score is 3 for 'Comprehensive' or 'Extensive' community resources,\
+    \ 2 for 'Adequate', and 1 for 'Limited'.}\n\nCompiler note: Averages com_res mapped to scores (Comprehensive/Extensive=3,\
+    \ Adequate=2, Limited=1); NULL/empty com_res excluded via CASE returning NULL, consistent with AVG\
+    \ ignoring NULLs. Observed values in data: Limited, Adequate, Comprehensive, and blank/NULL."
+  sql_expression: AVG(CASE com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate'
+    THEN 2 WHEN 'Limited' THEN 1 END)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: patient_functional_impairment_score_pfis
+  description: "Calculates an average functional impairment score across patients.\n\nPFIS = \text{The\
+    \ average of functional impairment scores, where the score is 3 for 'Severe' impairment, 2 for 'Moderate',\
+    \ and 1 for 'Mild'.}\n\nCompiler note: func_imp has case noise (e.g. 'SeVere'); matched case-insensitively\
+    \ via UPPER(). NULL/empty values are ignored by CASE/AVG, consistent with 'func_imp not assessed'\
+    \ meaning missing."
+  sql_expression: AVG(CASE UPPER(func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN
+    1 END)
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - calculations
+- name: crisis_intervention_frequency_cif
+  description: "Calculated as the total number of crisis interventions at a facility divided by the total\
+    \ number of unique patients in that facility.\n\nCIF = \frac{sum \text{Crisis Interventions}}{\text{Total\
+    \ number of unique patients}} \text{ for a given facility.}\n\nCompiler note: Joined encounters (fac_id\
+    \ = facilities.fac_key) to treatmentbasics (enc_ref = enc_key) to sum crisis_int; divided by count\
+    \ of distinct patients (pat_ref) in encounters for that facility."
+  sql_expression: (SELECT SUM(tb.crisis_int) FROM encounters e JOIN treatmentbasics tb ON tb.enc_ref =
+    e.enc_key WHERE e.fac_id = facilities.fac_key) * 1.0 / (SELECT COUNT(DISTINCT e2.pat_ref) FROM encounters
+    e2 WHERE e2.fac_id = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: social_support_effectiveness_sse
+  description: "Evaluates the effectiveness of social support based on social support level and relationship\
+    \ quality.\n\nSSE = \text{The average of the sum of two scores: a social support score (Strong=3,\
+    \ Adequate=2, Limited=1, Weak=0) and a relationship quality score (Good=3, Fair=2, Poor=1, Conflicted=0).}\n\
+    \nCompiler note: Per-record Social Support Effectiveness score; averaging across a cohort is left\
+    \ to the caller via AVG(). Checked funcassess->>'Soc_Sup' values: data contains 'Strong','Moderate','Limited',\
+    \ and NULL (no 'Adequate' or 'Weak' literal strings) — mapped 'Moderate' to the documented 'Adequate'=2\
+    \ score since no other value fits; 'Weak'=0 has no observed rows but is kept in the CASE for completeness.\
+    \ funcassess->>'Rel_Qual' values matched documented set exactly: 'Good','Fair','Poor','Conflicted'."
+  sql_expression: (CASE funcassess->>'Soc_Sup' WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited'
+    THEN 1 WHEN 'Weak' THEN 0 END) + (CASE funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN 'Fair' THEN
+    2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - calculations
+- name: missed_appointment_rate_mar
+  description: "Calculates the average number of missed appointments per patient at a facility.\n\nMAR\
+    \ = \frac{sum \text{Missed Appointments}}{\text{Total number of unique patients}} \text{ for a given\
+    \ facility.}\n\nCompiler note: MAR is per facility: sum of miss_appt across encounters at that facility\
+    \ divided by count of distinct patients encountered at that facility. encounters.fac_id is a local\
+    \ (non-FK) reference to facilities.fac_key, matched by value."
+  sql_expression: (SELECT SUM(e.miss_appt) / COUNT(DISTINCT e.pat_ref) FROM encounters e WHERE e.fac_id
+    = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: high_risk_patient
+  description: 'Identifies patients with elevated suicide risk or severe symptoms.
+
+
+    A patient whose assessed suicide risk is ''High'', or whose depression score (PHQ-9) is over 15, or
+    whose anxiety score (GAD-7) is over 15.
+
+
+    Compiler note: suic_risk, phq9_scr, gad7_scr are all on assessmentsymptomsandrisk, keyed by assessment
+    (asr_key); each assessment corresponds to one patient via assessmentbasics.pat_owner_ref.'
+  sql_expression: suic_risk = 'High' OR phq9_scr > 15 OR gad7_scr > 15
+  source_model: main.assessmentsymptomsandrisk
+  domains:
+  - definitions
+- name: treatment_resistant_patient
+  description: 'Identifies patients with poor treatment response despite adherence.
+
+
+    A patient whose treatment response is rated ''Poor'' despite having a treatment adherence level of
+    ''Medium'' or ''High''.
+
+
+    Compiler note: Tx_Resp and Tx_Adh fields in txprogmet JSON are consistently cased (''Poor'',''Medium'',''High''),
+    no normalization needed.'
+  sql_expression: (txprogmet->>'Tx_Resp') = 'Poor' AND (txprogmet->>'Tx_Adh') IN ('Medium', 'High')
+  source_model: main.treatmentoutcomes
+  domains:
+  - definitions
+- name: complex_care_needs
+  description: 'Identifies patients requiring intensive care coordination due to multiple risk factors.
+
+
+    A patient at a facility where the Suicide Risk Prevalence is over 20%, the average Patient Functional
+    Impairment Score is over 2.5, and the patient''s substance use includes ''Opioids'' or ''Multiple''
+    substances.
+
+
+    Built on: suicide_risk_prevalence_srp, patient_functional_impairment_score_pfis.
+
+
+    Compiler note: Patients lack a direct facility link, so facility association is resolved via encounters.pat_ref/fac_id
+    (a patient may link to multiple facilities, so EXISTS checks if any associated facility meets both
+    the SRP>20% and PFIS>2.5 thresholds, computed per facility using the same joins as the SRP and PFIS
+    entries). Substance use is checked via EXISTS across all of the patient''s assessments (assessmentbasics->assessmentsymptomsandrisk),
+    since a patient can have multiple assessment records and sub_use values ''Opioids'' or ''Multiple''
+    are used as given.'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM encounters e\n  WHERE e.pat_ref = patients.pat_key\n    AND\
+    \ (\n      SELECT CASE WHEN COUNT(*) = 0 THEN NULL ELSE 100.0 * SUM(CASE WHEN r2.suic_risk = 'High'\
+    \ THEN 1 ELSE 0 END) / COUNT(*) END\n      FROM encounters e2 JOIN assessmentsymptomsandrisk r2 ON\
+    \ e2.ab_ref = r2.asr_key\n      WHERE e2.fac_id = e.fac_id\n    ) > 20\n    AND (\n      SELECT AVG(CASE\
+    \ UPPER(asd.func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END)\n      FROM\
+    \ encounters e3 JOIN assessmentbasics ab3 ON e3.ab_ref = ab3.ab_key\n      JOIN assessmentsocialanddiagnosis\
+    \ asd ON ab3.ab_key = asd.asd_key\n      WHERE e3.fac_id = e.fac_id\n    ) > 2.5\n)\nAND EXISTS (\n\
+    \  SELECT 1 FROM assessmentbasics ab\n  JOIN assessmentsymptomsandrisk r ON ab.ab_key = r.asr_key\n\
+    \  WHERE ab.pat_owner_ref = patients.pat_key\n    AND r.sub_use IN ('Opioids', 'Multiple')\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: stable_recovery_patient
+  description: 'Identifies patients showing stable recovery with good functional outcomes.
+
+
+    A patient whose recovery status is ''Stable'' and whose functional improvement is rated as ''Moderate''
+    or ''Significant''.
+
+
+    Compiler note: Recovery status (''Stable'') comes from assessmentsocialanddiagnosis, linked to patients
+    via assessmentbasics.pat_owner_ref. Functional improvement (Func_Impv field in treatmentoutcomes.txprogmet
+    jsonb) is linked to patients via treatmentbasics.enc_ref -> encounters.pat_ref. Case-insensitive comparison
+    used since Func_Impv values contain mixed-case noise like ''ModerAtE'', ''significant'', etc. Patient
+    flagged if they have any matching assessment record with Stable status and any matching treatment
+    outcome record with Moderate/Significant functional improvement.'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM assessmentsocialanddiagnosis asd\n  JOIN assessmentbasics\
+    \ ab ON asd.asd_key = ab.ab_key\n  WHERE ab.pat_owner_ref = patients.pat_key\n    AND asd.rec_status\
+    \ = 'Stable'\n)\nAND EXISTS (\n  SELECT 1 FROM treatmentoutcomes tox\n  JOIN treatmentbasics tb ON\
+    \ tox.tx_ref = tb.tx_key\n  JOIN encounters e ON tb.enc_ref = e.enc_key\n  WHERE e.pat_ref = patients.pat_key\n\
+    \    AND UPPER(tox.txprogmet->>'Func_Impv') IN ('MODERATE','SIGNIFICANT')\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: low_engagement_risk
+  description: 'Identifies patients at risk of disengagement from therapy.
+
+
+    A patient with a Therapy Engagement Score below 1.5 and a current therapy engagement level of ''Low''.
+
+
+    Built on: therapy_engagement_score_tes.
+
+
+    Compiler note: Therapy Engagement Score (TES) is computed per patient by averaging the High=3/Medium=2/Low=1
+    mapping of th_eng across all treatment records linked (via encounters) to that patient. The ''current''
+    therapy engagement level is taken as this treatment record''s own th_eng value. A row qualifies if
+    its th_eng is ''Low'' and the patient''s overall TES (across all their treatment records) is below
+    1.5. Verified treatmentbasics.enc_ref -> encounters.enc_key -> pat_ref is a valid many-to-one path
+    (multiple treatment rows can share an encounter/patient).'
+  sql_expression: "th_eng = 'Low' AND (\n  SELECT AVG(CASE t2.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END)\n  FROM treatmentbasics t2\n  JOIN encounters e2 ON t2.enc_ref = e2.enc_key\n\
+    \  WHERE e2.pat_ref = (SELECT e1.pat_ref FROM encounters e1 WHERE e1.enc_key = treatmentbasics.enc_ref)\n\
+    ) < 1.5"
+  source_model: main.treatmentbasics
+  domains:
+  - definitions
+- name: resource_supported_facility
+  description: 'Identifies facilities with adequate or comprehensive community resources.
+
+
+    A facility where the available community resources are rated as ''Adequate'', ''Comprehensive'', or
+    ''Extensive''.
+
+
+    Built on: facility_resource_adequacy_index_frai.
+
+
+    Compiler note: Direct predicate on com_res column values as stated.'
+  sql_expression: com_res IN ('Adequate', 'Comprehensive', 'Extensive')
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: high_social_support_patient
+  description: 'Identifies patients with strong social support and good relationship quality.
+
+
+    A patient with a Social Support Effectiveness score of 5 or greater.
+
+
+    Built on: social_support_effectiveness_sse.
+
+
+    Compiler note: Uses SSE definition computed per row from funcassess JSON fields Soc_Sup and Rel_Qual;
+    flags rows where sum >= 5.'
+  sql_expression: ((CASE funcassess->>'Soc_Sup' WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited'
+    THEN 1 WHEN 'Weak' THEN 0 END) + (CASE funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN 'Fair' THEN
+    2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) >= 5
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - definitions
+- name: frequent_crisis_patient
+  description: 'Identifies patients with frequent crisis interventions.
+
+
+    A patient at a facility where the average Crisis Intervention Frequency is greater than 2.
+
+
+    Built on: crisis_intervention_frequency_cif.
+
+
+    Compiler note: A patient may have encounters at multiple facilities; treated as ''Frequent Crisis
+    Patient'' if at least one of their associated facilities has a Crisis Intervention Frequency (CIF)
+    greater than 2, using the CIF definition (sum of crisis_int for the facility''s encounters/treatments
+    divided by count of distinct patients at that facility).'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM encounters e\n  WHERE e.pat_ref = patients.pat_key\n    AND\
+    \ (\n      (SELECT SUM(tb.crisis_int) FROM encounters e2 JOIN treatmentbasics tb ON tb.enc_ref = e2.enc_key\
+    \ WHERE e2.fac_id = e.fac_id) * 1.0\n      / (SELECT COUNT(DISTINCT e3.pat_ref) FROM encounters e3\
+    \ WHERE e3.fac_id = e.fac_id)\n    ) > 2\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: non_compliant_patient
+  description: 'Identifies patients with consistent non-compliance in treatment.
+
+
+    A patient whose treatment adherence from their outcome record and their medication adherence are both
+    rated as ''Non-compliant''.
+
+
+    Compiler note: Treatment adherence from treatmentoutcomes.txprogmet->>''Tx_Adh'' (values include ''Non-compliant'');
+    medication adherence from treatmentbasics.med_adh. Linked via treatmentoutcomes.tx_ref -> treatmentbasics.tx_key
+    -> encounters.enc_ref -> patients.pat_ref. Flags patient if any linked treatment record has both fields
+    equal to ''Non-compliant''. Parenthesizing the jsonb ->> extraction was required to avoid a DuckDB
+    cast error.'
+  sql_expression: "EXISTS (\n  SELECT 1\n  FROM treatmentbasics tb\n  JOIN treatmentoutcomes tox ON tox.tx_ref\
+    \ = tb.tx_key\n  JOIN encounters e ON e.enc_key = tb.enc_ref\n  WHERE e.pat_ref = patients.pat_key\n\
+    \    AND tb.med_adh = 'Non-compliant'\n    AND (tox.txprogmet->>'Tx_Adh') = 'Non-compliant'\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: high_appointment_adherence
+  description: 'Identifies patients with low missed appointment rates.
+
+
+    A patient at a facility where the average Missed Appointment Rate is less than 1.
+
+
+    Built on: missed_appointment_rate_mar.
+
+
+    Compiler note: Patients can appear at multiple facilities (via encounters.fac_id), so the predicate
+    is encoded as ''exists a facility the patient is linked to whose Missed Appointment Rate (MAR) is
+    < 1'', using the MAR definition from facilities-level subquery.'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM encounters e\n  WHERE e.pat_ref = patients.pat_key\n    AND\
+    \ (\n      SELECT SUM(e2.miss_appt) / COUNT(DISTINCT e2.pat_ref)\n      FROM encounters e2\n     \
+    \ WHERE e2.fac_id = e.fac_id\n    ) < 1\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: symptom_severity_index_ssi
+  description: "Calculates a combined average symptom severity score for a facility, based on depression\
+    \ and anxiety.\n\nSSI = \frac{\text{Average PHQ-9 Score} + \text{Average GAD-7 Score}}{2}\n\nBuilt\
+    \ on: average_phq_9_score_by_facility_apsf, average_gad_7_score_by_facility_agsf.\n\nCompiler note:\
+    \ SSI combines the facility-level average PHQ-9 and GAD-7 scores (as defined by APSF and AGSF metrics)\
+    \ averaged together, per facility."
+  sql_expression: (((SELECT AVG(asr.phq9_scr) FROM encounters e JOIN assessmentsymptomsandrisk asr ON
+    asr.asr_key = e.ab_ref WHERE e.fac_id = facilities.fac_key) + (SELECT AVG(asr.gad7_scr) FROM encounters
+    e JOIN assessmentsymptomsandrisk asr ON asr.asr_key = e.ab_ref WHERE e.fac_id = facilities.fac_key))
+    / 2)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: engagement_adherence_score_eas
+  description: "Computes a composite score reflecting patient participation and adherence to treatment\
+    \ plans at a facility.\n\nEAS = \frac{\text{Therapy Engagement Score} + (\text{Treatment Adherence\
+    \ Rate} \times 3)}{2}\n\nBuilt on: therapy_engagement_score_tes, treatment_adherence_rate_tar.\n\n\
+    Compiler note: EAS combines the facility-level Therapy Engagement Score (avg of th_eng mapped High=3/Medium=2/Low=1\
+    \ for treatments at the facility, joined via encounters.fac_id) and Treatment Adherence Rate (share\
+    \ of treatmentoutcomes.txprogmet->>'Tx_Adh' in High/Medium/Compliant for the facility), per formula\
+    \ (TES + TAR*3)/2. Verified joins and fac_id-fac_key linkage produce one row per facility."
+  sql_expression: "(\n  (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low'\
+    \ THEN 1 END)\n   FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n   WHERE e.fac_id\
+    \ = facilities.fac_key)\n  +\n  (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))\
+    \ AS DOUBLE PRECISION) / COUNT(*)\n   FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref\
+    \ = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n   WHERE e.fac_id = facilities.fac_key)\
+    \ * 3\n) / 2"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: facility_risk_profile_index_frpi
+  description: "Generates an index indicating the overall risk level associated with the patient population\
+    \ at a facility.\n\nFRPI = (\frac{\text{Suicide Risk Prevalence}}{100} \times 5) + \text{Patient Functional\
+    \ Impairment Score}\n\nBuilt on: suicide_risk_prevalence_srp, patient_functional_impairment_score_pfis.\n\
+    \nCompiler note: FRPI = (SRP/100*5) + PFIS, both computed per facility via scalar subqueries joining\
+    \ encounters to assessmentsymptomsandrisk (for suicide risk) and assessmentsocialanddiagnosis (for\
+    \ functional impairment, case-insensitive mapping Severe=3/Moderate=2/Mild=1). Verified against sample\
+    \ facilities."
+  sql_expression: '( (CASE WHEN (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON
+    e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key) = 0 THEN NULL ELSE 100.0 * (SELECT COUNT(*)
+    FROM encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key
+    AND r.suic_risk = ''High'') / (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r
+    ON e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key) END) / 100.0 * 5 )
+
+    + (SELECT AVG(CASE UPPER(d.func_imp) WHEN ''SEVERE'' THEN 3 WHEN ''MODERATE'' THEN 2 WHEN ''MILD''
+    THEN 1 END) FROM encounters e JOIN assessmentsocialanddiagnosis d ON e.ab_ref = d.asd_key WHERE e.fac_id
+    = facilities.fac_key)'
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: patient_stability_metric_psm
+  description: "Calculates an index reflecting patient stability, inversely related to crisis frequency\
+    \ and missed appointments.\n\nPSM = \frac{1}{1 + \text{Crisis Intervention Frequency} + \text{Missed\
+    \ Appointment Rate}}\n\nBuilt on: crisis_intervention_frequency_cif, missed_appointment_rate_mar.\n\
+    \nCompiler note: Combines CIF and MAR subqueries (both scoped by facilities.fac_key = encounters.fac_id)\
+    \ into PSM = 1/(1+CIF+MAR)."
+  sql_expression: 1.0 / (1 + (SELECT SUM(tb.crisis_int) FROM encounters e JOIN treatmentbasics tb ON tb.enc_ref
+    = e.enc_key WHERE e.fac_id = facilities.fac_key) * 1.0 / (SELECT COUNT(DISTINCT e2.pat_ref) FROM encounters
+    e2 WHERE e2.fac_id = facilities.fac_key) + (SELECT SUM(e3.miss_appt) / COUNT(DISTINCT e3.pat_ref)
+    FROM encounters e3 WHERE e3.fac_id = facilities.fac_key))
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: resource_demand_differential_rdd
+  description: "Measures the potential gap between average patient functional needs and available facility\
+    \ resources.\n\nRDD = \text{Patient Functional Impairment Score} - \text{Facility Resource Adequacy\
+    \ Index}\n\nBuilt on: patient_functional_impairment_score_pfis, facility_resource_adequacy_index_frai.\n\
+    \nCompiler note: RDD = PFIS - FRAI per facility. PFIS computed via scalar subquery joining assessmentsocialanddiagnosis\
+    \ -> assessmentbasics -> patients -> encounters, matching encounters.fac_id to facilities.fac_key\
+    \ (verified all encounters have a matching facility). FRAI computed directly from facilities.com_res\
+    \ using the given scoring (Comprehensive/Extensive=3, Adequate=2, Limited=1)."
+  sql_expression: "(SELECT AVG(CASE UPPER(asd.func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN\
+    \ 'MILD' THEN 1 END)\n FROM assessmentsocialanddiagnosis asd\n JOIN assessmentbasics ab ON asd.asd_key\
+    \ = ab.ab_key\n JOIN patients p ON ab.pat_owner_ref = p.pat_key\n JOIN encounters e ON e.pat_ref =\
+    \ p.pat_key\n WHERE e.fac_id = facilities.fac_key)\n-\n(CASE com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END)"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: socio_environmental_support_index_sesi
+  description: "Computes a composite index reflecting the quality of the patient's social environment\
+    \ and the facility's resource context.\n\nSESI = \frac{\text{Average Social Support Effectiveness}\
+    \ + \text{Facility Resource Adequacy Index}}{2}\n\nBuilt on: social_support_effectiveness_sse, facility_resource_adequacy_index_frai.\n\
+    \nCompiler note: SESI computed per facility: average SSE (Soc_Sup + Rel_Qual scores) across patients\
+    \ linked to the facility via encounters.fac_id -> patients.pat_ref -> assessmentbasics.pat_owner_ref\
+    \ -> assessmentsocialanddiagnosis, combined with FRAI (single com_res score per facility since facilities\
+    \ table has one row per facility) averaged together."
+  sql_expression: "(\n  (SELECT AVG(\n      (CASE asd.funcassess->>'Soc_Sup' WHEN 'Strong' THEN 3 WHEN\
+    \ 'Moderate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      +\n      (CASE asd.funcassess->>'Rel_Qual'\
+    \ WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)\n   )\n \
+    \  FROM assessmentsocialanddiagnosis asd\n   JOIN assessmentbasics ab ON ab.ab_key = asd.asd_key\n\
+    \   JOIN encounters e ON e.pat_ref = ab.pat_owner_ref\n   WHERE e.fac_id = facilities.fac_key)\n \
+    \ +\n  (CASE facilities.com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate'\
+    \ THEN 2 WHEN 'Limited' THEN 1 END)\n) / 2.0"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: adherence_effectiveness_ratio_aer
+  description: "Calculates a ratio comparing treatment adherence rate to the average functional impairment,\
+    \ suggesting potential treatment impact relative to need.\n\nAER = \frac{\text{Treatment Adherence\
+    \ Rate}}{\text{Patient Functional Impairment Score}} \text{ (handle division by zero)}\n\nBuilt on:\
+    \ treatment_adherence_rate_tar, patient_functional_impairment_score_pfis.\n\nCompiler note: AER =\
+    \ Treatment Adherence Rate / Patient Functional Impairment Score, computed per facility. PFIS is computed\
+    \ by joining assessmentsocialanddiagnosis -> assessmentbasics -> patients -> encounters to link patients'\
+    \ functional impairment to the facility where their encounter occurred (via encounters.fac_id). Division-by-zero/NULL\
+    \ PFIS (no impairment data) handled by returning NULL."
+  sql_expression: CASE WHEN (SELECT AVG(CASE UPPER(asd.func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE'
+    THEN 2 WHEN 'MILD' THEN 1 END) FROM assessmentsocialanddiagnosis asd JOIN assessmentbasics ab ON asd.asd_key
+    = ab.ab_key JOIN patients p ON ab.pat_owner_ref = p.pat_key JOIN encounters e ON e.pat_ref = p.pat_key
+    WHERE e.fac_id = facilities.fac_key) IS NULL OR (SELECT AVG(CASE UPPER(asd.func_imp) WHEN 'SEVERE'
+    THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END) FROM assessmentsocialanddiagnosis asd JOIN assessmentbasics
+    ab ON asd.asd_key = ab.ab_key JOIN patients p ON ab.pat_owner_ref = p.pat_key JOIN encounters e ON
+    e.pat_ref = p.pat_key WHERE e.fac_id = facilities.fac_key) = 0 THEN NULL ELSE (SELECT CAST(COUNT(*)
+    FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)
+    FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref
+    = e.enc_key WHERE e.fac_id = facilities.fac_key) / (SELECT AVG(CASE UPPER(asd.func_imp) WHEN 'SEVERE'
+    THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END) FROM assessmentsocialanddiagnosis asd JOIN assessmentbasics
+    ab ON asd.asd_key = ab.ab_key JOIN patients p ON ab.pat_owner_ref = p.pat_key JOIN encounters e ON
+    e.pat_ref = p.pat_key WHERE e.fac_id = facilities.fac_key) END
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: engagement_deficit_index_edi
+  description: "Quantifies the degree of patient disengagement, considering both therapy engagement scores\
+    \ and appointment attendance.\n\nEDI = (3 - \text{Therapy Engagement Score}) \times (1 + \text{Missed\
+    \ Appointment Rate})\n\nBuilt on: therapy_engagement_score_tes, missed_appointment_rate_mar.\n\nCompiler\
+    \ note: EDI computed per facility: Therapy Engagement Score (TES) is the average of th_eng scores\
+    \ (High=3,Medium=2,Low=1) for treatments linked via encounters to the facility; Missed Appointment\
+    \ Rate (MAR) is SUM(miss_appt)/COUNT(DISTINCT pat_ref) for encounters at the facility. Both are scalar\
+    \ subqueries aggregating to one row per facility."
+  sql_expression: (3 - (SELECT AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN
+    1 END) FROM treatmentbasics t JOIN encounters e ON t.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key))
+    * (1 + (SELECT SUM(e2.miss_appt)*1.0 / COUNT(DISTINCT e2.pat_ref) FROM encounters e2 WHERE e2.fac_id
+    = facilities.fac_key))
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: comprehensive_facility_risk_score_cfrs
+  description: "A normalized index assessing overall facility risk based on combined depression severity,\
+    \ suicide risk prevalence, and functional impairment.\n\nCFRS = \frac{\text{Average PHQ-9 Score}}{27}\
+    \ + \frac{\text{Suicide Risk Prevalence}}{100} + \frac{\text{Patient Functional Impairment Score}}{3}\n\
+    \nBuilt on: average_phq_9_score_by_facility_apsf, suicide_risk_prevalence_srp, patient_functional_impairment_score_pfis.\n\
+    \nCompiler note: CFRS combines three facility-level sub-metrics (APSF, SRP, PFIS) each computed via\
+    \ scalar subqueries joining encounters to the relevant assessment table on fac_id = facilities.fac_key,\
+    \ matching the referenced entries' definitions. Divided by their respective max/normalization constants\
+    \ (27, 100, 3) and summed."
+  sql_expression: '(SELECT AVG(asr.phq9_scr) FROM encounters e JOIN assessmentsymptomsandrisk asr ON asr.asr_key
+    = e.ab_ref WHERE e.fac_id = facilities.fac_key) / 27.0
+
+    + (CASE WHEN (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key
+    WHERE e.fac_id = facilities.fac_key) = 0 THEN NULL ELSE 100.0 * (SELECT COUNT(*) FROM encounters e
+    JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key AND r.suic_risk
+    = ''High'') / (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key
+    WHERE e.fac_id = facilities.fac_key) END) / 100.0
+
+    + (SELECT AVG(CASE UPPER(asd.func_imp) WHEN ''SEVERE'' THEN 3 WHEN ''MODERATE'' THEN 2 WHEN ''MILD''
+    THEN 1 END) FROM encounters e JOIN assessmentsocialanddiagnosis asd ON asd.asd_key = e.ab_ref WHERE
+    e.fac_id = facilities.fac_key) / 3.0'
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: support_system_pressure_index_sspi
+  description: "Index assessing the pressure on support systems based on crisis frequency relative to\
+    \ social support effectiveness.\n\nSSPI = \frac{\text{Crisis Intervention Frequency}}{\text{Average\
+    \ Social Support Effectiveness} + 1}\n\nBuilt on: crisis_intervention_frequency_cif, social_support_effectiveness_sse.\n\
+    \nCompiler note: SSPI = Crisis Intervention Frequency (sum of crisis_int for facility's encounters/unique\
+    \ patients) divided by (average Social Support Effectiveness, computed from funcassess JSON Soc_Sup+Rel_Qual\
+    \ scores for assessments linked via encounters.ab_ref to the facility, plus 1)."
+  sql_expression: ((SELECT SUM(tb.crisis_int) FROM encounters e JOIN treatmentbasics tb ON tb.enc_ref
+    = e.enc_key WHERE e.fac_id = facilities.fac_key) * 1.0 / (SELECT COUNT(DISTINCT e2.pat_ref) FROM encounters
+    e2 WHERE e2.fac_id = facilities.fac_key)) / ( (SELECT AVG((CASE asd.funcassess->>'Soc_Sup' WHEN 'Strong'
+    THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END) + (CASE asd.funcassess->>'Rel_Qual'
+    WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) FROM encounters
+    e3 JOIN assessmentsocialanddiagnosis asd ON asd.asd_key = e3.ab_ref WHERE e3.fac_id = facilities.fac_key)
+    + 1 )
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: high_need_under_resourced_facility
+  description: 'Identifies facilities facing significant aggregate patient risk without adequate community
+    resources.
+
+
+    A facility where the Facility Risk Profile Index is greater than 4.5 and the Facility Resource Adequacy
+    Index is less than 1.5.
+
+
+    Built on: facility_risk_profile_index_frpi, facility_resource_adequacy_index_frai.
+
+
+    Compiler note: FRPI computed as correlated subqueries over encounters/assessmentsymptomsandrisk and
+    assessmentsocialanddiagnosis joined by fac_id = facilities.fac_key, matching the FRPI definition.
+    FRAI: facilities.com_res is a single per-facility value (not a repeated multi-row attribute), so the
+    ''average'' resource score for a facility reduces to the CASE score of that facility''s own com_res
+    value (Comprehensive/Extensive=3, Adequate=2, Limited=1); NULL com_res yields NULL and the comparison
+    then evaluates to NULL/false.'
+  sql_expression: ((CASE WHEN (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref
+    = r.asr_key WHERE e.fac_id = facilities.fac_key) = 0 THEN NULL ELSE 100.0 * (SELECT COUNT(*) FROM
+    encounters e JOIN assessmentsymptomsandrisk r ON e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key
+    AND r.suic_risk = 'High') / (SELECT COUNT(*) FROM encounters e JOIN assessmentsymptomsandrisk r ON
+    e.ab_ref = r.asr_key WHERE e.fac_id = facilities.fac_key) END) / 100.0 * 5 + (SELECT AVG(CASE UPPER(d.func_imp)
+    WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END) FROM encounters e JOIN assessmentsocialanddiagnosis
+    d ON e.ab_ref = d.asd_key WHERE e.fac_id = facilities.fac_key) > 4.5) AND ((CASE com_res WHEN 'Comprehensive'
+    THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END) < 1.5)
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: facility_with_engaged_but_high_impairment_population
+  description: 'Identifies facilities where the patient population is generally engaged and adherent but
+    continues to struggle with high functional impairment.
+
+
+    A facility where the Engagement-Adherence Score is greater than 2.0 and the Patient Functional Impairment
+    Score is also greater than 2.0.
+
+
+    Built on: engagement_adherence_score_eas, patient_functional_impairment_score_pfis.
+
+
+    Compiler note: Combines Engagement-Adherence Score (avg therapy engagement score + 3*treatment adherence
+    rate, /2) and Patient Functional Impairment Score (avg of severity-coded func_imp, case-normalized
+    via UPPER) computed per facility by joining treatmentbasics/treatmentoutcomes/assessmentsocialanddiagnosis
+    through encounters.fac_id. Both subqueries aggregate to a single scalar per facility row.'
+  sql_expression: "(\n  (\n    (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN\
+    \ 'Low' THEN 1 END)\n     FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key)\n    +\n    (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh'\
+    \ IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n     FROM treatmentoutcomes o\
+    \ JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key) * 3\n  ) / 2\n) > 2.0\nAND\n(\n  SELECT AVG(CASE UPPER(asd.func_imp)\
+    \ WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END)\n  FROM assessmentsocialanddiagnosis\
+    \ asd\n  JOIN encounters e ON e.ab_ref = asd.asd_key\n  WHERE e.fac_id = facilities.fac_key\n) > 2.0"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: patient_with_strong_recovery_capital
+  description: 'Identifies patients demonstrating high social support effectiveness coupled with low functional
+    impairment.
+
+
+    A patient with a Social Support Effectiveness score of 5 or greater and whose functional impairment
+    is rated as ''Mild''.
+
+
+    Built on: social_support_effectiveness_sse, patient_functional_impairment_score_pfis.
+
+
+    Compiler note: Social Support Effectiveness computed per row from funcassess fields; functional impairment
+    compared case-insensitively since func_imp has mixed-case noise (''Mild'',''mIld'', etc).'
+  sql_expression: ((CASE funcassess->>'Soc_Sup' WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited'
+    THEN 1 WHEN 'Weak' THEN 0 END) + (CASE funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN 'Fair' THEN
+    2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) >= 5 AND UPPER(func_imp) = 'MILD'
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - definitions
+- name: facility_attrition_risk_indicator
+  description: 'Identifies facilities potentially experiencing high patient dropout, characterized by
+    low engagement/adherence and high missed appointment rates.
+
+
+    A facility where the Engagement-Adherence Score is less than 1.5 and the Missed Appointment Rate is
+    greater than 2.5.
+
+
+    Built on: engagement_adherence_score_eas, missed_appointment_rate_mar.
+
+
+    Compiler note: Combines Engagement-Adherence Score (<1.5) and Missed Appointment Rate (>2.5) subqueries
+    scoped by fac_id, per their respective definitions.'
+  sql_expression: "(\n  (\n    (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN\
+    \ 'Low' THEN 1 END)\n     FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key)\n    +\n    (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh'\
+    \ IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n     FROM treatmentoutcomes o\
+    \ JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key) * 3\n  ) / 2\n) < 1.5\nAND\n(\n  (SELECT SUM(e.miss_appt)\
+    \ / COUNT(DISTINCT e.pat_ref) FROM encounters e WHERE e.fac_id = facilities.fac_key)\n) > 2.5"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: well_resourced_high_support_environment
+  description: 'Identifies facilities that are well-resourced and serve a patient population with generally
+    high levels of social support effectiveness.
+
+
+    A facility where the Facility Resource Adequacy Index is 2.0 or greater and the average Social Support
+    Effectiveness score of its patients is 4.5 or greater.
+
+
+    Built on: facility_resource_adequacy_index_frai, social_support_effectiveness_sse.
+
+
+    Compiler note: FRAI computed directly from facilities.com_res (single value per facility, so AVG is
+    trivial). SSE averaged over distinct patient assessments (assessmentsocialanddiagnosis rows) linked
+    to the facility via assessmentbasics.pat_owner_ref -> patients -> encounters.fac_id, deduplicated
+    by asd_key to avoid double counting from multiple encounters per patient. Facilities with no com_res
+    or no linked patients yield NULL and are excluded (not >= threshold).'
+  sql_expression: "(CASE com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate' THEN\
+    \ 2 WHEN 'Limited' THEN 1 END) >= 2.0\nAND (\n  SELECT AVG(sse) FROM (\n    SELECT DISTINCT asd.asd_key,\n\
+    \      (CASE asd.funcassess->>'Soc_Sup' WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited'\
+    \ THEN 1 WHEN 'Weak' THEN 0 END) +\n      (CASE asd.funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN\
+    \ 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END) AS sse\n    FROM assessmentsocialanddiagnosis\
+    \ asd\n    JOIN assessmentbasics ab ON asd.asd_key = ab.ab_key\n    JOIN patients p ON ab.pat_owner_ref\
+    \ = p.pat_key\n    JOIN encounters e ON e.pat_ref = p.pat_key\n    WHERE e.fac_id = facilities.fac_key\n\
+    \  ) t\n) >= 4.5"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: patient_with_severe_comorbid_distress_profile
+  description: 'Identifies patients experiencing significant simultaneous distress across depression,
+    anxiety, and functional domains.
+
+
+    A patient whose depression score (PHQ-9) is 15 or greater, whose anxiety score (GAD-7) is 15 or greater,
+    AND whose functional impairment is rated as ''Severe''.
+
+
+    Built on: average_phq_9_score_by_facility_apsf, average_gad_7_score_by_facility_agsf, patient_functional_impairment_score_pfis.
+
+
+    Compiler note: Patient-level predicate: checks, for any single assessment belonging to the patient
+    (linked via assessmentbasics.pat_owner_ref, with matching phq9/gad7 from assessmentsymptomsandrisk
+    and func_imp from assessmentsocialanddiagnosis, both keyed to the same ab_key), whether PHQ-9>=15
+    AND GAD-7>=15 AND functional impairment is ''Severe'' (case-insensitive, per observed noisy casing
+    variants).'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM assessmentbasics ab\n  JOIN assessmentsymptomsandrisk asr\
+    \ ON asr.asr_key = ab.ab_key\n  JOIN assessmentsocialanddiagnosis asd ON asd.asd_key = ab.ab_key\n\
+    \  WHERE ab.pat_owner_ref = patients.pat_key\n    AND asr.phq9_scr >= 15\n    AND asr.gad7_scr >=\
+    \ 15\n    AND UPPER(asd.func_imp) = 'SEVERE'\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: facility_with_potential_treatment_inertia
+  description: 'Identifies facilities where patients seem engaged in therapy but struggle with overall
+    treatment adherence, suggesting potential systemic barriers or resistance.
+
+
+    A facility where the Therapy Engagement Score is greater than 2.2 but the Treatment Adherence Rate
+    is less than 0.6.
+
+
+    Built on: therapy_engagement_score_tes, treatment_adherence_rate_tar.
+
+
+    Compiler note: TES computed per facility by joining treatmentbasics to encounters on enc_ref/fac_id;
+    TAR computed per facility via treatmentoutcomes->treatmentbasics->encounters join on fac_id, matching
+    the given subquery definition. Facilities with no matching treatment/outcome rows yield NULL and are
+    excluded by the comparison (NULL > 2.2 is NULL/false).'
+  sql_expression: "(SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN\
+    \ 1 END)\n FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key)\
+    \ > 2.2\nAND\n(SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))\
+    \ AS DOUBLE PRECISION) / COUNT(*)\n FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref =\
+    \ tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key) < 0.6"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: patient_with_high_crisis_low_support_profile
+  description: 'Identifies patients characterized by frequent crisis interventions and weak social support
+    systems.
+
+
+    A patient with a total crisis intervention count greater than 2 AND a personal Social Support Effectiveness
+    score of less than 3.
+
+
+    Built on: crisis_intervention_frequency_cif, social_support_effectiveness_sse.
+
+
+    Compiler note: Total crisis intervention count = sum of treatmentbasics.crisis_int over all encounters
+    for the patient. Personal Social Support Effectiveness score (SSE) uses the defined Soc_Sup/Rel_Qual
+    scoring; since a patient may have multiple assessment records (verified via assessmentbasics.pat_owner_ref
+    grouping), the personal SSE is averaged across all their assessments.'
+  sql_expression: "(SELECT COALESCE(SUM(tb.crisis_int),0) FROM encounters e JOIN treatmentbasics tb ON\
+    \ tb.enc_ref = e.enc_key WHERE e.pat_ref = patients.pat_key) > 2\nAND\n(SELECT AVG((CASE asd.funcassess->>'Soc_Sup'\
+    \ WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END) + (CASE\
+    \ asd.funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted'\
+    \ THEN 0 END))\n FROM assessmentsocialanddiagnosis asd JOIN assessmentbasics ab ON asd.asd_key = ab.ab_key\
+    \ WHERE ab.pat_owner_ref = patients.pat_key) < 3"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: facility_demonstrating_strong_patient_retention
+  description: 'Identifies facilities showing positive performance indicators related to high patient
+    adherence and low missed appointment rates.
+
+
+    A facility where the Treatment Adherence Rate is greater than 0.75 and the Missed Appointment Rate
+    is less than 1.0.
+
+
+    Built on: treatment_adherence_rate_tar, missed_appointment_rate_mar.
+
+
+    Compiler note: Combines Treatment Adherence Rate (>0.75) and Missed Appointment Rate (<1.0), both
+    computed as scalar subqueries per facility using the given definitions.'
+  sql_expression: '(SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>''Tx_Adh'' IN (''High'',''Medium'',''Compliant''))
+    AS DOUBLE PRECISION) / COUNT(*) FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key
+    JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key) > 0.75
+
+    AND
+
+    (SELECT SUM(e.miss_appt) / COUNT(DISTINCT e.pat_ref) FROM encounters e WHERE e.fac_id = facilities.fac_key)
+    < 1.0'
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: high_severity_high_risk_patient_group
+  description: 'Identifies patients presenting with both high symptom severity (depression/anxiety) and
+    elevated suicide risk.
+
+
+    A patient with a depression score (PHQ-9) over 19 OR an anxiety score (GAD-7) over 14, AND an assessed
+    suicide risk of ''High''.
+
+
+    Compiler note: Uses phq9_scr, gad7_scr, and suic_risk columns directly from assessmentsymptomsandrisk;
+    suic_risk value ''High'' matches documented category.'
+  sql_expression: (phq9_scr > 19 OR gad7_scr > 14) AND suic_risk = 'High'
+  source_model: main.assessmentsymptomsandrisk
+  domains:
+  - definitions
+- name: clinical_improvement_potential_index_cipi
+  description: "Calculates a ratio comparing patient engagement/adherence to overall symptom severity\
+    \ at a facility, suggesting potential responsiveness to intervention.\n\nCIPI = \frac{\text{Engagement-Adherence\
+    \ Score}}{\text{Symptom Severity Index} + 1}\n\nBuilt on: engagement_adherence_score_eas, symptom_severity_index_ssi.\n\
+    \nCompiler note: CIPI = EAS / (SSI + 1), composed directly from the given EAS and SSI subqueries,\
+    \ each scoped to the facility via facilities.fac_key."
+  sql_expression: "(\n  (\n    (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN\
+    \ 'Low' THEN 1 END)\n     FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key)\n    +\n    (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh'\
+    \ IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n     FROM treatmentoutcomes o\
+    \ JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key) * 3\n  ) / 2\n) / (\n  (((SELECT AVG(asr.phq9_scr) FROM encounters\
+    \ e JOIN assessmentsymptomsandrisk asr ON asr.asr_key = e.ab_ref WHERE e.fac_id = facilities.fac_key)\
+    \ + (SELECT AVG(asr.gad7_scr) FROM encounters e JOIN assessmentsymptomsandrisk asr ON asr.asr_key\
+    \ = e.ab_ref WHERE e.fac_id = facilities.fac_key)) / 2) + 1\n)"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: facility_efficiency_index_fei
+  description: "Estimates facility efficiency by relating the achieved patient stability metric to the\
+    \ available facility resource adequacy.\n\nFEI = \text{Patient Stability Metric} \times \text{Facility\
+    \ Resource Adequacy Index}\n\nBuilt on: patient_stability_metric_psm, facility_resource_adequacy_index_frai.\n\
+    \nCompiler note: FEI = PSM * FRAI. Since facilities table has one row per facility, FRAI reduces to\
+    \ a direct CASE on com_res (no averaging needed, consistent with facility_resource_adequacy_index_frai\
+    \ definition). PSM computed via subqueries over encounters/treatmentbasics joined on fac_id, matching\
+    \ patient_stability_metric_psm entry exactly, with COALESCE to handle facilities with no encounters/crisis\
+    \ interventions."
+  sql_expression: (1.0 / (1 + (SELECT COALESCE(SUM(tb.crisis_int),0) FROM encounters e JOIN treatmentbasics
+    tb ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key) * 1.0 / (SELECT COUNT(DISTINCT e2.pat_ref)
+    FROM encounters e2 WHERE e2.fac_id = facilities.fac_key) + (SELECT COALESCE(SUM(e3.miss_appt),0) /
+    COUNT(DISTINCT e3.pat_ref) FROM encounters e3 WHERE e3.fac_id = facilities.fac_key))) * (CASE com_res
+    WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: therapeutic_alliance_engagement_score_taes
+  description: "Computes a combined score reflecting both the average clinician-reported therapeutic alliance\
+    \ and the calculated therapy engagement score for a facility.\n\nTAES = \frac{\text{Average Therapeutic\
+    \ Alliance Score} + \text{Therapy Engagement Score}}{2}, where the alliance score is 3 for 'Strong',\
+    \ 2 for 'Moderate', 1 for 'Weak', and 0 for 'Poor'.\n\nBuilt on: therapy_engagement_score_tes.\n\n\
+    Compiler note: Alliance score from treatmentoutcomes.txprogmet->>'Ther_Alliance', case-insensitive\
+    \ mapped Strong=3,Moderate=2,Weak=1,Poor=0, averaged over treatment outcomes linked via treatmentbasics/encounters\
+    \ to the facility (encounters.fac_id matches facilities.fac_key). Engagement score (TES) averaged\
+    \ over treatmentbasics.th_eng for the same facility join path. TAES is the average of these two facility-level\
+    \ averages."
+  sql_expression: "( (SELECT AVG(CASE lower(txo.txprogmet->>'Ther_Alliance')\n                WHEN 'strong'\
+    \ THEN 3\n                WHEN 'moderate' THEN 2\n                WHEN 'weak' THEN 1\n           \
+    \     WHEN 'poor' THEN 0\n              END)\n    FROM treatmentoutcomes txo\n    JOIN treatmentbasics\
+    \ tb ON tb.tx_key = txo.tx_ref\n    JOIN encounters e ON e.enc_key = tb.enc_ref\n    WHERE e.fac_id\
+    \ = facilities.fac_key)\n  +\n  (SELECT AVG(CASE tb2.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN\
+    \ 2 WHEN 'Low' THEN 1 END)\n    FROM treatmentbasics tb2\n    JOIN encounters e2 ON e2.enc_key = tb2.enc_ref\n\
+    \    WHERE e2.fac_id = facilities.fac_key)\n) / 2"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: recovery_trajectory_index_rti
+  description: "Estimates the effectiveness of treatment adherence in achieving functional improvement\
+    \ at a facility.\n\nRTI = \text{Average Functional Improvement Score} \times \text{Treatment Adherence\
+    \ Rate}, where the improvement score is 3 for 'Significant', 2 for 'Moderate', and 1 for 'Minimal'.\n\
+    \nBuilt on: treatment_adherence_rate_tar.\n\nCompiler note: Func_Impv values are case-noisy (e.g.\
+    \ 'ModerAtE','sIGnIfiCanT'); normalized via UPPER() to map to Significant=3, Moderate=2, Minimal=1\
+    \ (NULL ignored by AVG). Combined with existing Treatment Adherence Rate (TAR) subquery joined via\
+    \ treatmentoutcomes->treatmentbasics->encounters->fac_id per facility."
+  sql_expression: (SELECT AVG(CASE WHEN UPPER(o.txprogmet->>'Func_Impv') = 'SIGNIFICANT' THEN 3 WHEN UPPER(o.txprogmet->>'Func_Impv')
+    = 'MODERATE' THEN 2 WHEN UPPER(o.txprogmet->>'Func_Impv') = 'MINIMAL' THEN 1 END) FROM treatmentoutcomes
+    o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key WHERE
+    e.fac_id = facilities.fac_key) * (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))
+    AS DOUBLE PRECISION) / COUNT(*) FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key
+    JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key)
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: crisis_adherence_ratio_car
+  description: "Calculates the ratio of crisis intervention frequency to the treatment adherence rate,\
+    \ indicating crises occurring per unit of adherence.\n\nCAR = \frac{\text{Crisis Intervention Frequency}}{\t\
+    ext{Treatment Adherence Rate} + 0.01}\n\nBuilt on: crisis_intervention_frequency_cif, treatment_adherence_rate_tar.\n\
+    \nCompiler note: CAR = Crisis Intervention Frequency (sum of crisis_int for facility's encounters\
+    \ / distinct patients) divided by (Treatment Adherence Rate (High/Medium/Compliant share of Tx_Adh\
+    \ in txprogmet JSON) + 0.01), both computed per facility via scalar subqueries."
+  sql_expression: "(\n  (SELECT SUM(tb.crisis_int) FROM encounters e JOIN treatmentbasics tb ON tb.enc_ref\
+    \ = e.enc_key WHERE e.fac_id = facilities.fac_key) * 1.0 /\n  (SELECT COUNT(DISTINCT e2.pat_ref) FROM\
+    \ encounters e2 WHERE e2.fac_id = facilities.fac_key)\n) / (\n  (SELECT CAST(COUNT(*) FILTER (WHERE\
+    \ o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*) FROM treatmentoutcomes\
+    \ o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key WHERE\
+    \ e.fac_id = facilities.fac_key)\n  + 0.01\n)"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: facility_with_high_clinical_leverage_potential
+  description: 'Identifies facilities with a highly engaged and adherent patient population that still
+    experiences significant symptom severity, suggesting readiness for potentially more intensive or alternative
+    interventions.
+
+
+    A facility where the Engagement-Adherence Score is greater than 2.5 AND the Symptom Severity Index
+    is greater than 15.
+
+
+    Built on: engagement_adherence_score_eas, symptom_severity_index_ssi.
+
+
+    Compiler note: Combines Engagement-Adherence Score (EAS) and Symptom Severity Index (SSI) as defined,
+    both computed via correlated subqueries per facility against treatmentbasics/treatmentoutcomes/encounters/assessmentsymptomsandrisk.'
+  sql_expression: "(\n  (\n    (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN\
+    \ 'Low' THEN 1 END)\n     FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key)\n    +\n    (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh'\
+    \ IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n     FROM treatmentoutcomes o\
+    \ JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n  \
+    \   WHERE e.fac_id = facilities.fac_key) * 3\n  ) / 2\n) > 2.5\nAND\n(\n  ((SELECT AVG(asr.phq9_scr)\
+    \ FROM encounters e JOIN assessmentsymptomsandrisk asr ON asr.asr_key = e.ab_ref WHERE e.fac_id =\
+    \ facilities.fac_key)\n   + (SELECT AVG(asr.gad7_scr) FROM encounters e JOIN assessmentsymptomsandrisk\
+    \ asr ON asr.asr_key = e.ab_ref WHERE e.fac_id = facilities.fac_key)) / 2\n) > 15"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: patient_exhibiting_fragile_stability
+  description: 'Identifies patients currently classified as ''Stable Recovery'' but who exhibit risk factors
+    like frequent missed appointments or low social support, suggesting potential for destabilization.
+
+
+    A patient who meets the ''Stable Recovery Patient'' criteria BUT has an average of more than 2 missed
+    appointments OR has a personal Social Support Effectiveness score of less than 3.
+
+
+    Built on: stable_recovery_patient, missed_appointment_rate_mar, social_support_effectiveness_sse.
+
+
+    Compiler note: Stable Recovery Patient criteria reused as given. For patients with multiple encounters,
+    averaged miss_appt across all their encounters for the >2 threshold; for patients with multiple social/diagnosis
+    assessments, averaged the personal SSE score across all their assessment records since the entry does
+    not specify a selection rule among multiple records.'
+  sql_expression: "(EXISTS (\n  SELECT 1 FROM assessmentsocialanddiagnosis asd\n  JOIN assessmentbasics\
+    \ ab ON asd.asd_key = ab.ab_key\n  WHERE ab.pat_owner_ref = patients.pat_key\n    AND asd.rec_status\
+    \ = 'Stable'\n)\nAND EXISTS (\n  SELECT 1 FROM treatmentoutcomes tox\n  JOIN treatmentbasics tb ON\
+    \ tox.tx_ref = tb.tx_key\n  JOIN encounters e ON tb.enc_ref = e.enc_key\n  WHERE e.pat_ref = patients.pat_key\n\
+    \    AND UPPER(tox.txprogmet->>'Func_Impv') IN ('MODERATE','SIGNIFICANT')\n))\nAND (\n  (SELECT AVG(e.miss_appt)\
+    \ FROM encounters e WHERE e.pat_ref = patients.pat_key) > 2\n  OR\n  (SELECT AVG(\n      (CASE asd.funcassess->>'Soc_Sup'\
+    \ WHEN 'Strong' THEN 3 WHEN 'Moderate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END) +\n  \
+    \    (CASE asd.funcassess->>'Rel_Qual' WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN\
+    \ 'Conflicted' THEN 0 END)\n    )\n    FROM assessmentsocialanddiagnosis asd\n    JOIN assessmentbasics\
+    \ ab ON asd.asd_key = ab.ab_key\n    WHERE ab.pat_owner_ref = patients.pat_key\n  ) < 3\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: resource_intensive_high_risk_patient_cohort
+  description: 'Identifies patients requiring significant care coordination and intervention due to possessing
+    characteristics of both Complex Care Needs and Frequent Crisis Patterns.
+
+
+    A patient who meets the criteria for both ''Complex Care Needs'' AND ''Frequent Crisis Patient''.
+
+
+    Built on: complex_care_needs, frequent_crisis_patient.
+
+
+    Compiler note: Combines the two existing predicate definitions (Complex Care Needs AND Frequent Crisis
+    Patient) via conjunction, each evaluated via EXISTS over the patient''s encounters/assessments, consistent
+    with how those two entries are defined.'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM encounters e\n  WHERE e.pat_ref = patients.pat_key\n    AND\
+    \ (\n      SELECT CASE WHEN COUNT(*) = 0 THEN NULL ELSE 100.0 * SUM(CASE WHEN r2.suic_risk = 'High'\
+    \ THEN 1 ELSE 0 END) / COUNT(*) END\n      FROM encounters e2 JOIN assessmentsymptomsandrisk r2 ON\
+    \ e2.ab_ref = r2.asr_key\n      WHERE e2.fac_id = e.fac_id\n    ) > 20\n    AND (\n      SELECT AVG(CASE\
+    \ UPPER(asd.func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN 2 WHEN 'MILD' THEN 1 END)\n      FROM\
+    \ encounters e3 JOIN assessmentbasics ab3 ON e3.ab_ref = ab3.ab_key\n      JOIN assessmentsocialanddiagnosis\
+    \ asd ON ab3.ab_key = asd.asd_key\n      WHERE e3.fac_id = e.fac_id\n    ) > 2.5\n)\nAND EXISTS (\n\
+    \  SELECT 1 FROM assessmentbasics ab\n  JOIN assessmentsymptomsandrisk r ON ab.ab_key = r.asr_key\n\
+    \  WHERE ab.pat_owner_ref = patients.pat_key\n    AND r.sub_use IN ('Opioids', 'Multiple')\n)\nAND\
+    \ EXISTS (\n  SELECT 1 FROM encounters e\n  WHERE e.pat_ref = patients.pat_key\n    AND (\n      (SELECT\
+    \ SUM(tb.crisis_int) FROM encounters e2 JOIN treatmentbasics tb ON tb.enc_ref = e2.enc_key WHERE e2.fac_id\
+    \ = e.fac_id) * 1.0\n      / (SELECT COUNT(DISTINCT e3.pat_ref) FROM encounters e3 WHERE e3.fac_id\
+    \ = e.fac_id)\n    ) > 2\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: facility_with_potential_engagement_outcome_disconnect
+  description: 'Identifies facilities where high therapy engagement scores do not seem to translate into
+    expected functional improvements or recovery progression.
+
+
+    A facility where the Therapy Engagement Score is greater than 2.0 but the Recovery Trajectory Index
+    is less than 0.8.
+
+
+    Built on: therapy_engagement_score_tes, recovery_trajectory_index_rti.
+
+
+    Compiler note: TES computed per facility from treatmentbasics joined via encounters.fac_id = facilities.fac_key.
+    RTI computed as per its given definition (Func_Impv average score * Tx_Adh high/medium/compliant rate)
+    scoped to the same facility.'
+  sql_expression: "(SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN\
+    \ 1 END) FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key)\
+    \ > 2.0\nAND\n(\n  (SELECT AVG(CASE WHEN UPPER(o.txprogmet->>'Func_Impv') = 'SIGNIFICANT' THEN 3 WHEN\
+    \ UPPER(o.txprogmet->>'Func_Impv') = 'MODERATE' THEN 2 WHEN UPPER(o.txprogmet->>'Func_Impv') = 'MINIMAL'\
+    \ THEN 1 END) FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters\
+    \ e ON tb.enc_ref = e.enc_key WHERE e.fac_id = facilities.fac_key)\n  *\n  (SELECT CAST(COUNT(*) FILTER\
+    \ (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\
+    \ FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref\
+    \ = e.enc_key WHERE e.fac_id = facilities.fac_key)\n) < 0.8"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: systemically_stressed_facility_environment
+  description: 'Identifies facilities potentially facing overwhelming systemic stress, characterized by
+    a significant gap between patient needs and resources, compounded by high patient attrition risk.
+
+
+    A facility where the Resource-Demand Differential is greater than 1.0 AND it meets the criteria for
+    ''Facility Attrition Risk Indicator''.
+
+
+    Built on: resource_demand_differential_rdd, facility_attrition_risk_indicator.
+
+
+    Compiler note: Combines Resource-Demand Differential (>1.0) with Facility Attrition Risk Indicator
+    (Engagement-Adherence Score <1.5 AND Missed Appointment Rate >2.5), each computed via correlated subqueries
+    over facilities.fac_key.'
+  sql_expression: "(\n  (SELECT AVG(CASE UPPER(asd.func_imp) WHEN 'SEVERE' THEN 3 WHEN 'MODERATE' THEN\
+    \ 2 WHEN 'MILD' THEN 1 END)\n   FROM assessmentsocialanddiagnosis asd\n   JOIN assessmentbasics ab\
+    \ ON asd.asd_key = ab.ab_key\n   JOIN patients p ON ab.pat_owner_ref = p.pat_key\n   JOIN encounters\
+    \ e ON e.pat_ref = p.pat_key\n   WHERE e.fac_id = facilities.fac_key)\n  -\n  (CASE com_res WHEN 'Comprehensive'\
+    \ THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END)\n) > 1.0\nAND\n\
+    (\n  (\n    (SELECT AVG(CASE tb.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)\n\
+    \     FROM treatmentbasics tb JOIN encounters e ON tb.enc_ref = e.enc_key\n     WHERE e.fac_id = facilities.fac_key)\n\
+    \    +\n    (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))\
+    \ AS DOUBLE PRECISION) / COUNT(*)\n     FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref\
+    \ = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n     WHERE e.fac_id = facilities.fac_key)\
+    \ * 3\n  ) / 2\n) < 1.5\nAND\n(\n  (SELECT SUM(e.miss_appt) / COUNT(DISTINCT e.pat_ref) FROM encounters\
+    \ e WHERE e.fac_id = facilities.fac_key)\n) > 2.5"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: correlation_between_resource_adequacy_and_adherence_craa
+  description: "Measures the correlation between individual facility resource adequacy scores and treatment\
+    \ adherence rates.\n\nCRAA = \text{CORRELATION}(\text{facility resource score}, \text{facility treatment\
+    \ adherence rate})\n\nBuilt on: facility_resource_adequacy_index_frai, treatment_adherence_rate_tar.\n\
+    \nCompiler note: Computed as a single aggregate CORR() over the facilities table: for each facility\
+    \ row, the resource score is derived directly from its own com_res value (3=Comprehensive/Extensive,\
+    \ 2=Adequate, 1=Limited), and the adherence rate is a scalar subquery joining treatmentoutcomes->treatmentbasics->encounters\
+    \ filtered to that facility (e.fac_id), matching the given TAR definition."
+  sql_expression: "corr(\n  CASE com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate'\
+    \ THEN 2 WHEN 'Limited' THEN 1 END,\n  (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh'\
+    \ IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n   FROM treatmentoutcomes o JOIN\
+    \ treatmentbasics tb ON o.tx_ref = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n   WHERE\
+    \ e.fac_id = facilities.fac_key)\n)"
+  source_model: main.facilities
+  domains:
+  - calculations
+- name: facility_performance_quadrant_fpq
+  description: 'Categorizes facilities into performance quadrants based on their Treatment Adherence Rate
+    and Patient Stability Metric relative to median thresholds.
+
+
+    A facility is assigned to a quadrant based on whether its Treatment Adherence Rate and Patient Stability
+    Metric are above or below the median values for all facilities.
+
+
+    Built on: treatment_adherence_rate_tar, patient_stability_metric_psm.
+
+
+    Compiler note: Computed TAR and PSM per facility per their stated formulas, and compared each facility''s
+    value to the median of that value across all facilities (using DuckDB''s median()), assigning one
+    of four quadrant labels. Verified median computation runs over 541 facilities with median TAR=0.5
+    and median PSM≈0.143.'
+  sql_expression: "CASE\n  WHEN (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))\
+    \ AS DOUBLE PRECISION) / COUNT(*)\n        FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref\
+    \ = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n        WHERE e.fac_id = facilities.fac_key)\
+    \ >=\n       (SELECT median(tar_val) FROM (\n          SELECT (SELECT CAST(COUNT(*) FILTER (WHERE\
+    \ o2.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n    \
+    \              FROM treatmentoutcomes o2 JOIN treatmentbasics tb2 ON o2.tx_ref = tb2.tx_key JOIN encounters\
+    \ e2 ON tb2.enc_ref = e2.enc_key\n                  WHERE e2.fac_id = f2.fac_key) AS tar_val\n   \
+    \       FROM facilities f2\n        ) t_tar)\n   AND\n       1.0 / (1 + (SELECT SUM(tb3.crisis_int)\
+    \ FROM encounters e3 JOIN treatmentbasics tb3 ON tb3.enc_ref = e3.enc_key WHERE e3.fac_id = facilities.fac_key)\
+    \ * 1.0 / (SELECT COUNT(DISTINCT e4.pat_ref) FROM encounters e4 WHERE e4.fac_id = facilities.fac_key)\
+    \ + (SELECT SUM(e5.miss_appt) / COUNT(DISTINCT e5.pat_ref) FROM encounters e5 WHERE e5.fac_id = facilities.fac_key))\n\
+    \       >=\n       (SELECT median(psm_val) FROM (\n          SELECT 1.0 / (1 + (SELECT SUM(tb4.crisis_int)\
+    \ FROM encounters e6 JOIN treatmentbasics tb4 ON tb4.enc_ref = e6.enc_key WHERE e6.fac_id = f3.fac_key)\
+    \ * 1.0 / (SELECT COUNT(DISTINCT e7.pat_ref) FROM encounters e7 WHERE e7.fac_id = f3.fac_key) + (SELECT\
+    \ SUM(e8.miss_appt) / COUNT(DISTINCT e8.pat_ref) FROM encounters e8 WHERE e8.fac_id = f3.fac_key))\
+    \ AS psm_val\n          FROM facilities f3\n        ) t_psm)\n  THEN 'High Adherence / High Stability'\n\
+    \  WHEN (SELECT CAST(COUNT(*) FILTER (WHERE o.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant'))\
+    \ AS DOUBLE PRECISION) / COUNT(*)\n        FROM treatmentoutcomes o JOIN treatmentbasics tb ON o.tx_ref\
+    \ = tb.tx_key JOIN encounters e ON tb.enc_ref = e.enc_key\n        WHERE e.fac_id = facilities.fac_key)\
+    \ >=\n       (SELECT median(tar_val) FROM (\n          SELECT (SELECT CAST(COUNT(*) FILTER (WHERE\
+    \ o2.txprogmet->>'Tx_Adh' IN ('High','Medium','Compliant')) AS DOUBLE PRECISION) / COUNT(*)\n    \
+    \              FROM treatmentoutcomes o2 JOIN treatmentbasics tb2 ON o2.tx_ref = tb2.tx_key JOIN encounters\
+    \ e2 ON tb2.enc_ref = e2.enc_key\n                  WHERE e2.fac_id = f2.fac_key) AS tar_val\n   \
+    \       FROM facilities f2\n        ) t_tar)\n  THEN 'High Adherence / Low Stability'\n  WHEN 1.0\
+    \ / (1 + (SELECT SUM(tb3.crisis_int) FROM encounters e3 JOIN treatmentbasics tb3 ON tb3.enc_ref =\
+    \ e3.enc_key WHERE e3.fac_id = facilities.fac_key) * 1.0 / (SELECT COUNT(DISTINCT e4.pat_ref) FROM\
+    \ encounters e4 WHERE e4.fac_id = facilities.fac_key) + (SELECT SUM(e5.miss_appt) / COUNT(DISTINCT\
+    \ e5.pat_ref) FROM encounters e5 WHERE e5.fac_id = facilities.fac_key))\n       >=\n       (SELECT\
+    \ median(psm_val) FROM (\n          SELECT 1.0 / (1 + (SELECT SUM(tb4.crisis_int) FROM encounters\
+    \ e6 JOIN treatmentbasics tb4 ON tb4.enc_ref = e6.enc_key WHERE e6.fac_id = f3.fac_key) * 1.0 / (SELECT\
+    \ COUNT(DISTINCT e7.pat_ref) FROM encounters e7 WHERE e7.fac_id = f3.fac_key) + (SELECT SUM(e8.miss_appt)\
+    \ / COUNT(DISTINCT e8.pat_ref) FROM encounters e8 WHERE e8.fac_id = f3.fac_key)) AS psm_val\n    \
+    \      FROM facilities f3\n        ) t_psm)\n  THEN 'Low Adherence / High Stability'\n  ELSE 'Low\
+    \ Adherence / Low Stability'\nEND"
+  source_model: main.facilities
+  domains:
+  - definitions
+- name: stale_treatment_outcome_records
+  description: 'Treatment outcome records associated with encounters that occurred before a specific time
+    threshold (e.g., older than 60 days).
+
+
+    Treatment outcome records where the timestamp of the linked clinical encounter is older than a defined
+    interval (e.g., 60 days).
+
+
+    Compiler note: Joined treatmentoutcomes.tx_ref -> treatmentbasics.tx_key (unique) -> encounters.enc_ref
+    to get the linked encounter''s time_mark. Used the example threshold of 60 days as stated in the definition;
+    ''now()'' is evaluation time.'
+  sql_expression: (SELECT e.time_mark FROM treatmentbasics t JOIN encounters e ON e.enc_key = t.enc_ref
+    WHERE t.tx_key = treatmentoutcomes.tx_ref) < now() - INTERVAL '60 days'
+  source_model: main.treatmentoutcomes
+  domains:
+  - definitions
+- name: engagement_driver_analysis
+  description: 'A diagnostic analysis that disaggregates a composite engagement metric into its constituent
+    parts to identify the primary factors contributing to the overall score across different cohorts.
+
+
+    The process of separately calculating and presenting the average Therapy Engagement Score and Treatment
+    Adherence Rate for a given group to understand the drivers behind their composite Engagement-Adherence
+    Score.
+
+
+    Built on: therapy_engagement_score_tes, treatment_adherence_rate_tar.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes an analytical process (disaggregating a composite metric into components
+    and presenting them per cohort) rather than a single boolean/scalar computation over rows of one table.
+    It is a reporting workflow combining two separately-defined metrics (TES, TAR), not itself a row-level
+    predicate or calculation.
+- name: vulnerable_patient_watchlist_generation_64
+  description: 'A domain-specific process for creating a prioritized and actionable list of at-risk patients.
+
+
+    The process of identifying patients who meet specific high-risk criteria (like the ''Patient with
+    High Crisis & Low Support Profile''), displaying contextual and actionable data (like last hospitalization
+    and next appointment), and sorting the results to prioritize intervention.
+
+
+    Built on: patient_with_high_crisis_low_support_profile.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a process for generating a report (identifying patients, displaying
+    contextual fields like last hospitalization and next appointment, and sorting results) rather than
+    a single computation or boolean predicate over rows of one table. It cannot be encoded as a SQL expression.
+- name: post_hospitalization_response_time
+  description: "A performance metric that measures the average time it takes for a high-risk patient to\
+    \ have their next scheduled appointment following a hospitalization.\n\n\text{PHRT} = \text{Average\
+    \ time difference between a patient's next scheduled appointment and their last hospitalization date\
+    \ for a high-risk cohort.}"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires, for each high-risk patient, "their next scheduled appointment" and
+    "their last hospitalization date". Patients can have multiple assessment records (each with its own
+    last_hosp_dt in assessmentsocialanddiagnosis) and multiple encounter records (each with its own nx_appt_dt),
+    as verified by querying for duplicate pat_owner_ref/pat_ref counts (e.g. patient P883038 has 2 assessment
+    records, P228727 has 3 encounters). The entry gives no selection rule for picking which hospitalization
+    date or which next-appointment to use per patient when several exist, so the join needed to compute
+    "a patient's next scheduled appointment and their last hospitalization date" cannot be made unique,
+    and no aggregation rule is stated either. This cannot be encoded without guessing a selection rule.
+- name: annualized_hospitalization_risk
+  description: "A risk score calculated by dividing a patient's total previous hospitalizations by the\
+    \ duration of their diagnosis in years.\n\n\text{AHR} = \frac{\text{Total previous hospitalizations}}{(\t\
+    ext{Diagnosis duration in months} / 12)}\n\nCompiler note: AHR = prev_hosp / (dx_dur_m/12). dx_dur_m=0\
+    \ occurs for at least one row, which would cause division by zero; encoded as NULL in that case."
+  sql_expression: CASE WHEN dx_dur_m = 0 THEN NULL ELSE prev_hosp / (dx_dur_m / 12.0) END
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - calculations
+- name: intensive_care_coordination_flag
+  description: 'A flag indicating a patient requires immediate, intensive care coordination based on their
+    risk profile and current treatment intensity.
+
+
+    A patient is flagged if their Annualized Hospitalization Risk is greater than 1.5 AND their total
+    monthly therapy hours are less than 8.
+
+
+    Built on: annualized_hospitalization_risk.
+
+
+    Compiler note: Annualized Hospitalization Risk computed via scalar subquery joining assessmentsocialanddiagnosis
+    on asd_key=ab_key (1-1 FK relationship). Monthly therapy hours parsed from therapy_exp_intensity text
+    by taking numeric value before '' hours/month''. dx_dur_m=0 guarded via NULLIF to avoid division by
+    zero (yields NULL, so predicate is false/unknown).'
+  sql_expression: '( (SELECT prev_hosp FROM assessmentsocialanddiagnosis a WHERE a.asd_key = ab_key) /
+    NULLIF((SELECT dx_dur_m FROM assessmentsocialanddiagnosis a WHERE a.asd_key = ab_key) / 12.0, 0) )
+    > 1.5
+
+    AND CAST(split_part(therapy_exp_intensity, '' '', 1) AS DOUBLE) < 8'
+  source_model: main.assessmentbasics
+  domains:
+  - definitions
+- name: annual_treatment_benefit
+  description: "The projected total reduction in depression score over a 12-month period.\n\n\text{Benefit}\
+    \ = \text{Numeric value of depression improvement rate} \times 12\n\nCompiler note: depr_improve_rate\
+    \ is stored as text like '1.6 points/month'; extracted numeric value by splitting on space before\
+    \ unit, then multiplied by 12 for annualized benefit."
+  sql_expression: CAST(SPLIT_PART(depr_improve_rate, ' ', 1) AS DOUBLE) * 12
+  source_model: main.assessmentbasics
+  domains:
+  - calculations
+- name: annual_treatment_burden
+  description: "The projected total number of side effects over a 12-month period, assuming a standard\
+    \ number of medications.\n\n\text{Burden} = \text{Numeric value of medication side effect density}\
+    \ \times \text{number of medications} \times 12"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires "number of medications" as a standard/assumed constant, but no such
+    standard value is specified anywhere in the documentation or database (med counts vary per patient
+    in treatmentbasics.cur_med, which is a free-text list, not a fixed standard). Without a defined constant
+    for "number of medications," the formula cannot be computed, so I cannot encode this without guessing
+    an unstated value.
+- name: high_responder_profile
+  description: 'Identifies patients for whom the projected annual benefit of treatment is at least five
+    times greater than the projected burden of side effects.
+
+
+    A patient where the ''Annual Treatment Benefit'' is at least five times greater than the ''Annual
+    Treatment Burden'' AND they have been in therapy for at least 6 months.
+
+
+    Built on: annual_treatment_benefit, annual_treatment_burden.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on 'Annual Treatment Burden', which itself cannot be encoded because
+    it requires an unstated 'number of medications' constant not present anywhere in the documentation
+    or schema (med counts vary per patient via free-text treatmentbasics.cur_med). Since the benefit-to-burden
+    ratio cannot be computed without that undefined constant, this entry cannot be encoded either. Additionally,
+    "been in therapy for at least 6 months" would require th_dur_m from treatmentbasics, which has no
+    direct unique join to assessmentbasics (the table holding the benefit rate), compounding the issue.
+- name: projected_annual_qol_gain
+  description: "Calculates the total expected Quality of Life points a patient will gain over a year based\
+    \ on their current cost-effectiveness and a given budget.\n\n\text{Projected Gain} = \text{Numeric\
+    \ value of treatment cost-effectiveness} \times \text{annual budget}"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires an "annual budget" input that is not defined anywhere in the schema
+    or documentation as a fixed value or derivable rule (contrast with entry 89, which specifies budget
+    tiers by insurance type). Since the entry gives no concrete budget figure or data-driven rule to determine
+    it, this generic version of the metric cannot be encoded as a SQL expression over any table.
+- name: projected_qol_gain_from_max_out_of_pocket
+  description: "Calculates the total expected Quality of Life points a patient will gain over a year based\
+    \ on their current cost-effectiveness and their insurance plan's maximum out-of-pocket budget.\n\n\
+    \text{Projected Gain} = \text{Numeric value of treatment cost-effectiveness} \times \text{annual max\
+    \ out-of-pocket budget}"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires an "annual max out-of-pocket budget" per patient's insurance plan.
+    No such values exist anywhere in the database or documentation (unlike entry 89's "Insurance-Adjusted
+    QoL Projection", which explicitly defines budget amounts per insurance type, no equivalent max-out-of-pocket
+    figures are given here). Cannot encode without this external data.
+- name: break_even_therapy_hours
+  description: "Calculates the number of therapy hours a patient needs to receive to achieve a predefined\
+    \ 'clinically valuable' outcome threshold, based on their personal cost-effectiveness and billing\
+    \ rates.\n\n\text{Hours} = \frac{(\frac{\text{Quality of Life Threshold}}{\text{cost-effectiveness\
+    \ rate}}) / \text{exchange rate}}{\text{hourly rate}}"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires a predefined "Quality of Life Threshold", an "exchange rate", and
+    an "hourly rate" (billing rate), none of which exist in this database (no currency/billing rate tables
+    or defined clinical thresholds are present). Only cost-effectiveness (assessmentbasics.treatment_cost_eff)
+    is available; the other constants cannot be sourced from the data.
+- name: top_clinicians_by_goal_velocity
+  description: 'A ranked list of clinicians based on their patients'' average ''Recovery Goal Velocity'',
+    measured in goals achieved per month.
+
+
+    A ranked list of clinicians based on the average recovery goal velocity (goals per month) of their
+    assigned patients.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a ranked aggregation (a list of clinicians ordered by the average
+    of a derived numeric metric across their patients), not a boolean predicate or scalar calculation
+    over rows of a single table. It requires GROUP BY clin_lead_ref with AVG(CAST(recovery_goal_vel numeric
+    part)) and ORDER BY, which cannot be expressed as a single row-level SQL expression per the contract's
+    format.
+- name: peer_mentor_candidate_profile
+  description: 'Identifies patients who are in stable recovery, have a long-term diagnosis, and demonstrate
+    high resilience, making them suitable candidates for mentorship roles.
+
+
+    A patient whose recovery status is ''Stable'', has been diagnosed for over 72 months, and has a resilience
+    score of 8 or greater.
+
+
+    Compiler note: Resilience score (Res_Scr) is a field in the funcassess JSONB column, stored as a numeric
+    string; cast to integer for comparison.'
+  sql_expression: rec_status = 'Stable' AND dx_dur_m > 72 AND CAST(funcassess->>'Res_Scr' AS INTEGER)
+    >= 8
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - definitions
+- name: chronic_high_acuity_bipolar_cohort
+  description: 'Identifies a specific group of Bipolar patients characterized by a long diagnosis history
+    and multiple prior hospitalizations.
+
+
+    A patient with a primary diagnosis of ''Bipolar'' who has been diagnosed for 120 months or more and
+    has had more than 3 previous hospitalizations.
+
+
+    Compiler note: Encoded directly over assessmentsocialanddiagnosis columns: prim_dx, dx_dur_m (months),
+    prev_hosp.'
+  sql_expression: prim_dx = 'Bipolar' AND dx_dur_m >= 120 AND prev_hosp > 3
+  source_model: main.assessmentsocialanddiagnosis
+  domains:
+  - definitions
+- name: intensive_therapy_standard_compliance
+  description: "A boolean check to determine if a patient's therapy intensity meets or exceeds a given\
+    \ threshold.\n\n\text{Compliance} = (\text{Numeric value of therapy intensity in hours per month}\
+    \ >= \text{threshold})"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric is parameterized by "a given threshold" that is not defined anywhere in the
+    documentation or database (no fixed numeric threshold value is specified). Without a concrete threshold
+    value, the boolean comparison cannot be encoded as a single SQL expression - it would require guessing
+    a placeholder threshold value, which is not permitted.
+- name: therapeutic_return_on_investment_t_roi
+  description: "Calculates the efficiency of therapy by measuring the rate of depression improvement per\
+    \ hour of therapy intensity.\n\n\text{T-ROI} = \frac{\text{Numeric value of depression improvement\
+    \ rate}}{\text{Numeric value of therapy intensity in hours per month}}\n\nCompiler note: depr_improve_rate\
+    \ and therapy_exp_intensity are stored as text 'value units'; extracted numeric value via split_part\
+    \ on space before dividing. Guarded against division by zero."
+  sql_expression: CASE WHEN split_part(therapy_exp_intensity, ' ', 1)::double precision = 0 THEN NULL
+    ELSE split_part(depr_improve_rate, ' ', 1)::double precision / split_part(therapy_exp_intensity, '
+    ', 1)::double precision END
+  source_model: main.assessmentbasics
+  domains:
+  - calculations
+- name: caseload_complexity_score
+  description: "The average hospitalization risk density across all patients assigned to a specific clinician.\n\
+    \n\text{Score} = \text{The average hospitalization risk density across all patients assigned to a\
+    \ specific clinician.}\n\nCompiler note: hosp_risk_density is text formatted as '<number> risk-score/year';\
+    \ numeric value extracted via split on space. Averaged across all assessment records (not just latest)\
+    \ for all patients whose clin_lead_ref matches the clinician, since the entry does not restrict to\
+    \ latest assessment."
+  sql_expression: (SELECT AVG(CAST(SPLIT_PART(ab.hosp_risk_density, ' ', 1) AS DOUBLE)) FROM assessmentbasics
+    ab JOIN patients p ON ab.pat_owner_ref = p.pat_key WHERE p.clin_lead_ref = clinicians.clin_key AND
+    ab.hosp_risk_density IS NOT NULL)
+  source_model: main.clinicians
+  domains:
+  - calculations
+- name: cost_effectiveness_by_referral_source
+  description: 'The average treatment cost-effectiveness for a cohort of patients grouped by their referral
+    source.
+
+
+    The average treatment cost-effectiveness for a group of patients, categorized by their referral source.
+
+
+    Compiler note: treatment_cost_eff is stored as text like ''0.1197... QoL-points/$''; numeric value
+    extracted via SPLIT_PART before the space and cast to DOUBLE. Referral source (r_source) lives on
+    facilities, reached via patients.clin_lead_ref -> clinicians.fac_connect -> facilities.fac_key; this
+    chain is unique per patient (one clinician, one facility). Since the metric is defined as a per-group
+    average rather than a single scalar, it is encoded as a window function AVG(...) OVER (PARTITION BY
+    referral_source) so each assessment row carries its cohort''s average cost-effectiveness.'
+  sql_expression: AVG(CAST(SPLIT_PART(treatment_cost_eff, ' ', 1) AS DOUBLE)) OVER (PARTITION BY (SELECT
+    f.r_source FROM patients p JOIN clinicians c ON p.clin_lead_ref = c.clin_key JOIN facilities f ON
+    c.fac_connect = f.fac_key WHERE p.pat_key = assessmentbasics.pat_owner_ref))
+  source_model: main.assessmentbasics
+  domains:
+  - calculations
+- name: annual_goal_achievement
+  description: "The projected number of recovery goals a patient is expected to achieve over a 12-month\
+    \ period, based on their current monthly velocity.\n\n\text{Annual Goals} = \text{Numeric value of\
+    \ recovery goal velocity} \times 12\n\nCompiler note: recovery_goal_vel stored as text like '0.3 goals/month';\
+    \ extracted the leading numeric value by splitting on space, then multiplied by 12 to annualize."
+  sql_expression: CAST(split_part(recovery_goal_vel, ' ', 1) AS DOUBLE PRECISION) * 12
+  source_model: main.assessmentbasics
+  domains:
+  - calculations
+- name: inter_group_goal_achievement_gap
+  description: "Calculates the difference in the average Annual Goal Achievement between two specified\
+    \ diagnostic cohorts.\n\n\text{Gap} = |\text{Average Annual Goal Achievement}{group1} - \text{Average\
+    \ Annual Goal Achievement}{group2}|\n\nBuilt on: annual_goal_achievement."
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires two specific diagnostic cohorts (group1 and group2) to be defined
+    for comparison, but the entry does not specify which cohorts to use. Without concrete group definitions
+    (e.g., specific values of prim_dx), this cannot be encoded as a single SQL expression over one table
+    - it describes a parameterized comparison function, not a fixed computation.
+- name: annualized_side_effect_score_83
+  description: "A projected total side effect burden over a 12-month period, assuming a standard number\
+    \ of medications.\n\n\text{Score} = \text{Numeric value of medication side effect density} \times\
+    \ \text{number of medications} \times 12"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires "number of medications", described as "a standard number of medications"
+    but no such standard value is defined anywhere in the documentation or schema. assessmentbasics.med_side_eff_density
+    gives a per-medication rate, but there is no column or stated constant for the assumed medication
+    count, so the multiplication cannot be computed.
+- name: annualized_side_effect_score_84
+  description: "A projected total side effect burden over a 12-month period, assuming a standard number\
+    \ of medications.\n\n\text{Score} = \text{Numeric value of medication side effect density} \times\
+    \ \text{number of medications} \times 12"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires multiplying by "number of medications", described as "a standard
+    number of medications," but this standard count is never specified anywhere in the documentation or
+    schema (no fixed medication count is defined). Without a defined constant for number of medications,
+    the calculation cannot be encoded.
+- name: high_burden_prevalence_rate
+  description: 'Calculates the percentage of patients within a specific cohort that are flagged as having
+    an Annualized Side Effect Score over the defined threshold.
+
+
+    The percentage of patients within a cohort who have an ''Annualized Side Effect Score'' greater than
+    a defined threshold.
+
+
+    Built on: annualized_side_effect_score_84.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric depends on the Annualized Side Effect Score, which itself cannot be encoded
+    because the formula requires "number of medications" (a standard constant) that is not specified anywhere
+    in the documentation or schema. Without that base metric, the threshold-based prevalence rate cannot
+    be computed either.
+- name: vulnerable_patient_watchlist_generation_86
+  description: 'A domain-specific process for creating a prioritized and actionable list of at-risk patients.
+
+
+    The process of identifying patients who meet specific high-risk criteria (like the ''Patient with
+    High Crisis & Low Support Profile''), creating a dedicated table, and populating it with contextual,
+    actionable data (like last hospitalization and next appointment) to prioritize clinical intervention.
+
+
+    Built on: patient_with_high_crisis_low_support_profile.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a process (creating a dedicated table and populating it with contextual
+    data to generate a watchlist), not a computation or boolean condition over rows of a single table.
+    It is an action/workflow, not a metric or predicate encodable as SQL over one source_model.
+- name: risk_factor_profile
+  description: 'A consolidated report for a specific patient cohort that combines key demographic and
+    clinical risk factors from their most recent assessments.
+
+
+    For a given patient, a selection of fields including their primary diagnosis, substance use status,
+    and housing stability drawn from their latest assessment records.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This describes a multi-field report (primary diagnosis, substance use status, housing
+    stability from latest assessment) rather than a single boolean predicate or computed metric over one
+    table's rows, so it cannot be encoded as a sql_expression.
+- name: high_qol_gain_candidate
+  description: 'A classification for patients whose projected treatment benefits, measured in Quality
+    of Life points, significantly exceed a defined clinical threshold based on their financial budget.
+
+
+    A patient is flagged if their ''Projected Annual QoL Gain'' is greater than 100.
+
+
+    Built on: projected_annual_qol_gain.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry depends on "Projected Annual QoL Gain", which itself cannot be encoded: it
+    requires a generic "annual budget" input that is not defined as a fixed value or derivable rule anywhere
+    in the schema or documentation (unlike entry 89, which specifies concrete budget tiers by insurance
+    type). Without a concrete budget figure, the threshold comparison (>100) cannot be computed as a SQL
+    expression over any table.'
+- name: insurance_adjusted_qol_projection
+  description: "A calculation that projects a patient's annual Quality of Life gain by applying an insurance-specific\
+    \ annual budget to their personal treatment cost-effectiveness rate.\n\n\text{Projection} = \text{cost-effectiveness\
+    \ rate} \times \text{budget}{\text{plan}}, \text{where } \text{budget}{\text{plan}} = \begin{cases}\
+    \ 6000 & \text{if insurance type = 'Private'} \\ 3500 & \text{if insurance type = 'Medicare'} \\ 2500\
+    \ & \text{if insurance type = 'Medicaid'} \\ 0 & \text{otherwise} end{cases}\n\nCompiler note: treatment_cost_eff\
+    \ stored as 'VALUE QoL-points/$' text; numeric value extracted via split_part before first space,\
+    \ cast to double. Joined to patients via pat_owner_ref (unique match per assessment) to get insur_type,\
+    \ applying budget per plan with 0 default for other/null insurance types."
+  sql_expression: CAST(split_part(treatment_cost_eff, ' ', 1) AS DOUBLE) * (CASE (SELECT p.insur_type
+    FROM patients p WHERE p.pat_key = assessmentbasics.pat_owner_ref) WHEN 'Private' THEN 6000 WHEN 'Medicare'
+    THEN 3500 WHEN 'Medicaid' THEN 2500 ELSE 0 END)
+  source_model: main.assessmentbasics
+  domains:
+  - calculations
+- name: high_risk_escalation_protocol
+  description: 'An automated clinical safety procedure that elevates the care coordination level for a
+    clinician when one of their patients is assessed with a high suicide risk.
+
+
+    A procedure to update a clinician''s care coordination level to ''Intensive'' if they are the lead
+    for a patient whose most recent assessment indicates a ''High'' suicide risk.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes an automated procedure/action (an UPDATE statement that modifies
+    clinician care_coord level) rather than a computation or predicate over existing rows. It cannot be
+    encoded as a SQL boolean expression or calculation; it is a described write-operation triggered by
+    a condition, not a readable metric.
+- name: intensive_caseload_summary
+  description: 'A report that details the specific high-risk patient counts and facility resources for
+    clinicians currently under an ''Intensive'' care coordination status.
+
+
+    A list of clinicians with an ''Intensive'' care coordination level, showing their ID, a count of their
+    patients with a ''High'' suicide risk, and their facility''s resource level.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This is a multi-row aggregated report (clinician ID, count of high-risk patients, facility
+    resource level), not a boolean/categorical condition over rows of one table. It requires grouping
+    clinicians, counting associated patients with 'High' suicide risk (via patients -> encounters -> assessmentsymptomsandrisk),
+    and joining to facility resource level - cannot be expressed as a single row-level predicate.
+- name: mandatory_case_review_protocol
+  description: 'A safety protocol that automatically flags patients for a case review when their hospitalization
+    risk exceeds a set threshold.
+
+
+    A procedure to flag a patient for case review if their latest hospitalization risk density is greater
+    than 1.5.
+
+
+    Compiler note: hosp_risk_density is stored as text like ''1.5 risk-score/year''; extracted numeric
+    part via split_part before the space and cast to double. ''Latest'' assessment determined by the patient''s
+    most recent encounter (by time_mark) and its linked assessment via ab_ref; verified each patient has
+    a unique most-recent encounter (no ties).'
+  sql_expression: CAST(split_part((SELECT ab.hosp_risk_density FROM encounters e JOIN assessmentbasics
+    ab ON ab.ab_key = e.ab_ref WHERE e.pat_ref = patients.pat_key ORDER BY e.time_mark DESC LIMIT 1),
+    ' ', 1) AS DOUBLE) > 1.5
+  source_model: main.patients
+  domains:
+  - definitions
+- name: unaddressed_case_review_report
+  description: 'A report that identifies patients who are flagged for a mandatory case review but do not
+    yet have a follow-up appointment scheduled in their latest encounter.
+
+
+    A list of patients who are flagged for case review but do not have a next appointment scheduled in
+    their most recent encounter record.
+
+
+    Built on: mandatory_case_review_protocol.
+
+
+    Compiler note: Mandatory Case Review Protocol condition reused as given (hosp_risk_density numeric
+    part > 1.5, taken from the single most-recent encounter''s linked assessment via ORDER BY time_mark
+    DESC LIMIT 1, matching the ties-handling convention of that entry). "No next appointment scheduled"
+    is checked against nx_appt_dt of the patient''s most recent encounter record (same LIMIT-1 selection),
+    treating NULL or blank/whitespace-only text as "not scheduled" since the column is stored as free
+    text dates; verified no NULL/blank values currently exist in the data, so this encodes the stated
+    rule even though it currently matches no rows. Where a patient has multiple encounters tied for most-recent
+    time_mark, an arbitrary one of them is used, consistent with how the base protocol entry resolves
+    ties.'
+  sql_expression: "CAST(split_part((SELECT ab.hosp_risk_density FROM encounters e JOIN assessmentbasics\
+    \ ab ON ab.ab_key = e.ab_ref WHERE e.pat_ref = patients.pat_key ORDER BY e.time_mark DESC LIMIT 1),\
+    \ ' ', 1) AS DOUBLE) > 1.5\nAND (\n  (SELECT e2.nx_appt_dt FROM encounters e2 WHERE e2.pat_ref = patients.pat_key\
+    \ ORDER BY e2.time_mark DESC LIMIT 1) IS NULL\n  OR trim((SELECT e2.nx_appt_dt FROM encounters e2\
+    \ WHERE e2.pat_ref = patients.pat_key ORDER BY e2.time_mark DESC LIMIT 1)) = ''\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+- name: therapeutic_goal_adjustment
+  description: 'A clinical management action where a patient''s performance metric is updated in their
+    record not to correct an error, but to codify a new, forward-looking therapeutic target in response
+    to a significant life event.
+
+
+    An update operation on a patient''s metric to reflect a new clinical goal rather than a new measurement.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a clinical management action (an UPDATE operation on a patient's
+    metric to codify a new therapeutic goal in response to a life event), not a computable boolean condition
+    or metric over existing rows. The database has no way to distinguish an "update reflecting a new goal"
+    from "a corrected measurement" - there's no event log, versioning, or reason-code column to encode
+    this on.
+- name: at_risk_independent_living_cohort
+  description: 'A high-risk group of patients characterized by living alone while also having a high dependency
+    on external support systems, making them vulnerable to sudden crises.
+
+
+    Patients who live alone AND have a recent support utilization rate greater than 2.5.
+
+
+    Compiler note: living_arr=''Alone'' encodes ''live alone''. support_util_rate is stored as text like
+    ''2.0 support-level/contact'' (sometimes ''inf ...''); numeric value extracted via split_part before
+    '' ''. ''Recent'' is interpreted as the value from the patient''s most recent encounter (by time_mark)
+    linked assessment, since assessmentbasics itself has no timestamp and many assessments link to encounters;
+    patients lacking any linked encounter yield NULL (treated as not meeting condition). ''inf'' values
+    are treated as satisfying ''>2.5''.'
+  sql_expression: "living_arr = 'Alone' AND (\n  CASE WHEN (\n    SELECT split_part(a.support_util_rate,\
+    \ ' ', 1)\n    FROM encounters e\n    JOIN assessmentbasics a ON a.ab_key = e.ab_ref\n    WHERE e.pat_ref\
+    \ = patients.pat_key\n    ORDER BY e.time_mark DESC\n    LIMIT 1\n  ) = 'inf' THEN true\n  ELSE (\n\
+    \    SELECT split_part(a.support_util_rate, ' ', 1)::double\n    FROM encounters e\n    JOIN assessmentbasics\
+    \ a ON a.ab_key = e.ab_ref\n    WHERE e.pat_ref = patients.pat_key\n    ORDER BY e.time_mark DESC\n\
+    \    LIMIT 1\n  ) > 2.5\n  END\n)"
+  source_model: main.patients
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: assessmentbasics
+  columns:
+  - name: ab_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each assessment record in the mental health database.
+  - name: a_type
+    type: VARCHAR
+    description: 'Type of mental health assessment conducted. Contains values: ''Initial'', ''Emergency'',
+      ''Routine'', ''Follow-up''.'
+  - name: a_method
+    type: VARCHAR
+    description: 'Method used to conduct the assessment. Contains values: ''Phone'', ''Self-report'',
+      ''In-person'', ''Telehealth''.'
+  - name: a_dur_min
+    type: BIGINT
+    description: Duration of the assessment session in minutes.
+  - name: a_lang
+    type: VARCHAR
+    description: 'Primary language used during the assessment. Contains values: ''Chinese'', ''French'',
+      ''English'', ''Spanish''.'
+  - name: a_valid
+    type: VARCHAR
+    description: 'Validity rating of the assessment results. Contains values: ''Questionable'', ''Invalid'',
+      ''Valid''.'
+  - name: resp_consist
+    type: VARCHAR
+    description: 'Consistency of patient responses throughout the assessment. Contains values: ''Medium'',
+      ''High'', ''Low''. Contains NULL when response consistency is not evaluated.'
+  - name: sympt_valid
+    type: VARCHAR
+    description: 'Validity of reported symptoms during the assessment. Contains values: ''Questionable'',
+      ''Valid'', ''Invalid''.'
+  - name: pat_owner_ref
+    type: VARCHAR
+    description: Foreign key referencing Patients(Pat_Key), linking the assessment to the specific patient.
+  - name: depr_improve_rate
+    type: VARCHAR
+    description: 'TEXT. The rate at which depression symptoms improve, calculated as the reduction in
+      PHQ-9 score per month of therapy. Example: 1.2 points/month.'
+  - name: therapy_exp_intensity
+    type: VARCHAR
+    description: 'TEXT. The total hours spent on therapy per month, based on the frequency and duration
+      of therapy sessions. Example: 8 hours/month.'
+  - name: med_side_eff_density
+    type: VARCHAR
+    description: 'TEXT. The density of side effects experienced from medications, calculated as the severity
+      of side effects per medication per month. Example: 0.03 side-effects/med/month.'
+  - name: crisis_event_rate
+    type: VARCHAR
+    description: 'TEXT. The rate at which crisis events occur, calculated as the total number of crisis
+      interventions and emergency contacts per month. Example: 0.2 events/month.'
+  - name: func_recovery_eff
+    type: VARCHAR
+    description: ''
+  - name: adherence_index
+    type: VARCHAR
+    description: 'TEXT. A measure of treatment adherence, calculated as the adherence score per therapy
+      appointment. Example: 0.75 adherence-score/appointment.'
+  - name: sympt_fluct_index
+    type: VARCHAR
+    description: 'TEXT. A measure of the fluctuation in symptoms (PHQ-9, GAD7, Mood scores), calculated
+      as the average fluctuation per assessment. Example: 3.2 fluctuation-points/assessment.'
+  - name: hosp_risk_density
+    type: VARCHAR
+    description: 'TEXT. The risk of hospitalization, calculated as the total number of hospitalizations
+      per year based on previous hospitalizations and diagnosis duration. Example: 1.5 risk-score/year.'
+  - name: med_change_freq
+    type: VARCHAR
+    description: 'TEXT. The frequency of medication changes, calculated as the number of changes in medication
+      type or dosage per month. Example: 0.1 changes/month.'
+  - name: support_util_rate
+    type: VARCHAR
+    description: 'TEXT. The rate of social support utilization, calculated as the level of support used
+      per emergency contact. Example: 2.0 support-level/contact.'
+  - name: treatment_cost_eff
+    type: VARCHAR
+    description: 'TEXT. The cost-efficiency of treatment, calculated as the Quality of Life score per
+      dollar spent on treatment. Example: 0.15 QoL-points/$.'
+  - name: recovery_goal_vel
+    type: VARCHAR
+    description: 'TEXT. The speed at which recovery goals are achieved, calculated as the number of goals
+      achieved per month of therapy. Example: 0.5 goals/month.'
+- schema: main
+  table: assessmentsocialanddiagnosis
+  columns:
+  - name: asd_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each social and diagnosis assessment record,
+      linking to AssessmentBasics(AB_Key).
+  - name: rec_status
+    type: VARCHAR
+    description: 'Patient''s recovery status and stage in treatment. Contains values: ''Relapse'', ''Stable'',
+      ''Advanced'', ''Early''.'
+  - name: prim_dx
+    type: VARCHAR
+    description: 'Patient''s primary mental health diagnosis. Contains values: ''Anxiety'', ''PTSD'',
+      ''Bipolar'', ''Schizophrenia'', ''Depression''.'
+  - name: sec_dx
+    type: VARCHAR
+    description: 'Patient''s secondary or comorbid mental health diagnosis. Contains values: ''OCD'',
+      ''Personality Disorder'', ''Substance Use'', ''Eating Disorder''. Contains NULL when secondary diagnosis
+      is not applicable.'
+  - name: dx_dur_m
+    type: BIGINT
+    description: Duration of the primary diagnosis in months since initial onset or first diagnosis.
+  - name: prev_hosp
+    type: BIGINT
+    description: Number of previous psychiatric hospitalizations or inpatient admissions for mental health
+      treatment.
+  - name: last_hosp_dt
+    type: VARCHAR
+    description: Date of the patient's last psychiatric hospitalization, stored as text with format yyyy/mm/dd
+      like '2024/12/13', '2023/11/09', '2025/02/13' due to noise modifications.
+  - name: qol_scr
+    type: BIGINT
+    description: Quality of Life score typically ranging from 1 to 100.
+  - name: func_imp
+    type: VARCHAR
+    description: 'Functional impairment assessment. Contains values: ''SEVERE'', ''MODERATE'', ''severe'',
+      ''moderate'', ''mild'', ''Severe'', ''Moderate'', ''Mild''. Contains noise with mixed case variations
+      like ''SeVerE'', ''MODErate'', ''SEVErE'', ''mIld'', ''MILD''. Contains NULL when functional impairment
+      is not assessed.
+
+
+      Functional Impairment: Illustrates the value of functional impairment levels.
+
+
+      Ranges from Mild to Severe. Mild indicates minimal impact on daily life, Moderate indicates noticeable
+      impact, and Severe indicates significant disruption.
+
+
+      Compiler note: Describes value meanings of func_imp column (Mild/Moderate/Severe, case-insensitive
+      variants observed in data).'
+  - name: funcassess
+    type: JSON
+    description: 'JSONB column. Groups functional assessment metrics including work functioning, social
+      functioning, ADL functioning, stress levels, coping skills, resilience, insight, and motivation
+      into a comprehensive functional profile. Fields: {"Work_Func": "Patient''s level of functioning
+      in work or vocational activities. Contains values: ''Disabled'', ''Poor'', ''Good'', ''Fair''.",
+      "Soc_Func": "Patient''s level of social functioning in various settings. Contains values: ''Isolated'',
+      ''Fair'', ''Good'', ''Poor''.", "ADL_Func": "Patient''s ability to perform activities of daily living
+      independently. Contains values: ''Minimal Help'', ''Independent'', ''Needs Help''.", "Strs_Lvl":
+      "Patient''s current stress level rating typically ranging from 1 to 10.", "Cop_Skill": "Assessment
+      of the patient''s coping skills and strategies. Contains values: ''Good'', ''Poor'', ''Fair''.",
+      "Res_Scr": "Resilience score rating typically ranging from 1 to 10.", "In_Level": "Patient''s level
+      of insight into their mental health condition. Contains values: ''Fair'', ''Good'', ''Poor''. Contains
+      NULL when insight level is not assessed.", "Motiv_Level": "Patient''s motivation level for treatment
+      and change. Contains values: ''High'', ''Medium'', ''Low''. Contains NULL when motivation assessment
+      is not completed.", "Soc_Sup": "Level of social support available to the patient. Contains values:
+      ''Strong'', ''Limited'', ''Adequate'', ''Weak''. Contains NULL when social support is not evaluated.",
+      "Fam_Inv": "Level of family involvement in the patient''s treatment. Contains values: ''Low'', ''High'',
+      ''Medium''. Contains NULL when family involvement is not assessed.", "Rel_Qual": "Quality of the
+      patient''s interpersonal relationships. Contains values: ''Poor'', ''Conflicted'', ''Good'', ''Fair''."}
+
+
+      Social Support Level: Illustrates the value of social support levels.
+
+
+      Ranges from Weak to Strong. Weak indicates minimal support, Limited indicates some support, Adequate
+      indicates good support, and Strong indicates robust support.
+
+
+      Compiler note: Describes the Soc_Sup field within the funcassess JSONB column, representing level
+      of social support available to the patient (documented values Weak/Limited/Adequate/Strong; actual
+      stored data shows Limited/Moderate/Strong plus blanks).'
+- schema: main
+  table: assessmentsymptomsandrisk
+  columns:
+  - name: asr_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each symptom and risk assessment record, linking
+      to AssessmentBasics(AB_Key).
+  - name: phq9_scr
+    type: BIGINT
+    description: 'Patient Health Questionnaire-9 total score, ranging from 0 to 27, measuring depression
+      severity.
+
+
+      PHQ-9 Score (Depression): Illustrates the value of the PHQ-9 score for depression severity.
+
+
+      Ranges from 0 to 27. A score of 0–4 indicates minimal depression, 5–9 mild, 10–14 moderate, 15–19
+      moderately severe, and 20–27 severe.
+
+
+      Compiler note: Describes the value range/meaning of the PHQ-9 total score column (0-27, severity
+      bands), matching assessmentsymptomsandrisk.phq9_scr.'
+  - name: phq9_sev
+    type: VARCHAR
+    description: 'PHQ-9 depression severity level based on total score. Contains values: ''Moderately
+      Severe'', ''Mild'', ''Moderate'', ''Severe''. Contains NULL when PHQ-9 is not administered.'
+  - name: gad7_scr
+    type: BIGINT
+    description: 'Generalized Anxiety Disorder 7-item scale total score, ranging from 0 to 21, measuring
+      anxiety severity.
+
+
+      GAD-7 Score (Anxiety): Illustrates the value of the GAD-7 score for anxiety severity.
+
+
+      Ranges from 0 to 21. A score of 0–4 indicates minimal anxiety, 5–9 mild, 10–14 moderate, and 15–21
+      severe.
+
+
+      Compiler note: Describes the GAD-7 numeric score range (0-21) and severity bands, which corresponds
+      to the gad7_scr column (gad7_sev holds the categorical label).'
+  - name: gad7_sev
+    type: VARCHAR
+    description: 'GAD-7 anxiety severity level based on total score. Contains values: ''Mild'', ''Moderate'',
+      ''Severe''. Contains NULL when GAD-7 is not administered.'
+  - name: suic_ideation
+    type: VARCHAR
+    description: 'Presence and severity of suicidal ideation. Contains values: ''Intent'', ''Active'',
+      ''Plan'', ''Passive'', ''None''. Contains NULL when suicidal ideation assessment is not completed.'
+  - name: suic_risk
+    type: VARCHAR
+    description: 'Overall suicide risk level assessment. Contains values: ''Medium'', ''High'', ''Low''.
+
+
+      Suicide Risk Level: Illustrates the value of the suicide risk level.
+
+
+      Ranges from Low to High. Low indicates minimal risk, Medium indicates some concern, and High indicates
+      immediate concern and need for intervention.
+
+
+      Compiler note: Describes the value range (Low/Medium/High) of the suic_risk column in assessmentsymptomsandrisk,
+      matching documented values.'
+  - name: self_harm
+    type: VARCHAR
+    description: 'History and current status of self-harm behaviors. Contains values: ''Recent'', ''Remote'',
+      ''Current'', ''None''. Contains NULL when self-harm assessment is not conducted.'
+  - name: viol_risk
+    type: VARCHAR
+    description: 'Assessment of violence risk toward others. Contains values: ''Medium'', ''Low'', ''High''.'
+  - name: sub_use
+    type: VARCHAR
+    description: 'Current substance use status. Contains values: ''Cannabis'', ''Opioids'', ''Alcohol'',
+      ''Multiple'', ''None''. Contains NULL when substance use assessment is not completed.'
+  - name: sub_use_freq
+    type: VARCHAR
+    description: 'Frequency of substance use when present. Contains values: ''Daily'', ''Occasional'',
+      ''Weekly'', ''Never''.'
+  - name: sub_use_sev
+    type: VARCHAR
+    description: 'Severity level of substance use disorder when present. Contains values: ''Moderate'',
+      ''Mild'', ''Severe''. Contains NULL when substance use severity is not evaluated.'
+  - name: sympscores
+    type: JSON
+    description: 'JSONB column. Consolidates all symptom rating scores including mood, anxiety, sleep,
+      appetite, energy, concentration, interest, and hopelessness measurements into a single assessment
+      profile. Fields: {"Mood_Scr": "Subjective mood rating score typically ranging from 1 to 10.", "Anx_Scr":
+      "Subjective anxiety rating score typically ranging from 1 to 10.", "Slp_Scr": "Sleep quality rating
+      score typically ranging from 1 to 10.", "App_Scr": "Appetite rating score typically ranging from
+      1 to 10.", "En_Scr": "Energy level rating score typically ranging from 1 to 10.", "Con_Scr": "Concentration
+      ability rating score typically ranging from 1 to 10.", "Int_Scr": "Interest in activities rating
+      score typically ranging from 1 to 10.", "Hope_Scr": "Hopelessness rating score typically ranging
+      from 1 to 10."}'
+- schema: main
+  table: clinicians
+  columns:
+  - name: clin_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each clinician record in the mental health assessment
+      database.
+  - name: clin_conf
+    type: VARCHAR
+    description: 'Clinician''s confidence level in their assessment and treatment decisions. Contains
+      values: ''Medium'', ''Low'', ''High''.'
+  - name: assess_lim
+    type: VARCHAR
+    description: 'Known limitations in the clinician''s assessment capabilities or scope of practice.
+      Contains values: ''Cognitive'', ''Cultural'', ''Language'', ''Engagement'', ''Time''. Contains NULL
+      when limitation assessment is not completed.'
+  - name: docu_stat
+    type: VARCHAR
+    description: 'Current status of the clinician''s documentation and record-keeping. Contains values:
+      ''Complete'', ''Incomplete'', ''Pending''.'
+  - name: bill_code
+    type: VARCHAR
+    description: Billing code or credential identifier for the clinician's services. Contains CPT codes
+      like 'CPT90511', 'CPT90696', 'CPT90854'.
+  - name: nxt_rev_dt
+    type: DATE
+    description: Next scheduled review date for the clinician's credentials in YYYY-MM-DD format.
+  - name: care_coord
+    type: VARCHAR
+    description: 'Level and type of care coordination activities performed by this clinician. Contains
+      values: ''Intensive'', ''Regular'', ''Limited''. Contains NULL when care coordination role is not
+      defined.'
+  - name: ref_need
+    type: VARCHAR
+    description: 'Referral needs or specialties that this clinician commonly requires. Contains values:
+      ''Services'', ''Testing'', ''Specialty''. Contains NULL when referral patterns are not tracked.'
+  - name: f_up_type
+    type: VARCHAR
+    description: 'Primary type of follow-up care provided by this clinician. Contains values: ''Therapy'',
+      ''Routine'', ''Crisis'', ''Assessment''.'
+  - name: f_up_freq
+    type: VARCHAR
+    description: 'Typical frequency of follow-up appointments scheduled by this clinician. Contains values:
+      ''Weekly'', ''Biweekly'', ''Monthly'', ''Quarterly''.'
+  - name: fac_connect
+    type: VARCHAR
+    description: Foreign key referencing Facilities(Fac_Key), linking the clinician to their primary practice
+      facility.
+- schema: main
+  table: encounters
+  columns:
+  - name: enc_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each clinical encounter record in the mental
+      health database.
+  - name: time_mark
+    type: TIMESTAMP
+    description: Timestamp recording the exact date and time when the clinical encounter occurred in YYYY-MM-DD
+      HH:MM:SS format.
+  - name: ab_ref
+    type: VARCHAR
+    description: Foreign key referencing AssessmentBasics(AB_Key), linking the encounter to a specific
+      assessment when applicable.
+  - name: pat_ref
+    type: VARCHAR
+    description: Foreign key referencing Patients(Pat_Key), linking the encounter to the specific patient.
+  - name: clin_id
+    type: VARCHAR
+    description: Identifier for the clinician who conducted this encounter (local reference, not foreign
+      key).
+  - name: fac_id
+    type: VARCHAR
+    description: Identifier for the facility where this encounter took place (local reference, not foreign
+      key).
+  - name: miss_appt
+    type: FLOAT
+    description: 'Number of appointments missed by the patient prior to or following this encounter.
+
+
+      Missed Appointment Count: Illustrates the value of the missed appointment count.
+
+
+      A numeric value indicating the number of missed appointments. A value of 0 indicates perfect attendance,
+      while higher values (e.g., 5) indicate frequent absences.
+
+
+      Compiler note: Describes the value semantics of encounters.miss_appt, the numeric count of missed
+      appointments (0 = perfect attendance, higher = frequent absences).'
+  - name: tx_barrier
+    type: VARCHAR
+    description: 'Treatment barriers identified during this encounter. Contains values: ''multiple'',
+      ''time'', ''financial'', ''Transportation''. Contains noise with mixed case variations like ''MULTIPLE'',
+      ''FiNAncIal'', ''TRAnsPorTATiON'', ''FINANCIAL'', ''TIME'', ''TRANSPORTATION''. Contains NULL when
+      treatment barriers are not assessed.'
+  - name: nx_appt_dt
+    type: VARCHAR
+    description: Date of the next scheduled appointment following this encounter, stored as text with
+      dd/mm/yyyy format like '21/02/2025', '18/04/2025', '13/04/2025'.
+  - name: dq_score
+    type: BIGINT
+    description: Data quality score for this encounter record, indicating completeness and accuracy of
+      documentation.
+  - name: assess_complete
+    type: VARCHAR
+    description: Assessment completeness indicator for this encounter. Contains standard completeness
+      values.
+- schema: main
+  table: facilities
+  columns:
+  - name: fac_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each healthcare facility record in the mental
+      health assessment database.
+  - name: r_source
+    type: VARCHAR
+    description: 'Referral source category indicating how patients are directed to this facility. Contains
+      values: ''Self'', ''Physician'', ''Court'', ''Emergency'', ''Family''.'
+  - name: env_stress
+    type: VARCHAR
+    description: Environmental stressors present in the facility's service area. Contains NULL when environmental
+      stressor assessment is not available.
+  - name: life_impact
+    type: VARCHAR
+    description: 'Major life events impact assessment for the facility''s patient population. Contains
+      values: ''Mild'', ''Moderate'', ''Severe''. Contains NULL when life events impact data is not collected.'
+  - name: season_pat
+    type: VARCHAR
+    description: Seasonal pattern observations in patient mental health conditions at this facility. Contains
+      NULL when seasonal pattern tracking is not implemented.
+  - name: legl_issue
+    type: VARCHAR
+    description: 'Legal issues commonly encountered by patients at this facility. Contains values: ''Resolved'',
+      ''Pending'', ''Ongoing''. Contains noise with mixed case variations like ''PEnding'', ''oNgoING'',
+      ''ReSOlveD'', ''rESOLvED'', ''ONgOInG''. Contains NULL when legal issue tracking is not maintained.'
+  - name: spt_svc
+    type: VARCHAR
+    description: Support services available at or through this facility. Contains values like 'Case Management',
+      'Limited', 'Comprehensive', 'Adequate'. Contains NULL when support service information is not documented.
+  - name: com_res
+    type: VARCHAR
+    description: 'Community resources accessible to patients from this facility. Contains values: ''Comprehensive'',
+      ''Limited'', ''Adequate'', ''Extensive''. Contains NULL when community resource mapping is incomplete.
+
+
+      Community Resources: Illustrates the value of community resource availability.
+
+
+      Ranges from Limited to Comprehensive/Extensive. Limited indicates few resources, Adequate indicates
+      sufficient resources, and Comprehensive/Extensive indicates robust resources.
+
+
+      Compiler note: Describes value range of facilities.com_res (Limited, Adequate, Comprehensive, Extensive).'
+  - name: emer_contact
+    type: VARCHAR
+    description: Emergency contact protocols and contact information for crisis situations. Typically
+      contains numeric values representing contact counts.
+  - name: s_plan_stat
+    type: VARCHAR
+    description: 'Safety plan implementation status at this facility. Contains values: ''Not Needed'',
+      ''Active'', ''Needs Update''. Contains NULL when safety plan status is not tracked.'
+  - name: c_plan_stat
+    type: VARCHAR
+    description: 'Crisis plan readiness status for this facility. Contains values: ''Not Needed'', ''Active'',
+      ''Needs Update''. Contains NULL when crisis planning status is not documented.'
+  - name: s_system_chg
+    type: VARCHAR
+    description: 'Recent or planned changes to support systems at this facility. Contains values: ''Improved'',
+      ''Declined'', ''Variable''. Contains NULL when support system change tracking is not maintained.'
+- schema: main
+  table: patients
+  columns:
+  - name: pat_key
+    type: VARCHAR
+    description: A TEXT primary key uniquely identifying each patient record in the mental health assessment
+      database.
+  - name: pat_age
+    type: BIGINT
+    description: Patient's age in years at the time of assessment or registration.
+  - name: pat_gender
+    type: VARCHAR
+    description: 'Patient''s gender identity. Contains values: ''M'', ''F'', ''Other''.'
+  - name: pat_eth
+    type: VARCHAR
+    description: 'Patient''s ethnicity or racial background. Contains values: ''Other'', ''Hispanic'',
+      ''White'', ''Black'', ''Asian''.'
+  - name: edu_level
+    type: VARCHAR
+    description: 'Patient''s highest level of education completed. Contains values: ''High School'', ''College'',
+      ''Graduate'', ''Less than High School''.'
+  - name: emp_stat
+    type: VARCHAR
+    description: 'Patient''s current employment status. Contains values: ''Retired'', ''Employed'', ''Unemployed'',
+      ''Student'', ''Disabled''.'
+  - name: mari_stat
+    type: VARCHAR
+    description: 'Patient''s marital or relationship status. Contains values: ''Widowed'', ''Married'',
+      ''Single'', ''Divorced'', ''Separated''.'
+  - name: living_arr
+    type: VARCHAR
+    description: 'Patient''s current living arrangement. Contains values: ''Alone'', ''Partner'', ''Family'',
+      ''Group Home''.'
+  - name: insur_type
+    type: VARCHAR
+    description: 'Type of health insurance coverage held by the patient. Contains values: ''Medicaid'',
+      ''Medicare'', ''Private'', ''None'', ''Military''. Contains NULL when insurance information is not
+      available.'
+  - name: insur_stat
+    type: VARCHAR
+    description: 'Current status of the patient''s insurance coverage. Contains values: ''Pending'', ''Approved'',
+      ''Denied'', ''Active''.'
+  - name: disab_stat
+    type: VARCHAR
+    description: 'Patient''s disability status and accommodations needed. Contains values: ''PENDING'',
+      ''pErManent'', ''temporary'', ''pErmAneNt'', ''Temporary'', ''Pending'', ''permanent'', ''TEMPORARY'',
+      ''PERMANENT''. Contains noise with mixed case variations like ''PeNDinG'', ''PeNDING'', ''TEmpOrarY'',
+      ''PERmAnent'', ''PeRmanENT''. Contains NULL when disability status assessment is not completed.'
+  - name: house_stable
+    type: VARCHAR
+    description: 'Stability and security of the patient''s housing situation. Contains values: ''Stable'',
+      ''Homeless'', ''At Risk'', ''Temporary''.'
+  - name: cult_factor
+    type: VARCHAR
+    description: 'Cultural factors that may impact the patient''s mental health treatment. Contains values:
+      ''Language'', ''beliefs'', ''Family'', ''multiple''. Contains noise with mixed case variations like
+      ''LANGUAGE'', ''mUlTiplE'', ''FAMILy'', ''BELIefs'', ''BELIEFS'', ''MULTIPLE'', ''FAMILY''. Contains
+      NULL when cultural assessment is not conducted.'
+  - name: stigma_imp
+    type: VARCHAR
+    description: 'Impact of mental health stigma on the patient''s treatment engagement. Contains values:
+      ''moderate'', ''Mild'', ''severe''. Contains noise with mixed case variations like ''mODErATe'',
+      ''mILd'', ''MOdERatE'', ''seVERe'', ''SEVERE'', ''MODERATE'', ''MILD''. Contains NULL when stigma
+      impact is not evaluated.'
+  - name: fin_stress
+    type: VARCHAR
+    description: 'Level of financial stress experienced by the patient. Contains values: ''Severe'', ''Moderate'',
+      ''Mild''. Contains NULL when financial stress assessment is not performed.'
+  - name: clin_lead_ref
+    type: VARCHAR
+    description: Foreign key referencing Clinicians(Clin_Key), identifying the patient's primary clinician.
+- schema: main
+  table: treatmentbasics
+  columns:
+  - name: tx_key
+    type: BIGINT
+    description: A BIGSERIAL primary key auto-incrementing identifier for treatment records.
+  - name: enc_ref
+    type: VARCHAR
+    description: Foreign key referencing Encounters(Enc_Key), linking treatment to specific clinical encounters.
+  - name: cur_med
+    type: VARCHAR
+    description: Current medications prescribed to the patient. Free-text field containing medication
+      combinations like 'Antidepressant,Antipsychotic', 'None,Antipsychotic,Mood Stabilizer'. Contains
+      NULL when medication information is not documented.
+  - name: med_adh
+    type: VARCHAR
+    description: 'Medication adherence level. Contains values: ''Medium'', ''Low'', ''High''.'
+  - name: med_side
+    type: VARCHAR
+    description: 'Medication side effects experienced. Contains values: ''Mild'', ''Moderate'', ''Severe''.
+      Contains NULL when side effects are not monitored.'
+  - name: med_chg
+    type: VARCHAR
+    description: 'Recent medication changes made. Contains values: ''Dose Adjustment'', ''Augmentation'',
+      ''Switch''. Contains NULL when medication changes are not tracked.'
+  - name: th_type
+    type: VARCHAR
+    description: 'Type of therapy being provided. Contains values: ''CBT'', ''Group'', ''Individual'',
+      ''Family''. Contains NULL when therapy type is not specified.'
+  - name: th_freq
+    type: VARCHAR
+    description: 'Frequency of therapy sessions. Contains values: ''Biweekly'', ''Monthly'', ''Weekly'',
+      ''Quarterly''. Contains NULL when therapy frequency is not documented.'
+  - name: th_dur_m
+    type: BIGINT
+    description: Duration of therapy treatment in months.
+  - name: th_eng
+    type: VARCHAR
+    description: 'Level of patient engagement in therapy. Contains values: ''Medium'', ''High'', ''Low''.
+
+
+      Therapy Engagement: Illustrates the value of therapy engagement levels.
+
+
+      Ranges from Low to High. Low indicates minimal participation, Medium indicates regular participation,
+      and High indicates active engagement.
+
+
+      Compiler note: th_eng contains values High/Medium/Low (plus Non-compliant) matching the described
+      Low-Medium-High therapy engagement scale.'
+  - name: th_chg
+    type: VARCHAR
+    description: 'Recent therapy changes made to the treatment plan. Contains values: ''Frequency Change'',
+      ''Modality Change'', ''No Change''. Contains NULL when therapy changes are not tracked.'
+  - name: crisis_int
+    type: FLOAT
+    description: 'Number of crisis interventions required during the treatment period.
+
+
+      Crisis Intervention Count: Illustrates the value of the crisis intervention count.
+
+
+      A numeric value indicating the number of crisis interventions. A value of 0 indicates no interventions,
+      while higher values (e.g., 3) indicate frequent interventions.
+
+
+      Compiler note: Describes the value semantics of crisis_int: numeric count of crisis interventions,
+      observed range 0-5 in data, 0=no interventions, higher=more frequent.'
+- schema: main
+  table: treatmentoutcomes
+  columns:
+  - name: tx_out_key
+    type: BIGINT
+    description: A BIGSERIAL primary key auto-incrementing identifier for treatment outcome records.
+  - name: tx_ref
+    type: BIGINT
+    description: Foreign key referencing TreatmentBasics(Tx_Key), linking outcomes to specific treatment
+      records.
+  - name: tx_goal_stat
+    type: VARCHAR
+    description: 'Treatment goals achievement status. Contains values: ''Not Started'', ''In Progress'',
+      ''Achieved'', ''Partially Met''.'
+  - name: rec_goal_stat
+    type: VARCHAR
+    description: 'Recovery goals achievement status. Contains values: ''Not Started'', ''In Progress'',
+      ''Achieved'', ''Partially Met''.'
+  - name: txprogmet
+    type: JSON
+    description: 'JSONB column. Combines treatment progress metrics including therapy progress, treatment
+      adherence, response, side effect burden, symptom improvement, functional improvement, and satisfaction
+      measures. Fields: {"Th_Prog": "Therapy progress assessment. Contains values: ''Fair'', ''Good'',
+      ''Poor'', ''Excellent''. Contains NULL when therapy progress is not evaluated.", "Tx_Adh": "Treatment
+      adherence level. Contains values: ''Non-compliant'', ''Medium'', ''High'', ''Compliant''.", "Tx_Resp":
+      "Treatment response assessment. Contains values: ''Poor'', ''Partial'', ''Good'', ''Excellent''.
+      Contains NULL when treatment response is not evaluated.", "Side_Burd": "Side effect burden experienced
+      by the patient. Contains values: ''Mild'', ''Moderate'', ''Good'', ''Severe''. Contains NULL when
+      side effect burden is not assessed.", "Symp_Imp": "Symptom improvement assessment. Contains values:
+      ''MODERATE'', ''minimal'', ''Significant'', ''moderate''. Contains noise with mixed case variations
+      like ''MODeRatE'', ''MoDERATe'', ''miNiMAL'', ''SignIFIcaNT'', ''MINIMAL'', ''SIGNIFICANT''. Contains
+      NULL when symptom improvement is not evaluated.", "Func_Impv": "Functional improvement assessment.
+      Contains values: ''MODERATE'', ''moDeraTe'', ''Moderate'', ''MINIMAL'', ''Minimal'', ''siGnIfiCAnT'',
+      ''moderate'', ''significant''. Contains noise with mixed case variations like ''moDEraTE'', ''MINimAL'',
+      ''signiFIcant'', ''SignIFicAnT''. Contains NULL when functional improvement is not assessed.", "Work_Stat_Chg":
+      "Work status changes during treatment. Contains values: ''Leave'', ''reduced hours'', ''Terminated''.
+      Contains noise with mixed case variations like ''REDUCED HOURS'', ''LEAVE'', ''termINaTEd'', ''TeRMINaTed'',
+      ''TERMINATED'', ''REduCeD HOURS''. Contains NULL when work status changes are not tracked.", "Sat_Scr":
+      "Patient satisfaction score typically ranging from 1 to 10.", "Ther_Alliance": "Therapeutic alliance
+      quality assessment. Contains values: ''poor'', ''StROng'', ''moderate'', ''strong'', ''MODERATE'',
+      ''POOR'', ''Weak'', ''Strong''. Contains noise with mixed case variations like ''stroNG'', ''sTRONg'',
+      ''mODERAte'', ''weAk'', ''STRONG'', ''WEAK''. Contains NULL when therapeutic alliance is not assessed.",
+      "Tx_Eng": "Treatment engagement level. Contains values: ''High'', ''Medium'', ''Low'', ''Non-compliant''.",
+      "Tx_Sat": "Treatment satisfaction level. Contains values: ''meDiUm'', ''DisSAtISFieD'', ''Dissatisfied'',
+      ''lOw'', ''Low'', ''DISSATISFIED'', ''HIGH'', ''High'', ''Medium''. Contains noise with mixed case
+      variations like ''medIUm'', ''DISsATISFied'', ''MEdiuM'', ''HIGh'', ''MEDIUM''. Contains NULL when
+      treatment satisfaction is not assessed."}'

@@ -1,0 +1,1425 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: robot_fault_prediction, compiler: claudesonnet5
+# inputs: robot_fault_prediction_kb.jsonl, robot_fault_prediction_column_meaning_base.json, robot_fault_prediction_schema.txt, robot_fault_prediction.duckdb
+metrics:
+- name: robot_age
+  description: 'Calculates the operational age of a robot in days since its commissioning date.
+
+
+    The duration in days from the robot''s installation date to the present. Formula: CURRENT_DATE - installation_date.
+
+
+    Compiler note: Computed as days between current date and installation date (instdateval), per formula.'
+  sql_expression: CURRENT_DATE - instdateval
+  source_model: main.robot_details
+  domains:
+  - calculations
+- name: payload_utilization_ratio_pur
+  description: 'Measures the ratio of the robot''s actual working payload to its maximum rated payload
+    capacity, indicating how heavily it is loaded.
+
+
+    The proportion of the robot''s maximum lifting capacity being used. Formula: actual_payload_weight
+    / payload_capacity_kg.
+
+
+    Compiler note: actual_payload_weight = actuation_data.payloadwval; payload_capacity_kg fetched via
+    unique join actrecref -> robot_details.botdetreg (1:1).'
+  sql_expression: payloadwval / (SELECT r.payloadcapkg FROM robot_details r WHERE r.botdetreg = actuation_data.actrecref)
+  source_model: main.actuation_data
+  domains:
+  - calculations
+- name: mean_time_between_stoppages_mtbs
+  description: 'Calculates the average operating hours between emergency stop events, a key indicator
+    of operational reliability.
+
+
+    The total operational hours divided by the number of emergency stop events. Formula: total_operational_hours
+    / emergency_stop_count.
+
+
+    Compiler note: total_operational_hours comes from operation.totopshrval, reached via actuation_data
+    (effectivenessactuation -> actreg -> actoperref -> operreg); verified this join is one-to-one (479
+    rows each). emergency_stop_count is performance_and_safety.emergencystopcount. Division by zero when
+    emergencystopcount=0 follows integer/float division rules of the engine.'
+  sql_expression: (SELECT o.totopshrval FROM actuation_data a JOIN operation o ON o.operreg = a.actoperref
+    WHERE a.actreg = effectivenessactuation) / emergencystopcount
+  source_model: main.performance_and_safety
+  domains:
+  - calculations
+- name: supply_sufficiency_days
+  description: 'Estimates for how many days the current supplies can last. This is determined by the most
+    limiting resource (either food or water).
+
+
+    Calculates the minimum number of days supplies can last, assuming a daily consumption of 2kg of food
+    and 3 liters of water per person. Formula: LEAST((food_tons * 1000) / (affected_population * 2), water_liters
+    / (affected_population * 3)).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database schema (robot/operation/actuation/maintenance tables) contains no columns
+    for food_tons, water_liters, or affected_population - this metric relates to disaster relief supply
+    data not present anywhere in this robotics-focused database.
+- name: average_joint_temperature
+  description: 'Calculates the average temperature across all of the robot''s joints.
+
+
+    The mean temperature across all six joints (J1 to J6). Formula: (J1_temp + ... + J6_temp) / 6.
+
+
+    Compiler note: Averages temperature_C across J1-J6 extracted from the joint_health JSONB column.'
+  sql_expression: ((joint_health->'J1'->>'temperature_C')::float + (joint_health->'J2'->>'temperature_C')::float
+    + (joint_health->'J3'->>'temperature_C')::float + (joint_health->'J4'->>'temperature_C')::float +
+    (joint_health->'J5'->>'temperature_C')::float + (joint_health->'J6'->>'temperature_C')::float) / 6
+  source_model: main.joint_condition
+  domains:
+  - calculations
+- name: average_joint_vibration
+  description: 'Calculates the average vibration level across all of the robot''s joints.
+
+
+    The mean vibration level (in mm/s) across all of a robot''s joints, calculated by averaging the ''vibration_mmps''
+    values from the ''joint_health'' JSONB field.
+
+
+    Compiler note: Averaged vibration_mmps across J1-J6 extracted from joint_health JSONB field.'
+  sql_expression: "(\n  (joint_health->'J1'->>'vibration_mmps')::double precision +\n  (joint_health->'J2'->>'vibration_mmps')::double\
+    \ precision +\n  (joint_health->'J3'->>'vibration_mmps')::double precision +\n  (joint_health->'J4'->>'vibration_mmps')::double\
+    \ precision +\n  (joint_health->'J5'->>'vibration_mmps')::double precision +\n  (joint_health->'J6'->>'vibration_mmps')::double\
+    \ precision\n) / 6"
+  source_model: main.joint_condition
+  domains:
+  - calculations
+- name: controller_stress_score
+  description: 'A combined score representing the current processing and memory load on the system controller.
+
+
+    A composite score representing controller load. Formula: (overseer_load_value + memory_usage_value)
+    / 2.
+
+
+    Compiler note: Direct average of overseerloadvalue and memuseval columns from system_controller.'
+  sql_expression: (overseerloadvalue + memuseval) / 2
+  source_model: main.system_controller
+  domains:
+  - calculations
+- name: safety_incident_rate
+  description: 'Calculates the number of safety incidents (collisions, zone, and speed violations) per
+    1000 hours of operation.
+
+
+    The frequency of safety violations per 1000 operational hours. Formula: (collision_count + zone_violations
+    + speed_violations) * 1000 / total_operational_hours.
+
+
+    Compiler note: Joins performance_and_safety -> actuation_data (via EffectivenessActuation=ActReg)
+    -> operation (via ActOperRef=OperReg) to get TotOpsHrVal; this join is unique since ActReg is PK of
+    actuation_data and OperReg is PK of operation. Formula: (collision_count + zone_violations + speed_violations)
+    * 1000 / total_operational_hours.'
+  sql_expression: (collisioncount + zoneviolnum + speedviolnum) * 1000 / (SELECT o.totopshrval FROM actuation_data
+    a JOIN operation o ON o.operreg = a.actoperref WHERE a.actreg = performance_and_safety.effectivenessactuation)
+  source_model: main.performance_and_safety
+  domains:
+  - calculations
+- name: relative_positional_error
+  description: 'Normalizes the Cartesian position error against the robot''s maximum reach to provide
+    a scale-independent accuracy metric.
+
+
+    The robot''s positional error as a fraction of its maximum reach. Formula: positional_error_mm / reach_mm.
+
+
+    Compiler note: Positional error (PosErrMMVal) divided by robot''s reach (ReachMMVal from robot_details),
+    joined via actrecref -> botdetreg, a unique match per actuation record.'
+  sql_expression: poserrmmval / (SELECT rd.reachmmval FROM robot_details rd WHERE rd.botdetreg = actuation_data.actrecref)
+  source_model: main.actuation_data
+  domains:
+  - calculations
+- name: joint_temperature_differential
+  description: 'Measures the temperature difference between the hottest and coolest joints, which can
+    indicate localized issues.
+
+
+    The difference between the maximum and minimum temperature across all six joints (J1 to J6). Formula:
+    GREATEST(J1_temp, ..., J6_temp) - LEAST(J1_temp, ..., J6_temp).
+
+
+    Compiler note: Extracted temperature_C per joint (J1-J6) from joint_health JSONB, computed max-min
+    across the 6 values.'
+  sql_expression: GREATEST((joint_health->'J1'->>'temperature_C')::double, (joint_health->'J2'->>'temperature_C')::double,
+    (joint_health->'J3'->>'temperature_C')::double, (joint_health->'J4'->>'temperature_C')::double, (joint_health->'J5'->>'temperature_C')::double,
+    (joint_health->'J6'->>'temperature_C')::double) - LEAST((joint_health->'J1'->>'temperature_C')::double,
+    (joint_health->'J2'->>'temperature_C')::double, (joint_health->'J3'->>'temperature_C')::double, (joint_health->'J4'->>'temperature_C')::double,
+    (joint_health->'J5'->>'temperature_C')::double, (joint_health->'J6'->>'temperature_C')::double)
+  source_model: main.joint_condition
+  domains:
+  - calculations
+- name: remaining_useful_life_in_days
+  description: 'Converts the remaining useful life from hours to days for easier planning.
+
+
+    The robot''s projected operational lifespan in days. Formula: remaining_useful_life_hours / 24.
+
+
+    Compiler note: RULHours column in maintenance_and_fault holds remaining useful life in hours; divided
+    by 24 to get days.'
+  sql_expression: rulhours / 24.0
+  source_model: main.maintenance_and_fault
+  domains:
+  - calculations
+- name: budget_runway_days
+  description: 'Estimates the number of days until the allocated budget is depleted, based on the current
+    burn rate.
+
+
+    The estimated number of days an operation can continue before its budget is exhausted. Formula: (allocated_budget
+    - total_operational_costs) / Financial Burn Rate.
+
+
+    Built on: average_joint_temperature.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database contains no tables or columns related to budgets, allocated funds, operational
+    costs, or financial burn rate. This entry requires financial data not present in this schema.
+- name: throughput_rate
+  description: 'Calculates the number of cycles completed per minute, as a direct measure of production
+    throughput.
+
+
+    The number of program cycles a robot completes per minute. Formula: 60 / cycle_time_seconds.
+
+
+    Compiler note: Direct application of formula 60/cycle_time_seconds using operation.cycletimesecval;
+    NULL/nan propagate naturally for missing data.'
+  sql_expression: 60 / cycletimesecval
+  source_model: main.operation
+  domains:
+  - calculations
+- name: overload_frequency
+  description: 'Calculates the frequency of overload events per 1000 operating hours.
+
+
+    The number of overload events per 1000 operational hours. Formula: overload_count / (total_operational_hours
+    / 1000.0).
+
+
+    Compiler note: Overload events per 1000 operational hours = overloadcnt / (total_operational_hours/1000).
+    Total operational hours retrieved via actuation_data.actreg (unique PK) -> operation.totopshrval (unique
+    PK join).'
+  sql_expression: overloadcnt / ( (SELECT o.totopshrval FROM actuation_data a JOIN operation o ON a.actoperref
+    = o.operreg WHERE a.actreg = effectivenessactuation) / 1000.0 )
+  source_model: main.performance_and_safety
+  domains:
+  - calculations
+- name: response_effectiveness_score_res
+  description: 'A composite score measuring the overall effectiveness of the response operation.
+
+
+    A weighted score of an operation''s success. Formula: (0.4 * success_rate) + (0.3 * bene_feedbackscore
+    * 10) + (0.3 * distequityidx * 100).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database contains robot/manufacturing operations data (robot_record, robot_details,
+    operation, actuation_data, joint_performance, joint_condition, mechanical_status, system_controller,
+    maintenance_and_fault, performance_and_safety). It has no tables or columns for success_rate, bene_feedbackscore,
+    or distequityidx, which this humanitarian/disaster-response metric requires. These concepts have no
+    corresponding data in this schema.
+- name: average_backlash
+  description: 'Calculates the average mechanical backlash across all of the robot''s joints, an indicator
+    of gear wear.
+
+
+    The mean backlash (in degrees) across all of a robot''s joints.
+
+
+    Compiler note: Averaged backlash_deg across joints J1-J6 extracted from the joint_health JSONB column.'
+  sql_expression: ((joint_health->'J1'->>'backlash_deg')::double precision + (joint_health->'J2'->>'backlash_deg')::double
+    precision + (joint_health->'J3'->>'backlash_deg')::double precision + (joint_health->'J4'->>'backlash_deg')::double
+    precision + (joint_health->'J5'->>'backlash_deg')::double precision + (joint_health->'J6'->>'backlash_deg')::double
+    precision) / 6
+  source_model: main.joint_condition
+  domains:
+  - calculations
+- name: maintenance_cost_per_hour
+  description: 'Estimates the maintenance cost per hour of operation based on the next scheduled upkeep.
+
+
+    The robot''s estimated upkeep cost divided by its total operational hours. Formula: upkeep_cost_est
+    / total_ops_hours.
+
+
+    Compiler note: upkeepcostest is stored as text like ''$7,299.59''; stripped ''$'' and '','' and cast
+    to DOUBLE before dividing by total_ops_hours (operation.totopshrval), joined via upkeepoperation=operreg
+    (verified unique match). Note: all upkeepcostest values in current data are NULL/empty, so result
+    is currently NULL for all rows, but formula is correctly encoded.'
+  sql_expression: CAST(REPLACE(REPLACE(upkeepcostest, '$', ''), ',', '') AS DOUBLE) / (SELECT o.totopshrval
+    FROM operation o WHERE o.operreg = maintenance_and_fault.upkeepoperation)
+  source_model: main.maintenance_and_fault
+  domains:
+  - calculations
+- name: predictive_maintenance_urgency_pmu
+  description: 'A score that quantifies the urgency of performing maintenance based on predictive models.
+
+
+    A risk score combining remaining useful life (RUL) and fault prediction. Formula: (1000 / (rulhours
+    + 1)) + (faultpredscore * 10).
+
+
+    Compiler note: Computed directly from rulhours and faultpredscore columns in maintenance_and_fault;
+    used 1000.0 to avoid integer division.'
+  sql_expression: (1000.0 / (rulhours + 1)) + (faultpredscore * 10)
+  source_model: main.maintenance_and_fault
+  domains:
+  - calculations
+- name: mechanical_wear_score
+  description: 'A calculated indicator that combines vibration and backlash data to estimate overall mechanical
+    degradation.
+
+
+    A weighted score of mechanical wear. Formula: (0.6 * Average Joint Vibration) + (0.4 * Average Backlash).
+
+
+    Built on: average_joint_vibration, average_backlash.
+
+
+    Compiler note: Combines Average Joint Vibration and Average Backlash per joint_health JSON fields,
+    weighted 0.6/0.4.'
+  sql_expression: "0.6 * (\n  ((joint_health->'J1'->>'vibration_mmps')::double precision +\n   (joint_health->'J2'->>'vibration_mmps')::double\
+    \ precision +\n   (joint_health->'J3'->>'vibration_mmps')::double precision +\n   (joint_health->'J4'->>'vibration_mmps')::double\
+    \ precision +\n   (joint_health->'J5'->>'vibration_mmps')::double precision +\n   (joint_health->'J6'->>'vibration_mmps')::double\
+    \ precision) / 6\n) + 0.4 * (\n  ((joint_health->'J1'->>'backlash_deg')::double precision +\n   (joint_health->'J2'->>'backlash_deg')::double\
+    \ precision +\n   (joint_health->'J3'->>'backlash_deg')::double precision +\n   (joint_health->'J4'->>'backlash_deg')::double\
+    \ precision +\n   (joint_health->'J5'->>'backlash_deg')::double precision +\n   (joint_health->'J6'->>'backlash_deg')::double\
+    \ precision) / 6\n)"
+  source_model: main.joint_condition
+  domains:
+  - calculations
+- name: health_degradation_rate_hdr
+  description: 'Calculates the rate at which the robot''s composite health index is declining relative
+    to its age.
+
+
+    The rate of decline in a robot''s health index per day. Formula: (1.0 - condition_index) / robot_age_in_days.
+
+
+    Built on: robot_age.
+
+
+    Compiler note: condition_index from performance_and_safety.conditionindexval; robot_age_in_days computed
+    inline as CURRENT_DATE - instdateval via scalar subquery to robot_details (botdetreg is PK, unique
+    match).'
+  sql_expression: (1.0 - conditionindexval) / (CURRENT_DATE - (SELECT rd.instdateval FROM robot_details
+    rd WHERE rd.botdetreg = performance_and_safety.effectivenessrobot))
+  source_model: main.performance_and_safety
+  domains:
+  - calculations
+- name: financial_health_score_fhs
+  description: 'An index assessing the financial stability of an operation based on budget and spending.
+
+
+    A score assessing financial stability, calculated by averaging the budget remaining percentage and
+    funding sufficiency. Formula: 0.5 * (100 - funds_util_pct) + 0.5 * ((budgetallotusd - COALESCE(resource_gaps_usd,
+    0)) / NULLIF(budgetallotusd, 0)) * 100.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database contains no financial/budget data (no fields for funds_util_pct, budgetallotusd,
+    or resource_gaps_usd). The schema covers robot operational, mechanical, and maintenance data only,
+    with no tables related to budgets or financial operations.
+- name: imminent_supply_depletion_alert
+  description: 'A critical warning that essential life-sustaining supplies will run out within 48 hours.
+
+
+    An ''Imminent Supply Depletion Alert'' is triggered when the calculated Supply Sufficiency (Days)
+    is less than 2.
+
+
+    Built on: supply_sufficiency_days.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Depends on Supply Sufficiency (Days), which cannot be encoded: the database has no food_tons,
+    water_liters, or affected_population columns anywhere in this robotics-focused schema. No table holds
+    this disaster relief supply data.'
+- name: public_health_emergency
+  description: 'A state where the risk of disease is high and the capacity to respond is critically low.
+
+
+    A ''Public Health Emergency'' exists if the Public Health Risk Score (PHRS) exceeds a critical threshold
+    of 70.
+
+
+    Built on: health_degradation_rate_hdr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition references a "Public Health Risk Score (PHRS)" which is never defined in
+    the knowledge base, and this database contains only robot/operation telemetry data (no disease risk,
+    population, or health-response-capacity data). There is no way to compute PHRS or this threshold condition
+    over any table in this schema.
+- name: highly_effective_operation
+  description: 'An operation that demonstrates excellence across coordination, logistics, and beneficiary
+    satisfaction.
+
+
+    An operation is ''Highly Effective'' if its Response Effectiveness Score (RES) is greater than 85
+    AND its Coordination Quality Index (CQI) is greater than 85.
+
+
+    Built on: response_effectiveness_score_res, average_backlash.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on Response Effectiveness Score (RES) and Coordination Quality Index
+    (CQI), which require fields like success_rate, bene_feedbackscore, distequityidx, and logistics/coordination
+    data for humanitarian operations. This database only contains robot/manufacturing operations data
+    (robot_record, robot_details, operation, actuation_data, joint_performance, joint_condition, mechanical_status,
+    system_controller, maintenance_and_fault, performance_and_safety) with no corresponding tables or
+    columns for these humanitarian response concepts.
+- name: overwhelmed_logistical_hub
+  description: 'Flags a distribution hub that is under extreme pressure and likely a bottleneck in the
+    supply chain.
+
+
+    A hub is ''Overwhelmed'' if its Hub Strain Index (HSI) is greater than 1,000,000.
+
+
+    Built on: safety_incident_rate.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This database models industrial robots (operations, actuation, joints, maintenance) and
+    has no concept of distribution hubs, hub throughput, or a Hub Strain Index (HSI). There is no table
+    or column representing logistical hubs, so this metric cannot be computed from this schema.
+- name: failing_operation
+  description: 'An operation characterized by poor logistical performance and low effectiveness.
+
+
+    An operation is ''Failing'' if its Logistical Throughput per Vehicle (LTV) is below 1.0 OR its Response
+    Effectiveness Score (RES) is below 40.
+
+
+    Built on: controller_stress_score, response_effectiveness_score_res.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on Logistical Throughput per Vehicle (LTV) and Response Effectiveness
+    Score (RES), neither of which can be computed from this database. RES requires success_rate, bene_feedbackscore,
+    and distequityidx, and LTV requires vehicle/logistics throughput data - none of these concepts exist
+    in this schema (robot/manufacturing operations data only). Cannot encode.
+- name: high_cost_low_impact_operation
+  description: 'An operation that is financially expensive but is having little positive effect on the
+    ground.
+
+
+    An operation is ''High Cost, Low Impact'' if its Cost Per Person Affected (CPPA) is above average
+    AND its Response Effectiveness Score (RES) is below average.
+
+
+    Built on: average_joint_vibration, response_effectiveness_score_res.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database contains robot/manufacturing operations data only. It has no tables or columns
+    for Cost Per Person Affected (CPPA) or its inputs (operation costs, affected population), nor the
+    Response Effectiveness Score (RES) inputs (success_rate, bene_feedbackscore, distequityidx). This
+    humanitarian/disaster-response metric has no corresponding data in this schema.
+- name: high_wear_applications
+  description: 'An enumeration of robot applications known to cause high levels of mechanical wear and
+    tear.
+
+
+    High-Wear Applications include ''Welding'', ''Grinding'', ''Deburring'', ''Palletizing'', and ''Machine
+    Tending''.
+
+
+    Compiler note: Predicate flags operations whose apptypeval matches the enumerated High-Wear Applications
+    list; only Welding and Palletizing appear in observed data but all five values are included per the
+    definition.'
+  sql_expression: apptypeval IN ('Welding', 'Grinding', 'Deburring', 'Palletizing', 'Machine Tending')
+  source_model: main.operation
+  domains:
+  - definitions
+- name: precision_critical_applications
+  description: 'An enumeration of robot applications that demand the highest degree of positional and
+    orientational accuracy.
+
+
+    Precision-Critical Applications include ''Assembly'', ''Electronics-Handling'', ''Inspection'', ''Dispensing'',
+    and ''Laser Cutting''.
+
+
+    Compiler note: Checked distinct apptypeval values in operation table; only ''Assembly'' from the enumerated
+    list actually occurs (others: Welding, Painting, Palletizing, Material Handling, NULL), but the predicate
+    encodes the full stated enumeration.'
+  sql_expression: apptypeval IN ('Assembly', 'Electronics-Handling', 'Inspection', 'Dispensing', 'Laser
+    Cutting')
+  source_model: main.operation
+  domains:
+  - definitions
+- name: payload_overload_condition
+  description: 'A rule to determine if a robot is operating beyond its rated payload capacity.
+
+
+    A Payload Overload Condition is active if the Payload Utilization Ratio (PUR) is greater than 1.0.
+
+
+    Built on: payload_utilization_ratio_pur.
+
+
+    Compiler note: Encodes PUR > 1.0 using payloadwval divided by the robot''s payloadcapkg joined via
+    actrecref=botdetreg (unique match).'
+  sql_expression: payloadwval / (SELECT r.payloadcapkg FROM robot_details r WHERE r.botdetreg = actuation_data.actrecref)
+    > 1.0
+  source_model: main.actuation_data
+  domains:
+  - definitions
+- name: thermal_anomaly
+  description: 'Identifies a potential thermal issue in a robot''s joints based on temperature deviations.
+
+
+    A Thermal Anomaly is flagged if the Average Joint Temperature exceeds 75°C or if the Joint Temperature
+    Differential is greater than 15°C.
+
+
+    Built on: average_joint_temperature, joint_temperature_differential.
+
+
+    Compiler note: Combines Average Joint Temperature (>75) OR Joint Temperature Differential (>15) computed
+    directly from joint_health JSON per joint.'
+  sql_expression: '(((joint_health->''J1''->>''temperature_C'')::double + (joint_health->''J2''->>''temperature_C'')::double
+    + (joint_health->''J3''->>''temperature_C'')::double + (joint_health->''J4''->>''temperature_C'')::double
+    + (joint_health->''J5''->>''temperature_C'')::double + (joint_health->''J6''->>''temperature_C'')::double)
+    / 6 > 75)
+
+    OR
+
+    (GREATEST((joint_health->''J1''->>''temperature_C'')::double, (joint_health->''J2''->>''temperature_C'')::double,
+    (joint_health->''J3''->>''temperature_C'')::double, (joint_health->''J4''->>''temperature_C'')::double,
+    (joint_health->''J5''->>''temperature_C'')::double, (joint_health->''J6''->>''temperature_C'')::double)
+    - LEAST((joint_health->''J1''->>''temperature_C'')::double, (joint_health->''J2''->>''temperature_C'')::double,
+    (joint_health->''J3''->>''temperature_C'')::double, (joint_health->''J4''->>''temperature_C'')::double,
+    (joint_health->''J5''->>''temperature_C'')::double, (joint_health->''J6''->>''temperature_C'')::double))
+    > 15'
+  source_model: main.joint_condition
+  domains:
+  - definitions
+- name: underutilized_asset
+  description: 'Identifies a robot that is significantly underused relative to its age.
+
+
+    A robot is considered an Underutilized Asset if its Robot Age is greater than 365 days and its cumulative
+    operating hours are less than 2000.
+
+
+    Built on: robot_age.
+
+
+    Compiler note: Robot Age = CURRENT_DATE - instdateval (days). Cumulative operating hours computed
+    as SUM(totopshrval) across all operation rows linked to the robot via operrecref=botdetreg, since
+    a robot can have multiple operations.'
+  sql_expression: (CURRENT_DATE - instdateval) > 365 AND (SELECT SUM(o.totopshrval) FROM operation o WHERE
+    o.operrecref = robot_details.botdetreg) < 2000
+  source_model: main.robot_details
+  domains:
+  - definitions
+- name: reliability_risk
+  description: 'Assesses the robot''s operational reliability based on its history of unplanned stops.
+
+
+    A robot is at ''High Reliability Risk'' if its Mean Time Between Stoppages (MTBS) is less than 500
+    hours.
+
+
+    Built on: mean_time_between_stoppages_mtbs.
+
+
+    Compiler note: MTBS = total_operational_hours / emergency_stop_count, joined via actuation_data to
+    operation (unique match verified). Guard against division by zero when emergencystopcount=0 (treated
+    as not meeting the <500 condition since MTBS undefined/infinite reliability window).'
+  sql_expression: emergencystopcount > 0 AND (SELECT o.totopshrval FROM actuation_data a JOIN operation
+    o ON o.operreg = a.actoperref WHERE a.actreg = effectivenessactuation) / emergencystopcount < 500
+  source_model: main.performance_and_safety
+  domains:
+  - definitions
+- name: mechanical_degradation_alert
+  description: 'A composite alert for significant mechanical wear based on multiple indicators.
+
+
+    A Mechanical Degradation Alert is triggered if the robot''s Average Backlash corresponds to a ''High''
+    Backlash Severity, or its Average Joint Vibration exceeds 3.0 mm/s.
+
+
+    Built on: average_joint_vibration, Backlash Severity.
+
+
+    Compiler note: Average Backlash = mean of J1..J6 backlash_deg; High severity is >0.05 deg. Average
+    Joint Vibration = mean of J1..J6 vibration_mmps; alert if >3.0 mm/s. Combined with OR as defined.'
+  sql_expression: "(\n  (\n    (joint_health->'J1'->>'backlash_deg')::double precision +\n    (joint_health->'J2'->>'backlash_deg')::double\
+    \ precision +\n    (joint_health->'J3'->>'backlash_deg')::double precision +\n    (joint_health->'J4'->>'backlash_deg')::double\
+    \ precision +\n    (joint_health->'J5'->>'backlash_deg')::double precision +\n    (joint_health->'J6'->>'backlash_deg')::double\
+    \ precision\n  ) / 6 > 0.05\n)\nOR\n(\n  (\n    (joint_health->'J1'->>'vibration_mmps')::double precision\
+    \ +\n    (joint_health->'J2'->>'vibration_mmps')::double precision +\n    (joint_health->'J3'->>'vibration_mmps')::double\
+    \ precision +\n    (joint_health->'J4'->>'vibration_mmps')::double precision +\n    (joint_health->'J5'->>'vibration_mmps')::double\
+    \ precision +\n    (joint_health->'J6'->>'vibration_mmps')::double precision\n  ) / 6 > 3.0\n)"
+  source_model: main.joint_condition
+  domains:
+  - definitions
+- name: predictive_maintenance_trigger
+  description: 'A rule that triggers a high-priority maintenance work order based on predictive data.
+
+
+    A Predictive Maintenance Trigger is activated if the Predictive Maintenance Urgency (PMU) score is
+    greater than 50.
+
+
+    Built on: predictive_maintenance_urgency_pmu.
+
+
+    Compiler note: Uses PMU formula directly over maintenance_and_fault columns rulhours and faultpredscore.'
+  sql_expression: (1000.0 / (rulhours + 1)) + (faultpredscore * 10) > 50
+  source_model: main.maintenance_and_fault
+  domains:
+  - definitions
+- name: high_safety_risk_unit
+  description: 'Identifies a robot with a history of frequent or severe safety incidents.
+
+
+    A robot is classified as a High Safety-Risk Unit if its Safety Incident Rate is greater than 2.0 OR
+    its cumulative collision count is greater than 5.
+
+
+    Built on: safety_incident_rate.
+
+
+    Compiler note: Encodes OR of Safety Incident Rate > 2.0 (per its defined formula, joining to operation
+    via actuation_data) and collisioncount > 5. Verified actuation_data.actreg -> operation.operreg join
+    is unique (PK/FK).'
+  sql_expression: (((collisioncount + zoneviolnum + speedviolnum) * 1000.0 / (SELECT o.totopshrval FROM
+    actuation_data a JOIN operation o ON o.operreg = a.actoperref WHERE a.actreg = performance_and_safety.effectivenessactuation))
+    > 2.0) OR (collisioncount > 5)
+  source_model: main.performance_and_safety
+  domains:
+  - definitions
+- name: precision_performance_degradation
+  description: 'Evaluates if a robot''s accuracy is suitable for its task.
+
+
+    Precision Performance Degradation is flagged if the Relative Positional Error exceeds 0.0001.
+
+
+    Built on: relative_positional_error.
+
+
+    Compiler note: Uses relative_positional_error (poserrmmval / reach_mm via unique robot_details match
+    on actrecref); flags when it exceeds 0.0001. NULL poserrmmval yields NULL (not flagged).'
+  sql_expression: (poserrmmval / (SELECT rd.reachmmval FROM robot_details rd WHERE rd.botdetreg = actuation_data.actrecref))
+    > 0.0001
+  source_model: main.actuation_data
+  domains:
+  - definitions
+- name: catastrophic_disaster
+  description: 'Classifies a disaster as ''Catastrophic'' based on the DSI, indicating a need for maximum-level
+    international response.
+
+
+    A ''Catastrophic Disaster'' is any event where the Overall Disaster Severity Index (DSI) is greater
+    than 15,000.
+
+
+    Built on: maintenance_cost_per_hour.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This database contains only robot/operation/maintenance data; it has no disaster severity
+    index (DSI) or related fields (affected population, disaster events, etc.) needed to compute this
+    metric.
+- name: workhorse_robot
+  description: 'Identifies highly utilized, mature robots that are critical to production.
+
+
+    A robot is classified as a ''Workhorse'' if its Robot Age is greater than 1,825 days (5 years) AND
+    its cumulative operating hours exceed 40,000.
+
+
+    Built on: robot_age.
+
+
+    Compiler note: Robot Age = CURRENT_DATE - instdateval. Cumulative operating hours taken as MAX(totopshrval)
+    across a robot''s operation records, since operrecref->operation is one-to-many and totopshrval appears
+    to represent a cumulative counter at time of each record (so the max observed value is the robot''s
+    cumulative total).'
+  sql_expression: (CURRENT_DATE - instdateval) > 1825 AND (SELECT MAX(o.totopshrval) FROM operation o
+    WHERE o.operrecref = robot_details.botdetreg) > 40000
+  source_model: main.robot_details
+  domains:
+  - definitions
+- name: urgent_maintenance_required
+  description: 'Identifies a robot that requires immediate maintenance based on its predicted remaining
+    life or scheduled due date.
+
+
+    A robot requires ''Urgent Maintenance'' if its Remaining Useful Life in Days is less than 7 OR its
+    next scheduled maintenance is overdue (UpkeepDueDays <= 0).
+
+
+    Built on: remaining_useful_life_in_days.
+
+
+    Compiler note: RUL in days = rulhours/24.0; condition true if that is <7 or upkeepduedays<=0.'
+  sql_expression: (rulhours / 24.0) < 7 OR upkeepduedays <= 0
+  source_model: main.maintenance_and_fault
+  domains:
+  - definitions
+- name: legacy_robot
+  description: 'Identifies a robot that is old and may be a candidate for replacement or major overhaul.
+
+
+    A robot is considered a ''Legacy Robot'' if its Robot Age is greater than 3650 days (10 years).
+
+
+    Built on: robot_age.
+
+
+    Compiler note: Robot Age = CURRENT_DATE - instdateval (days); Legacy Robot flags age > 3650 days.'
+  sql_expression: (CURRENT_DATE - instdateval) > 3650
+  source_model: main.robot_details
+  domains:
+  - definitions
+- name: medical_staff_ratio
+  description: 'The number of medical staff available per 1000 affected people.
+
+
+    A ratio indicating medical staff availability. Formula: (medical_staff_count / affected_population)
+    * 1000.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no tables or columns related to medical staff counts or affected population;
+    this is a disaster-response metric with no corresponding data in this robotics/maintenance schema.
+- name: imminent_failure_warning
+  description: 'Issues a high-priority warning when multiple indicators suggest an impending failure.
+
+
+    An ''Imminent Failure Warning'' is active if a robot has a ''High'' Fault Prediction Score Tier AND
+    is also flagged for Urgent Maintenance Required.
+
+
+    Built on: Fault Prediction Score Tiers, urgent_maintenance_required.
+
+
+    Compiler note: High Fault Prediction Score Tier is faultpredscore > 0.7; Urgent Maintenance Required
+    is (rulhours/24.0) < 7 OR upkeepduedays <= 0, both computed from columns in maintenance_and_fault.'
+  sql_expression: faultpredscore > 0.7 AND ((rulhours / 24.0) < 7 OR upkeepduedays <= 0)
+  source_model: main.maintenance_and_fault
+  domains:
+  - definitions
+- name: high_burn_rate_alert
+  description: 'An alert for operations that have consumed a significant portion of their budget.
+
+
+    A ''High Burn Rate'' alert is triggered for an operation if its total costs exceed 20% of its total
+    allocated budget.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no tables or columns representing allocated budget or total operational
+    costs for operations; these financial fields do not exist in this schema, so the condition cannot
+    be computed.
+- name: intensive_workload
+  description: 'Identifies a robot that is consistently operating at a high intensity level.
+
+
+    A robot has an ''Intensive Workload'' if its Payload Utilization Ratio is > 0.8 AND its Throughput
+    Rate is in the top 20th percentile (quintile 1) for its application.
+
+
+    Built on: payload_utilization_ratio_pur, throughput_rate.
+
+
+    Compiler note: PUR computed via payloadwval/robot''s payloadcapkg (joined via actrecref->robot_details).
+    Throughput Rate = 60/cycletimesecval computed from the operation linked via actoperref (unique 1:1
+    mapping verified). Top 20th percentile within the same apptypeval group (including NULL apptypeval
+    as its own group) is determined by computing, for the operation''s throughput, the fraction of operations
+    in the same application group with throughput >= it (count of such rows / total group count), flagging
+    top quintile when this fraction <= 0.2. Rows with NULL/zero cycletimesecval excluded from throughput
+    ranking since Throughput Rate is undefined for them. Verified no stored NaNs remain among non-null
+    cycletimesecval values.'
+  sql_expression: "(\n  (actuation_data.payloadwval / (SELECT r.payloadcapkg FROM robot_details r WHERE\
+    \ r.botdetreg = actuation_data.actrecref)) > 0.8\n)\nAND\n(\n  (\n    SELECT CAST(COUNT(*) AS DOUBLE)\
+    \ FROM operation o2\n    WHERE o2.apptypeval = (SELECT o1.apptypeval FROM operation o1 WHERE o1.operreg\
+    \ = actuation_data.actoperref)\n      AND o2.cycletimesecval IS NOT NULL AND o2.cycletimesecval <>\
+    \ 0\n      AND (60.0/o2.cycletimesecval) >= (60.0/(SELECT o1.cycletimesecval FROM operation o1 WHERE\
+    \ o1.operreg = actuation_data.actoperref))\n  ) / NULLIF((\n    SELECT CAST(COUNT(*) AS DOUBLE) FROM\
+    \ operation o3\n    WHERE o3.apptypeval = (SELECT o1.apptypeval FROM operation o1 WHERE o1.operreg\
+    \ = actuation_data.actoperref)\n      AND o3.cycletimesecval IS NOT NULL AND o3.cycletimesecval <>\
+    \ 0\n  ),0) <= 0.2\n)"
+  source_model: main.actuation_data
+  domains:
+  - definitions
+- name: degrading_robot
+  description: 'Flags a robot whose health is currently deteriorating.
+
+
+    A robot is considered to be ''Degrading'' if its Health Degradation Rate (HDR) is greater than 0.
+
+
+    Built on: health_degradation_rate_hdr.
+
+
+    Compiler note: Encodes HDR > 0 using the HDR formula: (1 - conditionindexval) / robot age in days
+    (install date looked up uniquely via effectivenessrobot -> robot_details.botdetreg). Robot age is
+    always positive (install date in past), so condition reduces to conditionindexval < 1, but kept the
+    full HDR expression per definition.'
+  sql_expression: ((1.0 - conditionindexval) / (CURRENT_DATE - (SELECT rd.instdateval FROM robot_details
+    rd WHERE rd.botdetreg = performance_and_safety.effectivenessrobot))) > 0
+  source_model: main.performance_and_safety
+  domains:
+  - definitions
+- name: top_tier_usage_model
+  description: 'Identifies robot models that are in the top 25% of the fleet based on their cumulative
+    program cycle count, indicating they are the most heavily used models.
+
+
+    A robot model is a ''Top-Tier Usage Model'' if its total program cycle count is in the 75th percentile
+    or higher of all models.
+
+
+    Compiler note: Computed per-model total program cycle count by summing operation.progcyclecount for
+    all robots sharing the same modelseriesval (joined via robot_details.botdetreg = operation.operrecref).
+    A model is Top-Tier if its total is >= the 75th percentile (quantile_cont) of all models'' totals.'
+  sql_expression: (select sum(o.progcyclecount) from operation o join robot_details rd2 on o.operrecref
+    = rd2.botdetreg where rd2.modelseriesval = robot_details.modelseriesval) >= (select quantile_cont(total,
+    0.75) from (select rd3.modelseriesval, sum(o2.progcyclecount) as total from robot_details rd3 join
+    operation o2 on o2.operrecref = rd3.botdetreg group by rd3.modelseriesval) t)
+  source_model: main.robot_details
+  domains:
+  - definitions
+- name: anomalous_controller_stress
+  description: 'Identifies a controller whose current stress score is disproportionately high compared
+    to the average stress score of its specific model series.
+
+
+    A controller is under ''Anomalous Stress'' if its current real-time Controller Stress Score is more
+    than 20% higher than the average stress score for its model series.
+
+
+    Built on: controller_stress_score.
+
+
+    Compiler note: Controller Stress Score = (overseerloadvalue+memuseval)/2. Joined system_controller
+    -> operation -> robot_record -> robot_details (via operrecref/botcode) to get modelseriesval per controller;
+    verified join is unique (no duplicate rows). Compared each controller''s current stress score to the
+    average stress score of all controllers sharing the same model series, flagging >20% excess.'
+  sql_expression: "(overseerloadvalue + memuseval)/2 > 1.2 * (\n  SELECT AVG((sc2.overseerloadvalue +\
+    \ sc2.memuseval)/2)\n  FROM system_controller sc2\n  JOIN operation o2 ON sc2.systemoverseeroperation\
+    \ = o2.operreg\n  JOIN robot_record rr2 ON o2.operrecref = rr2.botcode\n  JOIN robot_details rd2 ON\
+    \ rr2.botcode = rd2.botdetreg\n  WHERE rd2.modelseriesval = (\n    SELECT rd1.modelseriesval\n   \
+    \ FROM operation o1\n    JOIN robot_record rr1 ON o1.operrecref = rr1.botcode\n    JOIN robot_details\
+    \ rd1 ON rr1.botcode = rd1.botdetreg\n    WHERE o1.operreg = system_controller.systemoverseeroperation\n\
+    \  )\n)"
+  source_model: main.system_controller
+  domains:
+  - definitions
+- name: critical_condition_robot
+  description: 'A robot that is simultaneously at risk from both thermal and mechanical issues.
+
+
+    A robot is in ''Critical Condition'' if it has both a ''Thermal Anomaly'' AND a ''Mechanical Degradation
+    Alert''.
+
+
+    Built on: thermal_anomaly, mechanical_degradation_alert.
+
+
+    Compiler note: Combines Thermal Anomaly and Mechanical Degradation Alert conditions, both computed
+    from joint_condition.joint_health JSON fields per joint, using the formulas given for those entries.'
+  sql_expression: "(\n  (\n    ((joint_health->'J1'->>'temperature_C')::double precision + (joint_health->'J2'->>'temperature_C')::double\
+    \ precision + (joint_health->'J3'->>'temperature_C')::double precision + (joint_health->'J4'->>'temperature_C')::double\
+    \ precision + (joint_health->'J5'->>'temperature_C')::double precision + (joint_health->'J6'->>'temperature_C')::double\
+    \ precision) / 6 > 75\n  )\n  OR\n  (\n    GREATEST((joint_health->'J1'->>'temperature_C')::double\
+    \ precision, (joint_health->'J2'->>'temperature_C')::double precision, (joint_health->'J3'->>'temperature_C')::double\
+    \ precision, (joint_health->'J4'->>'temperature_C')::double precision, (joint_health->'J5'->>'temperature_C')::double\
+    \ precision, (joint_health->'J6'->>'temperature_C')::double precision)\n    -\n    LEAST((joint_health->'J1'->>'temperature_C')::double\
+    \ precision, (joint_health->'J2'->>'temperature_C')::double precision, (joint_health->'J3'->>'temperature_C')::double\
+    \ precision, (joint_health->'J4'->>'temperature_C')::double precision, (joint_health->'J5'->>'temperature_C')::double\
+    \ precision, (joint_health->'J6'->>'temperature_C')::double precision)\n    > 15\n  )\n)\nAND\n(\n\
+    \  (\n    ((joint_health->'J1'->>'backlash_deg')::double precision + (joint_health->'J2'->>'backlash_deg')::double\
+    \ precision + (joint_health->'J3'->>'backlash_deg')::double precision + (joint_health->'J4'->>'backlash_deg')::double\
+    \ precision + (joint_health->'J5'->>'backlash_deg')::double precision + (joint_health->'J6'->>'backlash_deg')::double\
+    \ precision) / 6 > 0.05\n  )\n  OR\n  (\n    ((joint_health->'J1'->>'vibration_mmps')::double precision\
+    \ + (joint_health->'J2'->>'vibration_mmps')::double precision + (joint_health->'J3'->>'vibration_mmps')::double\
+    \ precision + (joint_health->'J4'->>'vibration_mmps')::double precision + (joint_health->'J5'->>'vibration_mmps')::double\
+    \ precision + (joint_health->'J6'->>'vibration_mmps')::double precision) / 6 > 3.0\n  )\n)"
+  source_model: main.joint_condition
+  domains:
+  - definitions
+- name: throughput_rate_cycles_per_hour
+  description: 'Calculates the number of cycles completed per hour.
+
+
+    The number of program cycles a robot completes per hour. Formula: 3600 / cycle_time_seconds.
+
+
+    Compiler note: Cycles per hour = 3600 / cycle time in seconds, computed directly from operation.cycletimesecval.'
+  sql_expression: 3600 / cycletimesecval
+  source_model: main.operation
+  domains:
+  - calculations
+- name: high_safety_risk
+  description: 'Identifies robots that pose a significant safety hazard based on their history of incidents,
+    considering both absolute counts and incident rates.
+
+
+    A robot is classified as ''High Safety-Risk'' if it meets either of the following criteria: 1. It
+    has experienced more than 5 total collisions. 2. Its combined rate of major incidents (collisions,
+    zone violations, and speed violations) is greater than 2.0 per 1000 hours of operation.
+
+
+    Compiler note: Collision count and incident rate (collisions+zone violations+speed violations per
+    1000 operational hours) taken from performance_and_safety; total operational hours obtained via unique
+    join performance_and_safety.effectivenessactuation -> actuation_data.actreg -> actuation_data.actoperref
+    -> operation.operreg (verified 1:1, 479 rows). NULLIF guards division by zero/null hours.'
+  sql_expression: collisioncount > 5 OR ((collisioncount + zoneviolnum + speedviolnum) * 1000.0 / NULLIF((SELECT
+    o.totopshrval FROM actuation_data a JOIN operation o ON a.actoperref = o.operreg WHERE a.actreg =
+    effectivenessactuation), 0)) > 2.0
+  source_model: main.performance_and_safety
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: actuation_data
+  columns:
+  - name: actreg
+    type: VARCHAR
+    description: TEXT. Unique actuation record identifier. PK.
+  - name: actoperref
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). FK to operation.
+  - name: actrecref
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_record table (BotCode). FK to robot_record.
+  - name: tcpxval
+    type: FLOAT
+    description: 'REAL. TCP X-coordinate in mm. **NULL means TCP pose data unavailable.**. Example: 1275.23.'
+  - name: tcpyval
+    type: FLOAT
+    description: 'REAL. TCP Y-coordinate in mm. **NULL means TCP pose data unavailable.**. Example: 873.0.'
+  - name: tcpzval
+    type: FLOAT
+    description: 'REAL. TCP Z-coordinate in mm. **NULL means TCP pose data unavailable.**. Example: 1618.63.'
+  - name: tcp_rxval
+    type: FLOAT
+    description: 'REAL. TCP rotation around the X-axis in radians. Example: -156.28.'
+  - name: tcp_ryval
+    type: FLOAT
+    description: 'REAL. TCP rotation around the Y-axis in radians. Example: -150.3.'
+  - name: tcp_rzval
+    type: FLOAT
+    description: 'REAL. TCP rotation around the Z-axis in radians. Example: -6.26.'
+  - name: tcpspeedval
+    type: FLOAT
+    description: 'REAL. Speed of the TCP in mm/s. Example: 1231.14.'
+  - name: tcpaccelval
+    type: FLOAT
+    description: 'REAL. Acceleration of the TCP in mm/s². Example: 6.65.'
+  - name: pathaccmmval
+    type: FLOAT
+    description: 'REAL. Path accuracy in mm. Example: 0.797.'
+  - name: poserrmmval
+    type: FLOAT
+    description: 'REAL. Position error in mm. **NULL means no position error data available.**. Example:
+      0.069.'
+  - name: orienterrdegval
+    type: FLOAT
+    description: 'REAL. Orientation error in degrees. **NULL means no orientation error data available.**.
+      Example: 0.471.'
+  - name: payloadwval
+    type: FLOAT
+    description: 'REAL. Payload weight in kg. **NULL means no payload data available.**. Example: 144.85.'
+  - name: payloadival
+    type: FLOAT
+    description: 'REAL. Payload current in Amps. Example: 1.78.'
+  - name: m1currval
+    type: FLOAT
+    description: 'REAL. Motor 1 current in Amps. **NULL means no motor 1 data available.**. Example: 6.58.'
+  - name: m2currval
+    type: FLOAT
+    description: 'REAL. Motor 2 current in Amps. **NULL means no motor 2 data available.**. Example: 8.61.'
+  - name: m3currval
+    type: FLOAT
+    description: 'REAL. Motor 3 current in Amps. **NULL means no motor 3 data available.**. Example: 3.31.'
+  - name: m4currval
+    type: FLOAT
+    description: 'REAL. Motor 4 current in Amps. **NULL means no motor 4 data available.**. Example: 14.16.'
+  - name: m5currval
+    type: FLOAT
+    description: 'REAL. Motor 5 current in Amps. **NULL means no motor 5 data available.**. Example: 6.16.'
+  - name: m6currval
+    type: FLOAT
+    description: 'REAL. Motor 6 current in Amps. **NULL means no motor 6 data available.**. Example: 1.81.'
+  - name: m1voltval
+    type: FLOAT
+    description: 'REAL. Motor 1 voltage in Volts. Example: 1.26.'
+  - name: m2voltval
+    type: FLOAT
+    description: 'REAL. Motor 2 voltage in Volts. Example: 15.66.'
+  - name: m3voltval
+    type: FLOAT
+    description: 'REAL. Motor 3 voltage in Volts. Example: 10.6.'
+  - name: m4voltval
+    type: FLOAT
+    description: 'REAL. Motor 4 voltage in Volts. Example: 9.13.'
+  - name: m5voltval
+    type: FLOAT
+    description: 'REAL. Motor 5 voltage in Volts. Example: 28.47.'
+  - name: m6voltval
+    type: FLOAT
+    description: 'REAL. Motor 6 voltage in Volts. Example: 32.12.'
+- schema: main
+  table: joint_condition
+  description: 'Backlash Severity: Categorizes joint backlash measurements into severity levels.
+
+
+    Backlash is ''Low'' if < 0.01 degrees, ''Medium'' if 0.01-0.05 degrees (early wear), or ''High'' if
+    > 0.05 degrees (significant wear). This applies to the average backlash across all joints.
+
+
+    Compiler note: Categorical label (CASE expression) derived from average_backlash over joint_condition.joint_health
+    JSON; not a single column, but a derived metric scoped to this table.'
+  columns:
+  - name: jcondid
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the joint condition record. PK.
+  - name: jcondoperref
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). FK to operation.
+  - name: jcdetref
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_details table (BotDetReg). FK to robot_details.
+  - name: joint_health
+    type: JSON
+    description: 'JSONB column. Consolidates thermal, vibration, and backlash indicators that describe
+      the health of each joint at the time of capture. Fields: {"J1": {"temperature_C": "REAL. Joint 1
+      temperature value in Celsius. Example: 20.57.", "vibration_mmps": "REAL. Joint 1 vibration value
+      in mm/s. Example: 1.14.", "backlash_deg": "REAL. Joint 1 backlash value in mm. Example: 0.0352."},
+      "J2": {"temperature_C": "REAL. Joint 2 temperature value in Celsius. Example: 39.54.", "vibration_mmps":
+      "REAL. Joint 2 vibration value in mm/s. Example: 1.636.", "backlash_deg": "REAL. Joint 2 backlash
+      value in mm. Example: 0.0272."}, "J3": {"temperature_C": "REAL. Joint 3 temperature value in Celsius.
+      Example: 42.16.", "vibration_mmps": "REAL. Joint 3 vibration value in mm/s. Example: 1.687.", "backlash_deg":
+      "REAL. Joint 3 backlash value in mm. Example: 0.0946."}, "J4": {"temperature_C": "REAL. Joint 4
+      temperature value in Celsius. Example: 34.88.", "vibration_mmps": "REAL. Joint 4 vibration value
+      in mm/s. Example: 3.264.", "backlash_deg": "REAL. Joint 4 backlash value in mm. Example: 0.056."},
+      "J5": {"temperature_C": "REAL. Joint 5 temperature value in Celsius. Example: 70.15.", "vibration_mmps":
+      "REAL. Joint 5 vibration value in mm/s. Example: 2.052.", "backlash_deg": "REAL. Joint 5 backlash
+      value in mm. Example: 0.0907."}, "J6": {"temperature_C": "REAL. Joint 6 temperature value in Celsius.
+      Example: 64.39.", "vibration_mmps": "REAL. Joint 6 vibration value in mm/s. Example: 6.422.", "backlash_deg":
+      "REAL. Joint 6 backlash value in mm. Example: 0.046."}}'
+- schema: main
+  table: joint_performance
+  columns:
+  - name: jperfid
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the joint performance record. PK.
+  - name: jperfoperref
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). FK to operation.
+  - name: jperfdetref
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_details table (BotDetReg). FK to robot_details.
+  - name: joint_metrics
+    type: JSON
+    description: 'JSONB column. Captures the kinematic performance of every joint (angle, speed, and torque)
+      in a single hierarchical JSON structure for quick retrieval. Fields: {"J1": {"angle_deg": "REAL.
+      Joint 1 angle value in degrees. Example: -37.72.", "speed_dps": "REAL. Joint 1 speed value in radians
+      per second. Example: 36.74.", "torque_nm": "REAL. Joint 1 torque value in Nm. Example: 12.0."},
+      "J2": {"angle_deg": "REAL. Joint 2 angle value in degrees. Example: 177.36.", "speed_dps": "REAL.
+      Joint 2 speed value in radians per second. Example: 65.06.", "torque_nm": "REAL. Joint 2 torque
+      value in Nm. Example: 79.88."}, "J3": {"angle_deg": "REAL. Joint 3 angle value in degrees. Example:
+      83.27.", "speed_dps": "REAL. Joint 3 speed value in radians per second. Example: 174.45.", "torque_nm":
+      "REAL. Joint 3 torque value in Nm. Example: 55.91."}, "J4": {"angle_deg": "REAL. Joint 4 angle value
+      in degrees. Example: -151.1.", "speed_dps": "REAL. Joint 4 speed value in radians per second. Example:
+      96.65.", "torque_nm": "REAL. Joint 4 torque value in Nm. Example: 75.22."}, "J5": {"angle_deg":
+      "REAL. Joint 5 angle value in degrees. Example: -162.94.", "speed_dps": "REAL. Joint 5 speed value
+      in radians per second. Example: 167.12.", "torque_nm": "REAL. Joint 5 torque value in Nm. Example:
+      2.14."}, "J6": {"angle_deg": "REAL. Joint 6 angle value in degrees. Example: -72.08.", "speed_dps":
+      "REAL. Joint 6 speed value in radians per second. Example: 69.94.", "torque_nm": "REAL. Joint 6
+      torque value in Nm. Example: 45.07."}}'
+- schema: main
+  table: maintenance_and_fault
+  columns:
+  - name: upkeepactuation
+    type: VARCHAR
+    description: TEXT. Foreign key to the actuation_data table (ActReg). PK, FK to actuation_data.
+  - name: upkeepoperation
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). FK to operation.
+  - name: faultcodeval
+    type: VARCHAR
+    description: 'TEXT. Fault code identifier. **NULL means no fault code provided.**. Example: E8902.'
+  - name: issuecategoryval
+    type: VARCHAR
+    description: 'TEXT. Category of the issue in the fault. Possible values: COM, ELE, MEC, NON, SOF.'
+  - name: issuelevelval
+    type: VARCHAR
+    description: 'TEXT. Level of the issue in the fault. Possible values: Critical level, High level,
+      Low level, Medium level, None level.'
+  - name: faultpredscore
+    type: FLOAT
+    description: 'REAL. Fault prediction score. **NULL means no fault prediction score available.**. Example:
+      0.021.
+
+
+      Fault Prediction Score Tiers: Categorizes the raw fault prediction probability score into actionable
+      tiers.
+
+
+      A Fault Prediction Score is ''Low'' if < 0.3 (normal operation), ''Medium'' if 0.3-0.7 (monitoring
+      required), or ''High'' if > 0.7 (high probability of impending fault).
+
+
+      Compiler note: Describes tiers for the raw FaultPredScore column values (0-1 probability) in maintenance_and_fault
+      table.'
+  - name: faulttypeestimation
+    type: VARCHAR
+    description: 'TEXT. Fault type estimation. **NULL means no fault type estimation available.**. Possible
+      values: Controller, Gearbox, Joint, Motor.'
+  - name: rulhours
+    type: BIGINT
+    description: 'BIGINT. Remaining useful life in hours. Example: 1601.'
+  - name: upkeepduedays
+    type: BIGINT
+    description: 'BIGINT. Days until the next maintenance is due. Example: 16.'
+  - name: upkeepcostest
+    type: VARCHAR
+    description: 'TEXT. Estimated upkeep cost. Example: $7,299.59.'
+- schema: main
+  table: mechanical_status
+  columns:
+  - name: mechactref
+    type: VARCHAR
+    description: TEXT. Foreign key to the actuation_data table (ActReg). FK to actuation_data.
+  - name: mechoperref
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). PK, FK to operation.
+  - name: mechdetref
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_details table (BotDetReg). FK to robot_details.
+  - name: component_status
+    type: JSON
+    description: 'JSONB column. Bundles together the real-time status of brakes, encoders, and gearbox
+      health for easier diagnostics and alerting. Fields: {"brakes": {"J1": "TEXT. Brake 1 status. **NULL
+      means no brake 1 status data available.**. Possible values: Error, Normal, Warning.", "J2": "TEXT.
+      Brake 2 status. Possible values: Error, Normal, Warning.", "J3": "TEXT. Brake 3 status. Possible
+      values: Error, Normal, Warning.", "J4": "TEXT. Brake 4 status. Possible values: Error, Normal, Warning.",
+      "J5": "TEXT. Brake 5 status. Possible values: Error, Normal, Warning.", "J6": "TEXT. Brake 6 status.
+      Possible values: Error, Normal, Warning."}, "encoders": {"J1": "TEXT. Encoder 1 status. **NULL means
+      no encoder 1 status data available.**. Possible values: Error, Normal, Warning.", "J2": "TEXT. Encoder
+      2 status. Possible values: Error, Normal, Warning.", "J3": "TEXT. Encoder 3 status. Possible values:
+      Error, Normal, Warning.", "J4": "TEXT. Encoder 4 status. Possible values: Error, Normal, Warning.",
+      "J5": "TEXT. Encoder 5 status. Possible values: Error, Normal, Warning.", "J6": "TEXT. Encoder 6
+      status. Possible values: Error, Normal, Warning."}, "gearboxes": {"J1": {"temperature_C": "REAL.
+      Gearbox 1 temperature in Celsius. Example: 24.92.", "vibration_mmps": "REAL. Gearbox 1 vibration
+      in mm/s. Example: 3.273."}, "J2": {"temperature_C": "REAL. Gearbox 2 temperature in Celsius. Example:
+      79.14.", "vibration_mmps": "REAL. Gearbox 2 vibration in mm/s. Example: 1.912."}, "J3": {"temperature_C":
+      "REAL. Gearbox 3 temperature in Celsius. Example: 56.76.", "vibration_mmps": "REAL. Gearbox 3 vibration
+      in mm/s. Example: 1.361."}, "J4": {"temperature_C": "REAL. Gearbox 4 temperature in Celsius. Example:
+      35.39.", "vibration_mmps": "REAL. Gearbox 4 vibration in mm/s. Example: 5.302."}, "J5": {"temperature_C":
+      "REAL. Gearbox 5 temperature in Celsius. Example: 60.72.", "vibration_mmps": "REAL. Gearbox 5 vibration
+      in mm/s. Example: 7.001."}, "J6": {"temperature_C": "REAL. Gearbox 6 temperature in Celsius. Example:
+      48.18.", "vibration_mmps": "REAL. Gearbox 6 vibration in mm/s. Example: 5.74."}}}'
+- schema: main
+  table: operation
+  columns:
+  - name: operreg
+    type: VARCHAR
+    description: TEXT. Unique operation record identifier. PK.
+  - name: operrecref
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_record table (BotCode). FK to robot_record.
+  - name: totopshrval
+    type: FLOAT
+    description: 'REAL. Total operational hours of the robot. **NULL means no operational hours data available.**.
+      Example: 20009.0.'
+  - name: apptypeval
+    type: VARCHAR
+    description: 'TEXT. Application type for the operation. **NULL means no application type specified.**.
+      Possible values: Assembly, Material Handling, Painting, Palletizing, Welding.
+
+
+      Common Application Groups: An enumeration of common business applications grouped by process type.
+
+
+      Application groups include: ''Material Handling'' (e.g., Picking, Packing, Palletizing), ''Processing''
+      (e.g., Grinding, Polishing), ''Assembly'', ''Welding'', and ''Standby''.
+
+
+      Compiler note: Describes the application-type groupings; closest matching column is operation.apptypeval,
+      whose actual distinct values are Material Handling, Palletizing, Welding, Painting, Assembly (no
+      Processing/Standby/Grinding/Polishing examples present in data).'
+  - name: opermodeval
+    type: VARCHAR
+    description: 'CHAR(25). Operating mode of the robot (e.g., automatic, manual). Possible values: MANU.'
+  - name: currprogval
+    type: VARCHAR
+    description: 'TEXT. Current program being executed by the robot. **NULL means no program is active.**.
+      Example: PRG_4901.'
+  - name: progcyclecount
+    type: BIGINT
+    description: 'BIGINT. Number of cycles executed by the robot. Example: 177681.'
+  - name: cycletimesecval
+    type: FLOAT
+    description: 'REAL. Cycle time of the robot operation in seconds. **NULL means no cycle time data
+      available.**. Example: 211.82.'
+  - name: axiscountval
+    type: BIGINT
+    description: 'BIGINT. Number of axes in the robot. Possible values: 4, 5, 6, 7.'
+- schema: main
+  table: performance_and_safety
+  columns:
+  - name: effectivenessactuation
+    type: VARCHAR
+    description: TEXT. Foreign key to the actuation_data table (ActReg). PK, FK to actuation_data.
+  - name: effectivenessrobot
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_details table (BotDetReg). FK to robot_details.
+  - name: conditionindexval
+    type: FLOAT
+    description: 'REAL. Condition index value of the robot. **NULL means no condition index data available.**.
+      Example: 0.152.
+
+
+      Condition Index Tiers: Translates the composite health index score into qualitative ratings of the
+      robot''s condition.
+
+
+      A Condition Index is ''Excellent'' if > 0.9, ''Good'' if 0.7-0.9, ''Fair'' if 0.5-0.7, or ''Poor''
+      if < 0.5 (significant wear or risk).
+
+
+      Compiler note: Describes qualitative tiers (Excellent/Good/Fair/Poor) derived from performance_and_safety.conditionindexval
+      thresholds.'
+  - name: effectivenessindexval
+    type: FLOAT
+    description: 'REAL. Effectiveness index value of the robot. **NULL means no effectiveness index data
+      available.**. Example: 0.603.'
+  - name: qualitymeasureval
+    type: FLOAT
+    description: 'REAL. Quality measure value for the robot. **NULL means no quality measure data available.**.
+      Example: 0.337.'
+  - name: energyusekwhval
+    type: VARCHAR
+    description: 'TEXT. Energy use in KWH. **NULL means no energy usage data available.**. Example: 70.54
+      kWh.'
+  - name: pwrfactorval
+    type: VARCHAR
+    description: 'TEXT. Power factor value. **NULL means no power factor data available.**. Example: PF=0.82.'
+  - name: airpressval
+    type: FLOAT
+    description: 'REAL. Air pressure value in the system. Example: 6.69.
+
+
+      Air Pressure Status: Defines the status of the pneumatic system based on air pressure readings.
+
+
+      Air pressure is ''Normal'' if 5.5-7.0 bar, ''Low'' if < 5.5 bar, or ''High'' if > 7.0 bar.
+
+
+      Compiler note: Describes categorical thresholds (Normal/Low/High) applied to performance_and_safety.airpressval
+      (bar readings); this is a value-labeling entry, not a computed metric, but maps directly onto this
+      column.'
+  - name: safetystateval
+    type: VARCHAR
+    description: 'TEXT. Safety state value of the robot. Possible values: Warning, ✓ Normal, ✗ Emergency.
+
+
+      Safety State Meanings: Illustrates the operational meaning of the robot''s various safety states.
+
+
+      Key safety states are: ''✓ Normal'' (normal operation), ''Protective Stop'' (database value ''Warning''),
+      and ''✗ Emergency'' (critical stop, database value ''✗ Emergency'').
+
+
+      Compiler note: Describes the meaning of values in performance_and_safety.SafetyStateVal (''Warning'',
+      ''✓ Normal'', ''✗ Emergency''), confirmed as the possible values listed for this column.'
+  - name: zoneviolnum
+    type: BIGINT
+    description: 'BIGINT. Number of zone violations. Example: 1.'
+  - name: emergencystopcount
+    type: BIGINT
+    description: 'BIGINT. Count of emergency stops. Possible values: 0, 1, 2, 3, 4, 5.'
+  - name: collisioncount
+    type: BIGINT
+    description: 'BIGINT. Count of collisions. Possible values: 0, 1, 2, 3.'
+  - name: overloadcnt
+    type: BIGINT
+    description: 'BIGINT. Count of overloads. Possible values: 0, 1, 2, 3, 4, 5.'
+  - name: speedviolnum
+    type: BIGINT
+    description: 'BIGINT. Number of speed violations. Example: 5.'
+  - name: calibstateval
+    type: VARCHAR
+    description: 'CHAR(20). Calibration state value of the robot. Possible values: 0, N, Y.
+
+
+      Calibration State Meanings: Clarifies the status of the robot''s calibration.
+
+
+      Calibration states are: ''Success'' (database value ''Y''), ''Failed'' (database value ''0''), or
+      ''Pending'' (database value ''N'').
+
+
+      Compiler note: Describes the meaning of the CalibStateVal codes (''Y'',''0'',''N'') stored in performance_and_safety.calibstateval.'
+  - name: toolchangecount
+    type: BIGINT
+    description: 'BIGINT. Number of tool changes. **NULL means no tool change data available.**. Example:
+      940.0.'
+  - name: toolwearpct
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: robot_details
+  columns:
+  - name: botdetreg
+    type: VARCHAR
+    description: TEXT. Foreign key to the robot_record table (BotCode). PK, FK to robot_record.
+  - name: mfgnameval
+    type: VARCHAR
+    description: 'TEXT. Manufacturer name of the robot. Possible values: ABB, FANUC, KUKA, Universal Robots,
+      Yaskawa.'
+  - name: modelseriesval
+    type: VARCHAR
+    description: 'TEXT. Model series of the robot. Example: Series_784.'
+  - name: bottypeval
+    type: VARCHAR
+    description: 'CHAR(15). Type of the robot (e.g., industrial, collaborative). Possible values: Articulated,
+      Cartesian, Collaborative, Delta, SCARA.
+
+
+      Robot Architectures: An enumeration of the primary robot family types based on their kinematic structure.
+
+
+      Core robot architectures include: ''Articulated'', ''SCARA'', ''Delta'', and ''Cartesian''.
+
+
+      Compiler note: Column bottypeval contains values Articulated, SCARA, Delta, Cartesian, and also
+      Collaborative; entry lists only the 4 ''core'' kinematic architectures, omitting Collaborative which
+      also appears in data.'
+  - name: payloadcapkg
+    type: FLOAT
+    description: 'REAL. Payload capacity of the robot in kilograms. Possible values: 3, 5, 10, 20, 50,
+      100, 200.
+
+
+      Payload Capacity Class: Classifies robots into weight categories based on their rated payload capacity.
+
+
+      Classes are: ''Light-Duty'' (< 20 kg), ''Medium-Duty'' (20-150 kg), or ''Heavy-Duty'' (>= 150 kg).
+
+
+      Compiler note: Categorizes robot_details.payloadcapkg into Light-Duty (<20), Medium-Duty (20-150),
+      Heavy-Duty (>=150). This is a CASE-based label entry, not encoded here per instructions (describes
+      column classification only).'
+  - name: reachmmval
+    type: BIGINT
+    description: 'BIGINT. Reach distance of the robot in millimeters. Example: 1592.'
+  - name: instdateval
+    type: DATE
+    description: 'DATE. Installation date of the robot. Example: 10 Jun 2023.'
+  - name: fwversionval
+    type: VARCHAR
+    description: 'TEXT. Firmware version of the robot. Example: 9.6.6.
+
+
+      Firmware Lifecycle Stage: Categorizes firmware versions to manage upgrades and support.
+
+
+      Stages are: ''Current'' (latest stable release), ''Supported'' (previous but supported), or ''End-of-Life''
+      (unsupported and a potential risk). All firmware versions starting with ''3.'' are considered End-of-Life.
+
+
+      Compiler note: Describes meaning of fwversionval categories (Current/Supported/End-of-Life). Confirmed
+      data contains values like ''3.1.1'', ''3.3.6'' starting with ''3.'' which per entry are End-of-Life.
+      However ''Current'' and ''Supported'' stages aren''t fully determinable from data (no explicit ''latest''
+      or ordering rule given beyond the ''3.'' rule), so this is a documentation of column value semantics
+      rather than a fully computable categorical expression.'
+  - name: ctrltypeval
+    type: VARCHAR
+    description: 'TEXT. Control type of the robot (e.g., manual, automatic). Example: Controller_C2.'
+- schema: main
+  table: robot_record
+  columns:
+  - name: recreg
+    type: VARCHAR
+    description: 'TEXT. Unique record registration identifier. PK. Example: RF100725.'
+  - name: rects
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp of the record creation. Not nullable. Possible values: 2025-02-18,
+      2025-02-19.'
+  - name: botcode
+    type: VARCHAR
+    description: 'TEXT. Unique robot code identifier. PK. Example: RB2073.'
+- schema: main
+  table: system_controller
+  columns:
+  - name: systemoverseeractuation
+    type: VARCHAR
+    description: TEXT. Foreign key to the actuation_data table (ActReg). PK, FK to actuation_data.
+  - name: systemoverseeroperation
+    type: VARCHAR
+    description: TEXT. Foreign key to the operation table (OperReg). FK to operation.
+  - name: overseerloadvalue
+    type: FLOAT
+    description: 'REAL. Load value of the system overseer. Example: 0.99.
+
+
+      CPU Load Levels: Categorizes the controller''s CPU load to identify processing strain.
+
+
+      CPU load is ''Normal'' if < 70%, ''High'' if 70%-90%, or ''Critical'' if > 90% (risks performance
+      degradation).
+
+
+      Compiler note: OverseerLoadValue ranges ~0-100, consistent with a CPU load percentage. This entry
+      categorizes it into Normal/High/Critical tiers (categorical labeling), matching this column''s range.'
+  - name: memuseval
+    type: FLOAT
+    description: 'REAL. Memory usage of the system overseer. Example: 32.07.'
+  - name: overseerthermallevel
+    type: VARCHAR
+    description: 'TEXT. Thermal level of the system overseer. Example: 38.5°C.'
+  - name: cabtempval
+    type: FLOAT
+    description: 'REAL. Cabinet temperature of the system overseer. Example: 33.84.'
+  - name: cabhumiditylevel
+    type: VARCHAR
+    description: 'TEXT. Humidity level in the cabinet of the system overseer. Example: 47%.
+
+
+      Cabinet Humidity Risk: Defines risk levels based on the humidity inside the control cabinet.
+
+
+      Humidity is ''Safe'' if < 60%, a ''Warning'' if 60%-80% (corrosion risk), or ''Danger'' if > 80%
+      (risk of electrical faults).
+
+
+      Compiler note: Describes risk tiers (Safe/Warning/Danger) for the humidity percentage stored in
+      system_controller.cabhumiditylevel. However, checked data: all 1000 rows have empty/blank cabhumiditylevel
+      values, so no humidity percentage is actually available to classify. Column identified as the intended
+      target but data is unusable for computing the predicate.'

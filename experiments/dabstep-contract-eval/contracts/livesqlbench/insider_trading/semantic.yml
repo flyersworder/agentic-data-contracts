@@ -1,0 +1,1865 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: insider_trading, compiler: claudesonnet5
+# inputs: insider_trading_kb.jsonl, insider_trading_column_meaning_base.json, insider_trading_schema.txt, insider_trading.duckdb
+metrics:
+- name: daily_turnover_rate_dtr
+  description: 'Calculates the ratio of a trader''s daily trading volume to their account balance, indicating
+    capital velocity.
+
+
+    DTR = \frac{\text{Daily Trading Volume}}{\text{Account Balance}}
+
+
+    Compiler note: Daily Trading Volume = trade_records.vol_day; Account Balance = traders.trader_fin_data.usd_bal,
+    a text field formatted like ''$4,692,991 '' which is stripped of ''$'', '','' and spaces then cast
+    to double. Joined via trade_records.tr_anchor = traders.TR_KEY (unique match). Division guarded against
+    zero balance with NULLIF.'
+  sql_expression: vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal'
+    FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor), '$', ''), ',', ''), ' ', '') AS DOUBLE),
+    0)
+  source_model: main.trade_records
+  domains:
+  - calculations
+- name: order_modification_intensity_omi
+  description: 'Measures how frequently a trader modifies orders relative to their cancellation rate.
+
+
+    OMI = \frac{\text{Order Modification Frequency}}{1 - \text{Order Cancellation Percentage}} \text{
+    (undefined if cancellation percentage is 1)}
+
+
+    Compiler note: OMI = mod_freq / (1 - cancel_pct), both from order_metrics JSON; undefined (NULL) when
+    cancel_pct = 1 (also naturally NULL when cancel_pct is NULL).'
+  sql_expression: CASE WHEN (order_metrics->>'cancel_pct')::double precision = 1 THEN NULL ELSE (order_metrics->>'mod_freq')::double
+    precision / (1 - (order_metrics->>'cancel_pct')::double precision) END
+  source_model: main.order_behaviour
+  domains:
+  - calculations
+- name: trader_leverage_exposure_tle
+  description: 'Extracts the leverage ratio from the trader''s performance data.
+
+
+    TLE = A trader''s leverage ratio, typically found within their performance metrics.
+
+
+    Compiler note: TLE is the leverage ratio stored in trade_records.trade_perf JSON field ''lev_ratio''
+    (per-trade performance metrics).'
+  sql_expression: (trade_perf->>'lev_ratio')::double precision
+  source_model: main.trade_records
+  domains:
+  - calculations
+- name: suspicious_activity_index_sai
+  description: 'A composite index attempting to quantify overall suspicious trading behavior based on
+    risk indicators.
+
+
+    SAI is a weighted sum of normalized risk indicators, including probabilities for spoofing, front-running,
+    wash trading, and confirmed layering.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: SAI is defined only vaguely as "a weighted sum of normalized risk indicators" without
+    specifying the actual weights, normalization method, or how categorical values (e.g., wash_flag 'Low'/'Medium'/'High',
+    layer_idx 'Confirmed'/'Suspected') are to be numerically encoded. There is no deterministic formula
+    given, so this cannot be translated into a concrete SQL expression.
+- name: pattern_anomaly_score_pas
+  description: 'Measures the deviation of a trader''s pattern similarity from their peer correlation,
+    potentially indicating unique illicit behavior.
+
+
+    PAS = |\text{Pattern Similarity Score} - \text{Peer Correlation Score}|
+
+
+    Compiler note: Pattern Similarity Score mapped to reg_compliance.pat_rec (unique match via REC_COMP=REC_PIN);
+    Peer Correlation Score mapped to market_conditions.market_metrics.peer_corr. Note scale mismatch:
+    pat_rec is stored on a 0-100 scale while peer_corr is on a -1..1 scale; computed as stated without
+    rescaling since no normalization rule given.'
+  sql_expression: ABS((SELECT r.pat_rec FROM reg_compliance r WHERE r."REC_COMP" = market_conditions."REC_PIN")
+    - (market_metrics->>'peer_corr')::double)
+  source_model: main.market_conditions
+  domains:
+  - calculations
+- name: compliance_recidivism_score_crs
+  description: 'Calculates a score indicating the tendency for repeat compliance issues, adjusted for
+    account age.
+
+
+    CRS = \frac{\text{Number of Previous Violations}}{\text{Max}(1, \frac{\text{Account Age in Days}}{365})}
+
+
+    Compiler note: Previous violations from compliance_data->>''prev_viol''; account age from traders.trader_fin_data->>''age_days''
+    reached via trade_records (REC_KEY=REC_COMP) -> tr_anchor -> traders, a unique join. Denominator floored
+    at 1 per formula.'
+  sql_expression: (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric
+    / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))
+  source_model: main.reg_compliance
+  domains:
+  - calculations
+- name: investigation_intensity_index_iii
+  description: 'Combines behavioral and network analysis scores from an investigation.
+
+
+    III = (0.6 \times \text{Behavioral Analysis Score}) + (0.4 \times \text{Network Analysis Score})
+
+
+    Compiler note: Behavioral Analysis Score mapped to reg_compliance.behav_score and Network Analysis
+    Score mapped to reg_compliance.net_score.'
+  sql_expression: (0.6 * behav_score) + (0.4 * net_score)
+  source_model: main.reg_compliance
+  domains:
+  - calculations
+- name: sentiment_divergence_factor_sdf
+  description: 'Measures the difference between news and social media sentiment scores.
+
+
+    SDF = |\text{News Sentiment Score} - \text{Social Sentiment Score}|
+
+
+    Compiler note: news_score and soc_sent are fields within sentiment_data jsonb; computed absolute difference.'
+  sql_expression: ABS((sentiment_data->>'news_score')::double precision - (sentiment_data->>'soc_sent')::double
+    precision)
+  source_model: main.sentiment_analytics
+  domains:
+  - calculations
+- name: relative_short_interest_rsi
+  description: 'Calculates short interest ratio relative to institutional ownership.
+
+
+    RSI = \frac{\text{Short Interest Ratio}}{\text{Institutional Ownership Percentage}} \text{ (undefined
+    if institutional ownership is 0)}
+
+
+    Compiler note: short_rt is the short interest ratio and inst_own is institutional ownership percentage;
+    RSI undefined (NULL) when inst_own is 0.'
+  sql_expression: CASE WHEN inst_own = 0 THEN NULL ELSE short_rt / inst_own END
+  source_model: main.sentiment_analytics
+  domains:
+  - calculations
+- name: enforcement_financial_impact_ratio_efir
+  description: 'Calculates the ratio of the penalty amount to the trader''s account balance at the time
+    of the related transaction.
+
+
+    EFIR = \frac{\text{Penalty Amount}}{\text{Account Balance}}
+
+
+    Compiler note: Penalty amount from enf_actions.pen_amt divided by trader''s account balance, obtained
+    via enforcement_actions.REC_ENF -> trade_records.REC_KEY (1:1 join verified) -> tr_anchor -> traders.trader_fin_data.usd_bal.
+    usd_bal stored as text like ''$4,692,991 ''; stripped $, commas, and spaces before casting to double.
+    Division guarded against zero balance.'
+  sql_expression: (enf_actions->>'pen_amt')::double / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal'
+    FROM trade_records tr JOIN traders t ON t."TR_KEY" = tr.tr_anchor WHERE tr."REC_KEY" = enforcement_actions."REC_ENF"),
+    '$', ''), ',', ''), ' ', '') AS DOUBLE), 0)
+  source_model: main.enforcement_actions
+  domains:
+  - calculations
+- name: high_risk_trader_profile
+  description: 'Identifies traders exhibiting characteristics associated with high-risk trading strategies.
+
+
+    A trader is considered High-Risk if their ''Trader Leverage Exposure'' > 5.0 AND their risk level
+    is ''Aggressive'' OR their ''Daily Turnover Rate'' > 0.5.
+
+
+    Built on: daily_turnover_rate_dtr, trader_leverage_exposure_tle.
+
+
+    Compiler note: High-Risk Trader Profile = (TLE>5.0 AND risk_lvl=''Aggressive'') OR (DTR>0.5), per
+    the stated boolean logic (AND binds tighter than OR). TLE from trade_perf->>''lev_ratio'' cast to
+    double; risk_lvl and usd_bal (cleaned of $, commas, spaces) looked up via scalar subquery on traders
+    by tr_anchor, which is unique per TR_KEY.'
+  sql_expression: ((trade_perf->>'lev_ratio')::double precision > 5.0 AND (SELECT t.trader_fin_data->>'risk_lvl'
+    FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor) = 'Aggressive') OR (vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT
+    t.trader_fin_data->>'usd_bal' FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor), '$', ''),
+    ',', ''), ' ', '') AS DOUBLE), 0)) > 0.5
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: potential_insider_trading_flag
+  description: 'Flags transactions potentially linked to insider knowledge based on timing and context.
+
+
+    A transaction is flagged if its information leakage score > 50.0 AND it is linked to a corporate event
+    AND the event''s announcement timing is ''Pre-market'' or ''Intraday''.
+
+
+    Built on: weighted_investigation_score_wis, sentiment_weighted_option_volume_swov.
+
+
+    Compiler note: leak_score is the information leakage score; evt_near non-null means linked to a corporate
+    event; announce_time values are stored as ''Pre-market hrs before''/''Intraday hrs before''/''Post-market
+    hrs before'', matched against ''Pre-market''/''Intraday''.'
+  sql_expression: leak_score > 50.0 AND evt_near IS NOT NULL AND announce_time IN ('Pre-market hrs before',
+    'Intraday hrs before')
+  source_model: main.corporate_events
+  domains:
+  - definitions
+- name: market_manipulation_pattern_layering_spoofing
+  description: 'Identifies trading sessions indicative of layering or spoofing tactics.
+
+
+    A transaction record suggests Layering/Spoofing if its layering indicator is ''Confirmed'' OR (its
+    spoofing probability > 0.75 AND ''Order Modification Intensity'' > 1.0).
+
+
+    Built on: order_modification_intensity_omi, combined_manipulation_indicator_cmi, compliance_health_score_chs.
+
+
+    Compiler note: layer_idx=''Confirmed'' is the layering indicator. spoof_prob is stored as text percentage
+    (e.g. ''0.88%''), converted to fraction via REPLACE and /100 to compare against 0.75. Order Modification
+    Intensity (OMI) computed via scalar subquery joining order_behaviour on REC_NODE=REC_TAG (1:1 PK/FK
+    relationship).'
+  sql_expression: "layer_idx = 'Confirmed' OR (\n  REPLACE(manip_signals->>'spoof_prob', '%', '')::double\
+    \ precision / 100 > 0.75\n  AND (\n    SELECT CASE WHEN (ob.order_metrics->>'cancel_pct')::double\
+    \ precision = 1 THEN NULL\n                ELSE (ob.order_metrics->>'mod_freq')::double precision\
+    \ / (1 - (ob.order_metrics->>'cancel_pct')::double precision) END\n    FROM order_behaviour ob WHERE\
+    \ ob.\"REC_NODE\" = manipulation_signals.\"REC_TAG\"\n  ) > 1.0\n)"
+  source_model: main.manipulation_signals
+  domains:
+  - definitions
+- name: collusion_network_indicator
+  description: 'Suggests potential collusion based on investigation details.
+
+
+    A case indicates potential collusion if the trader circle size > 5 AND the group behavior score >
+    0.6 AND the communication path is ''Regular''.
+
+
+    Built on: suspicion_weighted_turnover_swt.
+
+
+    Compiler note: circ_size maps to trader circle size; commPath to communication path. Group behavior
+    score mapped to trader_links.grp_score, which is stored on a 0-100 scale (observed values range ~0-100),
+    so the stated threshold of 0.6 is interpreted as 60 on this scale.'
+  sql_expression: circ_size > 5 AND (trader_links->>'grp_score')::float > 60 AND "commPath" = 'Regular'
+  source_model: main.trader_relationships
+  domains:
+  - definitions
+- name: elevated_regulatory_scrutiny
+  description: 'Identifies compliance cases under intense review or investigation.
+
+
+    A case is under Elevated Regulatory Scrutiny if its alert level is ''High'' or ''Critical'' AND its
+    investigation priority is ''High'' AND its monitoring intensity is ''Intensive''.
+
+
+    Built on: logarithmic_enforcement_fine_impact_lefi.
+
+
+    Compiler note: Direct mapping of alert_lvl, invest_prior, mon_inten columns to definition.'
+  sql_expression: alert_lvl IN ('High','Critical') AND invest_prior = 'High' AND mon_inten = 'Intensive'
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: problematic_compliance_history
+  description: 'Identifies traders with a poor track record of compliance.
+
+
+    A trader has a Problematic Compliance History if they have more than 3 previous violations OR their
+    compliance rating is ''C'' or ''D'' OR their ''Compliance Recidivism Score'' > 1.0.
+
+
+    Built on: compliance_recidivism_score_crs, aggressive_trading_intensity_ati.
+
+
+    Compiler note: Encoded over reg_compliance; prev_viol and comp_rate pulled from compliance_data JSON.
+    CRS term reuses defined formula, joining REC_COMP 1:1 to trade_records.REC_KEY to get trader age via
+    traders.trader_fin_data.age_days (confirmed unique join). Previous violations count compared >3, comp_rate
+    checked against C/D, and CRS >1.0 threshold applied as OR conditions.'
+  sql_expression: '(compliance_data->>''prev_viol'')::numeric > 3
+
+    OR (compliance_data->>''comp_rate'') IN (''C'',''D'')
+
+    OR (compliance_data->>''prev_viol'')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>''age_days'')::numeric
+    / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))
+    > 1.0'
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: wash_trading_alert
+  description: 'Flags transactions highly suspicious for wash trading.
+
+
+    A transaction triggers a Wash Trading Alert if its wash trading suspicion level is ''High''.
+
+
+    Built on: risk_adjusted_turnover_rat.
+
+
+    Compiler note: Wash trade suspicion level is stored in manip_signals.wash_flag (values: High, Medium,
+    Low, NULL). Alert triggers when it equals ''High''.'
+  sql_expression: (manip_signals->>'wash_flag') = 'High'
+  source_model: main.manipulation_signals
+  domains:
+  - definitions
+- name: event_driven_trader
+  description: 'Classifies traders whose activity appears strongly linked to corporate events.
+
+
+    A trader may be classified as Event-Driven if a significant portion (>30%) of their transactions are
+    linked to a corporate event.
+
+
+    Built on: weighted_investigation_score_wis.
+
+
+    Compiler note: A trade record is ''linked to a corporate event'' when its corporate_events.evt_near
+    is not null (NULL means no upcoming event recorded). Joined trade_records to corporate_events via
+    REC_KEY=REC_EVT (1:1, since trade_records.REC_KEY also serves as the market_conditions/corporate_events
+    primary key). Computed, per trader, the fraction of their trade records with a linked event; flagged
+    as Event-Driven if that fraction exceeds 30%.'
+  sql_expression: (SELECT CAST(COUNT(*) FILTER (WHERE ce.evt_near IS NOT NULL) AS DOUBLE) / COUNT(*) FROM
+    trade_records tr LEFT JOIN corporate_events ce ON tr."REC_KEY" = ce."REC_EVT" WHERE tr.tr_anchor =
+    traders."TR_KEY") > 0.3
+  source_model: main.traders
+  domains:
+  - definitions
+- name: high_cancellation_modification_trader
+  description: 'Identifies traders who frequently cancel or modify orders, potentially indicating manipulative
+    intent or poor execution strategy.
+
+
+    A trader is flagged if their average cancellation percentage > 0.5 OR their average ''Order Modification
+    Intensity'' > 1.5 across their transactions.
+
+
+    Built on: order_modification_intensity_omi.
+
+
+    Compiler note: Aggregated per trader across all their transactions (trade_records joined to order_behaviour
+    via REC_KEY=REC_NODE). Average cancel_pct and average OMI (mod_freq/(1-cancel_pct), undefined when
+    cancel_pct=1) computed via scalar subqueries correlated to traders.TR_KEY through trade_records.tr_anchor.'
+  sql_expression: "(\n  SELECT AVG((ob.order_metrics->>'cancel_pct')::double precision)\n  FROM trade_records\
+    \ tr\n  JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n  WHERE tr.tr_anchor = traders.\"\
+    TR_KEY\"\n) > 0.5\nOR\n(\n  SELECT AVG(\n    CASE WHEN (ob.order_metrics->>'cancel_pct')::double precision\
+    \ = 1 THEN NULL\n         ELSE (ob.order_metrics->>'mod_freq')::double precision / (1 - (ob.order_metrics->>'cancel_pct')::double\
+    \ precision)\n    END\n  )\n  FROM trade_records tr\n  JOIN order_behaviour ob ON tr.\"REC_KEY\" =\
+    \ ob.\"REC_NODE\"\n  WHERE tr.tr_anchor = traders.\"TR_KEY\"\n) > 1.5"
+  source_model: main.traders
+  domains:
+  - definitions
+- name: significant_enforcement_action
+  description: 'Categorizes enforcement actions that represent substantial penalties or restrictions.
+
+
+    An action is considered a Significant Enforcement Action if the penalty impact is ''Fine'' or ''Ban''
+    OR the action taken is ''Suspension'' OR the business restriction is ''Full''.
+
+
+    Built on: boosted_insider_leakage_score_bils, market_adjusted_pattern_anomaly_mapa.
+
+
+    Compiler note: pen_flag from enf_actions jsonb; checked values ''Fine'',''Ban'',''Warning'' present.
+    act_taken and biz_restrict are plain columns.'
+  sql_expression: (enf_actions->>'pen_flag') IN ('Fine', 'Ban') OR act_taken = 'Suspension' OR biz_restrict
+    = 'Full'
+  source_model: main.enforcement_actions
+  domains:
+  - definitions
+- name: risk_adjusted_turnover_rat
+  description: 'Calculates trader turnover scaled by their leverage exposure.
+
+
+    RAT = ''Daily Turnover Rate'' \times ''Trader Leverage Exposure''
+
+
+    Built on: daily_turnover_rate_dtr, trader_leverage_exposure_tle.
+
+
+    Compiler note: RAT = DTR * TLE, computed by combining the two referenced metrics'' sql expressions
+    directly over trade_records.'
+  sql_expression: (vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal'
+    FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor), '$', ''), ',', ''), ' ', '') AS DOUBLE),
+    0)) * (trade_perf->>'lev_ratio')::double precision
+  source_model: main.trade_records
+  domains:
+  - calculations
+- name: combined_manipulation_indicator_cmi
+  description: 'A combined score reflecting both general suspicious activity and specific pattern anomalies.
+
+
+    CMI = (''Suspicious Activity Index'' + ''Pattern Anomaly Score'') / 2
+
+
+    Built on: suspicious_activity_index_sai, pattern_anomaly_score_pas.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CMI depends on Suspicious Activity Index (SAI), which itself cannot be encoded (no concrete
+    formula/weights/normalization given, only a vague description). Since CMI = (SAI + PAS)/2 requires
+    SAI, CMI cannot be computed either.
+- name: compliance_health_score_chs
+  description: 'Inverse score reflecting compliance history severity, penalizing high recidivism and poor
+    ratings.
+
+
+    CHS = \frac{1}{1 + \text{''Compliance Recidivism Score''} \times \text{A numeric value mapped from
+    the ''Compliance Rating Grade''}}
+
+
+    Built on: compliance_recidivism_score_crs, Compliance Rating Grade.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The CHS formula requires "a numeric value mapped from the Compliance Rating Grade", but
+    neither the documentation (entry 71) nor the database defines what numeric values correspond to grades
+    A/B/C/D. Entry 71 only gives qualitative descriptions, not numbers. Without a defined mapping, this
+    metric cannot be encoded as a deterministic SQL expression.
+- name: weighted_investigation_score_wis
+  description: 'Combines raw investigation scores with the current alert severity level.
+
+
+    WIS = ''Investigation Intensity Index'' \times A numeric multiplier based on Alert Level Severity
+    (''Low''=1, ''High''=3, etc.)
+
+
+    Built on: investigation_intensity_index_iii, logarithmic_enforcement_fine_impact_lefi.
+
+
+    Compiler note: WIS = III * severity multiplier. III = 0.6*behav_score + 0.4*net_score (reg_compliance).
+    Alert levels in data are Low, Medium, High, Critical; only Low=1 and High=3 are specified explicitly,
+    so intermediate/extreme levels are assigned a consistent linear scale: Low=1, Medium=2, High=3, Critical=4.'
+  sql_expression: ((0.6 * behav_score) + (0.4 * net_score)) * (CASE alert_lvl WHEN 'Low' THEN 1 WHEN 'Medium'
+    THEN 2 WHEN 'High' THEN 3 WHEN 'Critical' THEN 4 ELSE NULL END)
+  source_model: main.reg_compliance
+  domains:
+  - calculations
+- name: sentiment_weighted_option_volume_swov
+  description: 'Adjusts the option volume ratio based on the divergence between news and social sentiment.
+
+
+    SWOV = \text{Option Volume Ratio} \times (1 + \text{''Sentiment Divergence Factor''})
+
+
+    Built on: sentiment_divergence_factor_sdf.
+
+
+    Compiler note: Option Volume Ratio is taken as the opt_vol column (options-trading volume value stored
+    as a ratio-scale number); Sentiment Divergence Factor computed from sentiment_data->>''news_score''
+    and ''soc_sent'' as in its own entry.'
+  sql_expression: opt_vol * (1 + ABS((sentiment_data->>'news_score')::double precision - (sentiment_data->>'soc_sent')::double
+    precision))
+  source_model: main.sentiment_analytics
+  domains:
+  - calculations
+- name: logarithmic_enforcement_fine_impact_lefi
+  description: 'Calculates the log-scaled financial impact ratio of enforcement fines, emphasizing order
+    of magnitude.
+
+
+    LEFI = ''Enforcement Financial Impact Ratio'' \times \log_{10}(\text{Max}(10, \text{Penalty Amount}))
+
+
+    Built on: enforcement_financial_impact_ratio_efir.
+
+
+    Compiler note: LEFI = EFIR * log10(max(10, pen_amt)). EFIR reused as defined, joining enforcement_actions.REC_ENF
+    to trade_records.REC_KEY (unique match) to get trader''s usd_bal, stripping $ and commas before casting.
+    pen_amt taken from enf_actions jsonb.'
+  sql_expression: ((enf_actions->>'pen_amt')::double / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal'
+    FROM trade_records tr JOIN traders t ON t."TR_KEY" = tr.tr_anchor WHERE tr."REC_KEY" = enforcement_actions."REC_ENF"),
+    '$', ''), ',', ''), ' ', '') AS DOUBLE), 0)) * LOG10(GREATEST(10, (enf_actions->>'pen_amt')::double))
+  source_model: main.enforcement_actions
+  domains:
+  - calculations
+- name: aggressive_trading_intensity_ati
+  description: 'Measures intensity by combining high turnover, leverage, and order modification frequency.
+
+
+    ATI = ''Daily Turnover Rate'' \times ''Trader Leverage Exposure'' \times ''Order Modification Intensity''.
+
+
+    Built on: daily_turnover_rate_dtr, order_modification_intensity_omi, trader_leverage_exposure_tle.
+
+
+    Compiler note: ATI = DTR * TLE * OMI. DTR uses trader_fin_data.usd_bal (strip $, commas, spaces) joined
+    via tr_anchor. TLE is trade_perf->>''lev_ratio''. OMI computed from order_behaviour joined 1:1 via
+    REC_NODE=REC_KEY, using order_metrics mod_freq/cancel_pct, undefined (NULL) when cancel_pct=1.'
+  sql_expression: '(vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>''usd_bal''
+    FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor), ''$'', ''''), '','', ''''), '' '', '''')
+    AS DOUBLE), 0))
+
+    * (trade_perf->>''lev_ratio'')::double precision
+
+    * (SELECT CASE WHEN (ob.order_metrics->>''cancel_pct'')::double precision = 1 THEN NULL ELSE (ob.order_metrics->>''mod_freq'')::double
+    precision / (1 - (ob.order_metrics->>''cancel_pct'')::double precision) END FROM order_behaviour ob
+    WHERE ob.REC_NODE = trade_records.REC_KEY)'
+  source_model: main.trade_records
+  domains:
+  - calculations
+- name: suspicion_weighted_turnover_swt
+  description: 'Calculates daily turnover weighted by the Suspicious Activity Index.
+
+
+    SWT = ''Suspicious Activity Index'' \times ''Daily Turnover Rate''
+
+
+    Built on: daily_turnover_rate_dtr, suspicious_activity_index_sai.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: SWT depends on Suspicious Activity Index (SAI), which cannot be encoded because it is
+    only vaguely defined as "a weighted sum of normalized risk indicators" without specific weights, normalization
+    method, or encoding rules for categorical inputs. Without a concrete SAI formula, SWT cannot be computed
+    either.
+- name: boosted_insider_leakage_score_bils
+  description: 'Increases the Information Leakage Score if a Potential Insider Trading Flag is also present.
+
+
+    BILS = The raw ''Information Leakage Score'' \times (1.5 \text{ if ''Potential Insider Trading Flag''
+    is True else } 1.0)
+
+
+    Built on: potential_insider_trading_flag, Information Leakage Score Interpretation.
+
+
+    Compiler note: BILS = leak_score boosted by 1.5x when Potential Insider Trading Flag condition holds
+    (leak_score>50, evt_near not null, announce_time in pre-market/intraday), else unchanged.'
+  sql_expression: leak_score * (CASE WHEN leak_score > 50.0 AND evt_near IS NOT NULL AND announce_time
+    IN ('Pre-market hrs before', 'Intraday hrs before') THEN 1.5 ELSE 1.0 END)
+  source_model: main.corporate_events
+  domains:
+  - calculations
+- name: market_adjusted_pattern_anomaly_mapa
+  description: 'Calculates pattern anomaly score adjusted for market correlation, highlighting non-market
+    related deviations.
+
+
+    MAPA = ''Pattern Anomaly Score'' \times (1 - \text{Market Correlation})
+
+
+    Built on: pattern_anomaly_score_pas.
+
+
+    Compiler note: MAPA = PAS * (1 - Market Correlation). PAS reused from its own entry (pat_rec from
+    reg_compliance joined 1:1 on REC_PIN/REC_COMP, minus peer_corr from market_metrics JSON). Market correlation
+    is market_conditions.mkt_corr.'
+  sql_expression: ABS((SELECT r.pat_rec FROM reg_compliance r WHERE r."REC_COMP" = market_conditions."REC_PIN")
+    - (market_metrics->>'peer_corr')::double) * (1 - mkt_corr)
+  source_model: main.market_conditions
+  domains:
+  - calculations
+- name: high_frequency_high_risk_trader
+  description: 'Identifies traders classified as High-Risk who also operate at high frequency.
+
+
+    A trader matching the ''High-Risk Trader Profile'' AND whose trading frequency scope is ''High''.
+
+
+    Built on: high_risk_trader_profile.
+
+
+    Compiler note: Combines High-Risk Trader Profile definition with freq_tag=''High'' (trading frequency
+    scope) on trade_records.'
+  sql_expression: (((trade_perf->>'lev_ratio')::double precision > 5.0 AND (SELECT t.trader_fin_data->>'risk_lvl'
+    FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor) = 'Aggressive') OR (vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT
+    t.trader_fin_data->>'usd_bal' FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor), '$', ''),
+    ',', ''), ' ', '') AS DOUBLE), 0)) > 0.5) AND freq_tag = 'High'
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: suspected_event_driven_insider
+  description: 'Flags traders identified as event-driven who also trigger potential insider trading alerts.
+
+
+    A trader who meets the criteria for ''Event-Driven Trader'' AND for whom the ''Potential Insider Trading
+    Flag'' is True.
+
+
+    Built on: potential_insider_trading_flag, event_driven_trader.
+
+
+    Compiler note: Event-Driven Trader: fraction of a trader''s trade_records linked (via REC_KEY=REC_EVT)
+    to a corporate event (evt_near IS NOT NULL) exceeds 0.3. Potential Insider Trading Flag applied per
+    transaction (corporate_events row) with leak_score>50 and evt_near present and announce_time in the
+    two pre-announcement categories. Combined entry: trader must be Event-Driven AND have at least one
+    transaction triggering the insider flag (EXISTS), since the flag is defined per-transaction but the
+    overall entry is evaluated at trader level.'
+  sql_expression: "(\n  (SELECT CAST(COUNT(*) FILTER (WHERE ce.evt_near IS NOT NULL) AS DOUBLE) / COUNT(*)\n\
+    \   FROM trade_records tr LEFT JOIN corporate_events ce ON tr.\"REC_KEY\" = ce.\"REC_EVT\"\n   WHERE\
+    \ tr.tr_anchor = traders.\"TR_KEY\") > 0.3\n)\nAND EXISTS (\n  SELECT 1 FROM trade_records tr2\n \
+    \ JOIN corporate_events ce2 ON tr2.\"REC_KEY\" = ce2.\"REC_EVT\"\n  WHERE tr2.tr_anchor = traders.\"\
+    TR_KEY\"\n    AND ce2.leak_score > 50.0\n    AND ce2.evt_near IS NOT NULL\n    AND ce2.announce_time\
+    \ IN ('Pre-market hrs before', 'Intraday hrs before')\n)"
+  source_model: main.traders
+  domains:
+  - definitions
+- name: confirmed_manipulator_under_scrutiny
+  description: 'Identifies traders with confirmed manipulative patterns whose cases are under high scrutiny.
+
+
+    A trader exhibiting a confirmed ''Market Manipulation Pattern: Layering/Spoofing'' AND whose case
+    status is ''Elevated Regulatory Scrutiny''.
+
+
+    Built on: market_manipulation_pattern_layering_spoofing, elevated_regulatory_scrutiny.
+
+
+    Compiler note: Combines Market Manipulation Pattern: Layering/Spoofing (manipulation_signals, joined
+    via order_behaviour for OMI) and Elevated Regulatory Scrutiny (reg_compliance), both keyed to market_conditions.REC_PIN
+    via REC_TAG/REC_COMP (1:1 joins verified).'
+  sql_expression: "EXISTS (\n  SELECT 1 FROM manipulation_signals ms\n  WHERE ms.\"REC_TAG\" = market_conditions.\"\
+    REC_PIN\"\n    AND (\n      ms.layer_idx = 'Confirmed'\n      OR (\n        REPLACE(ms.manip_signals->>'spoof_prob',\
+    \ '%', '')::double precision / 100 > 0.75\n        AND (\n          SELECT CASE WHEN (ob.order_metrics->>'cancel_pct')::double\
+    \ precision = 1 THEN NULL\n                      ELSE (ob.order_metrics->>'mod_freq')::double precision\
+    \ / (1 - (ob.order_metrics->>'cancel_pct')::double precision) END\n          FROM order_behaviour\
+    \ ob WHERE ob.\"REC_NODE\" = ms.\"REC_TAG\"\n        ) > 1.0\n      )\n    )\n)\nAND EXISTS (\n  SELECT\
+    \ 1 FROM reg_compliance rc\n  WHERE rc.\"REC_COMP\" = market_conditions.\"REC_PIN\"\n    AND rc.alert_lvl\
+    \ IN ('High','Critical')\n    AND rc.invest_prior = 'High'\n    AND rc.mon_inten = 'Intensive'\n)"
+  source_model: main.market_conditions
+  domains:
+  - definitions
+- name: high_risk_collusion_group_member
+  description: 'Identifies traders within a suspected collusion network who individually exhibit high-risk
+    behavior.
+
+
+    A trader flagged by the ''Collusion Network Indicator'' AND who also meets the ''High-Risk Trader
+    Profile'' criteria.
+
+
+    Built on: high_risk_trader_profile, collusion_network_indicator.
+
+
+    Compiler note: Combines collusion_network_indicator (circ_size>5, grp_score>60 on its native 0-100
+    scale, commPath=''Regular'') over trader_relationships with high_risk_trader_profile checked via EXISTS
+    over trade_records joined by tr_anchor=rel_root, since a trader may have multiple trade records and
+    the profile is met if any one qualifies.'
+  sql_expression: "circ_size > 5 AND (trader_links->>'grp_score')::float > 60 AND \"commPath\" = 'Regular'\
+    \ AND EXISTS (\n  SELECT 1 FROM trade_records tr\n  WHERE tr.tr_anchor = trader_relationships.rel_root\n\
+    \    AND (\n      ((tr.trade_perf->>'lev_ratio')::double precision > 5.0\n        AND (SELECT t.trader_fin_data->>'risk_lvl'\
+    \ FROM traders t WHERE t.TR_KEY = tr.tr_anchor) = 'Aggressive')\n      OR\n      (tr.vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT\
+    \ t.trader_fin_data->>'usd_bal' FROM traders t WHERE t.TR_KEY = tr.tr_anchor), '$', ''), ',', ''),\
+    \ ' ', '') AS DOUBLE), 0)) > 0.5\n    )\n)"
+  source_model: main.trader_relationships
+  domains:
+  - definitions
+- name: chronic_compliance_violator
+  description: 'Identifies traders with a problematic history and a high recidivism score.
+
+
+    A trader identified as having a ''Problematic Compliance History'' AND whose ''Compliance Recidivism
+    Score'' is greater than 1.5.
+
+
+    Built on: compliance_recidivism_score_crs, problematic_compliance_history.
+
+
+    Compiler note: Combines Problematic Compliance History (prev_viol>3 OR comp_rate in C/D OR CRS>1.0)
+    with CRS>1.5. CRS uses age_days from traders joined via trade_records.tr_anchor; verified REC_COMP
+    maps to a unique trade_records row.'
+  sql_expression: "(\n  (compliance_data->>'prev_viol')::numeric > 3\n  OR (compliance_data->>'comp_rate')\
+    \ IN ('C','D')\n  OR (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))\
+    \ > 1.0\n)\nAND\n(\n  (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))\
+    \ > 1.5\n)"
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: high_volume_wash_trading_concern
+  description: 'Flags traders with wash trading alerts who also trade significant volume.
+
+
+    A trader triggering a ''Wash Trading Alert'' AND whose daily trading volume exceeds 1,000,000.
+
+
+    Built on: wash_trading_alert.
+
+
+    Compiler note: Wash Trading Alert defined on manipulation_signals.manip_signals->>''wash_flag''=''High'';
+    joined to trade_records via REC_KEY=REC_TAG (1:1 match verified). vol_day is the daily trading volume
+    for the row, used as ''daily trading volume''.'
+  sql_expression: vol_day > 1000000 AND EXISTS (SELECT 1 FROM manipulation_signals m WHERE m."REC_TAG"
+    = trade_records."REC_KEY" AND (m.manip_signals->>'wash_flag') = 'High')
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: aggressive_event_speculator
+  description: 'Classifies event-driven traders who employ an aggressive risk strategy.
+
+
+    A trader classified as an ''Event-Driven Trader'' AND whose risk appetite is ''Aggressive''.
+
+
+    Built on: event_driven_trader, Order Type Distribution.
+
+
+    Compiler note: Event-Driven Trader defined as >30% of trader''s trade_records linked to a corporate
+    event; risk appetite taken from trader_fin_data->>''risk_lvl'' = ''Aggressive''.'
+  sql_expression: (SELECT CAST(COUNT(*) FILTER (WHERE ce.evt_near IS NOT NULL) AS DOUBLE) / COUNT(*) FROM
+    trade_records tr LEFT JOIN corporate_events ce ON tr."REC_KEY" = ce."REC_EVT" WHERE tr.tr_anchor =
+    traders."TR_KEY") > 0.3 AND (trader_fin_data->>'risk_lvl') = 'Aggressive'
+  source_model: main.traders
+  domains:
+  - definitions
+- name: potentially_evasive_order_modifier
+  description: 'Flags high cancellation/modification traders who make significant use of dark pools.
+
+
+    A trader identified as a ''High Cancellation/Modification Trader'' AND whose transactions show ''Dark
+    Pool Usage'' in more than 50% of instances.
+
+
+    Built on: high_cancellation_modification_trader, Dark Pool Usage Venues.
+
+
+    Compiler note: High Cancellation/Modification Trader condition reused as given. Dark Pool Usage "instances"
+    interpreted as transactions where dark_use > 0 (non-null, positive proportion routed to dark pools);
+    fraction of such instances across trader''s transactions > 0.5.'
+  sql_expression: "(\n  (\n    SELECT AVG((ob.order_metrics->>'cancel_pct')::double precision)\n    FROM\
+    \ trade_records tr\n    JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n    WHERE tr.tr_anchor\
+    \ = traders.\"TR_KEY\"\n  ) > 0.5\n  OR\n  (\n    SELECT AVG(\n      CASE WHEN (ob.order_metrics->>'cancel_pct')::double\
+    \ precision = 1 THEN NULL\n           ELSE (ob.order_metrics->>'mod_freq')::double precision / (1\
+    \ - (ob.order_metrics->>'cancel_pct')::double precision)\n      END\n    )\n    FROM trade_records\
+    \ tr\n    JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n    WHERE tr.tr_anchor = traders.\"\
+    TR_KEY\"\n  ) > 1.5\n)\nAND\n(\n  SELECT AVG(CASE WHEN ob.dark_use > 0 THEN 1.0 ELSE 0.0 END)\n  FROM\
+    \ trade_records tr\n  JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n  WHERE tr.tr_anchor\
+    \ = traders.\"TR_KEY\"\n) > 0.5"
+  source_model: main.traders
+  domains:
+  - definitions
+- name: financially_impactful_enforcement_case
+  description: 'Identifies traders who faced significant enforcement actions with a high financial impact
+    relative to their account size.
+
+
+    A trader subject to a ''Significant Enforcement Action'' AND whose ''Enforcement Financial Impact
+    Ratio (EFIR)'' is greater than 0.1.
+
+
+    Built on: enforcement_financial_impact_ratio_efir, significant_enforcement_action.
+
+
+    Compiler note: Combines Significant Enforcement Action predicate with EFIR>0.1, computed via scalar
+    subquery joining trade_records->traders to get account balance (unique match verified). pen_amt/usd_bal
+    parsed by stripping $ and commas.'
+  sql_expression: "( (enf_actions->>'pen_flag') IN ('Fine','Ban') OR act_taken = 'Suspension' OR biz_restrict\
+    \ = 'Full' )\nAND (\n  (enf_actions->>'pen_amt')::double\n  / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT\
+    \ t.trader_fin_data->>'usd_bal' FROM trade_records tr JOIN traders t ON t.\"TR_KEY\" = tr.tr_anchor\
+    \ WHERE tr.\"REC_KEY\" = enforcement_actions.\"REC_ENF\"), '$', ''), ',', ''), ' ', '') AS DOUBLE),\
+    \ 0)\n) > 0.1"
+  source_model: main.enforcement_actions
+  domains:
+  - definitions
+- name: peer_mimicry_suspicion
+  description: 'Flags traders whose behavior closely matches peers but deviates little from known patterns,
+    potentially mimicking a risky group.
+
+
+    A trader with a low ''Pattern Anomaly Score'' (e.g., < 0.1) BUT a high peer correlation score (e.g.,
+    > 0.7).
+
+
+    Built on: pattern_anomaly_score_pas.
+
+
+    Compiler note: Uses PAS = |pat_rec - peer_corr| (scalar subquery to reg_compliance, verified 1:1 join
+    on REC_PIN/REC_COMP). Flags PAS<0.1 AND peer_corr>0.7, per thresholds given in definition.'
+  sql_expression: ABS((SELECT r.pat_rec FROM reg_compliance r WHERE r."REC_COMP" = market_conditions."REC_PIN")
+    - (market_metrics->>'peer_corr')::double) < 0.1 AND (market_metrics->>'peer_corr')::double > 0.7
+  source_model: main.market_conditions
+  domains:
+  - definitions
+- name: investigation_compliance_risk_index_icri
+  description: 'Combines the weighted investigation score with the inverse compliance health score, highlighting
+    cases that are both problematic and under intense investigation.
+
+
+    ICRI = ''Weighted Investigation Score'' \times (1 - ''Compliance Health Score'')
+
+
+    Built on: compliance_health_score_chs, weighted_investigation_score_wis.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: ICRI depends on Compliance Health Score (CHS), which cannot be computed because its formula
+    requires "a numeric value mapped from the Compliance Rating Grade" (A/B/C/D), and neither the documentation
+    nor the database defines this mapping. Since CHS cannot be encoded as a deterministic SQL expression,
+    ICRI = WIS * (1 - CHS) cannot be encoded either.
+- name: sentiment_driven_leakage_risk_sdlr
+  description: 'Calculates potential information leakage risk weighted by sentiment-driven unusual option
+    volume.
+
+
+    SDLR = ''Sentiment-Weighted Option Volume'' \times \text{Information Leakage Score}.
+
+
+    Built on: Information Leakage Score Interpretation, sentiment_weighted_option_volume_swov.
+
+
+    Compiler note: SDLR = SWOV * Information Leakage Score. SWOV computed from opt_vol and sentiment_data
+    news_score/soc_sent. leak_score pulled from corporate_events via REC_EVT=REC_SA, a 1:1 join since
+    both are PKs referencing the same market_conditions.REC_PIN.'
+  sql_expression: opt_vol * (1 + ABS((sentiment_data->>'news_score')::double precision - (sentiment_data->>'soc_sent')::double
+    precision)) * (SELECT ce.leak_score FROM corporate_events ce WHERE ce."REC_EVT" = sentiment_analytics."REC_SA")
+  source_model: main.sentiment_analytics
+  domains:
+  - calculations
+- name: unique_pattern_deviation_ratio_updr
+  description: 'Measures the ratio of unique pattern deviation (anomaly) to the similarity with known
+    illicit patterns, indicating how unusual the potentially illicit behavior is.
+
+
+    UPDR = \frac{\text{''Pattern Anomaly Score''}}{\text{Max}(0.01, \text{''Pattern Similarity Score''})}
+
+
+    Built on: pattern_anomaly_score_pas, Pattern Similarity Score Context.
+
+
+    Compiler note: UPDR = PAS / max(0.01, Pattern Similarity Score). Reused PAS definition (pat_rec from
+    reg_compliance vs peer_corr from market_metrics JSON) as given; pat_rec serves as ''Pattern Similarity
+    Score'' per the PAS entry''s mapping, joined 1:1 via REC_COMP=REC_PIN.'
+  sql_expression: ABS((SELECT r.pat_rec FROM reg_compliance r WHERE r."REC_COMP" = market_conditions."REC_PIN")
+    - (market_metrics->>'peer_corr')::double) / GREATEST(0.01, (SELECT r.pat_rec FROM reg_compliance r
+    WHERE r."REC_COMP" = market_conditions."REC_PIN"))
+  source_model: main.market_conditions
+  domains:
+  - calculations
+- name: recidivism_enforcement_severity_res
+  description: 'Multiplies the compliance recidivism score by the enforcement financial impact, highlighting
+    costly repeat offenders.
+
+
+    RES = ''Compliance Recidivism Score'' \times ''Enforcement Financial Impact Ratio''
+
+
+    Built on: compliance_recidivism_score_crs, enforcement_financial_impact_ratio_efir.
+
+
+    Compiler note: RES = CRS * EFIR. Joined reg_compliance.REC_COMP to enforcement_actions.REC_ENF and
+    trade_records.REC_KEY (verified these keys align 1:1 across the three tables, matching the same market_conditions
+    REC_PIN identifier). CRS computed as prev_viol/GREATEST(1, age_days/365) via trade_records->traders
+    join; EFIR computed as pen_amt / cleaned usd_bal (stripped $, commas, spaces) via same join, NULLIF
+    0 to avoid division by zero.'
+  sql_expression: "( (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.\"TR_KEY\" = tr.tr_anchor WHERE tr.\"REC_KEY\" =\
+    \ reg_compliance.\"REC_COMP\")) )\n*\n( (SELECT (ea.enf_actions->>'pen_amt')::double / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT\
+    \ t.trader_fin_data->>'usd_bal' FROM trade_records tr JOIN traders t ON t.\"TR_KEY\" = tr.tr_anchor\
+    \ WHERE tr.\"REC_KEY\" = ea.\"REC_ENF\"), '$', ''), ',', ''), ' ', '') AS DOUBLE), 0)\n   FROM enforcement_actions\
+    \ ea WHERE ea.\"REC_ENF\" = reg_compliance.\"REC_COMP\") )"
+  source_model: main.reg_compliance
+  domains:
+  - calculations
+- name: aggressive_suspicion_score_ass
+  description: 'Combines overall suspicious activity index with aggressive trading intensity, identifying
+    traders who are both suspicious and trade aggressively.
+
+
+    ASS = ''Suspicious Activity Index'' \times ''Aggressive Trading Intensity''
+
+
+    Built on: suspicious_activity_index_sai, aggressive_trading_intensity_ati.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: ASS requires the Suspicious Activity Index (SAI), which is only vaguely defined as "a
+    weighted sum of normalized risk indicators" without specific weights, normalization method, or encoding
+    of categorical values. Since SAI has no deterministic formula, ASS = SAI × ATI cannot be computed
+    either.
+- name: capital_adjusted_investigation_intensity_caii
+  description: 'Normalizes the investigation intensity index by the trader''s account balance, showing
+    investigation focus relative to trader size.
+
+
+    CAII = \frac{\text{''Investigation Intensity Index''}}{\text{Max}(1000, \text{Account Balance})}
+
+
+    Built on: investigation_intensity_index_iii.
+
+
+    Compiler note: Joined reg_compliance.REC_COMP -> trade_records.REC_KEY -> traders.TR_KEY to get account
+    balance; usd_bal stored as ''$#,###'' text, stripped $ and commas and cast to double. III computed
+    inline as 0.6*behav_score+0.4*net_score. Denominator floored at 1000 per formula.'
+  sql_expression: ((0.6 * behav_score) + (0.4 * net_score)) / GREATEST(1000, (SELECT CAST(REPLACE(REPLACE(TRIM(t.trader_fin_data->>'usd_bal'),
+    '$', ''), ',', '') AS DOUBLE) FROM trade_records tr JOIN traders t ON t."TR_KEY" = tr.tr_anchor WHERE
+    tr."REC_KEY" = reg_compliance."REC_COMP"))
+  source_model: main.reg_compliance
+  domains:
+  - calculations
+- name: market_agnostic_suspicion_index_masi
+  description: 'Combines the general suspicion index with market-adjusted pattern anomaly, focusing on
+    suspicious activity independent of market moves.
+
+
+    MASI = (''Suspicious Activity Index'' + ''Market-Adjusted Pattern Anomaly'') / 2
+
+
+    Built on: suspicious_activity_index_sai, market_adjusted_pattern_anomaly_mapa.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: MASI depends on Suspicious Activity Index (SAI), which cannot be encoded (SAI has no deterministic
+    formula - it's described only as "a weighted sum of normalized risk indicators" without specified
+    weights or normalization method). Since MASI is defined as the average of SAI and MAPA, and SAI cannot
+    be computed, MASI cannot be computed either.
+- name: cross_modification_ratio_cmr
+  description: 'Calculates the ratio of cross-trade frequency to order modification intensity, potentially
+    indicating coordinated or manipulative crossing activity.
+
+
+    CMR = \frac{\text{Cross-Trade Frequency}}{\text{Max}(0.01, \text{''Order Modification Intensity''})}
+
+
+    Built on: order_modification_intensity_omi.
+
+
+    Compiler note: Cross-Trade Frequency mapped to order_behaviour.x_freq (execution/crossing frequency).
+    Order Modification Intensity (OMI) computed inline per its definition (NULL if cancel_pct=1), then
+    denominator floored at 0.01 via GREATEST.'
+  sql_expression: x_freq / GREATEST(0.01, CASE WHEN (order_metrics->>'cancel_pct')::double precision =
+    1 THEN NULL ELSE (order_metrics->>'mod_freq')::double precision / (1 - (order_metrics->>'cancel_pct')::double
+    precision) END)
+  source_model: main.order_behaviour
+  domains:
+  - calculations
+- name: insider_sentiment_short_ratio_issr
+  description: 'Combines boosted insider leakage score with relative short interest, identifying potential
+    insider trading concurrent with high relative short interest.
+
+
+    ISSR = ''Boosted Insider Leakage Score'' \times ''Relative Short Interest''
+
+
+    Built on: relative_short_interest_rsi, boosted_insider_leakage_score_bils.
+
+
+    Compiler note: ISSR = BILS * RSI. BILS computed from corporate_events (leak_score boosted 1.5x if
+    leak_score>50 and evt_near is not null and announce_time in pre-market/intraday), RSI computed from
+    sentiment_analytics (short_rt/inst_own, NULL if inst_own=0). Both corporate_events.REC_EVT and sentiment_analytics.REC_SA
+    are unique per market_conditions.REC_PIN, so joined via scalar subqueries from market_conditions.'
+  sql_expression: (SELECT ce.leak_score * (CASE WHEN ce.leak_score > 50.0 AND ce.evt_near IS NOT NULL
+    AND ce.announce_time IN ('Pre-market hrs before','Intraday hrs before') THEN 1.5 ELSE 1.0 END) FROM
+    corporate_events ce WHERE ce."REC_EVT" = market_conditions."REC_PIN") * (SELECT CASE WHEN sa.inst_own
+    = 0 THEN NULL ELSE sa.short_rt / sa.inst_own END FROM sentiment_analytics sa WHERE sa."REC_SA" = market_conditions."REC_PIN")
+  source_model: main.market_conditions
+  domains:
+  - calculations
+- name: risk_adjusted_win_rate_rawr
+  description: 'Calculates the trader''s historical win percentage adjusted for their leverage exposure.
+
+
+    RAWR = \frac{\text{Historical Win Percentage}}{\text{Max}(1, \text{''Trader Leverage Exposure''})}
+
+
+    Built on: trader_leverage_exposure_tle.
+
+
+    Compiler note: Win percentage taken from trade_perf->>''win_pct'' and leverage ratio from trade_perf->>''lev_ratio''
+    (TLE). Denominator floored at 1 using GREATEST. Result is NULL if either field is NULL.'
+  sql_expression: (trade_perf->>'win_pct')::double precision / GREATEST(1, (trade_perf->>'lev_ratio')::double
+    precision)
+  source_model: main.trade_records
+  domains:
+  - calculations
+- name: high_risk_manipulator_candidate
+  description: 'Identifies traders flagged for both high-risk profiles and specific market manipulation
+    patterns.
+
+
+    A trader who meets the ''High-Risk Trader Profile'' AND is flagged for ''Market Manipulation Pattern:
+    Layering/Spoofing''.
+
+
+    Built on: high_risk_trader_profile, market_manipulation_pattern_layering_spoofing.
+
+
+    Compiler note: Combines High-Risk Trader Profile (leverage>5 & Aggressive risk, or daily turnover>0.5)
+    computed per trade_records row with Market Manipulation Pattern: Layering/Spoofing (confirmed layering
+    or high spoof prob with OMI>1) joined via manipulation_signals.REC_TAG = trade_records.REC_KEY (1:1
+    relationship through market_conditions REC_PIN).'
+  sql_expression: "(\n  (\n    (trade_perf->>'lev_ratio')::double precision > 5.0\n    AND (SELECT t.trader_fin_data->>'risk_lvl'\
+    \ FROM traders t WHERE t.TR_KEY = trade_records.tr_anchor) = 'Aggressive'\n  )\n  OR (\n    vol_day\
+    \ / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal' FROM traders t WHERE\
+    \ t.TR_KEY = trade_records.tr_anchor), '$', ''), ',', ''), ' ', '') AS DOUBLE), 0)\n  ) > 0.5\n)\n\
+    AND\n(\n  SELECT ms.layer_idx = 'Confirmed'\n    OR (\n      REPLACE(ms.manip_signals->>'spoof_prob',\
+    \ '%', '')::double precision / 100 > 0.75\n      AND (\n        SELECT CASE WHEN (ob.order_metrics->>'cancel_pct')::double\
+    \ precision = 1 THEN NULL\n                    ELSE (ob.order_metrics->>'mod_freq')::double precision\
+    \ / (1 - (ob.order_metrics->>'cancel_pct')::double precision) END\n        FROM order_behaviour ob\
+    \ WHERE ob.\"REC_NODE\" = ms.\"REC_TAG\"\n      ) > 1.0\n    )\n  FROM manipulation_signals ms WHERE\
+    \ ms.\"REC_TAG\" = trade_records.\"REC_KEY\"\n)"
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: escalated_compliance_failure
+  description: 'Identifies traders with a problematic compliance history who have now incurred significant
+    enforcement actions.
+
+
+    A trader identified with ''Problematic Compliance History'' AND subject to a ''Significant Enforcement
+    Action''.
+
+
+    Built on: problematic_compliance_history, significant_enforcement_action.
+
+
+    Compiler note: Combines Problematic Compliance History (prev_viol>3 OR comp_rate in C/D OR recidivism
+    score>1.0, recidivism using trader age via trade_records join) with Significant Enforcement Action
+    (pen_flag in Fine/Ban, or act_taken=Suspension, or biz_restrict=Full) via 1:1 match between reg_compliance.REC_COMP
+    and enforcement_actions.REC_ENF (both referencing same market_conditions record, verified unique).'
+  sql_expression: "(\n  (compliance_data->>'prev_viol')::numeric > 3\n  OR (compliance_data->>'comp_rate')\
+    \ IN ('C','D')\n  OR (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.\"\
+    REC_COMP\")) > 1.0\n)\nAND\n(\n  SELECT (e.enf_actions->>'pen_flag') IN ('Fine','Ban') OR e.act_taken\
+    \ = 'Suspension' OR e.biz_restrict = 'Full'\n  FROM enforcement_actions e WHERE e.\"REC_ENF\" = reg_compliance.\"\
+    REC_COMP\"\n)"
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: networked_mimicry_risk
+  description: 'Flags traders suspected of peer mimicry who are also part of an identified potential collusion
+    network.
+
+
+    A trader flagged for ''Peer Mimicry Suspicion'' AND associated with a ''Collusion Network Indicator''.
+
+
+    Built on: collusion_network_indicator, peer_mimicry_suspicion.
+
+
+    Compiler note: Combines collusion_network_indicator (trader_relationships, joined via tr_anchor=rel_root)
+    and peer_mimicry_suspicion (market_conditions, joined via REC_KEY=REC_PIN, with pat_rec pulled from
+    reg_compliance via REC_COMP=REC_PIN). Both joins verified unique/total over trade_records.'
+  sql_expression: (SELECT tr.circ_size > 5 AND (tr.trader_links->>'grp_score')::double > 60 AND tr."commPath"
+    = 'Regular' FROM trader_relationships tr WHERE tr.rel_root = trade_records.tr_anchor) AND (SELECT
+    ABS((SELECT r.pat_rec FROM reg_compliance r WHERE r."REC_COMP" = mc."REC_PIN") - (mc.market_metrics->>'peer_corr')::double)
+    < 0.1 AND (mc.market_metrics->>'peer_corr')::double > 0.7 FROM market_conditions mc WHERE mc."REC_PIN"
+    = trade_records."REC_KEY")
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: high_scrutiny_wash_trading_case
+  description: 'Identifies compliance cases involving high-volume wash trading concerns that are also
+    under elevated regulatory scrutiny.
+
+
+    A compliance case flagged for ''Elevated Regulatory Scrutiny'' AND linked to a ''High-Volume Wash
+    Trading Concern''.
+
+
+    Built on: elevated_regulatory_scrutiny, high_volume_wash_trading_concern.
+
+
+    Compiler note: Elevated Regulatory Scrutiny defined directly on reg_compliance columns. High-Volume
+    Wash Trading Concern defined on trade_records joined via REC_KEY = reg_compliance.REC_COMP (same transaction-key
+    space, confirmed by join test), requiring vol_day > 1,000,000 and a linked manipulation_signals row
+    with wash_flag = ''High''.'
+  sql_expression: "(alert_lvl IN ('High','Critical') AND invest_prior = 'High' AND mon_inten = 'Intensive')\n\
+    AND EXISTS (\n  SELECT 1 FROM trade_records t\n  WHERE t.\"REC_KEY\" = reg_compliance.\"REC_COMP\"\
+    \n    AND t.vol_day > 1000000\n    AND EXISTS (\n      SELECT 1 FROM manipulation_signals m\n    \
+    \  WHERE m.\"REC_TAG\" = t.\"REC_KEY\"\n        AND (m.manip_signals->>'wash_flag') = 'High'\n   \
+    \ )\n)"
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: volatile_event_speculator
+  description: 'Flags aggressive event speculators whose trading coincides with high sentiment divergence,
+    indicating potential reaction to conflicting information.
+
+
+    A trader identified as an ''Aggressive Event Speculator'' AND associated with a high ''Sentiment Divergence
+    Factor'' (e.g., > 1.0).
+
+
+    Built on: sentiment_divergence_factor_sdf, aggressive_event_speculator.
+
+
+    Compiler note: Combines aggressive_event_speculator (trader-level: >30% of trader''s trade records
+    linked to a corporate event AND risk_lvl=''Aggressive'') with sentiment_divergence_factor_sdf (per
+    trade record, via sentiment_analytics joined on REC_SA = trade_records.REC_KEY, since REC_PIN/REC_SA
+    key space matches REC_KEY) exceeding 1.0. Evaluated per trade_records row.'
+  sql_expression: '(SELECT CAST(COUNT(*) FILTER (WHERE ce.evt_near IS NOT NULL) AS DOUBLE) / COUNT(*)
+    FROM trade_records tr2 LEFT JOIN corporate_events ce ON tr2."REC_KEY" = ce."REC_EVT" WHERE tr2.tr_anchor
+    = trade_records.tr_anchor) > 0.3
+
+    AND (SELECT (t.trader_fin_data->>''risk_lvl'') FROM traders t WHERE t."TR_KEY" = trade_records.tr_anchor)
+    = ''Aggressive''
+
+    AND (SELECT ABS((sa.sentiment_data->>''news_score'')::double precision - (sa.sentiment_data->>''soc_sent'')::double
+    precision) FROM sentiment_analytics sa WHERE sa."REC_SA" = trade_records."REC_KEY") > 1.0'
+  source_model: main.trade_records
+  domains:
+  - definitions
+- name: confirmed_evasive_layering_spoofing
+  description: 'Identifies traders confirmed to be layering or spoofing who also exhibit high cancellation/modification
+    behavior, suggesting deliberate evasion.
+
+
+    A trader flagged as a ''High Cancellation/Modification Trader'' AND confirmed via ''Market Manipulation
+    Pattern: Layering/Spoofing'' where the layering indicator is ''Confirmed'' or the spoofing probability
+    is > 0.75.
+
+
+    Built on: market_manipulation_pattern_layering_spoofing, high_cancellation_modification_trader.
+
+
+    Compiler note: Combines trader-level High Cancellation/Modification Trader condition (over traders
+    via trade_records/order_behaviour) with an EXISTS check that at least one of the trader''s trade records
+    has a manipulation_signals row satisfying the Layering/Spoofing pattern (layer_idx=''Confirmed'' OR
+    spoof_prob>75% AND OMI>1.0, computed via order_behaviour on the same REC_KEY). order_behaviour.REC_NODE
+    and manipulation_signals.REC_TAG are both unique per trade record (PK), so subqueries match uniquely.'
+  sql_expression: "(\n  (\n    SELECT AVG((ob.order_metrics->>'cancel_pct')::double precision)\n    FROM\
+    \ trade_records tr\n    JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n    WHERE tr.tr_anchor\
+    \ = traders.\"TR_KEY\"\n  ) > 0.5\n  OR\n  (\n    SELECT AVG(\n      CASE WHEN (ob.order_metrics->>'cancel_pct')::double\
+    \ precision = 1 THEN NULL\n           ELSE (ob.order_metrics->>'mod_freq')::double precision / (1\
+    \ - (ob.order_metrics->>'cancel_pct')::double precision)\n      END\n    )\n    FROM trade_records\
+    \ tr\n    JOIN order_behaviour ob ON tr.\"REC_KEY\" = ob.\"REC_NODE\"\n    WHERE tr.tr_anchor = traders.\"\
+    TR_KEY\"\n  ) > 1.5\n)\nAND EXISTS (\n  SELECT 1\n  FROM trade_records tr\n  JOIN manipulation_signals\
+    \ ms ON tr.\"REC_KEY\" = ms.\"REC_TAG\"\n  WHERE tr.tr_anchor = traders.\"TR_KEY\"\n  AND (\n    ms.layer_idx\
+    \ = 'Confirmed'\n    OR (\n      REPLACE(ms.manip_signals->>'spoof_prob', '%', '')::double precision\
+    \ / 100 > 0.75\n      AND (\n        SELECT CASE WHEN (ob2.order_metrics->>'cancel_pct')::double precision\
+    \ = 1 THEN NULL\n                    ELSE (ob2.order_metrics->>'mod_freq')::double precision / (1\
+    \ - (ob2.order_metrics->>'cancel_pct')::double precision) END\n        FROM order_behaviour ob2 WHERE\
+    \ ob2.\"REC_NODE\" = ms.\"REC_TAG\"\n      ) > 1.0\n    )\n  )\n)"
+  source_model: main.traders
+  domains:
+  - definitions
+- name: high_velocity_suspicion_trader
+  description: 'Identifies traders exhibiting both high risk-adjusted turnover and a high suspicious activity
+    index.
+
+
+    A trader with a high ''Risk-Adjusted Turnover'' (e.g., > 1.0) AND a high ''Suspicious Activity Index''
+    (e.g., > 0.6).
+
+
+    Built on: suspicious_activity_index_sai, risk_adjusted_turnover_rat.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric requires the Suspicious Activity Index (SAI), which itself cannot be encoded:
+    SAI is only vaguely defined as "a weighted sum of normalized risk indicators" without specified weights,
+    normalization method, or encoding of categorical fields (wash_flag, layer_idx, etc.). Since SAI has
+    no deterministic formula, the "High Suspicious Activity Index > 0.6" condition cannot be computed,
+    so this composite condition cannot be encoded either.'
+- name: high_intensity_insider_investigation
+  description: 'Flags investigations triggered by potential insider trading that show high intensity scores,
+    suggesting significant findings.
+
+
+    An investigation linked to a ''Potential Insider Trading Flag'' AND having a high ''Investigation
+    Intensity Index'' (e.g., > 70).
+
+
+    Built on: investigation_intensity_index_iii, potential_insider_trading_flag.
+
+
+    Compiler note: Joins corporate_events (1:1 via REC_EVT=REC_PIN) for Potential Insider Trading Flag,
+    and reg_compliance (1:1 via REC_COMP=REC_PIN) for Investigation Intensity Index = 0.6*behav_score+0.4*net_score,
+    threshold >70.'
+  sql_expression: 'EXISTS (SELECT 1 FROM corporate_events ce WHERE ce."REC_EVT" = "REC_PIN" AND ce.leak_score
+    > 50.0 AND ce.evt_near IS NOT NULL AND ce.announce_time IN (''Pre-market hrs before'',''Intraday hrs
+    before''))
+
+    AND (SELECT (0.6*rc.behav_score)+(0.4*rc.net_score) FROM reg_compliance rc WHERE rc."REC_COMP" = "REC_PIN")
+    > 70'
+  source_model: main.market_conditions
+  domains:
+  - definitions
+- name: severe_chronic_violator_case
+  description: 'Identifies compliance cases under elevated scrutiny involving traders flagged as chronic
+    compliance violators.
+
+
+    A compliance case flagged for ''Elevated Regulatory Scrutiny'' AND involving a trader identified as
+    a ''Chronic Compliance Violator''.
+
+
+    Built on: elevated_regulatory_scrutiny, chronic_compliance_violator.
+
+
+    Compiler note: Combines Elevated Regulatory Scrutiny (alert_lvl High/Critical, invest_prior High,
+    mon_inten Intensive) with Chronic Compliance Violator (problematic history OR recidivism score >1.0,
+    AND recidivism score >1.5), where recidivism score = prev_viol / max(1, age_days/365) via unique join
+    reg_compliance.REC_COMP -> trade_records.REC_KEY -> traders.TR_KEY (verified unique).'
+  sql_expression: "(alert_lvl IN ('High','Critical') AND invest_prior = 'High' AND mon_inten = 'Intensive')\n\
+    AND\n(\n  (\n    (compliance_data->>'prev_viol')::numeric > 3\n    OR (compliance_data->>'comp_rate')\
+    \ IN ('C','D')\n    OR (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))\
+    \ > 1.0\n  )\n  AND\n  (\n    (compliance_data->>'prev_viol')::numeric / GREATEST(1, (SELECT (t.trader_fin_data->>'age_days')::numeric\
+    \ / 365 FROM trade_records tr JOIN traders t ON t.TR_KEY = tr.tr_anchor WHERE tr.REC_KEY = reg_compliance.REC_COMP))\
+    \ > 1.5\n  )\n)"
+  source_model: main.reg_compliance
+  domains:
+  - definitions
+- name: costly_high_frequency_risk_enforcement
+  description: 'Identifies enforcement cases with significant financial impact against traders previously
+    identified as high-frequency, high-risk.
+
+
+    An enforcement case identified as ''Financially Impactful'' targeting a trader previously flagged
+    as a ''High-Frequency High-Risk Trader''.
+
+
+    Built on: high_frequency_high_risk_trader, financially_impactful_enforcement_case.
+
+
+    Compiler note: Joined enforcement_actions to trade_records via REC_ENF = REC_KEY (1:1, verified unique
+    match count). Combined Financially Impactful Enforcement Case condition (pen_flag/act_taken/biz_restrict
+    plus EFIR>0.1 using usd_bal string parsed to double) with EXISTS clause reproducing High-Frequency
+    High-Risk Trader logic (TLE>5 & Aggressive risk, or DTR>0.5, both AND freq_tag=''High'') on the linked
+    trade_records row.'
+  sql_expression: "( (enf_actions->>'pen_flag') IN ('Fine','Ban') OR act_taken = 'Suspension' OR biz_restrict\
+    \ = 'Full' )\nAND (\n  (enf_actions->>'pen_amt')::double\n  / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT\
+    \ t.trader_fin_data->>'usd_bal' FROM trade_records tr JOIN traders t ON t.\"TR_KEY\" = tr.tr_anchor\
+    \ WHERE tr.\"REC_KEY\" = enforcement_actions.\"REC_ENF\"), '$', ''), ',', ''), ' ', '') AS DOUBLE),\
+    \ 0)\n) > 0.1\nAND EXISTS (\n  SELECT 1 FROM trade_records tr\n  WHERE tr.\"REC_KEY\" = enforcement_actions.\"\
+    REC_ENF\"\n    AND (\n      ( (tr.trade_perf->>'lev_ratio')::double precision > 5.0\n        AND (SELECT\
+    \ t.trader_fin_data->>'risk_lvl' FROM traders t WHERE t.\"TR_KEY\" = tr.tr_anchor) = 'Aggressive'\n\
+    \      )\n      OR\n      ( tr.vol_day / NULLIF(CAST(REPLACE(REPLACE(REPLACE((SELECT t.trader_fin_data->>'usd_bal'\
+    \ FROM traders t WHERE t.\"TR_KEY\" = tr.tr_anchor), '$', ''), ',', ''), ' ', '') AS DOUBLE), 0) >\
+    \ 0.5 )\n    )\n    AND tr.freq_tag = 'High'\n)"
+  source_model: main.enforcement_actions
+  domains:
+  - definitions
+- name: high_sdlr_transaction
+  description: 'Identifies transactions deemed high-risk based on their Sentiment-Driven Leakage Risk
+    score exceeding a specific threshold.
+
+
+    A transaction where the calculated ''Sentiment-Driven Leakage Risk'' > 1000.
+
+
+    Built on: sentiment_driven_leakage_risk_sdlr.
+
+
+    Compiler note: Encodes SDLR = opt_vol * (1 + |news_score - soc_sent|) * leak_score (joined via corporate_events
+    on REC_EVT=REC_SA, 1:1), flagged when SDLR > 1000.'
+  sql_expression: opt_vol * (1 + ABS((sentiment_data->>'news_score')::double precision - (sentiment_data->>'soc_sent')::double
+    precision)) * (SELECT ce.leak_score FROM corporate_events ce WHERE ce."REC_EVT" = sentiment_analytics."REC_SA")
+    > 1000
+  source_model: main.sentiment_analytics
+  domains:
+  - definitions
+- name: premature_resolution_block
+  description: 'A business rule preventing an enforcement action from being marked as ''Resolved'' if
+    associated risk metrics exceed a predefined threshold, ensuring high-risk cases receive sufficient
+    review.
+
+
+    Block an enforcement action from being marked ''Resolved'' if its linked ''Investigation Intensity
+    Index'' is greater than 75.
+
+
+    Built on: investigation_intensity_index_iii.
+
+
+    Compiler note: Blocks marking ''Resolved'' when linked reg_compliance''s III (0.6*behav_score+0.4*net_score)
+    > 75. Join REC_ENF=REC_COMP is 1:1 (both FK to market_conditions PK). res_state read from enf_actions
+    jsonb field.'
+  sql_expression: (enf_actions->>'res_state') = 'Resolved' AND (SELECT (0.6 * r.behav_score) + (0.4 *
+    r.net_score) FROM reg_compliance r WHERE r."REC_COMP" = enforcement_actions."REC_ENF") > 75
+  source_model: main.enforcement_actions
+  domains:
+  - definitions
+- name: peer_correlation_z_score
+  description: 'A normalized score indicating how many standard deviations an individual record''s peer
+    correlation is away from the average peer correlation of all traders within the same trader category.
+    Used for standardized comparison across different peer groups.
+
+
+    Z-Score = (Individual Peer Correlation - Average Peer Correlation for the Trader''s Category) / Standard
+    Deviation of Peer Correlation for the Trader''s Category. The score is 0 if the standard deviation
+    is zero or not applicable.
+
+
+    Compiler note: Trader''s category interpreted as traders.typeFlag, reached via trade_records.REC_KEY
+    = market_conditions.REC_PIN (1:1 join) then trade_records.tr_anchor = traders.TR_KEY. Peer correlation
+    taken from market_metrics->>''peer_corr'' (float). Average and population stddev computed as window
+    functions partitioned by typeFlag over all market_conditions rows. When stddev is 0 (NULLIF makes
+    division NULL) or peer_corr is NULL for the row, COALESCE forces the result to 0 per the spec''s "undefined
+    -> 0" rule.'
+  sql_expression: "COALESCE(\n  (CAST(market_metrics->>'peer_corr' AS DOUBLE) -\n    AVG(CAST(market_metrics->>'peer_corr'\
+    \ AS DOUBLE)) OVER (PARTITION BY (SELECT t.typeFlag FROM trade_records tr JOIN traders t ON t.TR_KEY\
+    \ = tr.tr_anchor WHERE tr.REC_KEY = REC_PIN))\n  ) /\n  NULLIF(STDDEV_POP(CAST(market_metrics->>'peer_corr'\
+    \ AS DOUBLE)) OVER (PARTITION BY (SELECT t.typeFlag FROM trade_records tr JOIN traders t ON t.TR_KEY\
+    \ = tr.tr_anchor WHERE tr.REC_KEY = REC_PIN)), 0),\n0)"
+  source_model: main.market_conditions
+  domains:
+  - calculations
+tables:
+- schema: main
+  table: corporate_events
+  columns:
+  - name: REC_EVT
+    type: VARCHAR
+    description: TEXT. Identifier linking corporate-event data to a market-condition set. PK. FK to market_conditions(REC_PIN).
+  - name: evt_near
+    type: VARCHAR
+    description: 'TEXT. Flag indicating proximity of an upcoming corporate event. **NULL means no upcoming
+      event recorded.**. Possible values: Earnings, M&A, Restructuring.'
+  - name: announce_time
+    type: VARCHAR
+    description: 'TEXT. Scheduled or actual announcement time of the event. Possible values: Intraday
+      hrs before, Post-market hrs before, Pre-market hrs before.'
+  - name: leak_score
+    type: FLOAT
+    description: 'REAL. Score estimating likelihood of information leakage before the event. Example:
+      34.04.
+
+
+      Information Leakage Score Interpretation: Provides context for the information leakage score, indicating
+      potential trading on non-public information.
+
+
+      A score from 0-100. Low scores (<20) suggest little evidence of informed trading. Moderate scores
+      (20-50) warrant attention. High scores (>50) strongly suggest trading based on non-public information
+      and require investigation.
+
+
+      Compiler note: Describes interpretation of leak_score (0-100 scale) in corporate_events, matching
+      example value 34.04 and column description.'
+  - name: info_leak_rate
+    type: VARCHAR
+    description: 'TEXT. The rate at which information leakage occurs before a corporate event''s announcement,
+      measured in score per hour. Example: 0.45 score/hour.'
+- schema: main
+  table: enforcement_actions
+  columns:
+  - name: REC_ENF
+    type: VARCHAR
+    description: TEXT. Identifier linking enforcement actions to a market-condition set. PK. FK to market_conditions(REC_PIN).
+  - name: abuse_prob
+    type: FLOAT
+    description: 'REAL. Probability that abusive activity occurred. **NULL means abuse probability not
+      calculated.**. Example: 0.177.'
+  - name: evid_pow
+    type: VARCHAR
+    description: 'TEXT. Evidentiary strength supporting enforcement action. Possible values: Moderate,
+      Strong, Weak.'
+  - name: doc_stat
+    type: VARCHAR
+    description: 'TEXT. Status of supporting documentation. Possible values: Complete, Incomplete, Partial.'
+  - name: act_taken
+    type: VARCHAR
+    description: 'TEXT. Enforcement action taken. **NULL means no action recorded.**. Possible values:
+      Restriction, Suspension, Warning.'
+  - name: esc_lvl
+    type: VARCHAR
+    description: 'TEXT. Escalation level applied to the case. **NULL means escalation level not set.**.
+      Possible values: Compliance, Legal, Supervisor.'
+  - name: legal_state
+    type: VARCHAR
+    description: 'TEXT. Current legal-proceeding state. **NULL means legal case state not recorded.**.
+      Possible values: Active, Pending.'
+  - name: settle_state
+    type: VARCHAR
+    description: 'TEXT. Settlement state of the enforcement action. **NULL means settlement state unknown.**.
+      Possible values: Negotiating, Settled.'
+  - name: rep_impact
+    type: VARCHAR
+    description: 'TEXT. Reputational impact assessment. Possible values: Minimal, Moderate, Severe.'
+  - name: biz_restrict
+    type: VARCHAR
+    description: 'TEXT. Business-restriction imposed (if any). **NULL means business restriction not documented.**.
+      Possible values: Full, Partial.'
+  - name: rem_status
+    type: VARCHAR
+    description: 'TEXT. Remediation-status update. Possible values: Completed, Not Required, Pending.'
+  - name: sys_need
+    type: VARCHAR
+    description: 'TEXT. Required system changes identified. Possible values: Major, Minor, No.'
+  - name: policy_need
+    type: VARCHAR
+    description: 'TEXT. Required policy changes identified. Possible values: No, Urgent, Yes.'
+  - name: train_req
+    type: VARCHAR
+    description: 'TEXT. Mandatory training requirement specified. **NULL means training requirement not
+      specified.**. Possible values: Comprehensive, Refresher.'
+  - name: report_state
+    type: VARCHAR
+    description: 'TEXT. Reporting-obligation state. Possible values: Automated, Hybrid, Manual.'
+  - name: retain_stat
+    type: VARCHAR
+    description: 'TEXT. Data-retention status. **NULL means retention status not indicated.**. Possible
+      values: Archived, Current, Deleted.'
+  - name: audit_stat
+    type: VARCHAR
+    description: 'TEXT. Audit-status indicator. Possible values: Complete, Missing, Partial.'
+  - name: conf_lvl
+    type: VARCHAR
+    description: 'TEXT. Confidence level in enforcement findings. **NULL means confidence level not assigned.**.
+      Possible values: Highly Sensitive, Normal, Sensitive.'
+  - name: access_res
+    type: VARCHAR
+    description: 'TEXT. Access-restriction outcome after enforcement. Possible values: Internal, Public,
+      R.'
+  - name: share_state
+    type: VARCHAR
+    description: 'TEXT. Data-sharing state following enforcement. Possible values: Allowed, Limited, Prohibited.'
+  - name: enf_actions
+    type: JSON
+    description: 'JSONB column. Enforcement actions including penalties and resolutions. Fields: {"pen_amt":
+      "REAL. Monetary amount of the penalty imposed. Example: 290459.21.", "res_state": "TEXT. Resolution
+      state of the enforcement case. Possible values: In Progress, Pending, Resolved.", "pen_flag": "TEXT.
+      Indicator that a penalty was imposed. **NULL means penalty flag not decided.**. Possible values:
+      Ban, Fine, Warning."}'
+- schema: main
+  table: instruments
+  columns:
+  - name: SYM_KEY
+    type: VARCHAR
+    description: 'TEXT. Unique symbol key identifying a financial instrument. PK. Possible values: AAPL,
+      AMZN, GOOGL, META, MSFT.'
+  - name: inst_info
+    type: JSON
+    description: 'JSONB column. Instrument data including cap and sector. Fields: {"cap": "REAL. Market-capitalisation
+      value of the instrument. **NULL means market-cap could not be determined or is not reported.**.
+      Example: 155167483887.68.", "sector": "TEXT. Sector classification (padded string for alignment).
+      Possible values: Consumer, Energy, Finance, Healthcare, Technology.", "stream": "TEXT. Industry-stream
+      or sub-sector classification. Possible values: Banking, Biotech, Oil & Gas, Retail, Software."}'
+- schema: main
+  table: manipulation_signals
+  columns:
+  - name: REC_TAG
+    type: VARCHAR
+    description: TEXT. Identifier linking manipulation-signal metrics to a market-condition set. PK. FK
+      to market_conditions(REC_PIN).
+  - name: layer_idx
+    type: VARCHAR
+    description: 'TEXT. Index measuring order-layering activity. **NULL means layering index not assigned.**.
+      Possible values: Confirmed, Suspected.'
+  - name: stuff_idx
+    type: FLOAT
+    description: 'REAL. Quote-stuffing index. Example: 0.409.'
+  - name: ignite_sig
+    type: VARCHAR
+    description: 'TEXT. Signal denoting rapid-ignite trading tactics. **NULL means ignition signal not
+      detected.**. Possible values: Strong, Weak.
+
+
+      Momentum Ignition Signals: Explains the signals related to attempting to artificially create price
+      momentum.
+
+
+      The momentum ignition signal indicates attempts to create false price movement. ''Strong'' suggests
+      clear patterns of manipulative intent; ''Weak'' suggests such patterns are less evident.
+
+
+      Compiler note: Describes the possible values (''Strong'',''Weak'') of manipulation_signals.ignite_sig,
+      the momentum ignition signal column.'
+  - name: close_mark
+    type: VARCHAR
+    description: 'TEXT. Indicator of closing-price manipulation. **NULL means close-price marker not set.**.
+      Possible values: Frequent, Occasional.
+
+
+      Marking the Close Patterns: Explains the patterns associated with influencing the closing price
+      of a security.
+
+
+      Marking the close refers to trading near market close to manipulate the closing price. ''Frequent''
+      indicates repeated activity; ''Occasional'' suggests it is infrequent. This is a prohibited practice.
+
+
+      Compiler note: Describes the possible values (''Frequent'',''Occasional'') of close_mark, which
+      flags marking-the-close activity.'
+  - name: manip_signals
+    type: JSON
+    description: 'JSONB column. Signals related to market manipulation like spoofing. Fields: {"spoof_prob":
+      "TEXT. Estimated probability of spoofing behaviour. Example: 0.88%.", "wash_flag": "TEXT. Flag indicating
+      suspected wash-trading. **NULL means wash-trade flag not determined.**. Possible values: High, Low,
+      Medium.", "front_run": "REAL. Score indicating likelihood of front-running. Example: 39.75."}'
+- schema: main
+  table: market_conditions
+  columns:
+  - name: REC_PIN
+    type: VARCHAR
+    description: TEXT. Primary key linking market-condition metrics to a trade record. PK.
+  - name: vol_ano
+    type: FLOAT
+    description: 'REAL. Volume-anomaly indicator. Example: 2.12.'
+  - name: mov_pct
+    type: FLOAT
+    description: 'REAL. Percentage price movement over the observation window. Example: 9.6.'
+  - name: spreadTag
+    type: FLOAT
+    description: 'REAL. Bid-ask-spread metric for the instrument. Example: 0.471.'
+  - name: impactVal
+    type: VARCHAR
+    description: 'TEXT. Estimated market-impact value. Example: 0.05%.'
+  - name: mkt_corr
+    type: FLOAT
+    description: 'REAL. Correlation with the broader market index. Example: -0.327.'
+  - name: rot_imp
+    type: FLOAT
+    description: 'REAL. Rotation-impact score on sector rotation. Example: -0.793.'
+  - name: ofi_density
+    type: VARCHAR
+    description: 'TEXT. The order flow impact density, measured in basis points per million USD of trade
+      volume. Example: 8.76 bps/million USD.'
+  - name: liq_imp
+    type: VARCHAR
+    description: 'TEXT. The liquidity impact rate, calculated as the USD value of trades per minute. Reflects
+      the instantaneous impact on market liquidity by trading volume. Example: 12,534.56 USD/min.'
+  - name: price_accel
+    type: VARCHAR
+    description: 'TEXT. Rate of change in the price volatility per hour squared. A higher value indicates
+      a more volatile price movement over time. Example: 2.32 %/(hour²).'
+  - name: market_metrics
+    type: JSON
+    description: 'JSONB column. Market conditions data including volatility and correlation. Fields: {"px_vol":
+      "REAL. Price-weighted volume metric. Example: 0.348.", "liq_ratio": "REAL. Liquidity ratio for the
+      instrument. **NULL means liquidity ratio could not be determined.**. Example: 0.58.", "peer_corr":
+      "REAL. Correlation with peer instruments. **NULL means peer correlation metric not computed.**.
+      Example: 0.525."}'
+- schema: main
+  table: order_behaviour
+  columns:
+  - name: REC_NODE
+    type: VARCHAR
+    description: TEXT. Identifier linking order-behaviour stats to a market-condition set. PK. FK to market_conditions(REC_PIN).
+  - name: OST_ref
+    type: VARCHAR
+    description: TEXT. Reference to the order-status type token. FK to order_status_types(STAT_TOKEN).
+  - name: dark_use
+    type: FLOAT
+    description: 'REAL. Proportion of volume routed to dark pools. **NULL means dark-pool usage data not
+      collected.**. Example: 0.009.
+
+
+      Dark Pool Usage Venues: Explains the nature of dark pool usage indicated in transaction records.
+
+
+      Dark pools are private exchanges (e.g., Alternative Trading Systems) used for large orders to reduce
+      market impact. Usage patterns can be analyzed for regulatory compliance or signs of avoiding market
+      transparency.
+
+
+      Compiler note: Entry explains the meaning/context of the dark_use column (proportion of volume routed
+      to dark pools), a general explanatory note rather than a computation; mapped to the column it describes.'
+  - name: off_mkt
+    type: FLOAT
+    description: 'REAL. Fraction of executions occurring off-exchange. Example: 0.197.
+
+
+      Off-Market Trading Activity: Illustrates types of trading activity occurring outside public exchanges.
+
+
+      Off-market activity describes trades not on lit exchanges. ''Internal crosses'' involve a broker
+      matching buy/sell orders from their own clients internally, which requires monitoring for fairness.
+
+
+      Compiler note: off_mkt is the fraction of executions occurring off-exchange, matching the described
+      off-market trading activity concept.'
+  - name: x_freq
+    type: FLOAT
+    description: 'REAL. Execution frequency (orders filled per unit time). Example: 0.069.'
+  - name: order_metrics
+    type: JSON
+    description: 'JSONB column. Order behaviour metrics including size and cancellation. Fields: {"size_var":
+      "REAL. Variance of order sizes placed. Example: 0.791.", "cancel_pct": "REAL. Percentage of orders
+      cancelled. **NULL means cancellation percentage not computed.**. Example: 0.129.", "mod_freq": "REAL.
+      Frequency at which orders are modified. Example: 0.46."}'
+- schema: main
+  table: order_status_types
+  columns:
+  - name: STAT_TOKEN
+    type: VARCHAR
+    description: TEXT. Unique token representing an order-status type. PK.
+  - name: order_status
+    type: JSON
+    description: 'JSONB column. Order status types with tracking and spread. Fields: {"tick_type": "TEXT.
+      Tick-tracking state that the status token maps to (NOT NULL). Possible values: Irregular, Regular,
+      Suspicious.", "spread_type": "TEXT. Spread-classification that the status token maps to (NOT NULL).
+      Possible values: Limit, Market, Mixed."}
+
+
+      Order Type Distribution: Illustrates the mix of primary order types used by a trader.
+
+
+      The distribution of order types shows strategy: ''Market'' orders prioritize speed; ''Limit'' orders
+      prioritize price; ''Mixed'' suggests a combination of strategies.
+
+
+      Compiler note: Describes the spread_type field within order_status jsonb (values Market/Limit/Mixed),
+      representing primary order type distribution.'
+- schema: main
+  table: reg_compliance
+  columns:
+  - name: REC_COMP
+    type: VARCHAR
+    description: TEXT. Identifier linking regulatory-compliance data to a market-condition set. PK. FK
+      to market_conditions(REC_PIN).
+  - name: file_state
+    type: VARCHAR
+    description: 'TEXT. Filing-status state. Possible values: Current, Delayed, Missing.'
+  - name: disc_state
+    type: VARCHAR
+    description: 'TEXT. Disclosure-status state. Possible values: Full, Non-compliant, Partial.'
+  - name: restrict_win
+    type: VARCHAR
+    description: 'TEXT. Trading-restriction window status. **NULL means restriction window not defined.**.
+      Possible values: Blackout, Special.
+
+
+      Trading Restriction Period Types: Explains the types of trading restrictions imposed as part of
+      enforcement.
+
+
+      The type of trading restriction. ''Blackout'' is a complete prohibition on trading. ''Special''
+      indicates other, specific restrictions tailored to a case, such as position size limits or pre-trade
+      approvals.
+
+
+      Compiler note: Column reg_compliance.restrict_win holds values ''Blackout'' and ''Special'', matching
+      the described trading restriction period types.'
+  - name: broker_flag
+    type: VARCHAR
+    description: 'TEXT. Flag indicating broker-dealer involvement. **NULL means broker-flag unset.**.
+      Possible values: Complete, Incomplete, Late.'
+  - name: exch_note
+    type: VARCHAR
+    description: 'TEXT. Exchange note or comment. **NULL means no exchange note present.**. Possible values:
+      Inquiry, Warning.'
+  - name: invest_stat
+    type: VARCHAR
+    description: 'TEXT. Current investment-status designation. **NULL means investment status not specified.**.
+      Possible values: Active, Preliminary.'
+  - name: alert_lvl
+    type: VARCHAR
+    description: 'TEXT. Alert-level assigned by compliance monitoring. Possible values: Critical, High,
+      Low, Medium.'
+  - name: invest_prior
+    type: VARCHAR
+    description: 'TEXT. Investigation-priority indicator. Possible values: High, Low, Medium.'
+  - name: case_flag
+    type: VARCHAR
+    description: 'TEXT. Flag indicating an open compliance case. Possible values: Closed, Investigation,
+      Monitoring.'
+  - name: review_freq
+    type: VARCHAR
+    description: 'TEXT. Recommended frequency of compliance reviews. **NULL means review frequency not
+      defined.**. Possible values: Daily, Monthly, Weekly.'
+  - name: last_rev
+    type: DATE
+    description: 'DATE. Date of the most recent compliance review. Example: 2025/02/02.'
+  - name: next_rev
+    type: DATE
+    description: 'DATE. Scheduled date of the next compliance review. Example: March 19, 2025.'
+  - name: mon_inten
+    type: VARCHAR
+    description: 'TEXT. Monitoring-intensity setting. Possible values: Enhanced, Intensive, Standard.'
+  - name: sv_sys
+    type: VARCHAR
+    description: 'TEXT. Surveillance system used. Possible values: Multiple, Primary, Secondary.'
+  - name: det_meth
+    type: VARCHAR
+    description: 'TEXT. Detection method applied. Possible values: Automated, Hybrid, Manual.'
+  - name: fp_rate
+    type: FLOAT
+    description: 'REAL. False-positive rate of the detection system. Example: 0.033.'
+  - name: model_conf
+    type: FLOAT
+    description: 'REAL. Confidence score of the detection model. Example: 0.883.'
+  - name: pat_rec
+    type: FLOAT
+    description: 'REAL. Pattern-recognition metric for compliance. Example: 42.51.'
+  - name: behav_score
+    type: FLOAT
+    description: 'REAL. Behavioural risk score from compliance analytics. Example: 37.76.'
+  - name: net_score
+    type: FLOAT
+    description: 'REAL. Network-based compliance risk score. Example: 68.91.'
+  - name: reg_alert_conc
+    type: VARCHAR
+    description: 'TEXT. The concentration of regulatory alerts per billion USD of trading volume. Helps
+      identify market manipulation risks. Example: 45.2 alerts/billion USD.'
+  - name: reg_resp_spd
+    type: VARCHAR
+    description: 'TEXT. The speed of regulatory response, measured in hours per case. A lower value indicates
+      faster response times. Example: 42.3 hours/case.'
+  - name: compliance_data
+    type: JSON
+    description: 'JSONB column. Regulatory compliance data including violations and risk. Fields: {"prev_viol":
+      "BIGINT. Count of previous regulatory violations. Possible values: 0, 1, 2, 3, 4, 5.", "comp_rate":
+      "TEXT. Compliance rate category. Possible values: A, B, C, D.", "risk_val": "REAL. Quantitative
+      risk value for compliance breaches. Example: 58.84."}
+
+
+      Compliance Rating Grade: Explains the overall compliance assessment grade assigned in compliance
+      cases.
+
+
+      The compliance rating grade: ''A'' represents excellent compliance; ''B'' indicates good compliance
+      with minor issues; ''C'' suggests significant compliance deficiencies; ''D'' signifies serious or
+      repeated compliance failures.
+
+
+      Compiler note: Describes the comp_rate field inside reg_compliance.compliance_data JSONB (values
+      A/B/C/D), matching the documented grade meanings.'
+- schema: main
+  table: sentiment_analytics
+  columns:
+  - name: REC_SA
+    type: VARCHAR
+    description: TEXT. Identifier linking sentiment analytics to a market-condition set. PK. FK to market_conditions(REC_PIN).
+  - name: ins_hold
+    type: FLOAT
+    description: 'REAL. Percentage of insider holdings in the float. Example: 45.91.'
+  - name: inst_own
+    type: FLOAT
+    description: 'REAL. Percentage of institutional ownership. **NULL means institutional-ownership data
+      unavailable.**. Example: 78.29.'
+  - name: short_rt
+    type: FLOAT
+    description: 'REAL. Short-interest rate for the instrument. **NULL means short-interest rate not provided.**.
+      Example: 17.24.'
+  - name: opt_vol
+    type: FLOAT
+    description: 'REAL. Options-trading volume on the instrument. **NULL means options volume value is
+      missing.**. Example: 2.91.'
+  - name: pc_ratio
+    type: FLOAT
+    description: 'REAL. Put-call ratio for the instrument. Example: 1.17.'
+  - name: iv_rank
+    type: VARCHAR
+    description: 'TEXT. Implied-volatility rank classification. Example: 11.39%.'
+  - name: uo_act
+    type: VARCHAR
+    description: 'TEXT. Unusual-options-activity descriptor. **NULL means no unusual-options activity
+      recorded.**. Possible values: High, Moderate.
+
+
+      Unusual Option Activity Level: Illustrates the degree of detected unusual options trading volume
+      or types.
+
+
+      The level of unusual options activity indicates deviations from normal patterns. ''High'' suggests
+      significant deviations, a potential flag for insider information. ''Moderate'' indicates some unusual
+      activity, but less pronounced.
+
+
+      Compiler note: Describes the possible values (''High'',''Moderate'') of sentiment_analytics.uo_act,
+      the unusual-options-activity descriptor column.'
+  - name: short_press_int
+    type: VARCHAR
+    description: 'TEXT. The intensity of short selling pressure as a percentage per hour, reflecting how
+      quickly short interest builds up near corporate events. Example: 2.57 %/hour.'
+  - name: sentiment_data
+    type: JSON
+    description: 'JSONB column. Sentiment data from news, social media, and analysts. Fields: {"news_score":
+      "REAL. Sentiment score derived from news sources. Example: 0.874.", "soc_sent": "REAL. Aggregate
+      social-media sentiment score. Example: 0.613.", "analyst_cnt": "BIGINT. Number of analyst reports
+      considered. Example: 18."}'
+- schema: main
+  table: trade_records
+  columns:
+  - name: REC_KEY
+    type: VARCHAR
+    description: 'TEXT. Unique key identifying an individual trade record. PK. Example: IT291460.'
+  - name: snap_ts
+    type: VARCHAR
+    description: 'TIMESTAMP. Snapshot timestamp capturing the trade state. **NULL means snapshot time
+      was not captured.**. Example: 2024-11-24 23:31:04.103260.'
+  - name: tr_anchor
+    type: VARCHAR
+    description: TEXT. Trader key involved in the trade. FK to traders(TR_KEY).
+  - name: sym_anchor
+    type: VARCHAR
+    description: TEXT. Instrument symbol key traded. FK to instruments(SYM_KEY).
+  - name: freq_tag
+    type: VARCHAR
+    description: 'TEXT. Frequency-band tag for the trader’s activity. Possible values: High, Low, Medium.'
+  - name: vol_day
+    type: FLOAT
+    description: 'REAL. Average daily trading volume for the trader-instrument pair. Example: 693469.34.'
+  - name: pos_avg
+    type: FLOAT
+    description: 'REAL. Average position size held by the trader. Example: 63384.3.'
+  - name: hold_span
+    type: VARCHAR
+    description: 'TEXT. Typical holding-period span . Possible values: Intraday, Long-term, Position,
+      Swing.
+
+
+      Trader Position Holding Style: Illustrates the typical duration traders hold their positions, based
+      on their strategy.
+
+
+      The position holding span indicates strategy: ''Intraday'' for same-day trades; ''Swing'' for holds
+      of a few days to weeks; ''Position'' for weeks to months; ''Long-term'' for months or years.
+
+
+      Compiler note: Describes the meaning of the categorical values (''Intraday'',''Swing'',''Position'',''Long-term'')
+      stored in trade_records.hold_span, confirmed as the column''s possible values list.'
+  - name: margin_pct
+    type: FLOAT
+    description: 'REAL. Margin percentage utilised in the trades. Example: 74.62.'
+  - name: vol_adj_lev
+    type: VARCHAR
+    description: 'TEXT. The volatility-adjusted leverage, indicating the amount of leverage in relation
+      to market volatility. Example: 0.34 leverage-point/vol-point.'
+  - name: risk_adj_lev
+    type: VARCHAR
+    description: 'TEXT. The risk-adjusted leverage ratio, indicating the amount of leverage relative to
+      the trader''s risk tolerance. Example: 16.98 USD/risk-point.'
+  - name: bal_turnover
+    type: VARCHAR
+    description: 'TEXT. The turnover rate of the trader''s balance per day, calculated as the ratio of
+      daily trading volume to the account balance. Example: 2.34 times/day.'
+  - name: trade_perf
+    type: JSON
+    description: 'JSONB column. Trade performance including win/loss and leverage. Fields: {"win_pct":
+      "REAL. Percentage of profitable trades for the record. **NULL means win percentage has not been
+      calculated.**. Example: 55.83.", "pl_ratio": "REAL. Profit-to-loss ratio for the set of trades.
+      Example: 1.18.", "lev_ratio": "REAL. Leverage ratio applied by the trader. **NULL means leverage
+      ratio is not available.**. Example: 1.81."}'
+- schema: main
+  table: trader_relationships
+  columns:
+  - name: rel_root
+    type: VARCHAR
+    description: TEXT. Root trader referenced in the relationship map. PK. FK to traders(TR_KEY).
+  - name: map_state
+    type: VARCHAR
+    description: 'TEXT. Current mapping state of the relationship graph. Possible values: Complete, Partial,
+      Pending.'
+  - name: addrHits
+    type: BIGINT
+    description: 'BIGINT. Count of address matches across linked traders. Possible values: 0, 1, 2, 3,
+      4, 5.'
+  - name: commPath
+    type: VARCHAR
+    description: 'TEXT. Primary communication pathway identified. **NULL means communication path has
+      not been mapped.**. Possible values: Irregular, Regular.'
+  - name: circ_size
+    type: BIGINT
+    description: 'BIGINT. Size of the trader-relationship circle. Example: 32.'
+  - name: insider_net_str
+    type: VARCHAR
+    description: 'TEXT. The strength of the insider network, calculated by the number of connected entities
+      per percentage of insider ownership. Example: 12.45 connection-point/ownership%.'
+  - name: trader_links
+    type: JSON
+    description: 'JSONB column. Relationship data for traders including contact and links. Fields: {"link_count":
+      "BIGINT. Number of direct relationship links. **NULL means link count has not been recorded.**.
+      Example: 19.0.", "contact_share": "TEXT. Shared contact information among related traders. **NULL
+      means no shared-contact data available.**. Possible values: Email, Multiple, Phone.", "fin_link":
+      "TEXT. Indicator of financial linkage between traders. **NULL means financial linkage data not provided.**.
+      Possible values: Business, Personal.", "grp_score": "REAL. Group influence or cohesion score. Example:
+      41.87."}'
+- schema: main
+  table: traders
+  columns:
+  - name: TR_KEY
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for a trader account. PK. Example: TR73442.'
+  - name: typeFlag
+    type: VARCHAR
+    description: 'TEXT. Classification flag indicating trader type . Possible values: Broker, Individual,
+      Institution, Market Maker.'
+  - name: trader_fin_data
+    type: JSON
+    description: 'JSONB column. Trader financial details including balance and risk. Fields: {"usd_bal":
+      "TEXT. Current account balance denominated in U.S. dollars. Example: $4,692,991.", "risk_lvl": "TEXT.
+      Qualitative risk-tone category assigned to the trader. Possible values: Aggressive, Conservative,
+      Moderate.", "age_days": "BIGINT. Number of days since the trader account was created. Example: 1532."}'

@@ -1,0 +1,1177 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: planets_data, compiler: claudesonnet5
+# inputs: planets_data_kb.jsonl, planets_data_column_meaning_base.json, planets_data_schema.txt, planets_data.duckdb
+metrics:
+- name: distance_in_light_years
+  description: 'Converts the distance of a celestial object from parsecs to light-years.
+
+
+    Given the distance in parsecs ($D_{pc}$), the distance in light-years ($D_{ly}$) is calculated as:
+    $D_{ly} = D_{pc} \times 3.26156$
+
+
+    Compiler note: stellardist is distance in parsecs; multiplied by 3.26156 to get light-years.'
+  sql_expression: stellardist * 3.26156
+  source_model: main.stars
+  domains:
+  - calculations
+- name: planet_mass_in_earth_units
+  description: 'Converts a planet''s mass from Jupiter mass units to Earth mass units.
+
+
+    Given a planet''s mass in Jupiter masses ($M_J$), its mass in Earth masses ($M_E$) is: $M_E = M_J
+    \times 317.83$
+
+
+    Compiler note: Direct conversion of massjup (Jupiter masses) to Earth masses using factor 317.83.'
+  sql_expression: massjup * 317.83
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: planet_radius_in_earth_units
+  description: 'Converts a planet''s radius from Jupiter radius units to Earth radius units.
+
+
+    Given a planet''s radius in Jupiter radii ($R_J$), its radius in Earth radii ($R_E$) is: $R_E = R_J
+    \times 11.209$
+
+
+    Compiler note: Direct conversion of radjup (Jupiter radii) to Earth radii using factor 11.209.'
+  sql_expression: radjup * 11.209
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: stellar_luminosity
+  description: 'Calculates a star''s luminosity relative to the Sun using its temperature and radius.
+
+
+    Luminosity ($L_{\star}$) relative to the Sun is estimated using the Stefan-Boltzmann law: $L_{\star}
+    = \left( \frac{R_{\star}}{R_{\odot}} \right)^2 \left( \frac{T_{\star}}{T_{\odot}} \right)^4$, where
+    $R_{\star}$ is the star''s radius, $T_{\star}$ is its effective temperature, and $T_{\odot}$ is the
+    Sun''s effective temperature (~5778 K).
+
+
+    Compiler note: Radius_Value is stellar radius in solar radii, Temp_Value is effective temperature
+    in Kelvin, both from stellarprops->physical JSON. Luminosity computed as (R/R_sun)^2 * (T/5778)^4,
+    both fields cast to double precision for exponentiation.'
+  sql_expression: POWER((stellarprops->'physical'->>'Radius_Value')::double precision, 2) * POWER((stellarprops->'physical'->>'Temp_Value')::double
+    precision / 5778.0, 4)
+  source_model: main.stars
+  domains:
+  - calculations
+- name: planet_surface_gravity
+  description: 'Estimates the surface gravity of a planet relative to Earth''s.
+
+
+    The surface gravity ($g_p$) relative to Earth''s is found by: $g_p = \frac{M_E}{R_E^2}$, where $M_E$
+    is the planet''s mass in Earth masses and $R_E$ is its radius in Earth radii. Depends on knowing the
+    Planet Mass in Earth Units and Planet Radius in Earth Units.
+
+
+    Built on: planet_mass_in_earth_units, planet_radius_in_earth_units.
+
+
+    Compiler note: g_p = M_E / R_E^2, using massjup*317.83 for M_E and radjup*11.209 for R_E, computed
+    directly over physical_properties columns.'
+  sql_expression: (massjup * 317.83) / POWER(radjup * 11.209, 2)
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: planetary_equilibrium_temperature
+  description: 'Estimates a planet''s surface temperature based on the energy it receives from its star.
+
+
+    The equilibrium temperature ($T_{eq}$) of a planet is calculated as: $T_{eq} = T_{\star} \sqrt{\frac{R_{\star}}{2a}}$,
+    where $T_{\star}$ is the star''s temperature, $R_{\star}$ is the star''s radius, and $a$ is the planet''s
+    semi-major axis.
+
+
+    Compiler note: Teq = T_star * sqrt(R_star / (2*a)), using stellarprops.physical.Temp_Value (K) and
+    Radius_Value (solar radii) joined via planets.hostlink; a is orbital_characteristics.semimajor (AU).
+    Units of R_star and a are not converted to match (formula taken literally as stated), joins planetref->stellarref
+    are unique.'
+  sql_expression: (SELECT (s.stellarprops->'physical'->>'Temp_Value')::double * sqrt(((s.stellarprops->'physical'->>'Radius_Value')::double)
+    / (2 * orbital_characteristics.semimajor)) FROM planets p JOIN stars s ON p.hostlink = s.stellarref
+    WHERE p.planetref = orbital_characteristics.bodylink)
+  source_model: main.orbital_characteristics
+  domains:
+  - calculations
+- name: habitable_zone_inner_boundary
+  description: 'Calculates the inner edge of a star''s habitable zone, where a planet would be too hot
+    for liquid water.
+
+
+    The inner boundary of the habitable zone ($r_i$) in AU is estimated based on the star''s luminosity
+    ($L_{\star}$): $r_i \approx \sqrt{L_{\star} / 1.1}$. This relies on the Stellar Luminosity.
+
+
+    Built on: stellar_luminosity.
+
+
+    Compiler note: Inlines the Stellar Luminosity formula (radius and temp from stellarprops->''physical'')
+    and takes sqrt(L/1.1) per the stated formula.'
+  sql_expression: SQRT( (POWER((stellarprops->'physical'->>'Radius_Value')::double precision, 2) * POWER((stellarprops->'physical'->>'Temp_Value')::double
+    precision / 5778.0, 4)) / 1.1 )
+  source_model: main.stars
+  domains:
+  - calculations
+- name: habitable_zone_outer_boundary
+  description: 'Calculates the outer edge of a star''s habitable zone, where a planet would be too cold
+    for liquid water.
+
+
+    The outer boundary of the habitable zone ($r_o$) in AU is estimated based on the star''s luminosity
+    ($L_{\star}$): $r_o \approx \sqrt{L_{\star} / 0.53}$. This relies on the Stellar Luminosity.
+
+
+    Built on: stellar_luminosity.
+
+
+    Compiler note: Computes r_o = sqrt(L_star/0.53), reusing the stellar_luminosity formula inline from
+    Radius_Value and Temp_Value JSON fields in stellarprops.'
+  sql_expression: SQRT((POWER((stellarprops->'physical'->>'Radius_Value')::double precision, 2) * POWER((stellarprops->'physical'->>'Temp_Value')::double
+    precision / 5778.0, 4)) / 0.53)
+  source_model: main.stars
+  domains:
+  - calculations
+- name: relative_uncertainty
+  description: 'Measures the precision of a measurement as a percentage of the measured value.
+
+
+    For a value $v$ with positive error $e_1$ and negative error $e_2$, the relative uncertainty ($U_{rel}$)
+    is: $U_{rel} = \frac{(e_1 - e_2) / 2}{v} \times 100\%$'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This entry defines a generic formula U_rel = ((e1 - e2)/2)/v * 100% applicable to any
+    measured parameter (period, mass, radius, eccentricity, etc.), but does not itself specify which value/error
+    columns to use. It is a template referenced by other entries (e.g. High-Precision Measurement) that
+    apply it to a specific parameter; there is no single column triple in the schema that uniquely represents
+    "the measurement" referred to here, so it cannot be encoded as one concrete SQL expression over a
+    single table without arbitrarily picking a parameter.
+- name: transit_depth
+  description: 'Calculates the fractional drop in a star''s brightness when a planet passes in front of
+    it.
+
+
+    The transit depth ($Delta F$) is the ratio of the planet''s surface area to the star''s: $Delta F
+    = \left( \frac{R_p}{R_{\star}} \right)^2$, where $R_p$ is the planet''s radius and $R_{\star}$ is
+    the star''s radius.
+
+
+    Compiler note: Transit depth = (Rp/Rstar)^2. Rp stored in Jupiter radii (radjup), Rstar stored in
+    solar radii (stellarprops.physical.Radius_Value); converted Rp to solar radii using 1 R_Jup = 0.10049
+    R_sun. Joined physical_properties -> planets (objectlink=planetref, unique) -> stars (hostlink=stellarref,
+    unique) to get stellar radius.'
+  sql_expression: POWER( (radjup * 0.10049) / ( (SELECT (s.stellarprops->'physical'->>'Radius_Value')::real
+    FROM planets p JOIN stars s ON s.stellarref = p.hostlink WHERE p.planetref = physical_properties.objectlink)
+    ), 2)
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: planet_escape_velocity
+  description: 'Calculates the minimum speed needed for an object to escape a planet''s gravitational
+    pull.
+
+
+    The escape velocity ($v_e$) is calculated as: $v_e = \sqrt{\frac{2GM_p}{R_p}}$, where $M_p$ and $R_p$
+    are the planet''s mass and radius, and G is the gravitational constant. The calculation depends on
+    Planet Mass in Earth Units and Planet Radius in Earth Units, converted to standard units.
+
+
+    Built on: planet_mass_in_earth_units, planet_radius_in_earth_units.
+
+
+    Compiler note: Escape velocity in m/s: converts massjup to kg via Earth mass units (massjup*317.83
+    Earth masses * 5.972e24 kg/Earth mass) and radjup to meters via Earth radius units (radjup*11.209
+    Earth radii * 6.371e6 m/Earth radius), then applies v_e = sqrt(2*G*M/R) with G=6.674e-11 N·m²/kg².'
+  sql_expression: sqrt(2 * 6.674e-11 * (massjup * 317.83 * 5.972e24) / (radjup * 11.209 * 6.371e6))
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: orbital_velocity
+  description: 'Calculates the average speed of a planet as it orbits its host star.
+
+
+    Assuming a circular orbit, the orbital velocity ($v_{orb}$) is: $v_{orb} = \sqrt{\frac{GM_{\star}}{a}}$,
+    where $M_{\star}$ is the mass of the star and $a$ is the semi-major axis.
+
+
+    Compiler note: v_orb = sqrt(G*M_star/a) in m/s. Uses GM_sun=1.32712440018e20 m^3/s^2 (stellar mass
+    taken from stars.stellarprops.physical.Mass_Value in solar masses) and AU=1.495978707e11 m to convert
+    semimajor (AU) to meters. Mass_Value joined via planets.hostlink -> stars.stellarref, a unique match
+    per planet.'
+  sql_expression: sqrt(1.32712440018e20 * CAST((SELECT s.stellarprops->'physical'->>'Mass_Value' FROM
+    stars s JOIN planets p ON p.hostlink = s.stellarref WHERE p.planetref = orbital_characteristics.bodylink)
+    AS DOUBLE) / (orbital_characteristics.semimajor * 1.495978707e11))
+  source_model: main.orbital_characteristics
+  domains:
+  - calculations
+- name: stellar_density
+  description: 'Calculates the average density of a star.
+
+
+    The average density of a star ($\rho_{\star}$) is its mass divided by its volume: $\rho_{\star} =
+    \frac{M_{\star}}{\frac{4}{3}\pi R_{\star}^3}$, where $M_{\star}$ and $R_{\star}$ are the star''s mass
+    and radius.
+
+
+    Compiler note: Stellar density = Mass_Value / ((4/3)*pi*Radius_Value^3), both values extracted from
+    stellarprops.physical JSON (in solar mass / solar radius^3 units, not converted to g/cm^3).'
+  sql_expression: CAST(stellarprops->'physical'->>'Mass_Value' AS DOUBLE) / ((4.0/3.0) * PI() * POWER(CAST(stellarprops->'physical'->>'Radius_Value'
+    AS DOUBLE), 3))
+  source_model: main.stars
+  domains:
+  - calculations
+- name: hertzsprung_russell_hr_diagram_position
+  description: 'Determines a star''s position on the HR diagram based on its temperature and luminosity.
+
+
+    The position is a coordinate pair ($T_{\star}$, $L_{\star}$) where $T_{\star}$ is the star''s effective
+    temperature and $L_{\star}$ is its calculated Stellar Luminosity.
+
+
+    Built on: stellar_luminosity.
+
+
+    Compiler note: HR diagram position is the coordinate pair (T_star, L_star); encoded as a ROW of effective
+    temperature (Temp_Value) and stellar luminosity (computed per the stellar_luminosity entry from Radius_Value
+    and Temp_Value).'
+  sql_expression: ROW((stellarprops->'physical'->>'Temp_Value')::double precision, POWER((stellarprops->'physical'->>'Radius_Value')::double
+    precision, 2) * POWER((stellarprops->'physical'->>'Temp_Value')::double precision / 5778.0, 4))
+  source_model: main.stars
+  domains:
+  - calculations
+- name: goldilocks_value
+  description: 'Quantifies how centered a planet is within its star''s habitable zone.
+
+
+    A Goldilocks Value ($G$) can be defined as: $G = \frac{a - r_i}{r_o - r_i}$, where $a$ is the planet''s
+    semi-major axis, and $r_i$ and $r_o$ are the Habitable Zone Inner Boundary and Outer Boundary. A value
+    of 0.5 is perfectly centered.
+
+
+    Built on: habitable_zone_inner_boundary, habitable_zone_outer_boundary.
+
+
+    Compiler note: Computed G = (a - r_i)/(r_o - r_i) using semimajor axis from orbital_characteristics
+    and stellar radius/temperature from stars.stellarprops JSON, reached via scalar subquery through planets
+    (bodylink -> planetref -> hostlink -> stellarref). Verified bodylink is unique per orbital_characteristics
+    row (3371 rows, 3371 distinct bodylink) and each planet maps to exactly one star, so the subquery
+    returns a single row.'
+  sql_expression: "(\n  semimajor - SQRT(\n    (POWER((( SELECT s.stellarprops FROM stars s JOIN planets\
+    \ p ON p.hostlink = s.stellarref WHERE p.planetref = bodylink )->'physical'->>'Radius_Value')::double\
+    \ precision, 2) *\n     POWER((( SELECT s.stellarprops FROM stars s JOIN planets p ON p.hostlink =\
+    \ s.stellarref WHERE p.planetref = bodylink )->'physical'->>'Temp_Value')::double precision / 5778.0,\
+    \ 4)) / 1.1\n  )\n) / (\n  SQRT(\n    (POWER((( SELECT s.stellarprops FROM stars s JOIN planets p\
+    \ ON p.hostlink = s.stellarref WHERE p.planetref = bodylink )->'physical'->>'Radius_Value')::double\
+    \ precision, 2) *\n     POWER((( SELECT s.stellarprops FROM stars s JOIN planets p ON p.hostlink =\
+    \ s.stellarref WHERE p.planetref = bodylink )->'physical'->>'Temp_Value')::double precision / 5778.0,\
+    \ 4)) / 0.53\n  )\n  -\n  SQRT(\n    (POWER((( SELECT s.stellarprops FROM stars s JOIN planets p ON\
+    \ p.hostlink = s.stellarref WHERE p.planetref = bodylink )->'physical'->>'Radius_Value')::double precision,\
+    \ 2) *\n     POWER((( SELECT s.stellarprops FROM stars s JOIN planets p ON p.hostlink = s.stellarref\
+    \ WHERE p.planetref = bodylink )->'physical'->>'Temp_Value')::double precision / 5778.0, 4)) / 1.1\n\
+    \  )\n)"
+  source_model: main.orbital_characteristics
+  domains:
+  - calculations
+- name: kepler_s_third_law_verification
+  description: 'Uses a planet''s orbital properties to calculate the mass of its host star.
+
+
+    The mass of the star ($M_{\star}$) in solar masses can be derived from Kepler''s Third Law: $M_{\star}
+    = \frac{a^3}{P^2}$, where $a$ is the semi-major axis in AU and $P$ is the orbital period in years.
+
+
+    Compiler note: semimajor is in AU; period is stored in days, converted to years by dividing by 365.25
+    before squaring, per Kepler''s Third Law M* = a^3/P^2 (a in AU, P in years).'
+  sql_expression: power(semimajor, 3) / power(period / 365.25, 2)
+  source_model: main.orbital_characteristics
+  domains:
+  - calculations
+- name: mass_radius_relationship
+  description: 'A simple ratio to compare a planet''s mass and size.
+
+
+    A basic mass-radius ratio ($MRR$) can be expressed as: $MRR = \frac{M_E}{R_E}$, which depends on the
+    Planet Mass in Earth Units and Planet Radius in Earth Units.
+
+
+    Built on: planet_mass_in_earth_units, planet_radius_in_earth_units.
+
+
+    Compiler note: MRR = Planet Mass in Earth Units / Planet Radius in Earth Units, computed directly
+    from physical_properties.massjup and radjup using the given conversion factors.'
+  sql_expression: (massjup * 317.83) / (radjup * 11.209)
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: orbital_period_ratio
+  description: 'Calculates the ratio of the orbital periods of two adjacent planets in a system.
+
+
+    For two planets, an outer planet with period $P_{out}$ and an inner planet with period $P_{in}$, the
+    ratio is: $R_{period} = \frac{P_{out}}{P_{in}}$.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires pairing two distinct planets within the same system (an "outer" and
+    an "inner" adjacent planet by orbital period) and computing a ratio between their respective period
+    values. This is a cross-row, pairwise comparison between two different planet records, not a computation
+    over columns of a single row in one table. The schema has no notion of "adjacency rank" precomputed,
+    and the entry does not specify how to resolve ties or determine which planets count as adjacent beyond
+    period ordering - this would require a self-join with window functions (e.g., LAG/LEAD ordered by
+    period partitioned by host star) rather than a single SQL expression evaluated per row of one source_model
+    table.
+- name: planet_star_mass_ratio
+  description: 'Calculates the ratio of a planet''s mass to its host star''s mass.
+
+
+    The mass ratio ($q$) is: $q = \frac{M_p}{M_{\star}}$, where $M_p$ is the planet''s mass and $M_{\star}$
+    is the star''s mass. Both must be in the same units.
+
+
+    Compiler note: Converted planet mass from Jupiter masses to solar masses using 1 M_sun = 1047.56 M_jup,
+    then divided by stellar mass (Mass_Value, in solar masses) to get mass ratio q = M_p/M_star in consistent
+    units. Verified objectlink->planetref->hostlink->stellarref joins are each unique.'
+  sql_expression: (massjup / 1047.56) / (SELECT (s.stellarprops->'physical'->>'Mass_Value')::real FROM
+    planets p JOIN stars s ON s.stellarref = p.hostlink WHERE p.planetref = physical_properties.objectlink)
+  source_model: main.physical_properties
+  domains:
+  - calculations
+- name: gravitational_parameter
+  description: 'Calculates the standard gravitational parameter for a star, a constant used in orbital
+    mechanics.
+
+
+    The standard gravitational parameter is $\mu = G M_{\star}$, where G is the gravitational constant
+    and $M_{\star}$ is the mass of the star.
+
+
+    Compiler note: mu = G*M_star; M_star taken from stellarprops.physical.Mass_Value (solar masses) converted
+    to kg using 1 Msun=1.98847e30 kg, G=6.674e-11 m^3 kg^-1 s^-2. Result in SI units (m^3/s^2).'
+  sql_expression: 6.674e-11 * ((stellarprops->'physical'->>'Mass_Value')::double precision * 1.98847e30)
+  source_model: main.stars
+  domains:
+  - calculations
+- name: gas_giant_planet
+  description: 'A large planet composed primarily of gases like hydrogen and helium.
+
+
+    A planet with a mass greater than 0.1 Jupiter masses.
+
+
+    Compiler note: Mass is stored in Jupiter mass units (massjup) directly, so the threshold of 0.1 Jupiter
+    masses is applied as-is. NULL massjup rows naturally evaluate to NULL (excluded).'
+  sql_expression: massjup > 0.1
+  source_model: main.physical_properties
+  domains:
+  - definitions
+- name: rocky_planet
+  description: 'A planet composed primarily of rock or metals, with a solid surface.
+
+
+    A planet with a bulk density greater than 3 g/cm³.
+
+
+    Compiler note: Uses densvalue (g/cm3) from physical_properties; NULL densities yield unknown/false
+    under boolean filter.'
+  sql_expression: densvalue > 3
+  source_model: main.physical_properties
+  domains:
+  - definitions
+- name: short_period_planet
+  description: 'A planet that orbits its host star in a very short amount of time.
+
+
+    A planet with an orbital period of less than 10 days.
+
+
+    Compiler note: period column is in days; NULL periods naturally excluded.'
+  sql_expression: period < 10
+  source_model: main.orbital_characteristics
+  domains:
+  - definitions
+- name: hot_jupiter
+  description: 'A class of exoplanets that are physically similar to Jupiter but orbit very close to their
+    stars.
+
+
+    A planet that is classified as both a Gas Giant Planet and a Short-Period Planet.
+
+
+    Built on: gas_giant_planet, short_period_planet.
+
+
+    Compiler note: Combines Gas Giant Planet (massjup > 0.1 from physical_properties) and Short-Period
+    Planet (period < 10 from orbital_characteristics), joined via scalar subqueries on planetref since
+    both tables have a unique row per planet.'
+  sql_expression: (SELECT massjup FROM physical_properties WHERE objectlink = planetref) > 0.1 AND (SELECT
+    period FROM orbital_characteristics WHERE bodylink = planetref) < 10
+  source_model: main.planets
+  domains:
+  - definitions
+- name: super_earth
+  description: 'A class of planets with masses higher than Earth''s but substantially below those of the
+    solar system''s ice giants.
+
+
+    A planet that is likely a Rocky Planet and has a mass between 1 and 10 Earth masses. This depends
+    on the Planet Mass in Earth Units.
+
+
+    Built on: planet_mass_in_earth_units, rocky_planet.
+
+
+    Compiler note: Combines Rocky Planet (densvalue > 3 g/cm3) with Planet Mass in Earth Units (massjup*317.83)
+    being between 1 and 10 Earth masses, both computed over physical_properties.'
+  sql_expression: densvalue > 3 AND (massjup * 317.83) BETWEEN 1 AND 10
+  source_model: main.physical_properties
+  domains:
+  - definitions
+- name: planet_in_habitable_zone
+  description: 'A planet orbiting within a star''s habitable zone, where conditions might be right for
+    liquid water.
+
+
+    A planet whose semi-major axis ($a$) falls between the Habitable Zone Inner Boundary ($r_i$) and the
+    Habitable Zone Outer Boundary ($r_o$).
+
+
+    Built on: habitable_zone_inner_boundary, habitable_zone_outer_boundary.
+
+
+    Compiler note: Joined orbital_characteristics.bodylink -> planets.planetref -> planets.hostlink ->
+    stars.stellarref (unique match per planet) to compute the star''s habitable zone inner/outer boundaries
+    from stellarprops JSON (Radius_Value, Temp_Value), then checked semimajor axis lies within [r_i, r_o].'
+  sql_expression: "semimajor BETWEEN (\n    SELECT SQRT((POWER((s.stellarprops->'physical'->>'Radius_Value')::double\
+    \ precision, 2) * POWER((s.stellarprops->'physical'->>'Temp_Value')::double precision / 5778.0, 4))\
+    \ / 1.1)\n    FROM stars s JOIN planets p ON p.hostlink = s.stellarref WHERE p.planetref = orbital_characteristics.bodylink\n\
+    ) AND (\n    SELECT SQRT((POWER((s.stellarprops->'physical'->>'Radius_Value')::double precision, 2)\
+    \ * POWER((s.stellarprops->'physical'->>'Temp_Value')::double precision / 5778.0, 4)) / 0.53)\n  \
+    \  FROM stars s JOIN planets p ON p.hostlink = s.stellarref WHERE p.planetref = orbital_characteristics.bodylink\n\
+    )"
+  source_model: main.orbital_characteristics
+  domains:
+  - definitions
+- name: potentially_habitable_exoplanet
+  description: 'An exoplanet that has the potential to support life, typically meaning it is rocky and
+    in the habitable zone.
+
+
+    A planet that is classified as a Rocky Planet and is also a Planet in Habitable Zone.
+
+
+    Built on: rocky_planet, planet_in_habitable_zone.
+
+
+    Compiler note: Combines Rocky Planet (physical_properties.densvalue > 3, unique per planet via objectlink)
+    and Planet in Habitable Zone (orbital_characteristics.semimajor between HZ inner/outer bounds computed
+    from stars.stellarprops Radius_Value and Temp_Value, joined via planets.hostlink). Verified objectlink
+    and bodylink are unique per planet, so scalar subqueries match at most one row.'
+  sql_expression: "(SELECT densvalue FROM physical_properties pp WHERE pp.objectlink = planets.planetref)\
+    \ > 3\nAND\n(SELECT oc.semimajor FROM orbital_characteristics oc WHERE oc.bodylink = planets.planetref)\n\
+    \  BETWEEN\n  (SELECT SQRT((POWER((s.stellarprops->'physical'->>'Radius_Value')::double precision,\
+    \ 2) * POWER((s.stellarprops->'physical'->>'Temp_Value')::double precision / 5778.0, 4)) / 1.1)\n\
+    \   FROM stars s WHERE s.stellarref = planets.hostlink)\n  AND\n  (SELECT SQRT((POWER((s.stellarprops->'physical'->>'Radius_Value')::double\
+    \ precision, 2) * POWER((s.stellarprops->'physical'->>'Temp_Value')::double precision / 5778.0, 4))\
+    \ / 0.53)\n   FROM stars s WHERE s.stellarref = planets.hostlink)"
+  source_model: main.planets
+  domains:
+  - definitions
+- name: high_eccentricity_planet
+  description: 'A planet with a highly elliptical orbit, leading to significant temperature variations.
+
+
+    A planet with an orbital eccentricity greater than 0.25.
+
+
+    Compiler note: Encoded directly from orbital_characteristics.eccentricity column; NULLs yield unknown/false
+    as per standard SQL comparison semantics.'
+  sql_expression: eccentricity > 0.25
+  source_model: main.orbital_characteristics
+  domains:
+  - definitions
+- name: multi_planetary_system
+  description: 'A star that hosts more than one confirmed planet.
+
+
+    Any star system with a total number of confirmed planetary companions greater than 1.
+
+
+    Compiler note: Uses stars.compcount, the total number of confirmed planetary companions, directly
+    as stated.'
+  sql_expression: compcount > 1
+  source_model: main.stars
+  domains:
+  - definitions
+- name: high_precision_measurement
+  description: 'Indicates that a specific physical or orbital parameter is known with a high degree of
+    confidence.
+
+
+    A parameter for which the calculated Relative Uncertainty is less than 5%.
+
+
+    Built on: relative_uncertainty.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines a generic "High-Precision Measurement" flag applicable to any parameter
+    (period, mass, radius, eccentricity, etc.) via the generic Relative Uncertainty formula. The database
+    has no single column triple (value, err1, err2) that uniquely represents "the measurement" referred
+    to - it must be applied per-parameter (e.g. period, mass, radius each have their own value/err1/err2
+    columns across different tables). Without specifying which parameter, this cannot be encoded as one
+    concrete boolean SQL expression over a single table.
+- name: well_characterized_planet
+  description: 'A planet for which the key parameters of mass, radius, and period are known with high
+    precision.
+
+
+    A planet where the measurements for mass, radius, and orbital period are all considered High-Precision
+    Measurements.
+
+
+    Built on: high_precision_measurement.
+
+
+    Compiler note: High-Precision Measurement = relative uncertainty ((err1-err2)/2)/value*100 < 5%. Applied
+    to period (orbital_characteristics.period with data_quality_tracking.perioderr1/2), mass (physical_properties.massjup
+    with masserr1/2), and radius (physical_properties.radjup with raderr1/2), joined via unique 1:1 links
+    (orbital_characteristics.bodylink, physical_properties.objectlink, data_quality_tracking.targetlink
+    all unique per planetref). A planet is Well-Characterized if all three relative uncertainties are
+    below 5%; NULLs in any component propagate to NULL/false as expected since missing data cannot be
+    deemed high-precision.'
+  sql_expression: "(\n  (SELECT ((q.perioderr1 - q.perioderr2)/2) / o.period * 100 FROM data_quality_tracking\
+    \ q, orbital_characteristics o WHERE q.targetlink = planets.planetref AND o.bodylink = planets.planetref)\
+    \ < 5\n)\nAND\n(\n  (SELECT ((q.masserr1 - q.masserr2)/2) / p.massjup * 100 FROM data_quality_tracking\
+    \ q, physical_properties p WHERE q.targetlink = planets.planetref AND p.objectlink = planets.planetref)\
+    \ < 5\n)\nAND\n(\n  (SELECT ((q.raderr1 - q.raderr2)/2) / p.radjup * 100 FROM data_quality_tracking\
+    \ q, physical_properties p WHERE q.targetlink = planets.planetref AND p.objectlink = planets.planetref)\
+    \ < 5\n)"
+  source_model: main.planets
+  domains:
+  - definitions
+- name: retrograde_orbit
+  description: 'A planet that orbits its star in the opposite direction to the star''s rotation.
+
+
+    A planet with an orbital inclination greater than 90 degrees.
+
+
+    Compiler note: Retrograde Orbit: inclination (degrees) greater than 90.'
+  sql_expression: inclination > 90
+  source_model: main.orbital_characteristics
+  domains:
+  - definitions
+- name: inflated_gas_giant
+  description: 'A gas giant planet with a radius that is unexpectedly large for its mass, suggesting a
+    high internal temperature.
+
+
+    A Gas Giant Planet with a bulk density less than 0.5 g/cm³.
+
+
+    Built on: gas_giant_planet.
+
+
+    Compiler note: Combines Gas Giant Planet (massjup > 0.1) with bulk density < 0.5 g/cm3, both columns
+    available directly on physical_properties.'
+  sql_expression: massjup > 0.1 AND densvalue < 0.5
+  source_model: main.physical_properties
+  domains:
+  - definitions
+- name: compact_system
+  description: 'A planetary system where multiple planets orbit very close to each other.
+
+
+    A Multi-planetary System where the Orbital Period Ratio between all adjacent pairs of planets is less
+    than 3.
+
+
+    Built on: orbital_period_ratio, multi_planetary_system.
+
+
+    Compiler note: Multi-planetary System (compcount>1) combined with a check that all adjacent-by-period
+    orbital period ratios within that star''s planets are below 3, computed via a correlated subquery
+    using LAG() ordered by period over the star''s planets (joined via orbital_characteristics.bodylink
+    -> planets.planetref -> planets.hostlink = stars.stellarref). Verified against sample data.'
+  sql_expression: "compcount > 1 AND NOT EXISTS (\n    SELECT 1 FROM (\n      SELECT oc.period, oc.period\
+    \ / LAG(oc.period) OVER (ORDER BY oc.period) AS ratio\n      FROM orbital_characteristics oc JOIN\
+    \ planets p ON oc.bodylink = p.planetref\n      WHERE p.hostlink = stars.stellarref\n    ) t\n   \
+    \ WHERE ratio >= 3\n)"
+  source_model: main.stars
+  domains:
+  - definitions
+- name: minimum_mass_status
+  description: 'Indicates that the provided mass for a planet is a lower limit, not the true mass.
+
+
+    A flag indicating that the planet''s mass was determined using a method (like radial velocity) that
+    measures the minimum mass ($M \sin i$) because the orbital inclination is unknown.
+
+
+    Compiler note: Checked distinct values of masssource: ''Mass'', ''Msini'', ''Msin(i)/sin(i)'', and
+    empty string. ''Msini'' and ''Msin(i)/sin(i)'' both represent minimum mass (M sin i) determinations
+    where true mass is unknown due to unresolved inclination; ''Mass'' represents a true mass measurement.'
+  sql_expression: masssource IN ('Msini', 'Msin(i)/sin(i)')
+  source_model: main.data_quality_tracking
+  domains:
+  - definitions
+- name: upper_limit_value
+  description: 'Indicates that a measured value for a parameter is not an exact measurement but an upper
+    boundary.
+
+
+    A quality flag on a parameter signifying that its true value is less than or equal to the stated value.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a generic quality-flag concept (value=1 meaning upper limit) that
+    applies individually to many different parameters (period, semimajor axis, eccentricity, inclination,
+    mass, radius, density, distance, magnitude, temperature, stellar mass, stellar radius) stored as separate
+    keys inside data_quality_tracking.limitflags. It does not specify which parameter's flag to check,
+    so there is no single boolean condition over one table's rows that encodes "the" upper limit flag
+    without arbitrarily picking one parameter.
+- name: discovery_via_transit_method
+  description: 'Identifies a planet discovered by observing the dimming of its star as the planet passes
+    in front.
+
+
+    A planet whose discovery method is listed as Transit, TR, Transit Method, Photometry, or Photometric.
+
+
+    Compiler note: Encodes discmethod as a direct match against the listed raw labels for the Transit
+    discovery method.'
+  sql_expression: discmethod IN ('Transit', 'TR', 'Transit Method', 'Photometry', 'Photometric')
+  source_model: main.planets
+  domains:
+  - definitions
+- name: discovery_via_radial_velocity
+  description: 'Identifies a planet discovered by observing the wobble of its star caused by the planet''s
+    gravitational pull.
+
+
+    A planet whose discovery method is listed as RadVel, RV, RV Method, Radial Velocity, or Doppler.
+
+
+    Compiler note: Matches discmethod against the five raw labels denoting radial velocity discovery.'
+  sql_expression: discmethod IN ('RadVel', 'RV', 'RV Method', 'Radial Velocity', 'Doppler')
+  source_model: main.planets
+  domains:
+  - definitions
+- name: blended_measurement
+  description: 'Indicates a parameter measurement (like brightness or temperature) is potentially contaminated
+    by the light of nearby, unresolved stars.
+
+
+    A quality flag indicating that a measurement''s value is affected by light from stellar companions,
+    potentially reducing its accuracy.
+
+
+    Compiler note: Encoded as any of the four blend flags (Mag_Blend, Temp_Blend, Mass_Blend, Rad_Blend)
+    in stellarprops JSON being 1, indicating the measurement is affected by light from stellar companions.
+    NULL flags are treated as not-flagged (unknown).'
+  sql_expression: (stellarprops->'photometry'->>'Mag_Blend')::numeric = 1 OR (stellarprops->'physical'->>'Temp_Blend')::numeric
+    = 1 OR (stellarprops->'physical'->>'Mass_Blend')::numeric = 1 OR (stellarprops->'physical'->>'Rad_Blend')::numeric
+    = 1
+  source_model: main.stars
+  domains:
+  - definitions
+- name: kepler_mission_discovery
+  description: 'Identifies a planet discovered by the Kepler Space Telescope.
+
+
+    A planet whose observation record is linked to the ''kep'' facility.
+
+
+    Compiler note: Checked instruments_surveys: facilityname ''kep'' has instrumentref=2, uniquely identifying
+    the Kepler facility. A planet is a Kepler Mission Discovery if it has an observation record (planet_instrument_observations)
+    linked to that facility.'
+  sql_expression: EXISTS (SELECT 1 FROM planet_instrument_observations o JOIN instruments_surveys i ON
+    o.facilitylink = i.instrumentref WHERE o.subjectlink = planets.planetref AND i.facilityname = 'kep')
+  source_model: main.planets
+  domains:
+  - definitions
+- name: transit_timing_variation_ttv_method
+  description: 'A method of exoplanet detection that infers the presence of planets by observing variations
+    in the timing of a known transiting planet''s transit across its star.
+
+
+    A planet whose observation record is linked to the ''ttv'' facility.
+
+
+    Compiler note: ''ttv'' facility maps to instrumentref=1 in instruments_surveys; predicate checks if
+    planet has an observation record linked to that facility.'
+  sql_expression: planetref IN (SELECT subjectlink FROM planet_instrument_observations WHERE facilitylink
+    = (SELECT instrumentref FROM instruments_surveys WHERE facilityname = 'ttv'))
+  source_model: main.planets
+  domains:
+  - definitions
+- name: discovery_method_standardization
+  description: 'Standardizes various text entries for exoplanet discovery methods into a set of unified
+    categories.
+
+
+    A process that groups different raw discovery method labels from the database into a clear, standardized
+    set. The standard categories and their corresponding raw labels are: ''Radial Velocity'' (includes
+    ''RadVel'', ''RV'', ''RV Method'', ''Radial Velocity'', ''Doppler''), ''Transit'' (includes ''Transit'',
+    ''TR'', ''Transit Method'', ''Photometry'', ''Photometric''), ''Imaging'' (includes ''Direct Imaging'',
+    ''DI'', ''Imaging'', ''IMG'', ''Direct''), ''TTV'' (includes ''TTV'', ''Transit Timing Variations'',
+    ''Transit Timing'', ''TTV Method'', ''Timing Var''), ''Microlensing'' (includes ''Microlensing'',
+    ''ML'', ''\u03bcLens'', ''Lensing'', ''Gravitational''). Any method not in these groups is classified
+    as ''Other''.
+
+
+    Built on: discovery_via_transit_method, discovery_via_radial_velocity, transit_timing_variation_ttv_method.
+
+
+    Compiler note: Categorical label standardizing discmethod raw text into unified categories per the
+    five groups defined; unmatched/null values fall into ''Other''.'
+  sql_expression: "CASE\n  WHEN discmethod IN ('RadVel', 'RV', 'RV Method', 'Radial Velocity', 'Doppler')\
+    \ THEN 'Radial Velocity'\n  WHEN discmethod IN ('Transit', 'TR', 'Transit Method', 'Photometry', 'Photometric')\
+    \ THEN 'Transit'\n  WHEN discmethod IN ('Direct Imaging', 'DI', 'Imaging', 'IMG', 'Direct') THEN 'Imaging'\n\
+    \  WHEN discmethod IN ('TTV', 'Transit Timing Variations', 'Transit Timing', 'TTV Method', 'Timing\
+    \ Var') THEN 'TTV'\n  WHEN discmethod IN ('Microlensing', 'ML', 'μLens', 'Lensing', 'Gravitational')\
+    \ THEN 'Microlensing'\n  ELSE 'Other'\nEND"
+  source_model: main.planets
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: data_quality_tracking
+  columns:
+  - name: qualityref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each data quality record.
+  - name: targetlink
+    type: BIGINT
+    description: Foreign key INTEGER referencing planets(PlanetRef), linking quality metrics to a specific
+      planet.
+  - name: perioderr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_orbpererr1' in orbital period, in days. REAL representing
+      +1σ error. Contains  NULL when period uncertainty is not available or period itself is unknown.
+  - name: perioderr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_orbpererr2' in orbital period, in days. REAL representing
+      -1σ error, typically stored as negative value. Contains  NULL when period uncertainty is not available.
+  - name: semimajerr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_orbsmaxerr1' in semi-major axis, in AU. REAL representing
+      +1σ error in orbital distance. Contains  NULL when semi-major axis uncertainty is not available.
+  - name: semimajerr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_orbsmaxerr2' in semi-major axis, in AU. REAL representing
+      -1σ error, accommodating asymmetric uncertainties. Contains  NULL when semi-major axis uncertainty
+      is not available.
+  - name: eccerr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_orbeccenerr1' in eccentricity. REAL representing +1σ error,
+      typically small values <0.1. Contains  NULL when eccentricity uncertainty is not available or eccentricity
+      is unconstrained.
+  - name: eccerr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_orbeccenerr2' in eccentricity. REAL representing -1σ error,
+      often asymmetric for low-eccentricity orbits. Contains  NULL when eccentricity uncertainty is not
+      available.
+  - name: inclerr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_orbinclerr1' in inclination, in degrees. REAL representing
+      +1σ angular error. Contains  NULL when inclination uncertainty is not available or inclination is
+      unconstrained.
+  - name: inclerr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_orbinclerr2' in inclination, in degrees. REAL representing
+      -1σ angular error. Contains  NULL when inclination uncertainty is not available.
+  - name: masserr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_bmassjerr1' in planetary mass, in Jupiter masses. REAL
+      representing +1σ error in mass measurement. Contains  NULL when mass uncertainty is not available
+      or mass is unconstrained.
+  - name: masserr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_bmassjerr2' in planetary mass, in Jupiter masses. REAL
+      representing -1σ error, often asymmetric for low-mass planets. Contains  NULL when mass uncertainty
+      is not available.
+  - name: raderr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_radjerr1' in planetary radius, in Jupiter radii. REAL representing
+      +1σ error in radius measurement. Contains  NULL when radius uncertainty is not available or radius
+      is unconstrained.
+  - name: raderr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_radjerr2' in planetary radius, in Jupiter radii. REAL representing
+      -1σ error in radius measurement. Contains  NULL when radius uncertainty is not available.
+  - name: denserr1
+    type: FLOAT
+    description: Positive uncertainty from 'pl_denserr1' in planetary density, in g/cm³. REAL representing
+      +1σ error in density calculation. Contains  NULL when density uncertainty cannot be calculated due
+      to missing mass or radius uncertainties.
+  - name: denserr2
+    type: FLOAT
+    description: Negative uncertainty from 'pl_denserr2' in planetary density, in g/cm³. REAL representing
+      -1σ error in density calculation. Contains  NULL when density uncertainty cannot be calculated.
+  - name: disterr1
+    type: FLOAT
+    description: Positive uncertainty from 'st_disterr1' in stellar distance, in parsecs. REAL representing
+      +1σ error in distance measurement. Contains  NULL when stellar distance uncertainty is not available.
+  - name: disterr2
+    type: FLOAT
+    description: Negative uncertainty from 'st_disterr2' in stellar distance, in parsecs. REAL representing
+      -1σ error in distance measurement. Contains  NULL when stellar distance uncertainty is not available.
+  - name: optmagerr
+    type: FLOAT
+    description: Uncertainty from 'st_optmagerr' in stellar magnitude. REAL representing symmetric 1σ
+      error in magnitude measurement. Contains  NULL when magnitude uncertainty is not available.
+  - name: temperr1
+    type: FLOAT
+    description: Positive uncertainty from 'st_tefferr1' in stellar temperature, in Kelvin. REAL representing
+      +1σ error in temperature measurement. Contains  NULL when temperature uncertainty is not available.
+  - name: temperr2
+    type: FLOAT
+    description: Negative uncertainty from 'st_tefferr2' in stellar temperature, in Kelvin. REAL representing
+      -1σ error, accommodating larger negative uncertainties. Contains  NULL when temperature uncertainty
+      is not available.
+  - name: stellarmasserr1
+    type: FLOAT
+    description: Positive uncertainty from 'st_masserr1' in stellar mass, in solar masses. REAL representing
+      +1σ error in stellar mass. Contains  NULL when stellar mass uncertainty is not available.
+  - name: stellarmasserr2
+    type: FLOAT
+    description: Negative uncertainty from 'st_masserr2' in stellar mass, in solar masses. REAL representing
+      -1σ error in stellar mass. Contains  NULL when stellar mass uncertainty is not available.
+  - name: stellarraderr1
+    type: FLOAT
+    description: Positive uncertainty from 'st_raderr1' in stellar radius, in solar radii. REAL representing
+      +1σ error in stellar radius. Contains  NULL when stellar radius uncertainty is not available.
+  - name: stellarraderr2
+    type: FLOAT
+    description: Negative uncertainty from 'st_raderr2' in stellar radius, in solar radii. REAL representing
+      -1σ error in stellar radius. Contains  NULL when stellar radius uncertainty is not available.
+  - name: masssource
+    type: VARCHAR
+    description: 'Mass determination method from ''pl_bmassprov''. VARCHAR(50) with values: ''Msini''
+      (minimum mass from radial velocity, M×sin(i)), ''Mass'' (true mass from transit+RV or other methods),
+      ''Msin(i)/sin(i)'' (mass corrected for inclination). Contains  NULL when no mass measurement is
+      available.'
+  - name: updatestamp
+    type: DATE
+    description: Data update timestamp from 'rowupdate'. DATE field in YYYY-MM-DD format tracking when
+      the record was last updated, with dates ranging from 2014-05-14 to 2016-07-07 in current dataset.
+  - name: limitflags
+    type: JSON
+    description: 'JSONB column. Consolidates all measurement limit flags indicating whether values represent
+      actual measurements, upper limits, or lower limits for planetary and stellar parameters. Fields:
+      {"planetary_limits": {"Period_Lim": "Limit flag from ''pl_orbperlim'' for orbital period. REAL with
+      values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL when limit status
+      is unknown or not applicable.", "Semimaj_Lim": "Limit flag from ''pl_orbsmaxlim'' for semi-major
+      axis. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL when
+      limit status is unknown or not applicable.", "Ecc_Lim": "Limit flag from ''pl_orbeccenlim'' for
+      eccentricity. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL
+      when limit status is unknown or not applicable.", "Incl_Lim": "Limit flag from ''pl_orbincllim''
+      for inclination. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL
+      when limit status is unknown or not applicable.", "Mass_Lim": "Limit flag from ''pl_bmassjlim''
+      for planetary mass. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL
+      when limit status is unknown or not applicable.", "Rad_Lim": "Limit flag from ''pl_radjlim'' for
+      planetary radius. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL
+      when limit status is unknown or not applicable.", "Dens_Lim": "Limit flag from ''pl_denslim'' for
+      planetary density. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower limit). Contains  NULL
+      when limit status is unknown or not applicable."}, "stellar_limits": {"Dist_Lim": "Limit flag from
+      ''st_distlim'' for stellar distance. REAL with values: 0 (measured value), 1 (upper limit), -1 (lower
+      limit). Contains  NULL when limit status is unknown or not applicable.", "OptMag_Lim": "Limit flag
+      from ''st_optmaglim'' for stellar magnitude. REAL with values: 0 (measured value), 1 (upper limit),
+      -1 (lower limit). Contains  NULL when limit status is unknown or not applicable.", "Temp_Lim": "Limit
+      flag from ''st_tefflim'' for stellar temperature. REAL with values: 0 (measured value), 1 (upper
+      limit), -1 (lower limit). Contains  NULL when limit status is unknown or not applicable.", "StellarMass_Lim":
+      "Limit flag from ''st_masslim'' for stellar mass. REAL with values: 0 (measured value), 1 (upper
+      limit), -1 (lower limit). Contains  NULL when limit status is unknown or not applicable.", "StellarRad_Lim":
+      "Limit flag from ''st_radlim'' for stellar radius. REAL with values: 0 (measured value), 1 (upper
+      limit), -1 (lower limit). Contains  NULL when limit status is unknown or not applicable."}}'
+- schema: main
+  table: instruments_surveys
+  columns:
+  - name: instrumentref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each observational facility or survey program.
+  - name: facilityname
+    type: VARCHAR
+    description: 'Observational facility name derived from flag analysis. VARCHAR(100) NOT NULL UNIQUE
+      with values: ''ttv'' (from pl_ttvflag=''T''), ''kep'' (from pl_kepflag=1), ''k2'' (from pl_k2flag=true)
+      representing Transit Timing Variations, Kepler mission, and K2 mission respectively.'
+- schema: main
+  table: orbital_characteristics
+  columns:
+  - name: orbitalref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each orbital characteristics record.
+  - name: bodylink
+    type: BIGINT
+    description: Foreign key INTEGER referencing planets(PlanetRef), linking orbital parameters to a specific
+      planet.
+  - name: period
+    type: FLOAT
+    description: 'Orbital period from ''pl_orbper'' measured in days. REAL accommodating periods from
+      0.09 days (hot Jupiters) to 7,300,000 days (20,000+ years). Contains  NULL when orbital period cannot
+      be determined from available observations.
+
+
+      Orbital Period Value: Illustrates the value for the time a planet takes to complete one orbit around
+      its star.
+
+
+      Measured in days. ''Hot Jupiters'' can have periods of only a few days, while planets in very distant
+      orbits can have periods of many thousands of years.
+
+
+      Compiler note: Describes orbital_characteristics.period, which stores pl_orbper in days, matching
+      the entry''s description of orbital period value range from hot Jupiters to distant long-period
+      planets.'
+  - name: semimajor
+    type: FLOAT
+    description: Semi-major axis from 'pl_orbsmax' measured in AU. REAL covering range from 0.0044 AU
+      (ultra-hot Jupiters) to 2500 AU (wide-separation planets). Contains  NULL when orbital distance
+      cannot be reliably calculated.
+  - name: eccentricity
+    type: FLOAT
+    description: 'Orbital eccentricity from ''pl_orbeccen'' ranging from 0 (circular) to <1 (elliptical).
+      REAL providing high precision for nearly circular orbits. Contains  NULL when eccentricity cannot
+      be constrained from available data.
+
+
+      Orbital Eccentricity Value: Illustrates the value describing how much an orbit deviates from a perfect
+      circle.
+
+
+      A dimensionless value from 0 to <1. An eccentricity of 0 is a perfect circle. A value of 0.1 indicates
+      a slightly elliptical orbit, while a value of 0.7 indicates a very elongated, comet-like orbit.
+
+
+      Compiler note: Describes the meaning/range of orbital_characteristics.eccentricity (0 to <1, dimensionless).'
+  - name: inclination
+    type: FLOAT
+    description: Orbital inclination from 'pl_orbincl' in degrees relative to sky plane. REAL ranging
+      from 0° (face-on) to 180° (retrograde). Contains  NULL when inclination cannot be determined (e.g.,
+      for radial velocity-only discoveries).
+- schema: main
+  table: physical_properties
+  columns:
+  - name: physref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each physical properties record.
+  - name: objectlink
+    type: BIGINT
+    description: Foreign key INTEGER referencing planets(PlanetRef), linking physical parameters to a
+      specific planet.
+  - name: massjup
+    type: FLOAT
+    description: 'Planetary mass from ''pl_bmassj'' in Jupiter mass units. REAL covering range from 0.00006
+      MJ (sub-Earth) to 28.5 MJ (super-Jupiter). Contains  NULL when mass cannot be determined (e.g.,
+      for transit-only discoveries without radial velocity follow-up).
+
+
+      Planet Mass Value: Illustrates the value for a planet''s mass.
+
+
+      Typically measured in Jupiter masses ($M_J$). Earth''s mass is about 0.003 $M_J$. Known exoplanets
+      range from less than Earth''s mass to over 20 times the mass of Jupiter.
+
+
+      Compiler note: Describes the value semantics of physical_properties.massjup, planet mass in Jupiter
+      masses.'
+  - name: radjup
+    type: FLOAT
+    description: 'Planetary radius from ''pl_radj'' in Jupiter radius units. REAL covering range from
+      0.027 RJ (sub-Earth) to 6.9 RJ (inflated giants). Contains  NULL when radius cannot be measured
+      (e.g., for radial velocity-only discoveries).
+
+
+      Planet Radius Value: Illustrates the value for a planet''s physical size.
+
+
+      Typically measured in Jupiter radii ($R_J$). Earth''s radius is about 0.09 $R_J$. Planets range
+      from small rocky worlds smaller than Earth to ''inflated'' gas giants larger than Jupiter.
+
+
+      Compiler note: Describes the planet radius value stored in physical_properties.radjup, measured
+      in Jupiter radii (R_J), matching the column''s documented range and units.'
+  - name: densvalue
+    type: FLOAT
+    description: 'Bulk density from ''pl_dens'' in g/cm³. REAL covering gas giants (<1 g/cm³) to super-dense
+      planets (>20 g/cm³). Contains  NULL when both mass and radius are not available for density calculation.
+
+
+      Planet Density Value: Illustrates the value for a planet''s bulk density.
+
+
+      Measured in grams per cubic centimeter (g/cm³). Puffy gas giants can have densities less than water
+      (<1 g/cm³), while dense, rocky planets like Earth have densities around 5.5 g/cm³.
+
+
+      Compiler note: Describes the units and typical value range for densvalue (g/cm³), matching column
+      documentation for physical_properties.densvalue.'
+- schema: main
+  table: planet_instrument_observations
+  columns:
+  - name: obsref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each planet-instrument observation record.
+  - name: subjectlink
+    type: BIGINT
+    description: Foreign key INTEGER referencing planets(PlanetRef), indicating which planet was observed.
+  - name: facilitylink
+    type: BIGINT
+    description: Foreign key INTEGER referencing instruments_surveys(InstrumentRef), indicating which
+      facility made the observation.
+- schema: main
+  table: planets
+  columns:
+  - name: planetref
+    type: BIGINT
+    description: A primary key INTEGER derived from 'rowid' uniquely identifying each planet record, ranging
+      from 1 to 3372 in current dataset.
+  - name: hostlink
+    type: BIGINT
+    description: Foreign key INTEGER referencing stars(StellarRef), linking each planet to its host star
+      system derived from hostname matching.
+  - name: completter
+    type: VARCHAR
+    description: 'Planet designation from ''pl_letter'' within its system. VARCHAR(10) with values: ''b'',
+      ''c'', ''d'', ''e'', ''f'', ''g'', ''h'' following IAU conventions where ''b'' is typically the
+      first discovered planet.'
+  - name: notecount
+    type: BIGINT
+    description: Number of literature references from 'pl_nnotes'. INTEGER tracking annotation count for
+      this planet discovery.
+  - name: discmethod
+    type: VARCHAR
+    description: 'Discovery method from ''pl_discmethod''. VARCHAR(50) with standardized values: ''RadVel''/''RV''/''RV
+      Method''/''Radial Velocity''/''Doppler'' (radial velocity), ''Transit''/''TR''/''Transit Method''/''Photometry''/''Photometric''
+      (transit photometry), ''Direct Imaging''/''DI''/''Imaging''/''IMG''/''Direct'' (direct imaging),
+      ''TTV''/''Transit Timing Variations''/''Transit Timing''/''TTV Method''/''Timing Var'' (transit
+      timing), ''Microlensing''/''ML''/''μLens''/''Lensing''/''Gravitational'' (gravitational microlensing),
+      ''Pulsar''/''PSR Timing''/''PT''/''Pulsation Timing Variations'' (pulsar timing), ''Eclipse Timing
+      Variations''/''ETV''/''Eclipse Timing''/''Timing Variations'' (eclipse timing), ''Brightness Mod''/''OBM''/''Phase
+      Curve''/''Orbital Mod'' (orbital brightness modulation), ''AST'' (astrometry).'
+- schema: main
+  table: stars
+  columns:
+  - name: stellarref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each host star record in the database. Maps
+      to 'rowid' in source data.
+  - name: hostplname
+    type: VARCHAR
+    description: The name of the host star system derived from 'pl_hostname'. VARCHAR(50) NOT NULL UNIQUE
+      constraint ensures no duplicate star names. Examples include '11 Com', 'HD 114783', 'Kepler-1649'.
+  - name: stellardist
+    type: FLOAT
+    description: 'Distance to the host star measured in parsecs from ''st_dist''. REAL accommodating distances
+      from 3.21 to 8500 parsecs. Contains  NULL when stellar distance measurements are unavailable or
+      unreliable.
+
+
+      Stellar Distance Value: Illustrates the value for the distance to a star system.
+
+
+      Measured in parsecs (pc), where 1 parsec equals about 3.26 light-years. Values range from nearby
+      stars like Proxima Centauri (~1.3 pc) to stars thousands of parsecs away.
+
+
+      Compiler note: Describes the stellardist column (distance in parsecs), matching stars.stellardist
+      which stores st_dist in parsecs.'
+  - name: compcount
+    type: BIGINT
+    description: Total number of confirmed planetary companions from 'pl_pnum'. INTEGER count of planets
+      orbiting this host star, ranging from 1 to 8+ planets per system.
+  - name: coordsys
+    type: JSON
+    description: 'JSONB column. Consolidates all coordinate system information including both text and
+      decimal representations of right ascension and declination, providing complete positional data for
+      the host star. Fields: {"RA_Text": "Right ascension coordinate in sexagesimal format derived from
+      ''ra_str''. VARCHAR(60) with format like ''12h20m43.03s'', ''15h17m05.89s'', accommodating hours-minutes-seconds
+      notation. Contains  NULL when coordinate string representation is not available.", "RA_Decimal":
+      "Right ascension coordinate converted to decimal degrees from ''ra'' field. REAL providing precision
+      to arc-second level, ranging from 0 to 360 degrees. Contains  NULL when precise coordinates are
+      not available.", "Dec_Text": "Declination coordinate in sexagesimal format derived from ''dec_str''.
+      VARCHAR(60) with format like ''+17d47m34.3s'', ''+71d49m26.0s'', ''-39d14m10.3s'', accommodating
+      degrees-arcminutes-arcseconds notation with sign prefix. Contains  NULL when coordinate string representation
+      is not available.", "Dec_Decimal": "Declination coordinate converted to decimal degrees from ''dec''
+      field. REAL providing precision to arc-second level, ranging from -90 to +90 degrees. Contains  NULL
+      when precise coordinates are not available."}'
+  - name: stellarprops
+    type: JSON
+    description: 'JSONB column. Groups all stellar physical properties and their measurement quality flags,
+      including photometric, temperature, mass, and radius measurements with blend indicators. Fields:
+      {"photometry": {"Opt_Mag": "Optical magnitude of the host star from ''st_optmag''. REAL covering
+      magnitude range typically from -1.5 to 20+ magnitudes. Contains  NULL when stellar magnitude measurements
+      are not available.", "Mag_Blend": "Blend flag from ''st_optmagblend'' indicating if optical magnitude
+      is affected by stellar companions. REAL with values 0 (no blending), 1 (blended measurement). Contains  NULL
+      when blending status is unknown.", "Photo_Band": "Photometric band from ''st_optband'' used for
+      magnitude measurement. TEXT field with NOISE containing inconsistent representations of the same
+      bands: ''V (Johnson)'', ''Johnson'', ''V'', ''Johnson V'' (all representing Johnson V-band), ''Kepler-band'',
+      ''Kepler'', ''Kep-b'', ''Kep'' (all representing Kepler band), ''V-band'', ''K-band''. Contains  NULL
+      when photometric band information is not available."}, "physical": {"Temp_Value": "Effective temperature
+      from ''st_teff'' measured in Kelvin. REAL covering range from 575K to 57000K. Contains  NULL when
+      stellar temperature measurements are not available or unreliable.", "Temp_Blend": "Temperature blend
+      flag from ''st_teffblend'' indicating measurement quality. REAL with values 0 (clean measurement),
+      1 (affected by blending). Contains  NULL when temperature blending status is unknown.", "Mass_Value":
+      "Stellar mass from ''st_mass'' in solar mass units (M☉). REAL covering range from low-mass stars
+      to massive stars. Contains  NULL when stellar mass cannot be determined from available data.", "Mass_Blend":
+      "Mass blend flag from ''st_massblend'' indicating measurement reliability. REAL with values 0 (direct
+      measurement), 1 (affected by multiplicity). Contains  NULL when mass blending status is unknown.",
+      "Radius_Value": "Stellar radius from ''st_rad'' in solar radius units (R☉). REAL covering range
+      from sub-solar to giant stars. Contains  NULL when stellar radius measurements are not available.",
+      "Rad_Blend": "Radius blend flag from ''st_radblend'' indicating measurement quality. REAL with values
+      0 (clean measurement), 1 (affected by stellar activity). Contains  NULL when radius blending status
+      is unknown."}}
+
+
+      Apparent Magnitude Value: Illustrates the value for a star''s brightness as seen from Earth.
+
+
+      This is a logarithmic scale where smaller numbers are brighter. A magnitude of 1.0 is 100 times
+      brighter than a magnitude of 6.0. The brightest stars have negative magnitudes (e.g., Sirius is
+      -1.46).
+
+
+      Compiler note: Describes the Opt_Mag field within stellarprops.photometry JSON (st_optmag), the
+      star''s apparent magnitude as seen from Earth.
+
+
+      Stellar Temperature Value: Illustrates the value for a star''s effective surface temperature.
+
+
+      Measured in Kelvin (K). Cool red dwarfs can be around 3,000 K, a Sun-like star is about 5,800 K,
+      and very hot blue stars can exceed 30,000 K.
+
+
+      Compiler note: Value is stored at stellarprops->''physical''->''Temp_Value'' (Kelvin), as confirmed
+      by sample query.
+
+
+      Stellar Mass Value: Illustrates the value for a star''s mass.
+
+
+      Measured in solar masses ($M_{\odot}$), where 1 is the mass of our Sun. Most known host stars range
+      from low-mass red dwarfs (~0.1 $M_{\odot}$) to stars several times more massive than the Sun.
+
+
+      Compiler note: Describes the Mass_Value field nested under stellarprops.physical.Mass_Value, representing
+      stellar mass in solar masses (M☉).
+
+
+      Stellar Radius Value: Illustrates the value for a star''s radius.
+
+
+      Measured in solar radii ($R_{\odot}$), where 1 is the radius of our Sun. Values range from small
+      neutron stars to giant stars like Betelgeuse, which would extend beyond the orbit of Mars if in
+      our solar system.
+
+
+      Compiler note: Maps to stellarprops->physical->Radius_Value, the star''s radius in solar radii (R_sun),
+      stored as JSON field within stars.stellarprops.'

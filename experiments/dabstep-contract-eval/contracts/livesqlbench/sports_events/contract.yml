@@ -1,0 +1,131 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: sports_events, compiler: claudesonnet5
+# inputs: sports_events_kb.jsonl, sports_events_column_meaning_base.json, sports_events_schema.txt, sports_events.duckdb
+version: '1.0'
+name: livesqlbench-sports_events
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - circuits
+    - constructor_results
+    - constructor_standings
+    - constructors
+    - driver_standings
+    - drivers
+    - lap_times
+    - pit_stops
+    - qualifying
+    - races
+    - sprint_results
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Race Weekend Structure: Illustrates the standard sequence of sessions that constitute a championship
+      race weekend.
+
+
+      A typical race weekend consists of several sessions: up to three Free Practice sessions for teams
+      to tune their cars, a Qualifying session to determine the starting order for the main race, and
+      the Grand Prix Race itself. Some weekends also include a Sprint session.
+
+
+      Compiler note: Describes general race-weekend session structure (FP1-3, Qualifying, Sprint, Race)
+      as a concept, not a specific computation or condition over any table''s rows. No single table/column
+      encodes this; it''s background knowledge referenced by other entries (e.g., races.event_schedule
+      holds session dates/times but this entry itself states no computation).
+
+
+      Qualifying Format Explained: Illustrates the multi-stage knockout system used in qualifying to set
+      the race starting grid.
+
+
+      Qualifying is divided into three parts: Q1, Q2, and Q3. In Q1, all drivers compete, and the slowest
+      are eliminated. The remaining drivers proceed to Q2, where more are eliminated. The final top drivers
+      advance to Q3 to compete for Pole Position.
+
+
+      Compiler note: Describes the general qualifying knockout format/process (Q1/Q2/Q3 structure), not
+      a specific stored value in any table or column. The qualifying table stores results (q1_r, q2_r,
+      q3_r times) but does not encode the rules of elimination/advancement described here - that''s a
+      procedural/schema-level fact, not a computable condition over the data.
+
+
+      Sprint Session Explained: Illustrates the concept of a Sprint session within a race weekend.
+
+
+      A Sprint is a shorter race held on some race weekends. It has its own abbreviated qualifying and
+      awards fewer championship points than the main Grand Prix. Its result determines the starting grid
+      for the main race. The inclusion of a Sprint session modifies the standard Race Weekend Structure.
+
+
+      Compiler note: This entry describes a conceptual explanation of the Sprint session (its purpose,
+      scoring, and grid implications), not a computation or condition over a specific table/column. Although
+      sprint_results exists, this entry is purely descriptive/conceptual, so it cannot be encoded as a
+      SQL expression over a table.
+
+
+      Championship Points System (Race): Defines the standard points awarded for the top ten finishing
+      positions.
+
+
+      Points are awarded to the top 10 finishers as follows: 1st place - 25 points, 2nd - 18, 3rd - 15,
+      4th - 12, 5th - 10, 6th - 8, 7th - 6, 8th - 4, 9th - 2, 10th - 1.
+
+
+      Compiler note: Describes a general points-allocation rule, not stored data; no single table/column
+      encodes this scheme (points are stored as raw values in driver_standings.acc_pt / constructor_results.scoreVal
+      etc., not as this fixed mapping).
+
+
+      Championship Points System (Sprint): Defines the points awarded for top finishing positions in a
+      Sprint session.
+
+
+      Points are awarded to the top 8 finishers in a Sprint session as follows: 1st place - 8 points,
+      2nd - 7, 3rd - 6, 4th - 5, 5th - 4, 6th - 3, 7th - 2, 8th - 1. This is a key feature of the Sprint
+      Session Explained.
+
+
+      Compiler note: This describes a fixed external points scale, not a specific table/column. Checked
+      sprint_results.sprint_performance->>''points'': actual values don''t match a single fixed mapping
+      from position (e.g., pos=1 has both 8 and 3 points across different races/years), confirming this
+      is documented business rule rather than a derivable or storable value matching one column.'
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

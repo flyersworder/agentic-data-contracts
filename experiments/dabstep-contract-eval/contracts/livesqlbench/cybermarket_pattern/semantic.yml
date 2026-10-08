@@ -1,0 +1,948 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: cybermarket_pattern, compiler: claudesonnet5
+# inputs: cybermarket_pattern_kb.jsonl, cybermarket_pattern_column_meaning_base.json, cybermarket_pattern_schema.txt, cybermarket_pattern.duckdb
+metrics:
+- name: marketplace_risk_score_mrs
+  description: 'Evaluates the overall risk of a platform.
+
+
+    MRS = \frac{0.4 \times \text{vuln\_count} + 0.3 \times \text{event\_count} + 0.3 \times \text{reputation\_score}}{100}
+
+
+    Compiler note: vuln_count = platform_compliance.vuln_inst_count, event_count = platform_compliance.sec_event_count,
+    reputation_score = RepScore (stored as text with leading ''$'' and trailing space, sometimes empty
+    string meaning not assessed -> NULL after stripping).'
+  sql_expression: (0.4 * (platform_compliance->>'vuln_inst_count')::double + 0.3 * (platform_compliance->>'sec_event_count')::double
+    + 0.3 * NULLIF(TRIM(REPLACE("RepScore", '$', '')), '')::double) / 100
+  source_model: main.markets
+  domains:
+  - calculations
+- name: transaction_velocity_rate
+  description: 'Measures transaction completion speed.
+
+
+    TVR = \frac{\text{total\_transactions}}{\text{active\_time\_in\_hours}}
+
+
+    Built on: marketplace_risk_score_mrs.
+
+
+    Compiler note: TotalTxns stored as text with leading ''$'' and trailing space (e.g. ''$917 ''); stripped
+    to numeric. DaysActive is in days, converted to hours (*24) to match active_time_in_hours denominator.'
+  sql_expression: NULLIF(TRIM(REPLACE("TotalTxns", '$', '')), '')::double / (DaysActive * 24)
+  source_model: main.vendors
+  domains:
+  - calculations
+- name: compliance_efficiency_index_cei
+  description: 'Represents vendor''s compliance performance.
+
+
+    CEI = \frac{\text{compliance\_score}}{\text{violation\_count}}
+
+
+    Compiler note: CEI = reg_compliance_scr / viol_count, both pulled from vendor_compliance_ratings jsonb
+    (regulatory compliance score and policy violation count).'
+  sql_expression: (vendor_compliance_ratings->>'reg_compliance_scr')::double / (vendor_compliance_ratings->>'viol_count')::double
+  source_model: main.vendors
+  domains:
+  - calculations
+- name: data_protection_efficiency
+  description: 'Efficiency of data protection per vulnerability.
+
+
+    DPE = \frac{\text{protection\_measures}}{\text{vulnerability\_instances}}
+
+
+    Built on: transaction_velocity_rate, marketplace_risk_score_mrs.
+
+
+    Compiler note: DPE = protection_meas_count / vuln_inst_count from markets.platform_compliance JSON
+    fields; guarded against division by zero with NULLIF.'
+  sql_expression: (platform_compliance->>'protection_meas_count')::double / NULLIF((platform_compliance->>'vuln_inst_count')::double,
+    0)
+  source_model: main.markets
+  domains:
+  - calculations
+- name: anonymity_cost_index
+  description: 'Traceability score per anonymity level.
+
+
+    ACI = \frac{\text{traceability\_cost}}{\text{anonymity\_score}}
+
+
+    Built on: data_protection_efficiency, compliance_efficiency_index_cei.
+
+
+    Compiler note: traceability_cost is the numeric portion of anonymity_cost (stored as ''X USD/anonymity-point'');
+    anonymity_score is AnonLevel, which despite documented as categorical High/Medium/Low actually holds
+    a numeric score stored as text in the data.'
+  sql_expression: CAST(split_part("anonymity_cost", ' ', 1) AS DOUBLE) / NULLIF(CAST("AnonLevel" AS DOUBLE),
+    0)
+  source_model: main.connection_security
+  domains:
+  - calculations
+- name: buyer_risk_dollar_ratio
+  description: 'Risk per dollar spent by a buyer.
+
+
+    BRDR = \frac{\text{risk\_score}}{\text{total\_spending\_usd}}
+
+
+    Built on: transaction_velocity_rate, anonymity_cost_index.
+
+
+    Compiler note: risk_dollar_ratio field already stores BRDR = risk_score/total_spending_usd as text
+    like ''0.0644 RiskScore/USD''; parsed numeric prefix.'
+  sql_expression: CAST(split_part(buyer_risk_profile->>'risk_dollar_ratio', ' ', 1) AS DOUBLE)
+  source_model: main.buyers
+  domains:
+  - calculations
+- name: platform_liquidity_rate
+  description: 'Liquidity as a function of transaction flow and price.
+
+
+    PLR = \frac{\text{successful\_txns} \times \text{average\_price}}{\text{days\_active}}
+
+
+    Compiler note: PLR = successful_txns * average_price / days_active, computed at vendor level: successful_txns
+    = vendors.CompletedTxns, average_price = average of product_availability->>''price_amt'' over all
+    product listings pointing to this vendor (products.SellerPointer), days_active = vendors.DaysActive.
+    Checked that this does not exactly reproduce the stored vendor_compliance_ratings->>''liq_rate'' value
+    (ratios are not constant across vendors), so liq_rate appears to use a different/undocumented scaling;
+    this expression encodes the formula as stated in the documentation.'
+  sql_expression: ("CompletedTxns"::double * (SELECT AVG((p.product_availability->>'price_amt')::double)
+    FROM products p WHERE p."SellerPointer" = vendors."SellerKey")) / "DaysActive"
+  source_model: main.vendors
+  domains:
+  - calculations
+- name: threat_handling_rate
+  description: 'How efficiently threats are managed over time.
+
+
+    THR = \frac{\text{threats\_handled}}{\text{total\_hours}}
+
+
+    Built on: platform_liquidity_rate, data_protection_efficiency.
+
+
+    Compiler note: Threat_handle_rate stores THR already computed as ''X Threats/hour'' text; extracted
+    numeric value before the unit label.'
+  sql_expression: CAST(split_part("Threat_handle_rate", ' ', 1) AS DOUBLE)
+  source_model: main.connection_security
+  domains:
+  - calculations
+- name: suspicion_signal_density
+  description: 'Keyword hits per message volume in communication.
+
+
+    SSD = \frac{\text{keyword\_matches}}{\text{total\_messages}}
+
+
+    Compiler note: SSD = keyword_match_count / msg_count_total, both extracted from the communication_details
+    JSONB column.'
+  sql_expression: (communication_details->>'keyword_match_count')::numeric / (communication_details->>'msg_count_total')::numeric
+  source_model: main.communications
+  domains:
+  - calculations
+- name: wallet_turnover_rate
+  description: 'Turnover of funds in a crypto wallet.
+
+
+    WTR = \frac{\text{value\_moved}}{\text{wallet\_age\_in\_days}}
+
+
+    Built on: transaction_velocity_rate, compliance_efficiency_index_cei.
+
+
+    Compiler note: value_moved mapped to wallet_value_usd and wallet_age_in_days mapped to wallet_age_days
+    from wallet_risk_assessment JSON; divide-by-zero guarded with NULLIF.'
+  sql_expression: (wallet_risk_assessment->>'wallet_value_usd')::double / NULLIF((wallet_risk_assessment->>'wallet_age_days')::double,
+    0)
+  source_model: main.risk_analytics
+  domains:
+  - calculations
+- name: high_risk_vendor
+  description: 'A vendor flagged with active investigation or high law-enforcement interest.
+
+
+    A vendor is deemed High Risk if there is an active regulatory or law-enforcement investigation in
+    progress, or formal records indicate high interest from authorities.
+
+
+    Built on: data_protection_efficiency, anonymity_cost_index.
+
+
+    Compiler note: InvestigationFlag=''Active'' encodes an active investigation; LE_Interest=''High''
+    encodes high law-enforcement interest.'
+  sql_expression: '"InvestigationFlag" = ''Active'' OR "LE_Interest" = ''High'''
+  source_model: main.vendors
+  domains:
+  - definitions
+- name: cross_border_transaction
+  description: 'Indicates the shipment moves across national boundaries.
+
+
+    Any transaction where the shipment passes from one country to another, triggering customs or import
+    controls.
+
+
+    Compiler note: CrossBorder is a bigint flag (0/1) representing boolean Yes/No for whether shipment
+    crosses national boundaries.'
+  sql_expression: '"CrossBorder" = 1'
+  source_model: main.transactions
+  domains:
+  - definitions
+- name: advanced_verification_tier
+  description: 'Vendors with strong identity validation.
+
+
+    Vendors who have completed multi factor or document backed identity validation are classified as Advanced
+    tier.
+
+
+    Compiler note: Advanced Verification Tier maps directly to the VerTier column value ''Advanced'',
+    which represents vendors who completed multi-factor or document-backed identity validation.'
+  sql_expression: '"VerTier" = ''Advanced'''
+  source_model: main.vendors
+  domains:
+  - definitions
+- name: escrow_compliance
+  description: 'Measures vendor behavior towards using escrow.
+
+
+    A vendor is Escrow Compliant when they consistently route payments through an escrow mechanism until
+    delivery is confirmed.
+
+
+    Compiler note: Escrow usage per transaction is in transactions.transaction_financials->>''escrow_used_stat''
+    (Yes/No/NULL; NULL=unavailable). Used json_extract_string since ->> caused a cast error. A vendor
+    is Escrow Compliant if none of their transactions have escrow_used_stat=''No'' and at least one has
+    escrow_used_stat=''Yes'', ignoring NULL/unknown statuses.'
+  sql_expression: NOT EXISTS (SELECT 1 FROM transactions t WHERE t."VendorLink" = vendors."SellerKey"
+    AND json_extract_string(t.transaction_financials, '$.escrow_used_stat') = 'No') AND EXISTS (SELECT
+    1 FROM transactions t WHERE t."VendorLink" = vendors."SellerKey" AND json_extract_string(t.transaction_financials,
+    '$.escrow_used_stat') = 'Yes')
+  source_model: main.vendors
+  domains:
+  - definitions
+- name: premium_authentication
+  description: 'Sessions with multi-factor authentication or 2FA.
+
+
+    Sessions secured by two factor or multi factor authentication are considered to have Premium authentication.
+
+
+    Compiler note: auth_protocol_type values observed: ''2FA'', ''Basic'', ''Multi-factor''. Premium Authentication
+    = sessions using 2FA or Multi-factor.'
+  sql_expression: connection_security_metrics->>'auth_protocol_type' IN ('2FA', 'Multi-factor')
+  source_model: main.connection_security
+  domains:
+  - definitions
+- name: traceable_communication
+  description: 'Communications with high traceability signals.
+
+
+    Message threads exhibiting a high volume of flagged keywords and linguistic anomalies are marked as
+    Traceable for further review.
+
+
+    Compiler note: High keyword volume defined as above the 75th percentile of keyword_match_count (>15);
+    linguistic anomalies encoded as lang_pattern_type = ''Suspicious'' per the Language Patterns taxonomy.
+    Used -> with cast instead of ->> to avoid a DuckDB cast conflict when extracting two fields from the
+    same jsonb column in one expression.'
+  sql_expression: (communication_details->'keyword_match_count')::int > 15 AND (communication_details->>'lang_pattern_type')
+    = 'Suspicious'
+  source_model: main.communications
+  domains:
+  - definitions
+- name: suspicious_buyer
+  description: 'Buyers with low behavior consistency or high risk ratio.
+
+
+    A buyer is labeled Suspicious when their behavioural consistency score is low and their risk per dollar
+    metric is notably high.
+
+
+    Built on: threat_handling_rate, transaction_velocity_rate.
+
+
+    Compiler note: Encoded ''low behavior consistency'' as below the median (51.5) of behavior_consistency_scr
+    across buyers, and ''notably high'' risk-dollar ratio as above the 75th percentile (0.15145) of risk_dollar_ratio
+    (parsed numeric prefix before unit string ''RiskScore/USD''). Both conditions combined with AND per
+    ''and'' in definition.'
+  sql_expression: (buyer_risk_profile->>'behavior_consistency_scr')::double < 51.5 AND CAST(split_part(buyer_risk_profile->>'risk_dollar_ratio',
+    ' ', 1) AS DOUBLE) > 0.15145
+  source_model: main.buyers
+  domains:
+  - definitions
+- name: secure_platform
+  description: 'Platforms with low vulnerabilities and high protection count.
+
+
+    A platform with fewer than ten unresolved security vulnerabilities and more than fifteen active protection
+    measures qualifies as Secure.
+
+
+    Built on: compliance_efficiency_index_cei, premium_authentication.
+
+
+    Compiler note: Used platform_compliance JSON fields vuln_inst_count and protection_meas_count; thresholds
+    applied as strict < 10 and > 15 per definition.'
+  sql_expression: (platform_compliance->>'vuln_inst_count')::double < 10 AND (platform_compliance->>'protection_meas_count')::double
+    > 15
+  source_model: main.markets
+  domains:
+  - definitions
+- name: fraud_flagged_transaction
+  description: 'Transaction flagged by fraud model probability.
+
+
+    Transactions with a machine learning fraud probability exceeding 70 percent are designated as Fraud
+    Flagged.
+
+
+    Compiler note: FraudProb stored as a percentage (0-100 scale, e.g. 67.3, 78.8), so ''exceeding 70
+    percent'' maps to FraudProb > 70.'
+  sql_expression: '"FraudProb" > 70'
+  source_model: main.risk_analytics
+  domains:
+  - definitions
+- name: tier_3_escalation_case
+  description: 'Alert cases escalated to the highest priority tier.
+
+
+    Alert cases escalated to Tier-3 represent the highest priority and warrant immediate incident response
+    action.
+
+
+    Built on: threat_handling_rate, advanced_verification_tier.
+
+
+    Compiler note: Escalation tier stored as JSON field escalation_tier_stat with values Level1/Level2/Level3;
+    Tier-3 maps to ''Level3''.'
+  sql_expression: (alert_case_management->>'escalation_tier_stat') = 'Level3'
+  source_model: main.alerts
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: alerts
+  columns:
+  - name: EventTag
+    type: VARCHAR
+    description: 'TEXT. Identifier of the transaction for which the alert was generated. PK. FK to transactions(EventCode).
+      Example: TX4833222.'
+  - name: ReviewFreq
+    type: VARCHAR
+    description: 'TEXT. Recommended frequency for reviewing the alert or case. Possible values: Daily,
+      Monthly, Weekly.'
+  - name: NextReviewDt
+    type: DATE
+    description: 'DATE. Date of the next scheduled review. Example: 2025/3/17.'
+  - name: AnnotationCount
+    type: BIGINT
+    description: 'BIGINT. Number of analyst annotations attached to the alert record. Example: 3.'
+  - name: alert_case_management
+    type: JSON
+    description: 'JSONB column. Stores details about the alert case, including severity level, response
+      time, and actions taken. Fields: {"severity_level_stat": "TEXT. Severity level assigned to the alert.
+      Possible values: Critical, High, Low, Medium.", "alert_category": "TEXT. Categorical class of the
+      alert. **NULL means alert has not yet been classified.**. Possible values: Behavior, Pattern, Security,
+      Transaction.", "confidence_metric_val": "REAL. Confidence score associated with the alert classification.
+      Example: 59.6.", "invest_priority_stat": "TEXT. Investigation-priority level for the alert. Possible
+      values: High, Low, Medium.", "resp_time_min": "BIGINT. Time taken to respond to the alert, in minutes.
+      Example: 1411.", "escalation_tier_stat": "TEXT. Escalation tier applied to the alert. **NULL means
+      escalation tier has not been assigned.**. Possible values: Level1, Level2, Level3.", "case_state_stat":
+      "TEXT. Current state of the incident case. Possible values: Ongoing, Open, Resolved.", "resolve_hours":
+      "BIGINT. Hours taken to resolve the alert. Example: 122.", "action_taken_stat": "TEXT. Action undertaken
+      in response to the alert. **NULL means no action has yet been recorded.**. Possible values: Restriction,
+      Termination, Warning.", "needs_followup_stat": "BOOLEAN. Indicates whether further follow-up is
+      required. Possible values: No, Yes."}
+
+
+      Alert Severity Levels: Importance level of alerts.
+
+
+      Values: Critical, High, Medium, Low.
+
+
+      Compiler note: Describes the severity_level_stat field within the alert_case_management JSONB column
+      (values Critical, High, Medium, Low).'
+- schema: main
+  table: buyers
+  columns:
+  - name: AcqCode
+    type: VARCHAR
+    description: TEXT. Unique identifier for a buyer (acquirer) account. PK.
+  - name: ProfileAge
+    type: BIGINT
+    description: 'BIGINT. Age of the buyer’s profile in days. Example: 326.'
+  - name: PurchaseCount
+    type: BIGINT
+    description: 'BIGINT. Number of purchases made by the buyer. Example: 10.'
+  - name: AuthLevel
+    type: VARCHAR
+    description: 'TEXT. Authentication level attained by the buyer. **NULL means authentication level
+      has not been determined.**. Possible values: Advanced, Basic.
+
+
+      Buyer Authentication Levels: Levels of login verification for buyers.
+
+
+      Values: Advanced, Basic. Label descriptions: - Advanced: Account protected by multi factor authentication
+      or hardware-backed credentials, offering high assurance. - Basic: Account relies on single factor
+      authentication such as a password, with no secondary verification.
+
+
+      Compiler note: Describes the categorical values (Advanced, Basic) of buyers.AuthLevel column, matching
+      its documented possible values.'
+  - name: buyer_risk_profile
+    type: JSON
+    description: 'JSONB column. Contains the buyer’s risk-related metrics, including risk score, behavior
+      consistency, and purchase pattern. Fields: {"risk_metric_scr": "REAL. Risk metric assigned to the
+      buyer based on behaviour. **NULL means risk metric has not been calculated.**. Example: 29.5.",
+      "behavior_consistency_scr": "REAL. Behaviour-consistency score across sessions. **NULL means behavioural-consistency
+      metric not available.**. Example: 83.4.", "spend_pattern": "TEXT. Categorised spending pattern for
+      the buyer. Possible values: High, Low, Medium, Variable.", "purchase_freq": "TEXT. Buying-frequency
+      classification (e.g., low, medium, high). Possible values: Heavy, Occasional, One-time, Regular.",
+      "risk_dollar_ratio": "text. The risk indicator associated with each buyer, calculated as the ratio
+      of buyer risk score to payment amount in USD. Example: 0.1079 RiskScore/USD."}
+
+
+      Spend Pattern Categories: Buyer spending trends.
+
+
+      Values: High, Low, Medium, Variable.
+
+      Label descriptions:
+
+      - High: Frequent, high value purchases indicative of heavy marketplace engagement.
+
+      - Low: Infrequent, low value purchases typical of casual or opportunistic buyers.
+
+      - Medium: Steady purchasing cadence with moderate transaction amounts.
+
+      - Variable: Irregular bursts of spending with no predictable pattern.
+
+
+      Compiler note: Describes the ''spend_pattern'' field within buyers.buyer_risk_profile JSON, which
+      holds categorical values High/Low/Medium/Variable as documented.'
+- schema: main
+  table: communications
+  columns:
+  - name: EventLink
+    type: VARCHAR
+    description: TEXT. Identifier of the transaction related to this communication record. PK. FK to transactions(EventCode).
+  - name: communication_details
+    type: JSON
+    description: 'JSONB column. Stores metadata about communications related to transactions, including
+      sentiment and message frequency. Fields: {"encryption_type": "TEXT. Type of encryption used in the
+      communications. Possible values: Custom, Enhanced, Standard.", "comm_channel_type": "TEXT. Communication
+      channel (e.g., forum PM, email). Possible values: External, Internal, Mixed.", "msg_count_total":
+      "BIGINT. Number of messages exchanged in the communication thread. Example: 36.", "comm_freq_type":
+      "TEXT. Frequency classification of communications. Possible values: High, Low, Medium.", "lang_pattern_type":
+      "TEXT. Language pattern or grammar classification inferred from messages. Possible values: Consistent,
+      Suspicious, Variable.", "sentiment_val": "REAL. Sentiment-analysis score of the message corpus.
+      Example: -0.69.", "keyword_match_count": "BIGINT. Count of significant keyword matches detected.
+      Example: 20.", "suspic_index_scr": "REAL. Suspicion score derived from content analysis. Example:
+      14.7."}
+
+
+      Language Patterns: Communication grammar detected in messages.
+
+
+      Values: Consistent, Suspicious, Variable.
+
+      Label descriptions:
+
+      - Consistent: Uniform grammar, vocabulary, and tone across messages, suggesting a single genuine
+      author.
+
+      - Suspicious: Irregular phrasing, sudden language switches, or machine translated text indicating
+      possible deception.
+
+      - Variable: Mixed linguistic styles from multiple senders or intentionally altered patterns to hinder
+      profiling.
+
+
+      Compiler note: Describes the lang_pattern_type field (Consistent/Suspicious/Variable) within communications.communication_details
+      JSONB column.'
+- schema: main
+  table: connection_security
+  columns:
+  - name: TxnPointer
+    type: VARCHAR
+    description: TEXT. Identifier of the transaction under security review. PK. FK to transactions(EventCode).
+  - name: OpSecMetric
+    type: FLOAT
+    description: 'REAL. Operational-security metric for the transaction session. Example: 95.7.'
+  - name: ThreatIntelIndex
+    type: FLOAT
+    description: 'REAL. Threat-intelligence index derived from external feeds. Example: 79.2.'
+  - name: DetectionAvoidance
+    type: FLOAT
+    description: 'REAL. Score indicating detection-avoidance behaviour. Example: 94.65125815301414.'
+  - name: AnonLevel
+    type: VARCHAR
+    description: 'TEXT. Level of anonymity observed. Possible values: High, Low, Medium.
+
+
+      Session Anonymity Levels: How anonymous a session appears.
+
+
+      Values: High, Medium, Low.
+
+
+      Compiler note: Column documented as categorical with values High/Medium/Low describing session anonymity;
+      matches schema description "Level of anonymity observed."'
+  - name: TraceScore
+    type: FLOAT
+    description: 'REAL. Score indicating how easily the actor can be traced. Example: 14.4.'
+  - name: CorrelationValue
+    type: FLOAT
+    description: 'REAL. Correlation strength between session artefacts. Example: 69.6.'
+  - name: PatternMatchScore
+    type: FLOAT
+    description: 'REAL. Pattern-match score against known malicious signatures. Example: 36.5.'
+  - name: BehaviorScore
+    type: FLOAT
+    description: 'REAL. Behavioural risk score for the session. Example: 15.8.'
+  - name: ML_Confidence
+    type: FLOAT
+    description: 'REAL. Machine-learning confidence level for the classification. Example: 97.2.'
+  - name: AnomalyValue
+    type: FLOAT
+    description: 'REAL. Aggregate anomaly score for the session. **NULL means anomaly metric has not been
+      computed.**. Example: 38.9.'
+  - name: FalsePosProb
+    type: FLOAT
+    description: 'REAL. Probability that the detection is a false positive. Example: 10.4.'
+  - name: Threat_handle_rate
+    type: VARCHAR
+    description: 'text. The rate at which threats are handled in the system, measured in Threats/hour.
+      Example: 0.12 Threats/hour.'
+  - name: Data_proctecteff
+    type: VARCHAR
+    description: 'text. A measure of data protection efficiency, calculated as the ratio of vulnerability
+      count to data protection level, measured in Vulnerabilities/GB. Example: 1.82 Vulnerabilities/GB.'
+  - name: encrytion_cost
+    type: VARCHAR
+    description: 'text. The cost of encryption required for the transaction, measured in USD/encryption-bit.
+      Example: 8.21 USD/encryption-bit.'
+  - name: anonymity_cost
+    type: VARCHAR
+    description: 'text. A score reflecting the level of traceability in a transaction, associated with
+      the anonymity level, measured in USD/anonymity-point. Example: 51.71 USD/anonymity-point.'
+  - name: Bot_act_index
+    type: VARCHAR
+    description: 'text. A metric representing bot activity, calculated as actions per IP per hour, measured
+      in Actions/IP/hour. Example: 40.87 Actions/IP/hour.'
+  - name: Connection_duration
+    type: VARCHAR
+    description: 'text. The diversity of connection durations in a given session, measured in hours. Example:
+      8.92 hours.'
+  - name: connection_security_metrics
+    type: JSON
+    description: 'JSONB column. Captures the security metrics for the connection during the transaction,
+      such as IP count, VPN usage, and encryption strength. Fields: {"ip_count_total": "BIGINT. Number
+      of unique IP addresses observed for the transaction. **NULL means IP address data was not collected.**.
+      Possible values: 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0.", "tor_node_count": "BIGINT.
+      Count of Tor nodes traversed during the connection. **NULL means Tor-usage information is unavailable.**.
+      Example: 4.0.", "vpn_detect_status": "TEXT. Indicator whether a VPN was detected in the connection.
+      Possible values: No, Suspected, Yes.", "browser_fp_unique_scr": "REAL. Uniqueness score of the browser
+      fingerprint. Example: 6.4.", "device_fp_risk_score": "REAL. Risk score of the device fingerprint.
+      **NULL means device-fingerprint data is unavailable.**. Example: 63.7.", "conn_pattern_metric_scr":
+      "REAL. Metric describing anomalies in connection patterns. Example: 48.1.", "encryption_strength_scr":
+      "TEXT. Strength classification of the TLS/SSL encryption. Possible values: Military-grade, Standard,
+      Strong.", "auth_protocol_type": "TEXT. Authentication protocol used during the session. Possible
+      values: 2FA, Basic, Multi-factor.", "session_sec_rating_scr": "REAL. Overall security rating of
+      the session. **NULL means session-security rating not assessed.**. Example: 45.3.", "data_protection_class":
+      "TEXT. Data-protection classification assigned to the session. Possible values: Basic, Enhanced,
+      Maximum.", "privacy_score_val": "REAL. Score measuring privacy preservation during the session.
+      Example: 62.2."}'
+- schema: main
+  table: markets
+  columns:
+  - name: PlatCode
+    type: VARCHAR
+    description: TEXT. Unique identifier code for the marketplace platform. PK.
+  - name: PlatName
+    type: VARCHAR
+    description: 'TEXT. Human-readable name of the marketplace platform. Example: Market_84.'
+  - name: PlatformType
+    type: VARCHAR
+    description: TEXT. Classification of the platform (e.g., forum, service, marketplace).
+  - name: AgeDays
+    type: BIGINT
+    description: 'BIGINT. Number of days since the platform’s first observed appearance. Example: 168.'
+  - name: OperStatus
+    type: VARCHAR
+    description: 'TEXT. Current operational status of the platform (active, offline, seized, etc.). Possible
+      values: Active, Closed, Suspended, Under Investigation.
+
+
+      Platform Operational Status: Indicates current state of platform functionality.
+
+
+      Values: Active, Closed, Suspended, Under Investigation. Label descriptions: - Active: The marketplace
+      is online, accepting new listings and processing transactions normally.- Closed: Operators have
+      permanently shut down the marketplace; no further log ins or transactions are possible. - Suspended:
+      The marketplace is temporarily offline, often due to policy violations or maintenance, and may return
+      to service. - Under Investigation: Law enforcement or compliance review is in progress; user activity
+      is restricted or frozen.
+
+
+      Compiler note: Matches markets.OperStatus values (Active, Closed, Suspended, Under Investigation)
+      exactly as described.'
+  - name: RepScore
+    type: VARCHAR
+    description: 'TEXT. Reputation score assigned to the platform. **NULL means reputation has not yet
+      been assessed or is unavailable.**. Example: $65.20 .'
+  - name: ConfidenceLevel
+    type: VARCHAR
+    description: 'TEXT. Analyst-assigned confidence in the accuracy of platform metrics. Possible values:
+      High, Low, Medium, Unknown.'
+  - name: SizeCat
+    type: VARCHAR
+    description: 'TEXT. Categorical size bucket of the platform (small, medium, large). Possible values:
+      Large, Medium, Mega, Small.'
+  - name: DayTxnVol
+    type: FLOAT
+    description: 'REAL. Average daily transaction volume on the platform. Example: 5388.'
+  - name: ActiveUsersMo
+    type: VARCHAR
+    description: 'TEXT. Estimated number of active users per month. Example: $38,933 .'
+  - name: SellerCount
+    type: BIGINT
+    description: 'BIGINT. Number of distinct sellers currently active on the platform. **NULL means seller
+      count could not be determined at snapshot time.**. Example: 985.0.'
+  - name: AcqCount
+    type: BIGINT
+    description: 'BIGINT. Number of distinct buyer (acquirer) accounts on the platform. Example: 6009.'
+  - name: ItemListings
+    type: BIGINT
+    description: 'BIGINT. Current number of active product listings on the platform. Example: 34834.'
+  - name: lastUpdated
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp when this platform record was last refreshed. Example: 2025/2/16
+      15:29.'
+  - name: RefreshHrs
+    type: BIGINT
+    description: 'BIGINT. Scheduled refresh interval for this record, in hours. Possible values: 1, 4,
+      8, 24.'
+  - name: platform_compliance
+    type: JSON
+    description: 'JSONB column. Combines compliance and security-related metrics for the platform, including
+      audit results, vulnerability instances, and security measures. Fields: {"sec_audit_stat": "TEXT.
+      Status or date of the most recent security audit. Possible values: Fail, Pass, Warning.", "vuln_inst_count":
+      "BIGINT. Count of discovered security vulnerabilities on the platform. Example: 20.", "sec_event_count":
+      "BIGINT. Total number of recorded security events/incidents. Example: 0.", "protection_meas_count":
+      "BIGINT. Count of active security protection or mitigation measures. Example: 17.", "data_ret_policy_stat":
+      "TEXT. Declared data-retention policy of the platform. Possible values: Active, Archived, Deleted.",
+      "geo_dist_scr": "text. A score representing the geographical distribution of market activity, calculated
+      based on transaction volume and active users, measured in km. Example: 2140.32 km.", "laund_ve_score":
+      "text. The probability of fraudulent activity in a market, based on laundering velocity, measured
+      in USD/risk/day. Example: 0.62 USD/risk/day."}'
+- schema: main
+  table: products
+  columns:
+  - name: ProdCat
+    type: VARCHAR
+    description: 'TEXT. High-level product category. PK (composite). Possible values: Data, Digital, Physical,
+      Service.
+
+
+      Product Categories: The general type of products listed.
+
+
+      Values: Data, Digital, Physical, Service. Label descriptions: - Data: Digital information assets
+      such as credential dumps, personal records, or proprietary databases. - Digital: Intangible goods
+      like software licenses, media subscriptions, or downloadable files. - Physical: Tangible merchandise
+      shipped to the buyer, including hardware devices or printed documents. - Service: Intangible labor
+      or expertise, e.g., penetration testing, content creation, or laundering assistance.
+
+
+      Compiler note: Describes the ProdCat column''s categorical values (Data, Digital, Physical, Service),
+      matching the schema''s documented possible values.'
+  - name: Subcategory
+    type: VARCHAR
+    description: 'TEXT. Specific product subcategory. PK (composite). Possible values: Type_A, Type_B,
+      Type_C, Type_D.'
+  - name: ListingAge
+    type: BIGINT
+    description: 'BIGINT. Age of the listing in days. PK (composite). Example: 155.'
+  - name: SellerPointer
+    type: VARCHAR
+    description: TEXT. Identifier for the vendor offering the listing. PK (composite). FK to vendors(SellerKey).
+  - name: product_availability
+    type: JSON
+    description: 'JSONB column. Stores product-related metrics, including availability, price, and listing
+      age. Fields: {"price_amt": "REAL. Listing price amount. Example: 1166.46.", "qty_avail": "BIGINT.
+      Quantity available for sale in this listing."}'
+- schema: main
+  table: risk_analytics
+  columns:
+  - name: TxnLink
+    type: VARCHAR
+    description: TEXT. Identifier of the transaction under risk analysis. PK. FK to transactions(EventCode).
+  - name: RiskIndicatorCount
+    type: BIGINT
+    description: 'BIGINT. Number of risk indicators triggered for the transaction. Example: 9.'
+  - name: FraudProb
+    type: FLOAT
+    description: 'REAL. Model-computed probability that the transaction is fraudulent. Example: 67.3.'
+  - name: ML_Risk
+    type: VARCHAR
+    description: 'TEXT. Machine-learning-derived risk category. Possible values: High, Low, Medium.'
+  - name: LinkedEvents
+    type: BIGINT
+    description: 'BIGINT. Number of linked suspicious events. Example: 29.'
+  - name: ChainLength
+    type: BIGINT
+    description: 'BIGINT. Length of the associated blockchain transaction chain. **NULL means chain length
+      could not be determined.**. Possible values: 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0.'
+  - name: wallet_risk_assessment
+    type: JSON
+    description: 'JSONB column. Contains risk assessment metrics related to cryptocurrency wallets, such
+      as wallet score, transaction chain length, and turnover rate. Fields: {"wallet_score_val": "REAL.
+      Risk score of the cryptocurrency wallet involved. Example: 34.4.", "wallet_age_days": "BIGINT. Age
+      of the cryptocurrency wallet in days. Example: 722.", "wallet_value_usd": "REAL. Current value held
+      in the wallet. Example: 98937.33.", "turnover_rate_val": "REAL. Financial turnover rate of the wallet.
+      **NULL means turnover rate has not been calculated.**. Example: 4.29.", "pattern_classification":
+      "TEXT. Behaviour pattern classification for the transaction group. Possible values: High-risk, Normal,
+      Suspicious.", "cluster_coeff_val": "REAL. Network cluster coefficient of the wallet node. Example:
+      0.695.", "network_centrality_val": "REAL. Network-centrality measure within the blockchain graph.
+      Example: 40.9.", "conn_diversity_score": "REAL. Diversity of counterparties connected to the wallet.
+      **NULL means diversity metric has not been calculated.**. Example: 63.6.", "temporal_pattern_score":
+      "REAL. Temporal-pattern score for transaction activity. Example: 5.8.", "geo_dist_score_val": "REAL.
+      Geographical distribution score of connected entities. Example: 27.0."}'
+- schema: main
+  table: transaction_products
+  columns:
+  - name: EventLink
+    type: VARCHAR
+    description: TEXT. Identifier of the transaction that sold the product. PK (composite). FK to transactions(EventCode).
+  - name: ProdCat
+    type: VARCHAR
+    description: 'TEXT. Product category for the sold item. PK (composite). FK to products. Possible values:
+      Data, Digital, Physical, Service.'
+  - name: Subcategory
+    type: VARCHAR
+    description: 'TEXT. Product subcategory for the sold item. PK (composite). FK to products. Possible
+      values: Type_A, Type_B, Type_C, Type_D.'
+  - name: ListingAge
+    type: BIGINT
+    description: 'BIGINT. Age of the listing at the time of sale. PK (composite). FK to products. Example:
+      155.'
+  - name: SellerPointer
+    type: VARCHAR
+    description: TEXT. Vendor identifier for the sold listing. PK (composite). FK to products.
+  - name: PriceAmt
+    type: FLOAT
+    description: 'REAL. Price at which the item was sold. Example: 1166.46.'
+  - name: QtySold
+    type: BIGINT
+    description: 'BIGINT. Quantity of items sold in the transaction. Example: 92.'
+- schema: main
+  table: transactions
+  columns:
+  - name: EventCode
+    type: VARCHAR
+    description: TEXT. Unique identifier for the commercial event (transaction). PK.
+  - name: RecordTag
+    type: VARCHAR
+    description: 'TEXT. Secondary unique tag for cross-system correlation. Example: DN541412.'
+  - name: EventTimestamp
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Datetime when the transaction event was recorded. Example: 2024/4/2.'
+  - name: PlatformKey
+    type: VARCHAR
+    description: TEXT. Code of the platform where the transaction occurred. FK to markets(PlatCode).
+  - name: VendorLink
+    type: VARCHAR
+    description: 'TEXT. Identifier of the vendor involved in the transaction. FK to vendors(SellerKey).
+      Example: V63085.'
+  - name: AcqLink
+    type: VARCHAR
+    description: 'TEXT. Identifier of the buyer involved in the transaction. FK to buyers(AcqCode). Example:
+      B41538.'
+  - name: OriginRegion
+    type: VARCHAR
+    description: 'TEXT. Geographical origin region of the shipment. Possible values: Region_A, Region_B,
+      Region_C, Unknown.'
+  - name: DestRegion
+    type: VARCHAR
+    description: 'TEXT. Destination region of the shipment. Possible values: Region_X, Region_Y, Region_Z,
+      Unknown.'
+  - name: CrossBorder
+    type: BIGINT
+    description: 'BOOLEAN. Indicates whether the shipment crosses national borders. Possible values: No,
+      Yes.'
+  - name: RouteComplex
+    type: VARCHAR
+    description: 'TEXT. Complexity classification of the shipping route. Possible values: Complex, Medium,
+      Simple.
+
+
+      Shipping Route Complexity: Describes the complexity of delivery routes.
+
+
+      Values: Simple, Medium, Complex.
+
+
+      Compiler note: Matches documented values Simple, Medium, Complex for transactions.RouteComplex column.'
+  - name: Transaction_Velocity
+    type: VARCHAR
+    description: 'text. The rate at which transactions are completed, measured in USD/hour. Example: 45.67
+      USD/hour.'
+  - name: Border_cross_pre
+    type: VARCHAR
+    description: 'text. The premium associated with cross-border transactions, calculated based on payment
+      amount and cross-border flag. Example: 78.04 USD/border-crossing.'
+  - name: GeoDistScore
+    type: VARCHAR
+    description: 'text. The geographical distance involved in the transaction, measured in km. Example:
+      137.66 USD/border-crossing.'
+  - name: transaction_financials
+    type: JSON
+    description: 'JSONB column. Contains financial details related to the transaction, such as value,
+      fees, escrow usage, and shipping costs. Fields: {"pmt_method_type": "TEXT. Payment method used for
+      the transaction. **NULL means payment method information is not available.**. Possible values: Crypto_A,
+      Crypto_B, Crypto_C, Token.", "value_amt_usd": "TEXT. Total monetary value of the transaction. Example:
+      $16,635.50 .", "fee_amt_usd": "TEXT. Platform or escrow fee charged for the transaction. Example:
+      $637.83 .", "escrow_used_stat": "TEXT. Indicator describing escrow usage for the transaction. **NULL
+      means escrow usage detail is unavailable.**. Possible values: No, Yes.", "escrow_duration_hrs":
+      "BIGINT. Number of hours funds were held in escrow. **NULL means escrow duration could not be determined.**.
+      Example: 72.0.", "multisig_flag_stat": "BOOLEAN. Indicates whether multisignature payments were
+      employed. **NULL means multisignature information is missing.**. Possible values: No, Yes.", "completion_state_stat":
+      "TEXT. Final completion state of the transaction (e.g., completed, disputed). Possible values: Completed,
+      Disputed, Failed, In Progress.", "process_time_hrs": "BIGINT. Processing time from order to completion,
+      in hours. **NULL means processing time has not been calculated.**. Example: 114.9.", "shipping_method_type":
+      "TEXT. Shipping method chosen for physical goods. Possible values: Custom, Digital, Express, Standard.",
+      "shipping_cost_density": "text. The density of shipping cost per unit of geographical distance,
+      measured in USD/km. Example: 1.95 USD/km."}
+
+
+      Escrow Usage States: Whether escrow was used in a transaction.
+
+
+      Values: Yes, No.
+
+      Label descriptions:
+
+      - Yes: Funds were held in escrow pending delivery confirmation or dispute resolution, reducing counterparty
+      risk.
+
+      - No: Payment was released directly without escrow protection, increasing the chance of fraud.
+
+
+      Compiler note: Describes the escrow_used_stat field (Yes/No) within the transaction_financials JSONB
+      column, documenting the meaning of its two values.'
+- schema: main
+  table: vendor_countries
+  columns:
+  - name: SellerKey
+    type: VARCHAR
+    description: TEXT. Identifier of the vendor. PK (composite). FK to vendors(SellerKey).
+  - name: OpRegions
+    type: VARCHAR
+    description: 'TEXT. Operational region or country for the vendor. PK (composite). Possible values:
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10.'
+- schema: main
+  table: vendor_markets
+  columns:
+  - name: VendorKey
+    type: VARCHAR
+    description: TEXT. Identifier of the vendor. PK (composite). FK to vendors(SellerKey).
+  - name: PlatformID
+    type: VARCHAR
+    description: TEXT. Identifier of the platform. PK (composite). FK to markets(PlatCode).
+- schema: main
+  table: vendor_payment_methods
+  columns:
+  - name: VendorLink
+    type: VARCHAR
+    description: 'TEXT. Identifier of the vendor. PK (composite). FK to vendors(SellerKey). Example: V63085.'
+  - name: AcceptedPmtTypes
+    type: VARCHAR
+    description: 'TEXT. Payment type accepted by the vendor. PK (composite). Possible values: 1, 2, 3,
+      4, 5.'
+- schema: main
+  table: vendors
+  columns:
+  - name: SellerKey
+    type: VARCHAR
+    description: TEXT. Unique identifier for a vendor (seller) account. PK.
+  - name: DaysActive
+    type: BIGINT
+    description: 'BIGINT. Total number of days the vendor has been active across all platforms. Example:
+      319.'
+  - name: PerformanceRating
+    type: FLOAT
+    description: 'REAL. Aggregated performance rating derived from vendor transactions. Example: 4.5.'
+  - name: TotalTxns
+    type: VARCHAR
+    description: 'TEXT. Total number of transactions associated with the vendor. Example: $917 .'
+  - name: CompletedTxns
+    type: BIGINT
+    description: 'BIGINT. Number of transactions successfully completed by the vendor. Example: 572.'
+  - name: DisputedEvents
+    type: BIGINT
+    description: 'BIGINT. Count of transactions that resulted in disputes. Example: 33.'
+  - name: VerTier
+    type: VARCHAR
+    description: 'TEXT. Verification-tier level assigned to the vendor. **NULL means verification tier
+      not yet assigned or unavailable.**. Possible values: Advanced, Basic, Premium.'
+  - name: LastActiveDt
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Datetime when the vendor was last observed active. **NULL means no last-active
+      information is available.**. Example: 2025/2/5.'
+  - name: AccessLevel
+    type: VARCHAR
+    description: 'TEXT. Access-privilege level granted to the vendor account. **NULL means access level
+      has not been set.**. Possible values: Full, Partial.
+
+
+      Vendor Access Levels: Privileges granted to vendor accounts.
+
+
+      Values: Full, Partial. Label descriptions: - Full: Vendor can create listings, modify inventory,
+      withdraw funds, and communicate without restriction. - Partial: Vendor functionality is limited,
+      typically view only or blocked from withdrawals until verification is complete.
+
+
+      Compiler note: Describes the values/labels of vendors.AccessLevel column (Full, Partial) as documented.'
+  - name: InvestigationFlag
+    type: VARCHAR
+    description: 'TEXT. Indicator that the vendor is under investigation. **NULL means investigation status
+      is not recorded.**. Possible values: Active, Closed, Monitoring.'
+  - name: LE_Interest
+    type: VARCHAR
+    description: 'TEXT. Level of law-enforcement interest in the vendor. **NULL means no law-enforcement
+      interest has been documented.**. Possible values: High, Low, Medium.'
+  - name: ComplianceRisk
+    type: VARCHAR
+    description: 'TEXT. Overall compliance-risk categorisation for the vendor. Possible values: High,
+      Low, Medium.'
+  - name: RegStandeff
+    type: VARCHAR
+    description: 'text. The compliance efficiency score of a vendor, calculated as the ratio of compliance
+      score to rule violation count. Example: 14.95 Score/violation.'
+  - name: vendor_compliance_ratings
+    type: JSON
+    description: 'JSONB column. Stores the vendor''s compliance-related performance metrics, including
+      verification scores, trust metrics, and conflict resolution scores. Fields: {"prof_complete_pct":
+      "REAL. Percentage completeness of the vendor’s profile information. Example: 82.4.", "id_ver_score_val":
+      "REAL. Score indicating strength of identity-verification evidence. Example: 50.0.", "feedback_integrity_scr":
+      "REAL. Metric indicating trustworthiness of feedback left for the vendor. Example: 87.8.", "platform_engage_scr":
+      "REAL. Measure of the vendor’s engagement across supported platforms. Example: 76.3.", "comm_trust_scr":
+      "REAL. Communication trust metric derived from message analysis. **NULL means this metric has not
+      been computed.**. Example: 35.8.", "escrow_adher_score": "REAL. Percentage of the vendor’s transactions
+      that adhere to escrow requirements. Example: 12.8.", "conflict_res_scr": "REAL. Score reflecting
+      the vendor’s conflict-resolution performance. **NULL means no conflict-resolution score is available.**.
+      Example: 33.6.", "viol_count": "BIGINT. Total number of policy violations attributed to the vendor.
+      Example: 10.", "penalty_event_count": "BIGINT. Number of penalty or sanction events applied to the
+      vendor. Possible values: 0, 1, 2, 3, 4, 5, 6, 7.", "warn_count": "BIGINT. Count of formal warnings
+      issued to the vendor. Example: 6.", "reg_compliance_scr": "REAL. Score measuring the vendor’s adherence
+      to regulatory standards. Example: 20.0.", "liq_rate": "text. The liquidity rate of the vendor, calculated
+      based on successful transactions and product prices, measured in USD/day. Example: 350.45 USD/day."}'

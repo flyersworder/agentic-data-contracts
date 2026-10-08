@@ -1,0 +1,1217 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: sports_events, compiler: claudesonnet5
+# inputs: sports_events_kb.jsonl, sports_events_column_meaning_base.json, sports_events_schema.txt, sports_events.duckdb
+metrics:
+- name: pole_position
+  description: 'Defines the premier starting position for a race.
+
+
+    A driver achieves Pole Position by setting the fastest lap time during the final stage of the Qualifying
+    Format Explained.
+
+
+    Built on: Qualifying Format Explained.
+
+
+    Compiler note: Pole position is the qualifying result with px_pos (final qualifying position, determined
+    by Q3 time for top drivers) equal to 1.'
+  sql_expression: px_pos = 1
+  source_model: main.qualifying
+  domains:
+  - definitions
+- name: podium_finish
+  description: 'Defines a top-tier race/season result for a driver.
+
+
+    A Podium Finish is achieved when a driver''s final rank is 1st, 2nd, or 3rd.
+
+
+    Compiler note: Interpreted ''final rank'' as the driver''s standings position (px) recorded in driver_standings,
+    since no separate race-finish-position table exists in this schema. A Podium Finish is px = 1, 2,
+    or 3.'
+  sql_expression: px IN (1, 2, 3)
+  source_model: main.driver_standings
+  domains:
+  - definitions
+- name: points_finish
+  description: 'Defines a race result that earns championship points.
+
+
+    A Points Finish is a race classification within the top positions that are awarded points, as specified
+    by the Championship Points System (Race).
+
+
+    Built on: Championship Points System (Race).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: No table in this database records a driver's finishing position/classification in the
+    main Grand Prix race. driver_standings holds cumulative season standings (not a single race's finish
+    position), constructor_results holds only constructor-level points per race without a position column,
+    and sprint_results pertains to the Sprint session, not the main race. Without a race-classification
+    position per driver, "Points Finish" (top-10 classification per the race points table) cannot be computed.
+- name: fastest_lap_award
+  description: 'Defines the conditions for being awarded the fastest lap of a race.
+
+
+    The Fastest Lap Award is given to the driver who achieves the single quickest lap time during a race,
+    under the condition that they must also secure a Points Finish.
+
+
+    Built on: points_finish.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry depends on "Points Finish", which itself cannot be encoded: no table in this
+    database records a driver''s finishing position/classification in the main Grand Prix race (driver_standings
+    has cumulative season standings, constructor_results lacks a position column, sprint_results is for
+    the Sprint not the main race). Without a race-classification position per driver, neither "Points
+    Finish" nor the "Fastest Lap Award" (which requires it) can be computed. Additionally, lap_times has
+    per-lap times but no single column identifying "the fastest lap of the race" as an award flag - it
+    would need to be derived via a correlated minimum, but the Points Finish condition is the blocking
+    factor.'
+- name: high_altitude_circuit
+  description: 'Defines a circuit with specific environmental characteristics that impact vehicle performance.
+
+
+    A circuit is considered a High-Altitude Circuit if its elevation is greater than 800 meters above
+    sea level. These circuits pose unique challenges for aerodynamics and power unit performance.
+
+
+    Compiler note: Elevation stored at location_metadata.coordinates.elevation_m (meters); cast text to
+    numeric for comparison.'
+  sql_expression: (location_metadata->'coordinates'->>'elevation_m')::numeric > 800
+  source_model: main.circuits
+  domains:
+  - definitions
+- name: sprint_winner
+  description: 'Defines the winner of a sprint session.
+
+
+    A Sprint Winner is the driver who is classified in 1st place at the conclusion of a Sprint Session.
+
+
+    Built on: Sprint Session Explained.
+
+
+    Compiler note: Sprint Winner is a row in sprint_results whose sprint_performance.final_position equals
+    1.'
+  sql_expression: (sprint_performance->>'final_position')::int = 1
+  source_model: main.sprint_results
+  domains:
+  - definitions
+- name: race_winner
+  description: 'Defines the winner of the main race event.
+
+
+    A Race Winner is the driver who is classified in 1st place at the conclusion of the main Grand Prix
+    race.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no table holding the finishing classification/position of drivers in
+    the main Grand Prix race itself. driver_standings records cumulative season standings (position in
+    the championship after that race), not the race result; there is no "results" table with per-race
+    finishing position. constructor_results/sprint_results cover constructors and sprints respectively,
+    not main-race driver finishing position. Hence "Race Winner" (driver classified 1st in the main race)
+    cannot be computed from available data.
+- name: efficient_pit_stop
+  description: 'Defines a benchmark for an exceptionally fast pit stop.
+
+
+    An Efficient Pit Stop is a pit stop where the total time the car is stationary is less than 2.5 seconds,
+    indicating outstanding performance by the pit crew.
+
+
+    Compiler note: ms_count holds the pit stop duration in milliseconds; threshold is 2.5 seconds = 2500
+    ms.'
+  sql_expression: ms_count < 2500
+  source_model: main.pit_stops
+  domains:
+  - definitions
+- name: hat_trick
+  description: 'Defines a collection of three key achievements in a single race weekend.
+
+
+    A driver achieves a Hat Trick by securing Pole Position, being the Race Winner, and receiving the
+    Fastest Lap Award all in the same event.
+
+
+    Built on: pole_position, fastest_lap_award, race_winner.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Hat Trick requires Race Winner and Fastest Lap Award, neither of which can be encoded:
+    there is no table recording a driver''s finishing position/classification in the main Grand Prix race
+    (driver_standings only has cumulative season standings; constructor_results and sprint_results do
+    not give per-driver main-race finishing position). Without race classification, Race Winner, Points
+    Finish, and consequently Fastest Lap Award cannot be computed, so Hat Trick cannot be computed either.'
+- name: constructor_s_double_podium
+  description: 'Defines a top-tier race result for a constructor (team).
+
+
+    A Constructor''s Double Podium occurs when both drivers from the same team achieve a Podium Finish
+    in the same race.
+
+
+    Built on: podium_finish.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This requires knowing, for a given race, which constructor each driver drove for, so that
+    two podium-finishing drivers can be matched to the same team. The driver_standings table (which defines
+    podium_finish, px IN (1,2,3)) has no constructor column, and no other table links a driver to a constructor
+    and a race-finishing position simultaneously (qualifying/sprint_results link driver-constructor-race
+    but not race finishing position; constructor_results/constructor_standings have no driver). Thus the
+    row-level comparison "both drivers of same constructor are podium in same race" cannot be expressed
+    as a predicate over any single table in this schema.
+- name: driver_age
+  description: 'Calculates the current age of a driver based on their birth date.
+
+
+    Age = \lfloor \frac{Date_{current} - Date_{birth}}{365.25} \rfloor
+
+
+    Compiler note: birth_date stored as text ''YYYY-MM-DD'' under driver_identity JSON; cast to DATE,
+    subtract from current_date (returns integer days in DuckDB), then divide by 365.25 and floor. NULL
+    birth_date yields NULL age.'
+  sql_expression: FLOOR((current_date - CAST(driver_identity->>'birth_date' AS DATE)) / 365.25)
+  source_model: main.drivers
+  domains:
+  - calculations
+- name: lap_time_in_seconds
+  description: 'Converts lap time measurements from milliseconds to seconds.
+
+
+    T_{seconds} = \frac{T_{milliseconds}}{1000}
+
+
+    Compiler note: Converts lap_times.msec_val (milliseconds) to seconds by dividing by 1000.0.'
+  sql_expression: msec_val / 1000.0
+  source_model: main.lap_times
+  domains:
+  - calculations
+- name: pit_stop_duration_in_seconds
+  description: 'Converts pit stop duration from milliseconds to a more human-readable seconds format.
+
+
+    D_{seconds} = \frac{D_{milliseconds}}{1000}
+
+
+    Compiler note: Converts pit_stops.ms_count (milliseconds) to seconds via division by 1000.0.'
+  sql_expression: ms_count / 1000.0
+  source_model: main.pit_stops
+  domains:
+  - calculations
+- name: driver_s_average_lap_time
+  description: 'Calculates a driver''s average lap time over the course of a race.
+
+
+    \bar{T}_{lap} = \frac{\sum_{i=1}^{n} T_{lap_i}}{n}, \text{where } T_{lap_i} \text{ is the Lap Time
+    in Seconds for each lap } i \text{, and } n \text{ is the total number of laps completed by the driver.}
+
+
+    Built on: lap_time_in_seconds.
+
+
+    Compiler note: Average lap time in seconds for a driver in a race; computed as AVG(msec_val)/1000.0
+    over lap_times, to be used with GROUP BY rc_index, wheel_unit (race, driver) since lap_times is at
+    the per-lap grain.'
+  sql_expression: AVG(msec_val) / 1000.0
+  source_model: main.lap_times
+  domains:
+  - calculations
+- name: position_gain_loss
+  description: 'Calculates the number of positions a driver gained or lost between the start and end of
+    a race.
+
+
+    G_{pos} = P_{start} - P_{finish}, \text{where } P_{start} \text{ is the starting grid position and
+    } P_{finish} \text{ is the final race position. A positive value indicates a gain.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no main-race results table containing a driver's starting grid position
+    and final race classification for the Grand Prix. The only grid/final_position data present (sprint_results.sprint_performance)
+    pertains to the Sprint session, not the main race, so Position Gain/Loss for the main race cannot
+    be computed from this schema.
+- name: constructor_s_total_race_points
+  description: 'Calculates the total points a constructor scores in a single race from both of its drivers.
+
+
+    P_{constructor} = \sum P_{driver}, \text{where the sum includes the points from all drivers of a constructor
+    who had a Points Finish.}
+
+
+    Built on: points_finish.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This depends on "Points Finish", which cannot be encoded (no per-race driver finishing
+    position exists in this database). While constructor_results.scoreVal already stores the per-race,
+    per-constructor point total (one row per constructor per race, confirmed unique), the entry's definition
+    explicitly restricts the sum to drivers who had a Points Finish, a concept that cannot be computed
+    here, so the entry as defined cannot be verified/encoded.
+- name: driver_s_points_per_race_ppr
+  description: 'Calculates a driver''s average points accumulation per race.
+
+
+    PPR = \frac{P_{total}}{R_{completed}}, \text{where } P_{total} \text{ is the driver''s cumulative
+    points and } R_{completed} \text{ is the number of races the driver has participated in.}
+
+
+    Compiler note: driver_standings.acc_pt is cumulative points within a season (resets each year, verified
+    monotonic non-decreasing across races within a season), so career cumulative points P_total is approximated
+    as the sum of each season''s maximum (final) acc_pt value. R_completed is approximated as the count
+    of driver_standings rows for the driver (one row per race the driver appears in standings for), since
+    no separate per-race results table recording participation exists. Division guarded with NULLIF to
+    avoid divide-by-zero.'
+  sql_expression: (SELECT SUM(t.season_max) FROM (SELECT r.yr AS yr, MAX(ds.acc_pt) AS season_max FROM
+    driver_standings ds JOIN races r ON ds.rlink = r.rak_id WHERE ds.drive_link = drivers.drv_main GROUP
+    BY r.yr) t) / NULLIF((SELECT COUNT(*) FROM driver_standings ds2 WHERE ds2.drive_link = drivers.drv_main),
+    0)
+  source_model: main.drivers
+  domains:
+  - calculations
+- name: constructor_reliability_rate
+  description: 'Calculates the percentage of times a constructor''s cars have finished the races they
+    started.
+
+
+    R_{reliability} = \frac{N_{finishes}}{N_{starts}} \times 100, \text{where } N_{finishes} \text{ is
+    the total number of times the constructor''s cars were classified as finishers, and } N_{starts} \text{
+    is the total number of times they started a race.} A race is considered ''finished'' if the status
+    mark is not specially marked (null).
+
+
+    Compiler note: Per constructor: finishes are rows in constructor_results where st_mark IS NULL (not
+    specially marked); starts are all constructor_results rows for that constructor. Rate = finishes/starts*100,
+    computed via correlated subquery grouped implicitly by cstr_key.'
+  sql_expression: (SELECT CAST(SUM(CASE WHEN cr.st_mark IS NULL THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+    * 100 FROM constructor_results cr WHERE cr.unitnode = constructors.cstr_key)
+  source_model: main.constructors
+  domains:
+  - calculations
+- name: qualifying_time_deficit_to_pole
+  description: 'Calculates the time difference between a driver''s qualifying lap and the pole sitter''s
+    lap.
+
+
+    \Delta_{qualifying} = T_{driver} - T_{pole}, \text{where } T_{driver} \text{ is the driver''s best
+    Lap Time in Seconds during qualifying, and } T_{pole} \text{ is the time achieved by the driver in
+    Pole Position.}
+
+
+    Built on: pole_position, lap_time_in_seconds.
+
+
+    Compiler note: Qualifying times stored as text ''M:SS.mmm''. Driver''s best lap = minimum of q1_r,q2_r,q3_r
+    (NULLs treated as missing via large sentinel so they''re ignored unless all null). Pole sitter identified
+    via px_pos=1, verified unique per race (rbind). Deficit = driver''s best time in seconds - pole sitter''s
+    best time in seconds.'
+  sql_expression: "(\n  LEAST(\n    COALESCE(CAST(split_part(q1_r,':',1) AS DOUBLE)*60 + CAST(split_part(q1_r,':',2)\
+    \ AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2_r,':',2)\
+    \ AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q3_r,':',1) AS DOUBLE)*60 + CAST(split_part(q3_r,':',2)\
+    \ AS DOUBLE), 1e9)\n  )\n) - (\n  SELECT LEAST(\n    COALESCE(CAST(split_part(q2.q1_r,':',1) AS DOUBLE)*60\
+    \ + CAST(split_part(q2.q1_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2.q2_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q2.q2_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2.q3_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q2.q3_r,':',2) AS DOUBLE), 1e9)\n  )\n  FROM qualifying q2\n  WHERE\
+    \ q2.rbind = qualifying.rbind AND q2.px_pos = 1\n)"
+  source_model: main.qualifying
+  domains:
+  - calculations
+- name: race_time_delta_to_winner
+  description: 'Calculates the time gap between a driver''s final race time and that of the winner.
+
+
+    \Delta_{race} = T_{driver} - T_{winner}, \text{where } T_{driver} \text{ is the driver''s total race
+    time in seconds and } T_{winner} \text{ is the total race time of the Race Winner.}
+
+
+    Built on: sprint_winner.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no table holding main-race finishing results (total race time per driver
+    per race). Only sprint_results stores timing/final_position (for Sprint sessions), and lap_times/pit_stops
+    give per-lap/per-stop data but not a driver's total race time or classification for the Grand Prix
+    itself. Without a main race results table, neither the Race Winner's total race time nor a given driver's
+    total race time can be computed, so the Race Time Delta to Winner cannot be encoded.
+- name: race_performance_index_rpi
+  description: 'Calculates a driver''s overall performance in a race, rewarding both a high finishing
+    position and positions gained.
+
+
+    RPI = (21 - P_{finish}) + G_{pos}, \text{where } P_{finish} \text{ is the final position of the Race
+    Winner (or other driver) and } G_{pos} \text{ is the driver''s Position Gain / Loss.}
+
+
+    Built on: race_winner, position_gain_loss.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric depends on Race Winner / Position Gain-Loss, which require main-race finishing
+    position and starting grid position. The database has no results table with main-race finishing classification
+    or grid position (driver_standings only has season-cumulative standings, not per-race finish; sprint_results
+    only covers the Sprint session). Hence P_finish and G_pos cannot be computed, so RPI cannot be encoded.
+- name: constructor_s_performance_score_cps
+  description: 'Calculates a constructor''s overall seasonal performance by weighting their points-scoring
+    ability with their finishing reliability.
+
+
+    CPS = (\text{Season Total Points}) \times \frac{\text{Constructor Reliability Rate}}{100}, \text{where
+    total points are derived from their Constructor''s Total Race Points over the season.}
+
+
+    Built on: constructor_s_total_race_points, constructor_reliability_rate.
+
+
+    Compiler note: Season Total Points cannot be restricted to only drivers with a Points Finish (no per-driver
+    finishing position data), so it is encoded as the constructor''s all-time total points (SUM of constructor_results.scoreval).
+    Likewise, since the underlying Constructor Reliability Rate entry is defined without a season/year
+    filter (computed across all constructor_results rows for the constructor), this CPS is computed as
+    an overall (not per-season) score: total points * reliability_rate/100, matching the formula structure.'
+  sql_expression: (SELECT SUM(cr.scoreval) FROM constructor_results cr WHERE cr.unitnode = constructors.cstr_key)
+    * ((SELECT CAST(SUM(CASE WHEN cr2.st_mark IS NULL THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100 FROM
+    constructor_results cr2 WHERE cr2.unitnode = constructors.cstr_key) / 100)
+  source_model: main.constructors
+  domains:
+  - calculations
+- name: lap_time_consistency
+  description: 'Measures the stability of a driver''s lap times during a race, calculated as the standard
+    deviation.
+
+
+    LTC = \sqrt{\frac{\sum (T_{lap_i} - \bar{T}_{lap})^2}{n}}, \text{where } \bar{T}_{lap} \text{ is the
+    driver''s Driver''s Average Lap Time.}
+
+
+    Built on: lap_time_in_seconds, driver_s_average_lap_time.
+
+
+    Compiler note: Population standard deviation (matches the 1/n formula given) of lap times in seconds,
+    computed per driver per race using a window function partitioned by (rc_index, wheel_unit) since lap_times
+    stores one row per driver per lap.'
+  sql_expression: STDDEV_POP(msec_val / 1000.0) OVER (PARTITION BY rc_index, wheel_unit)
+  source_model: main.lap_times
+  domains:
+  - calculations
+- name: adjusted_race_time_delta
+  description: 'Calculates the race time difference to the winner after accounting for the total time
+    the driver spent stationary during pit stops.
+
+
+    \Delta_{Adjusted} = \Delta_{Race} - \sum D_{seconds}, \text{where } \Delta_{Race} \text{ is the Race
+    Time Delta to Winner and } D_{seconds} \text{ is each Pit Stop Duration in Seconds.}
+
+
+    Built on: pit_stop_duration_in_seconds, race_time_delta_to_winner.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric depends on Race Time Delta to Winner, which cannot be encoded because the
+    database has no table holding main-race finishing results (total race time per driver per race). Without
+    that base quantity, the Adjusted Race Time Delta cannot be computed either, regardless of the pit
+    stop duration component being available.
+- name: qualifying_to_race_pace_differential
+  description: 'Compares a driver''s raw qualifying pace to their average race pace to analyze performance
+    drop-off or improvement.
+
+
+    QRD = \bar{T}_{lap} - T_{qualifying}, \text{where } \bar{T}_{lap} \text{ is the Driver''s Average
+    Lap Time and } T_{qualifying} \text{ is their fastest qualifying lap from which the Qualifying Time
+    Deficit to Pole is measured.}
+
+
+    Built on: driver_s_average_lap_time, qualifying_time_deficit_to_pole.
+
+
+    Compiler note: QRD = driver''s average race lap time (seconds, from lap_times matched by race+driver)
+    minus the driver''s fastest qualifying lap time (seconds, min of Q1/Q2/Q3, with NULL sessions treated
+    as not-attended via large sentinel 1e9). Verified the race/driver pairing between qualifying.rbind/pilotrec
+    and lap_times.rc_index/wheel_unit returns a single avg value.'
+  sql_expression: "(SELECT AVG(l.msec_val)/1000.0 FROM lap_times l WHERE l.rc_index = qualifying.rbind\
+    \ AND l.wheel_unit = qualifying.pilotrec) - LEAST(\n    COALESCE(CAST(split_part(qualifying.q1_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(qualifying.q1_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(qualifying.q2_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(qualifying.q2_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(qualifying.q3_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(qualifying.q3_r,':',2) AS DOUBLE), 1e9)\n  )"
+  source_model: main.qualifying
+  domains:
+  - calculations
+- name: high_altitude_performance_factor
+  description: 'Quantifies a driver''s relative performance at circuits with unique atmospheric conditions.
+
+
+    HAPF = \frac{\text{Driver''s Average Lap Time at High-Altitude Circuit}}{\text{Driver''s Season Average
+    Lap Time}}, \text{which evaluates performance specifically at a High-Altitude Circuit.}
+
+
+    Built on: high_altitude_circuit, driver_s_average_lap_time.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires computing two separate aggregate averages (a driver's average lap
+    time restricted to High-Altitude Circuits, and that same driver's average lap time across their whole
+    season) and dividing one by the other. This is not expressible as a single SQL expression evaluated
+    row-by-row (or as one aggregate) over a single source_model/table - it needs a driver- and season-scoped
+    comparison across two different filtered subsets of lap_times joined to races/circuits, which the
+    contract format (one SELECT expression over one table) cannot capture. It would need to be computed
+    as a parameterized query (per driver, per season) rather than a reusable scalar/categorical SQL expression.
+- name: sprint_performance_index
+  description: 'Calculates a driver''s overall performance in a Sprint session, combining their finishing
+    result with points scored.
+
+
+    SPI = (9 - P_{sprint}) + S_{pts}, \text{where } P_{sprint} \text{ is the finishing position of the
+    Sprint Winner (or other driver) and } S_{pts} \text{ is points awarded per the Championship Points
+    System (Sprint).}
+
+
+    Built on: Championship Points System (Sprint), sprint_winner.
+
+
+    Compiler note: P_sprint taken from sprint_performance->>''final_position'' and S_pts from sprint_performance->>''points'',
+    both cast to numeric types.'
+  sql_expression: (9 - (sprint_performance->>'final_position')::int) + (sprint_performance->>'points')::real
+  source_model: main.sprint_results
+  domains:
+  - calculations
+- name: driver_performance_value
+  description: 'Calculates a value metric for a driver by comparing their points-scoring record to their
+    age.
+
+
+    DPV = \frac{\text{Driver''s Points Per Race (PPR)}}{\text{Driver Age}}, \text{providing a measure
+    of success relative to experience.}
+
+
+    Built on: driver_age, driver_s_points_per_race_ppr.
+
+
+    Compiler note: DPV = Driver''s Points Per Race (PPR) / Driver Age, both computed as scalar subqueries
+    over drivers; age denominator guarded with NULLIF to avoid divide-by-zero/NULL birth_date.'
+  sql_expression: (SELECT SUM(t.season_max) FROM (SELECT r.yr AS yr, MAX(ds.acc_pt) AS season_max FROM
+    driver_standings ds JOIN races r ON ds.rlink = r.rak_id WHERE ds.drive_link = drivers.drv_main GROUP
+    BY r.yr) t) / NULLIF((SELECT COUNT(*) FROM driver_standings ds2 WHERE ds2.drive_link = drivers.drv_main),
+    0) / NULLIF(FLOOR((current_date - CAST(drivers.driver_identity->>'birth_date' AS DATE)) / 365.25),
+    0)
+  source_model: main.drivers
+  domains:
+  - calculations
+- name: team_s_combined_race_result
+  description: 'Calculates a score for a team in a single race based on the collective finishing positions
+    of their drivers.
+
+
+    TCRR = P_{finishing position of driver 1} + P_{finishing result of driver 2}. \text{A lower score
+    is better, reaching its minimum when a team achieves a Constructor''s Double Podium with a Race Winner.}
+
+
+    Built on: race_winner, constructor_s_double_podium.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no table holding per-race finishing position for the main Grand Prix
+    race (driver_standings holds cumulative season standings, not race results). Without finishing positions
+    for individual drivers in a race, nor a race-level driver-to-constructor mapping with finishing position,
+    the sum of two drivers' finishing positions for a team in a race cannot be computed. This metric depends
+    on Race Winner and Constructor's Double Podium, both already flagged as not encodable for the same
+    underlying reason.
+- name: tyre_management_index
+  description: 'Estimates a driver''s ability to manage tyre degradation, by comparing their lap time
+    consistency against the number of pit stops made.
+
+
+    TMI = \frac{1}{\text{Lap Time Consistency} \times (1 + N_{stops})}, \text{ where a higher value is
+    better. Uses the concept of pit stops from Efficient Pit Stop.}
+
+
+    Built on: efficient_pit_stop, lap_time_consistency.
+
+
+    Compiler note: Lap Time Consistency is STDDEV_POP of lap times in seconds, computed as a window function
+    partitioned by (rc_index, wheel_unit) so it''s constant per driver-race. N_stops is the total count
+    of pit stops for that driver in that race (from pit_stops, matched on matchidx=rc_index and wunit=wheel_unit),
+    not restricted to Efficient Pit Stops - the entry only borrows the ''pit stop'' concept/table from
+    that definition, not the <2.5s filter, since TMI counts stops made in general.'
+  sql_expression: 1.0 / ( (STDDEV_POP(msec_val / 1000.0) OVER (PARTITION BY rc_index, wheel_unit)) * (1
+    + (SELECT COUNT(*) FROM pit_stops ps WHERE ps.matchidx = lap_times.rc_index AND ps.wunit = lap_times.wheel_unit))
+    )
+  source_model: main.lap_times
+  domains:
+  - calculations
+- name: clutch_performer
+  description: 'Defines a driver who excels under pressure by gaining many positions to secure a top result.
+
+
+    A driver is a Clutch Performer if their Position Gain / Loss is greater than 5 and they achieve a
+    Podium Finish in the same race.
+
+
+    Built on: podium_finish, position_gain_loss.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Clutch Performer requires Position Gain / Loss for the main race (starting grid position
+    vs final race position). The schema has no main-race results table with grid/finish positions (only
+    driver_standings with final championship-style px, and sprint_results which covers the Sprint, not
+    the main race). Therefore Position Gain / Loss cannot be computed for the main race, and this metric
+    cannot be encoded.
+- name: qualifying_specialist
+  description: 'Defines a driver who excels in qualifying but may not maintain the same relative pace
+    during the race.
+
+
+    A driver is a Qualifying Specialist if their Qualifying Time Deficit to Pole is less than 0.2 seconds.
+
+
+    Built on: qualifying_time_deficit_to_pole.
+
+
+    Compiler note: Encodes Qualifying Time Deficit to Pole (best of Q1/Q2/Q3 times parsed as m:ss, minus
+    pole sitter''s best time for same race) and tests it against the 0.2s threshold, as a per-row predicate
+    on qualifying.'
+  sql_expression: "(\n  LEAST(\n    COALESCE(CAST(split_part(q1_r,':',1) AS DOUBLE)*60 + CAST(split_part(q1_r,':',2)\
+    \ AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2_r,':',2)\
+    \ AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q3_r,':',1) AS DOUBLE)*60 + CAST(split_part(q3_r,':',2)\
+    \ AS DOUBLE), 1e9)\n  )\n) - (\n  SELECT LEAST(\n    COALESCE(CAST(split_part(q2.q1_r,':',1) AS DOUBLE)*60\
+    \ + CAST(split_part(q2.q1_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2.q2_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q2.q2_r,':',2) AS DOUBLE), 1e9),\n    COALESCE(CAST(split_part(q2.q3_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q2.q3_r,':',2) AS DOUBLE), 1e9)\n  )\n  FROM qualifying q2\n  WHERE\
+    \ q2.rbind = qualifying.rbind AND q2.px_pos = 1\n) < 0.2"
+  source_model: main.qualifying
+  domains:
+  - definitions
+- name: dominant_victory
+  description: 'Defines a particularly commanding win, characterized by a large margin over the competition.
+
+
+    A Dominant Victory is when a Race Winner''s final Race Time Delta to Winner over the second-place
+    driver is greater than 5 seconds.
+
+
+    Built on: sprint_winner, race_time_delta_to_winner.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on Race Time Delta to Winner, which requires a main-race results table
+    with total race time per driver (classification/finishing time for the Grand Prix). The database only
+    has sprint_results for timing/final_position; lap_times and pit_stops give per-lap/per-stop data,
+    not total race time or final classification for the main race. Without that, the Race Winner's margin
+    over second place cannot be computed.
+- name: strategic_masterclass
+  description: 'Defines a race won through superior strategy, often involving pit stops.
+
+
+    A Strategic Masterclass is when a Race Winner also achieves one or more Efficient Pit Stops, demonstrating
+    that flawless strategy contributed to the victory.
+
+
+    Built on: race_winner, efficient_pit_stop.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Depends on "Race Winner," which itself cannot be encoded: there is no table holding per-race
+    finishing position/classification for drivers in the main Grand Prix (driver_standings gives cumulative
+    championship standings, not race results). Without identifying the Race Winner, "Strategic Masterclass"
+    (Race Winner achieving an Efficient Pit Stop) cannot be computed from available data.'
+- name: grand_chelem
+  description: 'Defines the ''Grand Slam'' of a race weekend, the most complete individual performance
+    possible.
+
+
+    A Grand Chelem is achieved when a driver successfully completes a Hat Trick and also leads every lap
+    of the race from start to finish.
+
+
+    Built on: hat_trick.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Grand Chelem requires a Hat Trick (Pole Position, Race Winner, and Fastest Lap Award)
+    plus leading every lap. Hat Trick itself cannot be encoded: there is no table giving per-driver finishing
+    position/classification in the main Grand Prix race (driver_standings holds only cumulative season
+    standings, not per-race finishing position; constructor_results and sprint_results don''t give main-race
+    driver classification), so Race Winner and Fastest Lap Award cannot be determined. Additionally, there
+    is no data recording which driver led each lap of the race, so "leads every lap" cannot be verified
+    either. Both missing pieces make Grand Chelem impossible to encode over this database.'
+- name: reliable_and_performing_constructor
+  description: 'Defines a team that demonstrates both exceptional reliability and strong on-track performance.
+
+
+    A team is a Reliable and Performing Constructor if their Constructor Reliability Rate is above 95%
+    and their Constructor''s Performance Score (CPS) is in the top three for the season.
+
+
+    Built on: constructor_reliability_rate, constructor_s_performance_score_cps.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The constructors table has one row per constructor with no season/year dimension, and
+    the given dependency formulas (Constructor Reliability Rate, CPS) aggregate over all constructor_results
+    regardless of year. "Top three for the season" requires ranking constructors within each season, but
+    there is no way to express a per-season CPS or season-scoped top-3 ranking as a condition over rows
+    of the constructors table (or any single table) given these season-agnostic dependency definitions.
+    This cannot be encoded without a season-aware CPS computation, which the provided building-block entries
+    do not define.
+- name: high_altitude_ace
+  description: 'Defines a driver who shows exceptionally strong performance at high-altitude venues compared
+    to their own baseline.
+
+
+    A driver is a High-Altitude Ace if their Race Performance Index (RPI) at a High-Altitude Circuit is
+    at least 20% higher than their seasonal average RPI.
+
+
+    Built on: high_altitude_circuit, race_performance_index_rpi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: High-Altitude Ace depends on Race Performance Index (RPI), which itself cannot be encoded
+    because the database lacks a main-race results table with finishing position and starting grid position
+    (driver_standings holds only season-cumulative standings, not per-race results; sprint_results covers
+    only the Sprint session). Without RPI, this metric cannot be computed.
+- name: underdog_win
+  description: 'Defines a surprise victory by a driver who is not a typical front-runner based on their
+    performance.
+
+
+    An Underdog Win occurs when a Race Winner has a Driver''s Points Per Race (PPR) of less than 5 prior
+    to the event.
+
+
+    Built on: race_winner, driver_s_points_per_race_ppr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric depends on "Race Winner," which itself cannot be encoded: the database has
+    no table with per-race finishing position/classification for drivers in the main Grand Prix (driver_standings
+    holds cumulative season standings, not race results; constructor_results/sprint_results don''t cover
+    main race driver finishing position). Without identifying the Race Winner, Underdog Win cannot be
+    computed.'
+- name: flawless_team_weekend
+  description: 'Defines a weekend of perfect execution from both the driver and the pit crew.
+
+
+    A Flawless Team Weekend is when a driver secures Pole Position and is the Race Winner, and every service
+    for their car is an Efficient Pit Stop.
+
+
+    Built on: pole_position, race_winner, efficient_pit_stop.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric depends on "Race Winner," which requires a per-race finishing position/classification
+    for the main Grand Prix race. The database has no such results table: driver_standings only holds
+    cumulative season standings (position in championship after that race), not race finishing position.
+    Without being able to identify the Race Winner, Flawless Team Weekend (which requires pole + race
+    win + all efficient pit stops) cannot be computed.'
+- name: veteran_s_podium
+  description: 'Defines a significant achievement for an experienced, older driver.
+
+
+    A Veteran''s Podium is when a driver with a Driver Age of 35 years or more successfully achieves a
+    Podium Finish.
+
+
+    Built on: podium_finish, driver_age.
+
+
+    Compiler note: Podium Finish = px IN (1,2,3). Driver Age computed via scalar subquery joining drivers
+    on drive_link, using birth_date from driver_identity JSON, floor((current_date-birth_date)/365.25).
+    Veteran''s Podium requires age>=35 and podium finish.'
+  sql_expression: px IN (1,2,3) AND FLOOR((CURRENT_DATE - CAST((SELECT d.driver_identity->>'birth_date'
+    FROM drivers d WHERE d.drv_main = driver_standings.drive_link) AS DATE)) / 365.25) >= 35
+  source_model: main.driver_standings
+  domains:
+  - definitions
+- name: constructors_with_significant_participation
+  description: 'A threshold criterion for constructors with Significant Participation in races.
+
+
+    Constructors are considered to have significant participation if they have started more than 10 races,
+    ensuring statistical validity for reliability rate calculations.
+
+
+    Compiler note: Interpreted ''started a race'' as having a constructor_results row for that race; counted
+    distinct races (matchref) per constructor (unitnode) and required >10.'
+  sql_expression: (SELECT count(DISTINCT cr.matchref) FROM constructor_results cr WHERE cr.unitnode =
+    cstr_key) > 10
+  source_model: main.constructors
+  domains:
+  - definitions
+- name: pole_based_race_win_probability
+  description: 'Defines the likelihood of a driver winning a race based on their starting position being
+    pole.
+
+
+    Assume a race win probability of 35% if the driver started from Pole Position, and 5% otherwise.
+
+
+    Built on: pole_position, race_winner.
+
+
+    Compiler note: Encoded as a CASE expression over qualifying.px_pos assigning a probability value per
+    row: 0.35 if px_pos=1 (Pole Position), else 0.05, per the entry''s stated assumption.'
+  sql_expression: CASE WHEN px_pos = 1 THEN 0.35 ELSE 0.05 END
+  source_model: main.qualifying
+  domains:
+  - definitions
+- name: pole_based_fastest_lap_probability
+  description: 'Defines the likelihood of a driver setting the fastest lap based on their starting position
+    being pole.
+
+
+    Assume a fastest lap probability of 25% if the driver started from Pole Position, and 8% otherwise.
+
+
+    Built on: pole_position, fastest_lap_award.
+
+
+    Compiler note: Encoded as a CASE assigning a probability value: pole position is px_pos = 1 in qualifying;
+    returns 0.25 if pole, else 0.08. Treated as categorical/labeling CASE since it assigns a value per
+    condition rather than a single boolean predicate.'
+  sql_expression: CASE WHEN px_pos = 1 THEN 0.25 ELSE 0.08 END
+  source_model: main.qualifying
+  domains:
+  - definitions
+- name: qualifying_performance_cluster
+  description: 'Categorizes drivers based on their average qualifying deficit to pole position.
+
+
+    Three tiers: ''Pole Threat'' (<0.15s), ''Mid Gap'' (0.15s-0.4s), ''Backmarker'' (≥0.4s)
+
+
+    Built on: qualifying_time_deficit_to_pole.
+
+
+    Compiler note: Computed per-driver average of the qualifying_time_deficit_to_pole metric across all
+    their qualifying rows (correlated subquery grouping by pilotrec), then bucketed into the three tiers
+    given.'
+  sql_expression: "CASE\n  WHEN (\n    SELECT AVG(\n      (LEAST(\n        COALESCE(CAST(split_part(q.q1_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q1_r,':',2) AS DOUBLE), 1e9),\n        COALESCE(CAST(split_part(q.q2_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q2_r,':',2) AS DOUBLE), 1e9),\n        COALESCE(CAST(split_part(q.q3_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q3_r,':',2) AS DOUBLE), 1e9)\n      )) - (\n        SELECT LEAST(\n\
+    \          COALESCE(CAST(split_part(q2.q1_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q1_r,':',2)\
+    \ AS DOUBLE), 1e9),\n          COALESCE(CAST(split_part(q2.q2_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q2_r,':',2)\
+    \ AS DOUBLE), 1e9),\n          COALESCE(CAST(split_part(q2.q3_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q3_r,':',2)\
+    \ AS DOUBLE), 1e9)\n        )\n        FROM qualifying q2\n        WHERE q2.rbind = q.rbind AND q2.px_pos\
+    \ = 1\n      )\n    )\n    FROM qualifying q\n    WHERE q.pilotrec = qualifying.pilotrec\n  ) < 0.15\
+    \ THEN 'Pole Threat'\n  WHEN (\n    SELECT AVG(\n      (LEAST(\n        COALESCE(CAST(split_part(q.q1_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q1_r,':',2) AS DOUBLE), 1e9),\n        COALESCE(CAST(split_part(q.q2_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q2_r,':',2) AS DOUBLE), 1e9),\n        COALESCE(CAST(split_part(q.q3_r,':',1)\
+    \ AS DOUBLE)*60 + CAST(split_part(q.q3_r,':',2) AS DOUBLE), 1e9)\n      )) - (\n        SELECT LEAST(\n\
+    \          COALESCE(CAST(split_part(q2.q1_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q1_r,':',2)\
+    \ AS DOUBLE), 1e9),\n          COALESCE(CAST(split_part(q2.q2_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q2_r,':',2)\
+    \ AS DOUBLE), 1e9),\n          COALESCE(CAST(split_part(q2.q3_r,':',1) AS DOUBLE)*60 + CAST(split_part(q2.q3_r,':',2)\
+    \ AS DOUBLE), 1e9)\n        )\n        FROM qualifying q2\n        WHERE q2.rbind = q.rbind AND q2.px_pos\
+    \ = 1\n      )\n    )\n    FROM qualifying q\n    WHERE q.pilotrec = qualifying.pilotrec\n  ) < 0.4\
+    \ THEN 'Mid Gap'\n  ELSE 'Backmarker'\nEND"
+  source_model: main.qualifying
+  domains:
+  - definitions
+- name: average_stops_per_car
+  description: 'Calculates the average number of pit stops undertaken by each competing car in a single
+    race.
+
+
+    For a given race, this is calculated as: (Total Number of Pit Stops) / (Number of Unique Cars that
+    made a Pit Stop).
+
+
+    Compiler note: Computed as a per-race window aggregate over pit_stops: total pit stop rows for the
+    race divided by the number of distinct cars (wunit) that made at least one pit stop in that race,
+    partitioned by matchidx (race id).'
+  sql_expression: CAST(COUNT(*) OVER (PARTITION BY matchidx) AS DOUBLE) / COUNT(DISTINCT wunit) OVER (PARTITION
+    BY matchidx)
+  source_model: main.pit_stops
+  domains:
+  - calculations
+- name: pit_strategy_cluster
+  description: 'Classifies races based on average number of pit stops per car.
+
+
+    Three categories: ''Single-Stop Race'' (<1.5 stops), ''Standard Two-Stop'' (1.5-2.5 stops), ''High-Strategy
+    Event'' (≥2.5 stops)
+
+
+    Built on: average_stops_per_car.
+
+
+    Compiler note: Average stops per car computed per race via scalar subquery over pit_stops (COUNT(*)/COUNT(DISTINCT
+    wunit) grouped by matchidx=rak_id). Races with no pit stop rows yield NULL average, so they fall through
+    to ELSE ''High-Strategy Event''; this reflects lack of data rather than an actual classification,
+    but no separate category was specified for races without pit stop data.'
+  sql_expression: "CASE\n  WHEN (SELECT CAST(COUNT(*) AS DOUBLE) / COUNT(DISTINCT wunit) FROM pit_stops\
+    \ WHERE matchidx = rak_id) < 1.5 THEN 'Single-Stop Race'\n  WHEN (SELECT CAST(COUNT(*) AS DOUBLE)\
+    \ / COUNT(DISTINCT wunit) FROM pit_stops WHERE matchidx = rak_id) <= 2.5 THEN 'Standard Two-Stop'\n\
+    \  ELSE 'High-Strategy Event'\nEND"
+  source_model: main.races
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: circuits
+  columns:
+  - name: cctkey
+    type: INTEGER
+    description: 'INTEGER. Unique identifier for the circuit. PK. Example: 1.'
+  - name: location_metadata
+    type: JSON
+    description: 'JSONB column. Encapsulates all geographical and identification data related to the circuit’s
+      location. Fields: {"name": "TEXT. Name of the circuit. Example: Albert Park Grand Prix Circuit.",
+      "reference_code": "TEXT. Circuit reference code. Example: albert_park.", "location": {"city": "VARCHAR.
+      City or locality of the circuit. **NULL means the locality was not supplied or is unknown in the
+      source feed.**. Example: Melbourne.", "country": "TEXT. Name of the country where the circuit is
+      located. Example: Australia."}, "coordinates": {"latitude": "REAL. Latitude coordinate of the circuit.
+      **NULL means the latitude is not recorded or the circuit''s exact position is uncertain.**. Example:
+      -37.8497.", "longitude": "REAL. Longitude coordinate of the circuit. **NULL means longitude is missing
+      or unavailable.**. Example: 144.968.", "elevation_m": "INTEGER. Circuit elevation in metres. **NULL
+      means elevation data were not provided for this circuit.**. Example: 10.0."}, "external_link": "VARCHAR.
+      URL with more information about the circuit. **NULL means no official or stable link is on record.**.
+      Example: http://en.wikipedia.org/wiki/Melbourne_Grand_Prix_Circuit."}
+
+
+      Data Unavailability for Circuit Location: Clarifies the meaning of unavailable geographical data
+      for a circuit.
+
+
+      When a circuit''s city, latitude, or longitude are not provided, it indicates that this information
+      was not supplied or is unknown in the source data feed.
+
+
+      Compiler note: Describes NULL semantics for location fields (city, latitude, longitude) nested within
+      the circuits.location_metadata JSONB column.
+
+
+      Data Unavailability for Circuit Elevation: Clarifies the meaning of unavailable elevation data for
+      a circuit.
+
+
+      When a circuit''s elevation in meters is not provided, it signifies that this specific data point
+      was not recorded for the circuit.
+
+
+      Compiler note: Describes NULL semantics for the elevation_m field nested within circuits.location_metadata
+      (coordinates.elevation_m) - no dedicated elevation column exists at top level.'
+- schema: main
+  table: constructor_results
+  columns:
+  - name: cresref
+    type: INTEGER
+    description: 'INTEGER. Unique result reference. PK. Example: 15178.'
+  - name: matchref
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 943.'
+  - name: unitnode
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the constructors table (CSTR_Key). FK to constructors. Example:
+      9.'
+  - name: scoreval
+    type: FLOAT
+    description: 'REAL. Points scored by constructor in the race. **NULL means the constructor was unclassified
+      or data are missing.**. Example: 22.0.'
+  - name: st_mark
+    type: VARCHAR
+    description: 'TEXT. Status mark for the result. Possible values: D, \N.'
+- schema: main
+  table: constructor_standings
+  columns:
+  - name: cstnds
+    type: INTEGER
+    description: 'INTEGER. Unique standings reference. PK. Example: 25335.'
+  - name: rref
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 898.'
+  - name: contunit
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the constructors table (CSTR_Key). FK to constructors. Example:
+      9.'
+  - name: scr_tot
+    type: FLOAT
+    description: 'REAL. Constructor''s cumulative season points. **NULL means the constructor has not
+      yet scored or the tally is not updated.**. Example: 553.0.'
+  - name: posno
+    type: INTEGER
+    description: 'INTEGER. Constructor''s rank in standings. **NULL means no position computed.**. Example:
+      1.'
+  - name: poslab
+    type: VARCHAR
+    description: 'VARCHAR. Position text label. **NULL means no label available.**. Example: 1.'
+  - name: trophy_w
+    type: INTEGER
+    description: 'INTEGER. Total wins by constructor. **NULL means the constructor has no wins or the
+      count is pending update.**. Example: 12.'
+- schema: main
+  table: constructors
+  columns:
+  - name: cstr_key
+    type: INTEGER
+    description: 'INTEGER. Unique identifier for the constructor. PK. Example: 1.'
+  - name: refcod
+    type: VARCHAR
+    description: 'TEXT. Constructor reference code. Example: mclaren.'
+  - name: namelabel
+    type: VARCHAR
+    description: 'VARCHAR. Full team name. **NULL means the constructor name has not been resolved or
+      released.**. Example: McLaren.'
+  - name: naty
+    type: VARCHAR
+    description: 'VARCHAR. Nationality of the constructor. **NULL means the team''s nationality is not
+      specified in the dataset.**. Example: British.
+
+
+      Data Unavailability for Constructor Nationality: Clarifies the meaning of unavailable nationality
+      data for a constructor.
+
+
+      When a constructor''s nationality is not specified, it means the team''s country of origin is not
+      recorded in the dataset.
+
+
+      Compiler note: Describes NULL semantics for constructors.naty column, matching documented meaning.'
+  - name: linkpage
+    type: VARCHAR
+    description: 'VARCHAR. URL to the constructor''s page. **NULL means the reference link is missing.**.
+      Example: http://en.wikipedia.org/wiki/BMW_Sauber.'
+- schema: main
+  table: driver_standings
+  columns:
+  - name: drv_stnd
+    type: INTEGER
+    description: 'INTEGER. Unique standings reference. PK. Example: 50065.'
+  - name: rlink
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 752.'
+  - name: drive_link
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the drivers table (DRV_MAIN). FK to drivers. Example: 531.'
+  - name: acc_pt
+    type: FLOAT
+    description: 'REAL. Driver''s cumulative season points. **NULL means the driver has no points or totals
+      not updated.**. Example: 0.0.'
+  - name: px
+    type: INTEGER
+    description: 'INTEGER. Driver''s rank in standings. **NULL means ranking not yet calculated.**. Example:
+      56.0.'
+  - name: px_desc
+    type: VARCHAR
+    description: 'VARCHAR. Descriptive rank label. **NULL means label not assigned.**. Example: 56.0.'
+  - name: topmark
+    type: INTEGER
+    description: 'INTEGER. Total wins by driver. **NULL means the driver has not won or data have not
+      been entered.**. Example: 0.0.'
+- schema: main
+  table: drivers
+  columns:
+  - name: drv_main
+    type: INTEGER
+    description: 'INTEGER. Unique identifier for the driver. PK. Example: 1.'
+  - name: driver_identity
+    type: JSON
+    description: 'JSONB column. Consolidates driver’s identity, nationality, and references. Fields: {"reference":
+      "TEXT. Driver reference code. Example: hamilton.", "racing_number": "VARCHAR. Permanent racing number.
+      **NULL means the driver has no permanent number or it is not known.**. Example: 14.0.", "code":
+      "VARCHAR. Three-letter identifier code. **NULL means an FIA code has not been assigned.**. Example:
+      HAM.", "name": {"first_name": "VARCHAR. Driver''s given name. **NULL means the given name is not
+      stored.**. Example: Lewis.", "surname": "VARCHAR. Driver''s surname. **NULL means the surname is
+      missing.**. Example: Hamilton."}, "birth_date": "VARCHAR. Date of birth. **NULL means the birth
+      date is unknown or undisclosed.**. Example: 1985-01-07.", "nationality": "VARCHAR. Driver''s nationality.
+      **NULL means nationality is not recorded.**. Example: British.", "info_link": "VARCHAR. Link to
+      the driver''s info page. **NULL means no profile link is available.**. Example: http://en.wikipedia.org/wiki/Nick_Heidfeld."}
+
+
+      Data Unavailability for Driver Identification: Clarifies the meaning of a missing permanent racing
+      number or identification code for a driver.
+
+
+      When a driver''s permanent number or three-letter identifier code is unavailable, it indicates that
+      one has not been officially assigned or it is not present in the dataset.
+
+
+      Compiler note: Describes NULL semantics for the ''racing_number'' and ''code'' fields within the
+      driver_identity JSONB column of drivers table.'
+- schema: main
+  table: lap_times
+  columns:
+  - name: rc_index
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 1093.'
+  - name: wheel_unit
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the drivers table (DRV_MAIN). FK to drivers. Example: 4.'
+  - name: lapval
+    type: INTEGER
+    description: 'INTEGER. Lap value in the race. Example: 55.'
+  - name: pp
+    type: INTEGER
+    description: 'INTEGER. Position for the lap. Example: 7.'
+  - name: tmdesc
+    type: VARCHAR
+    description: 'VARCHAR. Recorded lap-time string. **NULL means the lap time was not captured or is
+      invalid.**. Example: 1:43.848.'
+  - name: msec_val
+    type: INTEGER
+    description: 'INTEGER. Lap time in milliseconds. Example: 103848.'
+- schema: main
+  table: pit_stops
+  columns:
+  - name: matchidx
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 911.'
+  - name: wunit
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the drivers table (DRV_MAIN). FK to drivers. Example: 3.'
+  - name: pause_no
+    type: INTEGER
+    description: 'INTEGER. Unique identifier for the pit stop. Possible values: 1, 2, 3, 4, 5, 6.'
+  - name: moment
+    type: INTEGER
+    description: 'INTEGER. Moment during the race when the pit stop occurs. Example: 19.'
+  - name: attime
+    type: VARCHAR
+    description: 'VARCHAR. Timestamp of the pit stop. **NULL means the exact pit-stop time wasn''t logged.**.
+      Example: 14:41:14.'
+  - name: durtxt
+    type: VARCHAR
+    description: 'TEXT. Duration of the pit stop. Example: 22.936.'
+  - name: ms_count
+    type: INTEGER
+    description: 'INTEGER. Millisecond count for the pit stop. Example: 22936.'
+- schema: main
+  table: qualifying
+  columns:
+  - name: qualkey
+    type: INTEGER
+    description: 'INTEGER. Unique qualifying key. PK. Example: 6815.'
+  - name: rbind
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 954.'
+  - name: pilotrec
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the drivers table (DRV_MAIN). FK to drivers. Example: 1.'
+  - name: corptag
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the constructors table (CSTR_Key). FK to constructors. Example:
+      131.'
+  - name: regno
+    type: INTEGER
+    description: 'INTEGER. Registration number of the driver. Example: 44.'
+  - name: px_pos
+    type: INTEGER
+    description: 'INTEGER. Position in qualifying. Example: 1.'
+  - name: q1_r
+    type: VARCHAR
+    description: 'TEXT. Q1 qualifying result. **NULL means no Q1 result.**. Example: 1:14.121.'
+  - name: q2_r
+    type: VARCHAR
+    description: 'TEXT. Q2 qualifying result. **NULL means no Q2 result.**. Example: 1:13.076.'
+  - name: q3_r
+    type: VARCHAR
+    description: 'TEXT. Q3 qualifying result. **NULL means no Q3 result.**. Example: 1:12.812.'
+- schema: main
+  table: races
+  columns:
+  - name: rak_id
+    type: INTEGER
+    description: 'INTEGER. Unique identifier for the race. PK. Example: 1.'
+  - name: yr
+    type: INTEGER
+    description: 'INTEGER. Year of the race. Example: 2009.'
+  - name: rnum
+    type: INTEGER
+    description: 'INTEGER. Race number. Example: 1.'
+  - name: trkbind
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the circuits table (CCTKEY). FK to circuits. Example: 1.'
+  - name: event_schedule
+    type: JSON
+    description: 'JSONB column. Groups all date and time-related fields for a race weekend schedule including
+      practice, qualifying, and sprint sessions. Fields: {"event_name": "VARCHAR. Official event name.
+      **NULL means the event name is not yet finalised or entered.**. Example: Australian Grand Prix.",
+      "date_set": "TEXT. Date set for the race. Example: 2009/03/29.", "start_time": "VARCHAR. Scheduled
+      race start time. **NULL means the start time is TBD or not recorded.**. Example: 06:00:00.", "sessions":
+      {"fp1": {"date": "VARCHAR. Free Practice 1 date. **NULL means FP1 is not scheduled or date not published.**.
+      Example: 2022/03/18.", "time": "VARCHAR. Free Practice 1 time. **NULL means FP1 time is not available.**.
+      Possible values: 02:30:00, 04:30:00, 09:30:00, 10:00:00, 11:30:00, 12:00:00, 13:30:00, 16:30:00,
+      17:30:00, 18:00:00."}, "fp2": {"date": "VARCHAR. Free Practice 2 date. **NULL means FP2 is not planned
+      or date is missing.**. Example: 2021/04/16.", "time": "VARCHAR. Free Practice 2 time. **NULL means
+      FP2 time is not available.**. Example: 15:00:00."}, "fp3": {"date": "VARCHAR. Free Practice 3 date.
+      **NULL means FP3 does not occur or date not provided.**. Example: 2021/04/17.", "time": "VARCHAR.
+      Free Practice 3 time. **NULL means FP3 time is not recorded.**. Example: 12:00:00."}, "qualifying":
+      {"date": "VARCHAR. Qualifying date. **NULL means qualifying date is unset.**. Example: 2021/04/17.",
+      "time": "VARCHAR. Qualifying time. **NULL means qualifying time is unknown.**. Example: 06:00:00."},
+      "sprint": {"date": "VARCHAR. Sprint-race date. **NULL means no sprint race for this event or date
+      not released.**. Possible values: 2021/07/17, 2021/09/11, 2022/04/23, 2022/07/09, 2022/11/12, 2023/10/07,
+      2023/11/04, 2024/05/04, 2024/11/02.", "time": "VARCHAR. Sprint-race time. **NULL means sprint time
+      is not applicable or missing.**. Possible values: 13:00:00, 13:30:00, 14:30:00, 18:00:00, 18:30:00,
+      22:00:00."}}, "details_url": "VARCHAR. URL to additional race details. **NULL means no external
+      reference is available.**. Example: http://en.wikipedia.org/wiki/2009_Chinese_Grand_Prix."}
+
+
+      Indeterminate Event Timings: Clarifies the meaning of unavailable date or time information for any
+      race weekend session.
+
+
+      When the date or time for any session (practice, qualifying, sprint, or race) is not provided, it
+      signifies that the schedule for that session is To Be Determined (TBD), not applicable for the event,
+      or not yet published.
+
+
+      Compiler note: Describes meaning of NULL date/time fields within event_schedule JSON (sessions.fp1/fp2/fp3/qualifying/sprint
+      date/time, and start_time), indicating TBD/not applicable/not published.'
+- schema: main
+  table: sprint_results
+  columns:
+  - name: srescode
+    type: INTEGER
+    description: 'INTEGER. Unique sprint result code. PK. Example: 1.'
+  - name: matchref
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the races table (RAK_ID). FK to races. Example: 1061.'
+  - name: unitdrive
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the drivers table (DRV_MAIN). FK to drivers. Example: 830.'
+  - name: makeref
+    type: INTEGER
+    description: 'INTEGER. Foreign key to the constructors table (CSTR_Key). FK to constructors. Example:
+      9.'
+  - name: rno
+    type: INTEGER
+    description: 'INTEGER. Sprint result number. **NULL means no sprint result number available.**. Example:
+      33.'
+  - name: sprint_performance
+    type: JSON
+    description: 'JSONB column. Captures performance metrics in sprint races including lap data, timing,
+      position, and score. Fields: {"grid": "INTEGER. Starting grid position. Example: 2.", "final_position":
+      "INTEGER. Sprint-race finishing position. **NULL means the driver did not finish / classify.**.
+      Example: 1.", "position_label": "VARCHAR. Sprint position label. **NULL means label not provided.**.
+      Example: 1.", "ranking_order": "INTEGER. Order mark for the sprint result. Example: 1.", "points":
+      "REAL. Points scored in the sprint. **NULL means no points were awarded or result is pending.**.
+      Possible values: 0, 1, 2, 3, 4, 5, 6, 7, 8.", "laps_completed": "INTEGER. Number of loops in the
+      sprint. Example: 17.", "timing": {"final_time": "VARCHAR. Final total time / status marker for the
+      sprint race. **NULL means the finisher had no classified time or data are not available.**. Example:
+      25:38.426.", "duration_ms": "INTEGER. Milliseconds for the sprint. Example: 1538426."}, "fastest_lap":
+      {"lap_number": "INTEGER. Fastest lap in the sprint. Example: 14.", "lap_time": "TEXT. Fast lap time
+      for the sprint. Example: 1:30.013."}, "status_code": "INTEGER. Sprint code. Possible values: 1,
+      3, 10, 23, 31, 43, 76, 130."}'

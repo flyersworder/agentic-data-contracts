@@ -1,0 +1,1578 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: virtual_idol, compiler: claudesonnet5
+# inputs: virtual_idol_kb.jsonl, virtual_idol_column_meaning_base.json, virtual_idol_schema.txt, virtual_idol.duckdb
+metrics:
+- name: fan_monetization_index_fmi
+  description: 'Measures a fan''s direct financial contribution per minute of engagement, indicating their
+    propensity for in-session spending.
+
+
+    FMI = \frac{\text{Total Gift Value in USD}}{\text{Session Duration in Minutes}}
+
+
+    Compiler note: Gift_Val_Usd extracted from gift_metrics JSONB and cast to double, divided by sess_dur_min
+    (session duration in minutes) per interaction row.'
+  sql_expression: (gift_metrics->>'Gift_Val_Usd')::double / sess_dur_min
+  source_model: main.interactions
+  domains:
+  - calculations
+- name: content_consumption_index_cci
+  description: 'Quantifies a fan''s level of passive engagement by measuring the hours of content they
+    watch relative to their session time.
+
+
+    CCI = \frac{\text{Total Watch Hours}}{\text{Session Duration in Minutes}}
+
+
+    Compiler note: CCI = Total Watch Hours / Session Duration in Minutes, using interactions.watch_hrs
+    and interactions.sess_dur_min directly.'
+  sql_expression: watch_hrs / sess_dur_min
+  source_model: main.interactions
+  domains:
+  - calculations
+- name: chattiness_score_cs
+  description: 'Measures a fan''s active communication during a session, reflecting their level of social
+    interaction.
+
+
+    CS = \frac{\text{Number of Chat Messages Sent}}{\text{Session Duration in Minutes}}
+
+
+    Compiler note: Chat_Msg extracted from chat_activity jsonb, divided by sess_dur_min (minutes).'
+  sql_expression: (chat_activity->>'Chat_Msg')::numeric / sess_dur_min
+  source_model: main.interactions
+  domains:
+  - calculations
+- name: fan_financial_value_ffv
+  description: 'Estimates a fan''s monthly financial contribution to the platform, serving as a proxy
+    for their lifetime value.
+
+
+    FFV = \frac{\text{Total Spending in USD}}{\text{Membership Duration in Days} / 30.44}
+
+
+    Compiler note: FFV = spend_usd / (memb_days/30.44); memb_days can be 0 so NULLIF used to avoid division
+    by zero, returning NULL in that case.'
+  sql_expression: spend_usd / (NULLIF(memb_days,0) / 30.44)
+  source_model: main.membershipandspending
+  domains:
+  - calculations
+- name: merchandise_affinity_score_mas
+  description: 'Calculates the proportion of a fan''s total spending that is dedicated to merchandise,
+    indicating their interest in physical goods.
+
+
+    MAS = \frac{\text{Total Merchandise Spend in USD}}{\text{Total Spending in USD}}
+
+
+    Compiler note: MAS = merch_spend_usd (CommerceAndCollection) / spend_usd (MembershipAndSpending),
+    joined via commerce_member_pivot -> member_reg, which is a unique 1:1 relationship (no duplicate commerce_member_pivot
+    values).'
+  sql_expression: merch_spend_usd / (SELECT m.spend_usd FROM membershipandspending m WHERE m.member_reg
+    = commerceandcollection.commerce_member_pivot)
+  source_model: main.commerceandcollection
+  domains:
+  - calculations
+- name: follower_to_following_ratio_ffr
+  description: 'Measures a fan''s social influence by comparing the number of users who follow them to
+    the number of users they follow.
+
+
+    FFR = \frac{\text{Follower Count}}{\text{Following Count}}, \text{ where Following Count is > 0}
+
+
+    Compiler note: Follower Count = network_stats.Foll_Count, Following Count = network_stats.Fing_Count;
+    ratio only defined when Fing_Count>0, else NULL.'
+  sql_expression: CASE WHEN (network_stats->>'Fing_Count')::bigint > 0 THEN (network_stats->>'Foll_Count')::bigint::double
+    precision / (network_stats->>'Fing_Count')::bigint ELSE NULL END
+  source_model: main.socialcommunity
+  domains:
+  - calculations
+- name: content_creator_score_ccs
+  description: 'Evaluates a fan''s contribution as a content creator by combining the volume and quality
+    of their user-generated content.
+
+
+    CCS = (Σ \text{Content Submissions} + \text{Collaborations}) \times \text{Average Content Quality
+    Rating}
+
+
+    Compiler note: Content Submissions = Art_Subs + Fic_Subs + Cover_Perf_Cnt (the three UGC submission-type
+    fields), Collaborations = Collab_Count, Average Content Quality Rating = Cont_Qual_Rate (single stored
+    value per record, used as-is). All fields read from content_creation jsonb on socialcommunity.'
+  sql_expression: ((content_creation->>'Art_Subs')::numeric + (content_creation->>'Fic_Subs')::numeric
+    + (content_creation->>'Cover_Perf_Cnt')::numeric + (content_creation->>'Collab_Count')::numeric) *
+    (content_creation->>'Cont_Qual_Rate')::numeric
+  source_model: main.socialcommunity
+  domains:
+  - calculations
+- name: community_influence_index_cii
+  description: 'A composite score that measures a fan''s overall influence within the community, based
+    on their social network reach and recognized influence.
+
+
+    CII = \sqrt{\text{Follower Count} \times \text{Content Reach}}
+
+
+    Compiler note: Follower Count from socialcommunity.network_stats->>''Foll_Count''; Content Reach from
+    retentionandinfluence.infl_impact->>''Cont_Reach'', joined via social_engage_pivot = retain_engage_pivot
+    (verified unique match per social_reg).'
+  sql_expression: sqrt((network_stats->>'Foll_Count')::numeric * (SELECT (r.infl_impact->>'Cont_Reach')::numeric
+    FROM retentionandinfluence r WHERE r.retain_engage_pivot = socialcommunity.social_engage_pivot))
+  source_model: main.socialcommunity
+  domains:
+  - calculations
+- name: achievement_density_ad
+  description: 'Measures the rate at which a fan earns achievements, indicating their level of engagement
+    with platform goals.
+
+
+    AD = \frac{\text{Total Achievements Unlocked}}{\text{Membership Duration in Days}}
+
+
+    Compiler note: Ach_Count from achiev_stats JSON divided by membership duration (memb_days) reached
+    via loyalty_events_pivot -> eventsandclub -> events_member_pivot -> membershipandspending (unique
+    join). NULLIF guards against division by zero.'
+  sql_expression: (achiev_stats->>'Ach_Count')::numeric / NULLIF((SELECT m.memb_days FROM eventsandclub
+    e JOIN membershipandspending m ON e.events_member_pivot = m.member_reg WHERE e.events_reg = loyaltyandachievements.loyalty_events_pivot),
+    0)
+  source_model: main.loyaltyandachievements
+  domains:
+  - calculations
+- name: support_load_score_sls
+  description: 'Quantifies the amount of support resources a fan utilizes, based on their submission of
+    tickets and issue reports.
+
+
+    SLS = \text{Support Tickets} + \text{Bug Reports} + \text{Technical Issue Reports}
+
+
+    Compiler note: SLS = Supp_Tix + Bug_Subs + Tech_Issue_Rpt, all fields from feedback_data jsonb in
+    supportandfeedback.'
+  sql_expression: (feedback_data->>'Supp_Tix')::numeric + (feedback_data->>'Bug_Subs')::numeric + (feedback_data->>'Tech_Issue_Rpt')::numeric
+  source_model: main.supportandfeedback
+  domains:
+  - calculations
+- name: viral_potential_score_vps
+  description: 'Assesses a fan''s ability to create and participate in viral trends.
+
+
+    VPS = \text{Viral Content Pieces} \times (1 + \text{Trend Participation Count})
+
+
+    Compiler note: Viral_Cont and Trend_Part extracted from infl_impact jsonb; VPS = Viral_Cont * (1 +
+    Trend_Part), computed per row.'
+  sql_expression: (infl_impact->>'Viral_Cont')::numeric * (1 + (infl_impact->>'Trend_Part')::numeric)
+  source_model: main.retentionandinfluence
+  domains:
+  - calculations
+- name: event_participation_score_eps
+  description: 'A weighted score that measures a fan''s engagement with platform events, prioritizing
+    in-person attendance.
+
+
+    EPS = (\text{Online Events} \times 1) + (\text{Offline Events} \times 1.5) + (\text{Meet-and-Greets}
+    \times 2)
+
+
+    Compiler note: Uses evt_participation JSON fields On_Evt_Att (online events), Off_Evt_Att (offline
+    events), Meet_Att (meet-and-greets) with weights 1, 1.5, 2 respectively.'
+  sql_expression: (evt_participation->>'On_Evt_Att')::numeric * 1 + (evt_participation->>'Off_Evt_Att')::numeric
+    * 1.5 + (evt_participation->>'Meet_Att')::numeric * 2
+  source_model: main.eventsandclub
+  domains:
+  - calculations
+- name: platform_stickiness_score_pss
+  description: 'Measures a fan''s loyalty and connection to the platform based on their interaction consistency
+    and session stability.
+
+
+    PSS = \frac{\text{Interaction Consistency Score} + \text{Platform Stability Score}}{2}
+
+
+    Compiler note: Interaction Consistency Score = usage_metrics.Int_Consist, Platform Stability Score
+    = usage_metrics.Plat_Stable, both in preferencesandsettings.usage_metrics JSONB.'
+  sql_expression: ((usage_metrics->>'Int_Consist')::double precision + (usage_metrics->>'Plat_Stable')::double
+    precision) / 2
+  source_model: main.preferencesandsettings
+  domains:
+  - calculations
+- name: loyalty_progression_rate_lpr
+  description: 'Measures the efficiency of a fan''s progression through loyalty tiers based on points
+    accumulated.
+
+
+    LPR = \frac{\text{Total Loyalty Points}}{\text{Current Tier Level}}
+
+
+    Compiler note: Total Loyalty Points = loyaltyandachievements.loy_pts. Current Tier Level = fans.tier_step,
+    reached via loyalty_engage_pivot -> engagement.engage_reg -> engage_member_pivot -> membershipandspending.member_reg
+    -> member_fan_pivot -> fans.user_registry. Verified this join chain is unique per loyalty_reg. Guarded
+    division by zero tier_step with NULLIF.'
+  sql_expression: loy_pts::double precision / NULLIF((SELECT f.tier_step FROM engagement e JOIN membershipandspending
+    m ON e.engage_member_pivot = m.member_reg JOIN fans f ON m.member_fan_pivot = f.user_registry WHERE
+    e.engage_reg = loyaltyandachievements.loyalty_engage_pivot), 0)
+  source_model: main.loyaltyandachievements
+  domains:
+  - calculations
+- name: social_capital_score_scs
+  description: 'Represents the size and strength of a fan''s social network on the platform.
+
+
+    SCS = \text{Social Network Size} + (\text{Friend Connections} \times 1.5)
+
+
+    Compiler note: Soc_Net_Sz and Friend_Con extracted from network_stats jsonb; SCS = Soc_Net_Sz + Friend_Con*1.5'
+  sql_expression: (network_stats->>'Soc_Net_Sz')::numeric + (network_stats->>'Friend_Con')::numeric *
+    1.5
+  source_model: main.socialcommunity
+  domains:
+  - calculations
+- name: collection_rate_cr
+  description: 'Measures the total number of digital and physical collectible items a fan owns.
+
+
+    CR = \text{Digital Items Owned} + \text{Physical Items Owned}
+
+
+    Compiler note: CR = Digital Items Owned (dig_own) + Physical Items Owned (phys_own), both stored directly
+    on commerceandcollection.'
+  sql_expression: dig_own + phys_own
+  source_model: main.commerceandcollection
+  domains:
+  - calculations
+- name: whale_fan
+  description: 'A fan who demonstrates extremely high in-session spending, representing a top-tier financial
+    contributor.
+
+
+    A fan is classified as a Whale Fan if their Fan Monetization Index (FMI) is greater than 20.
+
+
+    Built on: fan_monetization_index_fmi.
+
+
+    Compiler note: Uses FMI = Gift_Val_Usd / sess_dur_min computed per interaction; Whale Fan predicate
+    flags interactions where FMI > 20.'
+  sql_expression: (gift_metrics->>'Gift_Val_Usd')::double / sess_dur_min > 20
+  source_model: main.interactions
+  domains:
+  - definitions
+- name: engaged_lurker
+  description: 'A fan who actively consumes a large amount of content but participates minimally in social
+    chat.
+
+
+    A fan is an Engaged Lurker if their Content Consumption Index (CCI) is greater than 0.5 and their
+    Chattiness Score (CS) is less than 0.5.
+
+
+    Built on: content_consumption_index_cci, chattiness_score_cs.
+
+
+    Compiler note: CCI = watch_hrs/sess_dur_min, CS = Chat_Msg/sess_dur_min; both computed per interaction
+    row from interactions table.'
+  sql_expression: (watch_hrs / sess_dur_min) > 0.5 AND ((chat_activity->>'Chat_Msg')::numeric / sess_dur_min)
+    < 0.5
+  source_model: main.interactions
+  domains:
+  - definitions
+- name: high_value_member
+  description: 'A fan with a paid subscription who consistently contributes significant financial value
+    to the platform on a monthly basis.
+
+
+    A fan is a High-Value Member if they are a Premium Member and their Fan Financial Value (FFV) is greater
+    than $50 per month.
+
+
+    Built on: Premium Member, fan_financial_value_ffv.
+
+
+    Compiler note: Premium Member = memb_kind <> ''Free'' (values seen: Diamond, Premium, Free, Basic,
+    no case variation). FFV = spend_usd / (memb_days/30.44), guarded with NULLIF to avoid div-by-zero
+    when memb_days=0 (NULL result is falsy, excluded from High-Value Member).'
+  sql_expression: memb_kind <> 'Free' AND (spend_usd / (NULLIF(memb_days,0) / 30.44)) > 50
+  source_model: main.membershipandspending
+  domains:
+  - definitions
+- name: collector_fan
+  description: 'A fan who is highly focused on acquiring platform collectibles, both digital and physical.
+
+
+    A fan is a Collector Fan if their Collection Rate (CR) is greater than 50 and their collection completion
+    rate is above 75%.
+
+
+    Built on: collection_rate_cr.
+
+
+    Compiler note: Collection Rate (CR) = dig_own + phys_own; coll_comp_rate is stored as a percentage
+    value (e.g. 77.9 means 77.9%), so ''above 75%'' maps directly to coll_comp_rate > 75.'
+  sql_expression: (dig_own + phys_own) > 50 AND coll_comp_rate > 75
+  source_model: main.commerceandcollection
+  domains:
+  - definitions
+- name: community_influencer
+  description: 'A fan with significant social capital, characterized by a large and engaged follower base.
+
+
+    A fan is a Community Influencer if their Follower-to-Following Ratio (FFR) is greater than 2.0 and
+    their Community Influence Index (CII) is greater than 10000.
+
+
+    Built on: follower_to_following_ratio_ffr, community_influence_index_cii.
+
+
+    Compiler note: Combines FFR (Foll_Count/Fing_Count, null-guarded when Fing_Count=0) > 2.0 with CII
+    (sqrt(Foll_Count * Cont_Reach) via unique join to retentionandinfluence on retain_engage_pivot=social_engage_pivot)
+    > 10000. Verified retain_engage_pivot is unique in retentionandinfluence.'
+  sql_expression: 'CASE WHEN (network_stats->>''Fing_Count'')::bigint > 0 THEN (network_stats->>''Foll_Count'')::bigint::double
+    precision / (network_stats->>''Fing_Count'')::bigint ELSE NULL END > 2.0
+
+    AND sqrt((network_stats->>''Foll_Count'')::numeric * (SELECT (r.infl_impact->>''Cont_Reach'')::numeric
+    FROM retentionandinfluence r WHERE r.retain_engage_pivot = socialcommunity.social_engage_pivot)) >
+    10000'
+  source_model: main.socialcommunity
+  domains:
+  - definitions
+- name: super_creator
+  description: 'A fan who is a prolific and high-quality content creator, contributing significantly to
+    the platform''s user-generated content.
+
+
+    A fan is a Super Creator if their Content Creator Score (CCS) is greater than 200.
+
+
+    Built on: content_creator_score_ccs.
+
+
+    Compiler note: Super Creator = CCS > 200, where CCS = (Art_Subs+Fic_Subs+Cover_Perf_Cnt+Collab_Count)*Cont_Qual_Rate
+    from content_creation JSON.'
+  sql_expression: ((content_creation->>'Art_Subs')::numeric + (content_creation->>'Fic_Subs')::numeric
+    + (content_creation->>'Cover_Perf_Cnt')::numeric + (content_creation->>'Collab_Count')::numeric) *
+    (content_creation->>'Cont_Qual_Rate')::numeric > 200
+  source_model: main.socialcommunity
+  domains:
+  - definitions
+- name: at_risk_fan
+  description: 'A fan who shows signs of disengagement or has been flagged as having a high probability
+    of churning.
+
+
+    A fan is considered At-Risk if their Platform Stickiness Score (PSS) is below 0.4 or their churn flag
+    is ''High''.
+
+
+    Built on: platform_stickiness_score_pss.
+
+
+    Compiler note: PSS is defined over preferencesandsettings but retentionandinfluence only has churn_flag;
+    joined retentionandinfluence -> engagement (via retain_engage_pivot) -> preferencesandsettings (via
+    engage_member_pivot = preferences_member_pivot) to compute PSS, verified this join is unique (no fan
+    matches >1 row). At-Risk if PSS < 0.4 OR churn_flag = ''High''.'
+  sql_expression: "(\n  (SELECT ((p.usage_metrics->>'Int_Consist')::double precision + (p.usage_metrics->>'Plat_Stable')::double\
+    \ precision) / 2\n   FROM engagement e\n   JOIN preferencesandsettings p ON p.preferences_member_pivot\
+    \ = e.engage_member_pivot\n   WHERE e.engage_reg = retentionandinfluence.retain_engage_pivot) < 0.4\n\
+    \  OR churn_flag = 'High'\n)"
+  source_model: main.retentionandinfluence
+  domains:
+  - definitions
+- name: loyal_achiever
+  description: 'A fan who is deeply engaged with the platform''s gamification systems, rapidly earning
+    achievements and progressing through loyalty tiers.
+
+
+    A fan is a Loyal Achiever if their Achievement Density (AD) is greater than 0.2 and their Loyalty
+    Progression Rate (LPR) is greater than 500.
+
+
+    Built on: achievement_density_ad, loyalty_progression_rate_lpr.
+
+
+    Compiler note: Combines AD (Ach_Count/memb_days via events->membership join) > 0.2 and LPR (loy_pts/tier_step
+    via engagement->membership->fans join) > 500, per the given definitions.'
+  sql_expression: '((achiev_stats->>''Ach_Count'')::numeric / NULLIF((SELECT m.memb_days FROM eventsandclub
+    e JOIN membershipandspending m ON e.events_member_pivot = m.member_reg WHERE e.events_reg = loyaltyandachievements.loyalty_events_pivot),
+    0)) > 0.2
+
+    AND
+
+    (loy_pts::double precision / NULLIF((SELECT f.tier_step FROM engagement e JOIN membershipandspending
+    m ON e.engage_member_pivot = m.member_reg JOIN fans f ON m.member_fan_pivot = f.user_registry WHERE
+    e.engage_reg = loyaltyandachievements.loyalty_engage_pivot), 0)) > 500'
+  source_model: main.loyaltyandachievements
+  domains:
+  - definitions
+- name: high_maintenance_fan
+  description: 'A fan who frequently requires customer support, indicating potential issues with their
+    user experience or platform stability.
+
+
+    A fan is classified as High-Maintenance if their Support Load Score (SLS) is greater than 10.
+
+
+    Built on: support_load_score_sls.
+
+
+    Compiler note: SLS = Supp_Tix + Bug_Subs + Tech_Issue_Rpt from feedback_data JSON; High-Maintenance
+    if SLS > 10.'
+  sql_expression: ((feedback_data->>'Supp_Tix')::numeric + (feedback_data->>'Bug_Subs')::numeric + (feedback_data->>'Tech_Issue_Rpt')::numeric)
+    > 10
+  source_model: main.supportandfeedback
+  domains:
+  - definitions
+- name: platform_promoter
+  description: 'A fan who is highly likely to recommend the platform to others, as indicated by a top-tier
+    NPS score.
+
+
+    A fan is a Platform Promoter if they are classified in the ''Promoters'' category based on NPS Score
+    Tiers.
+
+
+    Built on: NPS Score Tiers.
+
+
+    Compiler note: NPS value is stored as feedback_data->>''NPS_Val'' (JSON field). Promoters are NPS
+    9-10.'
+  sql_expression: ((feedback_data->>'NPS_Val')::numeric) BETWEEN 9 AND 10
+  source_model: main.supportandfeedback
+  domains:
+  - definitions
+- name: social_butterfly
+  description: 'A fan who is exceptionally well-connected and active within the platform''s social communities.
+
+
+    A fan is a Social Butterfly if their Social Capital Score (SCS) is greater than 1000 and they are
+    a member of more than 5 community groups.
+
+
+    Built on: social_capital_score_scs.
+
+
+    Compiler note: SCS computed from network_stats JSON fields Soc_Net_Sz + Friend_Con*1.5; group membership
+    count from network_stats->>''Grp_Memb''.'
+  sql_expression: ((network_stats->>'Soc_Net_Sz')::numeric + (network_stats->>'Friend_Con')::numeric *
+    1.5) > 1000 AND (network_stats->>'Grp_Memb')::numeric > 5
+  source_model: main.socialcommunity
+  domains:
+  - definitions
+- name: event_enthusiast
+  description: 'A fan who actively and frequently participates in a wide range of platform events, especially
+    high-value ones like meet-and-greets.
+
+
+    A fan is an Event Enthusiast if their Event Participation Score (EPS) is greater than 25.
+
+
+    Built on: event_participation_score_eps.
+
+
+    Compiler note: Applies EPS formula directly over eventsandclub.evt_participation JSON fields; predicate
+    is EPS > 25.'
+  sql_expression: ((evt_participation->>'On_Evt_Att')::numeric * 1 + (evt_participation->>'Off_Evt_Att')::numeric
+    * 1.5 + (evt_participation->>'Meet_Att')::numeric * 2) > 25
+  source_model: main.eventsandclub
+  domains:
+  - definitions
+- name: professional_fan
+  description: 'An adult fan who identifies with a professional occupation, representing a key demographic
+    segment.
+
+
+    A fan is a Professional Fan if they are in the ''Adult'' or ''Senior'' Fan Age Category and their
+    occupation path is ''Professional''.
+
+
+    Built on: Fan Age Category.
+
+
+    Compiler note: Adult/Senior = Age_Count >= 30 (covers both categories, upper bound unspecified). Occu_Path
+    has random case noise, matched case-insensitively against ''professional''.'
+  sql_expression: (demo_profile->>'Age_Count')::int >= 30 AND lower(demo_profile->>'Occu_Path') = 'professional'
+  source_model: main.fans
+  domains:
+  - definitions
+- name: idol_superfan
+  description: 'An elite fan who combines high spending with high event participation, representing the
+    most dedicated segment of the user base.
+
+
+    A fan is an Idol Superfan if they are classified as both a Whale Fan and an Event Enthusiast.
+
+
+    Built on: whale_fan, event_enthusiast.
+
+
+    Compiler note: Idol Superfan = Event Enthusiast (eventsandclub row, EPS>25) AND Whale Fan (any interaction
+    of the linked fan with FMI>20). Linked the eventsandclub row to its fan via events_member_pivot ->
+    membershipandspending.member_reg (PK, unique) -> member_fan_pivot, then checked existence of a whale-fan
+    interaction for that fan via interact_fan_pivot. Since both whale_fan and event_enthusiast are row-level
+    (interactions, eventsandclub) and a fan can have multiple rows in each, used EXISTS to apply the ''is
+    classified as'' condition at the fan level, sourced from eventsandclub rows.'
+  sql_expression: "((evt_participation->>'On_Evt_Att')::numeric * 1 + (evt_participation->>'Off_Evt_Att')::numeric\
+    \ * 1.5 + (evt_participation->>'Meet_Att')::numeric * 2) > 25\nAND EXISTS (\n  SELECT 1 FROM interactions\
+    \ i\n  WHERE i.interact_fan_pivot = (\n    SELECT m.member_fan_pivot FROM membershipandspending m\
+    \ WHERE m.member_reg = eventsandclub.events_member_pivot\n  )\n  AND (i.gift_metrics->>'Gift_Val_Usd')::double\
+    \ / i.sess_dur_min > 20\n)"
+  source_model: main.eventsandclub
+  domains:
+  - definitions
+- name: rising_star_influencer
+  description: 'A fan with a demonstrated ability to create viral content who is on the cusp of becoming
+    a major community influencer.
+
+
+    A fan is a Rising Star Influencer if their Viral Potential Score (VPS) is greater than 50 and their
+    Community Influence Index (CII) is between 1000 and 10000.
+
+
+    Built on: viral_potential_score_vps, community_influence_index_cii.
+
+
+    Compiler note: VPS computed from infl_impact fields; CII computed via scalar subquery joining socialcommunity
+    on social_engage_pivot = retain_engage_pivot (unique match verified), using Foll_Count from network_stats
+    and Cont_Reach from infl_impact of the same retentionandinfluence row.'
+  sql_expression: "((infl_impact->>'Viral_Cont')::numeric * (1 + (infl_impact->>'Trend_Part')::numeric))\
+    \ > 50\nAND (\n  SELECT sqrt((sc.network_stats->>'Foll_Count')::numeric * (infl_impact->>'Cont_Reach')::numeric)\n\
+    \  FROM socialcommunity sc\n  WHERE sc.social_engage_pivot = retentionandinfluence.retain_engage_pivot\n\
+    ) BETWEEN 1000 AND 10000"
+  source_model: main.retentionandinfluence
+  domains:
+  - definitions
+- name: power_user
+  description: 'A highly engaged premium member who uses the platform extensively across multiple devices.
+
+
+    A fan is a Power User if they are a Premium Member, have a total session count greater than 400, and
+    use more than 2 devices.
+
+
+    Built on: Premium Member.
+
+
+    Compiler note: Premium Member = membershipandspending.memb_kind <> ''Free'', joined via preferences_member_pivot
+    -> member_reg (unique 1:1 join verified). Total session count taken from usage_metrics->>''Sess_Count''
+    (JSON field Sess_Count), devices from dev_count.'
+  sql_expression: (SELECT m.memb_kind FROM membershipandspending m WHERE m.member_reg = preferencesandsettings.preferences_member_pivot)
+    <> 'Free' AND (usage_metrics->>'Sess_Count')::bigint > 400 AND dev_count > 2
+  source_model: main.preferencesandsettings
+  domains:
+  - definitions
+- name: fan_segments
+  description: 'Defines four distinct fan categories by segmenting the user base into a 2x2 grid based
+    on their relative financial value and support load.
+
+
+    A classification of fans based on their rank for Fan Financial Value (FFV) and Support Load Score
+    (SLS). Fans are split into top/bottom 50% for each metric to create four quadrants: ''Ideal Fans'',
+    ''At-Risk VIPs'', ''Quiet Majority'', and ''Resource Drain''.
+
+
+    Built on: fan_financial_value_ffv, support_load_score_sls.
+
+
+    Compiler note: Joins supportandfeedback -> preferencesandsettings -> membershipandspending (verified
+    unique join, no fan-outs) to get each support record''s FFV and SLS. Population medians (over the
+    39 supportandfeedback rows that have a resolvable FFV/SLS) are used as the top/bottom 50% split point:
+    FFV >= median is ''high'' FFV, SLS < median is ''low'' SLS. Quadrants: Ideal Fans (high FFV, low SLS),
+    At-Risk VIPs (high FFV, high SLS), Resource Drain (low FFV, high SLS), Quiet Majority (low FFV, low
+    SLS).'
+  sql_expression: "CASE\n  WHEN (\n    (SELECT m.spend_usd / (NULLIF(m.memb_days,0)/30.44)\n       FROM\
+    \ preferencesandsettings p JOIN membershipandspending m ON m.member_reg = p.preferences_member_pivot\n\
+    \       WHERE p.pref_reg = supportandfeedback.support_pref_pivot)\n    >= (SELECT median(m2.spend_usd\
+    \ / (NULLIF(m2.memb_days,0)/30.44))\n          FROM supportandfeedback s2\n          JOIN preferencesandsettings\
+    \ p2 ON p2.pref_reg = s2.support_pref_pivot\n          JOIN membershipandspending m2 ON m2.member_reg\
+    \ = p2.preferences_member_pivot)\n  )\n  AND (\n    ((feedback_data->>'Supp_Tix')::numeric + (feedback_data->>'Bug_Subs')::numeric\
+    \ + (feedback_data->>'Tech_Issue_Rpt')::numeric)\n    < (SELECT median((s2.feedback_data->>'Supp_Tix')::numeric\
+    \ + (s2.feedback_data->>'Bug_Subs')::numeric + (s2.feedback_data->>'Tech_Issue_Rpt')::numeric)\n \
+    \        FROM supportandfeedback s2)\n  )\n  THEN 'Ideal Fans'\n  WHEN (\n    (SELECT m.spend_usd\
+    \ / (NULLIF(m.memb_days,0)/30.44)\n       FROM preferencesandsettings p JOIN membershipandspending\
+    \ m ON m.member_reg = p.preferences_member_pivot\n       WHERE p.pref_reg = supportandfeedback.support_pref_pivot)\n\
+    \    >= (SELECT median(m2.spend_usd / (NULLIF(m2.memb_days,0)/30.44))\n          FROM supportandfeedback\
+    \ s2\n          JOIN preferencesandsettings p2 ON p2.pref_reg = s2.support_pref_pivot\n          JOIN\
+    \ membershipandspending m2 ON m2.member_reg = p2.preferences_member_pivot)\n  )\n  AND (\n    ((feedback_data->>'Supp_Tix')::numeric\
+    \ + (feedback_data->>'Bug_Subs')::numeric + (feedback_data->>'Tech_Issue_Rpt')::numeric)\n    >= (SELECT\
+    \ median((s2.feedback_data->>'Supp_Tix')::numeric + (s2.feedback_data->>'Bug_Subs')::numeric + (s2.feedback_data->>'Tech_Issue_Rpt')::numeric)\n\
+    \         FROM supportandfeedback s2)\n  )\n  THEN 'At-Risk VIPs'\n  WHEN (\n    ((feedback_data->>'Supp_Tix')::numeric\
+    \ + (feedback_data->>'Bug_Subs')::numeric + (feedback_data->>'Tech_Issue_Rpt')::numeric)\n    >= (SELECT\
+    \ median((s2.feedback_data->>'Supp_Tix')::numeric + (s2.feedback_data->>'Bug_Subs')::numeric + (s2.feedback_data->>'Tech_Issue_Rpt')::numeric)\n\
+    \         FROM supportandfeedback s2)\n  )\n  THEN 'Resource Drain'\n  ELSE 'Quiet Majority'\nEND"
+  source_model: main.supportandfeedback
+  domains:
+  - definitions
+- name: data_archival_process
+  description: 'A routine data management task that involves moving old or inactive data from primary
+    operational tables to a secondary storage table to improve performance, followed by the deletion of
+    the original data.
+
+
+    A transactional process that first copies a specific subset of data (defined by age and user status)
+    from a source table to an archive table, and then deletes that same subset of data from the source
+    table.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a multi-step transactional data management process (copy to archive
+    table, then delete from source), not a boolean row-level condition or a computable value over the
+    schema. There is no archive table in this database, and the action itself (INSERT/DELETE operations)
+    cannot be expressed as a SQL predicate or scalar expression evaluated over a single table's rows.
+- name: composite_index
+  description: 'A database index that includes multiple columns, allowing for faster data retrieval when
+    queries filter on all or the leading columns of the index.
+
+
+    A database object created using CREATE INDEX on two or more columns of a table.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a database schema object (a CREATE INDEX statement on multiple columns),
+    not a computation or predicate over row values. It cannot be expressed as a SQL boolean condition
+    or scalar expression over any table's rows.
+- name: upsert_operation
+  description: 'A database operation that will INSERT a new row, or UPDATE an existing row if a conflict
+    (like a duplicate key) occurs.
+
+
+    An INSERT statement that includes an ON CONFLICT DO UPDATE clause to handle potential primary key
+    violations by updating the existing record instead of failing.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This describes a database write operation (an INSERT ... ON CONFLICT DO UPDATE statement),
+    not a predicate or computation over existing table rows. It cannot be expressed as a SQL boolean condition
+    evaluated via SELECT * FROM table WHERE ...
+- name: data_integrity_constraint
+  description: 'A rule enforced on a database column to ensure the accuracy and consistency of data. It
+    can limit the type, format, or range of values.
+
+
+    A database rule, often implemented with a CHECK clause in a CREATE TABLE or ALTER TABLE statement,
+    that validates data upon insertion or update.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a schema-level feature (a CHECK constraint enforced on a column at
+    insert/update time), not a computation or predicate evaluable over existing rows in a table. It cannot
+    be encoded as a SQL expression over row data.
+- name: monetary_domain
+  description: 'A custom, reusable data type created to enforce specific rules for columns that store
+    monetary values, such as format and non-negativity.
+
+
+    A custom data type created using CREATE DOMAIN that is based on a numeric type and includes a CHECK
+    constraint to ensure the value is non-negative.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This describes a schema-level feature (a CREATE DOMAIN type definition with a CHECK constraint),
+    not a predicate or calculation over table rows. It cannot be expressed as a SQL boolean condition
+    over a source table.
+- name: peak_monetization_index
+  description: 'The highest Fan Monetization Index (FMI) a fan has achieved in any single interaction
+    session.
+
+
+    The maximum value of the Fan Monetization Index (FMI) calculated across all of a fan''s interaction
+    sessions.
+
+
+    Built on: fan_monetization_index_fmi.
+
+
+    Compiler note: Peak FMI per fan = max over all their interactions of Gift_Val_Usd/sess_dur_min. Checked
+    sess_dur_min never 0, so no division-by-zero guard needed. Aggregated via scalar subquery correlated
+    on fans.user_registry.'
+  sql_expression: (SELECT MAX((i.gift_metrics->>'Gift_Val_Usd')::double / i.sess_dur_min) FROM interactions
+    i WHERE i.interact_fan_pivot = fans.user_registry)
+  source_model: main.fans
+  domains:
+  - calculations
+- name: conversion_funnel_analysis
+  description: 'Defines the key metrics for analyzing the fan journey to premium membership, including
+    the critical estimation for the subscription date.
+
+
+    This analysis requires calculating Time to Conversion and Interactions Before Conversion. As the subscription
+    date is not explicitly stored, it must be estimated using the formula: (current date - membership
+    duration in days).
+
+
+    Built on: Premium Member.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a multi-step analytical process (estimating a subscription date,
+    then computing Time to Conversion and Interactions Before Conversion by joining interaction timestamps
+    against that estimated date) rather than a single boolean condition or scalar computation over one
+    table's rows. It cannot be reduced to a predicate or calculation on a single source_model.
+- name: lone_wolf
+  description: 'A fan who is highly engaged with platform goals (achievements) but has low social connectivity.
+
+
+    A fan is a ''Lone Wolf'' if their Achievement Density (AD) is greater than 0.5 AND their Social Capital
+    Score (SCS) is less than 100.
+
+
+    Built on: achievement_density_ad, social_capital_score_scs.
+
+
+    Compiler note: Combines Achievement Density (Ach_Count / memb_days via events->membership join, unique
+    match) and Social Capital Score (Soc_Net_Sz + 1.5*Friend_Con from socialcommunity, joined uniquely
+    via engage_reg) to flag fans with AD>0.5 and SCS<100.'
+  sql_expression: '(achiev_stats->>''Ach_Count'')::numeric / NULLIF((SELECT m.memb_days FROM eventsandclub
+    e JOIN membershipandspending m ON e.events_member_pivot = m.member_reg WHERE e.events_reg = loyaltyandachievements.loyalty_events_pivot),
+    0) > 0.5
+
+    AND (SELECT (sc.network_stats->>''Soc_Net_Sz'')::numeric + (sc.network_stats->>''Friend_Con'')::numeric
+    * 1.5 FROM socialcommunity sc WHERE sc.social_engage_pivot = loyaltyandachievements.loyalty_engage_pivot)
+    < 100'
+  source_model: main.loyaltyandachievements
+  domains:
+  - definitions
+- name: cumulative_spending
+  description: 'The running total of a fan''s spending up to a specific point in time.
+
+
+    A value calculated using a window function (SUM OVER PARTITION BY fan ORDER BY date) on time-ordered
+    interaction data, specifically summing the Total Gift Value in USD from interaction gifts.
+
+
+    Compiler note: Computed as a window function: running SUM of Gift_Val_Usd (cast from jsonb gift_metrics)
+    partitioned by fan (interact_fan_pivot) and ordered by interaction timestamp (time_mark), giving the
+    cumulative gift spending per fan up to each interaction.'
+  sql_expression: SUM((gift_metrics->>'Gift_Val_Usd')::numeric) OVER (PARTITION BY interact_fan_pivot
+    ORDER BY time_mark)
+  source_model: main.interactions
+  domains:
+  - calculations
+- name: spending_velocity_cohort_analysis
+  description: 'An analysis that measures the average Cumulative Spending for a defined group of fans
+    at specific time milestones after their registration.
+
+
+    This analysis identifies a fan cohort, calculates each fan''s daily Cumulative Spending trajectory,
+    and then computes the average of these daily cumulative totals for all days up to each milestone (e.g.,
+    7, 30, and 90 days).
+
+
+    Built on: cumulative_spending.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This is a multi-step cohort analysis (grouping fans by registration cohort, computing
+    per-fan cumulative spending trajectories, then averaging across fans at specific day milestones) producing
+    an aggregate time-series result, not a boolean predicate or scalar expression over rows of one table.
+- name: average_time_to_first_gift
+  description: 'Measures the average number of days between a fan''s registration and their first gift-giving
+    interaction.
+
+
+    For a given fan cohort, this is calculated by first finding the minimum time difference between the
+    registration date and the date of any interaction with a gift value greater than zero for each fan,
+    and then averaging these minimum time differences across the entire cohort.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines a cohort-level aggregate (average of per-fan minimum time-to-first-gift),
+    not a boolean/predicate condition over rows of a single table. It requires grouping by fan, computing
+    MIN(time_mark - reg_moment) per fan filtered on gift value > 0, then averaging across fans - this
+    cannot be expressed as a single row-level boolean predicate or scalar expression evaluated per row
+    of one source_model table as required by the contract format.
+- name: ripple_effect_analysis
+  description: 'Measures the impact of a specific user segment (e.g., influencers) on the behavior of
+    other users within the same interaction session.
+
+
+    This analysis identifies all interactions involving the target user segment. For each such interaction,
+    it defines a ''session'' based on a Session Time Window. It then aggregates the behaviors (e.g., chat
+    sentiment) of all non-target users within that session to measure the influence.
+
+
+    Built on: community_influencer, Interaction Tone, session_time_window.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This is a multi-step aggregate analysis, not a single row-level computation or boolean
+    predicate over one table. It requires: (1) identifying interactions by a target user segment (e.g.,
+    community influencers, itself a cross-table definition joining socialcommunity/engagement/retentionandinfluence),
+    (2) a self-join on virtualidols/time within a ±5 minute Session Time Window to group other interactions
+    into the same session, and (3) aggregating the chat sentiment (Interaction Tone) of non-target users
+    across that session. This is a session-grouping and aggregation pipeline across interactions, socialcommunity,
+    engagement and retentionandinfluence tables, not an expression evaluable as a single column/boolean
+    over rows of one source table.'
+- name: session_time_window
+  description: 'Defines the time duration used to group related interactions into a single session for
+    analysis.
+
+
+    A session consists of all interactions with the same idol that occur within a 5-minute window (before
+    and after) of a key interaction.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This describes a method for grouping rows into sessions (self-join on same idol within
+    ±5 minutes of a key interaction's time_mark), not a single-row calculation or predicate over one table.
+    It defines a relationship/window used by other analyses, not a value to compute per row.
+tables:
+- schema: main
+  table: additionalnotes
+  columns:
+  - name: notes_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for additional notes record. PK = AdditionalNotes(Notes_Reg).
+  - name: notes_retain_pivot
+    type: BIGINT
+    description: BIGINT. Reference to retention record for contextual notes. FK to RetentionAndInfluence.
+  - name: note_info
+    type: VARCHAR
+    description: TEXT. Free-form notes and additional information about the fan. **NULL means no additional
+      notes recorded or information not available.**
+- schema: main
+  table: commerceandcollection
+  columns:
+  - name: commerce_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for commerce and collection record. PK =
+      CommerceAndCollection(Commerce_Reg).
+  - name: commerce_engage_pivot
+    type: BIGINT
+    description: BIGINT. Reference to engagement record for commerce behavior analysis. FK to Engagement.
+  - name: commerce_member_pivot
+    type: BIGINT
+    description: BIGINT. Reference to membership record for commerce correlation. FK to MembershipAndSpending.
+  - name: merch_buy
+    type: SMALLINT
+    description: SMALLINT. Number of merchandise items purchased by the fan.
+  - name: merch_spend_usd
+    type: FLOAT
+    description: REAL. Total amount spent on merchandise in USD.
+  - name: dig_own
+    type: BIGINT
+    description: BIGINT. Number of digital items owned by the fan.
+  - name: phys_own
+    type: BIGINT
+    description: BIGINT. Number of physical collectible items owned by the fan.
+  - name: coll_comp_rate
+    type: FLOAT
+    description: REAL. Collection completion rate as percentage of available items.
+  - name: trade_level
+    type: VARCHAR
+    description: 'TEXT. Trading activity level classification. **NULL means trading activity tracking
+      incomplete or user has not participated in trading.**
+
+
+      Trade Activity Level: Classifies a fan''s engagement in the trading of collectibles.
+
+
+      Classifies a fan''s engagement in the trading of digital or physical collectibles. ''High'', ''Medium'',
+      and ''Low'' levels reflect the frequency and volume of trades.
+
+
+      Compiler note: Describes the categorical values (''High'',''Medium'',''Low'') stored in commerceandcollection.trade_level,
+      which classifies a fan''s trading activity for collectibles.'
+- schema: main
+  table: engagement
+  columns:
+  - name: engage_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for engagement metrics record. PK = Engagement(Engage_Reg).
+  - name: engage_activity_pivot
+    type: VARCHAR
+    description: TEXT. Reference to the interaction activity for engagement analysis. FK to Interactions.
+  - name: engage_member_pivot
+    type: BIGINT
+    description: BIGINT. Reference to membership record for engagement correlation. FK to MembershipAndSpending.
+  - name: soc_int_score
+    type: FLOAT
+    description: REAL. Social interaction score measuring fan's community participation level.
+  - name: eng_rate
+    type: FLOAT
+    description: REAL. Overall engagement rate calculated from various interaction metrics.
+  - name: act_freq
+    type: VARCHAR
+    description: TEXT. Frequency classification of fan's activity on the platform.
+  - name: peak_time
+    type: VARCHAR
+    description: TEXT. Time period when fan shows highest activity levels.
+  - name: act_days_wk
+    type: SMALLINT
+    description: SMALLINT. Number of days per week fan is active on platform.
+  - name: avg_sess_count
+    type: SMALLINT
+    description: SMALLINT. Average number of sessions per active day.
+  - name: cont_pref
+    type: VARCHAR
+    description: TEXT. Fan's preferred content type or category.
+  - name: lang_pref
+    type: VARCHAR
+    description: 'TEXT. Fan''s preferred language for content consumption.
+
+
+      Language Preference Setting: Describes the language settings a fan can choose for content consumption.
+
+
+      Defines the fan''s preference for content language. ''Original'' means content is shown in the idol''s
+      primary language. ''Translated'' means the fan prefers translated versions. ''Both'' indicates a
+      willingness to consume content in either form.
+
+
+      Compiler note: Checked distinct values: engagement.lang_pref has exactly {''Original'',''Translated'',''Both''},
+      matching the entry''s description. preferencesandsettings.lang_set has {''Auto'',''Original'',''Translated''}
+      which doesn''t match ''Both''.'
+  - name: trans_use
+    type: VARCHAR
+    description: TEXT. Usage pattern of translation features by the fan.
+  - name: interaction_efficiency
+    type: VARCHAR
+    description: 'TEXT. Social interaction frequency and community participation rate. Example: 26.200000762939453
+      interactions/hr.'
+  - name: session_productivity
+    type: VARCHAR
+    description: 'TEXT. Platform usage frequency and session completion rate. Example: 21 sessions/week,
+      14 sessions/week, 35 sessions/week.'
+- schema: main
+  table: eventsandclub
+  columns:
+  - name: events_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for events and fan club record. PK = EventsAndClub(Events_Reg).
+  - name: events_social_pivot
+    type: BIGINT
+    description: BIGINT. Reference to social community record for event participation analysis. FK to
+      SocialCommunity.
+  - name: events_member_pivot
+    type: BIGINT
+    description: BIGINT. Reference to membership record for event access correlation. FK to MembershipAndSpending.
+  - name: evt_part
+    type: VARCHAR
+    description: 'TEXT. Level and type of event participation by the fan. **NULL means event participation
+      tracking incomplete or no events attended.** **DATA NOISE: Values have random case variations (lowercase,
+      uppercase, mixed case) virtual_idol.**'
+  - name: camp_part
+    type: VARCHAR
+    description: TEXT. Participation level in campaigns and promotional activities. **NULL means campaign
+      participation tracking incomplete or no campaigns joined.**
+  - name: club_stat
+    type: VARCHAR
+    description: TEXT. Current status within official fan club membership.
+  - name: club_j_date
+    type: VARCHAR
+    description: TEXT. Date when fan joined the official fan club.
+  - name: club_contrib
+    type: VARCHAR
+    description: 'TEXT. Type and level of contribution to fan club activities. **NULL means fan club contribution
+      assessment incomplete or minimal participation.** **DATA NOISE: Values have random case variations
+      (lowercase, uppercase, mixed case) virtual_idol.**'
+  - name: evt_participation
+    type: JSON
+    description: 'JSONB column. Event participation data including attendance counts for different event
+      types and voting behavior Fields: {"Off_Evt_Att": "SMALLINT. Number of offline events attended by
+      the fan.", "On_Evt_Att": "SMALLINT. Number of online events attended by the fan.", "Meet_Att": "SMALLINT.
+      Number of meet-and-greet events attended.", "Conc_Att": "SMALLINT. Number of concert or performance
+      events attended.", "Vote_Part_Rate": "REAL. Participation rate in voting activities as percentage."}'
+- schema: main
+  table: fans
+  columns:
+  - name: user_registry
+    type: VARCHAR
+    description: TEXT. Unique identifier for fan user account registration in the virtual_idol idol platform.
+      PK = Fans(User_Registry).
+  - name: nick_label
+    type: VARCHAR
+    description: TEXT. Display nickname or username chosen by the fan for public identification.
+  - name: reg_moment
+    type: VARCHAR
+    description: TEXT. Date and time when the fan account was first registered on the platform.
+  - name: tier_step
+    type: SMALLINT
+    description: SMALLINT. Fan loyalty tier level indicating status progression within the platform hierarchy.
+  - name: pts_val
+    type: BIGINT
+    description: BIGINT. Accumulated loyalty points earned through various platform activities and interactions.
+  - name: status_tag
+    type: VARCHAR
+    description: 'TEXT. Current account status classification for the fan user.
+
+
+      Fan Status Tiers: Illustrates the meaning of different fan account statuses on the platform.
+
+
+      Fan status indicates their platform standing. ''Active'' means regular recent activity. ''Inactive''
+      means no recent activity. ''VIP'' is a special high-value status granted based on contribution and
+      spending.
+
+
+      Compiler note: Describes meaning of values in fans.status_tag (Active/Inactive/VIP), confirmed via
+      sample rows.'
+  - name: lang_pref
+    type: VARCHAR
+    description: 'TEXT. Fan''s preferred language for platform interface and content. **NULL means language
+      preference not specified or using platform default.** **DATA NOISE: Values have random case variations
+      (lowercase, uppercase, mixed case) virtual_idol.**'
+  - name: demo_profile
+    type: JSON
+    description: 'JSONB column. Demographic profile information including age, gender, location, and personal
+      background Fields: {"Age_Count": "SMALLINT. Fan''s age in years for demographic analysis and content
+      targeting.", "Gender_Type": "TEXT. Fan''s gender classification for demographic segmentation.",
+      "Loc_Nation": "TEXT. Fan''s country of residence for geographic analysis.", "Loc_Town": "TEXT. Fan''s
+      city or local area for detailed geographic segmentation.", "Occu_Path": "TEXT. Fan''s occupation
+      or professional background. **NULL means occupation information not provided or privacy setting
+      enabled.** **DATA NOISE: Values have random case variations (lowercase, uppercase, mixed case) virtual_idol.**",
+      "Interest_Set": "TEXT. Fan''s declared interests and hobbies for content personalization. **NULL
+      means interest profile incomplete or not disclosed.** **DATA NOISE: Values have random case variations
+      (lowercase, uppercase, mixed case) virtual_idol.**"}
+
+
+      Fan Age Category: Categorizes fans into distinct age groups for demographic analysis.
+
+
+      Fan age is categorized as: Teen (<=18), Young Adult (19-29), Adult (30-49), Senior (>=50).
+
+
+      Compiler note: Age Category is derived from the Age_Count field inside fans.demo_profile JSONB (confirmed
+      numeric age values present). This entry defines categorical labels (Teen/Young Adult/Adult/Senior)
+      based on that field but is not itself a stored column.
+
+
+      Occupation Path: Categorizes the professional background of fans.
+
+
+      Represents the declared occupation category of a fan, such as ''Professional'', ''Student'', ''Creative'',
+      or ''Technical''.
+
+
+      Compiler note: Describes the Occu_Path key within the demo_profile JSONB column of fans (values
+      like Professional/Student/Creative/Other, with case-variation noise confirmed via query). No separate
+      column exists for this; it is a JSON field, so the entry maps to fans.demo_profile as a whole.'
+- schema: main
+  table: interactions
+  columns:
+  - name: activity_reg
+    type: VARCHAR
+    description: TEXT. Unique identifier for individual fan-idol interaction activity session. PK = Interactions(Activity_Reg).
+  - name: time_mark
+    type: TIMESTAMP
+    description: TIMESTAMP. Precise timestamp when the interaction activity occurred.
+  - name: interact_fan_pivot
+    type: VARCHAR
+    description: TEXT. Reference to the fan user participating in this interaction. FK to Fans.
+  - name: interact_idol_pivot
+    type: VARCHAR
+    description: TEXT. Reference to the virtual_idol idol involved in this interaction. FK to virtualidols.
+  - name: act_kind
+    type: VARCHAR
+    description: 'TEXT. Type of interaction activity performed. **NULL means interaction type classification
+      failed or is ambiguous.** **DATA NOISE: Values have random case variations (lowercase, uppercase,
+      mixed case) virtual_idol.**'
+  - name: act_plat
+    type: VARCHAR
+    description: 'TEXT. Platform where the interaction took place. **NULL means platform identification
+      failed or cross-platform activity.** **DATA NOISE: Values have random case variations (lowercase,
+      uppercase, mixed case) virtual_idol.**'
+  - name: plat_used
+    type: VARCHAR
+    description: 'TEXT. Specific platform or service used for the interaction. **NULL means platform usage
+      tracking incomplete or privacy mode enabled.** **DATA NOISE: Values have random case variations
+      (lowercase, uppercase, mixed case) virtual_idol.**'
+  - name: dev_type
+    type: VARCHAR
+    description: 'TEXT. Device type used by fan for the interaction. **NULL means device detection failed
+      or privacy settings block tracking.** **DATA NOISE: Values have random case variations (lowercase,
+      uppercase, mixed case) virtual_idol.**'
+  - name: app_ver
+    type: VARCHAR
+    description: TEXT. Application version used during the interaction session.
+  - name: sess_dur_min
+    type: SMALLINT
+    description: SMALLINT. Duration of the interaction session in minutes.
+  - name: live_att
+    type: SMALLINT
+    description: SMALLINT. Number of live stream sessions attended during this interaction.
+  - name: watch_hrs
+    type: FLOAT
+    description: REAL. Total hours of content watched during the interaction session.
+  - name: gift_metrics
+    type: JSON
+    description: 'JSONB column. Comprehensive gift-giving behavior metrics including frequency, quantities,
+      values, and preferences Fields: {"Gift_Freq": "TEXT. Frequency classification of gift-giving behavior
+      during interaction.", "Gift_Tot": "BIGINT. Total number of virtual_idol gifts sent during this interaction.",
+      "Gift_Val_Usd": "REAL. Total monetary value in USD of gifts sent during interaction.", "Fav_Gift_Tag":
+      "TEXT. Most frequently used or preferred gift type during interaction."}
+
+
+      Gift Frequency: Clarifies the categories used to classify a fan''s gift-giving behavior.
+
+
+      Classifies how often a fan gives virtual gifts during interactions. Categories include ''Often'',
+      ''Frequently'', ''Occasionally'', and ''Rarely''.
+
+
+      Compiler note: Describes the categorical values of the Gift_Freq subfield within the gift_metrics
+      JSONB column (observed values: Often, Rarely, Never, Frequent - close to but not exact match of
+      documented set).'
+  - name: chat_activity
+    type: JSON
+    description: 'JSONB column. Chat and messaging activity data including message counts, language, sentiment,
+      and emoji usage Fields: {"Chat_Msg": "BIGINT. Number of chat messages sent by the fan during this
+      interaction.", "Chat_Lang": "TEXT. Primary language used in chat messages during the interaction.",
+      "Msg_Tone": "TEXT. Sentiment or tone analysis result of messages sent during interaction.", "Emoji_Count":
+      "BIGINT. Total number of emojis used in messages during the interaction.", "Stk_Count": "BIGINT.
+      Total number of stickers used during the interaction session."}
+
+
+      Interaction Tone: Explains the sentiment classification of a fan''s chat messages.
+
+
+      Indicates the overall sentiment of a fan''s chat messages. Common values are ''Positive'', ''Negative'',
+      ''Neutral'', or ''Mixed''.
+
+
+      Compiler note: Describes the Msg_Tone field within the chat_activity JSONB column; confirmed values
+      Negative/Neutral/Positive present (Mixed also documented as possible).'
+  - name: engagement_rate
+    type: VARCHAR
+    description: 'TEXT. Fan engagement efficiency per time unit during interaction sessions. Example:
+      15 actions/hr.'
+  - name: gift_rate
+    type: VARCHAR
+    description: 'TEXT. Virtual gift-giving frequency and speed during interaction sessions. Example:
+      6 gifts/hr.'
+  - name: message_rate
+    type: VARCHAR
+    description: 'TEXT. Chat message sending frequency during interaction sessions. Example: 45 msgs/hr.'
+  - name: content_consumption_rate
+    type: VARCHAR
+    description: 'TEXT. Content viewing and consumption efficiency per session. Example: 489.68182650479406
+      mins/session.'
+- schema: main
+  table: loyaltyandachievements
+  columns:
+  - name: loyalty_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for loyalty and achievements record. PK =
+      LoyaltyAndAchievements(Loyalty_Reg).
+  - name: loyalty_events_pivot
+    type: BIGINT
+    description: BIGINT. Reference to events record for loyalty program correlation. FK to EventsAndClub.
+  - name: loyalty_engage_pivot
+    type: BIGINT
+    description: BIGINT. Reference to engagement record for loyalty calculation. FK to Engagement.
+  - name: loy_pts
+    type: BIGINT
+    description: BIGINT. Total loyalty points accumulated through platform activities.
+  - name: rew_tier
+    type: VARCHAR
+    description: 'TEXT. Current reward tier level in the loyalty program.
+
+
+      Loyalty Reward Tiers: Explains the progression of tiers within the fan loyalty program.
+
+
+      Represents the levels in the loyalty program, such as ''Bronze'', ''Silver'', ''Gold'', and ''Platinum'',
+      each unlocking different rewards.
+
+
+      Compiler note: Describes the categorical values stored in loyaltyandachievements.rew_tier (e.g.,
+      ''Bronze'', ''Gold'', ''Platinum'' seen in sample data).'
+  - name: repute_lv
+    type: VARCHAR
+    description: 'TEXT. Reputation level classification within the community.
+
+
+      Reputation Level: Describes the hierarchy of fan reputation and trustworthiness within the community.
+
+
+      Represents a fan''s standing and trustworthiness in the community. Common levels are ''Respected'',
+      ''Established'', and ''Elite''.
+
+
+      Compiler note: Matches column loyaltyandachievements.repute_lv, which stores values like ''Respected'',
+      ''Established'', ''Elite'' observed in sample data.'
+  - name: trust_val
+    type: FLOAT
+    description: REAL. Trust score calculated from community interactions and behavior.
+  - name: achiev_stats
+    type: JSON
+    description: 'JSONB column. Achievement and recognition statistics including counts of achievements,
+      badges, titles, and rankings Fields: {"Ach_Count": "BIGINT. Total number of achievements unlocked
+      by the fan.", "Badge_Coll": "BIGINT. Number of badges collected through various activities.", "Spec_Titles":
+      "BIGINT. Number of special titles earned by the fan.", "Rank_Pos": "BIGINT. Current ranking position
+      among all platform users.", "Infl_Score": "REAL. Influence score measuring fan''s impact on community
+      and platform."}'
+- schema: main
+  table: membershipandspending
+  columns:
+  - name: member_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for membership and spending record. PK =
+      MembershipAndSpending(Member_Reg).
+  - name: member_fan_pivot
+    type: VARCHAR
+    description: TEXT. Reference to the fan user for this membership record. FK to Fans.
+  - name: memb_kind
+    type: VARCHAR
+    description: 'TEXT. Type or tier of membership subscription held by the fan.
+
+
+      Premium Member: Identifies fans who have a paid membership subscription.
+
+
+      A fan is considered a Premium Member if their membership type is not ''Free''. This includes tiers
+      like ''Basic'', ''Elite'', etc.
+
+
+      Compiler note: Entry describes the meaning of values in membershipandspending.memb_kind (Free vs
+      paid tiers like Basic, Premium, Diamond), not a computable predicate/calculation.'
+  - name: memb_days
+    type: SMALLINT
+    description: SMALLINT. Duration of current membership in days since activation.
+  - name: spend_usd
+    type: FLOAT
+    description: REAL. Total amount spent by fan on platform in USD.
+  - name: spend_freq
+    type: VARCHAR
+    description: 'TEXT. Frequency pattern of spending behavior by the fan.
+
+
+      Spending Frequency: Illustrates the different patterns of fan spending behavior.
+
+
+      Describes a fan''s purchasing behavior pattern. ''Weekly'' or ''Daily'' indicates consistent spending.
+      ''Occasional'' indicates sporadic purchasing.
+
+
+      Compiler note: Describes categorical values in membershipandspending.spend_freq (e.g., ''Weekly'',
+      ''Daily'', ''Occasional'') representing fan purchasing behavior patterns; confirmed via sample rows
+      showing these exact values.'
+  - name: pay_method
+    type: VARCHAR
+    description: TEXT. Preferred payment method used for transactions.
+  - name: spend_rate
+    type: VARCHAR
+    description: 'TEXT. Daily spending velocity and financial engagement rate. Example: 32.296185365657216
+      USD/day.'
+  - name: value_per_day
+    type: VARCHAR
+    description: 'TEXT. Monthly spending projection based on current patterns. Example: 208.84866536458333
+      USD/month.'
+  - name: cost_efficiency
+    type: VARCHAR
+    description: 'TEXT. Value-to-cost ratio for membership and spending efficiency. Example: 85 value/USD.'
+- schema: main
+  table: moderationandcompliance
+  columns:
+  - name: mod_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for moderation and compliance record. PK
+      = ModerationAndCompliance(Mod_Reg).
+  - name: moderation_interact_pivot
+    type: VARCHAR
+    description: TEXT. Reference to interaction record for moderation context. FK to Interactions.
+  - name: moderation_social_pivot
+    type: BIGINT
+    description: BIGINT. Reference to social community record for moderation analysis. FK to SocialCommunity.
+  - name: rpt_count
+    type: SMALLINT
+    description: SMALLINT. Number of reports filed against this fan's content or behavior.
+  - name: warn_count
+    type: SMALLINT
+    description: SMALLINT. Number of warnings issued to this fan for policy violations.
+  - name: viol_hist
+    type: VARCHAR
+    description: TEXT. History of policy violations committed by the fan. **NULL means no violation history
+      recorded or clean conduct record.**
+  - name: mod_stat
+    type: VARCHAR
+    description: 'TEXT. Current moderation status and any active restrictions on the account.
+
+
+      Moderation Status: Defines the account standings related to compliance with platform rules.
+
+
+      Reflects a fan''s account standing. ''Good Standing'' means no issues. ''Warning'' indicates a minor
+      violation. ''Restricted'' indicates temporary limitations due to a serious violation.
+
+
+      Compiler note: Column values confirmed to be exactly ''Good Standing'', ''Warning'', ''Restricted''
+      as described.'
+  - name: cont_comp
+    type: VARCHAR
+    description: TEXT. Content compliance rating and adherence to platform guidelines.
+  - name: age_verif
+    type: VARCHAR
+    description: TEXT. Age verification status for access to age-restricted content.
+  - name: pay_verif
+    type: VARCHAR
+    description: TEXT. Payment method verification status. **NULL means payment verification not completed
+      or not required for current membership tier.**
+  - name: id_verif
+    type: VARCHAR
+    description: TEXT. Identity verification status for enhanced security features. **NULL means identity
+      verification not completed or not required for current account type.**
+- schema: main
+  table: preferencesandsettings
+  columns:
+  - name: pref_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for preferences and settings record. PK =
+      PreferencesAndSettings(Pref_Reg).
+  - name: preferences_member_pivot
+    type: BIGINT
+    description: BIGINT. Reference to membership record for preference correlation. FK to MembershipAndSpending.
+  - name: preferences_social_pivot
+    type: BIGINT
+    description: BIGINT. Reference to social community record for social preference analysis. FK to SocialCommunity.
+  - name: priv_set
+    type: VARCHAR
+    description: 'TEXT. Privacy settings configuration chosen by the fan.
+
+
+      Privacy Setting Levels: Explains the different profile privacy options available to fans.
+
+
+      Indicates the level of information a fan chooses to share. ''Public'' allows anyone to see their
+      profile. ''Private'' restricts profile visibility to approved connections.
+
+
+      Compiler note: Describes meaning of priv_set values (''Public'', ''Private'', also ''Friends Only''
+      present in data).'
+  - name: ds_consent
+    type: VARCHAR
+    description: TEXT. Data sharing consent status for analytics and personalization.
+  - name: notif_pref
+    type: VARCHAR
+    description: TEXT. Notification preferences for various platform activities. **NULL means notification
+      preferences not configured or using platform defaults.**
+  - name: comm_pref
+    type: VARCHAR
+    description: TEXT. Communication preferences for interactions with other users. **NULL means communication
+      preferences not specified or using standard settings.**
+  - name: mark_pref
+    type: VARCHAR
+    description: TEXT. Marketing communication preferences and opt-in status.
+  - name: lang_set
+    type: VARCHAR
+    description: TEXT. Language settings for platform interface and content.
+  - name: access_set
+    type: VARCHAR
+    description: TEXT. Accessibility settings and accommodations enabled.
+  - name: dev_count
+    type: SMALLINT
+    description: SMALLINT. Number of devices registered for account access.
+  - name: log_freq
+    type: VARCHAR
+    description: TEXT. Login frequency pattern and regularity classification.
+  - name: last_log_dt
+    type: VARCHAR
+    description: TEXT. Date and time of most recent login to the platform.
+  - name: conn_qual
+    type: VARCHAR
+    description: TEXT. Connection quality classification based on technical performance.
+  - name: usage_metrics
+    type: JSON
+    description: 'JSONB column. Platform usage metrics including session data, time spent, and activity
+      consistency measurements Fields: {"Sess_Count": "BIGINT. Total number of login sessions since account
+      creation.", "Time_Hrs": "BIGINT. Total time spent online on the platform in hours.", "Avg_Daily_Min":
+      "SMALLINT. Average daily time spent on platform in minutes.", "Peak_Sess": "SMALLINT. Maximum concurrent
+      sessions recorded for this user.", "Int_Consist": "REAL. Interaction consistency score measuring
+      regular engagement patterns.", "Plat_Stable": "REAL. Platform stability score based on session reliability
+      and connection quality."}'
+- schema: main
+  table: retentionandinfluence
+  columns:
+  - name: ret_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for retention and influence record. PK =
+      RetentionAndInfluence(Ret_Reg).
+  - name: retain_engage_pivot
+    type: BIGINT
+    description: BIGINT. Reference to engagement record for retention analysis. FK to Engagement.
+  - name: retain_loyalty_pivot
+    type: BIGINT
+    description: BIGINT. Reference to loyalty record for retention correlation. FK to LoyaltyAndAchievements.
+  - name: churn_flag
+    type: VARCHAR
+    description: 'TEXT. Churn risk classification and prediction status.
+
+
+      Churn Risk Flag: Defines the predictive flags for a fan''s likelihood of leaving the platform.
+
+
+      A predictive classification of a fan''s likelihood to stop using the platform. ''High'' indicates
+      a strong probability of churning soon. ''Medium'' indicates a moderate risk. ''Low'' indicates a
+      loyal and stable user.
+
+
+      Compiler note: Describes the values of retentionandinfluence.churn_flag (''High''/''Medium''/''Low''),
+      confirmed present in sample data.'
+  - name: ref_count
+    type: SMALLINT
+    description: SMALLINT. Number of referrals made by this fan to bring new users.
+  - name: infl_impact
+    type: JSON
+    description: 'JSONB column. User influence and viral impact metrics including content reach, viral
+      content, and trending participation Fields: {"Cont_Reach": "BIGINT. Reach and visibility metrics
+      for fan-created content.", "Viral_Cont": "SMALLINT. Number of viral content pieces created or shared.",
+      "Trend_Part": "SMALLINT. Number of trending topics or events participated in.", "React_Count": "SMALLINT.
+      Number of reactivation attempts or successful returns.", "Hash_Use": "SMALLINT. Number of hashtags
+      used for content discovery and engagement."}'
+- schema: main
+  table: socialcommunity
+  columns:
+  - name: social_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for social community record. PK = SocialCommunity(Social_Reg).
+  - name: social_engage_pivot
+    type: BIGINT
+    description: BIGINT. Reference to engagement record for social behavior analysis. FK to Engagement.
+  - name: social_commerce_pivot
+    type: BIGINT
+    description: BIGINT. Reference to commerce record for social influence on purchasing. FK to CommerceAndCollection.
+  - name: comm_contrib
+    type: VARCHAR
+    description: 'TEXT. Type and level of contribution to community activities. **NULL means contribution
+      assessment incomplete or minimal community participation.** **DATA NOISE: Values have random case
+      variations (lowercase, uppercase, mixed case) virtual_idol.**
+
+
+      Community Contribution Level: Defines the different levels of a fan''s positive impact on the community.
+
+
+      Measures a fan''s positive impact on the community. Levels include ''High'', ''Medium'', and ''Low'',
+      often associated with group roles and content creation.
+
+
+      Compiler note: Column stores exactly ''High''/''Medium''/''Low'' values (with case noise, e.g. ''HIgH'',
+      ''low'', empty string) matching the described contribution levels.'
+  - name: cont_create_stat
+    type: VARCHAR
+    description: 'TEXT. Status of content creation activities by the fan. **NULL means content creation
+      tracking incomplete or user has not created content.** **DATA NOISE: Values have random case variations
+      (lowercase, uppercase, mixed case) virtual_idol.**'
+  - name: network_stats
+    type: JSON
+    description: 'JSONB column. Social network statistics including connections, followers, and community
+      involvement Fields: {"Soc_Net_Sz": "BIGINT. Size of fan''s social network within the platform.",
+      "Foll_Count": "BIGINT. Number of other users following this fan.", "Fing_Count": "BIGINT. Number
+      of users this fan is following.", "Friend_Con": "BIGINT. Number of mutual friend connections within
+      the platform.", "Grp_Memb": "SMALLINT. Number of groups or communities the fan belongs to.", "Grp_Role":
+      "TEXT. Role or position held within community groups. **NULL means no specific group role assigned
+      or participating as regular member.**"}
+
+
+      Community Role Hierarchy: Defines the various roles a fan can hold within a community group.
+
+
+      Defines a fan''s position within a community group. ''Member'' is a standard participant. ''Moderator''
+      helps enforce rules. ''Leader'' manages the group.
+
+
+      Compiler note: Describes the Grp_Role field inside the network_stats JSONB column, which takes values
+      ''Member'', ''Moderator'', ''Leader'' (and empty string), matching the described role hierarchy.'
+  - name: content_creation
+    type: JSON
+    description: 'JSONB column. User-generated content creation metrics including submissions, performances,
+      and quality ratings Fields: {"Art_Subs": "BIGINT. Number of fan art submissions made by the fan.",
+      "Fic_Subs": "BIGINT. Number of fan fiction submissions made by the fan.", "Cover_Perf_Cnt": "BIGINT.
+      Number of cover performances or tribute content created.", "UGC_Val": "BIGINT. Total user-generated
+      content value or count created by fan.", "Cont_Qual_Rate": "REAL. Quality rating of content created
+      by the fan.", "Collab_Count": "SMALLINT. Number of collaborative projects participated in by the
+      fan."}'
+  - name: content_creation_rate
+    type: VARCHAR
+    description: 'TEXT. User-generated content production frequency and creativity output. Example: 3
+      posts/week, 7 posts/week, 1 posts/week.'
+  - name: community_growth_rate
+    type: VARCHAR
+    description: 'TEXT. Social network expansion and follower acquisition rate. Example: 25 followers/month,
+      45 followers/month, 12 followers/month.'
+  - name: influence_rate
+    type: VARCHAR
+    description: 'TEXT. Social influence expansion and network connection growth speed. Example: 15 connections/week,
+      28 connections/week, 8 connections/week.'
+- schema: main
+  table: supportandfeedback
+  columns:
+  - name: support_reg
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for support and feedback record. PK = SupportAndFeedback(Support_Reg).
+  - name: support_interact_pivot
+    type: VARCHAR
+    description: TEXT. Reference to interaction record for support context. FK to Interactions.
+  - name: support_pref_pivot
+    type: BIGINT
+    description: BIGINT. Reference to preferences record for support correlation. FK to PreferencesAndSettings.
+  - name: surv_part
+    type: VARCHAR
+    description: TEXT. Participation level in surveys and research studies.
+  - name: beta_part
+    type: VARCHAR
+    description: TEXT. Participation status in beta testing programs.
+  - name: feedback_data
+    type: JSON
+    description: 'JSONB column. Support and feedback engagement data including issue reports, submissions,
+      and satisfaction ratings Fields: {"Tech_Issue_Rpt": "SMALLINT. Number of technical issues reported
+      by the fan.", "Supp_Tix": "SMALLINT. Number of support tickets opened by the fan.", "Fb_Subs": "SMALLINT.
+      Number of feedback submissions made by the fan.", "Feat_Req_Subs": "SMALLINT. Number of feature
+      requests submitted by the fan.", "Bug_Subs": "SMALLINT. Number of bug reports submitted by the fan.",
+      "Sat_Rate": "REAL. Overall satisfaction rating provided by the fan.", "NPS_Val": "SMALLINT. Net
+      Promoter Score value indicating likelihood to recommend platform."}
+
+
+      NPS Score Tiers: Classifies fans into categories based on their Net Promoter Score, indicating their
+      likelihood to recommend the platform.
+
+
+      Net Promoter Score (NPS) is categorized as: Promoters (score 9-10), Passives (score 7-8), and Detractors
+      (score 0-6).
+
+
+      Compiler note: NPS_Val field inside feedback_data jsonb holds the Net Promoter Score (0-10) that
+      this entry categorizes into Promoters (9-10), Passives (7-8), Detractors (0-6).'
+- schema: main
+  table: virtualidols
+  columns:
+  - name: entity_reg
+    type: VARCHAR
+    description: TEXT. Unique identifier for virtual_idol idol entity registration. PK = virtualidols(Entity_Reg).
+  - name: name_tag
+    type: VARCHAR
+    description: TEXT. Official name or stage name of the virtual_idol idol character.
+  - name: kind_tag
+    type: VARCHAR
+    description: 'TEXT. Type or category classification of the virtual_idol idol (e.g., vtuber, AI idol).
+
+
+      Idol Type Classification: Explains the different types of virtual idols on the platform.
+
+
+      Describes the nature of the virtual idol. ''2D'' refers to traditionally animated characters. ''3D''
+      refers to computer-generated models. ''AI Generated'' refers to idols created and/or operated by
+      artificial intelligence.
+
+
+      Compiler note: Describes value meanings (''2D'',''3D'',''AI Generated'') of virtualidols.kind_tag.'
+  - name: deb_date
+    type: VARCHAR
+    description: TEXT. Official debut date when the virtual_idol idol first appeared publicly.
+  - name: assoc_group
+    type: VARCHAR
+    description: TEXT. Associated agency, company, or group managing the virtual_idol idol.
+  - name: genre_tag
+    type: VARCHAR
+    description: TEXT. Primary genre or content category the virtual_idol idol specializes in.
+  - name: prim_lang
+    type: VARCHAR
+    description: TEXT. Primary language used by the virtual_idol idol for content and communication.

@@ -1,0 +1,1371 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: labor_certification_applications, compiler: claudesonnet5
+# inputs: labor_certification_applications_kb.jsonl, labor_certification_applications_column_meaning_base.json, labor_certification_applications_schema.txt, labor_certification_applications.duckdb
+metrics:
+- name: wage_differential_rate_wdr
+  description: 'Calculates the percentage difference between offered wage and prevailing wage.
+
+
+    WDR = ((Offered Wage - Prevailing Wage) / Prevailing Wage) × 100%. Both offered and prevailing wages
+    are converted to the same payment unit (hourly, weekly, or annually) before calculation. Wage information
+    is included in the wage determination data.
+
+
+    Compiler note: Offered wage (''from'' field, with ''$'' prefix) and prevailing wage (''value'' field,
+    with ''USD '' prefix) are stored as text with thousands separators; both parsed to numeric after stripping
+    currency symbols/commas. Units (Hour/Week/Month/Year) differ across rows (checked via GROUP BY), so
+    both wages are normalized to an annual basis using standard conversion factors (Hour×2080, Week×52,
+    Month×12, Year×1) before computing the percentage differential.'
+  sql_expression: "(\n  (CAST(REPLACE(REPLACE(wage_details->'offered_wage'->>'from','$',''),',','') AS\
+    \ DOUBLE)\n    * CASE wage_details->'offered_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n     \
+    \   WHEN 'Week' THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n  -\n\
+    \  CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','') AS DOUBLE)\n \
+    \   * CASE wage_details->'prevailing_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n        WHEN 'Week'\
+    \ THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n  )\n  /\n  (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n    * CASE wage_details->'prevailing_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n\
+    \        WHEN 'Week' THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n\
+    \  )\n) * 100"
+  source_model: main.prevailing_wage
+  domains:
+  - calculations
+- name: application_processing_time_apt
+  description: 'Calculates the number of days between application receipt and decision.
+
+
+    APT is the number of days between the date the application is received and the date a decision is
+    made. Both dates are recorded as part of the application data.
+
+
+    Compiler note: recvday is stored as ''YYYY/MM/DD'' text and decisionday as ''YYYY-MM-DD'' text; both
+    parsed to DATE via strptime with their respective formats, then subtracted to get day difference.'
+  sql_expression: CAST(strptime(decisionday, '%Y-%m-%d') AS DATE) - CAST(strptime(recvday, '%Y/%m/%d')
+    AS DATE)
+  source_model: main.cases
+  domains:
+  - calculations
+- name: approval_rate_ar
+  description: 'Calculates the percentage of certified applications out of total applications.
+
+
+    AR = (Number of Certified Applications / Total Number of Applications) × 100%. Application status
+    is tracked as part of the application data.
+
+
+    Compiler note: statustag has inconsistent casing (Certified, certified, CERTIFIED); matched case-insensitively
+    to compute the percentage of certified applications over all applications.'
+  sql_expression: 100.0 * SUM(CASE WHEN UPPER(statustag) = 'CERTIFIED' THEN 1 ELSE 0 END) / COUNT(*)
+  source_model: main.cases
+  domains:
+  - calculations
+- name: attorney_case_load_acl
+  description: 'Measures the number of cases handled by each attorney.
+
+
+    ACL is the total number of cases handled by each attorney. Attorney assignment is tracked as part
+    of the application process.
+
+
+    Compiler note: ACL is computed per attorney as the count of case_attorney rows grouped by counselmail
+    (each row links an attorney to a case via docketkey). Expression should be used with GROUP BY counselmail
+    to get per-attorney load.'
+  sql_expression: COUNT(*)
+  source_model: main.case_attorney
+  domains:
+  - calculations
+- name: employer_h_1b_concentration_ehc
+  description: 'Measures the proportion of H-1B applications submitted by an employer relative to all
+    applications.
+
+
+    EHC = (Number of H-1B Applications by Employer / Total Number of H-1B Applications) × 100%. Visa classification
+    and employer information are tracked in the application data.
+
+
+    Compiler note: Interpreted as a per-employer ratio: for each row (case), compute the count of H-1B
+    cases by that case''s employer (homefirm) divided by total H-1B cases across all employers, times
+    100. Used window function partitioned implicitly via FILTER+homefirm match; visacls value confirmed
+    as ''H-1B'' exactly.'
+  sql_expression: (COUNT(*) FILTER (WHERE visacls = 'H-1B' AND homefirm = cases.homefirm) OVER () ) *
+    100.0 / (SELECT COUNT(*) FROM cases c2 WHERE c2.visacls = 'H-1B')
+  source_model: main.cases
+  domains:
+  - calculations
+- name: worksite_density_wd
+  description: 'Measures the number of visa workers per worksite.
+
+
+    WD = (Number of Workers at Worksite / Number of Worksites). Worksite and worker information are recorded
+    as part of the application data.
+
+
+    Compiler note: Computed as aggregate over case_worksite: total workers (sum of wsHeads) divided by
+    number of worksite rows (each row representing one worksite entry for a case).'
+  sql_expression: SUM(wsheads)::double / COUNT(*)
+  source_model: main.case_worksite
+  domains:
+  - calculations
+- name: wage_premium_rate_wpr
+  description: 'Measures how much more an employer pays compared to minimum requirements.
+
+
+    WPR = ((Offered Wage - Minimum Required Wage) / Minimum Required Wage) × 100%. Minimum required wage
+    is typically the prevailing wage or higher depending on regulations. Wage information is included
+    in the wage determination data.
+
+
+    Compiler note: Offered wage parsed from wage_details->offered_wage->from (strip leading ''$'' and
+    comma separators); minimum required (prevailing) wage parsed from wage_details->prevailing_wage->value
+    (strip ''USD '' prefix and commas). Computed per prevailing_wage/trackno row as ((offered-prevailing)/prevailing)*100.
+    Note: in a small number of rows (3 of 981) offered_wage.unit and prevailing_wage.unit differ (e.g.
+    Year vs Month), so the raw numeric comparison is not unit-normalized for those rows; no conversion
+    factors are given in the data to normalize them.'
+  sql_expression: ((CAST(REPLACE(REPLACE(wage_details->'offered_wage'->>'from','$',''),',','') AS DOUBLE
+    PRECISION) - CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD ',''),',','') AS
+    DOUBLE PRECISION)) / CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD ',''),',','')
+    AS DOUBLE PRECISION)) * 100
+  source_model: main.prevailing_wage
+  domains:
+  - calculations
+- name: application_success_rate_asr
+  description: 'Measures the success rate of applications by employer.
+
+
+    ASR = (Number of Certified Applications by Employer / Total Applications by Employer) × 100%. Employer
+    and application status are tracked as part of the application data.
+
+
+    Compiler note: Grouping by homefirm (employer) is required for a per-employer rate; expression computes,
+    for a given employer''s rows, the percentage of certified applications. statustag has case-variant
+    values (''CERTIFIED'',''Certified'',''certified'') all meaning certified, matched case-insensitively.
+    Analyst should apply with GROUP BY homefirm.'
+  sql_expression: (COUNT(*) FILTER (WHERE UPPER(statustag) = 'CERTIFIED') * 100.0 / COUNT(*))
+  source_model: main.cases
+  domains:
+  - calculations
+- name: state_application_distribution_sad
+  description: 'Measures the percentage of applications in each state.
+
+
+    SAD = (Number of Applications in State / Total Number of Applications) × 100%. State information is
+    included in the worksite data.
+
+
+    Compiler note: State is taken from case_worksite.wsstate (worksite state tied to each case). Computed
+    as a window-function ratio: for each row, the count of rows sharing that row''s wsstate divided by
+    the total row count, times 100, giving the percentage of applications located in that state. Uses
+    case_worksite as the application/worksite grain (981 rows); each row corresponds to one case-worksite
+    link.'
+  sql_expression: COUNT(*) OVER (PARTITION BY wsstate) * 100.0 / COUNT(*) OVER ()
+  source_model: main.case_worksite
+  domains:
+  - calculations
+- name: industry_application_distribution_iad
+  description: 'Measures the percentage of applications in each industry based on NAICS codes.
+
+
+    IAD = (Number of Applications in Industry / Total Number of Applications) × 100%. Industry is determined
+    by the employer''s NAICS code.
+
+
+    Compiler note: Industry is identified by employer.employer_contact_info->>''naics_code'', joined via
+    (homefirm,homezip) -> (corphandle,zipref), which is unique per employer PK. For each case, counts
+    all cases whose employer shares the same NAICS code, divided by total case count, times 100 to get
+    percentage share of applications in that industry.'
+  sql_expression: (SELECT COUNT(*) FROM cases c2 JOIN employer e2 ON c2.homefirm = e2.corphandle AND c2.homezip
+    = e2.zipref WHERE (e2.employer_contact_info->>'naics_code') = (SELECT e.employer_contact_info->>'naics_code'
+    FROM employer e WHERE e.corphandle = cases.homefirm AND e.zipref = cases.homezip)) * 100.0 / (SELECT
+    COUNT(*) FROM cases)
+  source_model: main.cases
+  domains:
+  - calculations
+- name: occupational_demand_index_odi
+  description: 'Measures the relative demand for specific occupations based on SOC codes.
+
+
+    ODI = (Number of Applications for SOC Code / Average Applications per SOC Code). SOC code information
+    is included in the job data for each application.
+
+
+    Compiler note: ODI computed per row as (applications for this row''s SOC code) / (average applications
+    per SOC code), where average = total applications / number of distinct SOC codes. Verified soccd has
+    no NULLs (981 rows, 130 distinct SOC codes), so no special NULL handling needed.'
+  sql_expression: COUNT(*) OVER (PARTITION BY soccd) / (COUNT(*) OVER () * 1.0 / COUNT(DISTINCT soccd)
+    OVER ())
+  source_model: main.cases
+  domains:
+  - calculations
+- name: cost_of_living_adjusted_wage_claw
+  description: 'Adjusts offered wage based on city''s cost of living index.
+
+
+    CLAW = (Offered Wage / Cost of Living Index) × 100, where the Cost of Living Index is a standardized
+    index with 100 as the national average. Wage and location information are included in the application
+    data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Cost of Living Index per city is not present anywhere in the database (no table or column
+    holds a standardized cost-of-living index). CLAW cannot be computed without this external data.
+- name: seasonal_application_index_sai
+  description: 'Measures the concentration of applications in different months of the year.
+
+
+    SAI = (Number of Applications in Month / Average Monthly Applications). Application receipt dates
+    are tracked as part of the application data.
+
+
+    Compiler note: recvday is stored as text ''YYYY/MM/DD''; month is extracted via substr(recvday,1,7)
+    (''YYYY/MM''). SAI per case = (count of applications in that case''s month) / (average monthly application
+    count = total applications / number of distinct months present), computed via window functions since
+    this is a per-row ratio referencing group aggregates.'
+  sql_expression: CAST(COUNT(*) OVER (PARTITION BY substr(recvday,1,7)) AS DOUBLE) / (CAST(COUNT(*) OVER
+    () AS DOUBLE) / COUNT(DISTINCT substr(recvday,1,7)) OVER ())
+  source_model: main.cases
+  domains:
+  - calculations
+- name: attorney_success_rate_asr_attorney
+  description: 'Measures the certification rate of applications handled by each attorney.
+
+
+    ASR = (Number of Certified Applications by Attorney / Total Applications by Attorney) × 100%. Attorney
+    assignment and application status are tracked as part of the application process.
+
+
+    Compiler note: Per-attorney certification rate: joins attorney to case_attorney to cases, counts cases
+    with statustag matching ''certified'' case-insensitively (values appear as Certified/certified/CERTIFIED)
+    divided by total cases linked to that attorney, times 100.'
+  sql_expression: (SELECT COUNT(*) FROM case_attorney ca JOIN cases c ON c.filekey = ca.docketkey WHERE
+    ca.counselmail = attorney.lawmail AND UPPER(c.statustag) = 'CERTIFIED') * 100.0 / (SELECT COUNT(*)
+    FROM case_attorney ca JOIN cases c ON c.filekey = ca.docketkey WHERE ca.counselmail = attorney.lawmail)
+  source_model: main.attorney
+  domains:
+  - calculations
+- name: employer_retention_rate_err
+  description: 'Measures the percentage of continuation applications by an employer.
+
+
+    ERR = (Number of Continuation Applications / Total Number of Applications by Employer) × 100%. Employer
+    and application type are tracked as part of the application data.
+
+
+    Compiler note: Aggregate expression intended to be grouped by homefirm (one row per employer). "Continuation
+    applications" are identified via cases.contemp > 0 (contemp counts continued-employment positions
+    on the case, as opposed to newemp for new employment); ERR = 100 * count(contemp>0)/count(*) per employer.'
+  sql_expression: SUM(CASE WHEN contemp > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*)
+  source_model: main.cases
+  domains:
+  - calculations
+- name: external_counsel_rate_ecr
+  description: 'Measures the percentage of applications using external legal counsel.
+
+
+    ECR = (Number of Applications with Attorney / Total Number of Applications) × 100%. Attorney assignment
+    is tracked as part of the application process.
+
+
+    Compiler note: ECR = (# distinct cases with an attorney assigned in case_attorney / total # cases
+    in cases) * 100. Used COUNT(DISTINCT docketkey) since case_attorney can have multiple rows (attorneys)
+    per case.'
+  sql_expression: (SELECT COUNT(DISTINCT docketkey) FROM case_attorney)::DOUBLE / COUNT(*) * 100
+  source_model: main.cases
+  domains:
+  - calculations
+- name: worksite_diversity_index_wdi
+  description: 'Measures the diversity of an employer''s worksites across different geographic areas.
+
+
+    WDI = 1 - sum((Number of Workers at Worksite i / Total Workers)^2) for all worksites. Worksite and
+    worker information are included in the application data.
+
+
+    Compiler note: Computed per employer (corphandle) over all its cases'' worksites (joined via cases.homefirm
+    -> case_worksite.dockkey). Worksite identity is the composite key (ws_addr1, wscity, wsstate, wszip);
+    workers per worksite summed via wsheads across all employer''s cases, then WDI = 1 - sum((site_heads/total_heads)^2).
+    Guarded with COALESCE for employers with no cases/worksites.'
+  sql_expression: "1 - (\n  SELECT COALESCE(SUM(POWER(ws.site_heads::double / tot.total_heads::double,\
+    \ 2)), 0)\n  FROM (\n    SELECT cw.ws_addr1, cw.wscity, cw.wsstate, cw.wszip, SUM(cw.wsheads) AS site_heads\n\
+    \    FROM cases c\n    JOIN case_worksite cw ON cw.dockkey = c.filekey\n    WHERE c.homefirm = employer.corphandle\n\
+    \    GROUP BY cw.ws_addr1, cw.wscity, cw.wsstate, cw.wszip\n  ) ws,\n  (\n    SELECT SUM(cw2.wsheads)\
+    \ AS total_heads\n    FROM cases c2\n    JOIN case_worksite cw2 ON cw2.dockkey = c2.filekey\n    WHERE\
+    \ c2.homefirm = employer.corphandle\n  ) tot\n)"
+  source_model: main.employer
+  domains:
+  - calculations
+- name: wage_competitiveness_index_wci
+  description: 'Measures how competitive an employer''s offered wage is compared to industry average.
+
+
+    WCI = (Employer Average Offered Wage / Industry Average Offered Wage). Wage and industry information
+    are included in the application data.
+
+
+    Compiler note: Employer and industry average offered wage computed from prevailing_wage.wage_details->offered_wage->from
+    (stripped of ''$'' and '','' and cast to double), joined via case_worksite (one worksite/wage record
+    per case, verified unique) and prevailing_wage. Industry is the employer''s NAICS code (employer_contact_info->>''naics_code''),
+    joined via homefirm/homezip (verified unique employer PK match). No unit normalization is specified
+    in the entry, so offered wage values are compared as stored (mixed Hour/Year units).'
+  sql_expression: "(\n  SELECT AVG(CAST(REPLACE(REPLACE(pw2.wage_details->'offered_wage'->>'from','$',''),',','')\
+    \ AS DOUBLE))\n  FROM cases c2\n  JOIN case_worksite cw2 ON cw2.dockkey = c2.filekey\n  JOIN prevailing_wage\
+    \ pw2 ON pw2.trackno = cw2.wagetrack\n  WHERE c2.homefirm = cases.homefirm AND c2.homezip = cases.homezip\n\
+    )\n/\n(\n  SELECT AVG(CAST(REPLACE(REPLACE(pw3.wage_details->'offered_wage'->>'from','$',''),',','')\
+    \ AS DOUBLE))\n  FROM cases c3\n  JOIN case_worksite cw3 ON cw3.dockkey = c3.filekey\n  JOIN prevailing_wage\
+    \ pw3 ON pw3.trackno = cw3.wagetrack\n  JOIN employer e3 ON e3.corphandle = c3.homefirm AND e3.zipref\
+    \ = c3.homezip\n  WHERE e3.employer_contact_info->>'naics_code' = (\n    SELECT e1.employer_contact_info->>'naics_code'\
+    \ FROM employer e1\n    WHERE e1.corphandle = cases.homefirm AND e1.zipref = cases.homezip\n  )\n)"
+  source_model: main.cases
+  domains:
+  - calculations
+- name: visa_class_distribution_vcd
+  description: 'Measures the percentage distribution of different visa classifications.
+
+
+    VCD = (Number of Applications for Visa Class / Total Number of Applications) × 100%. Visa classification
+    is tracked as part of the application data.
+
+
+    Compiler note: Computed as a per-row window function giving, for each case''s visa class, the percentage
+    of total applications that belong to that visa class (VCD = count of applications in that visacls
+    / total applications * 100).'
+  sql_expression: COUNT(*) OVER (PARTITION BY visacls) * 100.0 / COUNT(*) OVER ()
+  source_model: main.cases
+  domains:
+  - calculations
+- name: employer_scale_indicator_esi
+  description: 'Quantifies the relative size of an employer based on number of visa applications.
+
+
+    ESI = (Employer Number of Applications / Average Applications per Employer). Employer and application
+    information are tracked as part of the application data.
+
+
+    Compiler note: ESI computed per case row as (number of applications by that case''s employer, homefirm)
+    divided by the average applications per employer (total applications / distinct employers). Verified
+    homefirm values and counts via run_sql (981 total cases, 546 distinct employers).'
+  sql_expression: (SELECT COUNT(*) FROM cases c2 WHERE c2.homefirm = cases.homefirm)::double / ((SELECT
+    COUNT(*) FROM cases)::double / (SELECT COUNT(DISTINCT homefirm) FROM cases))
+  source_model: main.cases
+  domains:
+  - calculations
+- name: industry_wage_differential_iwd
+  description: 'Measures the average wage differential in each industry.
+
+
+    IWD = (Sum of Wage Differential Rates in Industry / Number of Applications in Industry). Wage and
+    industry information are included in the application data.
+
+
+    Built on: wage_differential_rate_wdr.
+
+
+    Compiler note: IWD is computed per industry (NAICS code, per entry 20) as the average Wage Differential
+    Rate (reusing WDR formula from entry 11) across all cases whose homeFirm employer shares the same
+    NAICS code as the current employer row. Industry is identified via employer_contact_info->>''naics_code''.
+    Linking is cases.homefirm -> employer.corphandle -> case_worksite.dockkey=cases.filekey -> prevailing_wage.trackno=case_worksite.wagetrack,
+    verified unique join paths via sample query. Since the output format evaluates one expression per
+    row of source_model, this is expressed as a per-employer-row correlated subquery returning that employer''s
+    industry average, equivalent to a GROUP BY industry aggregate.'
+  sql_expression: "(SELECT AVG((\n    (CAST(REPLACE(REPLACE(pw.wage_details->'offered_wage'->>'from','$',''),',','')\
+    \ AS DOUBLE)\n      * CASE pw.wage_details->'offered_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n    -\n    CAST(REPLACE(REPLACE(pw.wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE pw.wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN\
+    \ 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n    )\n    /\n    (CAST(REPLACE(REPLACE(pw.wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE pw.wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN\
+    \ 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n    )\n  ) * 100)\n  FROM cases c\n\
+    \  JOIN employer e2 ON e2.corphandle = c.homefirm\n  JOIN case_worksite cw ON cw.dockkey = c.filekey\n\
+    \  JOIN prevailing_wage pw ON pw.trackno = cw.wagetrack\n  WHERE (e2.employer_contact_info->>'naics_code')\
+    \ = (employer.employer_contact_info->>'naics_code')\n)"
+  source_model: main.employer
+  domains:
+  - calculations
+- name: processing_efficiency_ratio_per
+  description: 'Measures the efficiency of application processing relative to average times.
+
+
+    PER = (Average Processing Time / Application Processing Time), where values above 1 indicate faster
+    than average processing. Processing time is calculated from application receipt and decision dates.
+
+
+    Built on: application_processing_time_apt.
+
+
+    Compiler note: PER = average APT (over all cases with non-null recvday/decisionday) divided by each
+    row''s own APT. APT computed as decisionday (format %Y-%m-%d) minus recvday (format %Y/%m/%d), both
+    parsed via strptime; rows with null decisionday excluded from the average and yield NULL PER themselves.'
+  sql_expression: (SELECT AVG(CAST(strptime(decisionday, '%Y-%m-%d') AS DATE) - CAST(strptime(recvday,
+    '%Y/%m/%d') AS DATE)) FROM cases WHERE decisionday IS NOT NULL AND recvday IS NOT NULL) / (CAST(strptime(decisionday,
+    '%Y-%m-%d') AS DATE) - CAST(strptime(recvday, '%Y/%m/%d') AS DATE))
+  source_model: main.cases
+  domains:
+  - calculations
+- name: geographic_concentration_index_gci
+  description: 'Measures the geographic concentration of visa applications.
+
+
+    GCI = sum((Applications in State i / Total Applications)^2) for all states. State and application
+    information are included in the application data.
+
+
+    Built on: state_application_distribution_sad.
+
+
+    Compiler note: GCI is a single aggregate scalar over all worksite rows: for each state, compute its
+    share of total applications (rows in case_worksite), then sum the squares of these shares across all
+    states. Implemented as a scalar subquery grouping by wsstate.'
+  sql_expression: (SELECT sum(share*share) FROM (SELECT wsstate, count(*)*1.0/sum(count(*)) over () AS
+    share FROM case_worksite GROUP BY wsstate) t)
+  source_model: main.case_worksite
+  domains:
+  - calculations
+- name: attorney_specialization_index_asi
+  description: 'Measures how specialized an attorney is in specific visa types.
+
+
+    ASI = 1 - (Number of Different Visa Types Handled by Attorney / Total Number of Visa Types), where
+    values closer to 1 indicate higher specialization. Attorney and visa type information are tracked
+    as part of the application process.
+
+
+    Built on: visa_class_distribution_vcd.
+
+
+    Compiler note: ASI computed per attorney: 1 minus (count of distinct visacls among cases the attorney
+    handled, via case_attorney join, divided by total distinct visacls across all cases, which is 4).
+    Both counts verified non-null distinct counts over cases.visacls.'
+  sql_expression: "1 - (\n  (SELECT COUNT(DISTINCT c.visacls)\n   FROM case_attorney ca\n   JOIN cases\
+    \ c ON c.filekey = ca.docketkey\n   WHERE ca.counselmail = attorney.lawmail)::double\n  /\n  (SELECT\
+    \ COUNT(DISTINCT visacls) FROM cases)\n)"
+  source_model: main.attorney
+  domains:
+  - calculations
+- name: industry_concentration_ratio_icr
+  description: 'Measures the concentration of applications across industries.
+
+
+    ICR = sum((Applications in Industry i / Total Applications)^2) for all industries. Industry and application
+    information are included in the application data.
+
+
+    Built on: industry_application_distribution_iad.
+
+
+    Compiler note: Industry defined by employer.employer_contact_info->>''naics_code'', joined uniquely
+    via homefirm/homezip to corphandle/zipref (verified no duplicate matches). ICR is a single scalar
+    aggregate over all cases, computed via subquery grouping counts by naics_code, independent of the
+    per-row cases table used only as the nominal source_model.'
+  sql_expression: (SELECT SUM((t.cnt*1.0/tot.total)*(t.cnt*1.0/tot.total)) FROM (SELECT COUNT(*) AS cnt
+    FROM cases c JOIN employer e ON c.homefirm = e.corphandle AND c.homezip = e.zipref GROUP BY e.employer_contact_info->>'naics_code')
+    t, (SELECT COUNT(*) AS total FROM cases) tot)
+  source_model: main.cases
+  domains:
+  - calculations
+- name: wage_growth_rate_wgr
+  description: 'Measures the annual percentage increase in offered wages for similar positions.
+
+
+    WGR = ((Current Year Average Wage - Previous Year Average Wage) / Previous Year Average Wage) × 100%.
+    Wage and year information are included in the application data.
+
+
+    Built on: wage_competitiveness_index_wci.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric compares average offered wages between two different calendar years (current
+    year vs previous year) for "similar positions." It requires grouping cases by year and position type
+    and computing an aggregate ratio between two year-groups - this is a multi-row aggregate comparison,
+    not a per-row SQL expression over a single table that this contract format supports (SELECT <expr>
+    FROM <source_model> evaluated per row). Additionally "similar positions" is not precisely defined
+    (by SOC code? by job title?) and there's no reliable year dimension beyond parsing recvday text, nor
+    a clear definition of which years to compare (always current calendar year vs prior, or any two consecutive
+    years).
+- name: application_complexity_score_acs
+  description: 'Quantifies the complexity of a visa application based on multiple factors.
+
+
+    ACS is calculated as a weighted sum of factors such as H-1B dependency, willful violator status, new
+    employment, and amendment status. Each factor is represented as a binary indicator in the application
+    data.
+
+
+    Built on: H-1B Dependency Status, Willful Violator Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The entry defines ACS as a "weighted sum" of binary factors (H-1B dependency, willful
+    violator, new employment, amendment status) but does not specify the weights to use for each factor.
+    Without defined weights, this calculation cannot be encoded as a concrete SQL expression - it would
+    require guessing arbitrary weight values.
+- name: worksite_cost_index_wkci
+  description: 'Compares the cost of living at a worksite relative to the national average.
+
+
+    WkCI = (Worksite Cost of Living / National Average Cost of Living) × 100. Worksite and cost of living
+    information are included in the application data.
+
+
+    Built on: cost_of_living_adjusted_wage_claw.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Requires a standardized cost-of-living index per worksite/city, which is not present anywhere
+    in the database (no table or column holds such an index). Without this external data, WkCI cannot
+    be computed.
+- name: premium_processing_rate_ppr
+  description: 'Measures the percentage of applications using premium processing.
+
+
+    PPR = (Number of Premium Processing Applications / Total Number of Applications) × 100%. Premium processing
+    status is tracked as part of the application data.
+
+
+    Built on: application_processing_time_apt.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no column or field tracking "premium processing" status for applications
+    (no such flag exists in cases or any related table/JSON field). This metric requires data the database
+    does not hold.
+- name: premium_wage_position
+  description: 'Defines positions that offer significantly higher wages than required.
+
+
+    A position is considered a premium wage position if the Wage Differential Rate (WDR) exceeds 20%,
+    indicating the employer is offering significantly above the prevailing wage. Wage information is included
+    in the wage determination data.
+
+
+    Built on: wage_differential_rate_wdr.
+
+
+    Compiler note: Reused WDR formula from knowledge base entry 11, converting offered and prevailing
+    wage to annual basis before computing percentage difference; flags positions where WDR exceeds 20%.'
+  sql_expression: "(\n  (CAST(REPLACE(REPLACE(wage_details->'offered_wage'->>'from','$',''),',','') AS\
+    \ DOUBLE)\n    * CASE wage_details->'offered_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n     \
+    \   WHEN 'Week' THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n  -\n\
+    \  CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','') AS DOUBLE)\n \
+    \   * CASE wage_details->'prevailing_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n        WHEN 'Week'\
+    \ THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n  )\n  /\n  (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n    * CASE wage_details->'prevailing_wage'->>'unit'\n        WHEN 'Hour' THEN 2080\n\
+    \        WHEN 'Week' THEN 52\n        WHEN 'Month' THEN 12\n        WHEN 'Year' THEN 1\n      END\n\
+    \  )\n) * 100 > 20"
+  source_model: main.prevailing_wage
+  domains:
+  - definitions
+- name: visa_filing_window
+  description: 'Categorizes the timing of visa application submissions relative to employment start date.
+
+
+    The visa filing window represents when applications are submitted relative to the intended employment
+    start date. Applications are categorized as: ''Optimal Window (4-6 Months)'' before start date, ''Early
+    Filing'' (more than 6 months before), ''1-3 Months Before'', ''Same Month'', or ''After Start Date''.
+    These categories help analyze filing patterns and potential processing challenges. Submission and
+    start dates are tracked as part of the application data.
+
+
+    Compiler note: recvday stored as ''YYYY/MM/DD'' and beginday as ''DD/MM/YYYY''; parsed accordingly
+    with strptime. Month difference computed via date_diff(''month'', recv_date, begin_date) and bucketed
+    per definition: >6 Early Filing, 4-6 Optimal Window, 1-3 ''1-3 Months Before'', 0 Same Month, negative
+    After Start Date.'
+  sql_expression: "CASE\n  WHEN date_diff('month', strptime(recvday,'%Y/%m/%d'), strptime(beginday,'%d/%m/%Y'))\
+    \ > 6 THEN 'Early Filing'\n  WHEN date_diff('month', strptime(recvday,'%Y/%m/%d'), strptime(beginday,'%d/%m/%Y'))\
+    \ BETWEEN 4 AND 6 THEN 'Optimal Window (4-6 Months)'\n  WHEN date_diff('month', strptime(recvday,'%Y/%m/%d'),\
+    \ strptime(beginday,'%d/%m/%Y')) BETWEEN 1 AND 3 THEN '1-3 Months Before'\n  WHEN date_diff('month',\
+    \ strptime(recvday,'%Y/%m/%d'), strptime(beginday,'%d/%m/%Y')) = 0 THEN 'Same Month'\n  ELSE 'After\
+    \ Start Date'\nEND"
+  source_model: main.cases
+  domains:
+  - definitions
+- name: visa_dependent_industry
+  description: 'Defines industries that heavily rely on foreign workers through visa programs.
+
+
+    An industry is considered visa-dependent if the percentage of visa applications relative to the total
+    workforce exceeds 15%, indicating significant reliance on foreign talent. Industry information is
+    determined by the employer''s NAICS code.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric requires the total workforce size per industry (NAICS code) to compute visa
+    applications as a percentage of total workforce. The database only contains visa application records
+    (cases) and employer NAICS codes; it has no data on total employment/workforce by industry, so the
+    denominator cannot be computed.
+- name: skill_shortage_occupation
+  description: 'Identifies occupations with demonstrated shortages of qualified U.S. workers.
+
+
+    Occupations with significant shortages of qualified U.S. workers are identified by a Wage Differential
+    Rate (WDR) exceeding 10% and a statistically significant number of applications. These occupations
+    may receive prioritized processing or cap exemptions.
+
+
+    Built on: wage_differential_rate_wdr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires both a WDR > 10% condition AND a "statistically significant number
+    of applications" per occupation (SOC code). The latter threshold is not quantified anywhere in the
+    documentation or data (no definition of what counts as "statistically significant"), so it cannot
+    be encoded as a concrete predicate. Additionally, WDR is defined per prevailing_wage record, not per
+    occupation/SOC code aggregate, so there's no well-defined single-row boolean condition linking occupation-level
+    application counts to a row.
+- name: geographic_application_hotspot
+  description: 'Identifies geographic areas with concentrated visa application activity.
+
+
+    A geographic area (such as a state, metropolitan area, or city) is considered a hotspot if the volume
+    of visa applications is at least 50% higher than the national average when adjusted for population.
+    Location information is included in the worksite data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Requires population figures per geographic area (state/metro/city) to adjust application
+    volume per capita. The database contains no population data anywhere (employer, worksite, cases, etc.
+    tables lack any demographic/population columns), so "adjusted for population" cannot be computed.
+- name: attorney_specialization_category
+  description: 'Categorizes attorneys based on their visa application specialization patterns.
+
+
+    Attorneys are classified as Specialists (over 80% of cases in one visa type), Generalists (even distribution
+    across visa types), or Hybrid Practitioners (significant experience in 2-3 visa categories). Attorney
+    and visa type information are tracked as part of the application process.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines a categorical labeling (Specialist/Generalist/Hybrid Practitioner)
+    based on an attorney's distribution of cases across visa types. While "Specialist" is quantified (>80%
+    of cases in one visa type) and "Hybrid Practitioner" loosely (significant experience in 2-3 visa categories,
+    itself vague on what counts as "significant"), "Generalist" is defined only as "even distribution
+    across visa types" with no numeric threshold given anywhere in the documentation. Since the three
+    categories must jointly and exhaustively partition attorneys for a CASE expression, and the boundary
+    between Generalist and Hybrid Practitioner is not quantified, this cannot be encoded as a precise
+    SQL CASE expression without inventing an unstated threshold.
+- name: employer_size_classification
+  description: 'Categorizes employers based on their scale of visa usage.
+
+
+    Employers are classified as Small-scale users (fewer than 5 applications annually), Medium-scale users
+    (5-25 applications annually), or Large-scale users (more than 25 applications annually). Employer
+    and application information are tracked as part of the application data.
+
+
+    Compiler note: Annual application volume per employer computed as count of cases for same homefirm
+    within same calendar year (year extracted as substr(recvday,1,4), since recvday is stored as ''YYYY/MM/DD''
+    text). Classified as Small-scale (<5), Medium-scale (5-25 inclusive), or Large-scale (>25) per the
+    definition''s boundaries.'
+  sql_expression: "CASE\n  WHEN (SELECT COUNT(*) FROM cases c2 WHERE c2.homefirm = cases.homefirm AND\
+    \ substr(c2.recvday,1,4) = substr(cases.recvday,1,4)) < 5 THEN 'Small-scale'\n  WHEN (SELECT COUNT(*)\
+    \ FROM cases c2 WHERE c2.homefirm = cases.homefirm AND substr(c2.recvday,1,4) = substr(cases.recvday,1,4))\
+    \ <= 25 THEN 'Medium-scale'\n  ELSE 'Large-scale'\nEND"
+  source_model: main.cases
+  domains:
+  - definitions
+- name: application_status_categories
+  description: 'Defines the possible status outcomes for visa applications.
+
+
+    Possible outcomes for a visa application include: Certified (approved), Denied (rejected), Withdrawn
+    (voluntarily withdrawn by applicant), and Certified-Withdrawn (approved but later withdrawn). Application
+    status is tracked as part of the application data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry enumerates the full set of possible status labels (Certified, Denied, Withdrawn,
+    Certified-Withdrawn) for documentation purposes, not a computation or single predicate over rows.
+    Moreover the actual data only contains case-variants of "certified" (CERTIFIED, Certified, certified)
+    - the other listed outcomes (Denied, Withdrawn, Certified-Withdrawn) do not appear in cases.statustag,
+    so there is no way to encode a predicate or label mapping for those categories against this database.
+- name: wage_competitiveness_tiers
+  description: 'Categorizes wage offers based on their competitiveness in the labor market.
+
+
+    Wage offers are classified as Below-Market (WDR < 0%), Market-Competitive (0% ≤ WDR ≤ 10%), or Premium
+    (WDR > 10%), indicating how employers position their compensation relative to minimum requirements.
+    Wage information is included in the wage determination data.
+
+
+    Built on: wage_differential_rate_wdr.
+
+
+    Compiler note: Reused WDR formula (annualized wage comparison) from the referenced metric; applied
+    the three stated thresholds (<0%, 0-10%, >10%) as a CASE label expression since this entry assigns
+    categorical tiers rather than a single predicate.'
+  sql_expression: "CASE\n  WHEN (\n    ((CAST(REPLACE(REPLACE(wage_details->'offered_wage'->>'from','$',''),',','')\
+    \ AS DOUBLE)\n      * CASE wage_details->'offered_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n    -\n    (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n    )\n    /\n    (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n  ) * 100 < 0 THEN 'Below-Market'\n  WHEN\
+    \ (\n    ((CAST(REPLACE(REPLACE(wage_details->'offered_wage'->>'from','$',''),',','') AS DOUBLE)\n\
+    \      * CASE wage_details->'offered_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN\
+    \ 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n    -\n    (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n    )\n    /\n    (CAST(REPLACE(REPLACE(wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n      * CASE wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END)\n  ) * 100 <= 10 THEN 'Market-Competitive'\n\
+    \  ELSE 'Premium'\nEND"
+  source_model: main.prevailing_wage
+  domains:
+  - definitions
+- name: occupational_specialization_levels
+  description: 'Categorizes positions based on their level of specialization.
+
+
+    Job positions are classified as General (broad knowledge required), Specialized (focused expertise
+    in one area), or Highly Specialized (deep expertise in niche areas), typically correlated with wage
+    level and experience requirements. Job and wage information are included in the application data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry only states that specialization level "typically correlated with wage level
+    and experience requirements" without giving a concrete rule mapping wage levels (I-IV) or any other
+    column to the three categories (General/Specialized/Highly Specialized). There is no definite threshold
+    or formula to encode as a condition, so no SQL predicate/CASE can be derived from the data.
+- name: seasonal_application_pattern
+  description: 'Defines patterns in visa application timing throughout the year.
+
+
+    Seasonal patterns in visa application submissions include Peak Season (periods with higher submission
+    rates), Off-Peak Season (lower submission rates), and Transition Periods (moderate activity between
+    peaks). Application receipt dates are tracked as part of the application data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition does not specify numeric thresholds for what counts as "higher", "lower",
+    or "moderate" submission rates relative to the monthly average—unlike similar entries (e.g., Seasonal
+    Application Index [23]) which give an explicit formula. Classifying a given case's recvDay month as
+    Peak/Off-Peak/Transition requires comparing that month's aggregate case count to other months' counts
+    using an undefined cutoff, which cannot be encoded as a deterministic SQL CASE expression without
+    inventing the thresholds.
+- name: application_complexity_tiers
+  description: 'Categorizes applications based on their procedural complexity.
+
+
+    Applications are classified as Standard (straightforward cases), or Complex (cases involving H-1B
+    dependency, willful violator status, or special attestations). Complexity factors are tracked as part
+    of the application data.
+
+
+    Built on: H-1B Dependency Status, Willful Violator Status.
+
+
+    Compiler note: Complex if h1bdep=''Yes'' (H-1B dependent), willfulv=''Yes'' (willful violator), or
+    statbasis is non-null/non-empty (special attestations like $60,000+ wage or Masters degree basis).
+    Otherwise Standard. Checked distinct values of h1bdep, willfulv, statbasis in data.'
+  sql_expression: CASE WHEN h1bdep = 'Yes' OR willfulv = 'Yes' OR (statbasis IS NOT NULL AND statbasis
+    <> '') THEN 'Complex' ELSE 'Standard' END
+  source_model: main.cases
+  domains:
+  - definitions
+- name: attorney_performance_rating
+  description: 'Categorizes attorneys based on their application success rates.
+
+
+    Attorneys are rated as High Performers (over 95% approval rate), Standard Performers (85-95% approval
+    rate), or Underperformers (below 85% approval rate), based on their application outcomes.
+
+
+    Built on: attorney_success_rate_asr_attorney.
+
+
+    Compiler note: Uses ASR_Attorney metric (certified rate per attorney via case_attorney/cases join,
+    statustag matched case-insensitively to ''CERTIFIED''). Attorneys with zero cases get NULL rating
+    since rate is undefined. Thresholds: >95% High Performer, 85-95% Standard Performer, <85% Underperformer.'
+  sql_expression: "CASE\n  WHEN (SELECT COUNT(*) FROM case_attorney ca JOIN cases c ON c.filekey = ca.docketkey\
+    \ WHERE ca.counselmail = attorney.lawmail) = 0 THEN NULL\n  WHEN (SELECT COUNT(*) FROM case_attorney\
+    \ ca JOIN cases c ON c.filekey = ca.docketkey WHERE ca.counselmail = attorney.lawmail AND UPPER(c.statustag)\
+    \ = 'CERTIFIED') * 100.0 / (SELECT COUNT(*) FROM case_attorney ca JOIN cases c ON c.filekey = ca.docketkey\
+    \ WHERE ca.counselmail = attorney.lawmail) > 95 THEN 'High Performer'\n  WHEN (SELECT COUNT(*) FROM\
+    \ case_attorney ca JOIN cases c ON c.filekey = ca.docketkey WHERE ca.counselmail = attorney.lawmail\
+    \ AND UPPER(c.statustag) = 'CERTIFIED') * 100.0 / (SELECT COUNT(*) FROM case_attorney ca JOIN cases\
+    \ c ON c.filekey = ca.docketkey WHERE ca.counselmail = attorney.lawmail) >= 85 THEN 'Standard Performer'\n\
+    \  ELSE 'Underperformer'\nEND"
+  source_model: main.attorney
+  domains:
+  - definitions
+- name: worksite_geographic_diversity
+  description: 'Categorizes employers based on the geographic spread of their worksites.
+
+
+    Employers are classified as Single-Location (all applications for one location), Regional (multiple
+    locations in one region), or National (multiple regions), reflecting operational breadth. Worksite
+    information is included in the application data.
+
+
+    Built on: worksite_diversity_index_wdi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The classification requires distinguishing "Regional" (multiple locations within one region)
+    from "National" (multiple regions), which depends on a geographic region grouping above the state
+    level (e.g., Northeast, West, etc.). The database only stores worksite city/state/zip with no region/division
+    mapping, so there is no way to determine whether multiple worksite states fall within the same region
+    or span multiple regions. Only location (address) and state are available, insufficient to encode
+    the region-based tiers.
+- name: employer_dependency_level
+  description: 'Categorizes the degree to which employers rely on visa programs.
+
+
+    Employers are classified as Low Dependency (less than 5% of workforce), Moderate Dependency (5-15%),
+    or High Dependency (over 15%). H-1B dependent status typically applies to the high dependency category.
+
+
+    Built on: H-1B Dependency Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric requires knowing an employer's total workforce size (percentage of workforce
+    that are visa workers) to classify dependency level. The database has no table or column holding total
+    employee counts for an employer—only counts of visa applications/headcount per case. Without total
+    workforce denominator, the percentage thresholds (5%, 15%) cannot be computed.
+- name: position_scarcity_index
+  description: 'Categorizes positions based on the scarcity of qualified candidates.
+
+
+    Positions are classified as Abundant (many qualified candidates), Moderate Scarcity (limited candidates),
+    or High Scarcity (very few candidates), often correlated with wage premiums and processing priorities.
+
+
+    Built on: occupational_demand_index_odi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric requires data on the number/scarcity of qualified candidates for a position,
+    which is not present in this database (no labor market supply data exists). The schema only tracks
+    application counts, wages, and SOC codes, with no notion of candidate availability or scarcity to
+    classify positions as Abundant/Moderate Scarcity/High Scarcity.
+- name: premium_wage_employer
+  description: 'Defines employers that consistently offer above-market wages.
+
+
+    An employer is considered a premium wage employer if their average Wage Differential Rate (WDR) across
+    all applications exceeds 15%, indicating a consistent strategy of offering premium compensation.
+
+
+    Built on: wage_differential_rate_wdr.
+
+
+    Compiler note: WDR computed per case via its unique case_worksite row (verified 1:1 case-to-worksite)
+    and joined prevailing_wage record; averaged across all cases filed by the employer (matched by both
+    corphandle and zipref, since cases.homeFirm/homeZip FK to employer''s composite key); employer flagged
+    premium wage if average WDR > 15%.'
+  sql_expression: "(\n  SELECT AVG(\n    (\n      (CAST(REPLACE(REPLACE(pw.wage_details->'offered_wage'->>'from','$',''),',','')\
+    \ AS DOUBLE)\n        * CASE pw.wage_details->'offered_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n      -\n      CAST(REPLACE(REPLACE(pw.wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n        * CASE pw.wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN\
+    \ 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n      )\n      /\n      (CAST(REPLACE(REPLACE(pw.wage_details->'prevailing_wage'->>'value','USD',''),',','')\
+    \ AS DOUBLE)\n        * CASE pw.wage_details->'prevailing_wage'->>'unit' WHEN 'Hour' THEN 2080 WHEN\
+    \ 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END\n      )\n    ) * 100\n  )\n  FROM cases\
+    \ c\n  JOIN case_worksite cw ON cw.dockkey = c.filekey\n  JOIN prevailing_wage pw ON pw.trackno =\
+    \ cw.wagetrack\n  WHERE c.homefirm = employer.corphandle AND c.homezip = employer.zipref\n) > 15"
+  source_model: main.employer
+  domains:
+  - definitions
+- name: application_delay_risk_profile
+  description: 'Categorizes applications based on their risk of processing delays.
+
+
+    Applications are classified as Low Risk (no special factors), Moderate Risk (1-2 complexity factors),
+    or High Risk (3 or more complexity factors or from willful violators), based on the Application Complexity
+    Score (ACS).
+
+
+    Built on: application_complexity_score_acs.
+
+
+    Compiler note: ACS itself wasn''t compiled (no defined weights), so this entry uses an unweighted
+    count of the three documented binary complexity factors available on cases (h1bdep=''Yes'', newemp>0,
+    amendflag>0 as indicators of H-1B dependency, new employment, and amendment status) to determine the
+    ''3 or more complexity factors'' threshold, with willfulv=''Yes'' as the separate explicit override
+    for High Risk per the entry''s wording (''...or from willful violators''). Checked willfulv only takes
+    values ''No'' or NULL in current data, but condition is encoded generally. NULLs in h1bdep/newemp/amendflag/willfulv
+    treated as not meeting the factor (COALESCE to 0 / not ''Yes'').'
+  sql_expression: "CASE\n  WHEN willfulv = 'Yes' OR (\n    (CASE WHEN h1bdep = 'Yes' THEN 1 ELSE 0 END)\
+    \ +\n    (CASE WHEN COALESCE(newemp,0) > 0 THEN 1 ELSE 0 END) +\n    (CASE WHEN COALESCE(amendflag,0)\
+    \ > 0 THEN 1 ELSE 0 END)\n  ) >= 3 THEN 'High Risk'\n  WHEN (\n    (CASE WHEN h1bdep = 'Yes' THEN\
+    \ 1 ELSE 0 END) +\n    (CASE WHEN COALESCE(newemp,0) > 0 THEN 1 ELSE 0 END) +\n    (CASE WHEN COALESCE(amendflag,0)\
+    \ > 0 THEN 1 ELSE 0 END)\n  ) BETWEEN 1 AND 2 THEN 'Moderate Risk'\n  ELSE 'Low Risk'\nEND"
+  source_model: main.cases
+  domains:
+  - definitions
+- name: continuous_filing_employer
+  description: 'Defines employers with regular, ongoing visa application activity.
+
+
+    An employer is considered a continuous filer if they submit visa applications in at least 9 months
+    of the year, indicating consistent reliance on foreign worker programs.
+
+
+    Built on: seasonal_application_index_sai.
+
+
+    Compiler note: recvday stored as ''YYYY/MM/DD'' text; distinct year-month prefixes (substr 1,7) per
+    employer (matched via cases.homefirm = employer.corphandle) counted and compared to >=9 months.'
+  sql_expression: (SELECT COUNT(DISTINCT substr(c.recvday,1,7)) FROM cases c WHERE c.homefirm = employer.corphandle)
+    >= 9
+  source_model: main.employer
+  domains:
+  - definitions
+- name: legal_representation_efficacy
+  description: 'Evaluates the effectiveness of legal representation in visa applications.
+
+
+    Legal representation efficacy is measured by comparing the approval rate of applications with attorney
+    representation to those without. High Impact is defined as over 10% higher approval rate, Moderate
+    Impact as 5-10% higher, and Minimal Impact as less than 5% difference.
+
+
+    Built on: approval_rate_ar, attorney_success_rate_asr_attorney.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric is a single dataset-wide aggregate comparison (approval rate for represented
+    vs. unrepresented applications), yielding one categorical label for the whole database, not a per-row
+    boolean condition or scalar computable per row of any table.
+- name: alternative_prevailing_wage_sources
+  description: 'Enumerates the acceptable alternative sources for prevailing wage determinations.
+
+
+    Acceptable sources for prevailing wage determinations include Occupational Employment Statistics (OES),
+    Collective Bargaining Agreements (CBA), and independent published wage surveys that meet Department
+    of Labor requirements. Source information is included in the wage determination data.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry enumerates descriptive categories of acceptable prevailing wage sources (OES,
+    CBA, independent surveys) rather than stating a condition or computation over rows. The database only
+    stores alternate_source.source_type as 'CBA' or 'Survey' (no 'OES' value, since OES is the default/primary
+    source not an alternate), so there is no row-level predicate to encode; this is background knowledge
+    about valid categories, not a query.
+tables:
+- schema: main
+  table: attorney
+  columns:
+  - name: lawmail
+    type: VARCHAR
+    description: TEXT. Attorney's email address. PK.
+  - name: attorney_profile
+    type: JSON
+    description: 'JSONB column. Captures identifying details of the attorney, including name, address,
+      firm, and court affiliation. Fields: {"name": {"first": "TEXT. First name of the attorney. Example:
+      Maria.", "middle": "TEXT. Middle initial of the attorney. **NULL means no middle initial provided.**.
+      Example: T..", "last": "TEXT. Last name of the attorney. Example: Schneider."}, "address": {"line1":
+      "TEXT. Primary address line for the attorney. Example: 302 West Third Street.", "line2": "TEXT.
+      Secondary address line for the attorney. **NULL means no secondary address provided.**. Example:
+      Suite 710.", "city": "TEXT. City of the attorney. Example: Cincinnati.", "state": "TEXT. State of
+      the attorney. Example: OH.", "zip": "TEXT. Postal code for the attorney. Example: 45202.", "country":
+      "TEXT. Country of the attorney. Possible values: CANADA, UNITED STATES OF AMERICA.", "province":
+      "TEXT. Province or region of the attorney. **NULL means no province specified.**. Example: Ontario."},
+      "contact": {"phone": "BIGINT. Phone number for the attorney. Example: 15133818472.0.", "extension":
+      "BIGINT. Extension number for the attorney’s phone. **NULL means no extension provided.**. Example:
+      7375.0."}, "firm": "TEXT. Law firm name or business name. Example: Musillo Unkenholt, LLC..", "highest_court":
+      {"state": "TEXT. State of the highest court the attorney is registered with. **NULL means no state
+      provided.**. Example: OH.", "name": "TEXT. Name of the highest court the attorney is registered
+      with. **NULL means no court name provided.**. Example: Supreme Court of Ohio."}}'
+- schema: main
+  table: case_attorney
+  columns:
+  - name: docketkey
+    type: VARCHAR
+    description: TEXT. Case number reference. FK to cases.fileKey.
+  - name: counselmail
+    type: VARCHAR
+    description: 'TEXT. Attorney''s email address. FK to attorney.lawMail. Example: tyler.peace@muimmigration.com.'
+  - name: counselfor
+    type: ENUM('No', 'Yes')
+    description: 'enum_agent_representing_employer. Indicates if the attorney is representing the employer.
+      Possible values: No, Yes.'
+- schema: main
+  table: case_worksite
+  columns:
+  - name: dockkey
+    type: VARCHAR
+    description: 'TEXT. Case number reference. FK to cases.fileKey. PK. Example: I-200-23355-584296.'
+  - name: ws_addr1
+    type: VARCHAR
+    description: 'TEXT. Primary worksite address line. PK. Example: 2800 10th Avenue North.'
+  - name: wscity
+    type: VARCHAR
+    description: 'TEXT. Worksite city. PK. Example: Billings.'
+  - name: wsstate
+    type: VARCHAR
+    description: 'TEXT. Worksite state. PK. Example: MT.'
+  - name: wszip
+    type: VARCHAR
+    description: 'TEXT. Worksite postal code. PK. Example: 59101.'
+  - name: wsheads
+    type: BIGINT
+    description: 'BIGINT. Number of workers at the worksite. Possible values: 1, 3, 4, 5, 6, 10, 25, 50.'
+  - name: wagetrack
+    type: VARCHAR
+    description: 'TEXT. Wage tracking number reference. FK to prevailing_wage.trackNo. Example: 1.'
+- schema: main
+  table: cases
+  columns:
+  - name: filekey
+    type: VARCHAR
+    description: TEXT. Unique case number identifier. PK.
+  - name: statustag
+    type: VARCHAR
+    description: 'TEXT. Current status of the case. Possible values: CERTIFIED, Certified, certified.'
+  - name: recvday
+    type: VARCHAR
+    description: 'TEXT. Date the case was received. Possible values: 2023/12/21.'
+  - name: decisionday
+    type: VARCHAR
+    description: 'TEXT. Date the case decision was made. **NULL means decision date not provided.**. Possible
+      values: 2023-12-29.'
+  - name: origcertday
+    type: DATE
+    description: 'DATE. Original certification date. **NULL means certification date not provided.**.
+      Possible values: .'
+  - name: visacls
+    type: ENUM('E-3 Australian', 'H-1B', 'H-1B1 Chile', 'H-1B1 Singapore')
+    description: 'enum_visa_class. Visa class for the case. Possible values: E-3 Australian, H-1B, H-1B1
+      Chile, H-1B1 Singapore.
+
+
+      Visa Classification Types: Illustrates the different types of work visas available in the employment-based
+      immigration system.
+
+
+      The visa classification system includes several types: H-1B (specialty occupations requiring theoretical
+      and practical application of specialized knowledge), H-1B1 Singapore (Singapore nationals in specialty
+      occupations), H-1B1 Chile (Chilean nationals in specialty occupations), and E-3 Australian (Australian
+      nationals in specialty occupations).
+
+
+      Compiler note: Describes the possible enum values of cases.visaCls (H-1B, H-1B1 Singapore, H-1B1
+      Chile, E-3 Australian), matching the documented enum_visa_class possible values.'
+  - name: jobtag
+    type: VARCHAR
+    description: 'TEXT. Job title associated with the case. Example: Registered Nurse.'
+  - name: soccd
+    type: VARCHAR
+    description: 'TEXT. Standard Occupational Classification (SOC) code. Example: 29-1141.00.
+
+
+      SOC Code Framework: Illustrates the Standard Occupational Classification system used in labor certification
+      applications.
+
+
+      The Standard Occupational Classification (SOC) code is a standardized numbering system that identifies
+      and classifies occupations. For example, 15-1253.00 represents ''Software Quality Assurance Analysts
+      and Testers'', while 29-1141.00 represents ''Registered Nurses''. These codes help ensure that foreign
+      workers are properly classified and paid according to their occupational category. The SOC code
+      is included in the job information for each application.
+
+
+      Compiler note: Describes the meaning of SOC code values stored in cases.SocCd (e.g., 15-1253.00,
+      29-1141.00), matching cases.socTitle examples given.'
+  - name: soctitle
+    type: VARCHAR
+    description: 'TEXT. SOC title for the job role. Example: Registered Nurses.'
+  - name: fulltimeind
+    type: VARCHAR
+    description: 'TEXT. Full-time employment indicator (Y/N). Possible values: 0, 1, N, Y.
+
+
+      Full-Time Position Indicator: Illustrates what defines a full-time position in visa applications.
+
+
+      A full-time position typically means employment for at least 35 hours per week, though specific
+      definitions may vary by employer. Non-full-time positions may include part-time roles that require
+      fewer hours per week. This indicator is recorded as part of the application data.
+
+
+      Compiler note: Describes the meaning of the FullTimeInd column values (Y/N indicating >=35 hrs/week
+      full-time status). Verified column has values Y, N, and empty string.'
+  - name: beginday
+    type: VARCHAR
+    description: 'TEXT. Start date of employment. Example: 21/12/2023.'
+  - name: endday
+    type: VARCHAR
+    description: 'TEXT. End date of employment. **NULL means no end date provided.**. Example: 2026 20th
+      Dec..'
+  - name: headct
+    type: BIGINT
+    description: 'BIGINT. Total number of worker positions in the case. Possible values: 1, 3, 4, 5, 6,
+      10, 25, 50.'
+  - name: newemp
+    type: BIGINT
+    description: 'BIGINT. Number of new employment positions. Possible values: 0, 1, 2, 5, 10, 20.'
+  - name: contemp
+    type: BIGINT
+    description: 'BIGINT. Number of continued employment positions. Possible values: 0, 1, 2, 5, 10.'
+  - name: changeprev
+    type: BIGINT
+    description: 'BIGINT. Number of changes from previous employment. Possible values: 0, 1, 2, 5.'
+  - name: concurrentlynew
+    type: BIGINT
+    description: 'BIGINT. Number of concurrent new employment positions. Possible values: 0, 1.'
+  - name: changefirm
+    type: BIGINT
+    description: 'BIGINT. Number of employer changes. Possible values: 0, 1, 2, 5, 10.'
+  - name: amendflag
+    type: BIGINT
+    description: 'BIGINT. Flag indicating if the petition is amended. Possible values: 0, 1, 2, 5.'
+  - name: siteslots
+    type: BIGINT
+    description: 'BIGINT. Total number of worksite locations. Possible values: 1, 2, 3, 4, 5, 10.'
+  - name: agreelc
+    type: VARCHAR
+    description: 'TEXT. Agreement to the labor condition statement. Possible values: Yes.'
+  - name: h1bdep
+    type: ENUM('No', 'Yes')
+    description: 'enum_h1b_dependent. Indicates if the applicant is a dependent under H-1B. Possible values:
+      No, Yes.
+
+
+      H-1B Dependency Status: Illustrates what it means for an employer to be H-1B dependent.
+
+
+      An employer is considered H-1B dependent when the proportion of H-1B workers relative to the total
+      workforce exceeds specific thresholds: 15% for employers with more than 50 employees, 8 workers
+      for employers with 26-50 employees, or 4 workers for employers with 25 or fewer employees. H-1B
+      dependent employers face additional attestation requirements. This status is tracked as part of
+      the application data.
+
+
+      Compiler note: Describes what the h1bDep flag (Yes/No) represents conceptually (H-1B dependency
+      thresholds by employer size); the underlying thresholds/employee counts are not stored in the DB,
+      only the resulting Yes/No status in cases.h1bdep.'
+  - name: willfulv
+    type: ENUM('No', 'Yes')
+    description: 'enum_willful_violator. Indicates if the employer is a willful violator. Possible values:
+      No.
+
+
+      Willful Violator Status: Illustrates what constitutes a willful violator designation for employers.
+
+
+      A willful violator is an employer who has been found by the Department of Labor to have committed
+      a willful failure to meet LCA conditions or made a misrepresentation of material fact on an LCA
+      within the past 5 years. Such employers face additional attestation requirements similar to H-1B
+      dependent employers. This status is tracked as part of the application data.
+
+
+      Compiler note: Describes meaning of cases.willfulV (enum_willful_violator) values tracked per application.'
+  - name: supporth
+    type: ENUM('No', 'Yes')
+    description: 'enum_support_h1b. Indicates if the employer supports H-1B. Possible values: Yes.'
+  - name: statbasis
+    type: VARCHAR
+    description: 'TEXT. Statutory basis for the case. Possible values: $60,000 or higher annual wage,
+      Both $60,000 or higher in annual wage and Masters Degree or higher in related specialty.'
+  - name: appa
+    type: VARCHAR
+    description: 'TEXT. Indicates if Appendix A is attached. Possible values: .'
+  - name: pubdisc
+    type: VARCHAR
+    description: 'TEXT. Public disclosure status. Possible values: Disclose Business, Disclose Business
+      and Employment, Disclose Employment.
+
+
+      Public Disclosure Options: Illustrates the choices employers have regarding public disclosure of
+      their business information.
+
+
+      Employers can choose whether their business information is publicly disclosed in the visa application
+      process. ''Disclose Business'' indicates the employer consents to having their information publicly
+      available, while other options may restrict disclosure to protect confidential business information.
+      Disclosure choices are recorded as part of the application data.
+
+
+      Compiler note: Matches cases.pubDisc column, which holds values like ''Disclose Business'', ''Disclose
+      Business and Employment'', ''Disclose Employment'' as confirmed in schema.'
+  - name: homefirm
+    type: VARCHAR
+    description: 'TEXT. Employer reference. FK to employer.corpHandle. Example: Avant Healthcare Professionals,
+      LLC..'
+  - name: homezip
+    type: VARCHAR
+    description: 'TEXT. Employer postal code reference. FK to employer.ZipRef. Example: 32751.'
+  - name: preplink
+    type: VARCHAR
+    description: 'TEXT. Preparer’s email address. FK to preparer.prepMail. Example: tyler.peace@muimmigration.com.'
+- schema: main
+  table: employer
+  columns:
+  - name: corphandle
+    type: VARCHAR
+    description: TEXT. Unique identifier for the employer. PK.
+  - name: zipref
+    type: VARCHAR
+    description: ''
+  - name: employer_contact_info
+    type: JSON
+    description: 'JSONB column. Groups the employer''s full address, contact details, and classification
+      data into a structured JSONB format. Fields: {"address": {"line1": "TEXT. Employer’s primary address
+      line. Example: 2301 Lucien Way.", "line2": "TEXT. Employer’s secondary address line. **NULL means
+      no secondary address provided.**. Example: Suite 360.", "city": "TEXT. City of the employer’s location.
+      Example: Maitland.", "state": "TEXT. State of the employer’s location. Example: FL.", "zip": "TEXT.
+      Postal code for the employer’s address. PK.", "country": "TEXT. Country of the employer. **NULL
+      means no country specified.**. Possible values: UNITED STATES OF AMERICA.", "province": "TEXT. Province
+      or region of the employer. **NULL means no province specified.**. Example: TX."}, "phone": {"number":
+      "BIGINT. Employer’s main phone number. Example: (140) 768 12999.", "extension": "BIGINT. Extension
+      number for the employer''s phone. **NULL means no extension provided.**. Example: 0.0."}, "naics_code":
+      "BIGINT. North American Industry Classification System (NAICS) code for the employer. Example: 561320.",
+      "alternate_name": "TEXT. Alternate name or trade name of the employer. **NULL means no alternate
+      name provided.**. Example: Lattice."}
+
+
+      NAICS Code Purpose: Illustrates the purpose and meaning of NAICS codes in the context of visa applications.
+
+
+      The North American Industry Classification System (NAICS) code is a 6-digit code that identifies
+      the employer''s primary industry sector. For example, code 541511 represents ''Custom Computer Programming
+      Services'', while 561320 represents ''Temporary Help Services''. These codes help categorize employers
+      by industry for statistical and regulatory purposes. The NAICS code is part of the employer''s profile
+      information.
+
+
+      Compiler note: Describes the meaning of the naics_code field nested within employer.employer_contact_info
+      JSONB column (employer''s industry classification).'
+- schema: main
+  table: employer_poc
+  columns:
+  - name: contactmail
+    type: VARCHAR
+    description: 'TEXT. Employer point of contact email address. PK. Example: skaul@avanthealthcare.com.'
+  - name: firmlink
+    type: VARCHAR
+    description: TEXT. Reference to the employer’s firm. FK to employer.corpHandle.
+  - name: firmzip
+    type: VARCHAR
+    description: TEXT. Reference to the employer’s postal code. FK to employer.ZipRef.
+  - name: poc_contact_info
+    type: JSON
+    description: 'JSONB column. Encapsulates personal and location-based contact details for the employer’s
+      point of contact. Fields: {"name": {"first": "TEXT. First name of the employer’s point of contact.
+      Example: Saloni.", "middle": "TEXT. Middle name of the employer’s point of contact. **NULL means
+      no middle name provided.**. Example: R..", "last": "TEXT. Last name of the employer’s point of contact.
+      Example: Kaul."}, "title": "TEXT. Job title of the employer’s point of contact. Example: Director
+      of Immigration.", "address": {"line1": "TEXT. Primary address line for the employer’s point of contact.
+      Example: 2301 Lucien Way.", "line2": "TEXT. Secondary address line for the employer’s point of contact.
+      **NULL means no secondary address provided.**. Example: Suite 360.", "city": "TEXT. City of the
+      employer’s point of contact. Example: Maitland.", "state": "TEXT. State of the employer’s point
+      of contact. Example: FL.", "zip": "TEXT. Postal code of the employer’s point of contact. Example:
+      32751.", "country": "TEXT. Country of the employer’s point of contact. Possible values: UNITED STATES
+      OF AMERICA.", "province": "TEXT. Province or region of the employer’s point of contact. **NULL means
+      no province specified.**. Possible values: CALIFORNIA, California, GEORGIA, New York, TEXAS, TX."},
+      "phone": {"number": "TEXT. Phone number for the employer’s point of contact. Example: 14076812999.",
+      "extension": "BIGINT. Extension number for the employer’s point of contact’s phone. **NULL means
+      no extension provided.**. Example: 0.0."}}'
+- schema: main
+  table: preparer
+  columns:
+  - name: prepmail
+    type: VARCHAR
+    description: TEXT. Preparer’s email address. PK.
+  - name: preplname
+    type: VARCHAR
+    description: 'TEXT. Last name of the preparer. Example: Peace.'
+  - name: prepfname
+    type: VARCHAR
+    description: 'TEXT. First name of the preparer. Example: Tyler.'
+  - name: prepmi
+    type: VARCHAR
+    description: 'TEXT. Middle initial of the preparer. Example: J.'
+  - name: prepbiz
+    type: VARCHAR
+    description: 'TEXT. Business name of the preparer. **NULL means no business name provided.**. Example:
+      Musillo Unkenholt, LLC..'
+- schema: main
+  table: prevailing_wage
+  columns:
+  - name: trackno
+    type: VARCHAR
+    description: TEXT. Unique tracking number for the prevailing wage record. PK.
+  - name: wage_details
+    type: JSON
+    description: 'JSONB column. Summarizes offered and prevailing wage details including ranges, units,
+      and source information. Fields: {"offered_wage": {"from": "TEXT. Minimum wage rate of pay from.
+      Example: $35.42.", "to": "REAL. Maximum wage rate of pay to. **NULL means maximum wage not provided.**.
+      Example: 150000.0.", "unit": "enum_wage_unit_of_pay. Unit of pay for the wage rate (e.g., Hour,
+      Week, Year). Possible values: Hour, Week, Year."}, "prevailing_wage": {"value": "TEXT. Prevailing
+      wage value. Example: USD 35.42.", "unit": "enum_pw_unit_of_pay. Unit of pay for the prevailing wage.
+      Possible values: Hour, Month, Week, Year.", "level": "enum_pw_wage_level. Wage level classification
+      for the position. Possible values: I, II, III, IV.", "oes_year": "TEXT. OES year for the prevailing
+      wage survey. **NULL means no OES span provided.**. Possible values: 7/1/2023 - 6/30/2024."}, "alternate_source":
+      {"source_type": "enum_pw_other_source. Source of the prevailing wage information. Possible values:
+      CBA, Survey.", "source_year": "BIGINT. Year of the alternative wage source. **NULL means no year
+      specified.**. Possible values: 2016.0, 2017.0, 2022.0, 2023.0.", "publisher": "TEXT. Name of the
+      prevailing wage survey publisher. Example: Willis Towers Watson.", "survey_title": "TEXT. Title
+      of the prevailing wage survey. Example: Gen. Industry Professional (Technical and Operations) Report."}}
+
+
+      Prevailing Wage Levels: Illustrates the meaning of the four wage levels in the prevailing wage system.
+
+
+      Prevailing wage levels range from I to IV, representing increasingly higher wages based on skill,
+      experience, education, and responsibility: Level I (entry-level), Level II (qualified), Level III
+      (experienced), and Level IV (fully competent). These levels are determined based on the position''s
+      requirements compared to the occupational standard. Wage level information is included in the wage
+      determination data.
+
+
+      Compiler note: Describes meaning of the ''prevailing_wage.level'' field (I-IV) within the wage_details
+      JSONB column; confirmed via sample rows that level values are ''I'',''II'',''III'',''IV'' strings
+      nested under prevailing_wage key. Describes a value enumeration, not a computable expression.
+
+
+      Wage Payment Units: Illustrates the different units of payment used in wage reporting.
+
+
+      Wage payment units indicate how wages are calculated and paid, with common units including: Hour
+      (payment calculated per working hour), Week (payment calculated as a weekly salary), Month (payment
+      calculated as a monthly salary), and Year (payment calculated as an annual salary). Different units
+      may be used depending on industry norms and position types. Wage unit information is included in
+      the wage determination data.
+
+
+      Compiler note: Describes the enumerated wage payment units (Hour, Week, Month, Year) found in wage_details->offered_wage->unit
+      and wage_details->prevailing_wage->unit JSON fields of prevailing_wage.wage_details.'
+- schema: main
+  table: worksite
+  columns:
+  - name: w_addr1
+    type: VARCHAR
+    description: TEXT. Primary address line of the worksite. PK.
+  - name: wcity
+    type: VARCHAR
+    description: TEXT. City of the worksite. PK.
+  - name: wstate
+    type: VARCHAR
+    description: TEXT. State of the worksite. PK.
+  - name: wzip
+    type: VARCHAR
+    description: TEXT. Postal code of the worksite. PK.
+  - name: secent
+    type: VARCHAR
+    description: 'TEXT. Secondary entity associated with the worksite. **NULL means no secondary entity
+      specified.**. Possible values: No, Yes.'
+  - name: secentname
+    type: VARCHAR
+    description: 'TEXT. Name of the secondary entity. **NULL means no secondary entity name provided.**.
+      Example: Billings Clinic Health System.'
+  - name: waddr_2
+    type: VARCHAR
+    description: 'TEXT. Secondary address line of the worksite. **NULL means no secondary address provided.**.
+      Example: 800.'
+  - name: wcnty
+    type: VARCHAR
+    description: 'TEXT. County of the worksite. **NULL means no county specified.**. Example: YELLOWSTONE.'

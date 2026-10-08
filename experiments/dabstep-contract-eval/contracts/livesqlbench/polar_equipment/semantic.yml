@@ -1,0 +1,1824 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: polar_equipment, compiler: claudesonnet5
+# inputs: polar_equipment_kb.jsonl, polar_equipment_column_meaning_base.json, polar_equipment_schema.txt, polar_equipment.duckdb
+metrics:
+- name: equipment_efficiency_rating_eer
+  description: 'A composite metric that evaluates the overall efficiency of equipment based on performance,
+    reliability, and environmental impact.
+
+
+    EER = \frac{\text{performance score} + \text{reliability index}}{2} \times (1 - \frac{\text{environmental
+    impact index}}{100}), \text{ where higher values indicate more efficient equipment with better performance
+    and lower environmental impact.}
+
+
+    Compiler note: performance_score and environmental_impact_idx pulled from EquipmentType.type_indices
+    JSON (unique match on EquipType PK); RELIAB_IDX taken directly from Equipment. Both indices are on
+    0-100 scale as stored.'
+  sql_expression: (((SELECT (et.type_indices->>'performance_score')::numeric FROM EquipmentType et WHERE
+    et.EquipType = Equipment."EquipType") + "RELIAB_IDX") / 2.0) * (1 - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric
+    FROM EquipmentType et WHERE et.EquipType = Equipment."EquipType") / 100.0)
+  source_model: main.Equipment
+  domains:
+  - calculations
+- name: operational_readiness_score_ors
+  description: 'Quantifies how ready equipment is for immediate deployment based on operational status
+    and maintenance schedule.
+
+
+    ORS = \begin{cases} 10 \times (1 - \frac{\text{operation hours}}{\text{maintenance cycle hours}})
+    & \text{if operational status = ''Active''} \\ 5 \times (1 - \frac{\text{operation hours}}{\text{maintenance
+    cycle hours}}) & \text{if operational status = ''Standby''} \\ 0 & \text{otherwise} \end{cases}
+
+
+    Compiler note: Computed directly from OperationMaintenance.OPER_status, OPER_hours, maintCycleHrs.
+    Division uses real columns so no integer-division issue.'
+  sql_expression: "CASE\n  WHEN \"OPER_status\" = 'Active' THEN 10 * (1 - \"OPER_hours\" / \"maintCycleHrs\"\
+    )\n  WHEN \"OPER_status\" = 'Standby' THEN 5 * (1 - \"OPER_hours\" / \"maintCycleHrs\")\n  ELSE 0\n\
+    END"
+  source_model: main.OperationMaintenance
+  domains:
+  - calculations
+- name: energy_sustainability_index_esi
+  description: 'Measures the sustainability of an equipment''s energy usage by evaluating energy efficiency
+    and renewable sources.
+
+
+    ESI = \text{energy efficiency percent} \times \begin{cases} 1.5 & \text{if power source IN (''Solar'',
+    ''Wind'', ''Hybrid'')} \\ 1.0 & \text{if power source = ''Battery''} \\ 0.7 & \text{if power source
+    = ''Diesel''} \\ 0 & \text{otherwise} \end{cases}, \text{ providing higher ratings for renewable energy
+    and lower ratings for fossil fuels.}
+
+
+    Compiler note: Energy efficiency percent mapped to battery_telemetry.power_state.conversion_eff_pct;
+    power source mapped to battery_telemetry.power_state.primary_source. Verified via sample rows that
+    primary_source takes values Solar/Wind/Diesel/etc matching the case conditions.'
+  sql_expression: (battery_telemetry->'power_state'->>'conversion_eff_pct')::double precision * CASE WHEN
+    battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid') THEN 1.5 WHEN battery_telemetry->'power_state'->>'primary_source'
+    = 'Battery' THEN 1.0 WHEN battery_telemetry->'power_state'->>'primary_source' = 'Diesel' THEN 0.7
+    ELSE 0 END
+  source_model: main.PowerBattery
+  domains:
+  - calculations
+- name: structural_safety_factor_ssf
+  description: 'Evaluates the safety margin of structures under extreme weather conditions.
+
+
+    SSF = \frac{100 - \text{structural load percent}}{100} \times \begin{cases} 0.5 & \text{if snow load
+    (kg/m^2) > 100 or wind speed (m/s) > 20} \\ 0.8 & \text{if snow load (kg/m^2) > 50 or wind speed (m/s)
+    > 10} \\ 1.0 & \text{otherwise} \end{cases}
+
+
+    Compiler note: All inputs (structLoadPct, snowLoad_kgm2, windSpeed_ms) are directly in WeatherAndStructure
+    table.'
+  sql_expression: ((100 - "structLoadPct") / 100.0) * CASE WHEN "snowLoad_kgm2" > 100 OR "windSpeed_ms"
+    > 20 THEN 0.5 WHEN "snowLoad_kgm2" > 50 OR "windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END
+  source_model: main.WeatherAndStructure
+  domains:
+  - calculations
+- name: communication_reliability_index_cri
+  description: 'Assesses the reliability of communication systems based on signal metrics and antenna
+    status.
+
+
+    CRI = \begin{cases} 0 & \text{if antenna status = ''Error''} \\ 5 & \text{if antenna status = ''Warning''}
+    \\ 10 & \text{if antenna status = ''Normal''} \\ 0 & \text{otherwise} \end{cases} \times (1 - \frac{\text{signal
+    latency (ms)}}{1000}), \text{ where lower latency and better antenna status result in higher reliability.}
+
+
+    Compiler note: Maps antenna_stat to base score (Error=0, Warning=5, Normal=10, other=0), multiplied
+    by (1 - netLatency_ms/1000) using netLatency_ms as signal latency in ms.'
+  sql_expression: (CASE "antenna_stat" WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10
+    ELSE 0 END) * (1 - "netLatency_ms" / 1000.0)
+  source_model: main.Communication
+  domains:
+  - calculations
+- name: vehicle_performance_composite_vpc
+  description: 'A metric that evaluates vehicle performance based on mechanical condition and operational
+    efficiency.
+
+
+    VPC = (1 - \frac{\text{brake pad wear percent} + \text{track wear percent}}{200}) \times \frac{\text{vehicle
+    speed (km/h)}}{50} \times \frac{\text{engine load percent}}{100}, \text{ where lower wear percentages
+    and optimal engine load contribute to better performance.}
+
+
+    Compiler note: vehicle_motion.speed_kmh is actually stored as a text string with an ''m/s'' suffix
+    (e.g. ''49.30 m/s''), so it is parsed to numeric and converted to km/h by multiplying by 3.6. brake
+    pad wear and track wear come from ground_vehicle_status JSON; engine load_pct is fetched via engine_link
+    -> EngineAndFluids (1:1 match on ENGINE_ID).'
+  sql_expression: (1 - ((ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric + (ground_vehicle_status->'tracks'->>'wear_pct')::numeric)
+    / 200.0) * ((CAST(REPLACE(ground_vehicle_status->'vehicle_motion'->>'speed_kmh', ' m/s', '') AS numeric)
+    * 3.6) / 50.0) * ((SELECT (e.engine_fluids_snapshot->'engine_core'->>'load_pct')::numeric FROM EngineAndFluids
+    e WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)
+  source_model: main.ChassisAndVehicle
+  domains:
+  - calculations
+- name: thermal_insulation_efficiency_tie
+  description: 'Measures how effectively a structure retains heat based on insulation status and heat
+    loss rate.
+
+
+    TIE = \begin{cases} 0.9 - \frac{\text{heat loss rate (kWh)}}{10} & \text{if insulation status = ''Good''}
+    \\ 0.6 - \frac{\text{heat loss rate (kWh)}}{10} & \text{if insulation status = ''Fair''} \\ 0.3 -
+    \frac{\text{heat loss rate (kWh)}}{10} & \text{if insulation status = ''Poor''} \end{cases}, \text{
+    where lower heat loss and better insulation result in higher efficiency.}
+
+
+    Compiler note: Mapped insulation status (''Good''/''Fair''/''Poor'') to base constants 0.9/0.6/0.3
+    minus heatLoss_kwh/10, per formula. NULL for any other/null insulationStat or null heatLoss_kwh.'
+  sql_expression: "CASE \"insulationStat\"\n  WHEN 'Good' THEN 0.9 - \"heatLoss_kwh\"/10\n  WHEN 'Fair'\
+    \ THEN 0.6 - \"heatLoss_kwh\"/10\n  WHEN 'Poor' THEN 0.3 - \"heatLoss_kwh\"/10\nEND"
+  source_model: main.ThermalSolarWindAndGrid
+  domains:
+  - calculations
+- name: water_resource_management_index_wrmi
+  description: 'Evaluates the efficiency of water resource management based on water levels, quality,
+    and waste levels.
+
+
+    WRMI = \frac{\text{water level percent}}{100} \times \frac{\text{water quality index}}{100} \times
+    (1 - \frac{\text{waste tank level percent}}{100}), \text{ where higher water quality and appropriate
+    water/waste levels indicate better management.}
+
+
+    Compiler note: Direct mapping: waterLevelPct, waterQualityIdx, wasteTankPct from WaterAndWaste table.'
+  sql_expression: ("waterLevelPct"/100.0) * ("waterQualityIdx"/100.0) * (1 - "wasteTankPct"/100.0)
+  source_model: main.WaterAndWaste
+  domains:
+  - calculations
+- name: scientific_equipment_reliability_ser
+  description: 'Quantifies the reliability of scientific equipment based on calibration status and measurement
+    accuracy.
+
+
+    SER = \text{measurement accuracy percent} \times \begin{cases} 1.0 & \text{if calibration status =
+    ''Valid''} \\ 0.7 & \text{if calibration status = ''Due''} \\ 0.3 & \text{if calibration status =
+    ''Expired''} \end{cases}, \text{ where valid calibration and high accuracy result in more reliable
+    scientific data.}
+
+
+    Compiler note: SER computed from Scientific table columns measureAccPct and calibrStat; calibration
+    multiplier mapped per spec, NULL if calibrStat not one of Valid/Due/Expired.'
+  sql_expression: '"measureAccPct" * CASE "calibrStat" WHEN ''Valid'' THEN 1.0 WHEN ''Due'' THEN 0.7 WHEN
+    ''Expired'' THEN 0.3 ELSE NULL END'
+  source_model: main.Scientific
+  domains:
+  - calculations
+- name: renewable_energy_contribution_rec
+  description: 'Calculates the percentage contribution of renewable energy sources to the total power
+    generation.
+
+
+    REC = \frac{\text{solar output (W)} + \text{wind output (W)}}{\text{fuel cell output (W)} + \text{solar
+    output (W)} + \text{wind output (W)}} \times 100, \text{ where higher values indicate greater reliance
+    on renewable energy.}
+
+
+    Compiler note: REC = (solar+wind)/(fuelcell+solar+wind)*100, computed directly from ThermalSolarWindAndGrid
+    columns; division guarded with NULLIF to avoid divide-by-zero.'
+  sql_expression: ("solarOutput_w" + "windOutput_w") / NULLIF(("fuelCellOutput_w" + "solarOutput_w" +
+    "windOutput_w"), 0) * 100
+  source_model: main.ThermalSolarWindAndGrid
+  domains:
+  - calculations
+- name: extreme_weather_readiness_ewr
+  description: 'Evaluates how prepared equipment and structures are for extreme weather conditions.
+
+
+    A composite rating where equipment is considered ''Extreme Weather Ready'' if it maintains an SSF
+    > 0.7 and has operational heating systems (heater status not ''Off''), proper insulation (insulation
+    status not ''Poor''), and functional emergency systems (emergency light status = ''On'' or ''Testing'').
+
+
+    Built on: structural_safety_factor_ssf.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric requires combining SSF (WeatherAndStructure, keyed by loc_link/opmaint_link),
+    heater status (CabinEnvironment.cabin_env_snapshot.hvac.heater_state), insulation status (ThermalSolarWindAndGrid.insulationStat),
+    and emergency light status (LightingAndSafety.emerLightStat) for the same piece of equipment. These
+    tables do not share a single consistent equipment-level key: WeatherAndStructure links to equipment
+    only indirectly via opmaint_link->OperationMaintenance.equipRef, with a non-unique 1000-row-to-859-distinct-opmaint_link
+    relationship (multiple weather readings per equipment); CabinEnvironment only covers 346 of the equipment
+    units; ThermalSolarWindAndGrid links to equipment via comm_link->Communication.equipRef or batt_link->PowerBattery.equip_ref,
+    which need not agree; and LightingAndSafety covers only 693 units directly by equipRef. There is no
+    documented rule for selecting a single weather reading per equipment or for reconciling the two different
+    ThermalSolarWindAndGrid equipment linkages, so a unique, well-defined join across these tables cannot
+    be constructed.'
+- name: critical_equipment
+  description: 'Identifies equipment that is essential for life support and safety in polar environments.
+
+
+    Equipment is designated as ''Critical'' if it belongs to the ''Safety'' equipment type, has a safety
+    index > 0.75, and is associated with any of these life-critical systems: life support status, oxygen
+    supply status, or heater systems where temperatures are below freezing (external temperature (°C)
+    < 0).
+
+
+    Compiler note: safety_idx in EquipmentType.type_indices is stored on a 0-100 scale (e.g. 93, 34.6),
+    so the ">0.75" normalized threshold is encoded as ">75". "Associated with life-critical systems" is
+    interpreted as the status fields showing ''Critical'' for life support/O2 supply, or an active heater
+    (heater_state != ''Off'') while external temperature < 0°C. Joins verified unique: LightingAndSafety.equipRef
+    and CabinEnvironment.equipRef are 1-1 per equipment; WeatherAndStructure.opmaint_link is unique and
+    OperationMaintenance.equipRef is unique, giving a unique equipment->weather path.'
+  sql_expression: "\"EquipType\" = 'Safety'\nAND (SELECT (et.type_indices->>'safety_idx')::double precision\
+    \ FROM EquipmentType et WHERE et.\"EquipType\" = Equipment.\"EquipType\") > 75\nAND (\n  (SELECT l.\"\
+    lifeSupportStat\" FROM LightingAndSafety l WHERE l.equipRef = Equipment.\"EQUIP_CODE\") = 'Critical'\n\
+    \  OR (SELECT l.\"O2SupplyStat\" FROM LightingAndSafety l WHERE l.equipRef = Equipment.\"EQUIP_CODE\"\
+    ) = 'Critical'\n  OR (\n    (SELECT c.cabin_env_snapshot->'hvac'->>'heater_state' FROM CabinEnvironment\
+    \ c WHERE c.equipRef = Equipment.\"EQUIP_CODE\") != 'Off'\n    AND (SELECT w.\"extTempC\" FROM OperationMaintenance\
+    \ om JOIN WeatherAndStructure w ON w.opmaint_link = om.\"OP_MAINT_ID\" WHERE om.equipRef = Equipment.\"\
+    EQUIP_CODE\") < 0\n  )\n)"
+  source_model: main.Equipment
+  domains:
+  - definitions
+- name: maintenance_priority_level
+  description: 'Classifies equipment based on the urgency of required maintenance.
+
+
+    Equipment is categorized into maintenance priority levels: ''Immediate Attention'' (operation hours
+    > maintenance cycle hours OR operational status = ''Repair''), ''Scheduled Service'' (operation hours
+    > 0.8 * maintenance cycle hours), and ''Routine Maintenance'' (all other cases), helping prioritize
+    resource allocation.
+
+
+    Compiler note: Categorical label computed directly from OperationMaintenance.OPER_hours, maintCycleHrs,
+    and OPER_status.'
+  sql_expression: CASE WHEN "OPER_hours" > "maintCycleHrs" OR "OPER_status" = 'Repair' THEN 'Immediate
+    Attention' WHEN "OPER_hours" > 0.8 * "maintCycleHrs" THEN 'Scheduled Service' ELSE 'Routine Maintenance'
+    END
+  source_model: main.OperationMaintenance
+  domains:
+  - definitions
+- name: energy_sustainability_classification
+  description: 'Categories equipment based on their energy sustainability index for environmental impact
+    assessment.
+
+
+    Equipment is classified as ''Green'' (ESI > 0.8), ''Intermediate'' (ESI between 0.4 and 0.8), or ''High
+    Impact'' (ESI < 0.4), with Green indicating environmentally sustainable operations.
+
+
+    Built on: energy_sustainability_index_esi.
+
+
+    Compiler note: ESI as defined (efficiency_pct * source multiplier) ranges well above 1 (e.g. up to
+    ~150), so the stated thresholds 0.8/0.4 are interpreted as ESI/100 (consistent with other entries
+    like PTEC that use ESI÷100), i.e. ESI>80 -> Green, 40<=ESI<=80 -> Intermediate, else High Impact.'
+  sql_expression: "CASE\n  WHEN (battery_telemetry->'power_state'->>'conversion_eff_pct')::double precision\
+    \ * CASE\n      WHEN battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid')\
+    \ THEN 1.5\n      WHEN battery_telemetry->'power_state'->>'primary_source' = 'Battery' THEN 1.0\n\
+    \      WHEN battery_telemetry->'power_state'->>'primary_source' = 'Diesel' THEN 0.7\n      ELSE 0\
+    \ END > 80 THEN 'Green'\n  WHEN (battery_telemetry->'power_state'->>'conversion_eff_pct')::double\
+    \ precision * CASE\n      WHEN battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid')\
+    \ THEN 1.5\n      WHEN battery_telemetry->'power_state'->>'primary_source' = 'Battery' THEN 1.0\n\
+    \      WHEN battery_telemetry->'power_state'->>'primary_source' = 'Diesel' THEN 0.7\n      ELSE 0\
+    \ END >= 40 THEN 'Intermediate'\n  ELSE 'High Impact'\nEND"
+  source_model: main.PowerBattery
+  domains:
+  - definitions
+- name: communication_zone_status
+  description: 'Evaluates the communication coverage and reliability in different operational zones.
+
+
+    A zone is classified as having ''Reliable Coverage'' when equipment within it maintains a CRI > 7,
+    has active satellite connections (satellite status = ''Connected''), and supports emergency beacon
+    functionality (emergency beacon status != ''Inactive'').
+
+
+    Built on: communication_reliability_index_cri.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no concept of "operational zones" - no table or column groups equipment/Communication/CabinEnvironment
+    records by zone. This metric is defined as a zone-level aggregate (classifying a zone based on equipment
+    within it), not a per-row predicate over a single table, so it cannot be expressed as a boolean SQL
+    expression over any one table's rows.
+- name: vehicle_operational_safety_threshold
+  description: 'Defines the safety threshold for vehicle operations based on multiple safety factors.
+
+
+    A vehicle is considered ''Safe for Operation'' when it maintains a VPC > 0.6, has brake fluid levels
+    above 50%, brake pad wear below 70%, adequate tire pressure (tire pressure (kPa) > 200).
+
+
+    Built on: vehicle_performance_composite_vpc.
+
+
+    Compiler note: VPC computed inline per its definition (speed_kmh stored as text ''X m/s'', converted
+    m/s*3.6; engine load from linked EngineAndFluids via engine_link). Threshold requires VPC>0.6, brake
+    fluid_level_pct>50, pad_wear_pct<70, tire pressure_kpa>200. Confirmed JSON fields are numeric-castable
+    from sample rows.'
+  sql_expression: "(\n  (1 - (((ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric + (ground_vehicle_status->'tracks'->>'wear_pct')::numeric)\
+    \ / 200.0))\n  * ((CAST(REPLACE(ground_vehicle_status->'vehicle_motion'->>'speed_kmh', ' m/s', '')\
+    \ AS numeric) * 3.6) / 50.0)\n  * ((SELECT (e.engine_fluids_snapshot->'engine_core'->>'load_pct')::numeric\
+    \ FROM EngineAndFluids e WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)\n) > 0.6\nAND\
+    \ (ground_vehicle_status->'brake_system'->>'fluid_level_pct')::numeric > 50\nAND (ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric\
+    \ < 70\nAND (ground_vehicle_status->'tires'->>'pressure_kpa')::numeric > 200"
+  source_model: main.ChassisAndVehicle
+  domains:
+  - definitions
+- name: scientific_data_reliability_classification
+  description: 'Classifies scientific data based on equipment reliability and calibration status.
+
+
+    Scientific data is classified as ''Research Grade'' when collected by equipment with SER > 0.9, with
+    valid calibration status, and under appropriate environmental conditions for the equipment type.
+
+
+    Built on: scientific_equipment_reliability_ser.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition requires determining "appropriate environmental conditions for the equipment
+    type," but no table or column defines what environmental conditions are appropriate per equipment
+    type. This criterion cannot be derived from the schema, so the full classification cannot be encoded.
+- name: cabin_habitability_standard
+  description: 'Defines the minimum standards for habitable cabin conditions in polar environments.
+
+
+    A cabin meets ''Habitability Standards'' when it maintains internal temperature (°C) between 18-24°C,
+    oxygen level (%) above 19.5%, CO2 level (ppm) below 1000 ppm, functioning ventilation systems, and
+    operational heating systems.
+
+
+    Compiler note: Used cabin_env_snapshot JSON fields: air_metrics.temperature_c, air_metrics.o2_pct,
+    air_metrics.co2_ppm for the numeric thresholds; hvac.vent_state != ''Off'' as ''functioning ventilation''
+    and hvac.heater_state != ''Off'' as ''operational heating''.'
+  sql_expression: '((cabin_env_snapshot->''air_metrics''->>''temperature_c'')::real BETWEEN 18 AND 24)
+
+    AND ((cabin_env_snapshot->''air_metrics''->>''o2_pct'')::real > 19.5)
+
+    AND ((cabin_env_snapshot->''air_metrics''->>''co2_ppm'')::real < 1000)
+
+    AND ((cabin_env_snapshot->''hvac''->>''vent_state'') != ''Off'')
+
+    AND ((cabin_env_snapshot->''hvac''->>''heater_state'') != ''Off'')'
+  source_model: main.CabinEnvironment
+  domains:
+  - definitions
+- name: water_conservation_requirement
+  description: 'Specifies the conditions under which water conservation measures must be implemented.
+
+
+    Water conservation measures must be implemented when the WRMI falls below 0.5, indicating either low
+    water levels, poor water quality, or high waste tank levels that require immediate attention to maintain
+    sustainable water usage.
+
+
+    Built on: water_resource_management_index_wrmi.
+
+
+    Compiler note: WRMI computed inline from waterLevelPct, waterQualityIdx, wasteTankPct per the defining
+    entry; threshold <0.5 triggers conservation.'
+  sql_expression: (("waterLevelPct"/100.0) * ("waterQualityIdx"/100.0) * (1 - "wasteTankPct"/100.0)) <
+    0.5
+  source_model: main.WaterAndWaste
+  domains:
+  - definitions
+- name: sustainable_energy_operation
+  description: 'Defines the conditions for energy-sustainable operations in polar environments.
+
+
+    An operation is considered ''Energy-Sustainable'' when it maintains a REC above 70% (meaning more
+    than 70% of energy comes from renewable sources) while maintaining full operational capability and
+    adequate power reserves for at least 48 hours in case of emergency.
+
+
+    Built on: renewable_energy_contribution_rec.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: While REC itself is computable, the entry requires "maintaining full operational capability"
+    and "adequate power reserves for at least 48 hours in case of emergency" - neither of these is represented
+    by any column or combination of columns in the database (no concept of "operational capability status"
+    or "hours of reserve power" exists). Cannot encode this predicate.
+- name: water_quality_classification_system_wqcs
+  description: 'A standardized system that categorizes water quality for health, safety, and operational
+    purposes in polar environments.
+
+
+    Water is classified into five quality categories based on its quality index: ''High-Quality'' WHEN
+    (water quality index >= 91), suitable for all purposes including direct consumption; ''Good'' WHEN
+    (water quality index >= 71 AND water quality index < 91), safe for consumption after standard treatment;
+    ''Moderate'' WHEN (water quality index >= 51 AND water quality index < 71), acceptable for washing
+    but not consumption; ''Poor'' WHEN (water quality index >= 26 AND water quality index < 51), suitable
+    only for limited non-contact uses; ''Unsafe'' WHEN (water quality index < 26), unsuitable for any
+    use and requiring immediate remediation.
+
+
+    Compiler note: Categorical classification based on waterQualityIdx thresholds; NULL values fall into
+    ELSE ''Unsafe'' bucket implicitly if index is NULL (edge case not specified in docs).'
+  sql_expression: CASE WHEN "waterQualityIdx" >= 91 THEN 'High-Quality' WHEN "waterQualityIdx" >= 71 THEN
+    'Good' WHEN "waterQualityIdx" >= 51 THEN 'Moderate' WHEN "waterQualityIdx" >= 26 THEN 'Poor' ELSE
+    'Unsafe' END
+  source_model: main.WaterAndWaste
+  domains:
+  - definitions
+- name: overall_safety_performance_index_ospi
+  description: 'Comprehensively evaluates equipment''s overall safety performance based on safety index
+    and equipment efficiency rating
+
+
+    OSPI = \text{safety index}/100 \times EER \times 0.8
+
+
+    Built on: equipment_efficiency_rating_eer.
+
+
+    Compiler note: OSPI = (safety_idx/100) * EER * 0.8, where EER is the previously defined Equipment
+    Efficiency Rating expression using EquipmentType.type_indices (performance_score, environmental_impact_idx)
+    and Equipment.RELIAB_IDX. safety_idx is pulled from the same EquipmentType.type_indices JSON via a
+    scalar subquery on the equipment''s EquipType (unique match on EquipType PK).'
+  sql_expression: ((SELECT (et.type_indices->>'safety_idx')::numeric FROM EquipmentType et WHERE et.EquipType
+    = Equipment."EquipType") / 100.0) * ((((SELECT (et.type_indices->>'performance_score')::numeric FROM
+    EquipmentType et WHERE et.EquipType = Equipment."EquipType") + "RELIAB_IDX") / 2.0) * (1 - (SELECT
+    (et.type_indices->>'environmental_impact_idx')::numeric FROM EquipmentType et WHERE et.EquipType =
+    Equipment."EquipType") / 100.0)) * 0.8
+  source_model: main.Equipment
+  domains:
+  - calculations
+- name: polar_transportation_efficiency_coefficient_ptec
+  description: 'Measures vehicle transportation efficiency in polar conditions, considering vehicle performance
+    and energy sustainability
+
+
+    PTEC = VPC \times (0.6 + 0.4 \times ESI \div 100)
+
+
+    Built on: energy_sustainability_index_esi, vehicle_performance_composite_vpc.
+
+
+    Compiler note: PTEC = VPC * (0.6 + 0.4*ESI/100). VPC computed inline from ground_vehicle_status JSON
+    plus engine load via engine_link->EngineAndFluids. ESI computed via engine_link->batt_link->PowerBattery.battery_telemetry,
+    using conversion_eff_pct as energy efficiency percent and primary_source as power source. Verified
+    engine_link->batt_link->PowerBattery join is unique per chassis.'
+  sql_expression: ((1 - ((ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric + (ground_vehicle_status->'tracks'->>'wear_pct')::numeric)
+    / 200.0) * ((CAST(REPLACE(ground_vehicle_status->'vehicle_motion'->>'speed_kmh', ' m/s', '') AS numeric)
+    * 3.6) / 50.0) * ((SELECT (e.engine_fluids_snapshot->'engine_core'->>'load_pct')::numeric FROM EngineAndFluids
+    e WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)) * (0.6 + 0.4 * (SELECT (p.battery_telemetry->'power_state'->>'conversion_eff_pct')::double
+    precision * CASE WHEN p.battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid')
+    THEN 1.5 WHEN p.battery_telemetry->'power_state'->>'primary_source' = 'Battery' THEN 1.0 WHEN p.battery_telemetry->'power_state'->>'primary_source'
+    = 'Diesel' THEN 0.7 ELSE 0 END FROM EngineAndFluids e JOIN PowerBattery p ON p.PWR_BATT_ID = e.batt_link
+    WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)
+  source_model: main.ChassisAndVehicle
+  domains:
+  - calculations
+- name: base_station_communication_stability_index_bscsi
+  description: 'Evaluates the stability and reliability of polar base station communication systems
+
+
+    BSCSI = CRI \times (1 + 0.2 \times \text{radio signal (dBm)} \div 100) \times (1 - 0.01 \times (1000
+    - \text{latency (ms)}))
+
+
+    Built on: communication_reliability_index_cri.
+
+
+    Compiler note: BSCSI = CRI * (1 + 0.2*radioSignal_dBm/100) * (1 - 0.01*(1000-netLatency_ms)), with
+    CRI inlined from its definition using antenna_stat and netLatency_ms columns of Communication.'
+  sql_expression: (CASE "antenna_stat" WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10
+    ELSE 0 END) * (1 - "netLatency_ms" / 1000.0) * (1 + 0.2 * "radioSignal_dBm" / 100) * (1 - 0.01 * (1000
+    - "netLatency_ms"))
+  source_model: main.Communication
+  domains:
+  - calculations
+- name: life_support_system_reliability_lssr
+  description: 'Evaluates the reliability of life support systems under polar conditions
+
+
+    LSSR = 0.7 \times ORS + 0.3 \times TIE
+
+
+    Built on: operational_readiness_score_ors, thermal_insulation_efficiency_tie.
+
+
+    Compiler note: ORS computed directly on OperationMaintenance row; TIE computed via scalar subquery
+    joining PowerBattery (equip_ref=OperationMaintenance.equipRef) to ThermalSolarWindAndGrid (batt_link=PWR_BATT_ID),
+    verified this join is unique per OP_MAINT_ID.'
+  sql_expression: "0.7 * (CASE\n  WHEN \"OPER_status\" = 'Active' THEN 10 * (1 - \"OPER_hours\" / \"maintCycleHrs\"\
+    )\n  WHEN \"OPER_status\" = 'Standby' THEN 5 * (1 - \"OPER_hours\" / \"maintCycleHrs\")\n  ELSE 0\n\
+    END) + 0.3 * (\n  SELECT CASE t.\"insulationStat\"\n    WHEN 'Good' THEN 0.9 - t.\"heatLoss_kwh\"\
+    /10\n    WHEN 'Fair' THEN 0.6 - t.\"heatLoss_kwh\"/10\n    WHEN 'Poor' THEN 0.3 - t.\"heatLoss_kwh\"\
+    /10\n  END\n  FROM \"PowerBattery\" pb\n  JOIN \"ThermalSolarWindAndGrid\" t ON t.\"batt_link\" =\
+    \ pb.\"PWR_BATT_ID\"\n  WHERE pb.\"equip_ref\" = \"OperationMaintenance\".\"equipRef\"\n)"
+  source_model: main.OperationMaintenance
+  domains:
+  - calculations
+- name: scientific_mission_success_probability_smsp
+  description: 'Predicts the probability of successful completion of scientific missions
+
+
+    SMSP = SER \times (0.8 + 0.2 \times CRI \div 10)
+
+
+    Built on: communication_reliability_index_cri, scientific_equipment_reliability_ser.
+
+
+    Compiler note: SMSP = SER * (0.8 + 0.2*CRI/10). SER computed from Scientific.measureAccPct and calibrStat;
+    CRI pulled via scalar subquery joining Communication on equipRef (1:1 join verified unique).'
+  sql_expression: (("measureAccPct" * CASE "calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN
+    'Expired' THEN 0.3 ELSE NULL END) * (0.8 + 0.2 * ((SELECT (CASE c."antenna_stat" WHEN 'Error' THEN
+    0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END) * (1 - c."netLatency_ms" / 1000.0) FROM
+    Communication c WHERE c."equipRef" = "Scientific"."equipRef") / 10)))
+  source_model: main.Scientific
+  domains:
+  - calculations
+- name: resource_self_sufficiency_index_rssi
+  description: 'Measures a polar site''s self-sufficiency in terms of resources
+
+
+    RSSI = 0.6 \times REC + 0.4 \times WRMI
+
+
+    Built on: water_resource_management_index_wrmi, renewable_energy_contribution_rec.
+
+
+    Compiler note: RSSI = 0.6*REC + 0.4*WRMI. REC computed directly on ThermalSolarWindAndGrid row. WRMI
+    requires WaterAndWaste, which is linked to ThermalSolarWindAndGrid only indirectly via comm_link ->
+    Communication.COMM_ID -> Communication.equipRef -> WaterAndWaste.equipRef. Verified this join is unique
+    (WaterAndWaste.equipRef is unique per equipment, Communication.COMM_ID is PK), so the scalar subquery
+    returns at most one row per Thermal row.'
+  sql_expression: "0.6 * ((\"solarOutput_w\" + \"windOutput_w\") / NULLIF((\"fuelCellOutput_w\" + \"solarOutput_w\"\
+    \ + \"windOutput_w\"), 0) * 100) + 0.4 * (\n  (SELECT (\"waterLevelPct\"/100.0) * (\"waterQualityIdx\"\
+    /100.0) * (1 - \"wasteTankPct\"/100.0)\n   FROM WaterAndWaste w\n   JOIN Communication c ON c.\"equipRef\"\
+    \ = w.\"equipRef\"\n   WHERE c.\"COMM_ID\" = ThermalSolarWindAndGrid.comm_link)\n)"
+  source_model: main.ThermalSolarWindAndGrid
+  domains:
+  - calculations
+- name: extreme_climate_adaptation_coefficient_ecac
+  description: 'Evaluates equipment adaptation capability under extreme climate conditions
+
+
+    ECAC = SSF \times (1 + TIE \times 0.5) \times \begin{cases} 0.7 & \text{if external temperature (°C)
+    < -30} \\ 0.85 & \text{if external temperature (°C) < -15} \\ 1.0 & \text{otherwise} \end{cases}
+
+
+    Built on: structural_safety_factor_ssf, thermal_insulation_efficiency_tie.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'ECAC requires combining SSF (over WeatherAndStructure, using structLoadPct/snowLoad/windSpeed
+    and extTempC) with TIE (over ThermalSolarWindAndGrid, using insulationStat/heatLoss_kwh). There is
+    no valid join path linking these two tables: WeatherAndStructure.opmaint_link -> OperationMaintenance.comm_link
+    -> Communication.COMM_ID -> ThermalSolarWindAndGrid.comm_link, but OperationMaintenance.comm_link
+    is NULL for all rows (verified via query), so no WeatherAndStructure row can be matched to a ThermalSolarWindAndGrid
+    row. Hence ECAC cannot be computed as a single-table SQL expression.'
+- name: long_term_operational_stability_score_loss
+  description: 'Evaluates the stability of equipment during long-term operation
+
+
+    LOSS = 0.5 \times EER + 0.5 \times ORS \times (1 - \frac{\text{operation hours}}{20000})
+
+
+    Built on: equipment_efficiency_rating_eer, operational_readiness_score_ors.
+
+
+    Compiler note: LOSS = 0.5*EER + 0.5*ORS*(1 - operation_hours/20000). EER computed via EquipmentType
+    join; ORS and operation hours taken from the unique OperationMaintenance row per equipRef (verified
+    one-to-one).'
+  sql_expression: "0.5 * ((((SELECT (et.type_indices->>'performance_score')::numeric FROM EquipmentType\
+    \ et WHERE et.EquipType = Equipment.\"EquipType\") + \"RELIAB_IDX\") / 2.0) * (1 - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") / 100.0))\n+ 0.5 * (\n    (SELECT\
+    \ CASE\n        WHEN om.\"OPER_status\" = 'Active' THEN 10 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\"\
+    )\n        WHEN om.\"OPER_status\" = 'Standby' THEN 5 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\"\
+    )\n        ELSE 0\n     END\n     FROM OperationMaintenance om WHERE om.\"equipRef\" = Equipment.\"\
+    EQUIP_CODE\")\n  ) * (1 - (SELECT om.\"OPER_hours\" FROM OperationMaintenance om WHERE om.\"equipRef\"\
+    \ = Equipment.\"EQUIP_CODE\") / 20000.0)"
+  source_model: main.Equipment
+  domains:
+  - calculations
+- name: energy_water_resource_integration_index_ewrii
+  description: 'Evaluates the integration efficiency of energy and water resource management
+
+
+    EWRII = 0.5 \times ESI + 0.5 \times WRMI \times (1 - \frac{\text{heater temperature (°C)}}{100})
+
+
+    Built on: energy_sustainability_index_esi, water_resource_management_index_wrmi.
+
+
+    Compiler note: ESI computed from PowerBattery.battery_telemetry (power_state.conversion_eff_pct, power_state.primary_source),
+    WRMI from WaterAndWaste (waterLevelPct, waterQualityIdx, wasteTankPct), heater temperature from CabinEnvironment.cabin_env_snapshot->hvac->heater_temp_c.
+    Verified each Equipment has exactly one row in PowerBattery, WaterAndWaste, and CabinEnvironment,
+    so scalar subqueries are unique. EWRII = 0.5*ESI + 0.5*WRMI*(1-heater_temp/100), joined via Equipment.EQUIP_CODE.'
+  sql_expression: '0.5 * (SELECT (pb.battery_telemetry->''power_state''->>''conversion_eff_pct'')::double
+    precision * CASE WHEN pb.battery_telemetry->''power_state''->>''primary_source'' IN (''Solar'',''Wind'',''Hybrid'')
+    THEN 1.5 WHEN pb.battery_telemetry->''power_state''->>''primary_source'' = ''Battery'' THEN 1.0 WHEN
+    pb.battery_telemetry->''power_state''->>''primary_source'' = ''Diesel'' THEN 0.7 ELSE 0 END FROM PowerBattery
+    pb WHERE pb.equip_ref = Equipment."EQUIP_CODE")
+
+    + 0.5 * (SELECT (ww."waterLevelPct"/100.0) * (ww."waterQualityIdx"/100.0) * (1 - ww."wasteTankPct"/100.0)
+    FROM WaterAndWaste ww WHERE ww.equipRef = Equipment."EQUIP_CODE")
+
+    * (1 - (SELECT (ce.cabin_env_snapshot->''hvac''->>''heater_temp_c'')::double precision FROM CabinEnvironment
+    ce WHERE ce.equipRef = Equipment."EQUIP_CODE") / 100.0)'
+  source_model: main.Equipment
+  domains:
+  - calculations
+- name: comprehensive_operational_reliability_indicator_cori
+  description: 'Comprehensively assesses the overall reliability of polar equipment operations
+
+
+    CORI = 0.4 \times EER + 0.4 \times ORS + 0.2 \times CRI
+
+
+    Built on: equipment_efficiency_rating_eer, operational_readiness_score_ors, communication_reliability_index_cri.
+
+
+    Compiler note: CORI combines EER, ORS, CRI computed via scalar subqueries from OperationMaintenance
+    and Communication tables (verified 1:1 join with Equipment via equipRef), plus EquipmentType lookups
+    for EER. Weighted sum per formula.'
+  sql_expression: "0.4 * ((((SELECT (et.type_indices->>'performance_score')::numeric FROM EquipmentType\
+    \ et WHERE et.\"EquipType\" = Equipment.\"EquipType\") + Equipment.\"RELIAB_IDX\") / 2.0) * (1 - (SELECT\
+    \ (et.type_indices->>'environmental_impact_idx')::numeric FROM EquipmentType et WHERE et.\"EquipType\"\
+    \ = Equipment.\"EquipType\") / 100.0))\n+ 0.4 * (SELECT CASE\n    WHEN om.\"OPER_status\" = 'Active'\
+    \ THEN 10 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n    WHEN om.\"OPER_status\" = 'Standby'\
+    \ THEN 5 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n    ELSE 0\n  END FROM OperationMaintenance\
+    \ om WHERE om.\"equipRef\" = Equipment.\"EQUIP_CODE\")\n+ 0.2 * (SELECT (CASE c.\"antenna_stat\" WHEN\
+    \ 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END) * (1 - c.\"netLatency_ms\"\
+    \ / 1000.0)\n  FROM Communication c WHERE c.\"equipRef\" = Equipment.\"EQUIP_CODE\")"
+  source_model: main.Equipment
+  domains:
+  - calculations
+- name: extreme_operating_conditions_eoc
+  description: 'Defines the extreme environmental conditions under which equipment can safely operate
+
+
+    Equipment is considered to ''operate safely under extreme conditions'' when its SSF > 0.65 and ECAC
+    > 0.8.
+
+
+    Built on: structural_safety_factor_ssf, extreme_climate_adaptation_coefficient_ecac.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'EOC depends on ECAC, which cannot be computed as a single-table SQL expression: ECAC
+    requires combining SSF (over WeatherAndStructure) with TIE (over ThermalSolarWindAndGrid), but there
+    is no valid join path linking these two tables (OperationMaintenance.comm_link, the only link from
+    WeatherAndStructure''s opmaint_link toward Communication/ThermalSolarWindAndGrid, is NULL for all
+    rows). Hence EOC cannot be encoded.'
+- name: emergency_response_readiness_status_errs
+  description: 'Assesses a polar site''s preparedness to respond to emergency situations
+
+
+    A polar site is rated as ''emergency response ready'' when its critical equipment maintains OSPI >
+    0.75 and LSSR > 0.8, with emergency communication status = ''Operational'' and backup power status
+    = ''Active'' and battery level (%) > 85.
+
+
+    Built on: overall_safety_performance_index_ospi, life_support_system_reliability_lssr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition requires "emergency communication status = 'Operational'", "backup power
+    status = 'Active'" and "battery level (%) > 85" tied to a site's "critical equipment", plus OSPI/LSSR
+    evaluated for that critical equipment. There is no column representing "emergency communication status"
+    anywhere in the schema (candidates like LightingAndSafety.emerStopStat use values Activated/Ready/Reset,
+    emerLightStat uses Off/On/Testing, CabinEnvironment's "emergency" field uses Active/Standby/Testing
+    - none use 'Operational'). Also there is no notion of a "polar site" as a row/entity (Location/Station
+    is not where critical equipment or OSPI/LSSR are computed), and no unique join path aggregating critical
+    equipment per site exists. This cannot be encoded over this database.
+- name: sustainable_polar_operations_spo
+  description: 'Defines sustainability standards for polar operations
+
+
+    Polar operations are defined as ''sustainable'' when the site maintains RSSI > 0.7 and EWRII > 0.65,
+    with waste management status = ''Normal'' and environmental impact index < 6.0.
+
+
+    Built on: resource_self_sufficiency_index_rssi, energy_water_resource_integration_index_ewrii.
+
+
+    Compiler note: Treated each Equipment unit as the ''site''. RSSI computed from the ThermalSolarWindAndGrid
+    row whose comm_link''s Communication.equipRef matches this equipment (verified unique match), using
+    its own solar/wind/fuelCell outputs for REC and the WaterAndWaste row of the same equipRef for WRMI,
+    per the RSSI definition. EWRII computed from this equipment''s PowerBattery (conversion_eff_pct, primary_source),
+    WaterAndWaste, and CabinEnvironment heater_temp_c (all verified 1:1 per equipRef). Waste management
+    status taken from LightingAndSafety.wasteMgmtStat (1:1 per equipRef). Environmental impact index taken
+    from EquipmentType.type_indices->>''environmental_impact_idx'' via Equipment.EquipType. All component
+    joins verified unique per equipment.'
+  sql_expression: "(\n  (SELECT 0.6 * ((t.\"solarOutput_w\" + t.\"windOutput_w\") / NULLIF((t.\"fuelCellOutput_w\"\
+    \ + t.\"solarOutput_w\" + t.\"windOutput_w\"),0) * 100)\n          + 0.4 * ((ww.\"waterLevelPct\"\
+    /100.0) * (ww.\"waterQualityIdx\"/100.0) * (1 - ww.\"wasteTankPct\"/100.0))\n   FROM ThermalSolarWindAndGrid\
+    \ t\n   JOIN Communication c ON c.\"COMM_ID\" = t.comm_link\n   JOIN WaterAndWaste ww ON ww.\"equipRef\"\
+    \ = c.\"equipRef\"\n   WHERE c.\"equipRef\" = Equipment.\"EQUIP_CODE\"\n  ) > 0.7\n  AND\n  (SELECT\
+    \ 0.5 * (pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::double precision\n         \
+    \ * CASE WHEN pb.battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid')\
+    \ THEN 1.5\n                 WHEN pb.battery_telemetry->'power_state'->>'primary_source' = 'Battery'\
+    \ THEN 1.0\n                 WHEN pb.battery_telemetry->'power_state'->>'primary_source' = 'Diesel'\
+    \ THEN 0.7\n                 ELSE 0 END\n        + 0.5 * (ww2.\"waterLevelPct\"/100.0) * (ww2.\"waterQualityIdx\"\
+    /100.0) * (1 - ww2.\"wasteTankPct\"/100.0)\n          * (1 - (ce.cabin_env_snapshot->'hvac'->>'heater_temp_c')::double\
+    \ precision / 100.0)\n   FROM PowerBattery pb, WaterAndWaste ww2, CabinEnvironment ce\n   WHERE pb.equip_ref\
+    \ = Equipment.\"EQUIP_CODE\" AND ww2.\"equipRef\" = Equipment.\"EQUIP_CODE\" AND ce.\"equipRef\" =\
+    \ Equipment.\"EQUIP_CODE\"\n  ) > 0.65\n  AND\n  (SELECT ls.\"wasteMgmtStat\" FROM LightingAndSafety\
+    \ ls WHERE ls.\"equipRef\" = Equipment.\"EQUIP_CODE\") = 'Normal'\n  AND\n  (SELECT (et.type_indices->>'environmental_impact_idx')::double\
+    \ precision FROM EquipmentType et WHERE et.\"EquipType\" = Equipment.\"EquipType\") < 6.0\n)"
+  source_model: main.Equipment
+  domains:
+  - definitions
+- name: critical_scientific_equipment_status_cses
+  description: 'Determines the operational status and reliability of critical scientific equipment
+
+
+    Scientific equipment is classified as ''Fully Operational'' (SER > 0.9 and SMSP > 0.85), ''Degraded
+    Operation'' (SER > 0.7 and SMSP > 0.6), or ''Needs Repair'' (other cases).
+
+
+    Built on: scientific_equipment_reliability_ser, scientific_mission_success_probability_smsp.
+
+
+    Compiler note: SER and SMSP computed per their definitions, joining Scientific.equipRef to Communication.equipRef
+    (1:1, verified unique). Thresholds use SER>0.9/0.7 and SMSP>0.85/0.6 in that priority order as stated.'
+  sql_expression: "CASE\n  WHEN (\"measureAccPct\" * CASE \"calibrStat\" WHEN 'Valid' THEN 1.0 WHEN 'Due'\
+    \ THEN 0.7 WHEN 'Expired' THEN 0.3 ELSE NULL END) > 0.9\n    AND ((\"measureAccPct\" * CASE \"calibrStat\"\
+    \ WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN 'Expired' THEN 0.3 ELSE NULL END) * (0.8 + 0.2 *\
+    \ ((SELECT (CASE c.\"antenna_stat\" WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10\
+    \ ELSE 0 END) * (1 - c.\"netLatency_ms\" / 1000.0) FROM Communication c WHERE c.\"equipRef\" = \"\
+    Scientific\".\"equipRef\") / 10))) > 0.85\n    THEN 'Fully Operational'\n  WHEN (\"measureAccPct\"\
+    \ * CASE \"calibrStat\" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN 'Expired' THEN 0.3 ELSE NULL\
+    \ END) > 0.7\n    AND ((\"measureAccPct\" * CASE \"calibrStat\" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN\
+    \ 0.7 WHEN 'Expired' THEN 0.3 ELSE NULL END) * (0.8 + 0.2 * ((SELECT (CASE c.\"antenna_stat\" WHEN\
+    \ 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END) * (1 - c.\"netLatency_ms\"\
+    \ / 1000.0) FROM Communication c WHERE c.\"equipRef\" = \"Scientific\".\"equipRef\") / 10))) > 0.6\n\
+    \    THEN 'Degraded Operation'\n  ELSE 'Needs Repair'\nEND"
+  source_model: main.Scientific
+  domains:
+  - definitions
+- name: polar_vehicle_safe_operation_conditions_pvsoc
+  description: 'Determines the conditions for safe operation of polar vehicles
+
+
+    Polar vehicles are considered ''suitable for polar missions'' when they maintain PTEC > 0.7 and VPC
+    > 0.75, with operational status = ''Active'' and safety index ≥ 0.8.
+
+
+    Built on: vehicle_performance_composite_vpc, polar_transportation_efficiency_coefficient_ptec.
+
+
+    Compiler note: PVSOC = PTEC>0.7 AND VPC>0.75 AND operational status=''Active'' AND safety index>=0.8.
+    VPC/PTEC computed as in prior entries (speed_kmh field stored as ''X m/s'' text, converted to km/h
+    via *3.6). Safety index taken from EquipmentType.type_indices->safety_idx, scaled /100 to match 0-1
+    scale used in threshold (consistent with OSPI''s safety index/100 usage). OPER_status joined uniquely
+    via Equipment.EQUIP_CODE=ChassisAndVehicle.equipRef to OperationMaintenance.equipRef (1:1 verified).'
+  sql_expression: "(\n  (1 - ((ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric + (ground_vehicle_status->'tracks'->>'wear_pct')::numeric)\
+    \ / 200.0)\n  * ((CAST(REPLACE(ground_vehicle_status->'vehicle_motion'->>'speed_kmh', ' m/s', '')\
+    \ AS numeric) * 3.6) / 50.0)\n  * ((SELECT (e.engine_fluids_snapshot->'engine_core'->>'load_pct')::numeric\
+    \ FROM EngineAndFluids e WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)\n) * (0.6 + 0.4\
+    \ * (SELECT (p.battery_telemetry->'power_state'->>'conversion_eff_pct')::double precision * CASE WHEN\
+    \ p.battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid') THEN 1.5 WHEN\
+    \ p.battery_telemetry->'power_state'->>'primary_source' = 'Battery' THEN 1.0 WHEN p.battery_telemetry->'power_state'->>'primary_source'\
+    \ = 'Diesel' THEN 0.7 ELSE 0 END FROM EngineAndFluids e JOIN PowerBattery p ON p.PWR_BATT_ID = e.batt_link\
+    \ WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0) > 0.7\nAND (\n  (1 - ((ground_vehicle_status->'brake_system'->>'pad_wear_pct')::numeric\
+    \ + (ground_vehicle_status->'tracks'->>'wear_pct')::numeric) / 200.0)\n  * ((CAST(REPLACE(ground_vehicle_status->'vehicle_motion'->>'speed_kmh',\
+    \ ' m/s', '') AS numeric) * 3.6) / 50.0)\n  * ((SELECT (e.engine_fluids_snapshot->'engine_core'->>'load_pct')::numeric\
+    \ FROM EngineAndFluids e WHERE e.ENGINE_ID = ChassisAndVehicle.engine_link) / 100.0)\n) > 0.75\nAND\
+    \ (SELECT om.OPER_status FROM OperationMaintenance om WHERE om.equipRef = ChassisAndVehicle.equipRef)\
+    \ = 'Active'\nAND (SELECT (et.type_indices->>'safety_idx')::numeric FROM Equipment eq JOIN EquipmentType\
+    \ et ON et.EquipType = eq.EquipType WHERE eq.EQUIP_CODE = ChassisAndVehicle.equipRef) / 100.0 >= 0.8"
+  source_model: main.ChassisAndVehicle
+  domains:
+  - definitions
+- name: communication_network_resilience_assessment_cnra
+  description: 'Assesses the resilience and interference resistance of polar communication networks
+
+
+    Communication networks are assessed as having ''High Resilience'' (CRI > 0.8 and BSCSI > 0.85), ''Medium
+    Resilience'' (CRI > 0.6 and BSCSI > 0.7), or ''Low Resilience'' (other cases).
+
+
+    Built on: communication_reliability_index_cri, base_station_communication_stability_index_bscsi.
+
+
+    Compiler note: CNRA computed per-row from CRI and BSCSI formulas defined over Communication table;
+    classified into High/Medium/Low Resilience per thresholds.'
+  sql_expression: 'CASE WHEN (CASE "antenna_stat" WHEN ''Error'' THEN 0 WHEN ''Warning'' THEN 5 WHEN ''Normal''
+    THEN 10 ELSE 0 END) * (1 - "netLatency_ms" / 1000.0) > 0.8 AND (CASE "antenna_stat" WHEN ''Error''
+    THEN 0 WHEN ''Warning'' THEN 5 WHEN ''Normal'' THEN 10 ELSE 0 END) * (1 - "netLatency_ms" / 1000.0)
+    * (1 + 0.2 * "radioSignal_dBm" / 100) * (1 - 0.01 * (1000 - "netLatency_ms")) > 0.85 THEN ''High Resilience''
+
+    WHEN (CASE "antenna_stat" WHEN ''Error'' THEN 0 WHEN ''Warning'' THEN 5 WHEN ''Normal'' THEN 10 ELSE
+    0 END) * (1 - "netLatency_ms" / 1000.0) > 0.6 AND (CASE "antenna_stat" WHEN ''Error'' THEN 0 WHEN
+    ''Warning'' THEN 5 WHEN ''Normal'' THEN 10 ELSE 0 END) * (1 - "netLatency_ms" / 1000.0) * (1 + 0.2
+    * "radioSignal_dBm" / 100) * (1 - 0.01 * (1000 - "netLatency_ms")) > 0.7 THEN ''Medium Resilience''
+
+    ELSE ''Low Resilience'' END'
+  source_model: main.Communication
+  domains:
+  - definitions
+- name: critical_infrastructure_protection_level_cipl
+  description: 'Determines the protection level for polar critical infrastructure
+
+
+    Infrastructure is assigned protection level ''A'' (SSF > 0.8, LOSS > 0.85, and OSPI > 0.9), ''B''
+    (SSF > 0.7, LOSS > 0.75, and OSPI > 0.8), or ''C'' (other cases).
+
+
+    Built on: structural_safety_factor_ssf, overall_safety_performance_index_ospi, long_term_operational_stability_score_loss.
+
+
+    Compiler note: CIPL joins Equipment with WeatherAndStructure via OperationMaintenance (opmaint_link);
+    verified this join is unique per equipment (one weather row per opmaint_link, except NULL links which
+    yield NULL SSF and thus fall to protection level ''C''). LOSS and OSPI are computed directly on Equipment/EquipmentType
+    per their definitions.'
+  sql_expression: "CASE\n  WHEN (\n    (SELECT ((100 - w.\"structLoadPct\") / 100.0) * CASE WHEN w.\"\
+    snowLoad_kgm2\" > 100 OR w.\"windSpeed_ms\" > 20 THEN 0.5 WHEN w.\"snowLoad_kgm2\" > 50 OR w.\"windSpeed_ms\"\
+    \ > 10 THEN 0.8 ELSE 1.0 END\n     FROM OperationMaintenance om JOIN WeatherAndStructure w ON w.opmaint_link\
+    \ = om.\"OP_MAINT_ID\"\n     WHERE om.\"equipRef\" = Equipment.\"EQUIP_CODE\")\n  ) > 0.8\n  AND (\n\
+    \    0.5 * ((((SELECT (et.type_indices->>'performance_score')::numeric FROM EquipmentType et WHERE\
+    \ et.EquipType = Equipment.\"EquipType\") + \"RELIAB_IDX\") / 2.0) * (1 - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") / 100.0))\n    + 0.5 * (\n \
+    \       (SELECT CASE\n            WHEN om.\"OPER_status\" = 'Active' THEN 10 * (1 - om.\"OPER_hours\"\
+    \ / om.\"maintCycleHrs\")\n            WHEN om.\"OPER_status\" = 'Standby' THEN 5 * (1 - om.\"OPER_hours\"\
+    \ / om.\"maintCycleHrs\")\n            ELSE 0\n         END\n         FROM OperationMaintenance om\
+    \ WHERE om.\"equipRef\" = Equipment.\"EQUIP_CODE\")\n      ) * (1 - (SELECT om.\"OPER_hours\" FROM\
+    \ OperationMaintenance om WHERE om.\"equipRef\" = Equipment.\"EQUIP_CODE\") / 20000.0)\n  ) > 0.85\n\
+    \  AND (\n    ((SELECT (et.type_indices->>'safety_idx')::numeric FROM EquipmentType et WHERE et.EquipType\
+    \ = Equipment.\"EquipType\") / 100.0) * ((((SELECT (et.type_indices->>'performance_score')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") + \"RELIAB_IDX\") / 2.0) * (1\
+    \ - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric FROM EquipmentType et WHERE et.EquipType\
+    \ = Equipment.\"EquipType\") / 100.0)) * 0.8\n  ) > 0.9\n  THEN 'A'\n  WHEN (\n    (SELECT ((100 -\
+    \ w.\"structLoadPct\") / 100.0) * CASE WHEN w.\"snowLoad_kgm2\" > 100 OR w.\"windSpeed_ms\" > 20 THEN\
+    \ 0.5 WHEN w.\"snowLoad_kgm2\" > 50 OR w.\"windSpeed_ms\" > 10 THEN 0.8 ELSE 1.0 END\n     FROM OperationMaintenance\
+    \ om JOIN WeatherAndStructure w ON w.opmaint_link = om.\"OP_MAINT_ID\"\n     WHERE om.\"equipRef\"\
+    \ = Equipment.\"EQUIP_CODE\")\n  ) > 0.7\n  AND (\n    0.5 * ((((SELECT (et.type_indices->>'performance_score')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") + \"RELIAB_IDX\") / 2.0) * (1\
+    \ - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric FROM EquipmentType et WHERE et.EquipType\
+    \ = Equipment.\"EquipType\") / 100.0))\n    + 0.5 * (\n        (SELECT CASE\n            WHEN om.\"\
+    OPER_status\" = 'Active' THEN 10 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n            WHEN\
+    \ om.\"OPER_status\" = 'Standby' THEN 5 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n       \
+    \     ELSE 0\n         END\n         FROM OperationMaintenance om WHERE om.\"equipRef\" = Equipment.\"\
+    EQUIP_CODE\")\n      ) * (1 - (SELECT om.\"OPER_hours\" FROM OperationMaintenance om WHERE om.\"equipRef\"\
+    \ = Equipment.\"EQUIP_CODE\") / 20000.0)\n  ) > 0.75\n  AND (\n    ((SELECT (et.type_indices->>'safety_idx')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") / 100.0) * ((((SELECT (et.type_indices->>'performance_score')::numeric\
+    \ FROM EquipmentType et WHERE et.EquipType = Equipment.\"EquipType\") + \"RELIAB_IDX\") / 2.0) * (1\
+    \ - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric FROM EquipmentType et WHERE et.EquipType\
+    \ = Equipment.\"EquipType\") / 100.0)) * 0.8\n  ) > 0.8\n  THEN 'B'\n  ELSE 'C'\nEND"
+  source_model: main.Equipment
+  domains:
+  - definitions
+- name: long_term_scientific_mission_viability_lsmv
+  description: 'Assesses the viability of long-term scientific missions under polar conditions
+
+
+    Scientific missions are assessed as ''long-term viable'' when all involved scientific equipment maintains
+    SMSP > 0.8 and overall site operations maintain CORI > 0.75, with calibration status = ''Valid'' and
+    data logging status = ''Active''.
+
+
+    Built on: scientific_mission_success_probability_smsp, comprehensive_operational_reliability_indicator_cori.
+
+
+    Compiler note: Evaluated per Scientific equipment row: SMSP computed inline using Scientific''s own
+    fields plus the Communication record for that equipRef (unique match); CORI computed inline using
+    the Equipment row''s EquipType indices, RELIAB_IDX, matching OperationMaintenance row, and matching
+    Communication row (all unique per equipRef). Final condition requires SMSP>0.8, CORI>0.75, calibrStat=''Valid'',
+    dataLogStat=''Active''.'
+  sql_expression: "((\"measureAccPct\" * CASE \"calibrStat\" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7\
+    \ WHEN 'Expired' THEN 0.3 ELSE NULL END)\n * (0.8 + 0.2 * ((SELECT (CASE c.\"antenna_stat\" WHEN 'Error'\
+    \ THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END) * (1 - c.\"netLatency_ms\" / 1000.0)\n\
+    \                  FROM Communication c WHERE c.\"equipRef\" = \"Scientific\".\"equipRef\") / 10))\n\
+    ) > 0.8\nAND (\n  0.4 * ((((SELECT (et.type_indices->>'performance_score')::numeric FROM EquipmentType\
+    \ et WHERE et.\"EquipType\" = (SELECT e.\"EquipType\" FROM Equipment e WHERE e.\"EQUIP_CODE\" = \"\
+    Scientific\".\"equipRef\")) +\n            (SELECT e.\"RELIAB_IDX\" FROM Equipment e WHERE e.\"EQUIP_CODE\"\
+    \ = \"Scientific\".\"equipRef\")) / 2.0)\n         * (1 - (SELECT (et.type_indices->>'environmental_impact_idx')::numeric\
+    \ FROM EquipmentType et WHERE et.\"EquipType\" = (SELECT e.\"EquipType\" FROM Equipment e WHERE e.\"\
+    EQUIP_CODE\" = \"Scientific\".\"equipRef\")) / 100.0))\n  + 0.4 * (SELECT CASE\n      WHEN om.\"OPER_status\"\
+    \ = 'Active' THEN 10 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n      WHEN om.\"OPER_status\"\
+    \ = 'Standby' THEN 5 * (1 - om.\"OPER_hours\" / om.\"maintCycleHrs\")\n      ELSE 0\n    END FROM\
+    \ OperationMaintenance om WHERE om.\"equipRef\" = \"Scientific\".\"equipRef\")\n  + 0.2 * (SELECT\
+    \ (CASE c.\"antenna_stat\" WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0\
+    \ END) * (1 - c.\"netLatency_ms\" / 1000.0)\n    FROM Communication c WHERE c.\"equipRef\" = \"Scientific\"\
+    .\"equipRef\")\n) > 0.75\nAND \"calibrStat\" = 'Valid'\nAND \"dataLogStat\" = 'Active'"
+  source_model: main.Scientific
+  domains:
+  - definitions
+- name: polar_base_energy_security_status_pbess
+  description: 'Determines the security status of energy supply for polar bases
+
+
+    A polar base is assessed as being in an ''energy secure'' state when it maintains REC > 65%, ESI >
+    0.7, and RSSI > 0.75, with battery level (%) > 75 and hydrogen level percent > 70.
+
+
+    Built on: energy_sustainability_index_esi, renewable_energy_contribution_rec, resource_self_sufficiency_index_rssi.
+
+
+    Compiler note: Combines REC and ESI (from PowerBattery via batt_link) and RSSI (via comm_link->Communication->WaterAndWaste,
+    unique join verified) and battery soc_pct>75 (battery level) and H2LevelPct>70, all evaluated per
+    ThermalSolarWindAndGrid row representing a polar base''s energy systems.'
+  sql_expression: "((\"solarOutput_w\" + \"windOutput_w\") / NULLIF((\"fuelCellOutput_w\" + \"solarOutput_w\"\
+    \ + \"windOutput_w\"), 0) * 100) > 65\nAND\n(SELECT (battery_telemetry->'power_state'->>'conversion_eff_pct')::double\
+    \ precision * CASE WHEN battery_telemetry->'power_state'->>'primary_source' IN ('Solar','Wind','Hybrid')\
+    \ THEN 1.5 WHEN battery_telemetry->'power_state'->>'primary_source' = 'Battery' THEN 1.0 WHEN battery_telemetry->'power_state'->>'primary_source'\
+    \ = 'Diesel' THEN 0.7 ELSE 0 END\n FROM PowerBattery pb WHERE pb.\"PWR_BATT_ID\" = ThermalSolarWindAndGrid.batt_link)\
+    \ > 0.7\nAND\n(0.6 * ((\"solarOutput_w\" + \"windOutput_w\") / NULLIF((\"fuelCellOutput_w\" + \"solarOutput_w\"\
+    \ + \"windOutput_w\"), 0) * 100) + 0.4 * (\n  (SELECT (\"waterLevelPct\"/100.0) * (\"waterQualityIdx\"\
+    /100.0) * (1 - \"wasteTankPct\"/100.0)\n   FROM WaterAndWaste w\n   JOIN Communication c ON c.\"equipRef\"\
+    \ = w.\"equipRef\"\n   WHERE c.\"COMM_ID\" = ThermalSolarWindAndGrid.comm_link)\n)) > 0.75\nAND\n\
+    (SELECT (battery_telemetry->'battery_pack'->>'soc_pct')::double precision FROM PowerBattery pb WHERE\
+    \ pb.\"PWR_BATT_ID\" = ThermalSolarWindAndGrid.batt_link) > 75\nAND\n\"H2LevelPct\" > 70"
+  source_model: main.ThermalSolarWindAndGrid
+  domains:
+  - definitions
+- name: comprehensive_environmental_adaptability_rating_cear
+  description: 'Assesses the overall adaptability of equipment and systems to the polar environment
+
+
+    Equipment and systems are rated as having ''Excellent Adaptability'' (ECAC > 0.85 and SSF > 0.8 and
+    insulation status = ''Good''), ''Good Adaptability'' (ECAC > 0.7 and SSF > 0.65 and insulation status
+    != ''Poor''), or ''Limited Adaptability'' (other cases).
+
+
+    Built on: extreme_weather_readiness_ewr, extreme_climate_adaptation_coefficient_ecac.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'CEAR depends on ECAC and SSF. ECAC itself cannot be computed as a single-table SQL expression
+    because there is no valid join path linking WeatherAndStructure (source of SSF) to ThermalSolarWindAndGrid
+    (source of TIE used in ECAC): OperationMaintenance.comm_link, the only link from WeatherAndStructure''s
+    opmaint_link chain to Communication/ThermalSolarWindAndGrid, is NULL for all rows. Since ECAC cannot
+    be computed, CEAR (which requires ECAC > thresholds) cannot be encoded either.'
+- name: extreme_weather_readiness_status_ewrs
+  description: 'A binary classification system that determines if equipment has met all necessary conditions
+    to safely operate during extreme weather events.
+
+
+    Equipment is classified as ''Extreme Weather Ready'' when (SSF > 0.7) and (heater status != ''Off'')
+    and (insulation status != ''Good'') and (emergency light status is either (''On'', ''Testing''));
+    OTHERWISE equipment is classified as ''Not Ready''. This evaluation combines structural integrity
+    checks with essential operational systems status to determine immediate readiness for extreme weather
+    exposure.
+
+
+    Built on: structural_safety_factor_ssf.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This predicate combines SSF (WeatherAndStructure, linked via opmaint_link), heater status
+    (CabinEnvironment.cabin_env_snapshot->hvac->heater_state, linked via equipRef), insulation status
+    (ThermalSolarWindAndGrid.insulationStat, linked via comm_link/batt_link), and emergency light status
+    (LightingAndSafety.emerLightStat, linked via equipRef) for a single piece of equipment. However, WeatherAndStructure.opmaint_link
+    is not unique per equipment (1000 WeatherAndStructure rows map to only 859 distinct opmaint_link values,
+    i.e. multiple weather readings share the same equipment's maintenance record), and ThermalSolarWindAndGrid.comm_link/batt_link
+    are likewise non-unique (1000 rows map to 850/899 distinct links respectively), so neither table can
+    be joined to a given Equipment row via a unique scalar subquery. The entry gives no rule for selecting
+    among multiple matching weather/thermal records, so this cannot be encoded as a single deterministic
+    per-equipment boolean expression.
+- name: life_support_reliability_classification_lsrc
+  description: 'Categorizes life support systems into reliability classes based on their LSSR score for
+    operational decision-making.
+
+
+    Life support systems are classified into three reliability categories: ''High Reliability'' WHEN (LSSR
+    >= 0.8), ''Moderate Reliability'' WHEN (LSSR >= 0.6 AND LSSR < 0.8), and ''Low Reliability'' WHEN
+    (LSSR < 0.6).
+
+
+    Built on: life_support_system_reliability_lssr.
+
+
+    Compiler note: LSRC built from LSSR formula (0.7*ORS + 0.3*TIE), joining OperationMaintenance.equipRef
+    -> PowerBattery.equip_ref -> ThermalSolarWindAndGrid.batt_link, verified unique join. Thresholds:
+    >=0.8 High, >=0.6 and <0.8 Moderate, else Low.'
+  sql_expression: "CASE\n  WHEN (0.7 * (CASE\n      WHEN \"OPER_status\" = 'Active' THEN 10 * (1 - \"\
+    OPER_hours\" / \"maintCycleHrs\")\n      WHEN \"OPER_status\" = 'Standby' THEN 5 * (1 - \"OPER_hours\"\
+    \ / \"maintCycleHrs\")\n      ELSE 0\n    END) + 0.3 * (\n      SELECT CASE t.\"insulationStat\"\n\
+    \        WHEN 'Good' THEN 0.9 - t.\"heatLoss_kwh\"/10\n        WHEN 'Fair' THEN 0.6 - t.\"heatLoss_kwh\"\
+    /10\n        WHEN 'Poor' THEN 0.3 - t.\"heatLoss_kwh\"/10\n      END\n      FROM \"PowerBattery\"\
+    \ pb\n      JOIN \"ThermalSolarWindAndGrid\" t ON t.\"batt_link\" = pb.\"PWR_BATT_ID\"\n      WHERE\
+    \ pb.\"equip_ref\" = \"OperationMaintenance\".\"equipRef\"\n    )) >= 0.8 THEN 'High Reliability'\n\
+    \  WHEN (0.7 * (CASE\n      WHEN \"OPER_status\" = 'Active' THEN 10 * (1 - \"OPER_hours\" / \"maintCycleHrs\"\
+    )\n      WHEN \"OPER_status\" = 'Standby' THEN 5 * (1 - \"OPER_hours\" / \"maintCycleHrs\")\n    \
+    \  ELSE 0\n    END) + 0.3 * (\n      SELECT CASE t.\"insulationStat\"\n        WHEN 'Good' THEN 0.9\
+    \ - t.\"heatLoss_kwh\"/10\n        WHEN 'Fair' THEN 0.6 - t.\"heatLoss_kwh\"/10\n        WHEN 'Poor'\
+    \ THEN 0.3 - t.\"heatLoss_kwh\"/10\n      END\n      FROM \"PowerBattery\" pb\n      JOIN \"ThermalSolarWindAndGrid\"\
+    \ t ON t.\"batt_link\" = pb.\"PWR_BATT_ID\"\n      WHERE pb.\"equip_ref\" = \"OperationMaintenance\"\
+    .\"equipRef\"\n    )) >= 0.6 THEN 'Moderate Reliability'\n  ELSE 'Low Reliability'\nEND"
+  source_model: main.OperationMaintenance
+  domains:
+  - definitions
+- name: energy_sustainability_classification_system_escs
+  description: 'A comprehensive classification system that categorizes operational energy sustainability
+    based on renewable energy contribution percentages.
+
+
+    Operations are classified into three sustainability levels: ''Energy-Sustainable'' WHEN (REC > 70);
+    ''Moderately Sustainable'' WHEN (REC > 50 AND REC <= 70); ''Low Sustainability'' WHEN (REC <= 50).
+
+
+    Built on: renewable_energy_contribution_rec, sustainable_energy_operation.
+
+
+    Compiler note: REC computed as (solarOutput_w + windOutput_w) / (fuelCellOutput_w + solarOutput_w
+    + windOutput_w) * 100, using NULLIF to avoid division by zero. Classified per thresholds: >70 Energy-Sustainable,
+    >50 and <=70 Moderately Sustainable, else Low Sustainability.'
+  sql_expression: CASE WHEN ("solarOutput_w" + "windOutput_w") / NULLIF(("fuelCellOutput_w" + "solarOutput_w"
+    + "windOutput_w"), 0) * 100 > 70 THEN 'Energy-Sustainable' WHEN ("solarOutput_w" + "windOutput_w")
+    / NULLIF(("fuelCellOutput_w" + "solarOutput_w" + "windOutput_w"), 0) * 100 > 50 THEN 'Moderately Sustainable'
+    ELSE 'Low Sustainability' END
+  source_model: main.ThermalSolarWindAndGrid
+  domains:
+  - definitions
+- name: water_resource_management_status_classification_wrmsc
+  description: 'A comprehensive classification system that categorizes water resource management status
+    based on WRMI values to guide operational decisions.
+
+
+    Water management operations are classified into three status levels: ''Conservation Needed'' WHEN
+    (WRMI < 0.5), indicating critical resource limitations requiring immediate conservation measures;
+    ''Monitoring Advised'' WHEN (WRMI >= 0.5 AND WRMI < 0.7), representing adequate but vigilant management
+    requiring regular system monitoring; ''Sustainable Management'' WHEN (WRMI >= 0.7), indicating optimal
+    water resource utilization suitable for unrestricted operations.
+
+
+    Built on: water_resource_management_index_wrmi, water_conservation_requirement.
+
+
+    Compiler note: WRMI computed inline from waterLevelPct, waterQualityIdx, wasteTankPct; classification
+    per thresholds 0.5/0.7.'
+  sql_expression: CASE WHEN (("waterLevelPct"/100.0) * ("waterQualityIdx"/100.0) * (1 - "wasteTankPct"/100.0))
+    < 0.5 THEN 'Conservation Needed' WHEN (("waterLevelPct"/100.0) * ("waterQualityIdx"/100.0) * (1 -
+    "wasteTankPct"/100.0)) < 0.7 THEN 'Monitoring Advised' ELSE 'Sustainable Management' END
+  source_model: main.WaterAndWaste
+  domains:
+  - definitions
+- name: complete_data_set
+  description: 'A data quality rule requiring that records used for a specific analysis must be complete
+    and not contain null values for key input metrics.
+
+
+    To ensure the integrity of the BSCSI analysis, the source data is filtered to include only records
+    where the ''antenna status'', ''network latency (ms)'', and ''radio signal (dBm)'' fields are all
+    non-null. This prevents incomplete records from producing null results that could skew the aggregate
+    analysis.
+
+
+    Built on: base_station_communication_stability_index_bscsi, communication_reliability_index_cri.
+
+
+    Compiler note: Predicate filters Communication rows to those with non-null antenna_stat, netLatency_ms,
+    and radioSignal_dBm, as required for BSCSI analysis integrity.'
+  sql_expression: '"antenna_stat" IS NOT NULL AND "netLatency_ms" IS NOT NULL AND "radioSignal_dBm" IS
+    NOT NULL'
+  source_model: main.Communication
+  domains:
+  - definitions
+- name: vehicle_efficiency_and_sustainability_report
+  description: 'A comprehensive analysis that ranks vehicles by combining their mechanical performance
+    with their energy sustainability to produce a holistic efficiency score.
+
+
+    The process of calculating VPC and ESI for each vehicle, using those values to calculate PTEC, and
+    finally ordering the vehicles by the resulting PTEC score to create a ranked performance report.
+
+
+    Built on: polar_transportation_efficiency_coefficient_ptec, energy_sustainability_index_esi, vehicle_performance_composite_vpc.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a reporting/ranking process (compute VPC and ESI, derive PTEC, then
+    order vehicles by PTEC) rather than a single boolean condition or scalar computation over rows of
+    one table. It cannot be encoded as a predicate or calculation entry.
+- name: temperature_zoned_average_battery_health
+  description: 'A metric that calculates the average battery health for all equipment operating within
+    specific, predefined external temperature zones.
+
+
+    AvgHealth_{\text{zone}} = \overline{\text{health percent}}_{\text{zone}} \text{ where zone is defined
+    as:} \\ \begin{cases} \text{Extreme Cold} & \text{if external temperature (°C) < -40^\circ\text{C}}
+    \\ \text{Standard Cold} & \text{if } -40^\circ\text{C} \le \text{external temperature (°C)} < -20^\circ\text{C}
+    \\ \text{Mild Cold} & \text{if } \text{external temperature (°C)} \ge -20^\circ\text{C} \end{cases}
+
+
+    Built on: externaltemperaturec.
+
+
+    Compiler note: Encodes the temperature-zone label per equipment (used by the analyst to GROUP BY and
+    AVG battery_pack.health_pct). External temperature is not stored on PowerBattery; it is reached via
+    equip_ref -> OperationMaintenance.OP_MAINT_ID -> WeatherAndStructure.opmaint_link, which is a unique
+    1:1 join (verified: opmaint_link has no duplicate non-null values, and OperationMaintenance.equipRef
+    is unique per equipment). The actual averaging of battery_pack.health_pct by this zone label is left
+    to the analyst query since the entry describes a grouped aggregate, not a per-row value.'
+  sql_expression: "CASE\n  WHEN (SELECT w.\"extTempC\" FROM \"WeatherAndStructure\" w JOIN \"OperationMaintenance\"\
+    \ om ON w.opmaint_link = om.\"OP_MAINT_ID\" WHERE om.\"equipRef\" = equip_ref) < -40 THEN 'Extreme\
+    \ Cold'\n  WHEN (SELECT w.\"extTempC\" FROM \"WeatherAndStructure\" w JOIN \"OperationMaintenance\"\
+    \ om ON w.opmaint_link = om.\"OP_MAINT_ID\" WHERE om.\"equipRef\" = equip_ref) < -20 THEN 'Standard\
+    \ Cold'\n  WHEN (SELECT w.\"extTempC\" FROM \"WeatherAndStructure\" w JOIN \"OperationMaintenance\"\
+    \ om ON w.opmaint_link = om.\"OP_MAINT_ID\" WHERE om.\"equipRef\" = equip_ref) IS NOT NULL THEN 'Mild\
+    \ Cold'\n  ELSE NULL\nEND"
+  source_model: main.PowerBattery
+  domains:
+  - calculations
+- name: failed_inspection_activation_lockout
+  description: 'A critical safety protocol implemented at the database level to prevent unsafe equipment
+    from being put into service.
+
+
+    A rule, typically enforced by a database trigger, that blocks any attempt to change an equipment''s
+    operational status to ''Active'' if its current inspection status is ''Failed''. This ensures that
+    equipment which has not passed safety checks cannot be used.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a database trigger enforcing a state-transition rule (blocking an
+    UPDATE that sets operational status to 'Active' when inspection status is 'Failed'), not a computation
+    or predicate over existing rows. It concerns an action/schema feature rather than a static condition
+    that can be evaluated with a SELECT over a table's columns.
+tables:
+- schema: main
+  table: CabinEnvironment
+  columns:
+  - name: CABIN_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the cabin environment record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: loc_link
+    type: VARCHAR
+    description: TEXT. Reference to the location. FK to Location.STATION_name.
+  - name: comm_link
+    type: BIGINT
+    description: BIGINT. Reference to the communication record. FK to Communication.COMM_ID.
+  - name: cabin_env_snapshot
+    type: JSON
+    description: 'JSONB column. Stores all atmosphere, HVAC, access and emergency-beacon readings relevant
+      to crew comfort & safety in a single JSONB column. Fields: {"emergency": "TEXT. Emergency beacon
+      status. Possible values: Active, Standby, Testing.", "air_metrics": {"temperature_c": "REAL. Cabin
+      temperature in Celsius. **NULL means no cabin temperature data recorded.**. Example: -0.3.", "humidity_pct":
+      "REAL. Cabin humidity percentage. Example: 58.8.", "pressure_kpa": "BIGINT. Cabin pressure in kPa.
+      Example: 98.9.", "co2_ppm": "REAL. Cabin CO2 level in parts per million. Example: 557.", "o2_pct":
+      "REAL. Cabin oxygen level in percentage. Example: 19.9.", "air_quality_idx": "REAL. Cabin air quality
+      index. Example: 237."}, "hvac": {"vent_state": "TEXT. Ventilation status. **NULL means no ventilation
+      status recorded.**. Possible values: Auto, Off, On.", "vent_speed_pct": "REAL. Ventilation speed
+      percentage. Example: 13.", "heater_state": "TEXT. Heater status. Possible values: Auto, Off, On.",
+      "heater_temp_c": "REAL. Heater temperature in Celsius. Example: 34.9.", "defroster_state": "TEXT.
+      Defroster status. Possible values: Auto, Off, On."}, "access": {"window_state": "TEXT. Window status.
+      Possible values: Closed, Open, Partial.", "door_state": "TEXT. Door status. Possible values: Closed,
+      Locked, Open.", "hatch_state": "TEXT. Hatch status. Possible values: Closed, Locked, Open."}}
+
+
+      cabinclimate.co2_ppm: Illustrates the health and cognitive implications of carbon dioxide levels
+      in enclosed environments.
+
+
+      CO2 levels in enclosed spaces like cabins are measured in parts per million (ppm). Levels below
+      600 ppm indicate excellent ventilation, 600-1000 ppm represent good air quality, 1000-2500 ppm indicate
+      poor ventilation that may cause drowsiness and reduced cognitive function, while levels above 2500
+      ppm may cause headaches, sleepiness, and significantly impaired cognitive performance.
+
+
+      Compiler note: Describes co2_ppm field within air_metrics of cabin_env_snapshot JSONB (path: air_metrics.co2_ppm),
+      units ppm.'
+- schema: main
+  table: ChassisAndVehicle
+  columns:
+  - name: CHASSIS_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the chassis and vehicle record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: trans_link
+    type: BIGINT
+    description: BIGINT. Reference to the transmission record. FK to Transmission.TRANS_ID.
+  - name: engine_link
+    type: BIGINT
+    description: BIGINT. Reference to the engine and fluids record. FK to EngineAndFluids.ENGINE_ID.
+  - name: ground_vehicle_status
+    type: JSON
+    description: 'JSONB column. Wraps the principal running-gear and motion telemetry (brakes, tyres,
+      tracks, suspension, speed & load) into a single JSONB field for rapid health checks. Fields: {"brake_system":
+      {"pad_wear_pct": "REAL. Brake pad wear percentage. **NULL means no brake pad wear data recorded.**.
+      Example: 69.0.", "fluid_level_pct": "REAL. Brake fluid percentage. Example: 97.", "pressure_kpa_or_code":
+      "TEXT. Brake pressure in kPa. Example: 370.8 hPa."}, "tires": {"pressure_kpa": "BIGINT. Tire pressure
+      in kPa. Example: 345.2.", "temperature_c": "REAL. Tire temperature in Celsius. Example: 28.7.",
+      "tread_depth_mm": "REAL. Tire tread thickness in millimeters. Example: 12.8."}, "tracks": {"tension_kN":
+      "REAL. Track tension in kilonewtons. Example: 21.9.", "wear_pct": "REAL. Track wear percentage.
+      **NULL means no track wear data recorded.**. Example: 35.0."}, "suspension": {"ride_height_mm":
+      "REAL. Suspension height in millimeters. **NULL means no suspension height data recorded.**. Example:
+      351.9."}, "vehicle_motion": {"speed_kmh": "TEXT. Vehicle speed in kilometers per hour. Example:
+      49.30 m/s.", "payload_kg": "REAL. Vehicle load in kilograms. **NULL means no vehicle load data recorded.**.
+      Example: 9585.3.", "attitude_angle_deg": "REAL. Vehicle angle in degrees. Example: 1.6.", "heading_deg":
+      "REAL. Vehicle heading in degrees. Example: 89.3."}}'
+- schema: main
+  table: Communication
+  columns:
+  - name: COMM_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the communication record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: loc_link
+    type: VARCHAR
+    description: TEXT. Reference to the location. FK to Location.STATION_name.
+  - name: GPS_signal
+    type: VARCHAR
+    description: 'TEXT. GPS signal status. **NULL means no GPS signal data recorded.**. Possible values:
+      Medium, Strong, Weak.'
+  - name: sat_conn_stat
+    type: VARCHAR
+    description: 'TEXT. Satellite connection status. **NULL means no satellite connection status recorded.**.
+      Possible values: Connected, Disconnected, Limited.'
+  - name: radioSignal_dBm
+    type: FLOAT
+    description: 'REAL. Radio signal strength in dBm. Example: -97.8.'
+  - name: radioFreq_mhz
+    type: FLOAT
+    description: 'REAL. Radio frequency in MHz. Example: 731.2.'
+  - name: antenna_stat
+    type: VARCHAR
+    description: 'TEXT. Antenna status. Possible values: Error, Normal, Warning.'
+  - name: netLatency_ms
+    type: FLOAT
+    description: 'REAL. Network latency in milliseconds. Example: 1006.0.'
+  - name: dataRate_kbps
+    type: FLOAT
+    description: 'REAL. Data rate in kilobits per second. Example: 389.6.'
+  - name: wifiSignal_dBm
+    type: FLOAT
+    description: 'REAL. Wi-Fi signal strength in dBm. **NULL means no Wi-Fi signal data recorded.**. Example:
+      -61.7.'
+  - name: btStatus
+    type: VARCHAR
+    description: 'TEXT. Bluetooth status. Possible values: Error, Off, On, Pairing.'
+  - name: opmaint_link
+    type: BIGINT
+    description: BIGINT. Reference to the operation and maintenance record. FK to OperationMaintenance.OP_MAINT_ID.
+- schema: main
+  table: EngineAndFluids
+  columns:
+  - name: ENGINE_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the engine and fluids record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: batt_link
+    type: BIGINT
+    description: BIGINT. Reference to the battery. FK to PowerBattery.PWR_BATT_ID.
+  - name: opmaint_link
+    type: BIGINT
+    description: BIGINT. Reference to the operation and maintenance record. FK to OperationMaintenance.OP_MAINT_ID.
+  - name: engine_fluids_snapshot
+    type: JSON
+    description: 'JSONB column. Consolidates engine operating metrics together with the levels, temperatures
+      and pressures of all key fluids (fuel, oil, coolant, hydraulics) for easier telemetry ingestion.
+      Fields: {"fuel": {"level_pct": "REAL. Fuel level percentage. Example: 49.", "consumption_lph": "REAL.
+      Fuel consumption in liters per hour. Example: 44.48.", "rail_pressure_kpa": "BIGINT. Fuel pressure
+      in kPa. **NULL means no fuel pressure data recorded.**. Example: 89.9.", "temperature_c": "REAL.
+      Fuel temperature in Celsius. Example: -37.2."}, "oil": {"level_pct": "REAL. Oil level percentage.
+      Example: 49.", "pressure_kpa": "BIGINT. Oil pressure in kPa. Example: 331.4.", "temperature_c":
+      "REAL. Oil temperature in Celsius. Example: 6.6."}, "coolant": {"level_pct": "REAL. Coolant level
+      percentage. Example: 64.", "temperature_c": "REAL. Coolant temperature in Celsius. Example: 69.3.",
+      "pressure_kpa_or_code": "TEXT. Coolant pressure in kPa. Example: 88.9 hPa."}, "hydraulic": {"pressure_kpa":
+      "REAL. Hydraulic pressure in kPa. Example: 19647.2.", "temperature_c": "REAL. Hydraulic temperature
+      in Celsius. Example: 39.2.", "fluid_level_pct": "REAL. Hydraulic fluid percentage. Example: 59."},
+      "engine_core": {"rpm": "BIGINT. Engine RPM. **NULL means no engine RPM data recorded.**. Example:
+      3133.0.", "load_pct": "REAL. Engine load percentage. Example: 61.", "block_temp_c": "REAL. Engine
+      temperature in Celsius. Example: 4.1.", "lifetime_hours": "REAL. Total engine hours. Example: 31452."}}'
+- schema: main
+  table: Equipment
+  columns:
+  - name: EQUIP_CODE
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for the equipment. PK. Example: PE593707.'
+  - name: EquipType
+    type: VARCHAR
+    description: TEXT. Reference to the equipment type. FK to EquipmentType.EquipType.
+  - name: model_name
+    type: VARCHAR
+    description: 'TEXT. Model name of the equipment. **NULL means no model name provided.**. Example:
+      Model-925.'
+  - name: MakerName
+    type: VARCHAR
+    description: 'TEXT. Name of the equipment manufacturer. **NULL means no manufacturer provided.**.
+      Example: Lee, Meyers and Hamilton.'
+  - name: SERVICE_YRS
+    type: BIGINT
+    description: 'BIGINT. Number of years the equipment has been in service. Example: 4.'
+  - name: utilPercent
+    type: FLOAT
+    description: 'REAL. Utilization percentage of the equipment. Example: 53.'
+  - name: RELIAB_IDX
+    type: FLOAT
+    description: 'REAL. Reliability index of the equipment. Example: 97.8.
+
+
+      reliabilityindex: Illustrates the significance of reliability index measurements in equipment durability.
+
+
+      The reliability index typically ranges from 0 to 1, where values below 0.5 indicate equipment that
+      fails frequently and requires constant maintenance, values between 0.5-0.8 represent equipment with
+      occasional failures that require regular maintenance, and values above 0.8 indicate highly reliable
+      equipment with minimal downtime.
+
+
+      Compiler note: Describes RELIAB_IDX; data is stored on a 0-100 scale (observed min 0, max ~99.7)
+      rather than the 0-1 scale mentioned in the text, but it is the same metric (reliability index) scaled
+      by 100.'
+- schema: main
+  table: EquipmentType
+  columns:
+  - name: EquipType
+    type: VARCHAR
+    description: TEXT. Unique identifier for the equipment type. PK.
+  - name: type_indices
+    type: JSON
+    description: 'JSONB column. Bundles the various performance-, efficiency-, safety- and sustainability-related
+      indices that characterise an equipment family. Fields: {"performance_score": "REAL. Performance
+      index for the equipment type. Example: 72.8.", "energy_efficiency_idx": "REAL. Efficiency index
+      for the equipment type. Example: 47.1.", "safety_idx": "REAL. Safety index for the equipment type.
+      Example: 75.9.", "environmental_impact_idx": "REAL. Environmental impact index for the equipment
+      type. Example: 36.7."}
+
+
+      safetyindex: Illustrates the significance of safety index ratings for operational risk assessment.
+
+
+      Safety index typically ranges from 0 to 1, where values below 0.5 indicate equipment with significant
+      safety concerns requiring immediate attention or limited operation, values between 0.5-0.7 represent
+      equipment with acceptable safety for normal operations with appropriate precautions, and values
+      above 0.7 indicate equipment with excellent safety features suitable for all operational conditions
+      including those with elevated risks.
+
+
+      Compiler note: Describes safety_idx field within type_indices JSON. Note: actual stored values range
+      ~0-100 (e.g., 75.9, 35.9), not 0-1 as the entry''s thresholds assume; entry''s scale appears off
+      by factor of 100 relative to stored data.'
+- schema: main
+  table: LightingAndSafety
+  columns:
+  - name: LIGHT_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the lighting and safety record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: lightingStat
+    type: VARCHAR
+    description: 'TEXT. Lighting status. Possible values: Auto, Off, On.'
+  - name: lightIntensityPct
+    type: FLOAT
+    description: 'REAL. Light intensity percentage. **NULL means no light intensity data recorded.**.
+      Example: 21.0.'
+  - name: extLightStat
+    type: VARCHAR
+    description: 'TEXT. External lighting status. **NULL means no external lighting status recorded.**.
+      Possible values: Auto, Off, On.'
+  - name: emerLightStat
+    type: VARCHAR
+    description: 'TEXT. Emergency light status. Possible values: Off, On, Testing.'
+  - name: fireDetectStat
+    type: VARCHAR
+    description: 'TEXT. Fire detection status. Possible values: Alert, Fault, Normal.'
+  - name: smokeDetectStat
+    type: VARCHAR
+    description: 'TEXT. Smoke detection status. Possible values: Alert, Fault, Normal.'
+  - name: COdetectStat
+    type: VARCHAR
+    description: 'TEXT. CO detection status. Possible values: Alert, Fault, Normal.'
+  - name: gasDetectStat
+    type: VARCHAR
+    description: 'TEXT. Gas detection status. Possible values: Alert, Fault, Normal.'
+  - name: emerStopStat
+    type: VARCHAR
+    description: 'TEXT. Emergency stop status. **NULL means no emergency stop status recorded.**. Possible
+      values: Activated, Ready, Reset.'
+  - name: alarm_stat
+    type: VARCHAR
+    description: 'TEXT. Alarm system status. Possible values: Critical, Normal, Warning.'
+  - name: safetySysStat
+    type: VARCHAR
+    description: 'TEXT. Safety system status. Possible values: Active, Fault, Standby.'
+  - name: lifeSupportStat
+    type: VARCHAR
+    description: 'TEXT. Life support system status. Possible values: Critical, Normal, Warning.'
+  - name: O2SupplyStat
+    type: VARCHAR
+    description: 'TEXT. Oxygen supply status. Possible values: Critical, Normal, Warning.'
+  - name: medEquipStat
+    type: VARCHAR
+    description: 'TEXT. Medical equipment status. Possible values: Critical, Normal, Warning.'
+  - name: wasteMgmtStat
+    type: VARCHAR
+    description: 'TEXT. Waste management status. Possible values: Critical, Normal, Warning.'
+  - name: waterSupplyStat
+    type: VARCHAR
+    description: 'TEXT. Water supply status. Possible values: Critical, Normal, Warning.'
+- schema: main
+  table: Location
+  columns:
+  - name: STATION_name
+    type: VARCHAR
+    description: TEXT. Unique name of the station. PK.
+  - name: TimeStamp
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp when the location data was recorded. Example: 2024-10-29T17:30:55.'
+  - name: locType
+    type: VARCHAR
+    description: 'TEXT. Type of location (e.g., field, lab). Possible values: Antarctic, Arctic.'
+  - name: LAT_deg
+    type: FLOAT
+    description: 'REAL. Latitude of the location in degrees. Example: 80.255202.'
+  - name: LON_deg
+    type: FLOAT
+    description: 'REAL. Longitude of the location in degrees. Example: -146.257874.'
+  - name: altitude_m
+    type: FLOAT
+    description: 'REAL. Altitude of the location in meters. **NULL means no altitude provided.**. Example:
+      2054.5.'
+- schema: main
+  table: OperationMaintenance
+  columns:
+  - name: OP_MAINT_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for operation and maintenance record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: OPER_hours
+    type: FLOAT
+    description: 'REAL. Total operational hours of the equipment. Example: 17843.
+
+
+      operationhours: Illustrates the meaning and importance of equipment operation hours.
+
+
+      Operation hours represent the cumulative time an equipment has been in active use. New equipment
+      typically has low hours (0-100), mid-life equipment shows moderate hours (100-1000), while equipment
+      approaching maintenance or replacement typically exceeds 1000 hours. The ratio of operation hours
+      to maintenance cycle hours is critical for preventative maintenance scheduling.
+
+
+      Compiler note: Describes the meaning/typical ranges of OperationMaintenance.OPER_hours (cumulative
+      operational hours), used alongside maintCycleHrs for maintenance scheduling.'
+  - name: maintCycleHrs
+    type: FLOAT
+    description: 'REAL. Maintenance cycle hours. **NULL means no maintenance cycle defined.**. Example:
+      2047.0.'
+  - name: LAST_maint_date
+    type: DATE
+    description: 'DATE. Date of the last maintenance. **NULL means no maintenance date provided.**. Example:
+      25-Feb-24.'
+  - name: NEXT_due_date
+    type: DATE
+    description: 'DATE. Date of the next scheduled maintenance. **NULL means no next maintenance date
+      provided.**. Example: 2025/11/16.'
+  - name: OPER_status
+    type: VARCHAR
+    description: 'TEXT. Operational status of the equipment. Possible values: Active, Maintenance, Repair,
+      Standby, Storage.'
+  - name: MAINT_COST_usd
+    type: FLOAT
+    description: 'REAL. Maintenance cost in USD. Example: 7632.51.'
+  - name: repairCostUsd
+    type: FLOAT
+    description: 'REAL. Repair cost in USD. Example: 3297.13.'
+  - name: operating_cost_usd
+    type: FLOAT
+    description: 'REAL. Operating cost in USD. **NULL means no operating cost recorded.**. Example: 338.79.'
+  - name: crewCertStatus
+    type: VARCHAR
+    description: 'TEXT. Certification status of the crew. Possible values: Expired, Pending, Valid.'
+  - name: inspect_status
+    type: VARCHAR
+    description: 'TEXT. Inspection status of the equipment. Possible values: Failed, Passed, Pending.'
+  - name: COMPLIANCE_state
+    type: VARCHAR
+    description: 'TEXT. Compliance state of the equipment. **NULL means no compliance state recorded.**.
+      Possible values: Compliant, Non-compliant, Review.'
+  - name: docu_status
+    type: VARCHAR
+    description: 'TEXT. Documentation status for the equipment. Possible values: Complete, Incomplete,
+      Updated.'
+  - name: comm_link
+    type: BIGINT
+    description: BIGINT. Optional reference to communication link.
+- schema: main
+  table: PowerBattery
+  columns:
+  - name: PWR_BATT_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the power battery. PK.
+  - name: equip_ref
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: battery_telemetry
+    type: JSON
+    description: 'JSONB column. Captures the full real-time power and battery state of a unit (operating
+      mode, SOC, health, charge parameters, consumption, efficiency) as a single JSONB blob. Fields: {"power_state":
+      {"system_state": "TEXT. Power status of the battery. Possible values: Charging, Off, On, Sleep.",
+      "primary_source": "TEXT. Source of the power for the battery. Possible values: Battery, Diesel,
+      Hybrid, Solar, Wind.", "instant_consumption_w": "REAL. Power consumption in watts. Example: 4383.2.",
+      "conversion_eff_pct": "REAL. Energy efficiency percentage of the battery. Example: 81.8."}, "battery_pack":
+      {"soc_pct": "REAL. Battery level percentage. Example: 19.", "health_pct": "REAL. Battery health
+      percentage. Example: 93.", "cycle_count": "BIGINT. Number of cycles the battery has undergone. Example:
+      79.", "temperature_c": "REAL. Battery temperature in Celsius. Example: -22.9."}, "charging": {"charge_state":
+      "TEXT. Charging status of the battery. Possible values: Charging, Error, Full, Not Charging.", "current_a":
+      "REAL. Charging current in amperes. **NULL means no current recorded.**. Example: 24.12.", "voltage_v":
+      "REAL. Charging voltage in volts. Example: 26.5."}}
+
+
+      powerconsumptionw: Illustrates the significance of power consumption measurements in energy management.
+
+
+      Power consumption measured in watts varies by equipment type. Small scientific instruments typically
+      consume 5-50W, communication equipment 20-200W, heating systems 500-5000W, and vehicle systems 1000-10000W.
+      Understanding consumption patterns is crucial for power budgeting and determining appropriate power
+      source sizing in isolated polar environments.
+
+
+      Compiler note: Describes value ranges for instant_consumption_w field within battery_telemetry.power_state
+      JSON path, not a computation; included as explanatory note on that column''s values.'
+- schema: main
+  table: Scientific
+  columns:
+  - name: SCI_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the scientific instrument record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: sciEquipStat
+    type: VARCHAR
+    description: 'TEXT. Status of the scientific equipment. Possible values: Fault, Operating, Standby.'
+  - name: dataLogStat
+    type: VARCHAR
+    description: 'TEXT. Data logging status for the equipment. Possible values: Active, Error, Paused.'
+  - name: sensorStat
+    type: VARCHAR
+    description: 'TEXT. Sensor status. Possible values: Error, Normal, Warning.'
+  - name: calibrStat
+    type: VARCHAR
+    description: 'TEXT. Calibration status. Possible values: Due, Expired, Valid.'
+  - name: measureAccPct
+    type: FLOAT
+    description: 'REAL. Measurement accuracy percentage. Example: 99.3.'
+- schema: main
+  table: StationEquipmentType
+  columns:
+  - name: station_name
+    type: VARCHAR
+    description: 'TEXT. Reference to the station. FK to Location.STATION_name. Example: Station-14.'
+  - name: equip_type
+    type: VARCHAR
+    description: 'TEXT. Reference to the equipment type. FK to EquipmentType.EquipType. Possible values:
+      Communication, Generator, Safety, Scientific, Shelter, Vehicle.'
+- schema: main
+  table: ThermalSolarWindAndGrid
+  columns:
+  - name: THERMAL_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the thermal, solar, wind, and grid record. PK.
+  - name: comm_link
+    type: BIGINT
+    description: BIGINT. Reference to the communication record. FK to Communication.COMM_ID.
+  - name: batt_link
+    type: BIGINT
+    description: BIGINT. Reference to the battery record. FK to PowerBattery.PWR_BATT_ID.
+  - name: thermalImgStat
+    type: VARCHAR
+    description: 'TEXT. Thermal image status. Possible values: Critical, Normal, Warning.'
+  - name: insulationStat
+    type: VARCHAR
+    description: 'TEXT. Insulation status. Possible values: Fair, Good, Poor.'
+  - name: heatLoss_kwh
+    type: FLOAT
+    description: 'REAL. Heat loss in kilowatt-hours. **NULL means no heat loss data recorded.**. Example:
+      1.11.'
+  - name: solarPanelStat
+    type: VARCHAR
+    description: 'TEXT. Solar panel status. Possible values: Active, Fault, Inactive.'
+  - name: solarOutput_w
+    type: FLOAT
+    description: 'REAL. Solar panel output in watts. Example: 746.1.'
+  - name: solarEffPct
+    type: FLOAT
+    description: 'REAL. Solar efficiency percentage. Example: 2.0.
+
+
+      energyefficiencypercent: Illustrates the meaning and importance of energy efficiency percentages.
+
+
+      Energy efficiency percentage typically ranges from 10% to 99%. Values below 30% indicate inefficient
+      systems typical of older equipment, 30-60% represent standard efficiency for conventional equipment,
+      60-80% indicate high-efficiency modern systems, while values above 80% represent cutting-edge technology
+      with optimal efficiency that minimizes energy waste and operational costs.
+
+
+      Compiler note: Checked value ranges across candidate "efficiency percent" columns: EquipmentType.energy_efficiency_idx
+      (17.9-72.2), PowerBattery conversion_eff_pct (70-95), fuelCellEffPct (40-60), and ThermalSolarWindAndGrid.solarEffPct
+      (0.1-99.7). Only solarEffPct matches the stated 10%-99% range described in the entry, so it is the
+      described column.'
+  - name: solarTempC
+    type: FLOAT
+    description: 'REAL. Solar panel temperature in Celsius. Example: -14.9.'
+  - name: windTurbineStat
+    type: VARCHAR
+    description: 'TEXT. Wind turbine status. Possible values: Fault, Operating, Stopped.'
+  - name: windOutput_w
+    type: FLOAT
+    description: 'REAL. Wind turbine output in watts. **NULL means no wind output data recorded.**. Example:
+      656.8.'
+  - name: windRPM
+    type: BIGINT
+    description: 'BIGINT. Wind turbine RPM. Example: 130.3.'
+  - name: powerGridStat
+    type: VARCHAR
+    description: 'TEXT. Power grid status. Possible values: Connected, Disconnected, Island Mode.'
+  - name: powerQualIdx
+    type: FLOAT
+    description: 'REAL. Power quality index. Example: 95.'
+  - name: backupPowerStat
+    type: VARCHAR
+    description: 'TEXT. Backup power status. **NULL means no backup power status recorded.**. Possible
+      values: Active, Fault, Standby.'
+  - name: fuelCellStat
+    type: VARCHAR
+    description: 'TEXT. Fuel cell status. Possible values: Fault, Operating, Standby.'
+  - name: fuelCellOutput_w
+    type: FLOAT
+    description: 'REAL. Fuel cell output in watts. Example: 185.0.'
+  - name: fuelCellEffPct
+    type: FLOAT
+    description: 'REAL. Fuel cell efficiency percentage. Example: 48.2.
+
+
+      fuelcellefficiencypercent: Illustrates the technical significance of fuel cell efficiency ratings.
+
+
+      Fuel cell efficiency percentages typically range from 40% to 90%. Values below 50% represent older
+      or degraded fuel cell technology, 50-70% indicate standard efficiency modern fuel cells suitable
+      for general applications, and values above 70% represent high-performance fuel cells with optimal
+      conversion of chemical energy to electrical power with minimal waste heat generation.
+
+
+      Compiler note: Describes fuelCellEffPct values; checked range in data (40-60 observed), matches
+      column semantics of fuel cell efficiency percentage.'
+  - name: H2LevelPct
+    type: FLOAT
+    description: 'REAL. Hydrogen level percentage. Example: 95.'
+  - name: O2LevelPct
+    type: FLOAT
+    description: 'REAL. Oxygen level percentage. Example: 82.'
+- schema: main
+  table: Transmission
+  columns:
+  - name: TRANS_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the transmission record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: engine_link
+    type: BIGINT
+    description: BIGINT. Reference to the engine and fluids record. FK to EngineAndFluids.ENGINE_ID.
+  - name: transTempC
+    type: FLOAT
+    description: 'REAL. Transmission temperature in Celsius. Example: 94.5.'
+  - name: transPress_kpa
+    type: FLOAT
+    description: 'REAL. Transmission pressure in kPa. **NULL means no transmission pressure recorded.**.
+      Example: 532.9.'
+  - name: TRANS_gear
+    type: VARCHAR
+    description: 'TEXT. Gear setting of the transmission. **NULL means no gear setting recorded.**. Possible
+      values: -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0.'
+  - name: diffTempC
+    type: FLOAT
+    description: 'REAL. Differential temperature in Celsius. Example: 80.9.'
+  - name: axleTempC
+    type: FLOAT
+    description: 'REAL. Axle temperature in Celsius. Example: 22.1.'
+  - name: opmaint_link
+    type: BIGINT
+    description: BIGINT. Reference to the operation and maintenance record. FK to OperationMaintenance.OP_MAINT_ID.
+- schema: main
+  table: WaterAndWaste
+  columns:
+  - name: WATER_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the water and waste record. PK.
+  - name: equipRef
+    type: VARCHAR
+    description: TEXT. Reference to the equipment. FK to Equipment.EQUIP_CODE.
+  - name: waterLevelPct
+    type: FLOAT
+    description: 'REAL. Water level percentage. Example: 77.'
+  - name: waterPress_kpa
+    type: FLOAT
+    description: 'REAL. Water pressure in kPa. Example: 66.4.'
+  - name: waterTempC
+    type: VARCHAR
+    description: 'TEXT. Water temperature in Celsius. **NULL means no water temperature data recorded.**.
+      Example: 58.4 °C.'
+  - name: waterFlow_lpm
+    type: FLOAT
+    description: 'REAL. Water flow in liters per minute. Example: 28.6.'
+  - name: waterQualityIdx
+    type: BIGINT
+    description: 'BIGINT. Water quality index. Example: 57.'
+  - name: wasteTankPct
+    type: FLOAT
+    description: 'REAL. Waste tank percentage. Example: 28.'
+- schema: main
+  table: WeatherAndStructure
+  columns:
+  - name: WEATHER_ID
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for the weather and structure record. PK.
+  - name: loc_link
+    type: VARCHAR
+    description: TEXT. Reference to the location. FK to Location.STATION_name.
+  - name: opmaint_link
+    type: BIGINT
+    description: BIGINT. Reference to the operation and maintenance record. FK to OperationMaintenance.OP_MAINT_ID.
+  - name: extTempC
+    type: FLOAT
+    description: 'REAL. External temperature in Celsius. Example: -14.9.
+
+
+      externaltemperaturec: Illustrates the significance of external temperature readings in polar environments.
+
+
+      External temperature in polar regions typically ranges from -70°C to 10°C. Temperatures below -40°C
+      represent extreme cold requiring special equipment protection measures, -20°C to -40°C require standard
+      cold weather protocols, while temperatures above -20°C are considered relatively mild for polar
+      operations but still require normal cold weather precautions.
+
+
+      Compiler note: Describes value ranges/zones for external temperature; matches WeatherAndStructure.extTempC
+      column.'
+  - name: windSpeed_ms
+    type: FLOAT
+    description: 'REAL. Wind speed in meters per second. Example: 26.5.
+
+
+      windspeedms: Illustrates the impact of wind speed measurements on operations and safety.
+
+
+      Wind speeds in polar environments typically range from 0 to 60 m/s. Speeds below 5 m/s represent
+      calm conditions, 5-15 m/s indicate moderate winds with minor operational impact, 15-25 m/s represent
+      strong winds requiring additional safety measures, and speeds above 25 m/s indicate dangerous conditions
+      that may require suspension of outdoor activities and securing of equipment.
+
+
+      Compiler note: Describes value ranges/interpretation of wind speed measurements, matching WeatherAndStructure.windSpeed_ms
+      column.'
+  - name: windDir_deg
+    type: FLOAT
+    description: 'REAL. Wind direction in degrees. **NULL means no wind direction data recorded.**. Example:
+      71.4.'
+  - name: baroPress_hpa
+    type: FLOAT
+    description: 'REAL. Barometric pressure in hectopascals. Example: 975.3.'
+  - name: solarRad_wm2
+    type: FLOAT
+    description: 'REAL. Solar radiation in watts per square meter. Example: 541.0.'
+  - name: snowDepth_cm
+    type: BIGINT
+    description: 'BIGINT. Snow depth in centimeters. Example: 143.6.'
+  - name: iceThick_cm
+    type: FLOAT
+    description: 'REAL. Ice thickness in centimeters. Example: 254.4.'
+  - name: visibility_km
+    type: FLOAT
+    description: 'REAL. Visibility in kilometers. Example: 42.8.'
+  - name: precipType
+    type: VARCHAR
+    description: 'TEXT. Type of precipitation (e.g., rain, snow). **NULL means no precipitation type recorded.**.
+      Possible values: Blowing Snow, Ice, Snow.'
+  - name: precipRate_mmh
+    type: FLOAT
+    description: 'REAL. Precipitation rate in millimeters per hour. Example: 2.4.'
+  - name: snowLoad_kgm2
+    type: BIGINT
+    description: 'BIGINT. Snow load in kilograms per square meter. Example: 459.7.'
+  - name: structLoadPct
+    type: FLOAT
+    description: 'REAL. Structural load percentage. Example: 62.'
+  - name: structIntegrityStat
+    type: VARCHAR
+    description: 'TEXT. Structural integrity status. **NULL means no structural integrity status recorded.**.
+      Possible values: Critical, Normal, Warning.'
+  - name: vibrLevel_mms2
+    type: FLOAT
+    description: 'REAL. Vibration level in millimeters squared. Example: 8.61.'
+  - name: noiseLevel_dB
+    type: FLOAT
+    description: 'REAL. Noise level in decibels. Example: 38.5.'

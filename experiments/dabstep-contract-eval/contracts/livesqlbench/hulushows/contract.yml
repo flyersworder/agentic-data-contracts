@@ -1,0 +1,66 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: hulushows, compiler: claudesonnet5
+# inputs: hulushows_kb.jsonl, hulushows_column_meaning_base.json, hulushows_schema.txt, hulushows.duckdb
+version: '1.0'
+name: livesqlbench-hulushows
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - availabilitys
+    - companies
+    - content_info
+    - core
+    - promo_info
+    - rollups
+    - show_rollups
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Boolean Value Variants: Indicates the diversity in how true/false values appear across fields.
+
+
+      Can appear as strings (''Yes'', ''No''), booleans (''TRUE'', ''FALSE''), or numerics (''1'', ''0'').
+
+
+      Compiler note: This describes a general phenomenon spanning multiple columns (e.g., companies.brandingassets.HasLogo_Flag,
+      availabilitys.accessflags.Movie_Flag) that each store booleans in varying formats, not a single
+      table/column.'
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

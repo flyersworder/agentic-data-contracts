@@ -1,0 +1,77 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: archeology_scan, compiler: claudesonnet5
+# inputs: archeology_scan_kb.jsonl, archeology_scan_column_meaning_base.json, archeology_scan_schema.txt, archeology_scan.duckdb
+version: '1.0'
+name: livesqlbench-archeology_scan
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - conservation
+    - environment
+    - equipment
+    - features
+    - mesh
+    - personnel
+    - pointcloud
+    - processing
+    - projects
+    - qualitycontrol
+    - registration
+    - scans
+    - sites
+    - spatial
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Registration Method: Illustrates different scan registration methodologies in archaeological documentation.
+
+
+      A categorization of alignment techniques with specific methodologies: ''ICP'' (Iterative Closest
+      Point algorithm for point cloud alignment), ''Target-based'' (alignment using physical reference
+      markers), ''Hybrid'' (combination of automatic and manual alignment), and ''SLAM'' (Simultaneous
+      Localization and Mapping for real-time registration). Each method has distinct accuracy characteristics
+      and use cases.
+
+
+      Compiler note: registration.reg_accuracy->>''Log_Method'' holds values Feature-based, Hybrid, Target-based
+      only; ICP and SLAM described in this entry do not appear in the data, so this entry does not match
+      any actual column''s value set.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

@@ -1,0 +1,1828 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: hulushows, compiler: claudesonnet5
+# inputs: hulushows_kb.jsonl, hulushows_column_meaning_base.json, hulushows_schema.txt, hulushows.duckdb
+metrics:
+- name: subscriber_only_content
+  description: 'Defines content that is not available in the free tier.
+
+
+    Content marked as only accessible to paying users is considered subscriber-only.
+
+
+    Compiler note: Subscriber_Only is stored as a boolean literal (true/false) in accessflags JSONB; cast
+    to boolean and check for true.'
+  sql_expression: (accessflags->>'Subscriber_Only')::boolean = TRUE
+  source_model: main.availabilitys
+  domains:
+  - definitions
+- name: html5_compatible_show
+  description: 'Denotes a show with HTML5 support for full episodes.
+
+
+    A show with more than 0 HTML5-compatible full episodes is HTML5 compatible.
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: H5_Episodes nested under html5metrics->html5_volumes; cast to numeric for comparison.'
+  sql_expression: (html5metrics->'html5_volumes'->>'H5_Episodes')::numeric > 0
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: unrated_media
+  description: 'Defines media that lacks an official rating.
+
+
+    Media is considered unrated when there is no official rating information available.
+
+
+    Compiler note: "Official rating information" is encoded as both TV_Rating and Peak_Rating fields in
+    ratinginfo; media is unrated when neither is present (both NULL). Checked data: TV_Rating is NULL
+    in sample rows while Peak_Rating often holds a value, so both fields are considered.'
+  sql_expression: (ratinginfo->>'TV_Rating') IS NULL AND (ratinginfo->>'Peak_Rating') IS NULL
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: franchise_group
+  description: 'Groups shows by shared franchise.
+
+
+    Content entries recognized as part of the same story world or universe are grouped together as a franchise.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a grouping action (grouping shows that share a series_id/franchise
+    into clusters), not a boolean predicate or scalar calculation over a single row. There's no yes/no
+    condition to encode - it defines how to partition content_key rows via core.series_id, which is a
+    GROUP BY operation, not a row-level predicate.
+- name: null_update_tag
+  description: 'Explains the implication of a missing update timestamp.
+
+
+    If there’s no recent update record, it means the content hasn’t received any new additions since it
+    first appeared.
+
+
+    Compiler note: Interprets ''no recent update record'' as latestadd being NULL, meaning the show has
+    received no additions since first appearing in that tier.'
+  sql_expression: latestadd IS NULL
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: long_running_series
+  description: 'Identifies series with significant longevity.
+
+
+    Any series that continues for 10 or more years or installments is considered long-running.
+
+
+    Compiler note: Interpreted "10 or more installments" as 10 or more content_key entries sharing the
+    same series_id, counted via correlated subquery on core. No year-span data exists to measure longevity
+    in calendar years, so installment count is the only encodable proxy.'
+  sql_expression: series_id IS NOT NULL AND (SELECT COUNT(*) FROM core c2 WHERE c2.series_id = core.series_id)
+    >= 10
+  source_model: main.core
+  domains:
+  - definitions
+- name: multi_tier_presence
+  description: 'Labels content appearing in multiple tiers.
+
+
+    If content is available in two or more distinct subscription tiers, it qualifies as multi-tier.
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Multi-tier presence is evaluated per content item (core.content_key) by counting the
+    distinct tierkeys (srlinks) in show_rollups linked to that content via srkeys. Content with 2 or more
+    distinct tiers qualifies as multi-tier.'
+  sql_expression: (SELECT COUNT(DISTINCT srlinks) FROM show_rollups WHERE srkeys = core.content_key) >=
+    2
+  source_model: main.core
+  domains:
+  - definitions
+- name: high_engagement_show
+  description: 'Represents shows with significant content volume.
+
+
+    If a show includes a very large number of episodes and extra video segments, it’s considered highly
+    engaging.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry defines "high engagement" only as "a very large number of episodes and extra
+    video segments" without specifying any numeric threshold or cutoff. Unlike other entries (e.g. Long-running
+    Series ">=10 years", Limited Series "<=10 installments"), no concrete bound is given here, and the
+    data does not force a unique choice of threshold (episode/clip counts range continuously, e.g. 90th
+    percentile episodes=264, clips=323, far from max of 747). Any cutoff would be an arbitrary guess not
+    stated by the entry, so this cannot be faithfully encoded.
+- name: showtime_exclusive
+  description: 'Indicates content only accessible to Showtime subscribers.
+
+
+    Content where the ''showtime-only'' flag is true is Showtime exclusive.
+
+
+    Built on: Movie Identifier Formats, Boolean Value Variants.
+
+
+    Compiler note: accessflags.Showtime_Only is stored as a proper boolean (observed values ''true''/''false''
+    as text representations of JSON booleans), so no additional normalization needed; condition checks
+    it equals true.'
+  sql_expression: (accessflags->>'Showtime_Only')::boolean = true
+  source_model: main.availabilitys
+  domains:
+  - definitions
+- name: canonical_rating_enumeration
+  description: 'Enumerates all known TV ratings for content classification.
+
+
+    The six recognized TV content ratings are TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry enumerates a fixed set of valid category values (the six TV rating labels),
+    not a computation or predicate over rows of a specific table.
+- name: html5_episode_ratio
+  description: 'Computes the share of HTML5 episodes relative to all episodes.
+
+
+    HER = \frac{\text{H5 Episodes}}{\text{Episodes Vol}}
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: HER computed per show_rollups row (per show per tier) as H5_Episodes / Ep_Vol, extracted
+    from the html5metrics.html5_volumes and contentvols.standard_content JSON paths respectively. No division-by-zero
+    guard added since not stated in entry.'
+  sql_expression: CAST((html5metrics->'html5_volumes'->>'H5_Episodes') AS NUMERIC) / CAST((contentvols->'standard_content'->>'Ep_Vol')
+    AS NUMERIC)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: content_size_index
+  description: 'Measures overall content size from video types.
+
+
+    CSI = \text{Episodes Vol} + \text{Film Clip Vol} + \text{Feature Vol} + \text{Game Vol} + \text{Film
+    Cli pVol} + \text{Trailer Vol}
+
+
+    Compiler note: CSI sums Episodes Vol, Clip Vol, Film Clip Vol, Feature Vol, Game Vol, and Trailer
+    Vol from contentvols->standard_content. The formula''s duplicate ''Film Clip Vol'' term is interpreted
+    as the distinct ''Clip_Vol'' field (vs ''FilmClip_Vol'') since both exist in the JSON schema, giving
+    six distinct volume components summed.'
+  sql_expression: COALESCE((contentvols->'standard_content'->>'Ep_Vol')::numeric,0) + COALESCE((contentvols->'standard_content'->>'Clip_Vol')::numeric,0)
+    + COALESCE((contentvols->'standard_content'->>'FilmClip_Vol')::numeric,0) + COALESCE((contentvols->'standard_content'->>'Feature_Vol')::numeric,0)
+    + COALESCE((contentvols->'standard_content'->>'Game_Vol')::numeric,0) + COALESCE((contentvols->'standard_content'->>'Trailer_Vol')::numeric,0)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: media_platform_compatibility_rate
+  description: 'Assesses platform compatibility for all media.
+
+
+    MPCR = \frac{\text{H5Media Total}}{\text{Media Total}}
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: MPCR computed per show_rollups row as H5_MediaTotal (html5metrics.html5_volumes.H5_MediaTotal)
+    divided by Media_Total (contentvols.standard_content.Media_Total).'
+  sql_expression: CAST(html5metrics->'html5_volumes'->>'H5_MediaTotal' AS DOUBLE) / CAST(contentvols->'standard_content'->>'Media_Total'
+    AS DOUBLE)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: season_to_episode_ratio
+  description: 'Computes average episodes per season.
+
+
+    SE_Ratio = \frac{\text{Episodes Vol}}{\text{Seasons Count}}
+
+
+    Compiler note: Episode_Total and Seasons_Total come from mediacounts->content_volumes. Guarded against
+    division by zero when Seasons_Total is 0.'
+  sql_expression: CASE WHEN (mediacounts->'content_volumes'->>'Seasons_Total')::numeric = 0 THEN NULL
+    ELSE (mediacounts->'content_volumes'->>'Episode_Total')::numeric / (mediacounts->'content_volumes'->>'Seasons_Total')::numeric
+    END
+  source_model: main.content_info
+  domains:
+  - calculations
+- name: unrated_share
+  description: 'Estimates the share of unrated content.
+
+
+    Unrated content share is calculated as the amount of unrated material divided by all available content.
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: Unrated Share computed per show_rollups row as ratinginfo.Unrated_Vol (count of unrated
+    media) divided by contentvols.standard_content.Media_Total (total media count), representing the share
+    of unrated content out of all available content for that show/tier. Division guarded against zero
+    denominator with NULLIF.'
+  sql_expression: CAST(ratinginfo->>'Unrated_Vol' AS NUMERIC) / NULLIF(CAST(contentvols->'standard_content'->>'Media_Total'
+    AS NUMERIC), 0)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: promotional_message_count
+  description: 'Counts the total promotional fields for a content entry.
+
+
+    PMC = The count of promotional messages is found by adding up all the filled-in promotional and availability
+    notes for a piece of content.
+
+
+    Compiler note: Counts non-null promotional/availability note fields (Alert_Note, Avail_Note, Promo_Note,
+    Expire_Note) across both free_tier and member_tier objects in tiernotices JSON, out of 8 possible
+    slots.'
+  sql_expression: '(CASE WHEN tiernotices->''free_tier''->>''Alert_Note'' IS NOT NULL THEN 1 ELSE 0 END)
+    +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Avail_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Promo_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Expire_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Alert_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Avail_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Promo_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Expire_Note'' IS NOT NULL THEN 1 ELSE 0 END)'
+  source_model: main.promo_info
+  domains:
+  - calculations
+- name: average_media_per_tier
+  description: 'Computes average number of media items across tiers.
+
+
+    AMT = \frac{\sum Media Total tier}{|Tiers|}
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Computed per show (srkeys) as the average of Media_Total across all tier rows (srlinks)
+    for that show, using a window function since source_model rows are per show-tier combination.'
+  sql_expression: AVG((contentvols->'standard_content'->>'Media_Total')::numeric) OVER (PARTITION BY srkeys)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: show_longevity_estimate
+  description: 'Estimates how long content has been on platform.
+
+
+    Longevity = How long content has been available is estimated by subtracting its release year from
+    the current year.
+
+
+    Built on: Cache Time Formats.
+
+
+    Compiler note: Used launchmoment as the proxy for release date since there is no dedicated release-year
+    column; checked that launchmoment values are consistently stored in ISO format ''YYYY-MM-DD'', so
+    the year is extracted from the first 4 characters and subtracted from the current year.'
+  sql_expression: EXTRACT(YEAR FROM CURRENT_DATE) - CAST(SUBSTRING(launchmoment, 1, 4) AS INTEGER)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: normalized_user_score
+  description: 'Scales user score to [0,1] range.
+
+
+    NUS = \frac{score - min}{max - min}
+
+
+    Built on: User Score Formats.
+
+
+    Compiler note: User_Score values in this dataset are all plain decimal strings (checked for currency/star/RTG
+    suffixes, none found), so cast directly to double. Min/max computed via scalar subqueries over core.genreclass->>''User_Score''.'
+  sql_expression: ((genreclass->>'User_Score')::double - (SELECT min((genreclass->>'User_Score')::double)
+    FROM core)) / ((SELECT max((genreclass->>'User_Score')::double) FROM core) - (SELECT min((genreclass->>'User_Score')::double)
+    FROM core))
+  source_model: main.core
+  domains:
+  - calculations
+- name: tier_distribution_ratio
+  description: 'Determines tier-specific share of media.
+
+
+    TDR = \frac{\text{Media Total}_{tier}}{\sum_{tier} Media Total tier}
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: TDR computed per (srkeys, srlinks) row: Media_Total of that tier divided by sum of
+    Media_Total across all tier rows (srlinks) sharing the same srkeys (show). Media_Total extracted from
+    contentvols->standard_content->>Media_Total, cast to numeric.'
+  sql_expression: (contentvols->'standard_content'->>'Media_Total')::numeric / (SELECT SUM((sr2.contentvols->'standard_content'->>'Media_Total')::numeric)
+    FROM show_rollups sr2 WHERE sr2.srkeys = show_rollups.srkeys)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: average_episode_rating_aer
+  description: 'Calculates the average user score for a show''s episodes.
+
+
+    AER = The average rating across all episodes of a show is calculated by taking all their ratings and
+    finding the mean.
+
+
+    Built on: User Score Formats.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database stores only a single User_Score per show (core.genreclass->>'User_Score');
+    there is no episode-level rating data anywhere in the schema to average over. AER as defined (mean
+    across a show's episodes) cannot be computed.
+- name: normalized_media_volume_nmv
+  description: 'Computes the normalized total media volume across different tiers.
+
+
+    NMV = The normalized media volume is found by dividing the total content amount by the total number
+    of parts or groupings, plus one.
+
+
+    Built on: High-Resolution Logo Flags, Movie Identifier Formats.
+
+
+    Compiler note: Interpreted "total content amount" as Media_Total and "number of parts or groupings"
+    as Season_Vol, both from contentvols->''standard_content'' per show_rollups row (per show per tier).
+    NMV = Media_Total / (Season_Vol + 1).'
+  sql_expression: (contentvols->'standard_content'->>'Media_Total')::numeric / ((contentvols->'standard_content'->>'Season_Vol')::numeric
+    + 1)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: studio_productivity_index_spi
+  description: 'Measures how productive a studio is based on the number of videos and seasons it produces.
+
+
+    SPI = The productivity of a studio is measured by dividing the number of videos it made by the number
+    of project groupings, plus one.
+
+
+    Built on: Movie Identifier Formats.
+
+
+    Compiler note: SPI computed per studio (companies row): sum of Videos_Total from content_info for
+    all shows linked via core.studiolink, divided by (count of those shows + 1). ''Number of project groupings''
+    interpreted as count of distinct content items (shows) linked to the studio.'
+  sql_expression: (SELECT SUM((ci.mediacounts->'content_volumes'->>'Videos_Total')::numeric) FROM core
+    c JOIN content_info ci ON c.content_key = ci.content_key WHERE c.studiolink = companies.entity_key)
+    / (CAST((SELECT COUNT(*) FROM core c WHERE c.studiolink = companies.entity_key) AS numeric) + 1)
+  source_model: main.companies
+  domains:
+  - calculations
+- name: high_res_branding_ratio_hbr
+  description: 'Measures the share of studios with high-resolution logos.
+
+
+    HBR = The share of studios using high-quality brand images is found by dividing the number that use
+    them by the total number of studios.
+
+
+    Built on: TV Rating Types.
+
+
+    Compiler note: HasLogo_Flag values observed in data are only ''True''/''False'' (no other noise variants
+    present); HBR computed as count of companies with HasLogo_Flag=''True'' divided by total companies.'
+  sql_expression: CAST(SUM(CASE WHEN brandingassets->>'HasLogo_Flag' = 'True' THEN 1 ELSE 0 END) AS DOUBLE)
+    / COUNT(*)
+  source_model: main.companies
+  domains:
+  - calculations
+- name: user_score_dispersion_usd
+  description: 'Calculates the variance of user scores for a show’s episodes.
+
+
+    USD = User score dispersion is the variance in episode ratings for a show.
+
+
+    Built on: User Score Formats.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database stores only a single User_Score per show (core.genreclass->>'User_Score');
+    there is no episode-level rating data to compute a variance across episodes of a show.
+- name: availability_entropy_score_aes
+  description: 'Calculates the entropy of availability types for a show.
+
+
+    AES = -\sum_{i=1}^{k} type_i \log type_i, where type_i is the proportion of availability tier i.
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Interpreted ''proportion of availability tier i'' as the share of a show''s Media_Total
+    that falls in tier i (contentvols->standard_content->Media_Total), analogous to Tier Distribution
+    Ratio (entry 29). Entropy computed as -sum(p_i * ln(p_i)) over all tier rows (srlinks) belonging to
+    the same srkeys as the current row, treating zero-proportion terms as 0. This yields the same AES
+    value for every tier-row of a given show, since the metric is defined per-show but the table is tier-row
+    granular.'
+  sql_expression: "(\n  WITH tier_vals AS (\n    SELECT sr2.srkeys AS k, CAST(sr2.contentvols->'standard_content'->>'Media_Total'\
+    \ AS DOUBLE) AS media_total\n    FROM show_rollups sr2\n    WHERE sr2.srkeys = show_rollups.srkeys\n\
+    \  ),\n  totals AS (\n    SELECT k, SUM(media_total) AS total_media\n    FROM tier_vals\n    GROUP\
+    \ BY k\n  )\n  SELECT -SUM(CASE WHEN tv.media_total > 0 AND t.total_media > 0 THEN (tv.media_total\
+    \ / t.total_media) * LN(tv.media_total / t.total_media) ELSE 0 END)\n  FROM tier_vals tv JOIN totals\
+    \ t ON tv.k = t.k\n)"
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: title_to_episode_ratio_ter
+  description: 'Ratio between content title length and episode volume.
+
+
+    TER = The ratio of the length of a show’s title to its total number of episodes, plus one.
+
+
+    Built on: User Score Formats.
+
+
+    Compiler note: TER = length(content_title) / (Episode_Total + 1), using content_info.mediacounts.content_volumes.Episode_Total
+    joined 1:1 by content_key.'
+  sql_expression: length(core.content_title)::numeric / (((SELECT mediacounts FROM content_info WHERE
+    content_info.content_key = core.content_key)->'content_volumes'->>'Episode_Total')::numeric + 1)
+  source_model: main.core
+  domains:
+  - calculations
+- name: premium_exclusivity_score_pes
+  description: 'Measures exclusivity of a show to premium access tiers.
+
+
+    PES = \frac{\text{Subscriber OnlyContent}}{\text{Total Content}}, based on access restrictions.
+
+
+    Built on: Subscription Tier Values, High-Resolution Logo Flags.
+
+
+    Compiler note: PES computed as the fraction of content items flagged Subscriber_Only=true (accessflags.Subscriber_Only,
+    boolean stored as text) out of all content items in availabilitys.'
+  sql_expression: CAST(SUM(CASE WHEN (accessflags->>'Subscriber_Only')::boolean THEN 1 ELSE 0 END) AS
+    DOUBLE) / COUNT(*)
+  source_model: main.availabilitys
+  domains:
+  - calculations
+- name: annotated_content_ratio_acr
+  description: 'Proportion of content items with non-empty annotation fields.
+
+
+    ACR = The share of content items that include extra notes or descriptions.
+
+
+    Built on: Content Type Labels.
+
+
+    Compiler note: ACR computed as the fraction of core rows whose annotations field is non-null and non-blank
+    (checked that all non-null values are non-empty strings in this data) out of all rows.'
+  sql_expression: CAST(COUNT(*) FILTER (WHERE annotations IS NOT NULL AND trim(annotations) <> '') AS
+    DOUBLE) / COUNT(*)
+  source_model: main.core
+  domains:
+  - calculations
+- name: multi_genre_spread_score_mgss
+  description: 'Captures how many hierarchical and hybrid genres a show spans.
+
+
+    MGSS = Multi-genre spread is measured by the number of ways genres are split or combined in a show.
+
+
+    Built on: Content Type Labels.
+
+
+    Compiler note: MGSS measures the number of ways genres are split (''~'') or combined (''|'') in a
+    show''s Hierarchical_Genres string, computed as the total count of ''~'' and ''|'' delimiter characters
+    present. Returns NULL when Hierarchical_Genres is NULL.'
+  sql_expression: (LENGTH(genreclass->>'Hierarchical_Genres') - LENGTH(REPLACE(genreclass->>'Hierarchical_Genres',
+    '~', ''))) + (LENGTH(genreclass->>'Hierarchical_Genres') - LENGTH(REPLACE(genreclass->>'Hierarchical_Genres',
+    '|', '')))
+  source_model: main.core
+  domains:
+  - calculations
+- name: limited_series
+  description: 'Defines content with very few seasons, often a single story arc.
+
+
+    If a show consists of only a single part and no more than ten installments, it''s called a limited
+    series.
+
+
+    Built on: User Score Formats, Movie Identifier Formats.
+
+
+    Compiler note: Interpreted "single part" as Seasons_Total = 1 and "no more than ten installments"
+    as Episode_Total <= 10, both from content_info.mediacounts.content_volumes.'
+  sql_expression: (mediacounts->'content_volumes'->>'Seasons_Total')::int = 1 AND (mediacounts->'content_volumes'->>'Episode_Total')::int
+    <= 10
+  source_model: main.content_info
+  domains:
+  - definitions
+- name: multitier_syndicated_show
+  description: 'Identifies content available across multiple subscription tiers.
+
+
+    If a show is made available in three or more distinct access groups, it''s considered multi-tier.
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Counts distinct tier keys (srlinks, referencing rollups.tierkey/tiertype access groups)
+    per show (srkeys) via correlated subquery; multi-tier if show appears in 3 or more distinct tiers.'
+  sql_expression: (SELECT COUNT(DISTINCT sr2.srlinks) FROM show_rollups sr2 WHERE sr2.srkeys = show_rollups.srkeys)
+    >= 3
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: premium_access_content
+  description: 'Refers to shows exclusively available to paying subscribers or special access tiers.
+
+
+    Defined as content with is subscriber_only = TRUE or available only on Showtime tiers.
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Subscriber_Only and Showtime_Only are boolean-valued JSON fields in accessflags (observed
+    as true/false); cast to boolean and combined with OR per definition.'
+  sql_expression: (accessflags->>'Subscriber_Only')::boolean = TRUE OR (accessflags->>'Showtime_Only')::boolean
+    = TRUE
+  source_model: main.availabilitys
+  domains:
+  - definitions
+- name: iconic_comedy_brands
+  description: 'Identifies production companies that created multiple top-rated comedy shows.
+
+
+    A studio is considered iconic for comedy if it has created at least three highly-rated comedy shows.
+
+
+    Built on: Content Type Labels, average_episode_rating_aer.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry requires classifying shows as "highly-rated" and "comedy", then counting per
+    studio whether a company produced at least 3 such shows. No threshold or definition for "highly-rated"
+    (e.g. a User_Score cutoff) is given anywhere in the documentation or schema, so the condition cannot
+    be evaluated. Additionally, this is an aggregate (count of qualifying shows per studio across the
+    core table), not a per-row boolean predicate expressible as a single WHERE condition over one row
+    of a table without an undefined threshold.
+- name: highly_diversified_show
+  description: 'Indicates a show that spans multiple genre branches.
+
+
+    If a show’s genres span many different types and combinations, it’s highly diversified.
+
+
+    Built on: multi_genre_spread_score_mgss.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry only vaguely states a show is "highly diversified" if its genres "span many
+    different types and combinations" (per MGSS), but gives no numeric threshold for "many". The MGSS
+    distribution over core ranges from 0 to 6 with no natural cutoff indicated by the text, so the boolean
+    condition cannot be determined without guessing an arbitrary threshold.
+- name: studio_brand_consistency
+  description: 'Identifies studios that consistently apply high-resolution logos across all their shows.
+
+
+    Studios with HBR = 1 are said to maintain brand consistency.
+
+
+    Built on: high_res_branding_ratio_hbr.
+
+
+    Compiler note: Companies table has one brandingassets record per studio (no per-show logo data), so
+    HBR for a studio reduces to whether its single HasLogo_Flag is true. Checked distinct values: only
+    ''True''/''False'' occur (no other noise variants in this table), so HBR=1 (brand consistency) corresponds
+    exactly to HasLogo_Flag = ''True''.'
+  sql_expression: brandingassets->>'HasLogo_Flag' = 'True'
+  source_model: main.companies
+  domains:
+  - definitions
+- name: genre_enumeration_animation_families
+  description: 'Defines a group of genre types frequently used for animation-targeted family content.
+
+
+    Includes ''Animation and Cartoons'', ''Primetime Animation'', ''Teen'', ''Comedy'', ''Sitcoms''.
+
+
+    Compiler note: Encoded as a predicate flagging rows whose Primary_Genre matches one of the five listed
+    animation-family genre labels, or whose Hierarchical_Genres string (which uses ''~'' and ''|'' delimiters
+    per the genre hierarchy format, confirmed via sample data) contains any of those labels as a substring,
+    since the definition is a set-membership rule over the genre fields rather than a single-column equality.
+    Each genreclass->>''...'' extraction needed explicit parentheses to avoid a DuckDB JSON-cast parsing
+    issue when combined with multiple ORs.'
+  sql_expression: (genreclass->>'Primary_Genre') IN ('Animation and Cartoons', 'Primetime Animation',
+    'Teen', 'Comedy', 'Sitcoms') OR (genreclass->>'Hierarchical_Genres') ILIKE '%Animation and Cartoons%'
+    OR (genreclass->>'Hierarchical_Genres') ILIKE '%Primetime Animation%' OR (genreclass->>'Hierarchical_Genres')
+    ILIKE '%Teen%' OR (genreclass->>'Hierarchical_Genres') ILIKE '%Comedy%' OR (genreclass->>'Hierarchical_Genres')
+    ILIKE '%Sitcoms%'
+  source_model: main.core
+  domains:
+  - definitions
+- name: empty_clip_bucket_indicator
+  description: 'Highlights content with no associated clips but existing full episodes.
+
+
+    Shows where Film Clips Count = 0 and Episodes Vol > 0 indicate a ''clip bucket empty'' status.
+
+
+    Built on: User Score Formats.
+
+
+    Compiler note: Used content_info.mediacounts.content_volumes.Film_Clips as ''Film Clips Count'' and
+    Episode_Total as ''Episodes Vol'', both cast from text to integer; condition is Film_Clips = 0 and
+    Episode_Total > 0.'
+  sql_expression: CAST(mediacounts->'content_volumes'->>'Film_Clips' AS INTEGER) = 0 AND CAST(mediacounts->'content_volumes'->>'Episode_Total'
+    AS INTEGER) > 0
+  source_model: main.content_info
+  domains:
+  - definitions
+- name: missing_launch_moment
+  description: 'A meaningful missing value indicating legacy or untracked rollup entries.
+
+
+    If Launch Moment is NULL while Media Total > 0, the show is considered legacy-uploaded.
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: Media Total extracted from contentvols->standard_content->Media_Total, cast to numeric
+    for comparison; Launch Moment is launchmoment column.'
+  sql_expression: launchmoment IS NULL AND (contentvols->'standard_content'->>'Media_Total')::numeric
+    > 0
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: underutilized_franchise
+  description: 'Defines a franchise ID that has multiple content entries but low total media output.
+
+
+    Franchises with ≥ 3 content items and aggregate Media Total < 10 are underutilized.
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: Franchise grouping uses core.series_id. Media Total per content item is taken as the
+    max across its tiers (show_rollups.contentvols->standard_content->Media_Total), since it varies by
+    tier; these per-content maxima are summed across all content sharing the series_id to get aggregate
+    franchise media total. Underutilized = series_id has >=3 distinct content_keys and aggregate media
+    total < 10.'
+  sql_expression: series_id IS NOT NULL AND (SELECT count(DISTINCT c2.content_key) FROM core c2 WHERE
+    c2.series_id = core.series_id) >= 3 AND (SELECT sum(mt.media_total) FROM (SELECT sr.srkeys, max((sr.contentvols->'standard_content'->>'Media_Total')::numeric)
+    AS media_total FROM show_rollups sr JOIN core c3 ON c3.content_key = sr.srkeys WHERE c3.series_id
+    = core.series_id GROUP BY sr.srkeys) mt) < 10
+  source_model: main.core
+  domains:
+  - definitions
+- name: genre_fragmentation_index_gfi
+  description: 'Quantifies the complexity of genre categorization using delimiter count.
+
+
+    GFI = \frac{\text{Number of genre tokens}}{1 + \text{Number of ''~'' or ''|'' delimiters}}, using
+    the way genres are split or grouped into subtypes and alternatives
+
+
+    Built on: Genre Hierarchy Format.
+
+
+    Compiler note: Hierarchical_Genres uses ''~'' for sub-genres and ''|'' for alternatives (e.g. ''Comedy~Sitcoms|Teen'').
+    Number of genre tokens = count of elements when splitting on either delimiter (regexp_split_to_array
+    on ''[~|]''); number of delimiters = total count of ''~'' and ''|'' characters, computed via length
+    difference after stripping them. GFI = tokens / (1 + delimiters). NULL Hierarchical_Genres yields
+    NULL.'
+  sql_expression: CAST(array_length(regexp_split_to_array(genreclass->>'Hierarchical_Genres', '[~|]'),
+    1) AS DOUBLE) / (1 + (length(genreclass->>'Hierarchical_Genres') - length(replace(replace(genreclass->>'Hierarchical_Genres',
+    '~', ''), '|', ''))))
+  source_model: main.core
+  domains:
+  - calculations
+- name: tier_normalized_media_load_tnml
+  description: 'Calculates average media volume per available tier.
+
+
+    TNML = \frac{\text{Total Media Volume}}{\text{Number of Availability Tiers}}, where tiers are determined
+    by content access grouping.
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: TNML computed per show (srkeys) as total Media_Total across all tier rows for that
+    show divided by the number of tier rows (distinct srlinks) for that show, using a window function
+    partitioned by srkeys over show_rollups.'
+  sql_expression: SUM((contentvols->'standard_content'->>'Media_Total')::numeric) OVER (PARTITION BY srkeys)
+    / COUNT(*) OVER (PARTITION BY srkeys)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: high_resolution_utilization_rate_hrur
+  description: 'Measures how effectively high-res logos are used relative to movie content.
+
+
+    HRUR = \frac{\text{HighResLogos for Movies}}{\text{Total Movies}}, based on the presence of high-quality
+    logo indicators and labels showing whether content is a movie
+
+
+    Built on: TV Rating Types, Subscription Tier Values.
+
+
+    Compiler note: HRUR links availabilitys.accessflags.Movie_Flag (movie indicator, normalized case-insensitively
+    to true/y/movie) to the studio''s companies.brandingassets.HasLogo_Flag via core.studiolink, since
+    high-res logo is a company-level attribute, not a content-level one. Checked actual data: accessflags->>''Movie_Flag''
+    in this dataset only takes value ''no'' for all 1000 rows, so no movies exist and this ratio evaluates
+    to NULL (0/0) over current data, but the expression is correctly structured per the documented logic.'
+  sql_expression: CAST(SUM(CASE WHEN lower(accessflags->>'Movie_Flag') IN ('true','y','movie') AND lower((SELECT
+    c2.brandingassets->>'HasLogo_Flag' FROM core c JOIN companies c2 ON c2.entity_key = c.studiolink WHERE
+    c.content_key = availabilitys.content_key)) = 'true' THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(SUM(CASE
+    WHEN lower(accessflags->>'Movie_Flag') IN ('true','y','movie') THEN 1 ELSE 0 END), 0)
+  source_model: main.availabilitys
+  domains:
+  - calculations
+- name: rating_diversity_score_rds
+  description: 'Evaluates the variance of TV ratings within a franchise.
+
+
+    RDS = stddev(Rating) across all content within a Franchise Group, by checking the different rating
+    categories assigned within the same franchise
+
+
+    Built on: User Score Formats.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: TV ratings (e.g. 'TV-14', 'TV-MA') are categorical labels, not numeric values, so a standard
+    deviation cannot be computed over them. There is no defined numeric mapping for rating categories
+    in the schema, so RDS cannot be encoded as a SQL expression.
+- name: boolean_value_redundancy_rate_bvrr
+  description: 'Estimates how many redundant encodings of booleans are present.
+
+
+    BVRR = \frac{\text{Unique Representations}}{\text{Total Boolean Fields}}, by comparing the variety
+    of true/false indicators used
+
+
+    Built on: Boolean Value Variants.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: BVRR requires enumerating the distinct string/boolean/numeric representations used to
+    encode true/false across multiple unrelated boolean-valued fields (e.g. HasLogo_Flag, Movie_Flag,
+    Showtime_Only, etc.) and comparing that count to the total number of boolean fields. This is a meta-analysis
+    of encoding diversity across many columns/tables, not a row-level SQL expression over a single source_model
+    table.
+- name: unrated_proportion_per_tier_upt
+  description: 'Computes the share of unrated media for each access tier.
+
+
+    UPT = \frac{\text{Unrated Vol}_{tier}}{\text{Media Total}_{tier}}, using the standard set of content
+    ratings and grouping by access level
+
+
+    Built on: High-Resolution Logo Flags, tier_distribution_ratio.
+
+
+    Compiler note: UPT computed per show_rollups row (which already represents a show-tier pair, srlinks
+    being the tier key): Unrated_Vol from ratinginfo divided by Media_Total from contentvols.standard_content.'
+  sql_expression: (ratinginfo->>'Unrated_Vol')::numeric / (contentvols->'standard_content'->>'Media_Total')::numeric
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: clip_to_feature_ratio_cfr
+  description: 'Compares short-form clips to long-form feature content.
+
+
+    CFR = \frac{\text{Film Clip Vol}}{\text{Feature Vol}}, both contributing to the total size of content
+    available
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: CFR = FilmClip_Vol / Feature_Vol, both from contentvols->standard_content JSON path.
+    Cast to DOUBLE for division; NULLIF guards against division by zero when Feature_Vol = 0 (common in
+    data).'
+  sql_expression: CAST(contentvols->'standard_content'->>'FilmClip_Vol' AS DOUBLE) / NULLIF(CAST(contentvols->'standard_content'->>'Feature_Vol'
+    AS DOUBLE), 0)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: temporal_staleness_index_tsi
+  description: 'Measures how long it''s been since a show was last updated.
+
+
+    TSI = \text{Current Date} - \text{Latest Update Date}, where lack of a recent update means the content
+    is considered unchanged
+
+
+    Built on: null_update_tag.
+
+
+    Compiler note: latestadd stored as text in M/D/YYYY format; parsed with strptime to DATE and subtracted
+    from CURRENT_DATE to get day count since last update. Rows with NULL latestadd (no recent update)
+    yield NULL, consistent with null_update_tag.'
+  sql_expression: CURRENT_DATE - strptime(latestadd, '%m/%d/%Y')::DATE
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: trailer_coverage_ratio_tcr
+  description: 'Proportion of content entries that include trailers.
+
+
+    TCR = \frac{\text{Trailer Vol}}{\text{Total Content Items}}, indicating marketing completeness.
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: Computed as a single aggregate over the whole table: total trailer volume (summed from
+    contentvols.standard_content.Trailer_Vol across all tier rows) divided by the count of distinct content
+    items (srkeys), representing average trailer coverage per content item.'
+  sql_expression: SUM((contentvols->'standard_content'->>'Trailer_Vol')::numeric) / COUNT(DISTINCT srkeys)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: html5_depth_index_hdi
+  description: 'Quantifies HTML5 support by combining media type counts.
+
+
+    HDI = H5 Clips + H5 Episodes + H5 Trailers + H5 Games, by adding up the number of HTML5-compatible
+    video types
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: HDI sums H5_Clips, H5_Episodes, H5_Trailers, H5_Games from html5metrics->''html5_volumes''
+    JSON fields on show_rollups, one row per show/tier.'
+  sql_expression: (html5metrics->'html5_volumes'->>'H5_Clips')::numeric + (html5metrics->'html5_volumes'->>'H5_Episodes')::numeric
+    + (html5metrics->'html5_volumes'->>'H5_Trailers')::numeric + (html5metrics->'html5_volumes'->>'H5_Games')::numeric
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: single_platform_dependency
+  description: 'Labels content that only supports HTML5 media types.
+
+
+    Content is considered single-platform dependent if all available content is playable in HTML5 format
+
+
+    Built on: HTML5 Media Metrics.
+
+
+    Compiler note: Interpreted "all available content is playable in HTML5 format" as total standard media
+    volume equals total HTML5 media volume for a given show/tier row (contentvols.standard_content.Media_Total
+    == html5metrics.html5_volumes.H5_MediaTotal), confirmed both fields exist and vary row to row.'
+  sql_expression: (contentvols->'standard_content'->>'Media_Total')::numeric = (html5metrics->'html5_volumes'->>'H5_MediaTotal')::numeric
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: redundant_boolean_format
+  description: 'Flags fields that store boolean values in multiple redundant encodings.
+
+
+    Identified by BVRR > threshold, by checking for repeated ways of marking true or false values
+
+
+    Built on: Boolean Value Variants.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric requires computing BVRR (ratio of unique boolean encodings to total boolean
+    fields) across multiple columns/fields of the schema and comparing to an unspecified threshold. It
+    is a schema-level aggregate analysis, not a row-level boolean predicate over a single table, and the
+    threshold value is not defined anywhere in the documentation.
+- name: fragmented_genre_definition
+  description: 'Labels shows with complex or ambiguous genre hierarchy.
+
+
+    Shows are considered fragmented if the number of types and subtypes listed for the show is high
+
+
+    Built on: Genre Hierarchy Format.
+
+
+    Compiler note: Interpreted "number of types and subtypes" as the count of genre tokens obtained by
+    splitting Hierarchical_Genres on both ''~'' (sub-genre) and ''|'' (alternative) delimiters. The entry''s
+    "high" threshold is not numerically specified, so I derived it from the data: token counts across
+    shows range 1-7 with the 75th percentile at 4, so "fragmented" is defined as token_count > 4 (i.e.,
+    top quartile of genre complexity). Rows with NULL Hierarchical_Genres yield NULL (treated as not fragmented).'
+  sql_expression: array_length(string_to_array(replace(genreclass->>'Hierarchical_Genres', '|', '~'),
+    '~'), 1) > 4
+  source_model: main.core
+  domains:
+  - definitions
+- name: incomplete_high_engagement_title
+  description: 'Titles with high content volume but missing key annotations.
+
+
+    Defined by high Content Size Index and ACR < 0.5.
+
+
+    Built on: High-Resolution Logo Flags, annotated_content_ratio_acr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This definition mixes two things that cannot both be expressed as a single per-row boolean
+    predicate. ACR (Annotated Content Ratio) is defined as an aggregate ratio over the entire core table
+    (COUNT filtered / COUNT), i.e. a single scalar for the whole dataset, not a per-row quantity that
+    can vary per content item or be compared row-by-row. There's no definition tying ACR to an individual
+    title (e.g. no "per-studio" or "per-franchise" ACR). Additionally, "high Content Size Index" gives
+    no numeric threshold anywhere in the documentation, so "high" cannot be translated into a concrete
+    comparison. Since one of the two required conditions (ACR < 0.5) is a dataset-wide aggregate rather
+    than a row-level predicate, and the other ("high" CSI) has no defined cutoff, this cannot be encoded
+    as `SELECT * FROM table WHERE <predicate>`.
+- name: tier_specific_content_gaps
+  description: 'Highlights tiers with significantly lower media volume.
+
+
+    Tiers where normalized content amount is less than a given threshold are considered to have content
+    gaps.
+
+
+    Built on: normalized_media_volume_nmv.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on "a given threshold" that is never specified numerically anywhere
+    in the documentation or data. Without a concrete threshold value, the condition "normalized content
+    amount is less than a given threshold" cannot be encoded as a definite SQL predicate.
+- name: legacy_title_indicator
+  description: 'Flags older shows that lack launch timestamps.
+
+
+    Shows are considered legacy if there is no launch date and the content hasn’t been updated for a long
+    time
+
+
+    Built on: null_update_tag.
+
+
+    Compiler note: Encoded "no launch date" as launchmoment IS NULL, and "hasn''t been updated for a long
+    time" using the null_update_tag definition (latestadd IS NULL = no updates since first appeared),
+    since no duration/date-diff data is available to measure staleness directly.'
+  sql_expression: launchmoment IS NULL AND latestadd IS NULL
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: rating_inconsistency_in_franchise
+  description: 'Detects franchises with significant rating inconsistency.
+
+
+    Franchise Groups where the range of rating types is very wide are labeled inconsistent
+
+
+    Built on: User Score Formats.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires computing a "range" of TV rating types within a franchise and labeling
+    it "very wide". TV ratings (TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA) are categorical text values with
+    no numeric ordering defined in the schema, so a "range" cannot be computed, and no threshold for "very
+    wide" is given. Cannot be encoded as a boolean predicate over the data.
+- name: trailer_deficient_feature
+  description: 'Content with features but no accompanying trailer.
+
+
+    A show is trailer-deficient if it has many main episodes but no trailers
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: "Many main episodes" is not numerically defined in the documentation; used the 75th
+    percentile of Ep_Vol (~110, rounded to 100) across show_rollups as the threshold for ''many'', combined
+    with Trailer_Vol = 0 for ''no trailers''.'
+  sql_expression: (contentvols->'standard_content'->>'Trailer_Vol')::int = 0 AND (contentvols->'standard_content'->>'Ep_Vol')::int
+    > 100
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: over_fragmented_offering_68
+  description: 'Indicates a show spread across too many short-form genres.
+
+
+    A show is over-fragmented if the number of short-form genre categories and content types exceeds a
+    given threshold
+
+
+    Built on: Genre Hierarchy Format.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition says a show is over-fragmented if its count of short-form genre categories/content
+    types "exceeds a given threshold" but no concrete threshold value is specified anywhere in this entry
+    (unlike the similarly-named entry [71] which gives a concrete rule of >6 nested genres and clip>feature
+    volume). Without a defined numeric threshold this cannot be turned into a SQL boolean condition.
+- name: high_visibility_empty_bucket
+  description: 'Popular show with missing clip or trailer materials.
+
+
+    A show is highly rated but has no extra video segments or trailers
+
+
+    Built on: average_episode_rating_aer, High-Resolution Logo Flags.
+
+
+    Compiler note: "Highly rated" interpreted using the High band threshold (>4.2) from the Episode Rating
+    Band entry, applied to core.genreclass->>''User_Score'' (verified numeric and clean, no noisy formats
+    present in data) via scalar subquery on content_key=srkeys. "Extra video segments or trailers" interpreted
+    as Clip_Vol and Trailer_Vol in show_rollups.contentvols->standard_content, both required to be zero
+    (treating NULL as 0).'
+  sql_expression: CAST((SELECT genreclass->>'User_Score' FROM core WHERE core.content_key = show_rollups.srkeys)
+    AS DOUBLE PRECISION) > 4.2 AND COALESCE((contentvols->'standard_content'->>'Clip_Vol')::numeric, 0)
+    = 0 AND COALESCE((contentvols->'standard_content'->>'Trailer_Vol')::numeric, 0) = 0
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: highly_rated_but_visually_empty
+  description: 'Finds the top-rated show among those missing both trailers and clips.
+
+
+    Among top-rated shows, find those missing both trailers and extra video segments
+
+
+    Built on: High-Resolution Logo Flags, average_episode_rating_aer.
+
+
+    Compiler note: "Missing clips" encoded as Film_Clips=0 AND Clips_Total=0 (content_info.mediacounts);
+    "missing trailers" encoded as sum of Trailer_Vol across all show_rollups tiers for the show = 0 (treating
+    no rows as 0 via COALESCE). "Top-rated" encoded as having the maximum core.genreclass->>''User_Score''
+    (cast to numeric, verified clean numeric format in data) among all shows satisfying the missing-clips-and-trailers
+    condition. Multiple shows can tie for max score (verified e.g. several ''Vikings'' entries tie at
+    4.783), so predicate may select more than one row.'
+  sql_expression: "(SELECT (ci.mediacounts->'content_volumes'->>'Film_Clips')::numeric FROM content_info\
+    \ ci WHERE ci.content_key = core.content_key) = 0\nAND (SELECT (ci.mediacounts->'content_volumes'->>'Clips_Total')::numeric\
+    \ FROM content_info ci WHERE ci.content_key = core.content_key) = 0\nAND COALESCE((SELECT SUM((sr.contentvols->'standard_content'->>'Trailer_Vol')::numeric)\
+    \ FROM show_rollups sr WHERE sr.srkeys = core.content_key), 0) = 0\nAND (core.genreclass->>'User_Score')::numeric\
+    \ = (\n  SELECT MAX((c2.genreclass->>'User_Score')::numeric)\n  FROM core c2\n  JOIN content_info\
+    \ ci2 ON ci2.content_key = c2.content_key\n  WHERE (ci2.mediacounts->'content_volumes'->>'Film_Clips')::numeric\
+    \ = 0\n    AND (ci2.mediacounts->'content_volumes'->>'Clips_Total')::numeric = 0\n    AND COALESCE((SELECT\
+    \ SUM((sr2.contentvols->'standard_content'->>'Trailer_Vol')::numeric) FROM show_rollups sr2 WHERE\
+    \ sr2.srkeys = c2.content_key), 0) = 0\n)"
+  source_model: main.core
+  domains:
+  - definitions
+- name: over_fragmented_offering_71
+  description: 'Indicates a show spread across too many short-form genres.
+
+
+    A show is considered over-fragmented if it is associated with more than six nested genre categories
+    and the quantity of its short-form video assets exceeds that of its long-form feature content.
+
+
+    Compiler note: Nested genre categories counted as tokens of Hierarchical_Genres split on both ''~''
+    and ''|'' delimiters (per Genre Hierarchy Format doc). Short-form video assets = Clips_Total + Film_Clips
+    from mediacounts.content_volumes; long-form = Feature_Films. core.content_key 1:1 join with content_info.content_key
+    verified via PK/FK.'
+  sql_expression: "(SELECT array_length(regexp_split_to_array(c.genreclass->>'Hierarchical_Genres', '[~|]'),\
+    \ 1) FROM core c WHERE c.content_key = content_info.content_key) > 6\nAND (COALESCE((content_info.mediacounts->'content_volumes'->>'Clips_Total')::numeric,\
+    \ 0) + COALESCE((content_info.mediacounts->'content_volumes'->>'Film_Clips')::numeric, 0))\n    >\
+    \ COALESCE((content_info.mediacounts->'content_volumes'->>'Feature_Films')::numeric, 0)"
+  source_model: main.content_info
+  domains:
+  - definitions
+- name: franchise_engagement_summary
+  description: 'Summarizes engagement statistics across franchises by grouping shows with shared series
+    identifiers.
+
+
+    For each franchise group, compute the number of shows and the total episode count by summing up values
+    across all entries that share the same franchise.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a grouped aggregation (count of shows and sum of episode counts per
+    series_id/franchise group), not a per-row boolean predicate or scalar expression. It requires a GROUP
+    BY query returning one row per franchise, which doesn't fit the required format of a single boolean/scalar
+    expression evaluated per row of one source table.
+- name: syndicated_franchise_engagement
+  description: 'Identifies popular franchises that span across multiple availability tiers.
+
+
+    Franchises that have at least 3 shows and are available in 3 or more unique subscription tiers.
+
+
+    Built on: Subscription Tier Values.
+
+
+    Compiler note: Franchise = core.series_id. Show count per franchise is distinct content_key count
+    within same series_id; tier count per franchise is distinct srlinks (rollups.tierkey) across show_rollups
+    rows for all content_keys sharing that series_id. Flags rows (shows) belonging to franchises meeting
+    both thresholds (>=3 shows, >=3 distinct tiers).'
+  sql_expression: "series_id IS NOT NULL\n  AND (SELECT COUNT(DISTINCT c2.content_key) FROM core c2 WHERE\
+    \ c2.series_id = core.series_id) >= 3\n  AND (SELECT COUNT(DISTINCT sr.srlinks) FROM show_rollups\
+    \ sr JOIN core c3 ON sr.srkeys = c3.content_key WHERE c3.series_id = core.series_id) >= 3"
+  source_model: main.core
+  domains:
+  - definitions
+- name: content_volume_level_classification
+  description: 'Classifies shows into tiers based on total video volume.
+
+
+    If videos total > 500 then ''High''; if between 200 and 500 then ''Medium''; otherwise ''Low''.
+
+
+    Compiler note: Videos_Total extracted from mediacounts->content_volumes->Videos_Total, cast to numeric.
+    Classified as High (>500), Medium (200-500 inclusive), Low (otherwise, including NULL falls into ELSE/Low
+    since comparison with NULL is unknown).'
+  sql_expression: CASE WHEN (mediacounts->'content_volumes'->>'Videos_Total')::numeric > 500 THEN 'High'
+    WHEN (mediacounts->'content_volumes'->>'Videos_Total')::numeric BETWEEN 200 AND 500 THEN 'Medium'
+    ELSE 'Low' END
+  source_model: main.content_info
+  domains:
+  - calculations
+- name: multi_tier_syndication
+  description: 'Identifies shows that are distributed across multiple availability tiers.
+
+
+    A show is considered ''multi-tier'' if it appears in at least three different viewing plans, like
+    free, basic, and premium.
+
+
+    Compiler note: Counts distinct tier keys (srlinks) associated with the same show (srkeys) via a scalar
+    subquery; a show is multi-tier if it appears in 3 or more distinct tiers.'
+  sql_expression: (SELECT COUNT(DISTINCT sr2.srlinks) FROM show_rollups sr2 WHERE sr2.srkeys = show_rollups.srkeys)
+    >= 3
+  source_model: main.show_rollups
+  domains:
+  - definitions
+- name: peak_media_load
+  description: 'Identifies shows with heavy media volume by selecting the larger of trailer or feature
+    content.
+
+
+    For each show, we check the sizes of both its trailers and full episodes, and pick whichever is bigger
+    to represent its media load.
+
+
+    Built on: trailer_deficient_feature.
+
+
+    Compiler note: Despite the title mentioning ''trailer or feature content'', the description text clarifies
+    the comparison is between trailer volume and episode volume (''sizes of both its trailers and full
+    episodes''); encoded as GREATEST of Trailer_Vol and Ep_Vol from contentvols.standard_content per tier
+    row.'
+  sql_expression: GREATEST((contentvols->'standard_content'->>'Trailer_Vol')::int, (contentvols->'standard_content'->>'Ep_Vol')::int)
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: episode_rating_band
+  description: 'Groups shows into bands like Low, Medium, and High based on average episode ratings.
+
+
+    We calculate the average user rating across all episodes in a show, and sort it into one of three
+    categories: Low (under 3.5), Medium (3.5 to 4.2), or High (above 4.2).
+
+
+    Built on: high_visibility_empty_bucket.
+
+
+    Compiler note: No per-episode rating data exists; genreclass.User_Score is the only available rating
+    field (one value per show, stored as plain decimal strings in this data), used as proxy for ''average
+    episode rating''. Bands: <3.5 Low, 3.5-4.2 Medium, >4.2 High.'
+  sql_expression: CASE WHEN (genreclass->>'User_Score')::double precision < 3.5 THEN 'Low' WHEN (genreclass->>'User_Score')::double
+    precision <= 4.2 THEN 'Medium' ELSE 'High' END
+  source_model: main.core
+  domains:
+  - calculations
+- name: clip_availability_flag
+  description: 'Flags shows based on whether they contain any film clip content.
+
+
+    If a show includes at least one film clip, it’s marked as ''Has Clips''; if it doesn’t, it’s marked
+    as ''No Clips''.
+
+
+    Built on: High-Resolution Logo Flags.
+
+
+    Compiler note: Film_Clips count found at mediacounts->content_volumes->Film_Clips; treated NULL as
+    0 (no clips).'
+  sql_expression: CASE WHEN COALESCE((mediacounts->'content_volumes'->>'Film_Clips')::numeric, 0) > 0
+    THEN 'Has Clips' ELSE 'No Clips' END
+  source_model: main.content_info
+  domains:
+  - definitions
+- name: promotional_intensity_summary
+  description: 'Summarizes the number of promotional notes available for each content across all tiers.
+
+
+    We check each show or movie for various promo message types—like availability, promotions, alerts,
+    or expirations—and count how many of them are actually filled in.
+
+
+    Compiler note: Counts non-null promo note fields (Alert_Note, Avail_Note, Promo_Note, Expire_Note)
+    across both free_tier and member_tier JSON objects in tiernotices, out of 8 possible slots, per content
+    item.'
+  sql_expression: '(CASE WHEN tiernotices->''free_tier''->>''Alert_Note'' IS NOT NULL THEN 1 ELSE 0 END)
+    +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Avail_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Promo_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''free_tier''->>''Expire_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Alert_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Avail_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Promo_Note'' IS NOT NULL THEN 1 ELSE 0 END) +
+
+    (CASE WHEN tiernotices->''member_tier''->>''Expire_Note'' IS NOT NULL THEN 1 ELSE 0 END)'
+  source_model: main.promo_info
+  domains:
+  - calculations
+- name: most_common_peak_tv_rating
+  description: 'Finds the most commonly assigned peak TV rating across all content distribution records
+    in the HuluShows dataset. This metric is useful for understanding the typical maturity level (e.g.,
+    TV-PG, TV-MA) that shows are released with.
+
+
+    This identifies which TV rating (like TV-MA or TV-PG) appears the most often across all shows, showing
+    the most typical maturity level in the catalog.
+
+
+    Compiler note: Computed as the statistical mode of the Peak_Rating field in ratinginfo across all
+    show_rollups records. MODE() in DuckDB ignores NULLs, so the most frequent non-null raw value is returned
+    (no normalization of rating-label noise like ''TV14''/''T''/''14+'' is applied, since the entry does
+    not specify a mapping).'
+  sql_expression: MODE(ratinginfo->>'Peak_Rating')
+  source_model: main.show_rollups
+  domains:
+  - calculations
+- name: maximum_promo_saturation_ratio
+  description: 'Promo Saturation Ratio (PSR) quantifies how heavily a show is overloaded with promotional
+    messages. It is calculated as the total number of non-null promotional fields (alertnote, availnote,
+    promonote, expirenote) across both the free and member tiers, divided by 8 (the maximum possible promotional
+    slots). The maximum PSR identifies the most saturated show in terms of promotional presence.
+
+
+    This measures how packed a show is with promotional content. It looks at how many of the 8 possible
+    promo message spots are used. A score of 1.0 means all spots are filled.
+
+
+    Compiler note: PSR per row = count of non-null fields among free_tier/member_tier {Alert_Note,Avail_Note,Promo_Note,Expire_Note}
+    divided by 8. Max PSR aggregates this over all content rows in promo_info to find the most saturated
+    show''s ratio.'
+  sql_expression: "MAX(\n  (\n    (CASE WHEN tiernotices->'free_tier'->>'Alert_Note' IS NOT NULL THEN\
+    \ 1 ELSE 0 END) +\n    (CASE WHEN tiernotices->'free_tier'->>'Avail_Note' IS NOT NULL THEN 1 ELSE\
+    \ 0 END) +\n    (CASE WHEN tiernotices->'free_tier'->>'Promo_Note' IS NOT NULL THEN 1 ELSE 0 END)\
+    \ +\n    (CASE WHEN tiernotices->'free_tier'->>'Expire_Note' IS NOT NULL THEN 1 ELSE 0 END) +\n  \
+    \  (CASE WHEN tiernotices->'member_tier'->>'Alert_Note' IS NOT NULL THEN 1 ELSE 0 END) +\n    (CASE\
+    \ WHEN tiernotices->'member_tier'->>'Avail_Note' IS NOT NULL THEN 1 ELSE 0 END) +\n    (CASE WHEN\
+    \ tiernotices->'member_tier'->>'Promo_Note' IS NOT NULL THEN 1 ELSE 0 END) +\n    (CASE WHEN tiernotices->'member_tier'->>'Expire_Note'\
+    \ IS NOT NULL THEN 1 ELSE 0 END)\n  ) / 8.0\n)"
+  source_model: main.promo_info
+  domains:
+  - calculations
+- name: tiereduserscorecoverage
+  description: 'Counts how many shows have user scores that fall within predefined standard score tiers
+
+
+    Each show gets a user rating, which is then matched to a category: Low (0–2), Medium (2–4), or High
+    (4–5). We count how many shows fall into each of those rating bands.
+
+
+    Compiler note: User_Score in genreclass JSON is stored as plain numeric text in this dataset (checked:
+    no $, ★, bp, or RTG noise found), so cast directly to double precision. Bands: Low [0,2), Medium [2,4),
+    High [4,5]. The entry''s output is per-show label; counts per band can be obtained via GROUP BY on
+    this expression.'
+  sql_expression: "CASE\n  WHEN (genreclass->>'User_Score')::double precision >= 0 AND (genreclass->>'User_Score')::double\
+    \ precision < 2 THEN 'Low'\n  WHEN (genreclass->>'User_Score')::double precision >= 2 AND (genreclass->>'User_Score')::double\
+    \ precision < 4 THEN 'Medium'\n  WHEN (genreclass->>'User_Score')::double precision >= 4 AND (genreclass->>'User_Score')::double\
+    \ precision <= 5 THEN 'High'\n  ELSE NULL\nEND"
+  source_model: main.core
+  domains:
+  - calculations
+- name: studio_activity_index
+  description: 'The Studio Activity Index (SAI) measures how active a production studio is by counting
+    how many distinct titles in the table and are linked to each studio via the studio link. This metric
+    helps determine which studios have the largest output footprint in the catalog.
+
+
+    This measures how many different shows a studio is involved in, giving a sense of how active or prolific
+    each studio is.
+
+
+    Compiler note: SAI is computed per studio as the count of distinct content_key (titles) linked via
+    studiolink. Expressed as an aggregate over core; expected to be used with GROUP BY studiolink to get
+    activity per studio.'
+  sql_expression: COUNT(DISTINCT content_key)
+  source_model: main.core
+  domains:
+  - calculations
+- name: series_entry_count
+  description: 'Counts how many distinct titles are part of each series. Useful for understanding franchise
+    size or continuation.
+
+
+    For each series, we count how many unique shows or episodes it includes. This helps show how big or
+    ongoing the series is.
+
+
+    Compiler note: Computed as a per-row window count of distinct content_key entries sharing the same
+    series_id, giving the number of titles in each series.'
+  sql_expression: COUNT(*) OVER (PARTITION BY series_id)
+  source_model: main.core
+  domains:
+  - calculations
+- name: series_size
+  description: 'Series Size measures how many individual titles (e.g., episodes or entries) are associated
+    with each series identifier in the catalog.
+
+
+    This tells us how many titles are part of a single series, giving a sense of how large or deep a series
+    is.
+
+
+    Compiler note: Series Size counts the number of content_key rows sharing the same series_id, computed
+    as a window count partitioned by series_id over the core table (one row per title).'
+  sql_expression: COUNT(*) OVER (PARTITION BY series_id)
+  source_model: main.core
+  domains:
+  - calculations
+- name: series_title_uniformity_flag
+  description: 'Checks whether all content entries in the same series share the same canonical name.
+
+
+    If every title in a series uses the exact same name, it’s marked as ''True''. If they don’t match,
+    it’s marked as ''False''.
+
+
+    Compiler note: For each row, checks whether all core rows sharing the same series_id have the same
+    canonical_name; returns ''True'' if uniform, ''False'' otherwise, NULL when series_id is NULL (not
+    part of a series). Verified no series currently has multiple distinct canonical names.'
+  sql_expression: CASE WHEN series_id IS NULL THEN NULL WHEN (SELECT COUNT(DISTINCT c2.canonical_name)
+    FROM core c2 WHERE c2.series_id = core.series_id) = 1 THEN 'True' ELSE 'False' END
+  source_model: main.core
+  domains:
+  - calculations
+- name: studio_catalog_size
+  description: 'Measures the number of unique titles associated with each studio.
+
+
+    This counts how many different shows are linked to each studio, showing how big their catalog is.
+
+
+    Compiler note: Counts distinct content_key rows in core linked to each studio via studiolink = companies.entity_key,
+    representing catalog size per studio.'
+  sql_expression: (SELECT COUNT(*) FROM core WHERE core.studiolink = companies.entity_key)
+  source_model: main.companies
+  domains:
+  - calculations
+- name: title_count_per_studio
+  description: 'This metric reflects how many titles are associated with each production studio, helping
+    identify the studios with the most content in the catalog.
+
+
+    We total up how many shows are tied to each studio, to find out which ones have produced the most
+    content.
+
+
+    Compiler note: For each studio (companies.entity_key), count the number of core titles whose studiolink
+    references it. One row per studio with the count of associated titles.'
+  sql_expression: (SELECT count(*) FROM core WHERE core.studiolink = companies.entity_key)
+  source_model: main.companies
+  domains:
+  - calculations
+- name: average_title_length_per_studio
+  description: 'This metric measures how long the average show title is for each production studio. It
+    reflects naming trends or stylistic tendencies in studio catalogs.
+
+
+    We look at how many characters are in the titles of a studio’s shows, then average those lengths to
+    see what naming style they tend to use.
+
+
+    Compiler note: Grouped externally by studiolink; computes average character length of content_title
+    per studio. Query should be run as SELECT studiolink, AVG(LENGTH(content_title)) FROM core GROUP BY
+    studiolink.'
+  sql_expression: AVG(LENGTH(content_title))
+  source_model: main.core
+  domains:
+  - calculations
+- name: launch_year_distribution
+  description: 'Breaks down the number of titles launched each year based on their recorded launch dates.
+    Helps analyze content release trends over time.
+
+
+    We check when each show was released, group them by year, and count how many came out in each. This
+    shows how active each year was for launches.
+
+
+    Compiler note: Launch year is extracted from launchmoment (format YYYY-MM-DD) by casting to DATE and
+    extracting YEAR. The analyst should GROUP BY this expression and COUNT(*) to get the distribution
+    of titles launched per year; rows with NULL launchmoment are excluded from the distribution.'
+  sql_expression: EXTRACT(YEAR FROM CAST(launchmoment AS DATE))
+  source_model: main.show_rollups
+  domains:
+  - calculations
+tables:
+- schema: main
+  table: availabilitys
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: Primary key referencing core.content_key, ensuring 1:1 relationship for availability
+      information per show.
+  - name: cache_time
+    type: VARCHAR
+    description: 'Timestamp indicating when the content metadata was last cached or updated. Contains
+      noise with inconsistent date formats: ''2024-12-08'', ''2024/12/8'', ''24/12/8'', ''Dec 8, 2024''.
+      Contains  NULL when cache timestamp is not available or content has never been cached.
+
+
+      Cache Time Formats: Lists typical formats used in content caching timestamps.
+
+
+      Includes examples like ''2024-12-08'', ''Dec 8, 2024'', ''08/12/24'', and ISO-8601 format.
+
+
+      Compiler note: Column description matches documented noisy formats for availabilitys.cache_time
+      (ISO-8601, ''YYYY/M/D'', ''YY/M/D'', ''Mon D, YYYY'' etc).'
+  - name: auth_name
+    type: VARCHAR
+    description: Authentication or authorization level name required to access the content, indicating
+      access control requirements. Contains  NULL when no specific authentication requirements are needed
+      for content access.
+  - name: accessflags
+    type: JSON
+    description: 'JSONB column. Consolidates all boolean flags related to content access restrictions
+      and platform availability across different tiers and devices. Fields: {"Movie_Flag": "Boolean flag
+      stored as text indicating if content is a movie format. Contains noise with various formats: ''TRUE'',
+      ''FALSE'', ''Y'', ''N'', ''Movie'', ''Series''. Contains  NULL when content format classification
+      is not yet determined.", "Showtime_Only": "Boolean indicating whether content is exclusively available
+      through Showtime subscription tier. Contains  NULL when Showtime exclusivity status is not yet determined
+      or not applicable.", "Subscriber_Only": "Boolean indicating whether content requires a paid subscription
+      to access, not available in free tier. Contains  NULL when subscription requirement status is pending
+      determination.", "COPPA_Comp": "Boolean indicating whether content complies with Children''s Online
+      Privacy Protection Act (COPPA) regulations for child-safe viewing. Contains  NULL when COPPA compliance
+      status is not yet evaluated or not applicable.", "Web_Only": "Boolean indicating whether content
+      is exclusively available through web platform and not on mobile or living room devices. Contains  NULL
+      when platform availability restrictions are not yet determined."}
+
+
+      Movie Identifier Formats: Describes how movie content is labeled.
+
+
+      Can appear as ''TRUE'', ''FALSE'', ''Y'', ''N'', ''Movie'', ''Series''. These values signal whether
+      content is a movie.
+
+
+      Compiler note: Describes the Movie_Flag field within accessflags JSONB, which stores noisy boolean-like
+      values (''TRUE'',''FALSE'',''Y'',''N'',''Movie'',''Series'') indicating whether content is a movie,
+      as confirmed by column documentation.'
+- schema: main
+  table: companies
+  columns:
+  - name: entity_key
+    type: BIGINT
+    description: A BIGINT primary key uniquely identifying each production company, studio, or content
+      distributor in the database.
+  - name: chanref
+    type: BIGINT
+    description: Legacy channel reference ID used for backwards compatibility with older systems, may
+      contain gaps and non-sequential values. Contains  NULL when legacy channel reference is not available
+      or not applicable for newer companies.
+  - name: company_name
+    type: VARCHAR
+    description: Official full legal name of the production company or content distributor (e.g., 'Walt
+      Disney Pictures', 'Warner Bros Entertainment'). Contains  NULL when official company name is not
+      available or company operates under alternative naming conventions.
+  - name: short_name
+    type: VARCHAR
+    description: Abbreviated or commonly used short name for the company (e.g., 'Disney', 'Warner Bros').
+      Contains  NULL when no commonly recognized short name exists for the company.
+  - name: canonical_name
+    type: VARCHAR
+    description: Standardized canonical name used for consistent reference across the platform, normalized
+      for search and matching purposes. Contains  NULL when canonical normalization has not been established
+      for the company.
+  - name: brandingassets
+    type: JSON
+    description: 'JSONB column. Consolidates all branding and visual assets for the company including
+      key art, logos, and availability flags for display purposes. Fields: {"KeyArt_URL": "URL pointing
+      to the company''s key art image or logo used for branding display purposes on the platform. Contains  NULL
+      when key art is not available or company does not provide branding assets.", "NetworkLogo_URL":
+      "URL pointing to the network or company logo image file for display in the user interface. Contains  NULL
+      when network logo is not available or company operates without branded logo assets.", "HasLogo_Flag":
+      "Boolean flag stored as text indicating whether the company has a high-resolution logo available.
+      Contains noise with inconsistent formats: ''TRUE'', ''FALSE'', ''Yes'', ''No'', ''1'', ''0''. Contains  NULL
+      when logo availability status is unknown or not determined."}
+
+
+      High-Resolution Logo Flags: Explains how availability of high-res logos is marked.
+
+
+      Typical values include ''TRUE'', ''FALSE'', ''Yes'', ''No'', ''1'', ''0'' and all indicate presence
+      or absence of a high-resolution logo.
+
+
+      Compiler note: Describes the HasLogo_Flag sub-field within companies.brandingassets JSONB, which
+      stores boolean-like values in varying formats (TRUE/FALSE, Yes/No, 1/0) indicating high-res logo
+      availability.'
+- schema: main
+  table: content_info
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: Primary key referencing core.content_key, ensuring 1:1 relationship for detailed content
+      information per show.
+  - name: story_outline
+    type: VARCHAR
+    description: Detailed plot synopsis or description of the show's storyline and content for user discovery
+      and recommendation systems. Contains  NULL when plot synopsis is not available or content description
+      is pending.
+  - name: mediacounts
+    type: JSON
+    description: 'JSONB column. Aggregates all content volume metrics including episodes, clips, films,
+      seasons, and total video counts for inventory tracking. Fields: {"content_volumes": {"Clips_Total":
+      "Total number of short video clips or previews available for this content item. Contains  NULL when
+      clip count is not available or no clips exist for the content.", "Episode_Total": "Episode volume
+      count, representing the total number of episodes available for the show across all seasons. Contains  NULL
+      when episode count is not available or content is not episodic.", "Feature_Films": "Number of full-length
+      feature films associated with this content entry. Contains  NULL when feature film count is not
+      applicable or not available for the content type.", "Film_Clips": "Number of short clips or trailers
+      specifically related to films within this content package. Contains  NULL when film clips are not
+      available or not applicable to the content.", "Seasons_Total": "Total number of seasons available
+      for this show on the platform. Contains  NULL when season count is not applicable (e.g., for movies)
+      or not yet determined.", "Videos_Total": "Aggregate count of all video content types (episodes,
+      clips, features) associated with this show. Contains  NULL when total video count is not available
+      or cannot be determined."}}'
+  - name: visualassets
+    type: JSON
+    description: 'JSONB column. Contains all visual and descriptive assets for content presentation including
+      URLs, descriptions, and copyright information. Fields: {"Thumbnail_URL": "URL pointing to the small
+      thumbnail image used for content discovery and grid displays. Contains  NULL when thumbnail image
+      is not available or not yet uploaded for the content.", "KeyArt_URL": "URL pointing to the primary
+      promotional artwork or poster image for the content. Contains  NULL when key art is not available
+      or promotional materials are pending.", "Link_Desc": "Descriptive text used for content linking
+      and cross-references within the platform. Contains  NULL when link description is not available
+      or not yet created.", "Art_Copyright": "Copyright information and attribution for the promotional
+      artwork and images associated with the content. Contains  NULL when copyright information is not
+      available or not applicable."}'
+- schema: main
+  table: core
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: A BIGINT primary key uniquely identifying each show or content item in the Hulu database
+      system.
+  - name: canonical_name
+    type: VARCHAR
+    description: Standardized canonical name of the show used for consistent reference and search functionality
+      across the platform. Contains  NULL when canonical naming has not been established for the content.
+  - name: content_title
+    type: VARCHAR
+    description: Display title of the show as it appears to users on the platform interface. Contains  NULL
+      when display title is not yet finalized or content is in preliminary stages.
+  - name: series_id
+    type: BIGINT
+    description: Identifier linking individual shows to their parent series or franchise for grouping
+      related content. Contains  NULL when content is standalone and not part of a larger series or franchise.
+  - name: studiolink
+    type: BIGINT
+    description: Foreign key referencing companies.Entity_key, indicating the primary production studio.
+      Contains  NULL for independent or self-produced content without studio affiliation.
+  - name: annotations
+    type: VARCHAR
+    description: Combined free-text annotations and metadata comments from multiple sources, concatenated
+      from annotation fields 0 and 1. Contains  NULL when no annotations or metadata comments are available
+      for the content.
+  - name: genreclass
+    type: JSON
+    description: 'JSONB column. Groups all genre and classification metadata including primary genre,
+      complex genre hierarchies, content class, and user scoring information. Fields: {"Primary_Genre":
+      "Primary broad genre category from enum: ''Animation and Cartoons'', ''Comedy'', ''Drama'', ''Anime'',
+      ''Kids'', ''Reality and Game Shows'', ''Classics'', ''Family'', ''Science Fiction'', ''Action and
+      Adventure'', ''Food'', ''News and Information'', ''Health and Wellness'', ''Teen''. Contains  NULL
+      when primary genre classification is pending or undetermined.", "Hierarchical_Genres": "Complex
+      multi-genre classification string with hierarchical and combined genres using delimiters like ''~''
+      and ''|'' (e.g., ''Animation~Comedy|Teen''). Contains  NULL when detailed genre hierarchy has not
+      been established for the content.", "Content_Type": "Classification of content type, primarily observed
+      as ''show'' in the dataset but may include other values like ''movie'' or ''special''. Contains  NULL
+      when content type classification is pending review or determination.", "User_Score": "User rating
+      or professional score for the content, stored as text with various formats including monetary (''$4.35M''),
+      star ratings (''4.35★''), basis points (''435 bp''), and rating scales (''4.35 RTG''). Contains  NULL
+      when no user ratings or professional scores are available for the content."}
+
+
+      Content Type Labels: Clarifies the values used to indicate whether a piece of content is a show,
+      movie, or other format.
+
+
+      Includes ''show'', ''movie'', and ''special'' to distinguish the type of content displayed.
+
+
+      Compiler note: Describes the Content_Type field within core.genreclass JSONB column, which takes
+      values like ''show'' (observed), ''movie'', ''special''.
+
+
+      User Score Formats: Illustrates different formats used to record user ratings.
+
+
+      Examples include raw numbers like ''4.35'', symbols like ''4.35★'', monetized ratings like ''$4.35M'',
+      and normalized formats like ''4.35 RTG''.
+
+
+      Compiler note: Describes the formats used in genreclass.User_Score (e.g. ''4.35'', ''4.35★'', ''$4.35M'',
+      ''4.35 RTG''), confirmed via column meaning text for core.genreclass.User_Score noting mixed formats.
+
+
+      Genre Hierarchy Format: Explains how genres are combined and nested.
+
+
+      Uses ''~'' for sub genres and ''|'' for alternatives. Example: ''Comedy~Sitcom|Teen''.
+
+
+      Compiler note: Describes the Hierarchical_Genres field within core.genreclass JSONB, which uses
+      ''~'' for sub-genres and ''|'' for alternatives (e.g., ''Comedy~Sitcoms|Teen''), matching observed
+      data like ''Animation and Cartoons~Primetime Animation|Teen|Comedy~Sitcoms''.
+
+
+      Primary Genre Classification: Categorizes shows using common high-level genre tags for filtering.
+
+
+      Examples include ''Drama'', ''Comedy'', ''Documentary'', ''Reality'', and ''Animation''. These genres
+      can appear in the genre metadata of content records.
+
+
+      Compiler note: Describes the Primary_Genre field within the genreclass JSONB column, which stores
+      high-level genre tags like ''Comedy'', ''Drama'', etc.'
+- schema: main
+  table: promo_info
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: Primary key referencing core.content_key, ensuring 1:1 relationship for promotional messaging
+      per show.
+  - name: tiernotices
+    type: JSON
+    description: 'JSONB column. Organizes promotional and notification messages by subscription tier including
+      availability, expiration, alerts, and promotional content. Fields: {"free_tier": {"Avail_Note":
+      "Free tier availability notification text displayed to users about content access in the free subscription
+      level. Contains  NULL when no specific availability notifications are needed for free tier access.",
+      "Expire_Note": "Free tier expiration notice text informing users when free access to content will
+      end. Contains  NULL when content has no expiration date in free tier or expiration notice is not
+      applicable.", "Alert_Note": "Free tier alert message text for important notifications related to
+      free content access changes. Contains  NULL when no alerts are currently active for free tier content.",
+      "Promo_Note": "Free tier promotional message text used for marketing and user engagement for free
+      content. Contains  NULL when no promotional messaging is active for free tier."}, "member_tier":
+      {"Avail_Note": "Member/subscriber tier availability notification text displayed to paying subscribers
+      about content access. Contains  NULL when no specific availability notifications are needed for
+      subscriber access.", "Expire_Note": "Member/subscriber tier expiration notice text informing paid
+      users when content access will end. Contains  NULL when content has no expiration date for subscribers
+      or expiration notice is not applicable.", "Alert_Note": "Member/subscriber tier alert message text
+      for important notifications related to subscriber content access. Contains  NULL when no alerts
+      are currently active for subscriber content.", "Promo_Note": "Member/subscriber tier promotional
+      message text used for marketing premium content to paying subscribers. Contains  NULL when no promotional
+      messaging is active for subscriber tier."}}'
+- schema: main
+  table: rollups
+  columns:
+  - name: tierkey
+    type: BIGINT
+    description: A BIGSERIAL primary key uniquely identifying each subscription and availability tier
+      in the system.
+  - name: tiertype
+    type: ENUM('free', 'subscriber', 'current', 'free_on_web', 'subscriber_on_device', 'auth_on_web',
+      'showtime')
+    description: 'Enumerated subscription tier type from: ''free'' (free content), ''subscriber'' (paid
+      subscriber content), ''current'' (currently available content), ''free_on_web'' (web-only free content),
+      ''subscriber_on_device'' (device-specific subscriber content), ''auth_on_web'' (web authentication
+      required), ''showtime'' (Showtime premium content).
+
+
+      Subscription Tier Values: Represents different content access levels for viewers.
+
+
+      Common values include ''free'', ''subscriber'', ''current'', ''free on website'', ''auth on website'',
+      ''subscriber on device'', and ''show time''.
+
+
+      Compiler note: Describes the enumerated values of rollups.tiertype (''free'',''subscriber'',''current'',''free_on_web'',''auth_on_web'',''subscriber_on_device'',''showtime''),
+      matching the listed access levels.'
+- schema: main
+  table: show_rollups
+  columns:
+  - name: srkeys
+    type: BIGINT
+    description: Foreign key referencing core.content_key, indicating which show this rollup metrics record
+      belongs to.
+  - name: srlinks
+    type: BIGINT
+    description: Foreign key referencing rollups.TierKey, indicating which subscription tier these metrics
+      apply to.
+  - name: launchmoment
+    type: VARCHAR
+    description: 'Timestamp indicating when content was first made available in this subscription tier.
+      Contains noise with inconsistent formats: ''2024-12-08 10:30'', ''Dec 8, 2024'', ''08/12/24''. Contains  NULL
+      when launch date is not available or content has not yet launched in this tier.'
+  - name: latestadd
+    type: VARCHAR
+    description: Timestamp of the most recent content addition or update for this show in the specified
+      tier. Contains  NULL for shows with no recent updates or when no content additions have been tracked.
+  - name: contentvols
+    type: JSON
+    description: 'JSONB column. Groups all content volume metrics for different media types within subscription
+      tiers including clips, episodes, features, games, and seasons. Fields: {"standard_content": {"Clip_Vol":
+      "Volume count of short video clips available for this show in the specified subscription tier. May
+      contain professional notation like ''288K''. Contains  NULL when clip volume data is not available
+      for this tier.", "Ep_Vol": "Episode volume count available for this show in the specified subscription
+      tier. Contains  NULL when episode data is not available or not applicable for this tier.", "Feature_Vol":
+      "Count of full-length feature content items available in this tier for the show. Contains  NULL
+      when feature content is not available or not applicable for this subscription tier.", "FilmClip_Vol":
+      "Volume count of film-related clips and trailers available in this subscription tier. Contains  NULL
+      when film clips are not available for this tier.", "Trailer_Vol": "Count of trailer videos available
+      for this show in the specified subscription tier. Contains  NULL when trailers are not available
+      for this tier.", "Game_Vol": "Count of interactive games or game-related content available in this
+      tier. Contains  NULL when game content is not available or not applicable for this subscription
+      tier.", "Season_Vol": "Number of complete seasons available for this show in the specified subscription
+      tier. Contains  NULL when season data is not available for this tier.", "Media_Total": "Total aggregate
+      count of all media types (episodes, clips, features, games) available in this tier. Contains  NULL
+      when total media count cannot be determined for this tier."}}'
+  - name: html5metrics
+    type: JSON
+    description: 'JSONB column. Consolidates HTML5-compatible content counts for cross-platform streaming
+      capabilities across different media types. Fields: {"html5_volumes": {"H5_Clips": "Count of HTML5-compatible
+      video clips available for cross-platform playback in this subscription tier. Contains  NULL when
+      HTML5 clip data is not available for this tier.", "H5_Episodes": "Count of HTML5-compatible full
+      episodes available for cross-platform streaming in this tier. Contains  NULL when HTML5 episode
+      data is not available for this tier.", "H5_Games": "Count of HTML5-compatible interactive games
+      or game content available in this subscription tier. Contains  NULL when HTML5 game content is not
+      available for this tier.", "H5_Features": "Count of HTML5-compatible feature-length content available
+      for streaming in this tier. Contains  NULL when HTML5 feature content is not available for this
+      tier.", "H5_FilmClips": "Count of HTML5-compatible film clips and movie trailers available in this
+      subscription tier. Contains  NULL when HTML5 film clips are not available for this tier.", "H5_Trailers":
+      "Count of HTML5-compatible trailer videos available for cross-platform viewing in this tier. Contains  NULL
+      when HTML5 trailers are not available for this tier.", "H5_MediaTotal": "Total aggregate count of
+      all HTML5-compatible media content available in this subscription tier. Contains  NULL when HTML5
+      total count cannot be determined for this tier."}}
+
+
+      HTML5 Media Metrics: Details types of media available in HTML5 format.
+
+
+      Includes clips, episodes, games, features, trailers that support cross-platform playback.
+
+
+      Compiler note: Describes the html5_volumes JSON fields (H5_Clips, H5_Episodes, H5_Games, H5_Features,
+      H5_Trailers, H5_FilmClips, H5_MediaTotal) stored in show_rollups.html5metrics.'
+  - name: ratinginfo
+    type: JSON
+    description: 'JSONB column. Contains television rating information and unrated content counts for
+      content classification and parental guidance. Fields: {"TV_Rating": "Television content rating or
+      classification for content in this tier, stored as text with possible enum values like ''TV-14'',
+      ''TV-MA'', ''TV-PG'', etc. Contains  NULL when content rating has not been assigned or is pending
+      review for this tier.", "Peak_Rating": "Highest or peak content rating for content in this tier,
+      stored as text with possible noise in enum format: ''TV-14'', ''TV14'', ''T14'', ''FOURTEEN''. Contains  NULL
+      when peak rating cannot be determined or no rated content exists in this tier.", "Unrated_Vol":
+      "Count of content items that do not have official television ratings or are unrated in this tier.
+      Contains  NULL when unrated content count is not available or not tracked for this tier."}
+
+
+      TV Rating Types: Shows the different age-based content classifications used in broadcasting.
+
+
+      Includes ''TV-Y'', ''TV-Y7'', ''TV-G'', ''TV-PG'', ''TV-14'', and ''TV-MA'' to represent different
+      maturity levels.
+
+
+      Compiler note: Describes canonical TV rating values (''TV-Y'',''TV-Y7'',''TV-G'',''TV-PG'',''TV-14'',''TV-MA'')
+      intended for the TV_Rating field in ratinginfo JSONB. Checked data: TV_Rating is always empty/null
+      in this dataset, while Peak_Rating holds a noisy superset of these plus many variant encodings (TVMA,
+      T, MA, 14+, etc.), confirming this entry documents the intended canonical enumeration for that field.'

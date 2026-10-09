@@ -35,7 +35,12 @@ class ContractSession:
     ) -> None:
         self.contract = contract
         self.recorder = recorder
+        # ``retries`` is the max_retries budget: every failed query attempt.
+        # ``blocks`` and ``execution_errors`` say which kind of failure it was
+        # (a contract refusal, or SQL the database could not run).
         self.retries: int = 0
+        self.blocks: int = 0
+        self.execution_errors: int = 0
         self.tokens_used: int = 0
         self.cost_usd: float = 0.0
         self._start_time: float | None = None
@@ -58,6 +63,21 @@ class ContractSession:
         self._start_time = None
 
     def record_retry(self) -> None:
+        """Spend one failed attempt from the budget, of no recorded kind.
+
+        Kept for callers that do not classify the failure; the library's own
+        call sites use :meth:`record_block` or :meth:`record_execution_error`.
+        """
+        self.retries += 1
+
+    def record_block(self) -> None:
+        """The contract refused a query: a governance block. Spends a retry."""
+        self.blocks += 1
+        self.retries += 1
+
+    def record_execution_error(self) -> None:
+        """The database failed a query the contract allowed. Spends a retry."""
+        self.execution_errors += 1
         self.retries += 1
 
     def record_tokens(self, count: int) -> None:

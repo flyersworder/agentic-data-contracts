@@ -86,6 +86,7 @@ async def test_run_query_timeout_is_a_blocked_query(adapter: DuckDBAdapter) -> N
     assert "was cancelled" in text
     assert "Remaining:" in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
     # The statement was cancelled in the database, so the connection is free.
     assert len(adapter.execute(FAST_SQL).rows) == 3
 
@@ -166,6 +167,7 @@ async def test_run_query_timeout_falls_back_for_adapters_without_support(
     assert "may still be running" in text
     assert "was cancelled" not in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
 
 
 class _SlowRowLimitAdapterWithoutTimeout:
@@ -232,6 +234,7 @@ async def test_row_limited_path_falls_back_for_adapters_without_timeout_support(
     assert "may still be running" in text
     assert "was cancelled" not in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
     assert seen_timeouts == [None]
 
 

@@ -597,7 +597,7 @@ async def test_run_query_blocked_includes_remaining_budget(
 async def test_run_query_execute_exception_includes_remaining_budget(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """Adapter execute exceptions should surface BLOCKED with Remaining: suffix."""
+    """Adapter execute exceptions should surface ERROR with Remaining: suffix."""
     from unittest.mock import patch
 
     # max_result_rows=None: this test exercises the plain `execute` path (it
@@ -619,8 +619,7 @@ async def test_run_query_execute_exception_includes_remaining_budget(
             {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
         )
     text = result["content"][0]["text"]
-    assert "BLOCKED" in text
-    assert "execution failed" in text.lower()
+    assert text.startswith("ERROR — Query execution failed")  # not a block (#134)
     assert "Remaining:" in text
 
 
@@ -631,7 +630,7 @@ async def test_run_query_execute_limited_exception_includes_remaining_budget(
     """Sibling of the test above for the default (capped) path: DuckDBAdapter
     is a RowLimitAdapter, so create_tools()'s default max_result_rows=1000
     routes run_query through execute_limited instead of execute. An engine
-    failure there must surface the same BLOCKED + Remaining: response (#116).
+    failure there must surface the same ERROR + Remaining: response (#116).
     """
     from unittest.mock import patch
 
@@ -647,8 +646,7 @@ async def test_run_query_execute_limited_exception_includes_remaining_budget(
             {"sql": "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"}
         )
     text = result["content"][0]["text"]
-    assert "BLOCKED" in text
-    assert "execution failed" in text.lower()
+    assert text.startswith("ERROR — Query execution failed")  # not a block (#134)
     assert "Remaining:" in text
 
 

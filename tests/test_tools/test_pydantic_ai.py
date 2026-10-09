@@ -204,6 +204,25 @@ async def test_run_query_blocked_sql_raises_model_retry(
 
 
 @pytest.mark.asyncio
+async def test_run_query_execution_error_raises_model_retry(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """The agent's own failed SQL is worded ``ERROR —``, not ``BLOCKED —``, but
+    stays recoverable: the model should fix the query and try again (#134)."""
+    tools = create_pydantic_ai_tools(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    run_query = next(t for t in tools if t.name == "run_query")
+    with pytest.raises(ModelRetry) as exc:
+        await _invoke(
+            run_query,
+            sql="SELECT CAST(tenant_id AS INTEGER) AS n FROM analytics.orders"
+            " WHERE tenant_id = 'acme'",
+        )
+    assert str(exc.value).startswith("ERROR — Query execution failed")
+
+
+@pytest.mark.asyncio
 async def test_run_query_allowed_sql_returns_text(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:

@@ -29,6 +29,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _BLOCKED_PREFIX,
     RowFormat,
     ToolDef,
     _error_response,
@@ -38,8 +39,6 @@ from agentic_data_contracts.tools.factory import (
 
 if TYPE_CHECKING:
     from mcp.types import ToolAnnotations
-
-_BLOCKED_PREFIX = "BLOCKED —"
 
 # Tools that only read — from the contract, the semantic source, or the database
 # catalog. `run_query` is deliberately absent rather than annotated `False`:

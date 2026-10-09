@@ -11,6 +11,7 @@ from agentic_data_contracts.adapters.base import DatabaseAdapter, SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.tools.factory import (
+    _ERROR_PREFIX,
     _error_response,
     _warn_query_time_unenforceable,
     _warn_token_budget_unenforceable,
@@ -58,8 +59,14 @@ def contract_middleware(
                 # to a worker thread to keep the event loop responsive — same
                 # rationale as factory.py.
                 result = await asyncio.to_thread(validator.validate, sql)
+                if result.rejected_by_database:
+                    # A missing column or binder error: the agent's error.
+                    session.record_execution_error()
+                    return _error_response(
+                        f"{_ERROR_PREFIX} " + "\n".join(result.reasons)
+                    )
                 if result.blocked:
-                    session.record_retry()
+                    session.record_block()
                     return _error_response(
                         "BLOCKED — Violations:\n"
                         + "\n".join(f"- {r}" for r in result.reasons),

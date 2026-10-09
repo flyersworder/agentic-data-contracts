@@ -8,8 +8,10 @@ underlying callables self-validate SQL (see ``run_query`` in
 ``tools/factory.py``). Two enforcement signals are mapped onto Pydantic AI's
 error contract, which distinguishes recoverable from terminal failures:
 
-- **Validation block** (``BLOCKED —`` envelope from a tool — bad SQL, a
-  forbidden operation, a missing required filter, a failed result-check) is
+- **Validation block** (``BLOCKED —`` envelope from a tool — a forbidden
+  operation, a missing required filter, unparseable SQL, a failed
+  result-check) and **execution error** (``ERROR —``, SQL the database could
+  not run: a missing column, a failed cast) are
   *recoverable*: re-raised as ``pydantic_ai.ModelRetry`` so the model can
   rewrite its arguments and try again.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost
@@ -47,14 +49,14 @@ from agentic_data_contracts.core.session import (
 )
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _BLOCKED_PREFIX,
+    _ERROR_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
     validate_max_result_rows,
     validate_row_format,
 )
-
-_BLOCKED_PREFIX = "BLOCKED —"
 
 # One carried ``RunUsage`` per ``ContractSession``, so a session's token tally
 # can track a counter that spans every turn instead of per-run snapshots. Weak
@@ -203,12 +205,15 @@ def _to_pydantic_ai_tool(
         # "BLOCKED —" em-dash prefix. A session-budget breach is terminal even
         # when it surfaces from a tool's own self-check (run_query's limit
         # check under apply_middleware=False), so it must NOT become a
-        # recoverable ModelRetry. Everything else BLOCKED (bad SQL, forbidden
-        # op, permission gate, failed result-check) is recoverable: surfaced as
+        # recoverable ModelRetry. Everything else BLOCKED (forbidden op,
+        # permission gate, failed result-check) is recoverable: surfaced as
         # ModelRetry so the model can rewrite its arguments or switch tools.
+        # So is "ERROR —", SQL the database could not run.
         if text.startswith(_BLOCKED_PREFIX):
             if _SESSION_LIMIT_MARKER in text:
                 raise ContractSessionLimitError(text)
+            raise ModelRetry(text)
+        if text.startswith(_ERROR_PREFIX):
             raise ModelRetry(text)
 
         return text
@@ -314,8 +319,8 @@ def contract_run_kwargs(
     What is deliberately **not** mapped:
 
     - **``max_retries`` is NOT mapped onto ``request_limit``.** They count
-      different things — ``max_retries`` counts *blocked query attempts* here
-      (``record_retry()`` fires on a validation block), while ``request_limit``
+      different things — ``max_retries`` counts *failed query attempts* here
+      (a block or an execution error in ``run_query``), while ``request_limit``
       counts *model requests*. A contract saying ``max_retries: 3`` means
       "three bad queries and you are done", not "three LLM calls". Conflating
       them would silently change what an existing contract means.

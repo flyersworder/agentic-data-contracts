@@ -232,11 +232,11 @@ current: str | None = resolve_principal(principal)
 
 When `ai-agent-contracts` is NOT installed, `ContractSession` provides self-contained enforcement:
 
-- **Retry count** — incremented on each failed query attempt, checked against `max_retries`
+- **Retry count** — incremented on each failed query attempt, checked against `max_retries`. Two counters say which kind of failure it was: `blocks` (the contract refused the query: a validation block, a result-check block, or a query timeout) and `execution_errors` (the database could not run SQL the contract allowed — a missing column rejected by the `EXPLAIN` dry-run, a bad cast that fails during execution). The validator runs `EXPLAIN` only once every policy check has passed, so an `EXPLAIN` rejection is never mixed with a policy reason. SQL the validator cannot parse stays a block: it is refused fail-closed, because the contract cannot check it and the database might run it. `run_query` and both middlewares word an execution error `ERROR —` rather than `BLOCKED —`, and the framework wrappers treat both prefixes as recoverable. `record_retry()` still spends a retry without classifying it, for callers that do not know which it was.
 - **Token usage** — fed by the adapters via `observe_tokens()`, checked against `token_budget` (see below)
 - **Wall-clock duration** — lazy start on first `check_limits()` call (not at construction), checked against `max_duration_seconds`. Can be reset via `reset_timer()` for frameworks that manage their own idle timeouts.
 - **Cost estimate** — if EXPLAIN adapter returns cost info, checked against `cost_limit_usd`
-- **Query time** — `max_query_time_seconds` bounds each query the query tools execute (not the Layer 2 `EXPLAIN` dry-run, and not the session). An adapter implementing `TimeoutAdapter` cancels the statement in the database; any other gets a caller-side `asyncio.timeout`, and only that deadline counts as the limit (a driver's own `TimeoutError` does not). A timeout is a blocked query; in `run_query` it increments the retry count. `DuckDBAdapter` starts its timer only after taking its connection lock, because `interrupt()` cancels whatever the shared connection is running.
+- **Query time** — `max_query_time_seconds` bounds each query the query tools execute (not the Layer 2 `EXPLAIN` dry-run, and not the session). An adapter implementing `TimeoutAdapter` cancels the statement in the database; any other gets a caller-side `asyncio.timeout`, and only that deadline counts as the limit (a driver's own `TimeoutError` does not). A timeout is a blocked query; in `run_query` it counts as a block and spends a retry. `DuckDBAdapter` starts its timer only after taking its connection lock, because `interrupt()` cancels whatever the shared connection is running.
 - **Result size** — `create_tools(max_result_rows=1000)` caps the rows `run_query` and `preview_table` return (`None` disables it). An adapter implementing the optional `RowLimitAdapter` capability (`execute_limited(sql, max_rows, timeout_seconds=None)`) fetches at most `max_rows + 1` rows and reports `truncated`, so the cap bounds memory as well as what the agent sees; `DuckDBAdapter` does this with `fetchmany(max_rows + 1)`, and `memory_limit=` on its constructor bounds the engine itself as a second, independent limit. Without `RowLimitAdapter`, the tools still cap the agent's view but only after `execute` fetches everything, and warn once per adapter class. The same fallback applies when a subclass overrides `execute` but not `execute_limited` (which does not call `execute`): `create_tools` uses `execute_limited` only when it is defined at or below the class defining `execute` in the MRO, so a SQL-rewriting or auditing override is never bypassed silently, and warns once per adapter class that memory is not bounded. Result checks (`min_rows`, `max_rows`, `min_value`, `max_value`, `not_null`) see every fetched row, not just the capped rows the agent sees: the fetch is widened to `max(max_result_rows, T + 1)` rows, `T` being the largest `min_rows`/`max_rows` any rule declares. That makes `min_rows`/`max_rows` exact — a truncated fetch has provably more rows than every threshold, and a `max_rows` block then says the query returned "at least" the rows fetched. `min_value`, `max_value` and `not_null` run on the fetched rows, a superset of what the agent sees but not necessarily the full result.
 
 These are simple counters/timers with guard checks before each tool call. No formal state machine.
@@ -362,7 +362,7 @@ fed from outside the run (a shared session, or a direct `observe_tokens()`
 call, on either `apply_middleware` value).
 
 Two things are deliberately not mapped. `max_retries` must **not** become
-`request_limit`: ours counts blocked query attempts, theirs counts model
+`request_limit`: ours counts failed query attempts, theirs counts model
 requests, and conflating them would silently redefine existing contracts.
 `cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
 session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
@@ -655,6 +655,7 @@ The rule is **"the tool did not perform the action it advertises"**:
 | Group | `is_error` |
 |-------|-----------|
 | Governance blocks (`BLOCKED —` …) | Yes |
+| Execution errors (`ERROR —` …) | Yes |
 | Access denials (not in allowed tables, restricted for caller) | Yes |
 | Misconfiguration (no adapter, no semantic source) | Yes |
 | Invalid arguments (bad `direction` / `kinds`) | Yes |
@@ -683,7 +684,7 @@ signalled errors natively (`ToolException`, `ModelRetry` / the terminal
 path — the only path where the MCP envelope survives as MCP.
 
 **Two error signals now coexist, deliberately.** The wrappers still branch on
-`text.startswith("BLOCKED —")` rather than reading `is_error`, so a denial like
+`text.startswith("BLOCKED —")` (and `"ERROR —"`, for a query the database failed) rather than reading `is_error`, so a denial like
 `Table x is not in the allowed tables list.` carries the flag but does not become
 a `ToolException` / `ModelRetry`. Switching them was considered and rejected: it
 is not the behaviour-preserving refactor it appears to be, because `is_error`

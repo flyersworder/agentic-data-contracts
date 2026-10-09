@@ -82,7 +82,7 @@ def _resolve_data_plugin() -> Path | None:
 
 def _parse_run_query_body(text: str) -> dict | None:
     """run_query may prepend WARNINGS:/LOG: preambles before the JSON body."""
-    if text.startswith("BLOCKED") or text.startswith("No database adapter"):
+    if text.startswith(("BLOCKED", "ERROR", "No database adapter")):
         return None
     body = text
     for preamble in ("WARNINGS:", "LOG:"):

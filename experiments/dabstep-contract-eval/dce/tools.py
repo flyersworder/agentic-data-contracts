@@ -67,8 +67,7 @@ pydantic-ai counts every `ModelRetry` against that one shared budget. (That
 describes agentic-data-contracts up to 0.60.x. From 0.61.0 a contract block
 raises `ToolFailed`, which spends nothing; SQL the database could not run,
 `ERROR —`, still raises `ModelRetry`. The guidance below still holds for it.)
-Arms
-`schema_only` and `manual_prompt` never raise at all — a bad query comes back
+Arms `schema_only` and `manual_prompt` never raise at all — a bad query comes back
 as an ordinary `"ERROR: ..."` string and the model just keeps iterating.
 Measured end to end: arm A finished a task after 7 model calls; arm C raised
 `UnexpectedModelBehavior` and ended the run after 2, because two governed

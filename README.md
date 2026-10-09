@@ -401,18 +401,22 @@ fixes its SQL and tries again. Session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
-A refusal spends no Pydantic AI budget, so repeated refusals are bounded by the
-contract's `max_retries` (for `run_query`), and otherwise by Pydantic AI's
+A refusal spends no Pydantic AI retry budget. The contract's `max_retries`
+bounds repeated `run_query` refusals (`preview_table`'s per-principal gate does
+not count toward it), and its `token_budget` and `max_duration_seconds` bound
+the whole run. A contract with none of these leaves only Pydantic AI's
 `UsageLimits(request_limit=...)`, 50 model requests by default. Declare
-`resources.max_retries` to bound them by the contract.
+`resources.max_retries` to bound refusals by the contract.
 
-Pydantic AI ends a run when one tool raises `ModelRetry` more times in a row
-than its retry budget, which defaults to 1. `run_query` therefore takes the contract's
+Pydantic AI ends a run when one tool raises `ModelRetry` more times than its
+retry budget, which defaults to 1, without a success in between; a refusal
+neither counts nor resets that. `run_query` therefore takes the contract's
 `resources.max_retries` as its budget, so a run continues through failed
 queries until the contract's own limit ends it. The other tools, and
 `run_query` under a contract that declares no `max_retries`, keep the agent's
-setting: pass `Agent(..., retries={"tools": n})`, or two failures of one tool
-in a row end the run with `UnexpectedModelBehavior`.
+setting: pass `Agent(..., retries={"tools": n})`, or a second `ModelRetry` from
+one tool without a success in between ends the run with
+`UnexpectedModelBehavior`.
 
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
@@ -1792,8 +1796,8 @@ Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
 outside the run. `pydantic_ai.exceptions.UnexpectedModelBehavior` is reachable
-too: a tool that fails more times in a row than its retry budget ends the run
-with it (see the Pydantic AI section above). Sequential turns only: one counter
+too: a tool that raises `ModelRetry` more times than its retry budget without
+a success in between ends the run with it (see the Pydantic AI section above). Sequential turns only: one counter
 per session is shared mutable state.
 
 ## Optional Dependencies

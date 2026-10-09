@@ -13,8 +13,11 @@ error contract:
   result-check, a gated table) is *definitive*: the same call would be refused
   again. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
   refusal as a failed tool result and adapts, without retry instructions and
-  without spending the tool's Pydantic AI retry budget. The contract's own
-  ``max_retries`` bounds repeated refusals.
+  without spending the tool's Pydantic AI retry budget. The contract's
+  ``max_retries`` bounds repeated ``run_query`` refusals (``preview_table``'s
+  gate does not count toward it), and its ``token_budget`` and
+  ``max_duration_seconds`` bound the whole run; with none of them, only
+  Pydantic AI's ``UsageLimits.request_limit`` does.
 - **Execution error** (``ERROR —``, SQL the database could not run: a missing
   column, a failed cast) is *correctable*: raised as ``pydantic_ai.ModelRetry``
   so the model rewrites its SQL and tries again.
@@ -165,8 +168,9 @@ def create_pydantic_ai_tools(
         )
 
     # Every ERROR result becomes a ModelRetry, and Pydantic AI ends the run
-    # once a tool fails more times in a row than its retry budget, which
-    # defaults to 1. (A BLOCKED result is a ToolFailed and spends nothing.)
+    # once a tool raises more of them than its retry budget, which defaults to
+    # 1, without a success in between. (A BLOCKED result is a ToolFailed: it
+    # neither spends nor resets that count.)
     # run_query's failures are the ones the session counts against the
     # contract's max_retries, so run_query takes that as its budget, and the
     # session's terminal error then fires first. Other tools keep None, the

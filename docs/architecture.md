@@ -366,16 +366,27 @@ Two things are deliberately not mapped. `max_retries` must **not** become
 requests, and conflating them would silently redefine existing contracts.
 It does become `run_query`'s `max_retries`, though, the one tool whose
 failures the session counts; the other tools keep the agent's own setting.
-Pydantic AI ends a run once a tool raises `ModelRetry` more times in a row
-than that budget (default 1), and every `ERROR —` result is one. Left at the
-default, a second failed query in a row ended the run, whatever the contract
-allowed. A `BLOCKED —` result is a `ToolFailed` (since 0.61.0), which Pydantic
-AI shows the model as a failed tool result without spending the budget: a
-contract refusal is definitive, so the model should change approach rather
-than be told to retry, and the contract's `max_retries` bounds repeats.
+Pydantic AI ends a run once a tool raises `ModelRetry` more times than that
+budget (default 1) without a success in between, and every `ERROR —` result is
+one. Left at the default, a second failed query in a row ended the run,
+whatever the contract allowed. A `BLOCKED —` result is a `ToolFailed` (since
+0.61.0), which Pydantic AI shows the model as a failed tool result without
+spending the budget, and without resetting it: errors with refusals between
+them still accumulate. A contract refusal is definitive, so the model should
+change approach rather than be told to retry. The contract's `max_retries`
+bounds repeated `run_query` refusals (`preview_table`'s gate does not count
+toward it), and `token_budget` and `max_duration_seconds` bound the whole run;
+with none of them declared, only Pydantic AI's `request_limit` does.
+Providers with a native tool-error channel (Anthropic, Bedrock, Google) show
+the model the message as is; others, OpenAI among them, wrap it as
+`{"error": "..."}`.
 With the contract's value, the session's own terminal error fires first:
 after `max_retries` failures the next call is refused before it runs, while
 Pydantic AI would have stopped only on the failure after that.
+**Known limit, not specific to Pydantic AI:** calls in one model response run
+in parallel, and each passes `check_limits()` before any records its failure,
+so a response with several failing calls can overshoot `max_retries` by up to
+the number of extra calls in it.
 `cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
 session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
 the SDK path cannot observe usage at all, so the helper lives in a module that

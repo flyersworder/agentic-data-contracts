@@ -324,7 +324,7 @@ async def test_apply_middleware_false_skips_session_check(
 
 
 @pytest.mark.asyncio
-async def test_block_quoting_the_session_limit_phrase_stays_recoverable(
+async def test_block_quoting_the_session_limit_phrase_is_not_terminal(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """A parse error repeats the agent's SQL. If that SQL holds the phrase

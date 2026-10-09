@@ -79,6 +79,7 @@ async def test_run_query_timeout_is_a_blocked_query(adapter: DuckDBAdapter) -> N
     assert time.monotonic() - start < 5
     assert result["is_error"] is True
     assert result["_kind"] == "blocked"
+    assert result.get("_correctable") is True  # a lighter query can fix it
     text = result["content"][0]["text"]
     assert "max_query_time_seconds" in text
     assert "0.5s" in text

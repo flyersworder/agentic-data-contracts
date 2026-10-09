@@ -9,18 +9,23 @@ underlying callables self-validate SQL (see ``run_query`` in
 error contract:
 
 - **Contract refusal** (``BLOCKED —`` envelope from a tool — a forbidden
-  operation, a missing required filter, unparseable SQL, a failed
-  result-check, a gated table) is *definitive*: the same call would be refused
-  again. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
-  refusal as a failed tool result and adapts, without retry instructions and
-  without spending the tool's Pydantic AI retry budget. The contract's
+  operation, a table outside the allowlist, a missing required filter, a
+  failed result-check, a gated table) is *definitive*: the request itself is
+  not allowed, and the same call would be refused again. It is raised as
+  ``pydantic_ai.ToolFailed``, so the model sees the refusal as a failed tool
+  result and adapts, without retry instructions and without spending the
+  tool's Pydantic AI retry budget. The contract's
   ``max_retries`` bounds repeated ``run_query`` refusals (``preview_table``'s
   gate does not count toward it), and its ``token_budget`` and
   ``max_duration_seconds`` bound the whole run; with none of them, only
   Pydantic AI's ``UsageLimits.request_limit`` does.
-- **Execution error** (``ERROR —``, SQL the database could not run: a missing
-  column, a failed cast) is *correctable*: raised as ``pydantic_ai.ModelRetry``
-  so the model rewrites its SQL and tries again.
+- **Correctable failure** is raised as ``pydantic_ai.ModelRetry`` so the model
+  rewrites its SQL and tries again: an execution error (``ERROR —``, SQL the
+  database could not run: a missing column, a failed cast), and a block a
+  rewritten query can pass — unparseable SQL, a ``run_query`` timeout, an
+  EXPLAIN estimate over ``cost_limit_usd`` / ``max_rows_scanned``. Such a block
+  still reads ``BLOCKED —`` and counts as a block; ``run_query`` marks its
+  envelope ``_correctable``.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost
   budget) is *terminal*: retrying cannot help, so it is raised as
   ``ContractSessionLimitError`` (a plain ``RuntimeError`` subclass) which
@@ -225,7 +230,8 @@ def _to_pydantic_ai_tool(
                     _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session)
                 ) from e
 
-        text = _unwrap_mcp_text(await inner(kwargs))
+        envelope = await inner(kwargs)
+        text = _unwrap_mcp_text(envelope)
 
         # A session-budget breach is terminal even when it surfaces from a
         # tool's own self-check (run_query's limit check under
@@ -240,6 +246,11 @@ def _to_pydantic_ai_tool(
         if text.startswith(_SESSION_LIMIT_PREFIX):
             raise ContractSessionLimitError(text)
         if text.startswith(_BLOCKED_PREFIX):
+            # A block a rewritten query can pass (unparseable SQL, a timeout,
+            # an EXPLAIN estimate over a limit) asks for corrected SQL, like an
+            # execution error; any other refusal is definitive.
+            if isinstance(envelope, dict) and envelope.get("_correctable"):
+                raise ModelRetry(text)
             raise ToolFailed(text)
         if text.startswith(_ERROR_PREFIX):
             raise ModelRetry(text)

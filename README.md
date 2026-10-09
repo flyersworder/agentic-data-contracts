@@ -392,12 +392,14 @@ tools = create_pydantic_ai_tools(dc, adapter=adapter)
 agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 ```
 
-Enforcement is auto-applied in-tool. A query the contract refuses (forbidden
-operation, missing required filter, unparseable SQL) raises `ToolFailed`: the
-model sees the refusal as a failed tool result and changes its approach, and
-the refusal does not spend Pydantic AI's retry budget. A query the database
-fails to run (a missing column, a failed cast) raises `ModelRetry`, so the model
-fixes its SQL and tries again. Session-limit exhaustion raises a terminal
+Enforcement is auto-applied in-tool. A query the contract refuses outright
+(forbidden operation, table outside the allowlist, missing required filter)
+raises `ToolFailed`: the model sees the refusal as a failed tool result and
+changes its approach, and the refusal does not spend Pydantic AI's retry
+budget. A query a rewrite can fix raises `ModelRetry`, so the model corrects
+its SQL and tries again: one the database fails to run (a missing column, a
+failed cast), and one the contract blocks as unreadable or too heavy
+(unparseable SQL, a timeout, an `EXPLAIN` estimate over a limit). Session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 

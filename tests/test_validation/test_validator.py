@@ -610,3 +610,33 @@ class TestValidatorWithSemanticSource:
         )
         assert not result.blocked
         assert result.warnings == []
+
+
+# ── over_resource_limit: "too heavy", which a lighter query can fix ──────────
+
+
+@pytest.mark.parametrize(
+    ("cost", "rows"), [(10.0, 100), (1.0, 2_000_000)], ids=["cost", "rows"]
+)
+def test_explain_estimate_over_a_limit_is_over_resource_limit(
+    contract: DataContract, cost: float, rows: int
+) -> None:
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=cost, estimated_rows=rows, schema_valid=True)
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.blocked
+    assert result.over_resource_limit
+
+
+def test_a_policy_block_is_not_over_resource_limit(contract: DataContract) -> None:
+    # The same estimate would exceed the limit, but the missing tenant filter
+    # blocks first and EXPLAIN never runs.
+    adapter = FakeExplainAdapter(
+        ExplainResult(estimated_cost_usd=10.0, estimated_rows=100, schema_valid=True)
+    )
+    validator = Validator(contract, explain_adapter=adapter)
+    result = validator.validate("SELECT id FROM analytics.orders")
+    assert result.blocked
+    assert not result.over_resource_limit

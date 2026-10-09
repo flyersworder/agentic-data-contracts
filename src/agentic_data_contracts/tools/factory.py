@@ -71,7 +71,9 @@ _ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allow
 _SESSION_LIMIT_PREFIX = f"{_BLOCKED_PREFIX} Session limit exceeded"
 
 
-def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
+def _error_response(
+    text: str, kind: str = "error", *, correctable: bool = False
+) -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
     ``claude_agent_sdk`` reads ``is_error`` off this dict and maps it onto MCP's
@@ -101,7 +103,10 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     envelope to classify a tool call as blocked vs. error instead of treating
     every non-raising return as a successful call.
     """
-    return {**_text_response(text), "is_error": True, "_kind": kind}
+    response = {**_text_response(text), "is_error": True, "_kind": kind}
+    if correctable:
+        response["_correctable"] = True
+    return response
 
 
 def _folded_table_index(source: SemanticSource) -> dict[str, Any]:
@@ -1789,7 +1794,13 @@ def create_tools(
                 msg = "BLOCKED — Violations:\n" + "\n".join(
                     f"- {r}" for r in vresult.reasons
                 )
-                response = _error_response(_with_remaining(msg), kind="blocked")
+                # Unreadable or too heavy: still a block, but one a rewritten
+                # query can pass, unlike a refused table or operation.
+                response = _error_response(
+                    _with_remaining(msg),
+                    kind="blocked",
+                    correctable=vresult.parse_error or vresult.over_resource_limit,
+                )
                 _record(
                     response["_kind"],
                     detail="; ".join(vresult.reasons),
@@ -1827,8 +1838,11 @@ def create_tools(
                 # The contract's own limit stopped the query: a governance
                 # block, counted against max_retries like any other.
                 session.record_block()
+                # Correctable: the message asks for a lighter query.
                 response = _error_response(
-                    _with_remaining(_timeout_message(e)), kind="blocked"
+                    _with_remaining(_timeout_message(e)),
+                    kind="blocked",
+                    correctable=True,
                 )
                 _record(
                     response["_kind"],

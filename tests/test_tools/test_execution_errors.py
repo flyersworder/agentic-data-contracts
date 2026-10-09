@@ -172,3 +172,46 @@ async def test_middleware_counts_a_database_rejection_as_an_execution_error() ->
     assert _text(result).startswith("ERROR — Schema validation failed:")
     assert result["_kind"] == "error"
     assert (session.blocks, session.execution_errors) == (0, 1)
+
+
+# ── _correctable: refusals a rewritten query can fix (unreadable, too heavy) ──
+
+
+async def test_unparseable_sql_is_a_correctable_block() -> None:
+    dc = _contract()
+    result = await _run_query(dc, ContractSession(dc))(
+        {"sql": "SELEC id FROM analytics.orders"}
+    )
+    assert result["_kind"] == "blocked"
+    assert result.get("_correctable") is True
+
+
+async def test_a_row_estimate_over_the_limit_is_a_correctable_block() -> None:
+    dc = DataContract(
+        DataContractSchema(
+            name="test",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    )
+                ]
+            ),
+            resources=ResourceConfig(max_retries=5, max_rows_scanned=1),
+        )
+    )
+    result = await _run_query(dc, ContractSession(dc))(
+        {"sql": "SELECT id FROM analytics.orders"}
+    )
+    assert _text(result).startswith("BLOCKED —")
+    assert "exceeds limit" in _text(result)
+    assert result.get("_correctable") is True
+
+
+async def test_a_policy_block_is_not_correctable() -> None:
+    dc = _contract()
+    result = await _run_query(dc, ContractSession(dc))(
+        {"sql": "SELECT id FROM analytics.secrets"}
+    )
+    assert result["_kind"] == "blocked"
+    assert "_correctable" not in result

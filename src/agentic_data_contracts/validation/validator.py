@@ -130,6 +130,9 @@ class ValidationResult:
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
     parse_error: bool = False
+    # Blocked because the EXPLAIN estimate exceeds cost_limit_usd or
+    # max_rows_scanned: "too heavy", which a narrower query can fix.
+    over_resource_limit: bool = False
     relative_time: str | None = None
 
     @property
@@ -341,6 +344,7 @@ class Validator:
         estimated_rows: int | None = None
         schema_valid: bool = True
         explain_errors: list[str] = []
+        over_resource_limit = False
 
         # TokenError (an unterminated literal, say) is raised by the tokenizer
         # and is NOT a ParseError subclass; both mean "unreadable".
@@ -429,6 +433,7 @@ class Validator:
                         reasons.append(
                             f"Estimated cost ${cost:.2f} exceeds limit ${limit:.2f}"
                         )
+                        over_resource_limit = True
                     if (
                         res.max_rows_scanned is not None
                         and explain_result.estimated_rows is not None
@@ -439,6 +444,7 @@ class Validator:
                         reasons.append(
                             f"Estimated rows {rows:,} exceeds limit {max_rows:,}"
                         )
+                        over_resource_limit = True
 
         return ValidationResult(
             blocked=len(reasons) > 0,
@@ -449,6 +455,7 @@ class Validator:
             estimated_rows=estimated_rows,
             schema_valid=schema_valid,
             explain_errors=explain_errors,
+            over_resource_limit=over_resource_limit,
             relative_time=relative_time,
         )
 

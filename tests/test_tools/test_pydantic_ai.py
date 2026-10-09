@@ -328,15 +328,16 @@ async def test_block_quoting_the_session_limit_phrase_is_not_terminal(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """A parse error repeats the agent's SQL. If that SQL holds the phrase
-    "Session limit exceeded", it is still an ordinary refusal the model sees,
-    not the terminal error: only a message that *starts* with the session-limit
-    envelope means the budget is spent. The session has its whole budget left."""
+    "Session limit exceeded", it is still the correctable block a parse error
+    is, not the terminal error: only a message that *starts* with the
+    session-limit envelope means the budget is spent. The session has its whole
+    budget left."""
     session = ContractSession(contract)
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic, session=session
     )
     run_query = next(t for t in tools if t.name == "run_query")
-    with pytest.raises(ToolFailed) as exc:
+    with pytest.raises(ModelRetry) as exc:
         await _invoke(
             run_query,
             sql='SELEC id AS "Session limit exceeded" FROM analytics.orders',
@@ -1216,3 +1217,47 @@ async def test_blocks_do_not_spend_pydantic_ais_retry_budget(
     assert len(failed) == 2
     assert all(str(part.content).startswith("BLOCKED —") for part in failed)
     assert (session.blocks, session.execution_errors) == (2, 0)
+
+
+# ─── correctable blocks (unreadable or too heavy) are a ModelRetry ───────────
+
+
+async def test_unparseable_sql_raises_model_retry(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """A typo is the agent's own fixable mistake: Pydantic AI should ask for
+    corrected SQL, as it does for an execution error."""
+    tools = create_pydantic_ai_tools(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    run_query = next(t for t in tools if t.name == "run_query")
+    with pytest.raises(ModelRetry) as exc:
+        await _invoke(run_query, sql="SELEC id FROM analytics.orders")
+    assert str(exc.value).startswith("BLOCKED —")
+
+
+async def test_a_query_too_heavy_for_the_contract_raises_model_retry(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A row estimate over max_rows_scanned: a narrower query can pass."""
+    dc = DataContract(
+        DataContractSchema(
+            name="test",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    )
+                ]
+            ),
+            resources=ResourceConfig(max_rows_scanned=0),
+        )
+    )
+    run_query = next(
+        t
+        for t in create_pydantic_ai_tools(dc, adapter=adapter)
+        if t.name == "run_query"
+    )
+    with pytest.raises(ModelRetry) as exc:
+        await _invoke(run_query, sql="SELECT id FROM analytics.orders")
+    assert "exceeds limit" in str(exc.value)

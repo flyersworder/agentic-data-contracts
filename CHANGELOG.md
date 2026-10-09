@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.61.0] - 2026-10-09
+
+### Changed
+
+- **Under Pydantic AI, a contract refusal now raises `ToolFailed` instead of `ModelRetry`.** A `BLOCKED —` result (a forbidden operation, a missing required filter, unparseable SQL, a failed result check, a gated table) is definitive: the same call would be refused again. Pydantic AI's `ToolFailed` shows the model the refusal as a failed tool result, without the instructions to retry that `ModelRetry` adds, and without spending the tool's retry budget. The contract's `max_retries` still bounds repeated refusals, and still ends the run with `ContractSessionLimitError`. An execution error (`ERROR —`, SQL the database could not run) stays a `ModelRetry`, since the fix is corrected SQL. Code that caught `ModelRetry` around a direct call to a wrapped tool should catch `ToolFailed` for a refusal.
+- **`pydantic-ai-slim` 2.16.0 or later is required** for the `pydantic-ai` extra, up from 2.0.0. It is the first release with `ToolFailed`.
+
 ## [0.60.1] - 2026-10-09
 
 ### Fixed

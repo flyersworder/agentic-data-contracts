@@ -5,15 +5,19 @@ The returned list plugs directly into ``pydantic_ai.Agent(tools=...)``.
 Enforcement is applied **in-tool**, mirroring ``create_langchain_tools``'s
 default path: each wrapped tool pre-checks ``ContractSession`` limits and the
 underlying callables self-validate SQL (see ``run_query`` in
-``tools/factory.py``). Two enforcement signals are mapped onto Pydantic AI's
-error contract, which distinguishes recoverable from terminal failures:
+``tools/factory.py``). Three enforcement signals are mapped onto Pydantic AI's
+error contract:
 
-- **Validation block** (``BLOCKED —`` envelope from a tool — a forbidden
+- **Contract refusal** (``BLOCKED —`` envelope from a tool — a forbidden
   operation, a missing required filter, unparseable SQL, a failed
-  result-check) and **execution error** (``ERROR —``, SQL the database could
-  not run: a missing column, a failed cast) are
-  *recoverable*: re-raised as ``pydantic_ai.ModelRetry`` so the model can
-  rewrite its arguments and try again.
+  result-check, a gated table) is *definitive*: the same call would be refused
+  again. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
+  refusal as a failed tool result and adapts, without retry instructions and
+  without spending the tool's Pydantic AI retry budget. The contract's own
+  ``max_retries`` bounds repeated refusals.
+- **Execution error** (``ERROR —``, SQL the database could not run: a missing
+  column, a failed cast) is *correctable*: raised as ``pydantic_ai.ModelRetry``
+  so the model rewrites its SQL and tries again.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost
   budget) is *terminal*: retrying cannot help, so it is raised as
   ``ContractSessionLimitError`` (a plain ``RuntimeError`` subclass) which
@@ -40,7 +44,7 @@ from dataclasses import dataclass
 from typing import Any
 from weakref import WeakKeyDictionary
 
-from pydantic_ai import ModelRetry, RunContext, Tool
+from pydantic_ai import ModelRetry, RunContext, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset, ToolsetFunc
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -160,13 +164,14 @@ def create_pydantic_ai_tools(
             max_result_rows=max_result_rows,
         )
 
-    # Every BLOCKED / ERROR result becomes a ModelRetry, and Pydantic AI ends
-    # the run once a tool fails more times in a row than its retry budget,
-    # which defaults to 1. run_query's failures are the ones the session
-    # counts against the contract's max_retries, so run_query takes that as its
-    # budget, and the session's terminal error then fires first. Other tools
-    # keep None, the agent's own `retries` setting; so does run_query when the
-    # contract declares no max_retries.
+    # Every ERROR result becomes a ModelRetry, and Pydantic AI ends the run
+    # once a tool fails more times in a row than its retry budget, which
+    # defaults to 1. (A BLOCKED result is a ToolFailed and spends nothing.)
+    # run_query's failures are the ones the session counts against the
+    # contract's max_retries, so run_query takes that as its budget, and the
+    # session's terminal error then fires first. Other tools keep None, the
+    # agent's own `retries` setting; so does run_query when the contract
+    # declares no max_retries.
     resources = contract.schema.resources
     max_retries = resources.max_retries if resources else None
     return [
@@ -218,21 +223,20 @@ def _to_pydantic_ai_tool(
 
         text = _unwrap_mcp_text(await inner(kwargs))
 
-        # Every BLOCKED path in tools/factory.py uses the canonical
-        # "BLOCKED —" em-dash prefix. A session-budget breach is terminal even
-        # when it surfaces from a tool's own self-check (run_query's limit
-        # check under apply_middleware=False), so it must NOT become a
-        # recoverable ModelRetry. Everything else BLOCKED (forbidden op,
-        # permission gate, failed result-check) is recoverable: surfaced as
-        # ModelRetry so the model can rewrite its arguments or switch tools.
-        # So is "ERROR —", SQL the database could not run.
+        # A session-budget breach is terminal even when it surfaces from a
+        # tool's own self-check (run_query's limit check under
+        # apply_middleware=False), so it must NOT reach the model as a tool
+        # result. Every other BLOCKED (forbidden op, permission gate, failed
+        # result-check) is a definitive refusal: a ToolFailed, which the model
+        # sees and adapts to, and which spends no retry budget. "ERROR —", SQL
+        # the database could not run, is correctable: a ModelRetry.
         # Matched as a prefix, never a substring: a block message can quote the
         # agent's own SQL (a parse error does), and SQL containing the phrase
         # is not a spent budget.
         if text.startswith(_SESSION_LIMIT_PREFIX):
             raise ContractSessionLimitError(text)
         if text.startswith(_BLOCKED_PREFIX):
-            raise ModelRetry(text)
+            raise ToolFailed(text)
         if text.startswith(_ERROR_PREFIX):
             raise ModelRetry(text)
 
@@ -479,11 +483,12 @@ def create_pydantic_ai_toolset(
         max_result_rows: The most rows ``run_query`` / ``preview_table``
             return (default 1000); ``None`` for no cap. See ``create_tools``.
 
-    Enforcement is identical to :func:`create_pydantic_ai_tools` (a validation
-    block becomes ``ModelRetry``; a session-budget breach becomes the terminal
-    ``ContractSessionLimitError``). The shared config (adapter connection pool,
-    semantic source) stays shared across all users; only the per-user session and
-    principal vary, threaded in via ``deps``.
+    Enforcement is identical to :func:`create_pydantic_ai_tools` (a contract
+    refusal becomes ``ToolFailed``, an execution error ``ModelRetry``, and a
+    session-budget breach the terminal ``ContractSessionLimitError``). The
+    shared config (adapter connection pool, semantic source) stays shared
+    across all users; only the per-user session and principal vary, threaded
+    in via ``deps``.
     """
     # This function returns a factory that builds tools per run, so deferring
     # to create_tools would push a typo to the first agent run. Check now.

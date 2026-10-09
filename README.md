@@ -380,7 +380,7 @@ agent = create_deep_agent(
 </details>
 
 <details>
-<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.0.0+</summary>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.16.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -392,15 +392,17 @@ tools = create_pydantic_ai_tools(dc, adapter=adapter)
 agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 ```
 
-Enforcement is auto-applied in-tool: a blocked query (forbidden operation,
-missing required filter, unparseable SQL) or one the database fails to run
-(a missing column, a failed cast) raises `ModelRetry`
-so the model rewrites and retries, while session-limit exhaustion raises a terminal
+Enforcement is auto-applied in-tool. A query the contract refuses (forbidden
+operation, missing required filter, unparseable SQL) raises `ToolFailed`: the
+model sees the refusal as a failed tool result and changes its approach, and
+the refusal does not spend Pydantic AI's retry budget. A query the database
+fails to run (a missing column, a failed cast) raises `ModelRetry`, so the model
+fixes its SQL and tries again. Session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
-Pydantic AI ends a run when one tool fails more times in a row than its retry
-budget, which defaults to 1. `run_query` therefore takes the contract's
+Pydantic AI ends a run when one tool raises `ModelRetry` more times in a row
+than its retry budget, which defaults to 1. `run_query` therefore takes the contract's
 `resources.max_retries` as its budget, so a run continues through failed
 queries until the contract's own limit ends it. The other tools, and
 `run_query` under a contract that declares no `max_retries`, keep the agent's
@@ -432,7 +434,7 @@ result = await agent.run(
 
 The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
-`ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
+`ToolFailed` / `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
 
 Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
@@ -1799,7 +1801,7 @@ per session is shared mutable state.
 | `postgres` | `psycopg2-binary>=2.9.10` | Driver only — for a `DatabaseAdapter` you write |
 | `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp>=1.23.0` | Claude Agent SDK integration |
 | `langchain` | `langchain-core>=1.3.3`, `langchain>=1.2.17`, `langgraph>=1.1.10` | LangChain / deepagents integration |
-| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.0.0` | Pydantic AI integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.16.0` | Pydantic AI integration |
 | `agent-contracts` | `ai-agent-contracts>=0.3.1` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

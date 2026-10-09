@@ -59,7 +59,9 @@ dependencies = [
     # `GenerateSchema.__init__()` signature mismatch. It went unnoticed because
     # uv resolves the project universally, so transitive requirements float
     # pydantic above its own floor and test-lowest-floors never exercised it --
-    # hence the explicit wheel-and-floor check in that job.
+    # hence the explicit wheel-and-floor check in that job. The floor holds for
+    # the base install; the pydantic-ai extra (pydantic-ai-slim>=2.16) itself
+    # requires pydantic>=2.12.
     "pydantic>=2.11",
     "pyyaml>=6.0.3",
     "thefuzz>=0.22.1",

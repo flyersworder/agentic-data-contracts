@@ -1838,8 +1838,9 @@ def create_tools(
                 return response
             except Exception as e:  # noqa: BLE001
                 # The database could not run SQL the contract allowed: the
-                # agent's own error, not a block. It still spends a retry, and
-                # the wrappers treat ``ERROR —`` as recoverable like ``BLOCKED —``.
+                # agent's own error, not a block. It still spends a retry. The
+                # wrappers surface ``ERROR —`` as recoverable: a ToolException
+                # (LangChain) or a ModelRetry asking for corrected SQL (Pydantic AI).
                 session.record_execution_error()
                 response = _error_response(
                     _with_remaining(f"{_ERROR_PREFIX} Query execution failed: {e}")

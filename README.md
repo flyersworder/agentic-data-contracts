@@ -401,6 +401,11 @@ fixes its SQL and tries again. Session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
+A refusal spends no Pydantic AI budget, so repeated refusals are bounded by the
+contract's `max_retries` (for `run_query`), and otherwise by Pydantic AI's
+`UsageLimits(request_limit=...)`, 50 model requests by default. Declare
+`resources.max_retries` to bound them by the contract.
+
 Pydantic AI ends a run when one tool raises `ModelRetry` more times in a row
 than its retry budget, which defaults to 1. `run_query` therefore takes the contract's
 `resources.max_retries` as its budget, so a run continues through failed

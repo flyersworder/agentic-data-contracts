@@ -119,6 +119,40 @@ def test_explain_schema_invalid_blocks(contract: DataContract) -> None:
     assert result.blocked
 
 
+def _schema_invalid_adapter() -> FakeExplainAdapter:
+    return FakeExplainAdapter(
+        ExplainResult(
+            estimated_cost_usd=None,
+            estimated_rows=None,
+            schema_valid=False,
+            errors=["Column not found"],
+        )
+    )
+
+
+def test_schema_invalid_alone_is_a_database_rejection(contract: DataContract) -> None:
+    # #134: the database refused the SQL, and no policy check did.
+    validator = Validator(contract, explain_adapter=_schema_invalid_adapter())
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.rejected_by_database
+
+
+def test_policy_violation_is_never_a_database_rejection(contract: DataContract) -> None:
+    # The same adapter would reject the SQL, but a policy reason (the missing
+    # tenant filter) comes first: EXPLAIN never runs, and the query is a block.
+    validator = Validator(contract, explain_adapter=_schema_invalid_adapter())
+    result = validator.validate("SELECT id FROM analytics.orders")
+    assert result.blocked
+    assert not result.rejected_by_database
+
+
+def test_parse_error_is_not_a_database_rejection(contract: DataContract) -> None:
+    validator = Validator(contract, explain_adapter=_schema_invalid_adapter())
+    result = validator.validate("SELEC id FROM analytics.orders")
+    assert result.parse_error
+    assert not result.rejected_by_database
+
+
 def test_explain_within_limits_passes(contract: DataContract) -> None:
     adapter = FakeExplainAdapter(
         ExplainResult(estimated_cost_usd=1.0, estimated_rows=500, schema_valid=True)

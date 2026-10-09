@@ -85,7 +85,7 @@ def _resolve_data_plugin() -> Path | None:
 
 
 def _parse_run_query_body(text: str) -> dict | None:
-    if text.startswith("BLOCKED") or text.startswith("No database adapter"):
+    if text.startswith(("BLOCKED", "ERROR", "No database adapter")):
         return None
     body = text
     for preamble in ("WARNINGS:", "LOG:"):
@@ -354,7 +354,7 @@ async def _run_demo(
     authorized_result = await authorized_run.callable({"sql": deploy_sql})
     authorized_text = authorized_result["content"][0]["text"]
     print("\nAs sre_lead@co.com on sre.deploys:")
-    if authorized_text.startswith("BLOCKED"):
+    if authorized_text.startswith(("BLOCKED", "ERROR")):
         print(f"  {authorized_text[:200]}")
     else:
         body = _parse_run_query_body(authorized_text)
@@ -375,7 +375,7 @@ async def _run_demo(
     intern_incident_result = await intern_run.callable({"sql": incident_sql})
     intern_incident_text = intern_incident_result["content"][0]["text"]
     print("\nAs intern@co.com on sre.incidents (no principal gate — per-table scope):")
-    if intern_incident_text.startswith("BLOCKED"):
+    if intern_incident_text.startswith(("BLOCKED", "ERROR")):
         print(f"  {intern_incident_text[:200]}")
     else:
         body = _parse_run_query_body(intern_incident_text)
@@ -396,7 +396,7 @@ async def _run_demo(
     sre_lead_pii_result = await authorized_run.callable({"sql": pii_query})
     sre_lead_pii_text = sre_lead_pii_result["content"][0]["text"]
     print("\nAs sre_lead@co.com on customer_id (not exempted from rule):")
-    if sre_lead_pii_text.startswith("BLOCKED"):
+    if sre_lead_pii_text.startswith(("BLOCKED", "ERROR")):
         print(f"  {sre_lead_pii_text[:300]}")
     else:
         body = _parse_run_query_body(sre_lead_pii_text)
@@ -406,7 +406,7 @@ async def _run_demo(
     intern_pii_result = await intern_run.callable({"sql": pii_query})
     intern_pii_text = intern_pii_result["content"][0]["text"]
     print("\nAs intern@co.com on customer_id (also not exempted):")
-    if intern_pii_text.startswith("BLOCKED"):
+    if intern_pii_text.startswith(("BLOCKED", "ERROR")):
         print(f"  {intern_pii_text[:300]}")
     else:
         body = _parse_run_query_body(intern_pii_text)
@@ -416,7 +416,7 @@ async def _run_demo(
     compliance_pii_result = await compliance_run.callable({"sql": pii_query})
     compliance_pii_text = compliance_pii_result["content"][0]["text"]
     print("\nAs compliance@co.com on customer_id (exempted via blocked_principals):")
-    if compliance_pii_text.startswith("BLOCKED"):
+    if compliance_pii_text.startswith(("BLOCKED", "ERROR")):
         print(f"  {compliance_pii_text[:300]}")
     else:
         body = _parse_run_query_body(compliance_pii_text)

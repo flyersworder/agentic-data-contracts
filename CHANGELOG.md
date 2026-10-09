@@ -11,10 +11,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **`ContractSession.blocks` and `ContractSession.execution_errors`** count the two kinds of failed query separately, recorded with `record_block()` and `record_execution_error()`. Each also spends a retry, so `max_retries` means what it did: every failed query attempt, blocked or not. `record_retry()` still spends a retry without classifying it.
+- **`ValidationResult.rejected_by_database`** says a query was blocked only because the `EXPLAIN` dry-run rejected it.
 
 ### Changed
 
 - **The LangChain and Pydantic AI wrappers treat `ERROR —` like `BLOCKED —`**: a `ToolException`, or a recoverable `ModelRetry`, so an agent still gets the chance to fix its query. Code that matched `BLOCKED —` to detect a failed execution should match `ERROR —` too.
+- **Conformance friction no longer counts a query the database rejected at `EXPLAIN`.** Friction in `evaluate_conformance` counts `run_query` attempts the contract blocked. A missing column used to be recorded as `blocked` and counted; it is now an `error`, like a failed cast always was, so "N blocked run_query attempt(s)" counts contract refusals only.
 
 ## [0.59.1] - 2026-10-09
 

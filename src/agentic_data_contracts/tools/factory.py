@@ -61,6 +61,13 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
+# The two prefixes the framework wrappers match to turn a tool result into a
+# native, recoverable error. Defined once here, where they are emitted, so a
+# change to the wording cannot leave a wrapper matching the old one.
+_BLOCKED_PREFIX = "BLOCKED —"  # the contract refused the action
+_ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allowed
+
+
 def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
@@ -1761,14 +1768,12 @@ def create_tools(
             # explain_adapter.explain), so offload it to a worker thread to avoid
             # blocking the event loop.
             vresult = await asyncio.to_thread(validator.validate, sql)
-            if vresult.blocked and not vresult.schema_valid:
-                # The EXPLAIN dry-run runs only once every policy check has
-                # passed, so the database's rejection (a missing column, a
-                # binder error) is the sole reason: the agent's error, not a
+            if vresult.rejected_by_database:
+                # A missing column or binder error: the agent's error, not a
                 # block. Unparseable SQL stays a block, a fail-closed refusal.
                 session.record_execution_error()
                 response = _error_response(
-                    _with_remaining("ERROR — " + "\n".join(vresult.reasons))
+                    _with_remaining(f"{_ERROR_PREFIX} " + "\n".join(vresult.reasons))
                 )
                 _record(
                     response["_kind"],
@@ -1834,7 +1839,7 @@ def create_tools(
                 # the wrappers treat ``ERROR —`` as recoverable like ``BLOCKED —``.
                 session.record_execution_error()
                 response = _error_response(
-                    _with_remaining(f"ERROR — Query execution failed: {e}")
+                    _with_remaining(f"{_ERROR_PREFIX} Query execution failed: {e}")
                 )
                 _record(
                     response["_kind"],

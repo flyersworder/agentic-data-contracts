@@ -49,17 +49,14 @@ from agentic_data_contracts.core.session import (
 )
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _BLOCKED_PREFIX,
+    _ERROR_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
     validate_max_result_rows,
     validate_row_format,
 )
-
-_BLOCKED_PREFIX = "BLOCKED —"
-# run_query's wording for SQL the database could not run (#134). Not a block,
-# but just as recoverable: the model should fix the query and try again.
-_ERROR_PREFIX = "ERROR —"
 
 # One carried ``RunUsage`` per ``ContractSession``, so a session's token tally
 # can track a counter that spans every turn instead of per-run snapshots. Weak

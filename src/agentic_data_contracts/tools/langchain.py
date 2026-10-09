@@ -59,16 +59,13 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _BLOCKED_PREFIX,
+    _ERROR_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
 )
 from agentic_data_contracts.validation.validator import Validator
-
-_BLOCKED_PREFIX = "BLOCKED —"
-# run_query's wording for SQL the database could not run (#134). Not a block,
-# but just as recoverable, so it reaches the model the same way.
-_ERROR_PREFIX = "ERROR —"
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -430,9 +427,8 @@ class ContractMiddleware(AgentMiddleware):
         sql = args.get("sql") if isinstance(args, dict) else None
         if isinstance(sql, str) and sql:
             result = self._validator.validate(sql)
-            if result.blocked and not result.schema_valid:
-                # The database rejected the SQL at EXPLAIN, which runs only
-                # after every policy check passed: the agent's error (#134).
+            if result.rejected_by_database:
+                # A missing column or binder error: the agent's error (#134).
                 self._session.record_execution_error()
                 return ToolMessage(
                     content=_with_remaining(

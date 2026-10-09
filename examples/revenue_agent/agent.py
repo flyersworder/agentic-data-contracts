@@ -78,7 +78,7 @@ def _parse_run_query_body(text: str) -> dict | None:
     Returns the parsed JSON dict, or None if the response is a plain-text
     BLOCKED/error message.
     """
-    if text.startswith("BLOCKED") or text.startswith("No database adapter"):
+    if text.startswith(("BLOCKED", "ERROR", "No database adapter")):
         return None
     body = text
     if body.startswith("WARNINGS:"):

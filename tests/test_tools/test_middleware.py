@@ -72,6 +72,7 @@ async def test_middleware_tracks_session(
 
     await my_query({"sql": "DELETE FROM analytics.orders"})
     assert session.retries == 1
+    assert session.blocks == 1
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.60.0] - 2026-10-09
+
+### Fixed
+
+- **`run_query` reported the agent's own SQL errors as governance blocks.** A query the contract allowed but the database could not run came back as `BLOCKED — ...`, and the session counted it the same way as a contract refusal. The agent read "BLOCKED" for a query nothing blocked, and anyone reading the retry count as the number of blocks overstated enforcement: in one evaluation run all 28 recorded "blocks" were failed casts. A query that fails during execution (a failed cast, malformed JSON) now reads `ERROR — Query execution failed: ...`, and one the database rejects at the `EXPLAIN` dry-run (a missing column) reads `ERROR — Schema validation failed: ...`, in `run_query` and in both middlewares. SQL the validator cannot parse is still a block: it is refused fail-closed, because the contract cannot check it. (#134)
+
+### Added
+
+- **`ContractSession.blocks` and `ContractSession.execution_errors`** count the two kinds of failed query separately, recorded with `record_block()` and `record_execution_error()`. Each also spends a retry, so `max_retries` means what it did: every failed query attempt, blocked or not. `record_retry()` still spends a retry without classifying it.
+
+### Changed
+
+- **The LangChain and Pydantic AI wrappers treat `ERROR —` like `BLOCKED —`**: a `ToolException`, or a recoverable `ModelRetry`, so an agent still gets the chance to fix its query. Code that matched `BLOCKED —` to detect a failed execution should match `ERROR —` too.
+
 ## [0.59.1] - 2026-10-09
 
 ### Fixed

@@ -84,9 +84,9 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     *why* the call didn't perform its advertised action, not just that it
     didn't. ``"blocked"`` means the contract actively refused the action --
     a governance decision, not a failure -- and is reserved for call sites
-    where that is genuinely what happened; a message that merely *says*
-    "BLOCKED" in its text (e.g. an adapter raising during execution) is still
-    an execution failure and keeps the default ``"error"``. Consumed by the
+    where that is genuinely what happened; SQL the database could not run
+    (rejected by EXPLAIN, or raising during execution) is the agent's own
+    error, worded ``ERROR —``, and keeps the default ``"error"``. Consumed by the
     conformance recorder (a later feature), which reads ``_kind`` off the
     envelope to classify a tool call as blocked vs. error instead of treating
     every non-raising return as a successful call.
@@ -1761,8 +1761,23 @@ def create_tools(
             # explain_adapter.explain), so offload it to a worker thread to avoid
             # blocking the event loop.
             vresult = await asyncio.to_thread(validator.validate, sql)
+            if vresult.blocked and not vresult.schema_valid:
+                # The EXPLAIN dry-run runs only once every policy check has
+                # passed, so the database's rejection (a missing column, a
+                # binder error) is the sole reason: the agent's error, not a
+                # block. Unparseable SQL stays a block, a fail-closed refusal.
+                session.record_execution_error()
+                response = _error_response(
+                    _with_remaining("ERROR — " + "\n".join(vresult.reasons))
+                )
+                _record(
+                    response["_kind"],
+                    detail="; ".join(vresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
             if vresult.blocked:
-                session.record_retry()
+                session.record_block()
                 msg = "BLOCKED — Violations:\n" + "\n".join(
                     f"- {r}" for r in vresult.reasons
                 )
@@ -1803,7 +1818,7 @@ def create_tools(
             except QueryTimeoutError as e:
                 # The contract's own limit stopped the query: a governance
                 # block, counted against max_retries like any other.
-                session.record_retry()
+                session.record_block()
                 response = _error_response(
                     _with_remaining(_timeout_message(e)), kind="blocked"
                 )
@@ -1814,9 +1829,12 @@ def create_tools(
                 )
                 return response
             except Exception as e:  # noqa: BLE001
-                session.record_retry()
+                # The database could not run SQL the contract allowed: the
+                # agent's own error, not a block. It still spends a retry, and
+                # the wrappers treat ``ERROR —`` as recoverable like ``BLOCKED —``.
+                session.record_execution_error()
                 response = _error_response(
-                    _with_remaining(f"BLOCKED — Query execution failed: {e}")
+                    _with_remaining(f"ERROR — Query execution failed: {e}")
                 )
                 _record(
                     response["_kind"],
@@ -1833,7 +1851,7 @@ def create_tools(
                 truncated=qresult.truncated,
             )
             if rresult.blocked:
-                session.record_retry()
+                session.record_block()
                 msg = "BLOCKED — Result check violations:\n" + "\n".join(
                     f"- {r}" for r in rresult.reasons
                 )

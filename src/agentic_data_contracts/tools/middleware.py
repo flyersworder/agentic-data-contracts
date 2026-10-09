@@ -58,8 +58,13 @@ def contract_middleware(
                 # to a worker thread to keep the event loop responsive — same
                 # rationale as factory.py.
                 result = await asyncio.to_thread(validator.validate, sql)
+                if result.blocked and not result.schema_valid:
+                    # The database rejected the SQL at EXPLAIN, which runs
+                    # only after every policy check passed: the agent's error.
+                    session.record_execution_error()
+                    return _error_response("ERROR — " + "\n".join(result.reasons))
                 if result.blocked:
-                    session.record_retry()
+                    session.record_block()
                     return _error_response(
                         "BLOCKED — Violations:\n"
                         + "\n".join(f"- {r}" for r in result.reasons),

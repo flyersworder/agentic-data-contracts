@@ -10,8 +10,8 @@ Two integration paths are offered:
 
 1. **In-tool enforcement (default)** — ``create_langchain_tools(...)`` returns
    ``StructuredTool``s whose coroutine pre-checks ``ContractSession`` limits
-   and converts ``BLOCKED —`` envelopes from the underlying callables into
-   ``ToolException``. The agent runtime renders those as
+   and converts ``BLOCKED —`` and ``ERROR —`` envelopes from the underlying
+   callables into ``ToolException``. The agent runtime renders those as
    ``ToolMessage(status="error")``.
 
 2. **Graph-level enforcement** — ``ContractMiddleware`` subclasses
@@ -28,7 +28,7 @@ Important divergence from ``contract_middleware`` in ``tools.middleware``:
 that decorator validates SQL on *every* tool that has an ``args["sql"]``
 key — including ``inspect_query``, whose explicit purpose is to *report*
 violations as JSON without blocking. The in-tool path here therefore only
-runs ``session.check_limits()`` and the ``BLOCKED —`` prefix sniff; SQL
+runs ``session.check_limits()`` and the ``BLOCKED —`` / ``ERROR —`` prefix sniff; SQL
 validation is left to the underlying tools (``run_query`` self-validates
 inside ``factory.create_tools``).
 
@@ -66,6 +66,9 @@ from agentic_data_contracts.tools.factory import (
 from agentic_data_contracts.validation.validator import Validator
 
 _BLOCKED_PREFIX = "BLOCKED —"
+# run_query's wording for SQL the database could not run (#134). Not a block,
+# but just as recoverable, so it reaches the model the same way.
+_ERROR_PREFIX = "ERROR —"
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -227,10 +230,10 @@ def create_langchain_tools(
         apply_middleware: When ``True`` (default), each tool pre-checks
             ``session.check_limits()``. Set ``False`` if you are pairing
             this with ``ContractMiddleware`` to avoid duplicate
-            limit-check work — note that the ``BLOCKED —`` prefix sniff
-            is always active regardless of this flag, so error semantics
-            (raising ``ToolException`` on a blocked envelope) are
-            preserved either way.
+            limit-check work — note that the ``BLOCKED —`` / ``ERROR —``
+            prefix sniff is always active regardless of this flag, so error
+            semantics (raising ``ToolException`` on a blocked or failed
+            query) are preserved either way.
 
     Returns:
         A list of ``BaseTool`` instances; order matches the underlying
@@ -315,10 +318,11 @@ def _to_structured_tool(
         text = _unwrap_mcp_text(envelope)
 
         # Every BLOCKED path in tools/factory.py and tools/middleware.py
-        # uses the canonical "BLOCKED —" em-dash prefix; sniffing it lets
-        # us surface enforcement decisions as ToolException, which the
-        # agent runtime renders as ToolMessage(status="error").
-        if text.startswith(_BLOCKED_PREFIX):
+        # uses the canonical "BLOCKED —" em-dash prefix, and a failed
+        # execution uses "ERROR —"; sniffing them lets us surface both as
+        # ToolException, which the agent runtime renders as
+        # ToolMessage(status="error").
+        if text.startswith((_BLOCKED_PREFIX, _ERROR_PREFIX)):
             raise ToolException(text)
 
         return text, envelope
@@ -399,12 +403,12 @@ class ContractMiddleware(AgentMiddleware):
 
         self._observe_token_usage(request)
 
-        # Session-limit breach: do NOT call ``record_retry()`` here. The
+        # Session-limit breach: do NOT call ``record_block()`` here. The
         # session is already past its cap; recording another retry would
         # increment past it for no benefit and risks double-counting if a
         # future ceiling is added. This mirrors ``run_query`` in ``factory``,
-        # which similarly skips ``record_retry`` on limit-exceeded but does
-        # record on validation-block (next branch).
+        # which similarly records nothing on limit-exceeded but does record
+        # on validation-block (next branch).
         try:
             self._session.check_limits()
         except LimitExceededError as e:
@@ -426,8 +430,21 @@ class ContractMiddleware(AgentMiddleware):
         sql = args.get("sql") if isinstance(args, dict) else None
         if isinstance(sql, str) and sql:
             result = self._validator.validate(sql)
+            if result.blocked and not result.schema_valid:
+                # The database rejected the SQL at EXPLAIN, which runs only
+                # after every policy check passed: the agent's error (#134).
+                self._session.record_execution_error()
+                return ToolMessage(
+                    content=_with_remaining(
+                        f"{_ERROR_PREFIX} " + "\n".join(result.reasons),
+                        self._session,
+                    ),
+                    name=name,
+                    tool_call_id=tool_call_id,
+                    status="error",
+                )
             if result.blocked:
-                self._session.record_retry()
+                self._session.record_block()
                 return ToolMessage(
                     content=_with_remaining(
                         f"{_BLOCKED_PREFIX} Violations:\n"

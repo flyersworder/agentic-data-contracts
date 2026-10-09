@@ -392,9 +392,10 @@ tools = create_pydantic_ai_tools(dc, adapter=adapter)
 agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 ```
 
-Enforcement is auto-applied in-tool: a blocked query (bad SQL, forbidden
-operation, missing required filter) raises `ModelRetry` so the model rewrites
-and retries, while session-limit exhaustion raises a terminal
+Enforcement is auto-applied in-tool: a blocked query (forbidden operation,
+missing required filter, unparseable SQL) or one the database fails to run
+(a missing column, a failed cast) raises `ModelRetry`
+so the model rewrites and retries, while session-limit exhaustion raises a terminal
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
@@ -1641,7 +1642,7 @@ Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
 ```yaml
 resources:
   cost_limit_usd: 5.00          # max estimated query cost
-  max_retries: 3                 # max blocked queries per session
+  max_retries: 3                 # max failed queries (blocks + execution errors) per session
   token_budget: 50000            # max tokens consumed
   max_query_time_seconds: 30     # max wall-clock query time
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
@@ -1770,7 +1771,7 @@ estimated. Two things follow, both measured on a 500-token budget:
   is issued.
 
 `max_retries` is deliberately **not** mapped onto `request_limit`: ours counts
-blocked queries, theirs counts LLM calls.
+failed queries, theirs counts LLM calls.
 
 Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces

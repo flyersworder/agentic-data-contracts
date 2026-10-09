@@ -32,7 +32,7 @@ from agentic_data_contracts.tools.factory import (
     _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
-    _error_response,
+    _blocked_response,
     _warn_token_budget_unenforceable,
     create_tools,
 )
@@ -117,9 +117,8 @@ def _wrap_with_session_check(
         try:
             session.check_limits()
         except LimitExceededError as e:
-            return _error_response(
+            return _blocked_response(
                 _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session),
-                kind="blocked",
                 correctable=False,
             )
         return await inner(args)

@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 class CheckResult:
     passed: bool
     message: str
+    # This failure refuses *what* is asked for (a table, operation, column or
+    # value that is off-limits), not how the query is written: no rewrite of
+    # the same request passes it. See ValidationResult.correctable.
+    refuses_access: bool = False
 
 
 def extract_tables(expression: exp.Expression) -> set[str]:
@@ -165,11 +169,6 @@ class TableAllowlistChecker:
     queries (e.g. a Webex bot with one user per message).
     """
 
-    # Refuses *what* is asked for (data or an action off-limits), not how the
-    # query is written: no rewrite of the same request passes, so the block is
-    # not correctable (see ValidationResult.correctable).
-    refuses_access = True
-
     def __init__(
         self,
         principal_resolver: Callable[[], str | None] | None = None,
@@ -197,16 +196,11 @@ class TableAllowlistChecker:
                 f"Tables restricted to other principals "
                 f"(caller: {who!r}): {', '.join(sorted(restricted))}"
             )
-        return CheckResult(passed=False, message="; ".join(parts))
+        return CheckResult(passed=False, message="; ".join(parts), refuses_access=True)
 
 
 class OperationBlocklistChecker:
     """Checks that the SQL statement type is not in forbidden_operations."""
-
-    # Refuses *what* is asked for (data or an action off-limits), not how the
-    # query is written: no rewrite of the same request passes, so the block is
-    # not correctable (see ValidationResult.correctable).
-    refuses_access = True
 
     # Every entry here is an operation a contract can actually forbid. An
     # operation *not* listed is silently unenforceable: `forbidden_operations:
@@ -235,6 +229,7 @@ class OperationBlocklistChecker:
             if isinstance(ast, expr_type) and op_name in forbidden:
                 return CheckResult(
                     passed=False,
+                    refuses_access=True,
                     message=f"Forbidden operation: {op_name}",
                 )
 
@@ -248,6 +243,7 @@ class OperationBlocklistChecker:
         ):
             return CheckResult(
                 passed=False,
+                refuses_access=True,
                 message="Forbidden operation: TRUNCATE",
             )
 
@@ -440,11 +436,6 @@ class RequiredFilterValuesChecker:
     `allowed_principals` on the rule for a hard deny on unknown callers.
     """
 
-    # Refuses *what* is asked for (data or an action off-limits), not how the
-    # query is written: no rewrite of the same request passes, so the block is
-    # not correctable (see ValidationResult.correctable).
-    refuses_access = True
-
     def __init__(
         self,
         column: str,
@@ -494,6 +485,7 @@ class RequiredFilterValuesChecker:
         if smuggled:
             return CheckResult(
                 passed=False,
+                refuses_access=True,
                 message=(
                     f"Values {sorted(smuggled)} for {self.column} not allowed "
                     f"for principal {resolved_principal!r}; allowed: "
@@ -556,6 +548,7 @@ class RequiredFilterValuesChecker:
         bad_display = sorted(cov.bad)
         return CheckResult(
             passed=False,
+            refuses_access=True,
             message=(
                 f"Values {bad_display} for {self.column} not allowed for "
                 f"principal {principal!r}; allowed: {sorted(allowed)}"
@@ -758,11 +751,6 @@ class BlockedColumnsChecker:
     all SQL references to sensitive columns.
     """
 
-    # Refuses *what* is asked for (data or an action off-limits), not how the
-    # query is written: no rewrite of the same request passes, so the block is
-    # not correctable (see ValidationResult.correctable).
-    refuses_access = True
-
     def __init__(self, blocked: list[str]) -> None:
         self.blocked = {c.lower() for c in blocked}
 
@@ -787,6 +775,7 @@ class BlockedColumnsChecker:
             return CheckResult(
                 passed=False,
                 message=f"Blocked columns in SELECT: {', '.join(sorted(found))}",
+                refuses_access=True,
             )
         return CheckResult(passed=True, message="")
 

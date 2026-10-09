@@ -396,13 +396,13 @@ Enforcement is auto-applied in-tool, and a failed query is classified by
 whether a rewrite can pass it:
 
 - **What is asked for is off-limits** (a forbidden operation, a table outside
-  the allowlist or restricted for the caller, a blocked column, filter values
-  outside the caller's set): `ToolFailed`. The model sees the refusal as a
+  the allowlist, a selected blocked column, filter values outside the caller's
+  set), or a multi-statement batch: `ToolFailed`. The model sees the refusal as a
   failed tool result and changes its approach, and the refusal does not spend
   Pydantic AI's retry budget.
 - **How the query is written** (a missing required filter, `SELECT *`, too
-  many joins, unparseable SQL, more than one statement, a timeout, an
-  `EXPLAIN` estimate over a limit, a failed result check), or SQL the database
+  many joins, unparseable SQL, a timeout, an `EXPLAIN` estimate over a limit,
+  a failed result check), or SQL the database
   fails to run (a missing column, a failed cast): `ModelRetry`, so the model
   corrects its SQL and tries again.
 - **A spent session budget**: a terminal `ContractSessionLimitError` that ends

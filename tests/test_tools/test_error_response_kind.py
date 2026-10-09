@@ -1,10 +1,10 @@
-"""``_kind`` on `_error_response` envelopes.
+"""``_kind`` on `_error_response` / `_blocked_response` envelopes.
 
 Classifies *why* a tool returned an error envelope, distinct from
-``is_error`` (whether it should be one at all). ``kind="blocked"`` marks a
-governance denial — the contract refused the action; the default
-``kind="error"`` covers misconfiguration, invalid arguments, and execution
-failures. A later task (the conformance recorder) reads ``_kind`` to
+``is_error`` (whether it should be one at all). ``"blocked"`` marks a
+governance denial — the contract refused the action (`_blocked_response`);
+``"error"`` (`_error_response`) covers misconfiguration, invalid arguments,
+and execution failures. A later task (the conformance recorder) reads ``_kind`` to
 classify a tool call as blocked vs. error rather than treating every
 non-raising return as a successful call.
 
@@ -26,7 +26,12 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession
 from agentic_data_contracts.semantic.yaml_source import YamlSource
-from agentic_data_contracts.tools.factory import ToolDef, _error_response, create_tools
+from agentic_data_contracts.tools.factory import (
+    ToolDef,
+    _blocked_response,
+    _error_response,
+    create_tools,
+)
 
 # ── `_error_response`'s own contract (literal strings) ───────────────────────
 
@@ -36,7 +41,15 @@ def test_defaults_to_error_kind() -> None:
 
 
 def test_blocked_kind_is_carried() -> None:
-    assert _error_response("BLOCKED — nope", kind="blocked")["_kind"] == "blocked"
+    response = _blocked_response("BLOCKED — nope", correctable=False)
+    assert response["_kind"] == "blocked"
+    assert response["_correctable"] is False
+
+
+def test_a_block_must_state_whether_it_is_correctable() -> None:
+    # No default: a block site cannot leave the verdict out (#143).
+    with pytest.raises(TypeError):
+        _blocked_response("BLOCKED — nope")  # ty: ignore[missing-argument]
 
 
 def test_is_error_is_still_set_for_mcp() -> None:
@@ -154,35 +167,3 @@ async def test_trace_metric_impacts_invalid_direction_is_error(
         {"metric_name": "total_revenue", "direction": "sideways"}
     )
     assert result["_kind"] == "error"
-
-
-def test_every_blocked_envelope_says_whether_it_is_correctable() -> None:
-    """A block must state, where it is produced, whether a rewritten query can
-    pass it: the Pydantic AI wrapper raises ModelRetry or ToolFailed on it. A
-    site that left it out would default to "not correctable" silently, so
-    every ``_error_response(..., kind="blocked")`` in the package must pass
-    ``correctable=`` explicitly."""
-    import ast
-    from pathlib import Path
-
-    import agentic_data_contracts
-
-    package = Path(agentic_data_contracts.__file__).parent
-    missing = []
-    for path in sorted(package.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "_error_response"
-            ):
-                continue
-            keywords = {k.arg: k.value for k in node.keywords}
-            kind = keywords.get("kind")
-            if (
-                isinstance(kind, ast.Constant)
-                and kind.value == "blocked"
-                and "correctable" not in keywords
-            ):
-                missing.append(f"{path.relative_to(package)}:{node.lineno}")
-    assert not missing, f"blocked envelopes without correctable=: {missing}"

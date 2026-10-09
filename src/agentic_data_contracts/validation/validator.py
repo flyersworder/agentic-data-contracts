@@ -130,9 +130,11 @@ class ValidationResult:
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
     parse_error: bool = False
-    # A blocking reason came from a check that refuses *what* is asked for: a
-    # table outside the allowlist, a forbidden operation, a blocked column,
-    # filter values outside the caller's set (``refuses_access`` checkers).
+    # A blocking reason refuses *what* is asked for (a table outside the
+    # allowlist, a forbidden operation, a selected blocked column, filter values
+    # outside the caller's set: ``CheckResult.refuses_access``), or the block
+    # cannot be shown not to (a multi-statement batch, whose statements the
+    # checks never see).
     refused_access: bool = False
     relative_time: str | None = None
 
@@ -381,7 +383,13 @@ class Validator:
         # A policy block, not a parse error: the query was read, and it is
         # refused because the checkers below would only see one statement of it.
         if multi:
-            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
+            # Not shown correctable: the checks that would say whether a hidden
+            # statement refuses access never run on a batch, so fail closed.
+            return ValidationResult(
+                blocked=True,
+                reasons=[MULTIPLE_STATEMENTS_REASON],
+                refused_access=True,
+            )
 
         relative_time = _relative_time_node(ast)
 
@@ -396,13 +404,13 @@ class Validator:
             result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = True
+                refused_access = refused_access or result.refuses_access
 
         if self._operation_checker is not None:
             result = self._operation_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = True
+                refused_access = refused_access or result.refuses_access
 
         for entry in self._query_checkers:
             if not self._is_table_in_scope(entry.table_scope, referenced_tables):
@@ -415,8 +423,7 @@ class Validator:
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)
-                    if getattr(entry.checker, "refuses_access", False):
-                        refused_access = True
+                    refused_access = refused_access or result.refuses_access
                 elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:
@@ -511,7 +518,13 @@ class Validator:
         # from the parsed statement, which here would be only one of several,
         # so scoping cannot be trusted and there is no sound partial answer.
         if multi:
-            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
+            # Not shown correctable: the checks that would say whether a hidden
+            # statement refuses access never run on a batch, so fail closed.
+            return ValidationResult(
+                blocked=True,
+                reasons=[MULTIPLE_STATEMENTS_REASON],
+                refused_access=True,
+            )
 
         resolved_principal = resolve_principal(self._caller_principal)
 

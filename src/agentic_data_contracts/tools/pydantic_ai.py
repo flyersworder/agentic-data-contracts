@@ -10,8 +10,8 @@ error contract:
 
 - **Refusal of what is asked for** (a ``BLOCKED —`` envelope marked
   ``_correctable: False`` — a forbidden operation, a table outside the
-  allowlist or restricted for the caller, a blocked column, filter values
-  outside the caller's set) is *definitive*: no rewrite of the same request
+  allowlist, a selected blocked column, filter values outside the caller's
+  set, a multi-statement batch) is *definitive*: no rewrite of the same request
   passes. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
   refusal as a failed tool result and changes its approach, without retry
   instructions and without spending the tool's Pydantic AI retry budget. The
@@ -25,8 +25,8 @@ error contract:
   an execution error (``ERROR —``, SQL the database could not run: a missing
   column, a failed cast), and a ``BLOCKED —`` envelope marked
   ``_correctable: True`` — a missing required filter, ``SELECT *``, too many
-  joins, unparseable SQL, more than one statement, a ``run_query`` timeout, an
-  EXPLAIN estimate over a limit, a failed result check. Such a block still
+  joins, unparseable SQL, a ``run_query`` timeout, an EXPLAIN estimate over a
+  limit, a failed result check. Such a block still
   counts as a block. The producer of each envelope decides, from
   ``ValidationResult.correctable``; the wrapper only reads the mark.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost

@@ -637,9 +637,8 @@ def test_an_explain_estimate_over_a_limit_is_correctable(
         "SELECT id FROM analytics.orders",  # missing required tenant filter
         "SELECT * FROM analytics.orders WHERE tenant_id = 'x'",  # no_select_star
         "SELEC id FROM analytics.orders",  # unparseable
-        "SELECT 1; SELECT 2",  # more than one statement
     ],
-    ids=["required-filter", "select-star", "parse-error", "multi-statement"],
+    ids=["required-filter", "select-star", "parse-error"],
 )
 def test_a_block_on_how_the_query_is_written_is_correctable(
     validator: Validator, sql: str
@@ -675,22 +674,46 @@ def test_a_refusal_wins_over_a_form_problem(validator: Validator) -> None:
     assert not result.correctable
 
 
-def test_a_blocked_column_is_a_refusal(contract: DataContract) -> None:
-    from agentic_data_contracts.core.schema import QueryCheck
-
-    contract.schema.semantic.rules.append(
+def _blocked_email_only(contract: DataContract) -> Validator:
+    """The contract with one rule left: block the `email` column."""
+    contract.schema.semantic.rules[:] = [
         SemanticRule(
             name="no_pii",
             description="No PII",
             enforcement=Enforcement.BLOCK,
             query_check=QueryCheck(blocked_columns=["email"]),
         )
+    ]
+    return Validator(contract)
+
+
+def test_selecting_a_blocked_column_is_a_refusal(contract: DataContract) -> None:
+    result = _blocked_email_only(contract).validate(
+        "SELECT email FROM analytics.orders"
     )
-    result = Validator(contract).validate(
-        "SELECT email FROM analytics.orders WHERE tenant_id = 'x'"
-    )
+    assert result.blocked
     assert result.refused_access
     assert not result.correctable
+
+
+def test_select_star_under_blocked_columns_is_correctable(
+    contract: DataContract,
+) -> None:
+    # "SELECT * may expose blocked columns": listing the columns fixes it, so
+    # it is how the query is written, not a refusal of what it asks for.
+    result = _blocked_email_only(contract).validate("SELECT * FROM analytics.orders")
+    assert result.blocked
+    assert not result.refused_access
+    assert result.correctable
+
+
+def test_more_than_one_statement_is_not_correctable(validator: Validator) -> None:
+    # The checks that would say whether a hidden statement refuses access
+    # never run on a batch, so it cannot be shown correctable: fail closed.
+    for sql in ("SELECT 1; SELECT 2", "SELECT 1; DROP TABLE analytics.orders"):
+        result = validator.validate(sql)
+        assert result.blocked
+        assert not result.correctable
 
 
 def test_a_database_rejection_is_not_a_correctable_block(

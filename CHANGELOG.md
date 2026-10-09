@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.59.1] - 2026-10-09
+
+### Fixed
+
+- **With only the `duckdb` extra installed, a query returning a `TIMESTAMP WITH TIME ZONE` value failed.** DuckDB imports `pytz` to hand such a value to Python, and nothing in `agentic-data-contracts[duckdb]` installed it, so `run_query` answered `Required module 'pytz' failed to import` for SQL that was fine. The library's own test environment did not show it, because `pytz` arrives there through the Snowflake connector. The `duckdb` extra now declares `pytz`. (#135)
+
 ## [0.59.0] - 2026-10-02
 
 ### Fixed

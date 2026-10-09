@@ -78,3 +78,14 @@ findings (formerly `docs/superpowers/specs/`, now in git history only) argue fro
 
 Rows written before those fixes carry the old schema, and lack
 `forced_answer`, `provider_tag`, `quantization` and `reasoning_effort`.
+
+## `livesqlbench/luna-r{1,2,3}.jsonl` -- four arms on LiveSQLBench, gpt-6-luna
+
+`schema_only`, `manual_prompt`, `manual_compiled` and `contract` on
+`gpt-6-luna`, all 375 frozen tasks (302 `primary`, 73 `order_only`), at the
+run commit `1c1e302`. Each repeat holds all four arms and pairs within
+itself. Each sweep ran with `--retry-pass`; five construction errors were
+retried once each, so those (task, arm) pairs have two rows and the loaders
+keep the last. A row carries `gold`, the sha256 of the gold result, never the
+gold itself. See FINDINGS.md, *LiveSQLBench: compiled knowledge, delivered
+two ways*. `livesqlbench/smoke.jsonl` is the 12-task smoke run before it.

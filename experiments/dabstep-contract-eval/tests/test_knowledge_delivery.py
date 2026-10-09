@@ -28,3 +28,15 @@ def test_dabstep_is_unchanged():
         "manual_plus": "manual_resolved",
         "contract": "contract",
     }
+
+
+def test_a_model_runs_only_when_every_repeat_file_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(kd, "ROOT", tmp_path)
+    folder = tmp_path / "results" / "livesqlbench"
+    folder.mkdir(parents=True)
+    for i in (1, 2):
+        (folder / f"luna-r{i}.jsonl").write_text("", encoding="utf-8")
+    assert not kd.has_runs("livesqlbench", "gpt-6-luna")
+    (folder / "luna-r3.jsonl").write_text("", encoding="utf-8")
+    assert kd.has_runs("livesqlbench", "gpt-6-luna")
+    assert not kd.has_runs("livesqlbench", "gpt-6-sol")

@@ -98,6 +98,15 @@ def rows(name: str, model: str, repeat: int, arms: tuple[str, ...]) -> list[dict
     return out
 
 
+def has_runs(name: str, model: str) -> bool:
+    """Every repeat's results file exists, so the model can be reported."""
+    return all(
+        (ROOT / "results" / f"{stem}.jsonl").is_file()
+        for i in REPEATS
+        for stem in CONFIG[name]["runs"][model](i)
+    )
+
+
 def queries(row: dict) -> list[str]:
     """The SQL of every tool call in the run's trace, in order."""
     path = row["_traces"] / Path(row.get("trace_path") or "").name
@@ -157,7 +166,8 @@ def report(name: str, model: str) -> None:
     print(
         f"k={len(REPEATS)} "
         + "  ".join(f"{a} {totals[a] / (n * len(REPEATS)):.1%}" for a in arms)
-        + f"  share {note}/{lead} = {note / lead:.0%}"
+        + f"  share {note}/{lead} = "
+        + (f"{note / lead:.0%}" if lead else "-")
     )
 
     # Each task scored 0-3 over the repeats, per arm.
@@ -276,7 +286,10 @@ def main() -> None:
     parser.add_argument("--benchmark", choices=sorted(CONFIG), default="dabstep")
     name = parser.parse_args().benchmark
     for model in CONFIG[name]["runs"]:
-        report(name, model)
+        if has_runs(name, model):
+            report(name, model)
+        else:
+            print(f"== {model}: no runs yet")
 
 
 if __name__ == "__main__":

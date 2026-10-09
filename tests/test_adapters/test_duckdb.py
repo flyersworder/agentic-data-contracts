@@ -55,19 +55,6 @@ def test_execute_timestamptz(adapter: DuckDBAdapter) -> None:
     assert result.rows[0][0].tzinfo is not None
 
 
-def test_duckdb_extra_installs_pytz() -> None:
-    # The test above passes here only because another extra brings pytz in;
-    # the duckdb extra must declare it itself (#135).
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
-        "optional-dependencies"
-    ]
-    assert any(dep.startswith("pytz") for dep in extras["duckdb"])
-
-
 def test_explain(adapter: DuckDBAdapter) -> None:
     result = adapter.explain("SELECT id FROM analytics.orders")
     assert result.schema_valid

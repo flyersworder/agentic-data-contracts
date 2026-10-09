@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.60.1] - 2026-10-09
+
+### Fixed
+
+- **Under Pydantic AI, two failed queries in a row ended the run, whatever the contract's `max_retries` allowed.** The wrapper turns every `BLOCKED —` and `ERROR —` result into a `ModelRetry`, and Pydantic AI ends a run with `UnexpectedModelBehavior` once a tool fails more times in a row than its retry budget, which defaults to 1. The tools from `create_pydantic_ai_tools` and `create_pydantic_ai_toolset` now take the contract's `resources.max_retries` as that budget, so the run continues until the contract's own limit ends it with `ContractSessionLimitError`. A contract that declares no `max_retries` leaves the agent's `retries` setting in charge.
+- **Under Pydantic AI, SQL containing the words "Session limit exceeded" could end the run.** The wrapper took any `BLOCKED` message containing that phrase as a spent budget, and a parse error repeats the agent's SQL. It now matches the phrase only where a real budget breach puts it, right after the prefix, so such a block stays recoverable.
+
 ## [0.60.0] - 2026-10-09
 
 ### Fixed

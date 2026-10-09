@@ -399,6 +399,13 @@ so the model rewrites and retries, while session-limit exhaustion raises a termi
 `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
+Pydantic AI ends a run when one tool fails more times in a row than its retry
+budget, which defaults to 1. The wrapped tools therefore take the contract's
+`resources.max_retries` as their budget, so a run continues through failed
+queries until the contract's own limit ends it. If the contract declares no
+`max_retries`, the agent's setting applies: pass `Agent(..., retries={"tools": n})`
+or two failed queries in a row end the run with `UnexpectedModelBehavior`.
+
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
 rebuilds the tools per run, bound to that user's session and principal, so you

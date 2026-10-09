@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import sqlglot
 from sqlglot import errors, exp
+from sqlglot.dialects.dialect import Dialect
+from sqlglot.tokens import TokenType
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
@@ -70,6 +72,24 @@ def _warn_unenforceable_operations(forbidden: frozenset[str]) -> None:
 MULTIPLE_STATEMENTS_REASON = (
     "multiple statements in one query are not allowed; send one statement per call"
 )
+
+
+def _may_be_batch(sql: str, dialect: str | None) -> bool:
+    """True when unparseable *sql* may hold more than one statement.
+
+    For a query that failed to parse, so :func:`_is_multi_statement` could not
+    count its statements: a statement separator with any token after it. When
+    even tokenizing fails (an unterminated literal), any ``;`` before the end
+    counts, failing closed.
+    """
+    try:
+        tokens = Dialect.get_or_raise(dialect).tokenize(sql)
+    except errors.TokenError:
+        return ";" in sql.strip().rstrip(";")
+    separators = [
+        i for i, t in enumerate(tokens) if t.token_type == TokenType.SEMICOLON
+    ]
+    return any(i < len(tokens) - 1 for i in separators)
 
 
 def _is_multi_statement(sql: str, dialect: str | None) -> bool:
@@ -154,11 +174,12 @@ class ValidationResult:
     def correctable(self) -> bool:
         """Blocked only for *how* the query is written, which a rewrite fixes.
 
-        A missing required filter, ``SELECT *``, too many joins, unparseable
-        SQL, more than one statement, an EXPLAIN estimate over a limit, a
-        failed result check. Not a refusal of *what* is asked for
-        (``refused_access``), and not a database rejection, which is the
-        agent's error and handled apart from blocks. The Pydantic AI wrapper
+        A missing required filter, ``SELECT *``, too many joins, an unqualified
+        name of an allowed table, unparseable SQL, an EXPLAIN estimate over a
+        limit, a failed result check. Not a refusal of *what* is asked for
+        (``refused_access``), which a multi-statement batch also counts as,
+        and not a database rejection, which is the agent's error and handled
+        apart from blocks. The Pydantic AI wrapper
         raises ``ModelRetry`` for a correctable block and ``ToolFailed`` for
         any other.
         """
@@ -378,6 +399,9 @@ class Validator:
                 blocked=True,
                 reasons=[f"SQL parse error: {e}"],
                 parse_error=True,
+                # A typo is correctable, but not inside a batch, which the
+                # checks never see into: fail closed, as for one that parses.
+                refused_access=_may_be_batch(sql, self.dialect),
             )
 
         # A policy block, not a parse error: the query was read, and it is
@@ -404,13 +428,13 @@ class Validator:
             result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = refused_access or result.refuses_access
+                refused_access = refused_access or result.refuses_access is not False
 
         if self._operation_checker is not None:
             result = self._operation_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = refused_access or result.refuses_access
+                refused_access = refused_access or result.refuses_access is not False
 
         for entry in self._query_checkers:
             if not self._is_table_in_scope(entry.table_scope, referenced_tables):
@@ -423,7 +447,9 @@ class Validator:
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)
-                    refused_access = refused_access or result.refuses_access
+                    refused_access = (
+                        refused_access or result.refuses_access is not False
+                    )
                 elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:

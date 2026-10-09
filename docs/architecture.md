@@ -389,8 +389,12 @@ The verdict is per failure, not per rule: a checker sets
 "values not allowed" ones for `required_filter_values`, only an explicitly
 selected column for `blocked_columns`), and `ValidationResult.correctable` is
 "blocked, no failure refused access, and not a database rejection". A query
-with both kinds of failure is a refusal. A multi-statement batch is not
-correctable either: the checks that would say whether a hidden statement
+with both kinds of failure is a refusal, and so is a failure a check leaves
+unclassified (`refuses_access=None`, the default): the built-in form checks
+declare `False` explicitly. An undeclared table counts as form only when it is
+an unqualified name of a table the caller may use (`orders` for
+`analytics.orders`). A multi-statement batch is not correctable either, even
+one that fails to parse: the checks that would say whether a hidden statement
 refuses access never run on it, so it fails closed. Every block site builds
 its envelope with `_blocked_response(text, *, correctable)`, whose
 `correctable` has no default. `preview_table`'s timeout is not correctable:
@@ -400,7 +404,8 @@ verdict too, but their text has no `BLOCKED —` prefix, so the wrappers return
 them as ordinary results, as before (see "Two error signals" below). The contract's `max_retries`
 bounds repeated `run_query` refusals (`preview_table`'s gate does not count
 toward it), and `token_budget` and `max_duration_seconds` bound the whole run;
-with none of them declared, only Pydantic AI's `request_limit` does.
+with none of them declared, only Pydantic AI's `request_limit` does. A failed
+call, `ToolFailed` or `ModelRetry`, does not count toward `tool_calls_limit`.
 Providers with a native tool-error channel (Anthropic, Bedrock, Google) show
 the model the message as is; others, OpenAI among them, wrap it as
 `{"error": "..."}`.

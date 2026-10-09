@@ -8,25 +8,29 @@ underlying callables self-validate SQL (see ``run_query`` in
 ``tools/factory.py``). Three enforcement signals are mapped onto Pydantic AI's
 error contract:
 
-- **Refusal of what is asked for** (a ``BLOCKED —`` envelope marked
+- **Refusal of what is asked for** (a ``BLOCKED —`` result marked
   ``_correctable: False`` — a forbidden operation, a table outside the
   allowlist, a selected blocked column, filter values outside the caller's
-  set, a multi-statement batch) is *definitive*: no rewrite of the same request
-  passes. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
-  refusal as a failed tool result and changes its approach, without retry
-  instructions and without spending the tool's Pydantic AI retry budget. The
-  contract's
-  ``max_retries`` bounds repeated ``run_query`` refusals (``preview_table``'s
-  gate does not count toward it), and its ``token_budget`` and
-  ``max_duration_seconds`` bound the whole run; with none of them, only
-  Pydantic AI's ``UsageLimits.request_limit`` does.
+  set, a multi-statement batch) is *definitive*: no rewrite of the same
+  request passes. It is raised as ``pydantic_ai.ToolFailed``, so the model
+  sees the refusal as a failed tool result and changes its approach, without
+  retry instructions and without spending the tool's Pydantic AI retry
+  budget. The contract's ``max_retries`` bounds repeated ``run_query``
+  refusals (``preview_table``'s gate does not count toward it), and its
+  ``token_budget`` and ``max_duration_seconds`` bound the whole run; with none
+  of them, only Pydantic AI's ``UsageLimits.request_limit`` does. A failed
+  call does not count toward ``UsageLimits.tool_calls_limit``, for a
+  ``ToolFailed`` as for a ``ModelRetry``. ``describe_table`` /
+  ``preview_table`` access denials have no ``BLOCKED —`` prefix and come back
+  as ordinary results.
 - **A problem with how the query is written** is raised as
   ``pydantic_ai.ModelRetry`` so the model rewrites its SQL and tries again:
   an execution error (``ERROR —``, SQL the database could not run: a missing
   column, a failed cast), and a ``BLOCKED —`` envelope marked
   ``_correctable: True`` — a missing required filter, ``SELECT *``, too many
-  joins, unparseable SQL, a ``run_query`` timeout, an EXPLAIN estimate over a
-  limit, a failed result check. Such a block still
+  joins, an unqualified name of an allowed table, unparseable SQL, a
+  ``run_query`` timeout, an EXPLAIN estimate over a limit, a failed result
+  check. Such a block still
   counts as a block. The producer of each envelope decides, from
   ``ValidationResult.correctable``; the wrapper only reads the mark.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost

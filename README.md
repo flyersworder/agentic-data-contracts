@@ -401,8 +401,9 @@ whether a rewrite can pass it:
   failed tool result and changes its approach, and the refusal does not spend
   Pydantic AI's retry budget.
 - **How the query is written** (a missing required filter, `SELECT *`, too
-  many joins, unparseable SQL, a timeout, an `EXPLAIN` estimate over a limit,
-  a failed result check), or SQL the database
+  many joins, an unqualified name of an allowed table, unparseable SQL, a
+  timeout, an `EXPLAIN` estimate over a limit, a failed result check), or SQL
+  the database
   fails to run (a missing column, a failed cast): `ModelRetry`, so the model
   corrects its SQL and tries again.
 - **A spent session budget**: a terminal `ContractSessionLimitError` that ends

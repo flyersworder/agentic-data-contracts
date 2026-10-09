@@ -114,12 +114,7 @@ def _blocked_response(text: str, *, correctable: bool) -> dict[str, Any]:
     wrapper raises ``ModelRetry`` for the first and ``ToolFailed`` for the
     second.
     """
-    return {
-        **_text_response(text),
-        "is_error": True,
-        "_kind": "blocked",
-        "_correctable": correctable,
-    }
+    return {**_error_response(text), "_kind": "blocked", "_correctable": correctable}
 
 
 def _folded_table_index(source: SemanticSource) -> dict[str, Any]:

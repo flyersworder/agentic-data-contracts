@@ -724,3 +724,62 @@ def test_a_database_rejection_is_not_a_correctable_block(
     result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
     assert result.rejected_by_database
     assert not result.correctable
+
+
+def test_an_unqualified_name_of_an_allowed_table_is_correctable(
+    validator: Validator,
+) -> None:
+    # `orders` for the allowed `analytics.orders`: qualifying the name fixes
+    # it, so it is how the query is written, not a refusal of what it asks for.
+    result = validator.validate("SELECT id FROM orders WHERE tenant_id = 'x'")
+    assert result.blocked
+    assert result.correctable
+
+
+def test_a_batch_whose_later_statement_does_not_parse_is_not_correctable(
+    validator: Validator,
+) -> None:
+    # The parse fails before the batch is seen, but a batch is still not
+    # shown correctable: fail closed, as for a batch that parses.
+    result = validator.validate(
+        "SELECT id FROM analytics.orders WHERE tenant_id = 'x'; DELETE FROM"
+    )
+    assert result.blocked
+    assert result.parse_error
+    assert not result.correctable
+
+
+@pytest.mark.parametrize(
+    ("check", "sql"),
+    [
+        (QueryCheck(require_limit=True), "SELECT id FROM analytics.orders"),
+        (
+            QueryCheck(max_joins=0),
+            "SELECT o.id FROM analytics.orders o"
+            " JOIN analytics.orders p ON o.id = p.id",
+        ),
+    ],
+    ids=["require-limit", "max-joins"],
+)
+def test_form_checks_declare_their_failures_correctable(
+    contract: DataContract, check: QueryCheck, sql: str
+) -> None:
+    # An unclassified failure counts as a refusal, so every built-in form
+    # check must declare refuses_access=False on its failures.
+    contract.schema.semantic.rules[:] = [
+        SemanticRule(
+            name="form",
+            description="form",
+            enforcement=Enforcement.BLOCK,
+            query_check=check,
+        )
+    ]
+    result = Validator(contract).validate(sql)
+    assert result.blocked
+    assert result.correctable
+
+
+def test_an_unclassified_check_failure_counts_as_a_refusal() -> None:
+    from agentic_data_contracts.validation.checkers import CheckResult
+
+    assert CheckResult(passed=False, message="x").refuses_access is None

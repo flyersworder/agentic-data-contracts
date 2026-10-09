@@ -29,7 +29,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
-    _BLOCKED_PREFIX,
+    _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
     _error_response,
@@ -118,9 +118,7 @@ def _wrap_with_session_check(
             session.check_limits()
         except LimitExceededError as e:
             return _error_response(
-                _with_remaining(
-                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}", session
-                ),
+                _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session),
                 kind="blocked",
             )
         return await inner(args)

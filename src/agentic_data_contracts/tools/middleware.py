@@ -12,6 +12,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.tools.factory import (
     _ERROR_PREFIX,
+    _SESSION_LIMIT_PREFIX,
     _error_response,
     _warn_query_time_unenforceable,
     _warn_token_budget_unenforceable,
@@ -48,9 +49,7 @@ def contract_middleware(
             try:
                 session.check_limits()
             except LimitExceededError as e:
-                return _error_response(
-                    f"BLOCKED — Session limit exceeded: {e}", kind="blocked"
-                )
+                return _error_response(f"{_SESSION_LIMIT_PREFIX}: {e}", kind="blocked")
 
             sql = args.get("sql", "")
             if sql:

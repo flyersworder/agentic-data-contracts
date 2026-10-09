@@ -61,6 +61,7 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
     _BLOCKED_PREFIX,
     _ERROR_PREFIX,
+    _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
@@ -306,7 +307,7 @@ def _to_structured_tool(
             except LimitExceededError as e:
                 raise ToolException(
                     _with_remaining(
-                        f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                        f"{_SESSION_LIMIT_PREFIX}: {e}",
                         session,
                     )
                 ) from e
@@ -411,7 +412,7 @@ class ContractMiddleware(AgentMiddleware):
         except LimitExceededError as e:
             return ToolMessage(
                 content=_with_remaining(
-                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}",
+                    f"{_SESSION_LIMIT_PREFIX}: {e}",
                     self._session,
                 ),
                 name=name,

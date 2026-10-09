@@ -1113,10 +1113,16 @@ _GOOD = "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"
 def test_wrapped_tools_take_the_contracts_retry_budget(
     contract: DataContract, contract_no_source: DataContract, semantic: YamlSource
 ) -> None:
-    # valid_contract.yml declares max_retries: 3. A contract that declares
-    # none leaves the budget to the agent (None = the agent's default).
-    tools = create_pydantic_ai_tools(contract, semantic_source=semantic)
-    assert {t.max_retries for t in tools} == {3}
+    # valid_contract.yml declares max_retries: 3. Only run_query takes it: it
+    # is the tool whose failures the session counts. Every other tool, and
+    # run_query under a contract that declares none, keeps None, the agent's
+    # own `retries` setting.
+    budgets = {
+        t.name: t.max_retries
+        for t in create_pydantic_ai_tools(contract, semantic_source=semantic)
+    }
+    assert budgets.pop("run_query") == 3
+    assert set(budgets.values()) == {None}
     assert {t.max_retries for t in create_pydantic_ai_tools(contract_no_source)} == {
         None
     }

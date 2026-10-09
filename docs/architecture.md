@@ -364,9 +364,10 @@ call, on either `apply_middleware` value).
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts failed query attempts, theirs counts model
 requests, and conflating them would silently redefine existing contracts.
-It does become each wrapped tool's `max_retries`, though. Pydantic AI ends a
-run once a tool fails more times in a row than that budget (default 1), and
-every `BLOCKED —` / `ERROR —` result is a `ModelRetry`. Left at the default, a
+It does become `run_query`'s `max_retries`, though, the one tool whose
+failures the session counts; the other tools keep the agent's own setting.
+Pydantic AI ends a run once a tool fails more times in a row than that budget
+(default 1), and every `BLOCKED —` / `ERROR —` result is a `ModelRetry`. Left at the default, a
 second failed query in a row ended the run, whatever the contract allowed.
 With the contract's value, the session's own terminal error fires first:
 after `max_retries` failures the next call is refused before it runs, while

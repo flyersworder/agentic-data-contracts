@@ -8,24 +8,27 @@ underlying callables self-validate SQL (see ``run_query`` in
 ``tools/factory.py``). Three enforcement signals are mapped onto Pydantic AI's
 error contract:
 
-- **Contract refusal** (``BLOCKED —`` envelope from a tool — a forbidden
-  operation, a table outside the allowlist, a missing required filter, a
-  failed result-check, a gated table) is *definitive*: the request itself is
-  not allowed, and the same call would be refused again. It is raised as
-  ``pydantic_ai.ToolFailed``, so the model sees the refusal as a failed tool
-  result and adapts, without retry instructions and without spending the
-  tool's Pydantic AI retry budget. The contract's
+- **Refusal of what is asked for** (a ``BLOCKED —`` envelope marked
+  ``_correctable: False`` — a forbidden operation, a table outside the
+  allowlist or restricted for the caller, a blocked column, filter values
+  outside the caller's set) is *definitive*: no rewrite of the same request
+  passes. It is raised as ``pydantic_ai.ToolFailed``, so the model sees the
+  refusal as a failed tool result and changes its approach, without retry
+  instructions and without spending the tool's Pydantic AI retry budget. The
+  contract's
   ``max_retries`` bounds repeated ``run_query`` refusals (``preview_table``'s
   gate does not count toward it), and its ``token_budget`` and
   ``max_duration_seconds`` bound the whole run; with none of them, only
   Pydantic AI's ``UsageLimits.request_limit`` does.
-- **Correctable failure** is raised as ``pydantic_ai.ModelRetry`` so the model
-  rewrites its SQL and tries again: an execution error (``ERROR —``, SQL the
-  database could not run: a missing column, a failed cast), and a block a
-  rewritten query can pass — unparseable SQL, a ``run_query`` timeout, an
-  EXPLAIN estimate over ``cost_limit_usd`` / ``max_rows_scanned``. Such a block
-  still reads ``BLOCKED —`` and counts as a block; ``run_query`` marks its
-  envelope ``_correctable``.
+- **A problem with how the query is written** is raised as
+  ``pydantic_ai.ModelRetry`` so the model rewrites its SQL and tries again:
+  an execution error (``ERROR —``, SQL the database could not run: a missing
+  column, a failed cast), and a ``BLOCKED —`` envelope marked
+  ``_correctable: True`` — a missing required filter, ``SELECT *``, too many
+  joins, unparseable SQL, more than one statement, a ``run_query`` timeout, an
+  EXPLAIN estimate over a limit, a failed result check. Such a block still
+  counts as a block. The producer of each envelope decides, from
+  ``ValidationResult.correctable``; the wrapper only reads the mark.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost
   budget) is *terminal*: retrying cannot help, so it is raised as
   ``ContractSessionLimitError`` (a plain ``RuntimeError`` subclass) which
@@ -172,10 +175,11 @@ def create_pydantic_ai_tools(
             max_result_rows=max_result_rows,
         )
 
-    # Every ERROR result becomes a ModelRetry, and Pydantic AI ends the run
-    # once a tool raises more of them than its retry budget, which defaults to
-    # 1, without a success in between. (A BLOCKED result is a ToolFailed: it
-    # neither spends nor resets that count.)
+    # Every ERROR result and every correctable BLOCKED result becomes a
+    # ModelRetry, and Pydantic AI ends the run once a tool raises more of them
+    # than its retry budget, which defaults to 1, without a success in between.
+    # (A refusal of what is asked for is a ToolFailed: it neither spends nor
+    # resets that count.)
     # run_query's failures are the ones the session counts against the
     # contract's max_retries, so run_query takes that as its budget, and the
     # session's terminal error then fires first. Other tools keep None, the
@@ -236,19 +240,18 @@ def _to_pydantic_ai_tool(
         # A session-budget breach is terminal even when it surfaces from a
         # tool's own self-check (run_query's limit check under
         # apply_middleware=False), so it must NOT reach the model as a tool
-        # result. Every other BLOCKED (forbidden op, permission gate, failed
-        # result-check) is a definitive refusal: a ToolFailed, which the model
-        # sees and adapts to, and which spends no retry budget. "ERROR —", SQL
-        # the database could not run, is correctable: a ModelRetry.
+        # result. Any other BLOCKED is a ModelRetry when its producer marked it
+        # correctable (how the query is written) and otherwise a ToolFailed (a
+        # refusal of what is asked for), which spends no retry budget. "ERROR —",
+        # SQL the database could not run, is correctable: a ModelRetry.
         # Matched as a prefix, never a substring: a block message can quote the
         # agent's own SQL (a parse error does), and SQL containing the phrase
         # is not a spent budget.
         if text.startswith(_SESSION_LIMIT_PREFIX):
             raise ContractSessionLimitError(text)
         if text.startswith(_BLOCKED_PREFIX):
-            # A block a rewritten query can pass (unparseable SQL, a timeout,
-            # an EXPLAIN estimate over a limit) asks for corrected SQL, like an
-            # execution error; any other refusal is definitive.
+            # The producer classified the block (ValidationResult.correctable):
+            # a rewrite passes it, so ask for corrected SQL, as for an ERROR.
             if isinstance(envelope, dict) and envelope.get("_correctable"):
                 raise ModelRetry(text)
             raise ToolFailed(text)
@@ -498,9 +501,10 @@ def create_pydantic_ai_toolset(
         max_result_rows: The most rows ``run_query`` / ``preview_table``
             return (default 1000); ``None`` for no cap. See ``create_tools``.
 
-    Enforcement is identical to :func:`create_pydantic_ai_tools` (a contract
-    refusal becomes ``ToolFailed``, an execution error ``ModelRetry``, and a
-    session-budget breach the terminal ``ContractSessionLimitError``). The
+    Enforcement is identical to :func:`create_pydantic_ai_tools` (a refusal of
+    what is asked for becomes ``ToolFailed``; an execution error or a block on
+    how the query is written ``ModelRetry``; a session-budget breach the
+    terminal ``ContractSessionLimitError``). The
     shared config (adapter connection pool, semantic source) stays shared
     across all users; only the per-user session and principal vary, threaded
     in via ``deps``.

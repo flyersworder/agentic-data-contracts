@@ -49,7 +49,9 @@ def contract_middleware(
             try:
                 session.check_limits()
             except LimitExceededError as e:
-                return _error_response(f"{_SESSION_LIMIT_PREFIX}: {e}", kind="blocked")
+                return _error_response(
+                    f"{_SESSION_LIMIT_PREFIX}: {e}", kind="blocked", correctable=False
+                )
 
             sql = args.get("sql", "")
             if sql:
@@ -70,6 +72,7 @@ def contract_middleware(
                         "BLOCKED — Violations:\n"
                         + "\n".join(f"- {r}" for r in result.reasons),
                         kind="blocked",
+                        correctable=result.correctable,
                     )
 
             return await fn(args)

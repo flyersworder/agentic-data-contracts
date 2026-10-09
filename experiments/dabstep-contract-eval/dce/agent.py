@@ -556,8 +556,10 @@ def _retry_prompt_count(messages: list) -> int:
     tool-argument validation. Which governed results raise `ModelRetry`
     depends on the library version (`tools/pydantic_ai.py`'s
     `_to_pydantic_ai_tool`): up to agentic-data-contracts 0.60.x every
-    `BLOCKED —` and `ERROR —` result did; from 0.61.0 only `ERROR —` (SQL the
-    database could not run) does, and a contract block is a `ToolFailed`,
+    `BLOCKED —` and `ERROR —` result did. From 0.61.0 an `ERROR —` and a block
+    on *how* the query is written (a missing filter, `SELECT *`, unparseable
+    SQL, a timeout, ...) still do, while a refusal of *what* is asked for (a
+    forbidden operation, a table outside the allowlist, ...) is a `ToolFailed`,
     which produces a failed tool result and no retry prompt. Compare this
     number only across runs on the same library version. It is not identical
     to `run_task`'s `enforcement_blocks`
@@ -1447,9 +1449,10 @@ def _default_agent_factory(
         # bad queries while arm A iterates freely. Measured: arm A finished after
         # 7 model calls, arm C raised after 2. Set it high enough that arm C is
         # never budget-limited relative to arms A/B, and identically for all arms.
-        # (From agentic-data-contracts 0.61.0 a contract block is a ToolFailed
-        # and spends no budget, but an ERROR — still raises ModelRetry, and
-        # earlier pinned versions need this, so it stays.)
+        # (From agentic-data-contracts 0.61.0 a refusal of what is asked for is
+        # a ToolFailed and spends no budget, but an ERROR — and a block on how
+        # the query is written still raise ModelRetry, and earlier pinned
+        # versions need this, so it stays.)
         #
         # `retries` is threaded in from `run_task`'s effective `max_tool_calls`
         # rather than read off the `MAX_TOOL_CALLS` module constant: a caller

@@ -154,3 +154,35 @@ async def test_trace_metric_impacts_invalid_direction_is_error(
         {"metric_name": "total_revenue", "direction": "sideways"}
     )
     assert result["_kind"] == "error"
+
+
+def test_every_blocked_envelope_says_whether_it_is_correctable() -> None:
+    """A block must state, where it is produced, whether a rewritten query can
+    pass it: the Pydantic AI wrapper raises ModelRetry or ToolFailed on it. A
+    site that left it out would default to "not correctable" silently, so
+    every ``_error_response(..., kind="blocked")`` in the package must pass
+    ``correctable=`` explicitly."""
+    import ast
+    from pathlib import Path
+
+    import agentic_data_contracts
+
+    package = Path(agentic_data_contracts.__file__).parent
+    missing = []
+    for path in sorted(package.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_error_response"
+            ):
+                continue
+            keywords = {k.arg: k.value for k in node.keywords}
+            kind = keywords.get("kind")
+            if (
+                isinstance(kind, ast.Constant)
+                and kind.value == "blocked"
+                and "correctable" not in keywords
+            ):
+                missing.append(f"{path.relative_to(package)}:{node.lineno}")
+    assert not missing, f"blocked envelopes without correctable=: {missing}"

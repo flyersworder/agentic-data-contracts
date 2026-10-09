@@ -165,6 +165,11 @@ class TableAllowlistChecker:
     queries (e.g. a Webex bot with one user per message).
     """
 
+    # Refuses *what* is asked for (data or an action off-limits), not how the
+    # query is written: no rewrite of the same request passes, so the block is
+    # not correctable (see ValidationResult.correctable).
+    refuses_access = True
+
     def __init__(
         self,
         principal_resolver: Callable[[], str | None] | None = None,
@@ -197,6 +202,11 @@ class TableAllowlistChecker:
 
 class OperationBlocklistChecker:
     """Checks that the SQL statement type is not in forbidden_operations."""
+
+    # Refuses *what* is asked for (data or an action off-limits), not how the
+    # query is written: no rewrite of the same request passes, so the block is
+    # not correctable (see ValidationResult.correctable).
+    refuses_access = True
 
     # Every entry here is an operation a contract can actually forbid. An
     # operation *not* listed is silently unenforceable: `forbidden_operations:
@@ -429,6 +439,11 @@ class RequiredFilterValuesChecker:
     matching the `principal_scope` skip semantics in `Validator`. Pair with
     `allowed_principals` on the rule for a hard deny on unknown callers.
     """
+
+    # Refuses *what* is asked for (data or an action off-limits), not how the
+    # query is written: no rewrite of the same request passes, so the block is
+    # not correctable (see ValidationResult.correctable).
+    refuses_access = True
 
     def __init__(
         self,
@@ -742,6 +757,11 @@ class BlockedColumnsChecker:
     not blocked. The intent is to prevent data exposure in results, not to prevent
     all SQL references to sensitive columns.
     """
+
+    # Refuses *what* is asked for (data or an action off-limits), not how the
+    # query is written: no rewrite of the same request passes, so the block is
+    # not correctable (see ValidationResult.correctable).
+    refuses_access = True
 
     def __init__(self, blocked: list[str]) -> None:
         self.blocked = {c.lower() for c in blocked}

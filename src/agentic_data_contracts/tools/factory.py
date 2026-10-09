@@ -102,10 +102,18 @@ def _error_response(
     conformance recorder (a later feature), which reads ``_kind`` off the
     envelope to classify a tool call as blocked vs. error instead of treating
     every non-raising return as a successful call.
+
+    A ``"blocked"`` envelope also carries ``_correctable``: whether a rewrite of
+    the same request can pass the block (how the query is written: a missing
+    filter, ``SELECT *``, unparseable SQL, a timeout, an EXPLAIN limit, a result
+    check) or not (what is asked for: a table, operation, column or value that
+    is off-limits). The Pydantic AI wrapper raises ``ModelRetry`` for the first
+    and ``ToolFailed`` for the second. Every blocked call site passes
+    ``correctable=`` explicitly; a test enforces it.
     """
     response = {**_text_response(text), "is_error": True, "_kind": kind}
-    if correctable:
-        response["_correctable"] = True
+    if kind == "blocked":
+        response["_correctable"] = correctable
     return response
 
 
@@ -924,6 +932,7 @@ def create_tools(
                 response = _error_response(
                     f"Table {qualified} is not in the allowed tables list.",
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"])
                 return response
@@ -933,6 +942,7 @@ def create_tools(
                     f"Table {qualified} is restricted"
                     f" (caller: {_caller_label(principal)!r}).",
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"])
                 return response
@@ -1046,6 +1056,7 @@ def create_tools(
                 response = _error_response(
                     f"Table {qualified} is not in the allowed tables list.",
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"])
                 return response
@@ -1055,6 +1066,7 @@ def create_tools(
                     f"Table {qualified} is restricted"
                     f" (caller: {_caller_label(principal)!r}).",
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"])
                 return response
@@ -1125,6 +1137,7 @@ def create_tools(
                     + "\n".join(f"- {m}" for m in block_msgs)
                     + "\nUse run_query with explicit columns instead.",
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"])
                 return response
@@ -1147,6 +1160,7 @@ def create_tools(
                         " use run_query with a selective filter instead.",
                     ),
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"], detail=str(e))
                 return response
@@ -1767,6 +1781,7 @@ def create_tools(
                 response = _error_response(
                     _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}"),
                     kind="blocked",
+                    correctable=False,
                 )
                 _record(response["_kind"], detail=str(e))
                 return response
@@ -1794,12 +1809,12 @@ def create_tools(
                 msg = "BLOCKED — Violations:\n" + "\n".join(
                     f"- {r}" for r in vresult.reasons
                 )
-                # Unreadable or too heavy: still a block, but one a rewritten
-                # query can pass, unlike a refused table or operation.
+                # A block on how the query is written is one a rewrite can pass;
+                # a refusal of what it asks for is not (ValidationResult).
                 response = _error_response(
                     _with_remaining(msg),
                     kind="blocked",
-                    correctable=vresult.parse_error or vresult.over_resource_limit,
+                    correctable=vresult.correctable,
                 )
                 _record(
                     response["_kind"],
@@ -1878,7 +1893,11 @@ def create_tools(
                 msg = "BLOCKED — Result check violations:\n" + "\n".join(
                     f"- {r}" for r in rresult.reasons
                 )
-                response = _error_response(_with_remaining(msg), kind="blocked")
+                response = _error_response(
+                    _with_remaining(msg),
+                    kind="blocked",
+                    correctable=rresult.correctable,
+                )
                 _record(
                     response["_kind"],
                     detail="; ".join(rresult.reasons),

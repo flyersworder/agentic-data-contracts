@@ -979,9 +979,9 @@ def test_run_task_records_enforcement_blocks_separately_from_inspect_rejections(
     assert row["verdict"] == "correct"
     assert row["inspect_rejections"] == 0
     assert row["enforcement_blocks"] == 1
-    # Since agentic-data-contracts 0.61.0 a block is a `ToolFailed`, not a
-    # `ModelRetry`, so it no longer produces a retry prompt.
-    assert row["retry_prompts"] == 0
+    # `SELECT *` is a correctable block (how the query is written), so it is
+    # a `ModelRetry` and produces a retry prompt.
+    assert row["retry_prompts"] == 1
 
 
 def test_run_task_recovers_tokens_and_transcript_after_a_real_cap_trip(

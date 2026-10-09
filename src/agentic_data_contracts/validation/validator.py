@@ -130,9 +130,10 @@ class ValidationResult:
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
     parse_error: bool = False
-    # Blocked because the EXPLAIN estimate exceeds cost_limit_usd or
-    # max_rows_scanned: "too heavy", which a narrower query can fix.
-    over_resource_limit: bool = False
+    # A blocking reason came from a check that refuses *what* is asked for: a
+    # table outside the allowlist, a forbidden operation, a blocked column,
+    # filter values outside the caller's set (``refuses_access`` checkers).
+    refused_access: bool = False
     relative_time: str | None = None
 
     @property
@@ -146,6 +147,20 @@ class ValidationResult:
         EXPLAIN, fail-closed.
         """
         return self.blocked and not self.schema_valid
+
+    @property
+    def correctable(self) -> bool:
+        """Blocked only for *how* the query is written, which a rewrite fixes.
+
+        A missing required filter, ``SELECT *``, too many joins, unparseable
+        SQL, more than one statement, an EXPLAIN estimate over a limit, a
+        failed result check. Not a refusal of *what* is asked for
+        (``refused_access``), and not a database rejection, which is the
+        agent's error and handled apart from blocks. The Pydantic AI wrapper
+        raises ``ModelRetry`` for a correctable block and ``ToolFailed`` for
+        any other.
+        """
+        return self.blocked and self.schema_valid and not self.refused_access
 
 
 @dataclass(frozen=True)
@@ -344,7 +359,7 @@ class Validator:
         estimated_rows: int | None = None
         schema_valid: bool = True
         explain_errors: list[str] = []
-        over_resource_limit = False
+        refused_access = False
 
         # TokenError (an unterminated literal, say) is raised by the tokenizer
         # and is NOT a ParseError subclass; both mean "unreadable".
@@ -381,11 +396,13 @@ class Validator:
             result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
+                refused_access = True
 
         if self._operation_checker is not None:
             result = self._operation_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
+                refused_access = True
 
         for entry in self._query_checkers:
             if not self._is_table_in_scope(entry.table_scope, referenced_tables):
@@ -398,6 +415,8 @@ class Validator:
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)
+                    if getattr(entry.checker, "refuses_access", False):
+                        refused_access = True
                 elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:
@@ -433,7 +452,6 @@ class Validator:
                         reasons.append(
                             f"Estimated cost ${cost:.2f} exceeds limit ${limit:.2f}"
                         )
-                        over_resource_limit = True
                     if (
                         res.max_rows_scanned is not None
                         and explain_result.estimated_rows is not None
@@ -444,7 +462,6 @@ class Validator:
                         reasons.append(
                             f"Estimated rows {rows:,} exceeds limit {max_rows:,}"
                         )
-                        over_resource_limit = True
 
         return ValidationResult(
             blocked=len(reasons) > 0,
@@ -455,7 +472,7 @@ class Validator:
             estimated_rows=estimated_rows,
             schema_valid=schema_valid,
             explain_errors=explain_errors,
-            over_resource_limit=over_resource_limit,
+            refused_access=refused_access,
             relative_time=relative_time,
         )
 

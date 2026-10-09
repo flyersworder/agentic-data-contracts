@@ -64,9 +64,11 @@ tool-retry budget defaults to `Agent(retries=1)`. Arm `contract`'s governed
 tools raise `ModelRetry` on a validation block (bad SQL, `SELECT *` under
 `no_select_star`, a forbidden operation, a missing required filter, ...), and
 pydantic-ai counts every `ModelRetry` against that one shared budget. (That
-describes agentic-data-contracts up to 0.60.x. From 0.61.0 a contract block
-raises `ToolFailed`, which spends nothing; SQL the database could not run,
-`ERROR —`, still raises `ModelRetry`. The guidance below still holds for it.)
+describes agentic-data-contracts up to 0.60.x. From 0.61.0 only a refusal of
+what is asked for — a forbidden operation, a table outside the allowlist —
+raises `ToolFailed`, which spends nothing; a block on how the query is written
+(`SELECT *`, a missing filter, bad SQL) and an `ERROR —` still raise
+`ModelRetry`, so the guidance below still holds.)
 Arms `schema_only` and `manual_prompt` never raise at all — a bad query comes back
 as an ordinary `"ERROR: ..."` string and the model just keeps iterating.
 Measured end to end: arm A finished a task after 7 model calls; arm C raised

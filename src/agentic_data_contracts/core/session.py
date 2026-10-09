@@ -22,9 +22,9 @@ class ContractSessionLimitError(RuntimeError):
     agent run — it is terminal because retrying a breached
     ``max_retries`` / ``max_duration`` / cost cap cannot recover. Adapters
     that distinguish recoverable from terminal failures (e.g. the Pydantic AI
-    adapter, which raises ``ToolFailed`` for a contract refusal and
-    ``ModelRetry`` for an execution error) raise this instead so the run ends
-    rather than going on.
+    adapter, which raises ``ToolFailed`` for a refusal of what is asked for and
+    ``ModelRetry`` for a correctable failure) raise this instead so the run
+    ends rather than going on.
     """
 
 

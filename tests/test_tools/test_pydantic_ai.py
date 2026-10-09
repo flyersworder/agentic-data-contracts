@@ -1261,3 +1261,17 @@ async def test_a_query_too_heavy_for_the_contract_raises_model_retry(
     with pytest.raises(ModelRetry) as exc:
         await _invoke(run_query, sql="SELECT id FROM analytics.orders")
     assert "exceeds limit" in str(exc.value)
+
+
+async def test_a_missing_required_filter_raises_model_retry(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """How the query is written, not what it asks for: adding the filter
+    passes, so Pydantic AI should ask for corrected SQL."""
+    tools = create_pydantic_ai_tools(
+        contract, adapter=adapter, semantic_source=semantic
+    )
+    run_query = next(t for t in tools if t.name == "run_query")
+    with pytest.raises(ModelRetry) as exc:
+        await _invoke(run_query, sql="SELECT id FROM analytics.orders")
+    assert "tenant_id" in str(exc.value)

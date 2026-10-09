@@ -612,13 +612,13 @@ class TestValidatorWithSemanticSource:
         assert result.warnings == []
 
 
-# ── over_resource_limit: "too heavy", which a lighter query can fix ──────────
+# ── correctable: "how you asked" (fixable) vs "what you asked for" (refused) ─
 
 
 @pytest.mark.parametrize(
     ("cost", "rows"), [(10.0, 100), (1.0, 2_000_000)], ids=["cost", "rows"]
 )
-def test_explain_estimate_over_a_limit_is_over_resource_limit(
+def test_an_explain_estimate_over_a_limit_is_correctable(
     contract: DataContract, cost: float, rows: int
 ) -> None:
     adapter = FakeExplainAdapter(
@@ -627,16 +627,77 @@ def test_explain_estimate_over_a_limit_is_over_resource_limit(
     validator = Validator(contract, explain_adapter=adapter)
     result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
     assert result.blocked
-    assert result.over_resource_limit
+    assert result.correctable
+    assert not result.refused_access
 
 
-def test_a_policy_block_is_not_over_resource_limit(contract: DataContract) -> None:
-    # The same estimate would exceed the limit, but the missing tenant filter
-    # blocks first and EXPLAIN never runs.
-    adapter = FakeExplainAdapter(
-        ExplainResult(estimated_cost_usd=10.0, estimated_rows=100, schema_valid=True)
-    )
-    validator = Validator(contract, explain_adapter=adapter)
-    result = validator.validate("SELECT id FROM analytics.orders")
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT id FROM analytics.orders",  # missing required tenant filter
+        "SELECT * FROM analytics.orders WHERE tenant_id = 'x'",  # no_select_star
+        "SELEC id FROM analytics.orders",  # unparseable
+        "SELECT 1; SELECT 2",  # more than one statement
+    ],
+    ids=["required-filter", "select-star", "parse-error", "multi-statement"],
+)
+def test_a_block_on_how_the_query_is_written_is_correctable(
+    validator: Validator, sql: str
+) -> None:
+    result = validator.validate(sql)
     assert result.blocked
-    assert not result.over_resource_limit
+    assert result.correctable
+    assert not result.refused_access
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM analytics.orders WHERE tenant_id = 'x'",  # forbidden op
+        "SELECT id FROM analytics.secrets WHERE tenant_id = 'x'",  # not allowed
+    ],
+    ids=["forbidden-operation", "table-not-allowed"],
+)
+def test_a_refusal_of_what_is_asked_for_is_not_correctable(
+    validator: Validator, sql: str
+) -> None:
+    result = validator.validate(sql)
+    assert result.blocked
+    assert result.refused_access
+    assert not result.correctable
+
+
+def test_a_refusal_wins_over_a_form_problem(validator: Validator) -> None:
+    # Missing tenant filter (how) and a table outside the allowlist (what):
+    # fixing the form alone cannot pass, so the block is not correctable.
+    result = validator.validate("SELECT * FROM analytics.secrets")
+    assert result.refused_access
+    assert not result.correctable
+
+
+def test_a_blocked_column_is_a_refusal(contract: DataContract) -> None:
+    from agentic_data_contracts.core.schema import QueryCheck
+
+    contract.schema.semantic.rules.append(
+        SemanticRule(
+            name="no_pii",
+            description="No PII",
+            enforcement=Enforcement.BLOCK,
+            query_check=QueryCheck(blocked_columns=["email"]),
+        )
+    )
+    result = Validator(contract).validate(
+        "SELECT email FROM analytics.orders WHERE tenant_id = 'x'"
+    )
+    assert result.refused_access
+    assert not result.correctable
+
+
+def test_a_database_rejection_is_not_a_correctable_block(
+    contract: DataContract,
+) -> None:
+    # It is the agent's error and reads ERROR —, handled apart from blocks.
+    validator = Validator(contract, explain_adapter=_schema_invalid_adapter())
+    result = validator.validate("SELECT id FROM analytics.orders WHERE tenant_id = 'x'")
+    assert result.rejected_by_database
+    assert not result.correctable

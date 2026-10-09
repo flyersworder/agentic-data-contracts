@@ -369,19 +369,26 @@ failures the session counts; the other tools keep the agent's own setting.
 Pydantic AI ends a run once a tool raises `ModelRetry` more times than that
 budget (default 1) without a success in between, and every `ERROR —` result is
 one. Left at the default, a second failed query in a row ended the run,
-whatever the contract allowed. Since 0.61.0 a `BLOCKED —` result is a
-`ToolFailed`, which Pydantic AI shows the model as a failed tool result without
-spending the budget, and without resetting it: errors with refusals between
-them still accumulate. A refusal of the request itself (a forbidden operation,
-a table outside the allowlist, a missing required filter) is definitive, so
-the model should change approach rather than be told to retry. The exception
-is a block a rewritten query can pass: unparseable SQL, a `run_query` timeout,
-an `EXPLAIN` estimate over `cost_limit_usd` / `max_rows_scanned`. `run_query`
-marks those envelopes `_correctable` (from `ValidationResult.parse_error` /
-`over_resource_limit`, and the timeout branch), and the wrapper raises
-`ModelRetry` for them, as for an `ERROR —`. They still count as blocks in the
-session. `preview_table`'s timeout is not marked: the agent wrote no SQL there,
-and the message tells it to switch to `run_query`. The contract's `max_retries`
+whatever the contract allowed.
+
+**What vs how (since 0.61.0).** A block is classified where it is produced,
+by whether a rewrite of the same request can pass it. A refusal of *what* is
+asked for — a forbidden operation, a table outside the allowlist or restricted
+for the caller, a blocked column, filter values outside the caller's set — is
+definitive: the wrapper raises `ToolFailed`, which Pydantic AI shows the model
+as a failed tool result without spending the retry budget, and without
+resetting it, so errors with refusals between them still accumulate. A block
+on *how* the query is written — a missing required filter, `SELECT *`, too
+many joins, unparseable SQL, more than one statement, a `run_query` timeout,
+an `EXPLAIN` estimate over a limit, a failed result check — is correctable:
+`ModelRetry`, as for an `ERROR —`. Every blocked `_error_response` passes
+`correctable=` explicitly (a test scans the package for any that does not).
+The four checkers that refuse access declare `refuses_access = True`, and
+`ValidationResult.correctable` is "blocked, with no such reason, and not a
+database rejection"; a query with both kinds of reason is a refusal. Both
+kinds still count as blocks in the session. `preview_table`'s timeout is not
+correctable: the agent wrote no SQL there, and the message tells it to switch
+to `run_query`. The contract's `max_retries`
 bounds repeated `run_query` refusals (`preview_table`'s gate does not count
 toward it), and `token_budget` and `max_duration_seconds` bound the whole run;
 with none of them declared, only Pydantic AI's `request_limit` does.

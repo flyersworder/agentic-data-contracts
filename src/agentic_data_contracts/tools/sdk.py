@@ -120,6 +120,7 @@ def _wrap_with_session_check(
             return _error_response(
                 _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session),
                 kind="blocked",
+                correctable=False,
             )
         return await inner(args)
 
@@ -173,9 +174,10 @@ def create_sdk_mcp_server(
             receives a structured error signal on this path too. The
             LangChain adapter instead raises a ``ToolException`` (and its
             middleware returns ``ToolMessage(status="error")``); Pydantic AI
-            raises ``ToolFailed`` for a refusal and ``ModelRetry`` for an
-            execution error, or the terminal ``ContractSessionLimitError`` on
-            a budget breach. All three
+            raises ``ToolFailed`` for a refusal of what is asked for and
+            ``ModelRetry`` for an execution error or a block on how the query
+            is written, or the terminal ``ContractSessionLimitError`` on a
+            budget breach. All three
             surface the same text; they differ in *shape* — one MCP boolean
             here, native exception types there, which is why the other two
             can distinguish recoverable from terminal and this one cannot.

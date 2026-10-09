@@ -364,6 +364,14 @@ call, on either `apply_middleware` value).
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts failed query attempts, theirs counts model
 requests, and conflating them would silently redefine existing contracts.
+It does become `run_query`'s `max_retries`, though, the one tool whose
+failures the session counts; the other tools keep the agent's own setting.
+Pydantic AI ends a run once a tool fails more times in a row than that budget
+(default 1), and every `BLOCKED —` / `ERROR —` result is a `ModelRetry`. Left at the default, a
+second failed query in a row ended the run, whatever the contract allowed.
+With the contract's value, the session's own terminal error fires first:
+after `max_retries` failures the next call is refused before it runs, while
+Pydantic AI would have stopped only on the failure after that.
 `cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
 session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
 the SDK path cannot observe usage at all, so the helper lives in a module that

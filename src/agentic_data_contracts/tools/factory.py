@@ -66,6 +66,9 @@ def _text_response(text: str) -> dict[str, Any]:
 # change to the wording cannot leave a wrapper matching the old one.
 _BLOCKED_PREFIX = "BLOCKED —"  # the contract refused the action
 _ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allowed
+# A spent session budget: terminal, unlike any other BLOCKED. Matched as a
+# prefix by the Pydantic AI wrapper, so every emitter must start with it.
+_SESSION_LIMIT_PREFIX = f"{_BLOCKED_PREFIX} Session limit exceeded"
 
 
 def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
@@ -1757,7 +1760,7 @@ def create_tools(
                 session.check_limits()
             except LimitExceededError as e:
                 response = _error_response(
-                    _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
+                    _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}"),
                     kind="blocked",
                 )
                 _record(response["_kind"], detail=str(e))

@@ -21,6 +21,11 @@ error contract, which distinguishes recoverable from terminal failures:
   matches how ``factory.run_query`` already separates the two cases — it
   records a retry on a validation block but not on a limit breach.
 
+``run_query``'s Pydantic AI retry budget (``Tool.max_retries``) is the
+contract's ``max_retries``, so failed queries do not end the run before the
+contract's limit does. Other tools, and ``run_query`` when the contract
+declares none, keep the agent's own ``retries`` setting.
+
 Pass ``apply_middleware=False`` to skip the per-tool session pre-check (the
 underlying ``run_query`` still self-checks its own limits).
 
@@ -51,6 +56,7 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
     _BLOCKED_PREFIX,
     _ERROR_PREFIX,
+    _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
@@ -75,11 +81,6 @@ _CARRIED_USAGE: WeakKeyDictionary[ContractSession, RunUsage] = WeakKeyDictionary
 # 600 was recorded as 900, and the inflated tally then blocked a run that was
 # still within budget.
 _CARRIED_SCOPE = "pydantic-ai:carried"
-# Substring marking a *terminal* session-budget breach inside a BLOCKED
-# envelope (vs. a recoverable validation/permission block). Both this adapter's
-# own pre-check and ``factory.run_query``'s self-check emit it, so the sniff
-# below must treat it as terminal regardless of which layer produced it.
-_SESSION_LIMIT_MARKER = "Session limit exceeded"
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -159,13 +160,31 @@ def create_pydantic_ai_tools(
             max_result_rows=max_result_rows,
         )
 
-    return [_to_pydantic_ai_tool(t, session, apply_middleware) for t in tools]
+    # Every BLOCKED / ERROR result becomes a ModelRetry, and Pydantic AI ends
+    # the run once a tool fails more times in a row than its retry budget,
+    # which defaults to 1. run_query's failures are the ones the session
+    # counts against the contract's max_retries, so run_query takes that as its
+    # budget, and the session's terminal error then fires first. Other tools
+    # keep None, the agent's own `retries` setting; so does run_query when the
+    # contract declares no max_retries.
+    resources = contract.schema.resources
+    max_retries = resources.max_retries if resources else None
+    return [
+        _to_pydantic_ai_tool(
+            t,
+            session,
+            apply_middleware,
+            max_retries if t.name == "run_query" else None,
+        )
+        for t in tools
+    ]
 
 
 def _to_pydantic_ai_tool(
     tool_def: ToolDef,
     session: ContractSession,
     apply_middleware: bool,
+    max_retries: int | None = None,
 ) -> Tool:
     """Wrap one ``ToolDef`` into a ``pydantic_ai.Tool`` via ``Tool.from_schema``.
 
@@ -194,9 +213,7 @@ def _to_pydantic_ai_tool(
             except LimitExceededError as e:
                 # Terminal — do NOT raise ModelRetry; retrying cannot help.
                 raise ContractSessionLimitError(
-                    _with_remaining(
-                        f"{_BLOCKED_PREFIX} {_SESSION_LIMIT_MARKER}: {e}", session
-                    )
+                    _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session)
                 ) from e
 
         text = _unwrap_mcp_text(await inner(kwargs))
@@ -209,22 +226,28 @@ def _to_pydantic_ai_tool(
         # permission gate, failed result-check) is recoverable: surfaced as
         # ModelRetry so the model can rewrite its arguments or switch tools.
         # So is "ERROR —", SQL the database could not run.
+        # Matched as a prefix, never a substring: a block message can quote the
+        # agent's own SQL (a parse error does), and SQL containing the phrase
+        # is not a spent budget.
+        if text.startswith(_SESSION_LIMIT_PREFIX):
+            raise ContractSessionLimitError(text)
         if text.startswith(_BLOCKED_PREFIX):
-            if _SESSION_LIMIT_MARKER in text:
-                raise ContractSessionLimitError(text)
             raise ModelRetry(text)
         if text.startswith(_ERROR_PREFIX):
             raise ModelRetry(text)
 
         return text
 
-    return Tool.from_schema(
+    tool = Tool.from_schema(
         function=_fn,
         name=tool_def.name,
         description=tool_def.description,
         json_schema=tool_def.input_schema,
         takes_ctx=True,
     )
+    # Set after construction: ``from_schema`` takes no ``max_retries``.
+    tool.max_retries = max_retries
+    return tool
 
 
 def _usage_scope(ctx: RunContext[Any], session: ContractSession) -> str | None:
@@ -344,7 +367,10 @@ def contract_run_kwargs(
     ``ContractSessionLimitError`` remains reachable — the session still holds
     ``max_retries``, ``cost_limit_usd`` and ``max_duration_seconds``, and can be
     fed from outside the run — so keep that handler alongside
-    ``pydantic_ai.exceptions.UsageLimitExceeded``.
+    ``pydantic_ai.exceptions.UsageLimitExceeded``. ``UnexpectedModelBehavior``
+    is reachable too: a tool other than ``run_query`` that fails more times in
+    a row than the agent's ``retries`` allows ends the run with it, and so does
+    ``run_query`` under a contract that declares no ``max_retries``.
 
     ``contract`` supplies the budget and ``session`` supplies both the spend
     and the counter, so pass the session built for *that* contract. A

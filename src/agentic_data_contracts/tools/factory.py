@@ -66,6 +66,8 @@ def _text_response(text: str) -> dict[str, Any]:
 # change to the wording cannot leave a wrapper matching the old one.
 _BLOCKED_PREFIX = "BLOCKED —"  # the contract refused the action
 _ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allowed
+# What the wrappers match, as one tuple, so no adapter can miss a prefix.
+_FAILURE_PREFIXES = (_BLOCKED_PREFIX, _ERROR_PREFIX)
 # A spent session budget: terminal, unlike any other BLOCKED. Matched as a
 # prefix by the Pydantic AI wrapper, so every emitter must start with it.
 _SESSION_LIMIT_PREFIX = f"{_BLOCKED_PREFIX} Session limit exceeded"
@@ -1114,6 +1116,9 @@ def create_tools(
                     log_msgs.append(message)
 
             if block_msgs:
+                # A governance block like run_query's: it counts against
+                # max_retries, so a model that keeps hitting the gate is stopped.
+                session.record_block()
                 response = _error_response(
                     f"BLOCKED — preview_table SELECT * gated for caller"
                     f" {_caller_label(principal)!r}:\n"
@@ -1133,6 +1138,9 @@ def create_tools(
                     timeout_adapter=timeout_adapter,
                 )
             except QueryTimeoutError as e:
+                # Counted like run_query's timeout, so repeated previews cannot
+                # pile up scans that may still be running.
+                session.record_block()
                 # The agent wrote no SQL here, so the run_query advice to
                 # narrow a WHERE clause does not apply.
                 response = _error_response(

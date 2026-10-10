@@ -1208,3 +1208,55 @@ async def test_toolset_keeps_the_run_through_consecutive_failures(
 
     assert result.output == "done"
     assert session.retries == 2
+
+
+async def test_repeated_preview_blocks_end_the_run_at_the_contracts_budget(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A ToolFailed spends none of Pydantic AI's retry budget, so the session
+    must bound every tool's failures, not only run_query's: a model that keeps
+    hitting preview_table's SELECT * gate is stopped by max_retries."""
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    from agentic_data_contracts.core.schema import (
+        Enforcement,
+        QueryCheck,
+        SemanticRule,
+    )
+
+    dc = DataContract(
+        DataContractSchema(
+            name="gated-preview",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    )
+                ],
+                rules=[
+                    SemanticRule(
+                        name="pii_columns",
+                        description="Never expose tenant_id via SELECT *",
+                        enforcement=Enforcement.BLOCK,
+                        query_check=QueryCheck(blocked_columns=["tenant_id"]),
+                    )
+                ],
+            ),
+            resources=ResourceConfig(max_retries=2),
+        )
+    )
+
+    def _always_preview(messages: list[Any], info: AgentInfo) -> ModelResponse:
+        args = {"schema": "analytics", "table": "orders"}
+        return ModelResponse(parts=[ToolCallPart("preview_table", args)])
+
+    session = ContractSession(dc)
+    agent = Agent(
+        FunctionModel(_always_preview),
+        tools=create_pydantic_ai_tools(dc, adapter=adapter, session=session),
+    )
+
+    with pytest.raises(ContractSessionLimitError, match="retries"):
+        await agent.run("go")
+    assert session.blocks == 2

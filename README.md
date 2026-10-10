@@ -401,11 +401,13 @@ raises a terminal `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
 A failed call spends none of Pydantic AI's per-tool retry budget, so the
-contract is the one bound: `resources.max_retries` ends repeated `run_query`
-failures with `ContractSessionLimitError`, and `token_budget` and
-`max_duration_seconds` bound the whole run. A contract with none of these
-leaves only Pydantic AI's `UsageLimits(request_limit=...)`, 50 model requests
-by default.
+contract is the one bound: every `BLOCKED —` and `ERROR —` result counts toward
+`resources.max_retries`, which ends repeated failures with
+`ContractSessionLimitError`, and `token_budget` and `max_duration_seconds`
+bound the whole run. A contract with none of these leaves only Pydantic AI's
+`UsageLimits(request_limit=...)`, 50 model requests by default. Pydantic AI's
+own retries (tool arguments it cannot parse, output validation) still end a
+run with `UnexpectedModelBehavior` past the agent's `retries` setting.
 
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
@@ -1784,8 +1786,9 @@ failed queries, theirs counts LLM calls.
 Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
-outside the run. Sequential turns only: one counter per session is shared
-mutable state.
+outside the run. `pydantic_ai.exceptions.UnexpectedModelBehavior` is reachable
+too, from Pydantic AI's own retries (see the Pydantic AI section above).
+Sequential turns only: one counter per session is shared mutable state.
 
 ## Optional Dependencies
 

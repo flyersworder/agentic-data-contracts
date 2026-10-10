@@ -375,8 +375,13 @@ which adds generic retry instructions and spends a per-tool retry budget
 (default 1) whose exhaustion ends the run with `UnexpectedModelBehavior`, so
 0.60.1 had to give `run_query` the contract's `max_retries` as that budget.
 Two counters for one quantity drift; a `ToolFailed` spends none of Pydantic
-AI's budget, so the session is the one counter: after `max_retries` failures
-the next call is refused with the terminal `ContractSessionLimitError`.
+AI's budget, so the session is the one counter: every `BLOCKED —` and
+`ERROR —` result counts toward `max_retries` (since 0.61.0 that includes
+`preview_table`'s `SELECT *` gate and its timeout, which Pydantic AI's budget
+used to bound), and after `max_retries` failures the next call is refused with
+the terminal `ContractSessionLimitError`. `UnexpectedModelBehavior` still
+comes from Pydantic AI's own retries (unparseable tool arguments, output
+validation).
 Classifying each block as a refusal (`ToolFailed`) or a correctable form
 problem (`ModelRetry`) was built and dropped before release: every checker,
 including a user's own, would have had to classify its failures, with a

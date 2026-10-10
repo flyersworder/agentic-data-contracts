@@ -16,7 +16,8 @@ error contract:
   LangChain and Claude Agent SDK adapters, which return the same text. The
   message carries the next step; the exception type does not. ``ToolFailed``
   spends none of Pydantic AI's per-tool retry budget, so the contract is the
-  one bound: its ``max_retries`` ends repeated ``run_query`` failures with
+  one bound: every ``BLOCKED —`` and ``ERROR —`` result counts toward its
+  ``max_retries``, which ends repeated failures with
   ``ContractSessionLimitError``, and its ``token_budget`` and
   ``max_duration_seconds`` bound the whole run. With none of them, only
   Pydantic AI's ``UsageLimits.request_limit`` does (50 model requests by
@@ -55,8 +56,7 @@ from agentic_data_contracts.core.session import (
 )
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
-    _BLOCKED_PREFIX,
-    _ERROR_PREFIX,
+    _FAILURE_PREFIXES,
     _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
@@ -212,7 +212,7 @@ def _to_pydantic_ai_tool(
         # is not a spent budget.
         if text.startswith(_SESSION_LIMIT_PREFIX):
             raise ContractSessionLimitError(text)
-        if text.startswith((_BLOCKED_PREFIX, _ERROR_PREFIX)):
+        if text.startswith(_FAILURE_PREFIXES):
             raise ToolFailed(text)
 
         return text
@@ -343,7 +343,9 @@ def contract_run_kwargs(
     ``ContractSessionLimitError`` remains reachable — the session still holds
     ``max_retries``, ``cost_limit_usd`` and ``max_duration_seconds``, and can be
     fed from outside the run — so keep that handler alongside
-    ``pydantic_ai.exceptions.UsageLimitExceeded``.
+    ``pydantic_ai.exceptions.UsageLimitExceeded``. ``UnexpectedModelBehavior``
+    is reachable too, from Pydantic AI's own retries (tool arguments it cannot
+    parse, output validation) past the agent's ``retries`` setting.
 
     ``contract`` supplies the budget and ``session`` supplies both the spend
     and the counter, so pass the session built for *that* contract. A

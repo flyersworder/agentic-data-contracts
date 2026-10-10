@@ -392,40 +392,20 @@ tools = create_pydantic_ai_tools(dc, adapter=adapter)
 agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 ```
 
-Enforcement is auto-applied in-tool, and a failed query is classified by
-whether a rewrite can pass it:
-
-- **What is asked for is off-limits** (a forbidden operation, a table outside
-  the allowlist, a selected blocked column, filter values outside the caller's
-  set), or a multi-statement batch: `ToolFailed`. The model sees the refusal as a
-  failed tool result and changes its approach, and the refusal does not spend
-  Pydantic AI's retry budget.
-- **How the query is written** (a missing required filter, `SELECT *`, too
-  many joins, an unqualified name of an allowed table, unparseable SQL, a
-  timeout, an `EXPLAIN` estimate over a limit, a failed result check), or SQL
-  the database
-  fails to run (a missing column, a failed cast): `ModelRetry`, so the model
-  corrects its SQL and tries again.
-- **A spent session budget**: a terminal `ContractSessionLimitError` that ends
-  the run. Install:
+Enforcement is auto-applied in-tool: a blocked query (forbidden operation,
+missing required filter, unparseable SQL) or one the database fails to run
+(a missing column, a failed cast) raises `ToolFailed`. The model sees the
+message as a failed tool result and takes its next step from it, as it does
+under the LangChain and Claude Agent SDK adapters. Session-limit exhaustion
+raises a terminal `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
-A refusal spends no Pydantic AI retry budget. The contract's `max_retries`
-bounds repeated `run_query` refusals (`preview_table`'s per-principal gate does
-not count toward it), and its `token_budget` and `max_duration_seconds` bound
-the whole run. A contract with none of these leaves only Pydantic AI's
-`UsageLimits(request_limit=...)`, 50 model requests by default. Declare
-`resources.max_retries` to bound refusals by the contract.
-
-Pydantic AI ends a run when one tool raises `ModelRetry` more times than its
-retry budget, which defaults to 1, without a success in between; a refusal
-neither counts nor resets that. `run_query` therefore takes the contract's
-`resources.max_retries` as its budget, so a run continues through failed
-queries until the contract's own limit ends it. The other tools, and
-`run_query` under a contract that declares no `max_retries`, keep the agent's
-setting: pass `Agent(..., retries={"tools": n})`, or a second `ModelRetry` from
-one tool without a success in between ends the run with
-`UnexpectedModelBehavior`.
+A failed call spends none of Pydantic AI's per-tool retry budget, so the
+contract is the one bound: `resources.max_retries` ends repeated `run_query`
+failures with `ContractSessionLimitError`, and `token_budget` and
+`max_duration_seconds` bound the whole run. A contract with none of these
+leaves only Pydantic AI's `UsageLimits(request_limit=...)`, 50 model requests
+by default.
 
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
@@ -452,7 +432,7 @@ result = await agent.run(
 
 The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
-`ToolFailed` / `ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
+`ToolFailed` / `ContractSessionLimitError` enforcement applies per user.
 
 Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
@@ -1804,10 +1784,8 @@ failed queries, theirs counts LLM calls.
 Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
-outside the run. `pydantic_ai.exceptions.UnexpectedModelBehavior` is reachable
-too: a tool that raises `ModelRetry` more times than its retry budget without
-a success in between ends the run with it (see the Pydantic AI section above). Sequential turns only: one counter
-per session is shared mutable state.
+outside the run. Sequential turns only: one counter per session is shared
+mutable state.
 
 ## Optional Dependencies
 

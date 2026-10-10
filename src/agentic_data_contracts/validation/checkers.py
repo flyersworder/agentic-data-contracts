@@ -20,12 +20,6 @@ if TYPE_CHECKING:
 class CheckResult:
     passed: bool
     message: str
-    # Whether this failure refuses *what* is asked for (a table, operation,
-    # column or value that is off-limits: True) or only how the query is
-    # written, which a rewrite fixes (False). None, unclassified, counts as a
-    # refusal, so a check that does not say fails closed. See
-    # ValidationResult.correctable.
-    refuses_access: bool | None = None
 
 
 def extract_tables(expression: exp.Expression) -> set[str]:
@@ -198,16 +192,7 @@ class TableAllowlistChecker:
                 f"Tables restricted to other principals "
                 f"(caller: {who!r}): {', '.join(sorted(restricted))}"
             )
-        # `orders` for an allowed `analytics.orders` is how the query is
-        # written: qualifying the name fixes it. Any restricted table, or a name
-        # that matches no table the caller may use, refuses what is asked for.
-        fixable = not restricted and all(
-            "." not in name and any(table.endswith(f".{name}") for table in allowed)
-            for name in undeclared
-        )
-        return CheckResult(
-            passed=False, message="; ".join(parts), refuses_access=not fixable
-        )
+        return CheckResult(passed=False, message="; ".join(parts))
 
 
 class OperationBlocklistChecker:
@@ -240,7 +225,6 @@ class OperationBlocklistChecker:
             if isinstance(ast, expr_type) and op_name in forbidden:
                 return CheckResult(
                     passed=False,
-                    refuses_access=True,
                     message=f"Forbidden operation: {op_name}",
                 )
 
@@ -254,7 +238,6 @@ class OperationBlocklistChecker:
         ):
             return CheckResult(
                 passed=False,
-                refuses_access=True,
                 message="Forbidden operation: TRUNCATE",
             )
 
@@ -306,7 +289,6 @@ class NoSelectStarChecker:
                 if is_bare_star or is_qualified_star:
                     return CheckResult(
                         passed=False,
-                        refuses_access=False,
                         message="SELECT * is not allowed — specify explicit columns",
                     )
         return CheckResult(passed=True, message="")
@@ -329,13 +311,11 @@ class RequiredFilterChecker:
         if needle not in extract_where_columns(ast):
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=f"Missing required filter: {self.column}",
             )
         if needle not in extract_bound_columns(ast):
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Required filter on {self.column} is trivially satisfied "
                     f"(e.g. `col = col`); add a non-trivial condition"
@@ -477,7 +457,6 @@ class RequiredFilterValuesChecker:
         if self.column not in extract_where_columns(ast):
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=f"Missing required filter: {self.column}",
             )
 
@@ -490,7 +469,6 @@ class RequiredFilterValuesChecker:
         if has_non_literal_op:
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Filter on {self.column} contains a non-literal predicate "
                     f"(subquery, function, BETWEEN, or non-equality comparison); "
@@ -501,7 +479,6 @@ class RequiredFilterValuesChecker:
         if smuggled:
             return CheckResult(
                 passed=False,
-                refuses_access=True,
                 message=(
                     f"Values {sorted(smuggled)} for {self.column} not allowed "
                     f"for principal {resolved_principal!r}; allowed: "
@@ -528,7 +505,6 @@ class RequiredFilterValuesChecker:
         if not any_bound_in_allow:
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Filter on {self.column} is not constrained to a literal "
                     f"value set; cannot prove it is within the allowed values "
@@ -546,7 +522,6 @@ class RequiredFilterValuesChecker:
         if _TAUTOLOGY_MARKER in cov.bad:
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Required filter on {self.column} is trivially satisfied "
                     f"(e.g. `col = col`); add a non-trivial condition"
@@ -555,7 +530,6 @@ class RequiredFilterValuesChecker:
         if _NON_LITERAL_MARKER in cov.bad:
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Filter on {self.column} contains a non-literal predicate "
                     f"(subquery, function, BETWEEN, or non-equality comparison); "
@@ -567,7 +541,6 @@ class RequiredFilterValuesChecker:
         bad_display = sorted(cov.bad)
         return CheckResult(
             passed=False,
-            refuses_access=True,
             message=(
                 f"Values {bad_display} for {self.column} not allowed for "
                 f"principal {principal!r}; allowed: {sorted(allowed)}"
@@ -777,7 +750,6 @@ class BlockedColumnsChecker:
         if any(ast.find_all(exp.Star)):
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     "SELECT * may expose blocked columns: "
                     f"{', '.join(sorted(self.blocked))}"
@@ -795,7 +767,6 @@ class BlockedColumnsChecker:
             return CheckResult(
                 passed=False,
                 message=f"Blocked columns in SELECT: {', '.join(sorted(found))}",
-                refuses_access=True,
             )
         return CheckResult(passed=True, message="")
 
@@ -807,7 +778,6 @@ class RequireLimitChecker:
         if not list(ast.find_all(exp.Limit)):
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message="Query must include a LIMIT clause",
             )
         return CheckResult(passed=True, message="")
@@ -824,7 +794,6 @@ class MaxJoinsChecker:
         if join_count > self.max_joins:
             return CheckResult(
                 passed=False,
-                refuses_access=False,
                 message=(
                     f"Query has {join_count} JOINs, exceeds maximum of {self.max_joins}"
                 ),

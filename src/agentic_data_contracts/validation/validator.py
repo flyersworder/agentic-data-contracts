@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import sqlglot
 from sqlglot import errors, exp
-from sqlglot.dialects.dialect import Dialect
-from sqlglot.tokens import TokenType
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
@@ -74,24 +72,6 @@ MULTIPLE_STATEMENTS_REASON = (
 )
 
 
-def _may_be_batch(sql: str, dialect: str | None) -> bool:
-    """True when unparseable *sql* may hold more than one statement.
-
-    For a query that failed to parse, so :func:`_is_multi_statement` could not
-    count its statements: a statement separator with any token after it. When
-    even tokenizing fails (an unterminated literal), any ``;`` before the end
-    counts, failing closed.
-    """
-    try:
-        tokens = Dialect.get_or_raise(dialect).tokenize(sql)
-    except errors.TokenError:
-        return ";" in sql.strip().rstrip(";")
-    separators = [
-        i for i, t in enumerate(tokens) if t.token_type == TokenType.SEMICOLON
-    ]
-    return any(i < len(tokens) - 1 for i in separators)
-
-
 def _is_multi_statement(sql: str, dialect: str | None) -> bool:
     """True when *sql* holds more than one statement.
 
@@ -150,12 +130,6 @@ class ValidationResult:
     schema_valid: bool = True
     explain_errors: list[str] = field(default_factory=list)
     parse_error: bool = False
-    # A blocking reason refuses *what* is asked for (a table outside the
-    # allowlist, a forbidden operation, a selected blocked column, filter values
-    # outside the caller's set: ``CheckResult.refuses_access``), or the block
-    # cannot be shown not to (a multi-statement batch, whose statements the
-    # checks never see).
-    refused_access: bool = False
     relative_time: str | None = None
 
     @property
@@ -169,21 +143,6 @@ class ValidationResult:
         EXPLAIN, fail-closed.
         """
         return self.blocked and not self.schema_valid
-
-    @property
-    def correctable(self) -> bool:
-        """Blocked only for *how* the query is written, which a rewrite fixes.
-
-        A missing required filter, ``SELECT *``, too many joins, an unqualified
-        name of an allowed table, unparseable SQL, an EXPLAIN estimate over a
-        limit, a failed result check. Not a refusal of *what* is asked for
-        (``refused_access``), which a multi-statement batch also counts as,
-        and not a database rejection, which is the agent's error and handled
-        apart from blocks. The Pydantic AI wrapper
-        raises ``ModelRetry`` for a correctable block and ``ToolFailed`` for
-        any other.
-        """
-        return self.blocked and self.schema_valid and not self.refused_access
 
 
 @dataclass(frozen=True)
@@ -382,7 +341,6 @@ class Validator:
         estimated_rows: int | None = None
         schema_valid: bool = True
         explain_errors: list[str] = []
-        refused_access = False
 
         # TokenError (an unterminated literal, say) is raised by the tokenizer
         # and is NOT a ParseError subclass; both mean "unreadable".
@@ -399,21 +357,12 @@ class Validator:
                 blocked=True,
                 reasons=[f"SQL parse error: {e}"],
                 parse_error=True,
-                # A typo is correctable, but not inside a batch, which the
-                # checks never see into: fail closed, as for one that parses.
-                refused_access=_may_be_batch(sql, self.dialect),
             )
 
         # A policy block, not a parse error: the query was read, and it is
         # refused because the checkers below would only see one statement of it.
         if multi:
-            # Not shown correctable: the checks that would say whether a hidden
-            # statement refuses access never run on a batch, so fail closed.
-            return ValidationResult(
-                blocked=True,
-                reasons=[MULTIPLE_STATEMENTS_REASON],
-                refused_access=True,
-            )
+            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
 
         relative_time = _relative_time_node(ast)
 
@@ -428,13 +377,11 @@ class Validator:
             result = self._table_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = refused_access or result.refuses_access is not False
 
         if self._operation_checker is not None:
             result = self._operation_checker.check_ast(ast, self.contract)
             if not result.passed:
                 reasons.append(result.message)
-                refused_access = refused_access or result.refuses_access is not False
 
         for entry in self._query_checkers:
             if not self._is_table_in_scope(entry.table_scope, referenced_tables):
@@ -447,9 +394,6 @@ class Validator:
             if not result.passed:
                 if entry.enforcement == "block":
                     reasons.append(result.message)
-                    refused_access = (
-                        refused_access or result.refuses_access is not False
-                    )
                 elif entry.enforcement == "warn":
                     warnings.append(result.message)
                 else:
@@ -505,7 +449,6 @@ class Validator:
             estimated_rows=estimated_rows,
             schema_valid=schema_valid,
             explain_errors=explain_errors,
-            refused_access=refused_access,
             relative_time=relative_time,
         )
 
@@ -544,13 +487,7 @@ class Validator:
         # from the parsed statement, which here would be only one of several,
         # so scoping cannot be trusted and there is no sound partial answer.
         if multi:
-            # Not shown correctable: the checks that would say whether a hidden
-            # statement refuses access never run on a batch, so fail closed.
-            return ValidationResult(
-                blocked=True,
-                reasons=[MULTIPLE_STATEMENTS_REASON],
-                refused_access=True,
-            )
+            return ValidationResult(blocked=True, reasons=[MULTIPLE_STATEMENTS_REASON])
 
         resolved_principal = resolve_principal(self._caller_principal)
 

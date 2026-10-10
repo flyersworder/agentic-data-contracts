@@ -1,10 +1,10 @@
-"""``_kind`` on `_error_response` / `_blocked_response` envelopes.
+"""``_kind`` on `_error_response` envelopes.
 
 Classifies *why* a tool returned an error envelope, distinct from
-``is_error`` (whether it should be one at all). ``"blocked"`` marks a
-governance denial — the contract refused the action (`_blocked_response`);
-``"error"`` (`_error_response`) covers misconfiguration, invalid arguments,
-and execution failures. A later task (the conformance recorder) reads ``_kind`` to
+``is_error`` (whether it should be one at all). ``kind="blocked"`` marks a
+governance denial — the contract refused the action; the default
+``kind="error"`` covers misconfiguration, invalid arguments, and execution
+failures. A later task (the conformance recorder) reads ``_kind`` to
 classify a tool call as blocked vs. error rather than treating every
 non-raising return as a successful call.
 
@@ -26,12 +26,7 @@ from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession
 from agentic_data_contracts.semantic.yaml_source import YamlSource
-from agentic_data_contracts.tools.factory import (
-    ToolDef,
-    _blocked_response,
-    _error_response,
-    create_tools,
-)
+from agentic_data_contracts.tools.factory import ToolDef, _error_response, create_tools
 
 # ── `_error_response`'s own contract (literal strings) ───────────────────────
 
@@ -41,15 +36,7 @@ def test_defaults_to_error_kind() -> None:
 
 
 def test_blocked_kind_is_carried() -> None:
-    response = _blocked_response("BLOCKED — nope", correctable=False)
-    assert response["_kind"] == "blocked"
-    assert response["_correctable"] is False
-
-
-def test_a_block_must_state_whether_it_is_correctable() -> None:
-    # No default: a block site cannot leave the verdict out (#143).
-    with pytest.raises(TypeError):
-        _blocked_response("BLOCKED — nope")  # ty: ignore[missing-argument]
+    assert _error_response("BLOCKED — nope", kind="blocked")["_kind"] == "blocked"
 
 
 def test_is_error_is_still_set_for_mcp() -> None:

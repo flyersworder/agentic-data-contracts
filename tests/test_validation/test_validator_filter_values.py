@@ -23,9 +23,6 @@ class TestRequiredFilterValuesIntegration:
         result = v.validate("SELECT id FROM sales.opps WHERE account_id IN (123, 999)")
         assert result.blocked
         assert any("999" in r and "partner@co.com" in r for r in result.reasons)
-        # Values outside the caller's set: what is asked for is off-limits.
-        assert result.refused_access
-        assert not result.correctable
 
     def test_vip_in_own_set_passes(self, contract: DataContract) -> None:
         v = Validator(contract, caller_principal="vip@co.com")
@@ -56,9 +53,6 @@ class TestRequiredFilterValuesIntegration:
         result = v.validate("SELECT id FROM sales.opps WHERE id = 1")
         assert result.blocked
         assert any("Missing required filter" in r for r in result.reasons)
-        # No filter at all: how the query is written, which adding one fixes.
-        assert not result.refused_access
-        assert result.correctable
 
     def test_self_join_alias_bypass_blocked(self, contract: DataContract) -> None:
         """Regression for the cross-alias smuggle: t1 pinned to a legal value

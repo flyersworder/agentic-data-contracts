@@ -17,7 +17,7 @@ from dce.arms import (
     check_and_restore,
     make_working_copy,
 )
-from pydantic_ai import ModelRetry
+from pydantic_ai import ToolFailed
 
 DOCS = {"manual": "FEE RULE ALPHA: match on card_scheme.", "payments_readme": "cols"}
 
@@ -238,12 +238,11 @@ def test_bad_query_returns_something_the_model_can_act_on_every_arm(db):
     assert out_a.startswith("ERROR:")
 
     setup_c = build_arm("contract", db, DOCS)
-    # `SELECT *` is blocked by `no_select_star` before execution: a block on
-    # how the query is written, which listing the columns fixes, so it is a
-    # `ModelRetry` (not a bare exception) and the model rewrites its query.
-    # (From agentic-data-contracts 0.61.0 a refusal of *what* is asked for — a
-    # forbidden operation, a table outside the allowlist — is a `ToolFailed`.)
-    with pytest.raises(ModelRetry):
+    # `SELECT *` is blocked by `no_select_star` before execution, surfaced as
+    # `ToolFailed` (not a bare exception): the model reads the block as a
+    # failed tool result and rewrites its query. (`ModelRetry` up to
+    # agentic-data-contracts 0.60.x.)
+    with pytest.raises(ToolFailed):
         asyncio.run(
             _tool(setup_c, "run_query").function(
                 _CTX, sql="SELECT * FROM main.payments"

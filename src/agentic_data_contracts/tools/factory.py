@@ -71,7 +71,7 @@ _ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allow
 _SESSION_LIMIT_PREFIX = f"{_BLOCKED_PREFIX} Session limit exceeded"
 
 
-def _error_response(text: str) -> dict[str, Any]:
+def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
     ``claude_agent_sdk`` reads ``is_error`` off this dict and maps it onto MCP's
@@ -90,31 +90,18 @@ def _error_response(text: str) -> dict[str, Any]:
     Pydantic AI wrappers read only ``content`` -- so this is additive on every
     path.
 
-    ``_kind`` is a second, finer-grained axis alongside ``is_error``: it says
+    ``kind`` is a second, finer-grained axis alongside ``is_error``: it says
     *why* the call didn't perform its advertised action, not just that it
-    didn't. This envelope is ``"error"``: misconfiguration, invalid arguments,
-    and SQL the database could not run (rejected by EXPLAIN, or raising during
-    execution), which is the agent's own error and worded ``ERROR —``. A
-    governance block -- the contract actively refusing the action -- uses
-    :func:`_blocked_response` instead, which sets ``"blocked"`` and the
-    ``_correctable`` verdict. The conformance recorder reads ``_kind`` off the
+    didn't. ``"blocked"`` means the contract actively refused the action --
+    a governance decision, not a failure -- and is reserved for call sites
+    where that is genuinely what happened; SQL the database could not run
+    (rejected by EXPLAIN, or raising during execution) is the agent's own
+    error, worded ``ERROR —``, and keeps the default ``"error"``. Consumed by the
+    conformance recorder (a later feature), which reads ``_kind`` off the
     envelope to classify a tool call as blocked vs. error instead of treating
     every non-raising return as a successful call.
     """
-    return {**_text_response(text), "is_error": True, "_kind": "error"}
-
-
-def _blocked_response(text: str, *, correctable: bool) -> dict[str, Any]:
-    """Envelope for a governance block: :func:`_error_response` with ``_kind``
-    ``"blocked"`` and the ``_correctable`` verdict.
-
-    ``correctable`` has no default, so a block site cannot leave the verdict
-    out: whether a rewrite of the same request can pass the block (how the query
-    is written) or not (what is asked for is off-limits). The Pydantic AI
-    wrapper raises ``ModelRetry`` for the first and ``ToolFailed`` for the
-    second.
-    """
-    return {**_error_response(text), "_kind": "blocked", "_correctable": correctable}
+    return {**_text_response(text), "is_error": True, "_kind": kind}
 
 
 def _folded_table_index(source: SemanticSource) -> dict[str, Any]:
@@ -929,18 +916,18 @@ def create_tools(
             table_name = args.get("table", "")
             qualified = f"{schema_name}.{table_name}"
             if qualified not in contract.allowed_table_names():
-                response = _blocked_response(
+                response = _error_response(
                     f"Table {qualified} is not in the allowed tables list.",
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"])
                 return response
             principal = resolve_principal(caller_principal)
             if qualified not in contract.allowed_table_names_for(principal):
-                response = _blocked_response(
+                response = _error_response(
                     f"Table {qualified} is restricted"
                     f" (caller: {_caller_label(principal)!r}).",
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"])
                 return response
@@ -1051,18 +1038,18 @@ def create_tools(
                 limit = min(limit, max_result_rows)
             qualified = f"{schema}.{table}"
             if qualified not in contract.allowed_table_names():
-                response = _blocked_response(
+                response = _error_response(
                     f"Table {qualified} is not in the allowed tables list.",
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"])
                 return response
             principal = resolve_principal(caller_principal)
             if qualified not in contract.allowed_table_names_for(principal):
-                response = _blocked_response(
+                response = _error_response(
                     f"Table {qualified} is restricted"
                     f" (caller: {_caller_label(principal)!r}).",
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"])
                 return response
@@ -1127,12 +1114,12 @@ def create_tools(
                     log_msgs.append(message)
 
             if block_msgs:
-                response = _blocked_response(
+                response = _error_response(
                     f"BLOCKED — preview_table SELECT * gated for caller"
                     f" {_caller_label(principal)!r}:\n"
                     + "\n".join(f"- {m}" for m in block_msgs)
                     + "\nUse run_query with explicit columns instead.",
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"])
                 return response
@@ -1148,13 +1135,13 @@ def create_tools(
             except QueryTimeoutError as e:
                 # The agent wrote no SQL here, so the run_query advice to
                 # narrow a WHERE clause does not apply.
-                response = _blocked_response(
+                response = _error_response(
                     _timeout_message(
                         e,
                         "This table is expensive to scan even for a preview;"
                         " use run_query with a selective filter instead.",
                     ),
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"], detail=str(e))
                 return response
@@ -1772,9 +1759,9 @@ def create_tools(
             try:
                 session.check_limits()
             except LimitExceededError as e:
-                response = _blocked_response(
+                response = _error_response(
                     _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}"),
-                    correctable=False,
+                    kind="blocked",
                 )
                 _record(response["_kind"], detail=str(e))
                 return response
@@ -1802,12 +1789,7 @@ def create_tools(
                 msg = "BLOCKED — Violations:\n" + "\n".join(
                     f"- {r}" for r in vresult.reasons
                 )
-                # A block on how the query is written is one a rewrite can pass;
-                # a refusal of what it asks for is not (ValidationResult).
-                response = _blocked_response(
-                    _with_remaining(msg),
-                    correctable=vresult.correctable,
-                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
                 _record(
                     response["_kind"],
                     detail="; ".join(vresult.reasons),
@@ -1845,10 +1827,8 @@ def create_tools(
                 # The contract's own limit stopped the query: a governance
                 # block, counted against max_retries like any other.
                 session.record_block()
-                # Correctable: the message asks for a lighter query.
-                response = _blocked_response(
-                    _with_remaining(_timeout_message(e)),
-                    correctable=True,
+                response = _error_response(
+                    _with_remaining(_timeout_message(e)), kind="blocked"
                 )
                 _record(
                     response["_kind"],
@@ -1858,9 +1838,8 @@ def create_tools(
                 return response
             except Exception as e:  # noqa: BLE001
                 # The database could not run SQL the contract allowed: the
-                # agent's own error, not a block. It still spends a retry. The
-                # wrappers surface ``ERROR —`` as recoverable: a ToolException
-                # (LangChain) or a ModelRetry asking for corrected SQL (Pydantic AI).
+                # agent's own error, not a block. It still spends a retry, and
+                # the wrappers treat ``ERROR —`` as recoverable like ``BLOCKED —``.
                 session.record_execution_error()
                 response = _error_response(
                     _with_remaining(f"{_ERROR_PREFIX} Query execution failed: {e}")
@@ -1884,10 +1863,7 @@ def create_tools(
                 msg = "BLOCKED — Result check violations:\n" + "\n".join(
                     f"- {r}" for r in rresult.reasons
                 )
-                response = _blocked_response(
-                    _with_remaining(msg),
-                    correctable=rresult.correctable,
-                )
+                response = _error_response(_with_remaining(msg), kind="blocked")
                 _record(
                     response["_kind"],
                     detail="; ".join(rresult.reasons),

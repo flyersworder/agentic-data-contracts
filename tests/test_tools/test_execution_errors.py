@@ -15,7 +15,6 @@ from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
     Enforcement,
-    QueryCheck,
     ResourceConfig,
     ResultCheck,
     SemanticConfig,
@@ -173,91 +172,3 @@ async def test_middleware_counts_a_database_rejection_as_an_execution_error() ->
     assert _text(result).startswith("ERROR — Schema validation failed:")
     assert result["_kind"] == "error"
     assert (session.blocks, session.execution_errors) == (0, 1)
-
-
-# ── _correctable: a block on how the query is written, which a rewrite fixes ──
-
-
-async def test_unparseable_sql_is_a_correctable_block() -> None:
-    dc = _contract()
-    result = await _run_query(dc, ContractSession(dc))(
-        {"sql": "SELEC id FROM analytics.orders"}
-    )
-    assert result["_kind"] == "blocked"
-    assert result.get("_correctable") is True
-
-
-async def test_a_row_estimate_over_the_limit_is_a_correctable_block() -> None:
-    dc = DataContract(
-        DataContractSchema(
-            name="test",
-            semantic=SemanticConfig(
-                allowed_tables=[
-                    AllowedTable.model_validate(
-                        {"schema": "analytics", "tables": ["orders"]}
-                    )
-                ]
-            ),
-            resources=ResourceConfig(max_retries=5, max_rows_scanned=1),
-        )
-    )
-    result = await _run_query(dc, ContractSession(dc))(
-        {"sql": "SELECT id FROM analytics.orders"}
-    )
-    assert _text(result).startswith("BLOCKED —")
-    assert "exceeds limit" in _text(result)
-    assert result.get("_correctable") is True
-
-
-async def test_a_missing_required_filter_is_a_correctable_block() -> None:
-    rule = SemanticRule(
-        name="tenant",
-        description="Filter by tenant",
-        enforcement=Enforcement.BLOCK,
-        query_check=QueryCheck(required_filter="id"),
-    )
-    dc = _contract(rules=[rule])
-    result = await _run_query(dc, ContractSession(dc))(
-        {"sql": "SELECT amount FROM analytics.orders"}
-    )
-    assert result["_kind"] == "blocked"
-    assert result["_correctable"] is True
-
-
-async def test_a_result_check_block_is_correctable() -> None:
-    rule = SemanticRule(
-        name="no_negative",
-        description="No negative amounts",
-        enforcement=Enforcement.BLOCK,
-        result_check=ResultCheck(column="amount", min_value=0),
-    )
-    dc = _contract(rules=[rule])
-    result = await _run_query(dc, ContractSession(dc))(
-        {"sql": "SELECT id, amount FROM analytics.orders"}
-    )
-    assert _text(result).startswith("BLOCKED — Result check violations")
-    assert result["_correctable"] is True
-
-
-async def test_a_table_outside_the_allowlist_is_not_correctable() -> None:
-    dc = _contract()
-    result = await _run_query(dc, ContractSession(dc))(
-        {"sql": "SELECT id FROM analytics.secrets"}
-    )
-    assert result["_kind"] == "blocked"
-    assert result["_correctable"] is False
-
-
-async def test_middleware_marks_its_blocks_correctable_or_not() -> None:
-    from agentic_data_contracts.tools.middleware import contract_middleware
-
-    dc = _contract()
-
-    @contract_middleware(dc, adapter=_adapter(), session=ContractSession(dc))
-    async def my_query(args: dict) -> dict:  # pragma: no cover - never reached
-        return {"content": [{"type": "text", "text": "ran"}]}
-
-    parse = await my_query({"sql": "SELEC id FROM analytics.orders"})
-    refused = await my_query({"sql": "SELECT id FROM analytics.secrets"})
-    assert parse["_correctable"] is True
-    assert refused["_correctable"] is False

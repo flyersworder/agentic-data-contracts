@@ -2,16 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.61.0] - 2026-10-09
+## [0.61.0] - 2026-10-10
 
 ### Changed
 
-- **Under Pydantic AI, a refusal of what is asked for now raises `ToolFailed` instead of `ModelRetry`.** A block is classified where it is produced, by whether a rewrite of the same request can pass it. A refusal of *what* is asked for (a forbidden operation, a table outside the allowlist, a selected blocked column, filter values outside the caller's set) is definitive, and so is a multi-statement batch, which the checks never see into. Pydantic AI's `ToolFailed` shows the model the refusal as a failed tool result, without the instructions to retry that `ModelRetry` adds, and without spending the tool's retry budget. A block on *how* the query is written (a missing required filter, `SELECT *`, too many joins, an unqualified name of an allowed table, unparseable SQL, a `run_query` timeout, an `EXPLAIN` estimate over a limit, a failed result check) stays a `ModelRetry`, as does an execution error (`ERROR —`): the fix is corrected SQL. Both kinds still count as blocks in the session. The contract's `max_retries` bounds repeated `run_query` refusals, ending the run with `ContractSessionLimitError` (`preview_table`'s per-principal gate does not count toward it), and its `token_budget` and `max_duration_seconds` bound the whole run. A contract with none of these leaves only Pydantic AI's `UsageLimits(request_limit=...)`, 50 model requests by default. Code that caught `ModelRetry` around a direct call to a wrapped tool should also catch `ToolFailed`.
-- **`pydantic-ai-slim` 2.16.0 or later is required** for the `pydantic-ai` extra, up from 2.0.0. It is the first release with `ToolFailed`.
-
-### Added
-
-- **`ValidationResult.correctable` and `ValidationResult.refused_access`** say whether a block is on how the query is written or on what it asks for. Checkers classify each failure with `CheckResult.refuses_access`, a new field: `True` refuses access, `False` is form, and `None`, the default, counts as a refusal. A blocked tool envelope carries the verdict as `_correctable`.
+- **Under Pydantic AI, every failed call now raises `ToolFailed` instead of `ModelRetry`.** A block (`BLOCKED —`: a forbidden operation, a table outside the allowlist, a missing required filter, unparseable SQL, a failed result check) and an execution error (`ERROR —`: SQL the database could not run) both reach the model as a failed tool result, the same text the LangChain and Claude Agent SDK adapters return. The model decides its next step from the message, without the generic retry instructions `ModelRetry` adds. `ToolFailed` spends none of Pydantic AI's per-tool retry budget, so the contract is the one bound on failures: `max_retries` ends repeated `run_query` failures with `ContractSessionLimitError`, and `token_budget` and `max_duration_seconds` bound the whole run. A contract with none of these leaves only Pydantic AI's `UsageLimits(request_limit=...)`, 50 model requests by default. A spent session budget still raises the terminal `ContractSessionLimitError`. Code that caught `ModelRetry` around a direct call to a wrapped tool should catch `ToolFailed`.
+- **`run_query` no longer takes the contract's `max_retries` as its Pydantic AI retry budget** (added in 0.60.1). With no failure spending that budget, it is back to the agent's own `retries` setting, which now covers only Pydantic AI's own retries, such as malformed tool arguments.
+- **`pydantic-ai-slim` 2.16.0 or later is required** for the `pydantic-ai` extra, up from 2.0.0. It is the first release with `ToolFailed`. The lock moves to 2.55.0.
 
 ## [0.60.1] - 2026-10-09
 

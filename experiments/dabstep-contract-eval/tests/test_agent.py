@@ -979,7 +979,9 @@ def test_run_task_records_enforcement_blocks_separately_from_inspect_rejections(
     assert row["verdict"] == "correct"
     assert row["inspect_rejections"] == 0
     assert row["enforcement_blocks"] == 1
-    assert row["retry_prompts"] == 1
+    # From agentic-data-contracts 0.61.0 a block is a `ToolFailed`, a failed
+    # tool return rather than a retry prompt (it was 1 up to 0.60.x).
+    assert row["retry_prompts"] == 0
 
 
 def test_run_task_recovers_tokens_and_transcript_after_a_real_cap_trip(
@@ -1154,7 +1156,8 @@ def test_trim_dangling_tool_calls_keeps_a_complete_transcript_intact():
 
 
 def test_trim_dangling_tool_calls_counts_a_retry_prompt_as_an_answer():
-    """A `ModelRetry` (arm C's governed tools raise these) answers a tool call
+    """A `ModelRetry` (arm C's governed tools raised these up to
+    agentic-data-contracts 0.60.x) answers a tool call
     just as a return does — treating it as unanswered would throw away the
     rejection that is arm C's whole mechanism."""
     from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart

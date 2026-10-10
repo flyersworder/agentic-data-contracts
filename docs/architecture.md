@@ -364,14 +364,39 @@ call, on either `apply_middleware` value).
 Two things are deliberately not mapped. `max_retries` must **not** become
 `request_limit`: ours counts failed query attempts, theirs counts model
 requests, and conflating them would silently redefine existing contracts.
-It does become `run_query`'s `max_retries`, though, the one tool whose
-failures the session counts; the other tools keep the agent's own setting.
-Pydantic AI ends a run once a tool fails more times in a row than that budget
-(default 1), and every `BLOCKED —` / `ERROR —` result is a `ModelRetry`. Left at the default, a
-second failed query in a row ended the run, whatever the contract allowed.
-With the contract's value, the session's own terminal error fires first:
-after `max_retries` failures the next call is refused before it runs, while
-Pydantic AI would have stopped only on the failure after that.
+
+**Every failed call is a `ToolFailed` (since 0.61.0).** Each `BLOCKED —` and
+`ERROR —` result is raised as `ToolFailed`: the model sees the message as a
+failed tool result, the same text the LangChain and SDK adapters return, and
+decides its next step from it. The message carries that step, so each checker
+writes one that says what is wrong and what would pass; the exception type
+carries nothing a model reads. Up to 0.60.1 every failure was a `ModelRetry`,
+which adds generic retry instructions and spends a per-tool retry budget
+(default 1) whose exhaustion ends the run with `UnexpectedModelBehavior`, so
+0.60.1 had to give `run_query` the contract's `max_retries` as that budget.
+Two counters for one quantity drift; a `ToolFailed` spends none of Pydantic
+AI's budget, so the session is the one counter: every `BLOCKED —` and
+`ERROR —` result counts toward `max_retries` (since 0.61.0 that includes
+`preview_table`'s `SELECT *` gate and its timeout, which Pydantic AI's budget
+used to bound), and after `max_retries` failures the next call is refused with
+the terminal `ContractSessionLimitError`. `UnexpectedModelBehavior` still
+comes from Pydantic AI's own retries (unparseable tool arguments, output
+validation).
+Classifying each block as a refusal (`ToolFailed`) or a correctable form
+problem (`ModelRetry`) was built and dropped before release: every checker,
+including a user's own, would have had to classify its failures, with a
+fail-closed default and edge cases (an unqualified table name, a batch that
+fails to parse) for what bought only a different exception type. With no
+`max_retries`, `token_budget` or `max_duration_seconds` declared, only Pydantic
+AI's `request_limit` bounds repeated failures, as Pydantic AI recommends for
+`ToolFailed`. A failed call does not count toward `tool_calls_limit`.
+Providers with a native tool-error channel (Anthropic, Bedrock, Google) show
+the model the message as is; others, OpenAI among them, wrap it as
+`{"error": "..."}`. **Known limit, not specific to Pydantic AI:** calls in one
+model response run in parallel, and each passes `check_limits()` before any
+records its failure, so a response with several failing calls can overshoot
+`max_retries` by up to the number of extra calls in it.
+
 `cost_limit_usd` and `max_duration_seconds` have no equivalent and stay
 session-side. It is Pydantic AI only — LangChain has no per-request ceiling and
 the SDK path cannot observe usage at all, so the helper lives in a module that
@@ -406,7 +431,8 @@ AI's own tool-execution machinery and asserts `ContractSessionLimitError`
 propagates uncaught. Every other terminal-limit test invokes the tool function
 directly, proving only that *our* wrapper raises. Because
 `test-pydantic-ai-latest` runs this module against the newest release the floor
-allows, a future version that caught non-`ModelRetry` tool exceptions — turning
+allows, a future version that caught tool exceptions other than `ModelRetry`
+and `ToolFailed` — turning
 a breached budget into a retry — would surface there rather than in a user's
 install. Revisit this decision if that job ever goes red on it.
 
@@ -687,18 +713,18 @@ under `response_format="content_and_artifact"`, so `is_error` rides along for
 non-`BLOCKED` errors (missing adapter, restricted table, invalid argument). For a
 governance block it raises `ToolException` before any artifact is produced, so
 the flag is not observable there. Neither wrapper branches on it; both already
-signalled errors natively (`ToolException`, `ModelRetry` / the terminal
+signalled errors natively (`ToolException`, `ToolFailed` / the terminal
 `ContractSessionLimitError`), which is why this gap was specific to the SDK
 path — the only path where the MCP envelope survives as MCP.
 
 **Two error signals now coexist, deliberately.** The wrappers still branch on
 `text.startswith("BLOCKED —")` (and `"ERROR —"`, for a query the database failed) rather than reading `is_error`, so a denial like
 `Table x is not in the allowed tables list.` carries the flag but does not become
-a `ToolException` / `ModelRetry`. Switching them was considered and rejected: it
+a `ToolException` / `ToolFailed`. Switching them was considered and rejected: it
 is not the behaviour-preserving refactor it appears to be, because `is_error`
 covers strictly more than the prefix, so denials, misconfiguration, and invalid
 arguments would newly raise on two shipped adapters. And the inner
-`_SESSION_LIMIT_MARKER` sniff would have to stay regardless — one boolean cannot
+`_SESSION_LIMIT_PREFIX` sniff would have to stay regardless — one boolean cannot
 separate recoverable from terminal, which is the distinction those adapters exist
 to make. The prefix remains the wrappers' trigger; `is_error` is the MCP-facing
 signal. Revisit only with a deliberate decision to widen what the wrappers raise.

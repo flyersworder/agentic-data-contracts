@@ -250,12 +250,17 @@ async def test_preview_table_gated_block_carries_is_error(
             ),
         )
     )
-    tools = create_tools(gated, adapter=adapter)
+    from agentic_data_contracts.core.session import ContractSession
+
+    session = ContractSession(gated)
+    tools = create_tools(gated, adapter=adapter, session=session)
     result = await _tool(tools, "preview_table").callable(
         {"schema": "analytics", "table": "orders"}
     )
     assert _text(result).startswith("BLOCKED —")
     assert result.get("is_error") is True
+    # Every BLOCKED result counts against max_retries, not only run_query's.
+    assert (session.blocks, session.retries) == (1, 1)
 
 
 @pytest.mark.asyncio

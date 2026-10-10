@@ -380,7 +380,7 @@ agent = create_deep_agent(
 </details>
 
 <details>
-<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.0.0+</summary>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.16.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -394,18 +394,20 @@ agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 
 Enforcement is auto-applied in-tool: a blocked query (forbidden operation,
 missing required filter, unparseable SQL) or one the database fails to run
-(a missing column, a failed cast) raises `ModelRetry`
-so the model rewrites and retries, while session-limit exhaustion raises a terminal
-`ContractSessionLimitError` that ends the run. Install:
+(a missing column, a failed cast) raises `ToolFailed`. The model sees the
+message as a failed tool result and takes its next step from it, as it does
+under the LangChain and Claude Agent SDK adapters. Session-limit exhaustion
+raises a terminal `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
 
-Pydantic AI ends a run when one tool fails more times in a row than its retry
-budget, which defaults to 1. `run_query` therefore takes the contract's
-`resources.max_retries` as its budget, so a run continues through failed
-queries until the contract's own limit ends it. The other tools, and
-`run_query` under a contract that declares no `max_retries`, keep the agent's
-setting: pass `Agent(..., retries={"tools": n})`, or two failures of one tool
-in a row end the run with `UnexpectedModelBehavior`.
+A failed call spends none of Pydantic AI's per-tool retry budget, so the
+contract is the one bound: every `BLOCKED —` and `ERROR —` result counts toward
+`resources.max_retries`, which ends repeated failures with
+`ContractSessionLimitError`, and `token_budget` and `max_duration_seconds`
+bound the whole run. A contract with none of these leaves only Pydantic AI's
+`UsageLimits(request_limit=...)`, 50 model requests by default. Pydantic AI's
+own retries (tool arguments it cannot parse, output validation) still end a
+run with `UnexpectedModelBehavior` past the agent's `retries` setting.
 
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
@@ -432,7 +434,7 @@ result = await agent.run(
 
 The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
-`ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
+`ToolFailed` / `ContractSessionLimitError` enforcement applies per user.
 
 Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
@@ -1785,9 +1787,8 @@ Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
 outside the run. `pydantic_ai.exceptions.UnexpectedModelBehavior` is reachable
-too: a tool that fails more times in a row than its retry budget ends the run
-with it (see the Pydantic AI section above). Sequential turns only: one counter
-per session is shared mutable state.
+too, from Pydantic AI's own retries (see the Pydantic AI section above).
+Sequential turns only: one counter per session is shared mutable state.
 
 ## Optional Dependencies
 
@@ -1799,7 +1800,7 @@ per session is shared mutable state.
 | `postgres` | `psycopg2-binary>=2.9.10` | Driver only — for a `DatabaseAdapter` you write |
 | `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp>=1.23.0` | Claude Agent SDK integration |
 | `langchain` | `langchain-core>=1.3.3`, `langchain>=1.2.17`, `langgraph>=1.1.10` | LangChain / deepagents integration |
-| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.0.0` | Pydantic AI integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.16.0` | Pydantic AI integration |
 | `agent-contracts` | `ai-agent-contracts>=0.3.1` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

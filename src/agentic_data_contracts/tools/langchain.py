@@ -61,6 +61,7 @@ from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
     _BLOCKED_PREFIX,
     _ERROR_PREFIX,
+    _FAILURE_PREFIXES,
     _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
@@ -320,7 +321,7 @@ def _to_structured_tool(
         # execution uses "ERROR —"; sniffing them lets us surface both as
         # ToolException, which the agent runtime renders as
         # ToolMessage(status="error").
-        if text.startswith((_BLOCKED_PREFIX, _ERROR_PREFIX)):
+        if text.startswith(_FAILURE_PREFIXES):
             raise ToolException(text)
 
         return text, envelope

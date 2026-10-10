@@ -9,7 +9,7 @@ import pytest
 # matches the "extra is optional" backward-compat contract.
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai import Agent, ModelRetry, RunContext, Tool  # noqa: E402
+from pydantic_ai import Agent, RunContext, Tool, ToolFailed  # noqa: E402
 from pydantic_ai.models.test import TestModel  # noqa: E402
 from pydantic_ai.usage import RunUsage, UsageLimits  # noqa: E402
 
@@ -185,35 +185,44 @@ def test_run_query_schema_exposes_sql_property_verbatim(
     assert "sql" in props
 
 
-# ─── enforcement: run_query gated SQL → ModelRetry (recoverable) ──────────────
+# ─── enforcement: run_query gated SQL → ToolFailed (the model reads why) ──────
 
 
 @pytest.mark.asyncio
-async def test_run_query_blocked_sql_raises_model_retry(
-    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM analytics.orders",  # a forbidden operation
+        "SELECT id FROM analytics.orders",  # the required tenant_id filter is missing
+        "SELEC id FROM analytics.orders",  # unparseable
+    ],
+)
+async def test_run_query_blocked_sql_raises_tool_failed(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource, sql: str
 ) -> None:
-    """A blocked query is recoverable: the model should rewrite and retry,
-    so the adapter raises ModelRetry (not the terminal error)."""
+    """Every block is a ToolFailed, whatever its cause: the model reads the
+    message and decides its next step, and the session counts the failure.
+    Not the terminal error, which only a spent budget raises."""
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic
     )
     run_query = next(t for t in tools if t.name == "run_query")
-    with pytest.raises(ModelRetry) as exc:
-        await _invoke(run_query, sql="DELETE FROM analytics.orders")
-    assert "BLOCKED" in str(exc.value)
+    with pytest.raises(ToolFailed) as exc:
+        await _invoke(run_query, sql=sql)
+    assert str(exc.value).startswith("BLOCKED —")
 
 
 @pytest.mark.asyncio
-async def test_run_query_execution_error_raises_model_retry(
+async def test_run_query_execution_error_raises_tool_failed(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """The agent's own failed SQL is worded ``ERROR —``, not ``BLOCKED —``, but
-    stays recoverable: the model should fix the query and try again (#134)."""
+    """The agent's own failed SQL is worded ``ERROR —``, not ``BLOCKED —`` (#134),
+    and reaches the model the same way: a failed tool result."""
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic
     )
     run_query = next(t for t in tools if t.name == "run_query")
-    with pytest.raises(ModelRetry) as exc:
+    with pytest.raises(ToolFailed) as exc:
         await _invoke(
             run_query,
             sql="SELECT CAST(tenant_id AS INTEGER) AS n FROM analytics.orders"
@@ -247,7 +256,7 @@ async def test_inspect_query_reports_violations_as_json_does_not_raise(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """inspect_query *reports* violations as JSON; the adapter must not
-    convert that into a ModelRetry, or the agent loses dry-run inspection."""
+    convert that into a ToolFailed, or the agent loses dry-run inspection."""
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic
     )
@@ -272,15 +281,15 @@ async def test_describe_table_allowed_does_not_raise(
     assert "BLOCKED" not in result
 
 
-# ─── enforcement: session limits → terminal error (NOT ModelRetry) ────────────
+# ─── enforcement: session limits → terminal error (NOT ToolFailed) ───────────
 
 
 @pytest.mark.asyncio
-async def test_session_limit_exceeded_raises_terminal_not_model_retry(
+async def test_session_limit_exceeded_raises_terminal_not_tool_failed(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """Session-limit exhaustion is terminal: retrying can't help, so the
-    adapter raises ContractSessionLimitError (a RuntimeError), NOT ModelRetry.
+    adapter raises ContractSessionLimitError (a RuntimeError), NOT ToolFailed.
     Fixture sets max_retries=3 (tests/fixtures/valid_contract.yml). The error
     must carry the ``Remaining:`` budget summary run_query would emit."""
     session = ContractSession(contract)
@@ -292,7 +301,7 @@ async def test_session_limit_exceeded_raises_terminal_not_model_retry(
     describe = next(t for t in tools if t.name == "describe_table")
     with pytest.raises(ContractSessionLimitError) as exc:
         await _invoke(describe, schema="analytics", table="orders")
-    assert not isinstance(exc.value, ModelRetry)
+    assert not isinstance(exc.value, ToolFailed)
     msg = str(exc.value).lower()
     assert "limit" in msg or "exceeded" in msg
     assert "remaining:" in msg
@@ -323,19 +332,19 @@ async def test_apply_middleware_false_skips_session_check(
 
 
 @pytest.mark.asyncio
-async def test_block_quoting_the_session_limit_phrase_stays_recoverable(
+async def test_block_quoting_the_session_limit_phrase_is_not_terminal(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
     """A parse error repeats the agent's SQL. If that SQL holds the phrase
-    "Session limit exceeded", the block is still recoverable: only a message
-    that *starts* with the session-limit envelope means the budget is spent.
-    The session here has its whole budget left."""
+    "Session limit exceeded", the block is still an ordinary failed call: only
+    a message that *starts* with the session-limit envelope means the budget is
+    spent. The session here has its whole budget left."""
     session = ContractSession(contract)
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic, session=session
     )
     run_query = next(t for t in tools if t.name == "run_query")
-    with pytest.raises(ModelRetry) as exc:
+    with pytest.raises(ToolFailed) as exc:
         await _invoke(
             run_query,
             sql='SELEC id AS "Session limit exceeded" FROM analytics.orders',
@@ -351,7 +360,7 @@ async def test_run_query_session_limit_terminal_even_without_middleware(
     """Even with apply_middleware=False, run_query self-checks limits and
     emits its own ``BLOCKED — Session limit exceeded`` envelope. The adapter
     must still classify that as terminal (ContractSessionLimitError), not a
-    recoverable ModelRetry — otherwise the model loops against an exhausted
+    recoverable ToolFailed — otherwise the model loops against an exhausted
     budget. Regression guard for the BLOCKED-prefix over-classification bug."""
     session = ContractSession(contract)
     for _ in range(4):  # exceed max_retries=3
@@ -369,7 +378,7 @@ async def test_run_query_session_limit_terminal_even_without_middleware(
             run_query,
             sql="SELECT id FROM analytics.orders WHERE tenant_id = 'acme'",
         )
-    assert not isinstance(exc.value, ModelRetry)
+    assert not isinstance(exc.value, ToolFailed)
     assert "session limit exceeded" in str(exc.value).lower()
 
 
@@ -555,12 +564,12 @@ async def test_toolset_applies_per_principal_gating_via_deps(
 async def test_toolset_enforces_blocked_sql_via_deps(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """Enforcement still fires through the deps-aware path: blocked SQL → ModelRetry."""
+    """Enforcement still fires through the deps-aware path: blocked SQL → ToolFailed."""
     factory = create_pydantic_ai_toolset(
         contract, adapter=adapter, semantic_source=semantic
     )
     tools = _toolset_tools(factory, ContractDeps(session=ContractSession(contract)))
-    with pytest.raises(ModelRetry):
+    with pytest.raises(ToolFailed):
         await _invoke(tools["run_query"], sql="DELETE FROM analytics.orders")
 
 
@@ -687,7 +696,7 @@ async def test_usage_accumulates_across_runs_on_one_session(
 @pytest.mark.asyncio
 async def test_exhausted_token_budget_is_terminal(adapter: DuckDBAdapter) -> None:
     # A budget breach cannot be fixed by retrying, so it must raise the
-    # terminal error rather than a recoverable ModelRetry.
+    # terminal error rather than a recoverable ToolFailed.
     contract = DataContract(
         DataContractSchema(
             name="budgeted",
@@ -1059,8 +1068,9 @@ async def test_terminal_limit_error_escapes_agent_run(adapter: DuckDBAdapter) ->
     Every other terminal-limit test in this file invokes the tool function
     directly, which proves *our* wrapper raises. This one runs the exception
     through Pydantic AI's own tool-execution machinery, which is the part we
-    do not own: if a future release ever caught non-``ModelRetry`` exceptions
-    from a tool and converted them into a retry or a run-level failure, a
+    do not own: if a future release ever caught exceptions other than
+    ``ModelRetry`` and ``ToolFailed`` from a tool and converted them into a
+    retry or a run-level failure, a
     breached contract budget would stop being terminal and no other test here
     would notice.
 
@@ -1083,7 +1093,7 @@ async def test_terminal_limit_error_escapes_agent_run(adapter: DuckDBAdapter) ->
         await agent.run("go")
 
 
-# ─── the contract's max_retries, not Pydantic AI's default, bounds failures ──
+# ─── the contract's max_retries, not Pydantic AI's retry budget, bounds failures
 
 
 def _scripted_sql_model(sqls: list[str]) -> Any:
@@ -1110,30 +1120,46 @@ _FAILED_CAST = (
 _GOOD = "SELECT id FROM analytics.orders WHERE tenant_id = 'acme'"
 
 
-def test_wrapped_tools_take_the_contracts_retry_budget(
-    contract: DataContract, contract_no_source: DataContract, semantic: YamlSource
+async def test_failures_spend_none_of_pydantic_ais_retry_budget(
+    contract_no_source: DataContract, adapter: DuckDBAdapter
 ) -> None:
-    # valid_contract.yml declares max_retries: 3. Only run_query takes it: it
-    # is the tool whose failures the session counts. Every other tool, and
-    # run_query under a contract that declares none, keeps None, the agent's
-    # own `retries` setting.
-    budgets = {
-        t.name: t.max_retries
-        for t in create_pydantic_ai_tools(contract, semantic_source=semantic)
-    }
-    assert budgets.pop("run_query") == 3
-    assert set(budgets.values()) == {None}
-    assert {t.max_retries for t in create_pydantic_ai_tools(contract_no_source)} == {
-        None
-    }
+    """Under a contract with no max_retries, run_query keeps Pydantic AI's
+    default budget of one retry, which a ModelRetry per failure would spend on
+    the second failure in a row. A ToolFailed spends none: the run goes on, and
+    the model sees each failure as a failed tool result."""
+    from pydantic_ai.messages import ToolReturnPart
+
+    session = ContractSession(contract_no_source)
+    tools = create_pydantic_ai_tools(
+        contract_no_source, adapter=adapter, session=session
+    )
+    refused = "SELECT id FROM analytics.secrets"  # not an allowed table
+    bad_column = "SELECT nosuchcol FROM analytics.orders"
+    agent = Agent(
+        _scripted_sql_model(
+            [refused, bad_column, refused, "SELECT id FROM analytics.orders"]
+        ),
+        tools=tools,
+    )
+
+    result = await agent.run("go")
+
+    assert result.output == "done"
+    failed = [
+        str(part.content)
+        for message in result.all_messages()
+        for part in getattr(message, "parts", [])
+        if isinstance(part, ToolReturnPart) and part.outcome == "failed"
+    ]
+    assert [text.split(" —")[0] for text in failed] == ["BLOCKED", "ERROR", "BLOCKED"]
+    assert (session.blocks, session.execution_errors) == (2, 1)
 
 
 async def test_consecutive_failures_within_the_contract_budget_keep_the_run(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """Pydantic AI allows one consecutive retry per tool by default, which ended
-    a run on its second failed query in a row however many the contract
-    allows. Within the contract's max_retries the run continues."""
+    """Within the contract's max_retries the run continues, however many
+    failures in a row Pydantic AI's own retry budget would allow."""
     session = ContractSession(contract)
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic, session=session
@@ -1151,8 +1177,8 @@ async def test_consecutive_failures_within_the_contract_budget_keep_the_run(
 async def test_past_the_contract_budget_the_contracts_error_ends_the_run(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """The contract's terminal error fires before Pydantic AI's own retry limit,
-    so a caller sees which budget was spent."""
+    """Past the contract's max_retries, the contract's terminal error ends the
+    run, so a caller sees which budget was spent."""
     session = ContractSession(contract)
     tools = create_pydantic_ai_tools(
         contract, adapter=adapter, semantic_source=semantic, session=session
@@ -1167,7 +1193,7 @@ async def test_past_the_contract_budget_the_contracts_error_ends_the_run(
 async def test_toolset_keeps_the_run_through_consecutive_failures(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
-    """The deps-aware toolset carries the contract's budget too."""
+    """The deps-aware toolset fails calls the same way."""
     factory = create_pydantic_ai_toolset(
         contract, adapter=adapter, semantic_source=semantic
     )
@@ -1182,3 +1208,55 @@ async def test_toolset_keeps_the_run_through_consecutive_failures(
 
     assert result.output == "done"
     assert session.retries == 2
+
+
+async def test_repeated_preview_blocks_end_the_run_at_the_contracts_budget(
+    adapter: DuckDBAdapter,
+) -> None:
+    """A ToolFailed spends none of Pydantic AI's retry budget, so the session
+    must bound every tool's failures, not only run_query's: a model that keeps
+    hitting preview_table's SELECT * gate is stopped by max_retries."""
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    from agentic_data_contracts.core.schema import (
+        Enforcement,
+        QueryCheck,
+        SemanticRule,
+    )
+
+    dc = DataContract(
+        DataContractSchema(
+            name="gated-preview",
+            semantic=SemanticConfig(
+                allowed_tables=[
+                    AllowedTable.model_validate(
+                        {"schema": "analytics", "tables": ["orders"]}
+                    )
+                ],
+                rules=[
+                    SemanticRule(
+                        name="pii_columns",
+                        description="Never expose tenant_id via SELECT *",
+                        enforcement=Enforcement.BLOCK,
+                        query_check=QueryCheck(blocked_columns=["tenant_id"]),
+                    )
+                ],
+            ),
+            resources=ResourceConfig(max_retries=2),
+        )
+    )
+
+    def _always_preview(messages: list[Any], info: AgentInfo) -> ModelResponse:
+        args = {"schema": "analytics", "table": "orders"}
+        return ModelResponse(parts=[ToolCallPart("preview_table", args)])
+
+    session = ContractSession(dc)
+    agent = Agent(
+        FunctionModel(_always_preview),
+        tools=create_pydantic_ai_tools(dc, adapter=adapter, session=session),
+    )
+
+    with pytest.raises(ContractSessionLimitError, match="retries"):
+        await agent.run("go")
+    assert session.blocks == 2

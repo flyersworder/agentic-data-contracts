@@ -550,11 +550,13 @@ def _retry_prompt_count(messages: list) -> int:
     """Count `retry-prompt` parts — the event pydantic-ai actually sent a
     tool's rejection back to the model as a retryable failure.
 
-    This is closer to enforcement than `_inspect_rejections` is: a
-    `retry-prompt` fires from a real `ModelRetry` (raised whenever a governed
-    tool's response starts with `BLOCKED —`, `tools/pydantic_ai.py`'s
-    `_to_pydantic_ai_tool`), or from pydantic-ai's own tool-argument
-    validation — so it is not identical to `run_task`'s `enforcement_blocks`
+    A `retry-prompt` fires from a real `ModelRetry`, or from pydantic-ai's own
+    tool-argument validation. Up to agentic-data-contracts 0.60.x a governed
+    tool raised `ModelRetry` for every `BLOCKED —` and `ERROR —` result
+    (`tools/pydantic_ai.py`'s `_to_pydantic_ai_tool`); from 0.61.0 it raises
+    `ToolFailed`, a failed tool return and no retry prompt, so on 0.61.0 this
+    counts only pydantic-ai's own retries. Compare it only across runs on the
+    same library version. It is not identical to `run_task`'s `enforcement_blocks`
     (`ContractSession.retries`, which only counts `run_query`'s three
     contract-specific blocked paths). The two numbers can differ; both are
     recorded rather than treated as interchangeable.
@@ -1441,6 +1443,9 @@ def _default_agent_factory(
         # bad queries while arm A iterates freely. Measured: arm A finished after
         # 7 model calls, arm C raised after 2. Set it high enough that arm C is
         # never budget-limited relative to arms A/B, and identically for all arms.
+        # (From agentic-data-contracts 0.61.0 the governed tools raise
+        # ToolFailed, which spends no budget, but the pinned earlier versions
+        # still need this, so it stays.)
         #
         # `retries` is threaded in from `run_task`'s effective `max_tool_calls`
         # rather than read off the `MAX_TOOL_CALLS` module constant: a caller

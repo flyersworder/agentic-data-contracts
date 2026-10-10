@@ -173,7 +173,7 @@ def create_sdk_mcp_server(
             receives a structured error signal on this path too. The
             LangChain adapter instead raises a ``ToolException`` (and its
             middleware returns ``ToolMessage(status="error")``); Pydantic AI
-            raises ``ModelRetry``, or the terminal
+            raises ``ToolFailed``, or the terminal
             ``ContractSessionLimitError`` on a budget breach. All three
             surface the same text; they differ in *shape* — one MCP boolean
             here, native exception types there, which is why the other two

@@ -24,3 +24,7 @@ class CompileInputs:
     out_subdir: str  # under the contracts directory
     column_descriptions: dict[tuple[str, str], str] = field(default_factory=dict)
     table_descriptions: dict[str, str] = field(default_factory=dict)
+    #: Let a metric declare the FROM it is written against (`from_sql`, with
+    #: its `grain`). Off, the compiler is the frozen one, prompt and tools
+    #: unchanged.
+    joins: bool = False

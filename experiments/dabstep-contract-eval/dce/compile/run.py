@@ -53,7 +53,7 @@ def _sha256(path: Path) -> str:
 def _header(inputs: CompileInputs) -> dict:
     from dce.agent import _commit_sha
 
-    return {
+    header = {
         "type": "header",
         "benchmark": inputs.benchmark,
         "db": inputs.db_name,
@@ -61,6 +61,17 @@ def _header(inputs: CompileInputs) -> dict:
         "commit_sha": _commit_sha(),
         "inputs": {p.name: _sha256(p) for p in inputs.sources},
     }
+    if inputs.joins:  # absent otherwise, so the frozen logs stay as they are
+        header["joins"] = True
+    return header
+
+
+def _same_compiler(old: dict, inputs: CompileInputs) -> None:
+    if old.get("joins", False) != inputs.joins:
+        raise SystemExit(
+            f"{inputs.db_name}: compiled with joins={old.get('joins', False)}, "
+            f"now joins={inputs.joins}; use another --out"
+        )
 
 
 def _log_lines(path: Path) -> tuple[list[dict], bool]:
@@ -131,6 +142,8 @@ def compile_database(
     header = _header(inputs)
     if final.exists() and not log.exists():
         done = next((d for d in _gz_records(final) if d.get("type") == "header"), None)
+        if done is not None:
+            _same_compiler(done, inputs)
         if done is None or done["inputs"] != header["inputs"]:
             raise SystemExit(
                 f"{final}: inputs changed since this database was compiled; "
@@ -141,6 +154,8 @@ def compile_database(
     records: list[EntryRecord] = []
     if log.exists():
         old, records, torn = read_log(log)
+        if old is not None:
+            _same_compiler(old, inputs)
         if old is None or old["inputs"] != header["inputs"]:
             raise SystemExit(
                 f"{log}: inputs changed since this compile started; delete the "

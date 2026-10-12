@@ -3,16 +3,20 @@
     uv run python -m dce.compile --benchmark livesqlbench --db households --max-spend 5
     uv run python -m dce.compile --benchmark livesqlbench --all --max-spend 60
     uv run python -m dce.compile --benchmark dabstep --max-spend 10
+    uv run python -m dce.compile --benchmark dabstep --joins --max-spend 10
     uv run python -m dce.compile --benchmark livesqlbench --db households \
         --recompile 12 31 --max-spend 60
 
-Output goes to `<out>/<benchmark>/[<db>/]`. `--max-spend` caps the spend
-recorded across every log under `<out>/<benchmark>/`, resumes included.
+Output goes to `<out>/<benchmark>/[<db>/]`; `--joins` lets a metric declare
+the FROM it is written against, and writes to `contracts-joins` by default.
+`--max-spend` caps the spend recorded across every log under
+`<out>/<benchmark>/`, resumes included.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 from pathlib import Path
 
@@ -35,7 +39,17 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         default=Path(os.environ.get("LSB_DATA", Path.home() / "data" / "livesqlbench")),
     )
-    parser.add_argument("--out", type=Path, default=Path("contracts"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="default: contracts, or contracts-joins with --joins",
+    )
+    parser.add_argument(
+        "--joins",
+        action="store_true",
+        help="let a metric declare the FROM it is written against (from_sql and grain)",
+    )
     parser.add_argument("--max-spend", type=float, required=True)
     parser.add_argument(
         "--recompile",
@@ -46,6 +60,8 @@ def main(argv: list[str] | None = None) -> None:
         "every entry built on them",
     )
     args = parser.parse_args(argv)
+    if args.out is None:
+        args.out = Path("contracts-joins" if args.joins else "contracts")
 
     if args.benchmark == "livesqlbench":
         from dce.benchmarks.livesqlbench import compile_inputs
@@ -62,6 +78,9 @@ def main(argv: list[str] | None = None) -> None:
         from dce.benchmarks.dabstep import compile_inputs as dabstep_inputs
 
         work = [dabstep_inputs()]
+
+    if args.joins:
+        work = [dataclasses.replace(inputs, joins=True) for inputs in work]
 
     if args.recompile:
         if args.all or len(work) != 1:

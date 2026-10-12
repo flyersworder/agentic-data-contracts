@@ -97,3 +97,11 @@ retried once each, so those (task, arm) pairs have two rows and the loaders
 keep the last. A row carries `gold`, the sha256 of the gold result, never the
 gold itself. See FINDINGS.md, *LiveSQLBench: compiled knowledge, delivered
 two ways*. `livesqlbench/smoke.jsonl` is the 12-task smoke run before it.
+
+## `livesqlbench/qwen38-r{1,2,3}.jsonl` -- four arms on LiveSQLBench, qwen3.8-27b
+
+The same four arms and 375 tasks on `qwen3.8-27b`, at the same run commit
+`1c1e302`, k=3, `--retry-pass` on every repeat (14 construction errors
+retried; the loaders keep the last row per pair). Repeat 2 was resumed once
+after the job's volume filled while archiving traces; no row was rerun. See
+FINDINGS.md, *Qwen 3.8: the tie replicates, the two effects do not*.

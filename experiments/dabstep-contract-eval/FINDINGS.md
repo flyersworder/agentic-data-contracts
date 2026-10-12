@@ -626,8 +626,8 @@ Task-level sign tests over the three repeats, on the primary set:
   over the manual is 4 task-runs of 906.
 
 The pre-registered high-level / standard split shows the same three-way tie
-in both halves. Prediction (4) waits for the Qwen runs; (5) is answered
-below, under *The compiler on DABStep*.
+in both halves. Prediction (4) is answered below, under *Qwen 3.8*; (5)
+under *The compiler on DABStep*.
 
 The same kind of delivery, then, gives very different results on the two
 benchmarks with one model:
@@ -745,6 +745,50 @@ finished. On `qwen3.8-27b`, k=3, primary set, the same statistic is above zero
 at one-sided permutation p < 0.05 (100,000 relabellings, seed 2026). The
 groups use the review verdicts as they stand (sha256 in the commit that adds
 this paragraph); no verdict changes after that commit.
+
+### Qwen 3.8: the tie replicates, the two effects do not -- predictions (4) and (6)
+
+`qwen3.8-27b`, the same four arms, k=3, on the run commit `1c1e302`: 4,514
+rows (4,500 plus 14 retried after construction errors), $2.78, two errors
+left after the retry pass (one `schema_only`, one `contract`).
+
+| arm | r1 | r2 | r3 | k=3 (primary) | order-only |
+|---|---:|---:|---:|---:|---:|
+| schema_only | 72 | 69 | 69 | 23.2% | 14.6% |
+| manual_prompt | 115 | 113 | 110 | 37.3% | 34.7% |
+| manual_compiled | 113 | 119 | 110 | 37.7% | 34.7% |
+| contract | 118 | 115 | 109 | 37.7% | 34.7% |
+
+The pattern is luna's: knowledge helps (`manual_prompt` beats `schema_only`
+68 tasks to 13, p = 4e-10; `contract` 66 to 16, p = 2e-8), and how it is
+delivered does not (`manual_compiled` vs `manual_prompt` 24 to 18,
+p = 0.44; `contract` vs `manual_compiled` 22 to 24, p = 0.88). The
+high-level / standard split ties in both halves again.
+
+- **(4) holds in part.** `contract` is at `manual_compiled`, not above it
+  (37.7% each). Its advantage over `manual_compiled` is not smaller than on
+  gpt-6-luna, though: there it was -0.9 points, here 0.0. Both are ties.
+- **(6) fails.** The root-cause statistic -- mean compiled gain over
+  `manual_prompt` on group A minus group B -- is +0.028 correct runs per
+  task of 3 (one-sided permutation p = 0.41), against luna's +0.26
+  (p = 0.002). The private inputs matched the sha256 recorded in `20171bd`.
+
+| group (qwen3.8-27b, k=3) | tasks | schema_only | manual_prompt | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| A. every needed metric faithful | 118 | 27.1% | 46.0% | 44.9% | 46.9% |
+| B. a needed entry refused | 77 | 16.9% | 26.0% | 24.2% | 25.5% |
+| C. a needed metric wrong (material) | 47 | 16.3% | 27.0% | 31.9% | 30.5% |
+| D. no compiled metric needed | 25 | 46.7% | 45.3% | 56.0% | 45.3% |
+| E. a needed metric unclear | 35 | 16.2% | 41.0% | 38.1% | 38.1% |
+
+On Qwen neither effect is there: faithful definitions do not lift group A
+(10 tasks to 10, 15 to 15 against the manual), and refusals do not sink
+group B (1 to 3, 5 to 8). The luna split was exploratory, and on the model
+it was tested on it does not replicate, so the "two effects that cancel"
+account stays a luna observation, not a finding. It is not that Qwen ignores
+the definitions: it looks a metric up in 86% of its contract runs (luna
+93%), 1.8 lookups a run. What both models share is the null at the top: the
+compiled knowledge, however delivered, is worth what the manual is.
 
 ### The compiler on DABStep: prediction (5)
 

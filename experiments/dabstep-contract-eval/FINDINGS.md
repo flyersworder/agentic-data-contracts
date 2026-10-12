@@ -707,6 +707,45 @@ Hypotheses, not findings; each says what would test it.
    that the model writes them correctly from the KB text, so ready-made SQL
    saves little.
 
+### Two effects that cancel: exploratory on gpt-6-luna, prediction (6) on Qwen
+
+A blind review checked the 355 compiled metrics that primary tasks depend on.
+The reviewer had the metric, its KB entry and the database, but no tasks, golds
+or results. Verdicts: 247 faithful, 60 wrong in a way that changes results on
+the data, 13 wrong without that, 35 unclear. The most common error is NULL or
+unknown values silently classified or turned into numbers (30 metrics), then
+unit or scale (18). Three of the claims were re-checked against the data, and
+all three held.
+
+`analysis/lsb_root_cause.py` puts each primary task in one group. The groups
+come from the compile, the private task-to-KB mapping and the review, never
+from a model's results:
+
+| group (gpt-6-luna, k=3) | tasks | schema_only | manual_prompt | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| A. every needed metric faithful | 118 | 19.8% | 40.1% | 44.9% | 44.1% |
+| B. a needed entry refused | 77 | 16.5% | 30.3% | 26.0% | 26.0% |
+| C. a needed metric wrong (material) | 47 | 16.3% | 24.8% | 29.1% | 26.2% |
+| D. no compiled metric needed | 25 | 48.0% | 49.3% | 50.7% | 44.0% |
+| E. a needed metric unclear | 35 | 13.3% | 36.2% | 33.3% | 37.1% |
+
+Where the definitions are right, the compiled arms gain 4-5 points over the
+manual: `manual_compiled` 15 tasks to 4 (p = 0.02), `contract` 16 to 7
+(p = 0.09). Where a needed entry was refused, they lose about as much:
+`manual_compiled` 2 to 10 (p = 0.04). The two effects cancel in the total.
+This split was chosen after seeing these runs, so on gpt-6-luna it is
+exploratory. Its summary statistic is fixed here: per task, the mean correct
+runs of the two compiled arms minus those of `manual_prompt`, averaged over A
+minus over B. It is +0.26 correct runs per task of 3 (one-sided permutation
+p = 0.002).
+
+**Prediction (6)** was fixed before any Qwen 3.8 result was looked at by group.
+Per-arm totals of its first two repeats had been seen; the third had not
+finished. On `qwen3.8-27b`, k=3, primary set, the same statistic is above zero
+at one-sided permutation p < 0.05 (100,000 relabellings, seed 2026). The
+groups use the review verdicts as they stand (sha256 in the commit that adds
+this paragraph); no verdict changes after that commit.
+
 ### The compiler on DABStep: prediction (5)
 
 The same compiler, run on DABStep's manual (`contracts/dabstep/`),

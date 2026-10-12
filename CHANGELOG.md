@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.62.0] - 2026-10-12
+
+### Added
+
+- **A metric can declare the FROM clause it is written against, and its grain** (#136). `from_sql` holds the tables and aliases a `sql_expression` reads when that is more than its `source_model`, joined; `grain` says in words what one row of that FROM is, so an aggregate over a join that is not one-to-one is unambiguous. Before, such a join lived only in the description: nothing could build the query that checks the metric, and the agent rebuilt the join from prose. Both keys are optional. `lookup_metric` returns them when set, and `dump_semantic_source` writes them only when set, so existing frozen contracts keep their `contract_digest`. A contract that uses them needs this version or later: earlier versions refuse unknown metric keys. A blank value is refused.
+- **`validate_metric_from_sql(contract, metrics)`, the CI gate for a declared FROM.** For each metric with `from_sql`, it builds `SELECT <sql_expression> FROM <from_sql>` (also exposed as `metric_query(metric)`) and reports a problem when the query does not parse as one statement, reads a table the contract does not govern, or qualifies a column with a name the FROM does not define. `dialect`, `sql_normalizer` and `caller_principal` mean what they mean for `validate_sensitivity_tables`. Whether the query runs, and what it means, still needs a database and a reviewer.
+
 ## [0.61.0] - 2026-10-10
 
 ### Changed

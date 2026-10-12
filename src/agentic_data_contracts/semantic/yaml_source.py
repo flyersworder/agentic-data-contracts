@@ -79,6 +79,9 @@ METRIC_KEYS = frozenset(
         # Written by `dump_semantic_source` for a dbt/Cube metric that could
         # not be assembled, so a frozen contract keeps the reason (#123).
         "untranslated",
+        # A metric over several tables declares its FROM and grain (#136).
+        "from_sql",
+        "grain",
     }
 )
 DECOMPOSITION_KEYS = frozenset(
@@ -374,6 +377,18 @@ class YamlSource:
                         None
                         if m.get("untranslated") is None
                         else as_text(m.get("untranslated"))
+                    ),
+                    # `require_text` when present: a blank FROM would read as
+                    # declared while declaring nothing.
+                    from_sql=(
+                        None
+                        if m.get("from_sql") is None
+                        else require_text(m.get("from_sql"), where="metrics[] from_sql")
+                    ),
+                    grain=(
+                        None
+                        if m.get("grain") is None
+                        else require_text(m.get("grain"), where="metrics[] grain")
                     ),
                     decompositions=[
                         Decomposition(

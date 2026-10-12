@@ -754,6 +754,29 @@ likely to expect it.
 
 **Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** and from an **Ossie** model's `custom_extensions` block; dbt/Cube metrics default to unset.
 
+**Metrics over several tables (optional).** A metric whose `sql_expression` reads more than its `source_model` declares the FROM clause it is written against in `from_sql`, and what one row of that FROM is in `grain`:
+
+```yaml
+metrics:
+  - name: transaction_fee
+    description: "Fee for one payment under one fee rule that applies to it"
+    source_model: main.fees
+    from_sql: >-
+      main.payments p
+      JOIN main.merchant_data m ON m.merchant = p.merchant
+      JOIN main.fees f ON f.card_scheme = p.card_scheme
+    grain: one row per (payment, fee rule that applies to it)
+    sql_expression: "f.fixed_amount + f.rate * p.eur_amount / 10000"
+```
+
+Without them, a join lives only in the description: nothing can build the query that checks the metric, and the agent has to rebuild the join from prose. With them, `lookup_metric` returns both, and `SELECT <sql_expression> FROM <from_sql>` (`metric_query(metric)`) is a whole query. `validate_metric_from_sql(contract, metrics)` is the CI gate for it, and reports a problem when:
+
+- the query does not parse as one statement;
+- it reads a table the contract does not govern;
+- `sql_expression` qualifies a column with a name `from_sql` does not define.
+
+It takes `dialect`, `sql_normalizer` and `caller_principal` with the same meaning as `validate_sensitivity_tables`. Whether the query runs, and what it means, still needs a database and a reviewer. Both keys are optional and omitted from a frozen contract when unset, so existing digests do not move. A contract that uses them needs 0.62.0 or later, because earlier versions refuse unknown metric keys.
+
 **dbt** — point to a `manifest.json`:
 ```yaml
 semantic:

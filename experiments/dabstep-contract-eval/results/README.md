@@ -79,6 +79,14 @@ findings (formerly `docs/superpowers/specs/`, now in git history only) argue fro
 Rows written before those fixes carry the old schema, and lack
 `forced_answer`, `provider_tag`, `quantization` and `reasoning_effort`.
 
+## `dabstep-compiled-luna-r{1,2,3}.jsonl` -- the compiled DABStep contract, gpt-6-luna
+
+`contract` and `contract_compiled` on `gpt-6-luna`, 401 golded tasks, at the
+run commit `1c1e302`. Each repeat holds both arms and pairs within itself.
+Each sweep ran with `--retry-pass`, but no run errored, so every file has
+exactly one row per (task, arm). See FINDINGS.md, *The compiler on DABStep:
+prediction (5)*.
+
 ## `livesqlbench/luna-r{1,2,3}.jsonl` -- four arms on LiveSQLBench, gpt-6-luna
 
 `schema_only`, `manual_prompt`, `manual_compiled` and `contract` on

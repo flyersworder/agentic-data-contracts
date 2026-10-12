@@ -626,7 +626,8 @@ Task-level sign tests over the three repeats, on the primary set:
   over the manual is 4 task-runs of 906.
 
 The pre-registered high-level / standard split shows the same three-way tie
-in both halves. Predictions (4) and (5) wait for the Qwen and DABStep runs.
+in both halves. Prediction (4) waits for the Qwen runs; (5) is answered
+below, under *The compiler on DABStep*.
 
 The same kind of delivery, then, gives very different results on the two
 benchmarks with one model:
@@ -705,6 +706,44 @@ Hypotheses, not findings; each says what would test it.
    model gets wrong unaided; many LiveSQLBench formulas are short enough
    that the model writes them correctly from the KB text, so ready-made SQL
    saves little.
+
+### The compiler on DABStep: prediction (5)
+
+The same compiler, run on DABStep's manual (`contracts/dabstep/`),
+gives `contract_compiled`: only the authoring differs from the hand-written
+`contract`. Both arms ran together on `gpt-6-luna`, k=3, paired within each
+repeat, on the run commit. 2,406 task-runs, $8.08, no errors.
+
+| arm | r1 | r2 | r3 | mean |
+|---|---:|---:|---:|---:|
+| contract (hand-authored) | 321 | 318 | 326 | 80.2% |
+| contract_compiled | 180 | 185 | 184 | 45.6% |
+
+| tasks | n | contract | contract_compiled | contract better / worse |
+|---|---:|---:|---:|---:|
+| rule-set families | 60 | 97.2% | 16.7% | 60 / 0 |
+| total-fee families | 45 | 100.0% | 6.7% | 45 / 0 |
+| everything else | 296 | 73.8% | 57.4% | 91 / 18 |
+| all | 401 | 80.2% | 45.6% | 196 / 18 (p = 5e-39) |
+
+- **(5) mostly holds.** `contract_compiled` falls between the earlier runs'
+  `manual_prompt` (45.3%) and `contract` (81.1%), but only just above the
+  lower bound. The hand-authored contract beats it on 196 tasks and loses on
+  18. The loss is concentrated in the rule-set and total-fee families, where
+  the compiled contract is far below even `manual_prompt` (23 of 180 and 18
+  of 135 task-runs there).
+- **The last clause fails.** On the remaining tasks the compiled contract
+  does not stay close: it is 16 points behind, 91 tasks to 18.
+- The hand-authored arm reproduces: 80.2% here against 81.1% in the earlier
+  runs.
+
+So compiled knowledge, delivered the governed way, does what the manual does
+on both benchmarks: 45.6% against 45.3% on DABStep (not paired, different
+runs), 35.9% against 35.5% on LiveSQLBench. On DABStep, the 35-point gain
+belongs to the authored contract, not to the delivery as such. This favours
+hypothesis 1 over the other two: what a definition is worth depends on whether
+someone got it right, with the data open, and wrote down the procedure the
+tasks turn on.
 
 ## The contract compiles, so the residual gap is derivation, not information
 

@@ -315,6 +315,21 @@ class TestRefusedAtLoadTime:
         msg = self._refuse(contract, ex, source)
         assert "recent" in msg and "filters" in msg
 
+    def test_a_metric_that_declares_from_sql(self, contract: DataContract) -> None:
+        # Its expression is written against its own FROM's aliases; pasted
+        # into the example's FROM, they name nothing.
+        ex = VerifiedExample(
+            sql="SELECT {{ metric:fee }} FROM analytics.fees f", id="r1"
+        )
+        source = _source(
+            fee={
+                "sql_expression": "f.id + p.id",
+                "from_sql": "analytics.payments p JOIN analytics.fees f ON TRUE",
+            }
+        )
+        msg = self._refuse(contract, ex, source)
+        assert "fee" in msg and "from_sql" in msg
+
     def test_a_metric_its_source_could_not_translate(
         self, contract: DataContract, fixtures_dir: Path
     ) -> None:

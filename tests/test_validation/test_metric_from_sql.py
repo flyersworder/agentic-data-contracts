@@ -2,15 +2,16 @@
 
 With `from_sql` declared, `SELECT <sql_expression> FROM <from_sql>` is a whole
 query, so what a one-table metric never needed can now be checked statically:
-the contract's own Validator must not refuse it, every alias the expression
-qualifies a column with must be visible where it is used, and the FROM must
-read the metric's source_model.
+the contract's own Validator must not refuse it, and the FROM must read the
+metric's source_model. With an ExplainAdapter, the database must also bind
+every name in it.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from agentic_data_contracts.adapters.duckdb import DuckDBAdapter
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.semantic.base import MetricDefinition
 from agentic_data_contracts.validation import (
@@ -18,6 +19,7 @@ from agentic_data_contracts.validation import (
     metric_query,
     validate_metric_from_sql,
 )
+from agentic_data_contracts.validation.explain import ExplainResult
 
 JOIN = "main.payments p JOIN main.fees f ON f.card_scheme = p.card_scheme"
 
@@ -42,6 +44,7 @@ def _metric(
     expr: str = "f.fixed_amount + f.rate * p.eur_amount / 10000",
     from_sql: str | None = JOIN,
     source_model: str = "main.fees",
+    filters: list[str] | None = None,
 ) -> MetricDefinition:
     return MetricDefinition(
         name="transaction_fee",
@@ -49,6 +52,7 @@ def _metric(
         sql_expression=expr,
         source_model=source_model,
         from_sql=from_sql,
+        filters=filters or [],
     )
 
 
@@ -66,13 +70,6 @@ def test_an_ungoverned_table_is_reported() -> None:
     assert len(problems) == 1
     assert "transaction_fee" in problems[0]
     assert "main.fees" in problems[0]
-
-
-def test_an_alias_the_from_does_not_define_is_reported() -> None:
-    metric = _metric(expr="f.fixed_amount + m.rate")
-    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
-    assert len(problems) == 1
-    assert "'m'" in problems[0]
 
 
 def test_a_table_name_counts_as_a_qualifier() -> None:
@@ -236,54 +233,138 @@ def test_a_warn_rule_does_not_fail_the_gate() -> None:
     assert validate_metric_from_sql(contract, [_metric()]) == []
 
 
-# --- Qualifiers resolve the way the database resolves them -----------------
+# --- The metric's filters are part of the query ----------------------------
+
+
+def test_the_query_carries_the_metrics_filters() -> None:
+    metric = _metric(filters=["p.status = 'ok'", "f.active"])
+    query = metric_query(metric) or ""
+    assert query.startswith(f"SELECT {metric.sql_expression}\nFROM {JOIN}\nWHERE ")
+    assert "p.status = 'ok'" in query and "f.active" in query
+    # A trailing `--` comment in a filter cannot swallow the rest of the query.
+    commented = _metric(filters=["p.status = 'ok' -- settled only", "f.active"])
+    assert validate_metric_from_sql(_contract("payments", "fees"), [commented]) == []
+
+
+def test_a_filter_is_governed_too() -> None:
+    metric = _metric(filters=["p.merchant IN (SELECT s.merchant FROM main.secrets s)"])
+    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
+    assert len(problems) == 1
+    assert "main.secrets" in problems[0]
+
+
+# --- With a database, every name must bind ---------------------------------
+
+
+@pytest.fixture
+def adapter() -> DuckDBAdapter:
+    db = DuckDBAdapter(":memory:")
+    db.connection.execute(
+        """
+        CREATE TABLE main.payments (
+            card_scheme VARCHAR, eur_amount DOUBLE,
+            info STRUCT(amount DOUBLE)
+        );
+        CREATE TABLE main.fees (
+            card_scheme VARCHAR, fixed_amount DOUBLE, rate DOUBLE
+        );
+        """
+    )
+    return db
+
+
+def test_a_declared_join_that_binds_passes(adapter: DuckDBAdapter) -> None:
+    contract = _contract("payments", "fees")
+    assert (
+        validate_metric_from_sql(contract, [_metric()], explain_adapter=adapter) == []
+    )
 
 
 @pytest.mark.parametrize(
-    ("expr", "from_sql"),
+    "expr",
     [
-        ("SUM(p.info.amount)", "main.payments p"),  # struct field access
-        ("SUM(main.payments.eur_amount)", "main.payments"),  # schema-qualified
-        ("SUM(v.x)", "main.payments p JOIN (VALUES (1)) AS v(x) ON TRUE"),
-        ("SUM(u.x)", "main.payments p, UNNEST(p.arr) AS u(x)"),
-        ("SUM(l.n)", "main.payments p, LATERAL (SELECT 1 AS n) AS l"),
-        (
-            "(SELECT MAX(f.fixed_amount) FROM main.fees f WHERE f.k = p.k)",
-            "main.payments p",
-        ),  # correlated: p is the outer query's
+        "f.fixed_amount + m.rate",  # an alias the FROM does not define
+        "f.fixed_amount + payments.eur_amount",  # a bare name after its alias
+        "f.no_such_column",
     ],
 )
-def test_qualifiers_the_database_resolves_pass(expr: str, from_sql: str) -> None:
-    metric = _metric(expr=expr, from_sql=from_sql, source_model="main.payments")
+def test_a_name_the_database_cannot_bind_is_reported(
+    adapter: DuckDBAdapter, expr: str
+) -> None:
+    problems = validate_metric_from_sql(
+        _contract("payments", "fees"), [_metric(expr=expr)], explain_adapter=adapter
+    )
+    assert len(problems) == 1
+    assert "transaction_fee" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "SUM(info.amount)",  # a struct field, unqualified
+        "SUM(p.info.amount)",  # a struct field, qualified
+    ],
+)
+def test_struct_fields_bind(adapter: DuckDBAdapter, expr: str) -> None:
+    metric = _metric(expr=expr, from_sql="main.payments p", source_model="")
     assert (
         validate_metric_from_sql(
-            _contract("payments", "fees"), [metric], dialect="duckdb"
+            _contract("payments"), [metric], explain_adapter=adapter
         )
         == []
     )
 
 
-def test_a_tables_bare_name_does_not_qualify_once_it_is_aliased() -> None:
-    metric = _metric(
-        expr="SUM(payments.eur_amount)",
-        from_sql="main.payments p",
-        source_model="main.payments",
-    )
-    problems = validate_metric_from_sql(_contract("payments"), [metric])
-    assert len(problems) == 1
-    assert "'payments'" in problems[0]
+def test_without_a_database_names_are_not_bound() -> None:
+    # The static gate cannot tell `info.amount` (a struct field) from
+    # `alias.column` without the schema, so it leaves binding to EXPLAIN.
+    metric = _metric(expr="f.fixed_amount + m.rate")
+    assert validate_metric_from_sql(_contract("payments", "fees"), [metric]) == []
 
 
-def test_an_alias_inside_a_subquery_is_not_visible_outside_it() -> None:
-    metric = _metric(
-        expr="SUM(s2.fixed_amount)",
-        from_sql=(
-            "main.payments p JOIN (SELECT fixed_amount FROM main.fees s2) s ON TRUE"
-        ),
+class _RecordingExplain:
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def explain(self, sql: str) -> ExplainResult:
+        self.seen.append(sql)
+        return ExplainResult(
+            estimated_cost_usd=1e9, estimated_rows=10**12, schema_valid=True
+        )
+
+
+def test_explain_runs_only_on_a_join_the_validator_admits() -> None:
+    explain = _RecordingExplain()
+    metric = _metric()
+    validate_metric_from_sql(_contract("payments"), [metric], explain_adapter=explain)
+    assert explain.seen == []
+    validate_metric_from_sql(
+        _contract("payments", "fees"), [metric], explain_adapter=explain
     )
-    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
-    assert len(problems) == 1
-    assert "'s2'" in problems[0]
+    assert explain.seen == [metric_query(metric)]
+
+
+def test_resource_limits_do_not_apply_to_a_bare_join() -> None:
+    # A join with no WHERE estimates a full scan; the agent's query narrows it.
+    contract = DataContract.from_yaml_string(
+        """
+version: "1.0"
+name: from-sql-limits
+semantic:
+  allowed_tables:
+    - schema: main
+      tables: [payments, fees]
+  forbidden_operations: [DELETE]
+  rules: []
+resources:
+  cost_limit_usd: 1.0
+  max_rows_scanned: 1000
+"""
+    )
+    problems = validate_metric_from_sql(
+        contract, [_metric()], explain_adapter=_RecordingExplain()
+    )
+    assert problems == []
 
 
 class _PlusNormalizer:
@@ -293,13 +374,16 @@ class _PlusNormalizer:
         return sql.replace(" PLUS ", " + ")
 
 
-def test_qualifiers_are_checked_after_normalization() -> None:
-    metric = _metric(expr="f.fixed_amount PLUS m.rate")
-    problems = validate_metric_from_sql(
-        _contract("payments", "fees"), [metric], sql_normalizer=_PlusNormalizer()
+def test_the_sql_normalizer_is_applied() -> None:
+    metric = _metric(expr="f.fixed_amount PLUS p.eur_amount")
+    contract = _contract("payments", "fees")
+    assert (
+        validate_metric_from_sql(contract, [metric], sql_normalizer=_PlusNormalizer())
+        == []
     )
+    problems = validate_metric_from_sql(contract, [metric])
     assert len(problems) == 1
-    assert "'m'" in problems[0]
+    assert "parse error" in problems[0]
 
 
 # --- The FROM reads the metric's own table ---------------------------------
@@ -311,6 +395,23 @@ def test_a_from_that_omits_the_source_model_is_reported() -> None:
     assert len(problems) == 1
     assert "main.fees" in problems[0]
     assert "source_model" in problems[0]
+
+
+@pytest.mark.parametrize(
+    ("source_model", "from_sql"),
+    [
+        ("fees", "main.fees f"),  # source_model without its schema
+        ("prod.main.fees", "prod.main.fees f"),  # with its catalog
+        ("MAIN.FEES", "main.fees f"),
+    ],
+)
+def test_the_source_model_matches_however_it_is_qualified(
+    source_model: str, from_sql: str
+) -> None:
+    metric = _metric(
+        expr="SUM(f.fixed_amount)", from_sql=from_sql, source_model=source_model
+    )
+    assert validate_metric_from_sql(_contract("fees"), [metric]) == []
 
 
 def test_a_metric_without_a_source_model_is_not_held_to_one() -> None:

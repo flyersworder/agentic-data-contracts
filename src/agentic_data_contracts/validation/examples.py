@@ -648,6 +648,13 @@ def _expand_metric_refs(
                 "alone would drop them and certify a different quantity. Write "
                 "the metric's SQL out in this example instead."
             )
+        if metric.from_sql is not None:
+            raise ValueError(
+                f"example {label!r} references metric {name!r}, which declares "
+                "from_sql: its sql_expression is written against that FROM's "
+                "aliases, which the example's own FROM does not define. Write "
+                "the metric's SQL out in this example instead."
+            )
         if "{{" in expression:
             raise ValueError(
                 f"example {label!r} references metric {name!r}, whose "

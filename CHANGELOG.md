@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.62.0] - 2026-10-12
+
+### Added
+
+- **A metric can declare the FROM clause it is written against, and its grain** (#136). `from_sql` holds the tables and aliases a `sql_expression` reads when that is more than its `source_model`, joined; `grain` says in words what one row of that FROM is, so an aggregate over a join that is not one-to-one is unambiguous. Before, such a join lived only in the description: nothing could build the query that checks the metric, and the agent rebuilt the join from prose. Both keys are optional. `lookup_metric` returns them when set, and `dump_semantic_source` writes them only when set, so existing frozen contracts keep their `contract_digest`. A contract that uses them needs this version or later: earlier versions refuse unknown metric keys. A blank value is refused.
+- **`validate_metric_from_sql(contract, metrics)`, the CI gate for a declared FROM.** For each metric with `from_sql`, it builds `SELECT <sql_expression> FROM <from_sql>`, with the metric's `filters` as its WHERE clause (also exposed as `metric_query(metric)`). It reports a problem when `from_sql` is more than a FROM clause, when the contract's own `Validator` refuses that query, or when the FROM does not read the metric's `source_model`. Running the `Validator` means the gate refuses exactly what run time will refuse when the agent reuses the join: tables, principals, `max_joins`, one statement. The checks an agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out. Given an `explain_adapter`, it also reports what the database cannot bind, such as an undefined alias or a missing column; the contract's cost and row limits are not applied to the bare join. `dialect`, `sql_normalizer` and `caller_principal` mean what they mean for `Validator`; the default `caller_principal=None` is an anonymous caller.
+- **A `{{ metric:NAME }}` placeholder refuses a metric that declares `from_sql`**, as it already refuses one with `filters`: the expression is written against that FROM's aliases, which the example's own FROM does not define.
+
 ## [0.61.0] - 2026-10-10
 
 ### Changed

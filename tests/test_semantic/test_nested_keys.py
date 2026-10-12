@@ -267,6 +267,8 @@ _FULL_DOCUMENT: dict[str, Any] = {
             "operational_owner": None,
             "last_reviewed": None,
             "untranslated": None,
+            "from_sql": None,
+            "grain": None,
             "decompositions": [
                 {
                     "operator": "product",

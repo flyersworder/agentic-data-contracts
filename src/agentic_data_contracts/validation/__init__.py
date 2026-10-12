@@ -41,6 +41,10 @@ from agentic_data_contracts.validation.examples import (
     validate_examples,
 )
 from agentic_data_contracts.validation.explain import ExplainAdapter, ExplainResult
+from agentic_data_contracts.validation.metric_from import (
+    metric_query,
+    validate_metric_from_sql,
+)
 from agentic_data_contracts.validation.reconciliation import (
     ReconciliationResult,
     reconcile_decomposition,
@@ -99,7 +103,9 @@ __all__ = [
     "check_sensitivity",
     "evaluate_conformance",
     "extract_tables",
+    "metric_query",
     "reconcile_decomposition",
     "validate_examples",
+    "validate_metric_from_sql",
     "validate_sensitivity_tables",
 ]

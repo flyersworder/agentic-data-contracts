@@ -754,6 +754,30 @@ likely to expect it.
 
 **Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** and from an **Ossie** model's `custom_extensions` block; dbt/Cube metrics default to unset.
 
+**Metrics over several tables (optional).** A metric whose `sql_expression` reads more than its `source_model` declares the FROM clause it is written against in `from_sql`, and what one row of that FROM is in `grain`:
+
+```yaml
+metrics:
+  - name: transaction_fee
+    description: "Fee for one payment under one fee rule that applies to it"
+    source_model: main.fees
+    from_sql: >-
+      main.payments p
+      JOIN main.merchant_data m ON m.merchant = p.merchant
+      JOIN main.fees f ON f.card_scheme = p.card_scheme
+    grain: one row per (payment, fee rule that applies to it)
+    sql_expression: "f.fixed_amount + f.rate * p.eur_amount / 10000"
+```
+
+Without them, a join lives only in the description: nothing can build the query that checks the metric, and the agent has to rebuild the join from prose. With them, `lookup_metric` returns both, and `SELECT <sql_expression> FROM <from_sql>` (`metric_query(metric)`) is a whole query. `validate_metric_from_sql(contract, metrics)` is the CI gate for it, and reports a problem when:
+
+- the contract's own `Validator` refuses it: it does not parse as one statement, reads a table the caller may not read, joins more than `max_joins` allows, and so on. The agent will reuse the join, and the `Validator` is what judges that reuse, so the gate refuses exactly what run time would. Rules the agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out, and a `warn` or `log` rule is not a problem;
+- `from_sql` is more than a FROM clause (a WHERE, GROUP BY, ORDER BY, LIMIT or set operation in it), since the agent writes its own around it;
+- `from_sql` does not read the metric's `source_model`;
+- given an `explain_adapter`, the database cannot bind a name in the query, such as an alias `from_sql` does not define or a missing column. Only binding is checked, not the contract's cost or row limits, because a join with no WHERE estimates the full scan the agent's own query will narrow. Without an adapter, names are not checked: without the schema, `info.amount` may be a struct field as well as `alias.column`.
+
+The query includes the metric's `filters` as its WHERE clause, since without them it is a different quantity. `dialect`, `sql_normalizer` and `caller_principal` mean what they mean for `Validator`, and should match what the agent's queries are validated with. The default `caller_principal=None` is an anonymous caller, so a join over a principal-restricted table needs the principal that will reuse it. What the query means still needs a reviewer. A `{{ metric:NAME }}` placeholder in a verified example refuses a metric with `from_sql`, because its expression is written against aliases the example's FROM does not define. Both keys are optional and omitted from a frozen contract when unset, so existing digests do not move. A contract that uses them needs 0.62.0 or later, because earlier versions refuse unknown metric keys.
+
 **dbt** — point to a `manifest.json`:
 ```yaml
 semantic:

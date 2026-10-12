@@ -576,6 +576,31 @@ class SensitivityReport:
 DEFAULT_REPEATS = 2
 
 
+def _parse_statement(
+    sql: str, *, dialect: str | None, normalize: Normalize = _identity
+) -> exp.Expression | None:
+    """Contract-authored *sql*, normalized and parsed as ONE statement.
+
+    None covers every way it cannot be read: the normalizer raised, the
+    normalized text does not parse, or it holds more than one statement.
+    """
+    try:
+        text = normalize(sql)
+        if _is_multi_statement(text, dialect):
+            return None
+        parsed = sqlglot.parse_one(text, dialect=dialect)
+    except Exception:  # noqa: BLE001 - every failure means "cannot be read"
+        return None
+    if parsed is None:
+        return None
+    # sqlglot.parse_one is annotated to return the broader `Expr` base (as of
+    # the resolved sqlglot; the pinned floor still returns `Expression`
+    # directly). Every real parse produces an `exp.Expression` subtype, so
+    # this narrows the static type to match runtime reality -- same pattern
+    # as `_table_refs`.
+    return cast(exp.Expression, parsed)
+
+
 def _shadow_tables(
     shadow: Shadow, *, dialect: str | None, normalize: Normalize = _identity
 ) -> set[str] | None:
@@ -589,21 +614,9 @@ def _shadow_tables(
     error -- but refusing it here gives both gates a clear finding instead of
     an opaque engine error.
     """
-    try:
-        text = normalize(shadow.sql)
-        if _is_multi_statement(text, dialect):
-            return None
-        parsed = sqlglot.parse_one(text, dialect=dialect)
-    except Exception:  # noqa: BLE001 - every failure means "tables unknown"
+    tree = _parse_statement(shadow.sql, dialect=dialect, normalize=normalize)
+    if tree is None:
         return None
-    if parsed is None:
-        return None
-    # sqlglot.parse_one is annotated to return the broader `Expr` base (as of
-    # the resolved sqlglot; the pinned floor still returns `Expression`
-    # directly). Every real parse produces an `exp.Expression` subtype, so
-    # this narrows the static type to match runtime reality -- same pattern
-    # as `_table_refs`.
-    tree = cast(exp.Expression, parsed)
     ctes = _cte_aliases(tree)
     names: set[str] = set()
     for node in tree.find_all(exp.Table):

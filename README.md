@@ -771,11 +771,11 @@ metrics:
 
 Without them, a join lives only in the description: nothing can build the query that checks the metric, and the agent has to rebuild the join from prose. With them, `lookup_metric` returns both, and `SELECT <sql_expression> FROM <from_sql>` (`metric_query(metric)`) is a whole query. `validate_metric_from_sql(contract, metrics)` is the CI gate for it, and reports a problem when:
 
-- the query does not parse as one statement;
-- it reads a table the contract does not govern;
-- `sql_expression` qualifies a column with a name `from_sql` does not define.
+- the contract's own `Validator` refuses it: it does not parse as one statement, reads a table the caller may not read, reads a blocked column, joins more than `max_joins` allows, and so on. The agent will reuse the join, and the `Validator` is what judges that reuse, so the gate refuses exactly what run time would. Rules the agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out, and a `warn` or `log` rule is not a problem;
+- a column is qualified with a name that is not visible where the column is used. This is resolved scope by scope, as the database does it: an aliased table is visible only by its alias, and an alias inside a subquery only inside it. A three-part reference like `p.info.amount` is skipped, since without a schema it may be a struct field;
+- `from_sql` does not read the metric's `source_model`.
 
-It takes `dialect`, `sql_normalizer` and `caller_principal` with the same meaning as `validate_sensitivity_tables`. Whether the query runs, and what it means, still needs a database and a reviewer. Both keys are optional and omitted from a frozen contract when unset, so existing digests do not move. A contract that uses them needs 0.62.0 or later, because earlier versions refuse unknown metric keys.
+It takes `dialect`, `sql_normalizer` and `caller_principal` with the same meaning as `Validator`, and they should match what the agent's queries are validated with. The default `caller_principal=None` is an anonymous caller, so a join over a principal-restricted table needs the principal that will reuse it. Whether the query runs, and what it means, still needs a database and a reviewer. Both keys are optional and omitted from a frozen contract when unset, so existing digests do not move. A contract that uses them needs 0.62.0 or later, because earlier versions refuse unknown metric keys.
 
 **dbt** — point to a `manifest.json`:
 ```yaml

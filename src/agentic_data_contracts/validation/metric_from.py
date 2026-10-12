@@ -5,12 +5,15 @@ A metric's ``sql_expression`` may read several tables through aliases; its
 ``SELECT <sql_expression> FROM <from_sql>``, so three things can be checked
 without a database:
 
-- the query parses, as one statement;
-- every table it reads is one the contract governs, as a shadow's must be
-  (``validate_sensitivity_tables``) -- a declared join is contract-authored
-  SQL the agent is told to reuse, and must not reach data no query may;
-- every qualifier on a column of ``sql_expression`` is an alias or table
-  name the FROM defines, so the expression and its join agree.
+- the contract's own ``Validator`` does not refuse it -- a declared join is
+  contract-authored SQL the agent is told to reuse, and the Validator is what
+  will judge that reuse, so the gate asks it rather than re-deriving its
+  checks. The rules an agent satisfies by what it ADDS around the join (a
+  required filter, a LIMIT) are left out: the bare join cannot carry them;
+- every qualifier on a column names a table or alias visible where the column
+  is used, resolved scope by scope the way the database resolves it;
+- the FROM reads the metric's ``source_model``, so lookups that find metrics
+  by table point at a join that reads it.
 
 Like ``validate_sensitivity_tables`` this is a CI-time gate, not a load-time
 one: ``YamlSource`` holds no ``DataContract`` and no dialect. Whether the
@@ -19,23 +22,31 @@ query RUNS, and what it means, needs a database and a reviewer.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.principal import Principal
 from agentic_data_contracts.validation.checkers import extract_tables
 from agentic_data_contracts.validation.sensitivity import (
-    Normalize,
     _normalizer_fn,
-    _why_ungoverned,
+    _parse_statement,
 )
-from agentic_data_contracts.validation.validator import _is_multi_statement
+from agentic_data_contracts.validation.validator import Validator
 
 if TYPE_CHECKING:
     from agentic_data_contracts.semantic.base import MetricDefinition
+
+#: Query checks an agent satisfies by what its query adds around a declared
+#: join -- a WHERE filter, a LIMIT. The bare join cannot carry them.
+_ADDED_BY_THE_AGENT = {
+    "required_filter": None,
+    "required_filter_values": None,
+    "require_limit": None,
+}
 
 
 def metric_query(metric: MetricDefinition) -> str | None:
@@ -57,24 +68,22 @@ def validate_metric_from_sql(
     *,
     dialect: str | None = None,
     sql_normalizer: SqlNormalizer | None = None,
-    caller_principal: str | None = None,
+    caller_principal: Principal = None,
 ) -> list[str]:
     """Problems with the metrics' declared FROM clauses; empty when none.
 
-    Metrics without ``from_sql`` are skipped. ``dialect``,
-    ``sql_normalizer`` and ``caller_principal`` mean what they mean for
-    ``validate_sensitivity_tables``: omitted, the table check is structural,
-    against every table the contract declares.
+    Metrics without ``from_sql`` are skipped. ``dialect``, ``sql_normalizer``
+    and ``caller_principal`` mean what they mean for ``Validator``, and should
+    match what the agent's queries will be validated with. In particular the
+    default ``caller_principal=None`` is an anonymous caller, denied every
+    principal-restricted table: pass the principal that will reuse the metric.
     """
-    declared = {name.lower() for name in contract.allowed_table_names()}
-    allowed = {
-        name.lower()
-        for name in (
-            contract.allowed_table_names()
-            if caller_principal is None
-            else contract.allowed_table_names_for(caller_principal)
-        )
-    }
+    validator = Validator(
+        _without_rules_the_agent_satisfies(contract),
+        dialect=dialect,
+        sql_normalizer=sql_normalizer,
+        caller_principal=caller_principal,
+    )
     normalize = _normalizer_fn(sql_normalizer)
     problems: list[str] = []
     for metric in metrics:
@@ -82,63 +91,76 @@ def validate_metric_from_sql(
         if query is None:
             continue
         where = f"metric {metric.name!r} from_sql"
-        tree = _parse(query, dialect=dialect, normalize=normalize)
-        if tree is None:
-            problems.append(
-                f"{where} cannot be parsed together with its sql_expression, "
-                "so its tables cannot be checked against the contract"
-            )
+        try:
+            result = validator.validate(query)
+        except Exception as e:  # noqa: BLE001 - a normalizer may raise anything
+            problems.append(f"{where}: cannot be checked: {e}")
             continue
-        for name in sorted(extract_tables(tree)):
-            if name.lower() not in allowed:
-                problems.append(
-                    f"{where} reads {name!r}, which "
-                    f"{_why_ungoverned(name, declared, caller_principal)}"
-                )
-        for qualifier in sorted(_undefined_qualifiers(tree, metric, dialect)):
+        if result.blocked:
+            problems.extend(f"{where}: {reason}" for reason in result.reasons)
+        tree = _parse_statement(query, dialect=dialect, normalize=normalize)
+        if tree is None:
+            continue  # the Validator has already reported why
+        try:
+            undefined = _undefined_qualifiers(tree)
+        except Exception as e:  # noqa: BLE001 - sqlglot's scope builder can raise
+            problems.append(f"{where}: column qualifiers cannot be checked: {e}")
+            undefined = set()
+        problems.extend(
+            f"{where}: a column is qualified with {qualifier!r}, which names "
+            "no table or alias visible where it is used"
+            for qualifier in sorted(undefined)
+        )
+        source = metric.source_model.strip()
+        read = {name.lower() for name in extract_tables(tree)}
+        if source and source.lower() not in read:
             problems.append(
-                f"metric {metric.name!r}: sql_expression qualifies a column with "
-                f"{qualifier!r}, which from_sql does not define"
+                f"{where} does not read the metric's source_model {source!r}"
             )
     return problems
 
 
-def _parse(
-    query: str, *, dialect: str | None, normalize: Normalize
-) -> exp.Expression | None:
-    try:
-        text = normalize(query)
-        if _is_multi_statement(text, dialect):
-            return None
-        parsed = sqlglot.parse_one(text, dialect=dialect)
-    except Exception:  # noqa: BLE001 - every failure means "cannot be checked"
-        return None
-    return None if parsed is None else cast(exp.Expression, parsed)
+def _without_rules_the_agent_satisfies(contract: DataContract) -> DataContract:
+    """A copy of *contract* whose query checks a bare join can be held to."""
+    semantic = contract.schema.semantic
+    rules = [
+        rule
+        if rule.query_check is None
+        else rule.model_copy(
+            update={
+                "query_check": rule.query_check.model_copy(update=_ADDED_BY_THE_AGENT)
+            }
+        )
+        for rule in semantic.rules
+    ]
+    return DataContract(
+        contract.schema.model_copy(
+            update={"semantic": semantic.model_copy(update={"rules": rules})}
+        )
+    )
 
 
-def _undefined_qualifiers(
-    tree: exp.Expression, metric: MetricDefinition, dialect: str | None
-) -> set[str]:
-    """Qualifiers on ``sql_expression``'s columns that name nothing in the FROM.
+def _undefined_qualifiers(tree: exp.Expression) -> set[str]:
+    """Column qualifiers that name no source visible in the column's scope.
 
-    Defined names are every table's alias and bare name, and every aliased
-    subquery, anywhere in the query -- a correlated subquery inside the
-    expression may define its own.
+    A scope sees its own sources and, for a correlated subquery, its
+    enclosing scopes'. An aliased table is visible only by its alias, as in
+    the database. A three-part reference (``p.info.amount``) is skipped:
+    without a schema it may be a struct field as well as ``schema.table.col``.
     """
-    defined: set[str] = set()
-    for table in tree.find_all(exp.Table):
-        defined.add(table.name.lower())
-        if table.alias:
-            defined.add(table.alias.lower())
-    for sub in tree.find_all(exp.Subquery):
-        if sub.alias:
-            defined.add(sub.alias.lower())
-    try:
-        expression = sqlglot.parse_one(metric.sql_expression or "1", dialect=dialect)
-    except Exception:  # noqa: BLE001 - the whole query parsed; be lenient here
-        return set()
-    return {
-        column.table
-        for column in expression.find_all(exp.Column)
-        if column.table and column.table.lower() not in defined
-    }
+    undefined: set[str] = set()
+    for scope in traverse_scope(tree):
+        for column in scope.columns:
+            if not column.table or column.args.get("db"):
+                continue
+            if not _visible(column.table, scope):
+                undefined.add(column.table)
+    return undefined
+
+
+def _visible(qualifier: str, scope: Scope | None) -> bool:
+    while scope is not None:
+        if qualifier.lower() in {name.lower() for name in scope.sources}:
+            return True
+        scope = scope.parent
+    return False

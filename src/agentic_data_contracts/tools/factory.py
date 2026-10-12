@@ -490,9 +490,9 @@ def _metric_details(
         data["untranslated"] = metric.untranslated
     # The declared join, so the agent writes the query the metric was
     # written against (#136).
-    if metric.from_sql:
+    if metric.from_sql is not None:
         data["from_sql"] = metric.from_sql
-    if metric.grain:
+    if metric.grain is not None:
         data["grain"] = metric.grain
     if metric.domains:
         data["domains"] = list(metric.domains)

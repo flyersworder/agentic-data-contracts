@@ -5,6 +5,8 @@ A metric's ``sql_expression`` may read several tables through aliases; its
 ``SELECT <sql_expression> FROM <from_sql> WHERE <filters>``, and the gate
 checks that:
 
+- ``from_sql`` is a FROM clause and only that -- tables, aliases, joins -- as
+  the agent writes its own WHERE, GROUP BY and LIMIT around it;
 - the contract's own ``Validator`` does not refuse it -- a declared join is
   contract-authored SQL the agent is told to reuse, and the Validator is what
   will judge that reuse, so the gate asks it rather than re-deriving its
@@ -30,6 +32,7 @@ from sqlglot import exp
 from agentic_data_contracts.adapters._normalizer import SqlNormalizer
 from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.principal import Principal
+from agentic_data_contracts.validation.checkers import extract_tables
 from agentic_data_contracts.validation.explain import ExplainAdapter
 from agentic_data_contracts.validation.sensitivity import (
     _normalizer_fn,
@@ -47,6 +50,18 @@ _ADDED_BY_THE_AGENT = {
     "required_filter_values": None,
     "require_limit": None,
 }
+
+#: Clauses that would make ``SELECT 1 FROM <from_sql>`` more than a FROM.
+_NOT_FROM = (
+    "where",
+    "group",
+    "having",
+    "qualify",
+    "windows",
+    "order",
+    "limit",
+    "offset",
+)
 
 
 def metric_query(metric: MetricDefinition) -> str | None:
@@ -101,9 +116,21 @@ def validate_metric_from_sql(
     problems: list[str] = []
     for metric in metrics:
         query = metric_query(metric)
-        if query is None:
+        if query is None or metric.from_sql is None:
             continue
         where = f"metric {metric.name!r} from_sql"
+        if not metric.from_sql.strip():
+            problems.append(f"{where} is blank")
+            continue
+        from_only = _parse_statement(
+            f"SELECT 1 FROM {metric.from_sql}", dialect=dialect, normalize=normalize
+        )
+        if from_only is not None and not _is_only_a_from(from_only):
+            problems.append(
+                f"{where} must be only a FROM clause (tables, aliases, joins): the "
+                "agent writes its own WHERE, GROUP BY and LIMIT around it"
+            )
+            continue
         try:
             result = validator.validate(query)
         except Exception as e:  # noqa: BLE001 - a normalizer may raise anything
@@ -113,11 +140,10 @@ def validate_metric_from_sql(
             problems.extend(f"{where}: {reason}" for reason in result.reasons)
         elif explain_adapter is not None:
             problems.extend(f"{where}: {p}" for p in _binding(query, explain_adapter))
-        tree = _parse_statement(query, dialect=dialect, normalize=normalize)
-        if tree is None:
+        if from_only is None:
             continue  # the Validator has already reported why
         source = metric.source_model.strip()
-        if source and not _reads(tree, source):
+        if source and not _reads(from_only, source, dialect=dialect):
             problems.append(
                 f"{where} does not read the metric's source_model {source!r}"
             )
@@ -135,15 +161,25 @@ def _binding(query: str, explain_adapter: ExplainAdapter) -> list[str]:
     return [f"the database cannot bind it: {'; '.join(explained.errors)}"]
 
 
-def _reads(tree: exp.Expression, source_model: str) -> bool:
+def _is_only_a_from(tree: exp.Expression) -> bool:
+    return isinstance(tree, exp.Select) and not any(tree.args.get(k) for k in _NOT_FROM)
+
+
+def _reads(tree: exp.Expression, source_model: str, *, dialect: str | None) -> bool:
     """Whether *tree* reads *source_model*, however either is qualified.
 
-    Names are compared part by part from the right, over the parts both
-    spell out: ``fees`` and ``prod.main.fees`` both name ``main.fees``.
+    Schema and table name are compared from the right, over the parts both
+    spell out, so ``fees`` and ``"main"."fees"`` both name ``main.fees``.
+    A catalog is ignored, as ``extract_tables`` ignores it; a CTE is not a
+    table.
     """
-    wanted = source_model.lower().split(".")
-    for table in tree.find_all(exp.Table):
-        parts = [p.lower() for p in (table.catalog, table.db, table.name) if p]
+    try:
+        table = exp.to_table(source_model, dialect=dialect)
+    except Exception:  # noqa: BLE001 - an unparseable name names no table read
+        return False
+    wanted = [p.lower() for p in (table.db, table.name) if p]
+    for name in extract_tables(tree):
+        parts = name.lower().split(".")
         n = min(len(parts), len(wanted))
         if parts[-n:] == wanted[-n:]:
             return True

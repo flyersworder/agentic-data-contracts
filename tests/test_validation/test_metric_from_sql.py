@@ -419,3 +419,71 @@ def test_a_metric_without_a_source_model_is_not_held_to_one() -> None:
         expr="SUM(p.eur_amount)", from_sql="main.payments p", source_model=""
     )
     assert validate_metric_from_sql(_contract("payments"), [metric]) == []
+
+
+# --- from_sql is a FROM clause, and only that ------------------------------
+
+
+@pytest.mark.parametrize(
+    "from_sql",
+    [
+        "main.fees f WHERE f.active",
+        "main.fees f GROUP BY f.card_scheme",
+        "main.fees f GROUP BY f.card_scheme HAVING COUNT(*) > 1",
+        "main.fees f ORDER BY f.rate",
+        "main.fees f LIMIT 1",
+        "main.fees f UNION ALL SELECT 1 FROM main.payments",
+    ],
+)
+def test_a_from_sql_that_is_more_than_a_from_clause_is_reported(
+    from_sql: str,
+) -> None:
+    # The agent writes its own WHERE, GROUP BY and LIMIT around the join.
+    metric = _metric(expr="SUM(f.rate)", from_sql=from_sql)
+    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
+    assert len(problems) == 1
+    assert "only a FROM clause" in problems[0]
+
+
+def test_a_where_in_from_sql_is_named_even_with_filters() -> None:
+    metric = _metric(
+        expr="SUM(f.rate)", from_sql="main.fees f WHERE f.active", filters=["f.x"]
+    )
+    problems = validate_metric_from_sql(_contract("fees"), [metric])
+    assert len(problems) == 1
+    assert "only a FROM clause" in problems[0]
+
+
+def test_a_blank_from_sql_is_reported_as_blank() -> None:
+    metric = _metric(from_sql="   ")
+    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
+    assert problems == ["metric 'transaction_fee' from_sql is blank"]
+
+
+def test_a_source_model_read_only_by_a_filter_is_not_read_by_the_from() -> None:
+    metric = _metric(
+        expr="SUM(p.eur_amount)",
+        from_sql="main.payments p",
+        filters=["p.card_scheme IN (SELECT card_scheme FROM main.fees)"],
+    )
+    problems = validate_metric_from_sql(_contract("payments", "fees"), [metric])
+    assert len(problems) == 1
+    assert "source_model" in problems[0]
+
+
+def test_a_quoted_source_model_matches() -> None:
+    metric = _metric(
+        expr="SUM(f.rate)", from_sql="main.fees f", source_model='"main"."fees"'
+    )
+    assert validate_metric_from_sql(_contract("fees"), [metric]) == []
+
+
+def test_a_cte_named_like_the_source_model_does_not_count() -> None:
+    metric = _metric(
+        expr="SUM(f.eur_amount)",
+        from_sql="(WITH fees AS (SELECT * FROM main.payments) SELECT * FROM fees) f",
+        source_model="fees",
+    )
+    problems = validate_metric_from_sql(_contract("payments"), [metric])
+    assert len(problems) == 1
+    assert "source_model" in problems[0]

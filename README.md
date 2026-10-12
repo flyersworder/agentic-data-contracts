@@ -772,6 +772,7 @@ metrics:
 Without them, a join lives only in the description: nothing can build the query that checks the metric, and the agent has to rebuild the join from prose. With them, `lookup_metric` returns both, and `SELECT <sql_expression> FROM <from_sql>` (`metric_query(metric)`) is a whole query. `validate_metric_from_sql(contract, metrics)` is the CI gate for it, and reports a problem when:
 
 - the contract's own `Validator` refuses it: it does not parse as one statement, reads a table the caller may not read, joins more than `max_joins` allows, and so on. The agent will reuse the join, and the `Validator` is what judges that reuse, so the gate refuses exactly what run time would. Rules the agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out, and a `warn` or `log` rule is not a problem;
+- `from_sql` is more than a FROM clause (a WHERE, GROUP BY, ORDER BY, LIMIT or set operation in it), since the agent writes its own around it;
 - `from_sql` does not read the metric's `source_model`;
 - given an `explain_adapter`, the database cannot bind a name in the query, such as an alias `from_sql` does not define or a missing column. Only binding is checked, not the contract's cost or row limits, because a join with no WHERE estimates the full scan the agent's own query will narrow. Without an adapter, names are not checked: without the schema, `info.amount` may be a struct field as well as `alias.column`.
 

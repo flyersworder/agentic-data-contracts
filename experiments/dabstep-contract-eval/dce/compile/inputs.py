@@ -9,6 +9,9 @@ from pathlib import Path
 
 from dce.compile.entries import KBEntry
 
+#: The frozen compiler's model; `--model` picks another.
+COMPILER_MODEL = "claudesonnet5"
+
 
 @dataclass(frozen=True)
 class CompileInputs:
@@ -28,3 +31,5 @@ class CompileInputs:
     #: its `grain`). Off, the compiler is the frozen one, prompt and tools
     #: unchanged.
     joins: bool = False
+    #: The model that compiles; the log and the contract header record it.
+    model: str = COMPILER_MODEL

@@ -28,7 +28,6 @@ from dce.compile.db import CompileDB
 from dce.compile.entries import KBEntry, domain_of, metric_names, slug
 from dce.compile.inputs import CompileInputs
 
-COMPILER_MODEL = "claudesonnet5"
 MAX_ATTEMPTS = 3
 #: Starts the paragraph that carries what the compiler learned from the
 #: data. `manual_compiled` collects every such paragraph from the contract,

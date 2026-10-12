@@ -20,9 +20,8 @@ from pathlib import Path
 from dce.compile.db import CompileDB
 from dce.compile.emit import build, write
 from dce.compile.entries import compile_order
-from dce.compile.inputs import CompileInputs
+from dce.compile.inputs import COMPILER_MODEL, CompileInputs
 from dce.compile.session import (
-    COMPILER_MODEL,
     MAX_ATTEMPTS,
     DriverResult,
     EntryRecord,
@@ -57,7 +56,7 @@ def _header(inputs: CompileInputs) -> dict:
         "type": "header",
         "benchmark": inputs.benchmark,
         "db": inputs.db_name,
-        "model": COMPILER_MODEL,
+        "model": inputs.model,
         "commit_sha": _commit_sha(),
         "inputs": {p.name: _sha256(p) for p in inputs.sources},
     }
@@ -67,6 +66,11 @@ def _header(inputs: CompileInputs) -> dict:
 
 
 def _same_compiler(old: dict, inputs: CompileInputs) -> None:
+    if old.get("model", COMPILER_MODEL) != inputs.model:
+        raise SystemExit(
+            f"{inputs.db_name}: compiled with {old.get('model')}, now "
+            f"{inputs.model}; use another --out"
+        )
     if old.get("joins", False) != inputs.joins:
         raise SystemExit(
             f"{inputs.db_name}: compiled with joins={old.get('joins', False)}, "
@@ -251,7 +255,9 @@ def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
     return sorted(ids)
 
 
-def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResult:
+def claude_driver(
+    *, system_prompt: str, user_prompt: str, tools, model: str = COMPILER_MODEL
+) -> DriverResult:
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends
     money; tests replace it."""
@@ -268,7 +274,7 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
     from dce.pricing import cost
 
     agent = agent_module._default_agent_factory(
-        model=COMPILER_MODEL,
+        model=model,
         system_prompt=system_prompt,
         tools=[Tool(t) for t in tools],
         retries=MAX_ATTEMPTS + 2,
@@ -308,7 +314,7 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached,
-        "usd": cost(COMPILER_MODEL, in_tok, out_tok, cached),
+        "usd": cost(model, in_tok, out_tok, cached),
     }
     if error is not None:
         out["error"] = error

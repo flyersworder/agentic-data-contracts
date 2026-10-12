@@ -10,6 +10,7 @@ def test_every_model_is_a_pinned_snapshot():
         "z-ai/glm-5.3-flash",
         "openai/gpt-5.6-sol",
         "claudesonnet5",
+        "claudeopus5.5",
         "qwen3.6-27b",
         "qwen3.8-27b",
         "gpt-6-sol",
@@ -41,7 +42,7 @@ def test_only_openrouter_models_carry_an_openrouter_endpoint_pin():
         "litellm_openai",
         "litellm_responses",
     }
-    assert by_route["litellm_anthropic"] == ["claudesonnet5"]
+    assert by_route["litellm_anthropic"] == ["claudesonnet5", "claudeopus5.5"]
     assert by_route["litellm_openai"] == ["qwen3.6-27b", "qwen3.8-27b"]
     assert by_route["litellm_responses"] == ["gpt-6-sol", "gpt-6-luna"]
     assert len(by_route["openrouter"]) == 4

@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import functools
 import os
 from pathlib import Path
 
 from dce.compile import run as run_module
+from dce.compile.inputs import COMPILER_MODEL
+from dce.pricing import MODELS
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -46,6 +49,11 @@ def main(argv: list[str] | None = None) -> None:
         help="default: contracts, or contracts-joins with --joins",
     )
     parser.add_argument(
+        "--model",
+        default=COMPILER_MODEL,
+        help=f"the compiler model (default {COMPILER_MODEL}, the frozen one)",
+    )
+    parser.add_argument(
         "--joins",
         action="store_true",
         help="let a metric declare the FROM it is written against (from_sql and grain)",
@@ -60,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
         "every entry built on them",
     )
     args = parser.parse_args(argv)
+    if args.model not in MODELS:
+        raise SystemExit(f"--model {args.model!r} has no price in dce.pricing")
     if args.out is None:
         args.out = Path("contracts-joins" if args.joins else "contracts")
 
@@ -79,8 +89,11 @@ def main(argv: list[str] | None = None) -> None:
 
         work = [dabstep_inputs()]
 
-    if args.joins:
-        work = [dataclasses.replace(inputs, joins=True) for inputs in work]
+    work = [
+        dataclasses.replace(inputs, joins=args.joins, model=args.model)
+        for inputs in work
+    ]
+    driver = functools.partial(run_module.claude_driver, model=args.model)
 
     if args.recompile:
         if args.all or len(work) != 1:
@@ -92,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
         status, spent = run_module.compile_database(
             inputs,
             args.out / inputs.out_subdir,
-            run_module.claude_driver,
+            driver,
             spend_cap=args.max_spend,
             spent=spent,
         )

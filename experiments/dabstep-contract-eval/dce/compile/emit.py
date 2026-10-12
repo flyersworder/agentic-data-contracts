@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from dce.compile.inputs import CompileInputs
-from dce.compile.session import COMPILER_MODEL, JOIN_KEYS, NOTE_MARKER, EntryRecord
+from dce.compile.session import JOIN_KEYS, NOTE_MARKER, EntryRecord
 
 #: As the hand-authored DABStep contract forbids.
 FORBIDDEN_OPERATIONS = [
@@ -162,7 +162,7 @@ def write(out_dir: Path, contract: dict, semantic: dict, inputs: CompileInputs) 
     header = HEADER.format(
         benchmark=inputs.benchmark,
         db=inputs.db_name,
-        model=COMPILER_MODEL + (" (joins)" if inputs.joins else ""),
+        model=inputs.model + (" (joins)" if inputs.joins else ""),
         inputs=", ".join(p.name for p in inputs.sources),
     )
     for name, data in (("contract.yml", contract), ("semantic.yml", semantic)):

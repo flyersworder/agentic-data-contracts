@@ -1,0 +1,218 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: dabstep, database: dabstep, compiler: claudesonnet5 (joins)
+# inputs: manual.md, payments-readme.md, dabstep.duckdb
+metrics:
+- name: intracountry_transaction
+  description: 'A transaction is intracountry (domestic) if the issuing country equals the acquirer country;
+    false (international) otherwise.
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: issuing_country = acquirer_country
+  source_model: main.payments
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: is_local_acquiring
+  description: 'A transaction is considered local acquiring when the issuing country of the card equals
+    the acquirer country.
+
+
+    From the manual section "5.1.1 Optimizing Transactions through Local Acquiring".'
+  sql_expression: issuing_country = acquirer_country
+  source_model: main.payments
+  domains:
+  - 5_1_1_optimizing_transactions_through_local_acquiring
+- name: fraud_rate
+  description: 'Fraud defined as the ratio of fraudulent volume over total volume: sum of eur_amount of
+    transactions with has_fraudulent_dispute=true divided by sum of eur_amount of all transactions.
+
+
+    From the manual section "7 Reducing Fraud-Related Fees".'
+  sql_expression: SUM(CASE WHEN has_fraudulent_dispute THEN eur_amount ELSE 0 END) / SUM(eur_amount)
+  source_model: main.payments
+  domains:
+  - 7_reducing_fraud_related_fees
+- name: authorization_rate
+  description: 'Authorization Rate KPI: share of transactions not refused by Adyen (i.e. successfully
+    authorized), computed as 1 minus the refusal rate over all payments.
+
+
+    From the manual section "8.2 Leveraging Reporting Tools for Data-Driven Insights".'
+  sql_expression: AVG(CASE WHEN is_refused_by_adyen THEN 0.0 ELSE 1.0 END)
+  source_model: main.payments
+  domains:
+  - 8_2_leveraging_reporting_tools_for_data_driven_insights
+- name: fraud_rate_kpi_8_2
+  description: 'Fraud Rate KPI: ratio of transactions flagged with a fraudulent dispute over total transactions.
+
+
+    From the manual section "8.2 Leveraging Reporting Tools for Data-Driven Insights".'
+  sql_expression: AVG(CASE WHEN has_fraudulent_dispute THEN 1.0 ELSE 0.0 END)
+  source_model: main.payments
+  domains:
+  - 8_2_leveraging_reporting_tools_for_data_driven_insights
+tables:
+- schema: main
+  table: acquirer_countries
+  columns:
+  - name: column0
+    type: BIGINT
+    description: ''
+  - name: acquirer
+    type: VARCHAR
+    description: ''
+  - name: country_code
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: fees
+  columns:
+  - name: ID
+    type: BIGINT
+    description: ''
+  - name: card_scheme
+    type: VARCHAR
+    description: ''
+  - name: account_type
+    type: VARCHAR[]
+    description: ''
+  - name: capture_delay
+    type: VARCHAR
+    description: ''
+  - name: monthly_fraud_level
+    type: VARCHAR
+    description: ''
+  - name: monthly_volume
+    type: VARCHAR
+    description: ''
+  - name: merchant_category_code
+    type: BIGINT[]
+    description: ''
+  - name: is_credit
+    type: BOOLEAN
+    description: ''
+  - name: aci
+    type: VARCHAR[]
+    description: ''
+  - name: fixed_amount
+    type: DOUBLE
+    description: ''
+  - name: rate
+    type: BIGINT
+    description: ''
+  - name: intracountry
+    type: DOUBLE
+    description: ''
+- schema: main
+  table: merchant_category_codes
+  columns:
+  - name: column0
+    type: BIGINT
+    description: ''
+  - name: mcc
+    type: VARCHAR
+    description: ''
+  - name: description
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: merchant_data
+  columns:
+  - name: merchant
+    type: VARCHAR
+    description: ''
+  - name: capture_delay
+    type: VARCHAR
+    description: ''
+  - name: acquirer
+    type: VARCHAR[]
+    description: ''
+  - name: merchant_category_code
+    type: BIGINT
+    description: ''
+  - name: account_type
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: payments
+  description: "This is documentation for the payments.csv dataset\n\n\n- **Description**: Synthetic dataset\
+    \ of payment transactions processed by the Payments Processor.\n- **Columns**:\n  - `psp_reference`:\
+    \ Unique payment identifier (ID).\n  - `merchant`: Merchant name (Categorical), eg Starbucks or Netflix*.\n\
+    \  - `card_scheme`: Card Scheme used (Categorical) - *[MasterCard, Visa, Amex, Other]*.\n  - `year`:\
+    \ Payment initiation year (Numeric).\n  - `hour_of_day`: Payment initiation hour (Numeric).\n  - `minute_of_hour`:\
+    \ Payment initiation minute (Numeric).\n  - `day_of_year`: Day of the year of payment initiation (Numeric).\n\
+    \  - `is_credit`: Credit or Debit card indicator (Categorical).\n  - `eur_amount`: Payment amount\
+    \ in euro (Numeric).\n  - `ip_country`: The country the shopper was in at time of transaction (determined\
+    \ by IP address) (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*.\n  - `issuing_country`: Card-issuing\
+    \ country (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*.\n  - `device_type`: Device type used\
+    \ (Categorical) - *[Windows, Linux, MacOS, iOS, Android, Other]*.\n  - `ip_address`: Hashed shopper's\
+    \ IP (ID).\n  - `email_address`: Hashed shopper's email (ID).\n  - `card_number`: Hashed card number\
+    \ (ID).\n  - `shopper_interaction`: Payment method (Categorical) - *[Ecommerce, POS]*. POS means an\
+    \ in-person or in-store transaction.\n  - `card_bin`: Bank Identification Number (ID).\n  - `has_fraudulent_dispute`:\
+    \ Indicator of fraudulent dispute from issuing bank (Boolean).\n  - `is_refused_by_adyen`: Adyen refusal\
+    \ indicator (Boolean).\n  - `aci`: Authorization Characteristics Indicator (Categorical).\n  - `acquirer_country`:\
+    \ The location (country) of the acquiring bank (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*."
+  columns:
+  - name: psp_reference
+    type: BIGINT
+    description: ''
+  - name: merchant
+    type: VARCHAR
+    description: ''
+  - name: card_scheme
+    type: VARCHAR
+    description: ''
+  - name: year
+    type: BIGINT
+    description: ''
+  - name: hour_of_day
+    type: BIGINT
+    description: ''
+  - name: minute_of_hour
+    type: BIGINT
+    description: ''
+  - name: day_of_year
+    type: BIGINT
+    description: ''
+  - name: is_credit
+    type: BOOLEAN
+    description: ''
+  - name: eur_amount
+    type: DOUBLE
+    description: ''
+  - name: ip_country
+    type: VARCHAR
+    description: ''
+  - name: issuing_country
+    type: VARCHAR
+    description: ''
+  - name: device_type
+    type: VARCHAR
+    description: ''
+  - name: ip_address
+    type: VARCHAR
+    description: ''
+  - name: email_address
+    type: VARCHAR
+    description: ''
+  - name: card_number
+    type: VARCHAR
+    description: ''
+  - name: shopper_interaction
+    type: VARCHAR
+    description: ''
+  - name: card_bin
+    type: BIGINT
+    description: ''
+  - name: has_fraudulent_dispute
+    type: BOOLEAN
+    description: ''
+  - name: is_refused_by_adyen
+    type: BOOLEAN
+    description: ''
+  - name: aci
+    type: VARCHAR
+    description: ''
+  - name: acquirer_country
+    type: VARCHAR
+    description: ''

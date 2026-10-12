@@ -288,3 +288,35 @@ def test_the_section_tool_schema_lists_the_join_fields_only_when_on(ctx, joins):
     schema = json.dumps(Tool(driver.tools["submit_entry"]).function_schema.json_schema)
     assert ("from_sql" in schema) is joins
     assert ("grain" in schema) is joins
+
+
+def test_the_joins_rule_offers_any_join_condition_and_derived_tables(ctx):
+    _, driver = _submit(ctx, 3)
+    prompt = " ".join(driver.system_prompt.split())
+    assert "not only key equality" in prompt
+    assert "derived table" in prompt
+
+
+@pytest.mark.parametrize(
+    "from_sql",
+    [
+        # a join on a condition, with NULL meaning "any value"
+        "main.orders o JOIN main.customers c"
+        " ON (c.tier IS NULL OR c.tier = 'gold') AND o.amount > 100",
+        # a derived table for an aggregate the expression needs
+        "main.orders o JOIN (SELECT custid, SUM(amount) AS total"
+        " FROM main.orders GROUP BY custid) t ON t.custid = o.custid",
+    ],
+)
+def test_a_condition_join_or_a_derived_table_is_accepted(ctx, from_sql):
+    _, driver = _submit(
+        ctx,
+        3,
+        {
+            "sql_expression": "SUM(o.amount)",
+            "source_model": "orders",
+            "from_sql": from_sql,
+            "grain": "one row per order",
+        },
+    )
+    assert driver.replies == ["Recorded."]

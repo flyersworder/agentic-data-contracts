@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.62.0] - 2026-10-12
+
+### Added
+
+- **A metric can declare the FROM clause it is written against, and its grain** (#136). `from_sql` holds the tables and aliases a `sql_expression` reads when that is more than its `source_model`, joined; `grain` says in words what one row of that FROM is, so an aggregate over a join that is not one-to-one is unambiguous. Before, such a join lived only in the description: nothing could build the query that checks the metric, and the agent rebuilt the join from prose. Both keys are optional. `lookup_metric` returns them when set, and `dump_semantic_source` writes them only when set, so existing frozen contracts keep their `contract_digest`. A contract that uses them needs this version or later: earlier versions refuse unknown metric keys. A blank value is refused.
+- **`validate_metric_from_sql(contract, metrics)`, the CI gate for a declared FROM.** For each metric with `from_sql`, it builds `SELECT <sql_expression> FROM <from_sql>`, with the metric's `filters` as its WHERE clause (also exposed as `metric_query(metric)`). It reports a problem when `from_sql` is more than a FROM clause, when the contract's own `Validator` refuses that query, or when the FROM does not read the metric's `source_model`. Running the `Validator` means the gate refuses exactly what run time will refuse when the agent reuses the join: tables, principals, `max_joins`, one statement. The checks an agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out. Given an `explain_adapter`, it also reports what the database cannot bind, such as an undefined alias or a missing column; the contract's cost and row limits are not applied to the bare join. `dialect`, `sql_normalizer` and `caller_principal` mean what they mean for `Validator`; the default `caller_principal=None` is an anonymous caller.
+- **A `{{ metric:NAME }}` placeholder refuses a metric that declares `from_sql`**, as it already refuses one with `filters`: the expression is written against that FROM's aliases, which the example's own FROM does not define.
+
+## [0.61.0] - 2026-10-10
+
+### Changed
+
+- **Under Pydantic AI, every failed call now raises `ToolFailed` instead of `ModelRetry`.** A block (`BLOCKED —`: a forbidden operation, a table outside the allowlist, a missing required filter, unparseable SQL, a failed result check) and an execution error (`ERROR —`: SQL the database could not run) both reach the model as a failed tool result, the same text the LangChain and Claude Agent SDK adapters return. The model decides its next step from the message, without the generic retry instructions `ModelRetry` adds. `ToolFailed` spends none of Pydantic AI's per-tool retry budget, so the contract is the one bound on failures: `max_retries` ends repeated failures with `ContractSessionLimitError`, and `token_budget` and `max_duration_seconds` bound the whole run. A contract with none of these leaves only Pydantic AI's `UsageLimits(request_limit=...)`, 50 model requests by default. A spent session budget still raises the terminal `ContractSessionLimitError`. Code that caught `ModelRetry` around a direct call to a wrapped tool should catch `ToolFailed`.
+- **`preview_table`'s blocks now count toward `max_retries`, on every adapter.** Its `SELECT *` gate and its `max_query_time_seconds` timeout record a block in the session, as `run_query`'s blocks do, so every `BLOCKED —` and `ERROR —` result counts. Under Pydantic AI they were bounded by the tool's retry budget, which a `ToolFailed` no longer spends; elsewhere they were not bounded at all, so a model could repeat a preview that timed out, leaving scans running in the database.
+- **`run_query` no longer takes the contract's `max_retries` as its Pydantic AI retry budget** (added in 0.60.1). With no failure spending that budget, it is back to the agent's own `retries` setting, which now covers only Pydantic AI's own retries, such as malformed tool arguments.
+- **`pydantic-ai-slim` 2.16.0 or later is required** for the `pydantic-ai` extra, up from 2.0.0. It is the first release with `ToolFailed`. The lock moves to 2.55.0.
+
+## [0.60.1] - 2026-10-09
+
+### Fixed
+
+- **Under Pydantic AI, two failed queries in a row ended the run, whatever the contract's `max_retries` allowed.** The wrapper turns every `BLOCKED —` and `ERROR —` result into a `ModelRetry`, and Pydantic AI ends a run with `UnexpectedModelBehavior` once a tool fails more times in a row than its retry budget, which defaults to 1. `run_query`, from both `create_pydantic_ai_tools` and `create_pydantic_ai_toolset`, now takes the contract's `resources.max_retries` as that budget, so the run continues until the contract's own limit ends it with `ContractSessionLimitError`. The other tools, whose failures the session does not count, keep the agent's `retries` setting, and so does `run_query` under a contract that declares no `max_retries`.
+- **Under Pydantic AI, SQL containing the words "Session limit exceeded" could end the run.** The wrapper took any `BLOCKED` message containing that phrase as a spent budget, and a parse error repeats the agent's SQL. It now matches the phrase only where a real budget breach puts it, right after the prefix, so such a block stays recoverable.
+
+## [0.60.0] - 2026-10-09
+
+### Fixed
+
+- **`run_query` reported the agent's own SQL errors as governance blocks.** A query the contract allowed but the database could not run came back as `BLOCKED — ...`, and the session counted it the same way as a contract refusal. The agent read "BLOCKED" for a query nothing blocked, and anyone reading the retry count as the number of blocks overstated enforcement: in one evaluation run all 28 recorded "blocks" were failed casts. A query that fails during execution (a failed cast, malformed JSON) now reads `ERROR — Query execution failed: ...`, and one the database rejects at the `EXPLAIN` dry-run (a missing column) reads `ERROR — Schema validation failed: ...`, in `run_query` and in both middlewares. SQL the validator cannot parse is still a block: it is refused fail-closed, because the contract cannot check it. (#134)
+
+### Added
+
+- **`ContractSession.blocks` and `ContractSession.execution_errors`** count the two kinds of failed query separately, recorded with `record_block()` and `record_execution_error()`. Each also spends a retry, so `max_retries` means what it did: every failed query attempt, blocked or not. `record_retry()` still spends a retry without classifying it.
+- **`ValidationResult.rejected_by_database`** says a query was blocked only because the `EXPLAIN` dry-run rejected it.
+
+### Changed
+
+- **The LangChain and Pydantic AI wrappers treat `ERROR —` like `BLOCKED —`**: a `ToolException`, or a recoverable `ModelRetry`, so an agent still gets the chance to fix its query. Code that matched `BLOCKED —` to detect a failed execution should match `ERROR —` too.
+- **Conformance friction no longer counts a query the database rejected at `EXPLAIN`.** Friction in `evaluate_conformance` counts `run_query` attempts the contract blocked. A missing column used to be recorded as `blocked` and counted; it is now an `error`, like a failed cast always was, so "N blocked run_query attempt(s)" counts contract refusals only.
+
+## [0.59.1] - 2026-10-09
+
+### Fixed
+
+- **With only the `duckdb` extra installed, a query returning a `TIMESTAMP WITH TIME ZONE` value failed.** DuckDB imports `pytz` to hand such a value to Python, and nothing in `agentic-data-contracts[duckdb]` installed it, so `run_query` answered `Required module 'pytz' failed to import` for SQL that was fine. The library's own test environment did not show it, because `pytz` arrives there through the Snowflake connector. The `duckdb` extra now declares `pytz`. (#135)
+
 ## [0.59.0] - 2026-10-02
 
 ### Fixed

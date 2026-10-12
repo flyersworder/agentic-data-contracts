@@ -60,10 +60,16 @@ mid-flight restore just undid. `close()` every `ArmSetup` for the task first
 combination for which the restore is guaranteed durable.
 
 RETRY BUDGET, NOT FIXABLE HERE BUT CREATED HERE: pydantic-ai's per-run
-tool-retry budget defaults to `Agent(retries=1)`. Arm `contract`'s governed
-tools raise `ModelRetry` on a validation block (bad SQL, `SELECT *` under
+tool-retry budget defaults to `Agent(retries=1)`. Up to
+agentic-data-contracts 0.60.x, arm `contract`'s governed tools raise
+`ModelRetry` on a validation block (bad SQL, `SELECT *` under
 `no_select_star`, a forbidden operation, a missing required filter, ...), and
-pydantic-ai counts every `ModelRetry` against that one shared budget. Arms
+pydantic-ai counts every `ModelRetry` against that one shared budget. (From
+0.61.0 they raise `ToolFailed`, which spends nothing. That also changes what
+arm C's model sees: the block as a failed tool result, without pydantic-ai's
+"Fix the errors and try again" text, and wrapped as `{"error": ...}` on
+OpenAI-compatible providers such as OpenRouter. A sweep on 0.61.0 is a new
+treatment for arm C; compare it with 0.60.x runs only as such.) Arms
 `schema_only` and `manual_prompt` never raise at all — a bad query comes back
 as an ordinary `"ERROR: ..."` string and the model just keeps iterating.
 Measured end to end: arm A finished a task after 7 model calls; arm C raised

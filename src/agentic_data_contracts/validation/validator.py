@@ -132,6 +132,18 @@ class ValidationResult:
     parse_error: bool = False
     relative_time: str | None = None
 
+    @property
+    def rejected_by_database(self) -> bool:
+        """Blocked only because the EXPLAIN dry-run rejected the SQL (#134).
+
+        A missing column or a binder error: the agent's own mistake, not a
+        contract refusal. It holds because ``validate`` runs EXPLAIN only once
+        every policy check has passed, so a schema rejection is never mixed
+        with a policy reason. Unparseable SQL is not one: it is refused before
+        EXPLAIN, fail-closed.
+        """
+        return self.blocked and not self.schema_valid
+
 
 @dataclass(frozen=True)
 class _QueryRuleEntry:

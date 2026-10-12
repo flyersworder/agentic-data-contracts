@@ -380,7 +380,7 @@ agent = create_deep_agent(
 </details>
 
 <details>
-<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.0.0+</summary>
+<summary><b>Pydantic AI</b> — requires <code>pydantic-ai-slim</code> 2.16.0+</summary>
 
 ```python
 from agentic_data_contracts import create_pydantic_ai_tools
@@ -392,11 +392,22 @@ tools = create_pydantic_ai_tools(dc, adapter=adapter)
 agent = Agent("anthropic:claude-sonnet-4-6", tools=tools)
 ```
 
-Enforcement is auto-applied in-tool: a blocked query (bad SQL, forbidden
-operation, missing required filter) raises `ModelRetry` so the model rewrites
-and retries, while session-limit exhaustion raises a terminal
-`ContractSessionLimitError` that ends the run. Install:
+Enforcement is auto-applied in-tool: a blocked query (forbidden operation,
+missing required filter, unparseable SQL) or one the database fails to run
+(a missing column, a failed cast) raises `ToolFailed`. The model sees the
+message as a failed tool result and takes its next step from it, as it does
+under the LangChain and Claude Agent SDK adapters. Session-limit exhaustion
+raises a terminal `ContractSessionLimitError` that ends the run. Install:
 `pip install "agentic-data-contracts[pydantic-ai]"`.
+
+A failed call spends none of Pydantic AI's per-tool retry budget, so the
+contract is the one bound: every `BLOCKED —` and `ERROR —` result counts toward
+`resources.max_retries`, which ends repeated failures with
+`ContractSessionLimitError`, and `token_budget` and `max_duration_seconds`
+bound the whole run. A contract with none of these leaves only Pydantic AI's
+`UsageLimits(request_limit=...)`, 50 model requests by default. Pydantic AI's
+own retries (tool arguments it cannot parse, output validation) still end a
+run with `UnexpectedModelBehavior` past the agent's `retries` setting.
 
 **One shared agent for many users.** For a multi-user service, build the `Agent`
 **once** and pass each user's state via `deps` — `create_pydantic_ai_toolset`
@@ -423,7 +434,7 @@ result = await agent.run(
 
 The caller owns each user's `ContractSession` (created once per user, keyed by
 user id). Per-user principals drive per-principal table/rule gating, and the same
-`ModelRetry` / `ContractSessionLimitError` enforcement applies per user.
+`ToolFailed` / `ContractSessionLimitError` enforcement applies per user.
 
 Pair with `**contract_run_kwargs(dc, user_session)` on each `run()` to have
 Pydantic AI enforce the token budget per model request — see
@@ -742,6 +753,30 @@ likely to expect it.
 `tier`, `indicator_kind`, and `domains` are all optional. For dbt and Cube sources, these fields live under the metric's `meta:` block and are read through the same field names. For Ossie, they live in the model's `custom_extensions` block (see [Apache Ossie](#apache-ossie) below).
 
 **Ownership & review cadence (optional).** `business_owner` / `operational_owner` (always *teams*, not individuals — owners outlive any one person) and `last_reviewed` declare who owns a metric's definition vs. its data health, and when it was last vetted. `last_reviewed` feeds `DataContract.find_stale()` (see [Governance Staleness](docs/architecture.md#governance-staleness)) and surfaces in `lookup_metric` / `lookup_domain` as a `stale` flag so the agent can disclose drift at query time. The same three fields are accepted on a `domain`. They are read from the **YAML source** and from an **Ossie** model's `custom_extensions` block; dbt/Cube metrics default to unset.
+
+**Metrics over several tables (optional).** A metric whose `sql_expression` reads more than its `source_model` declares the FROM clause it is written against in `from_sql`, and what one row of that FROM is in `grain`:
+
+```yaml
+metrics:
+  - name: transaction_fee
+    description: "Fee for one payment under one fee rule that applies to it"
+    source_model: main.fees
+    from_sql: >-
+      main.payments p
+      JOIN main.merchant_data m ON m.merchant = p.merchant
+      JOIN main.fees f ON f.card_scheme = p.card_scheme
+    grain: one row per (payment, fee rule that applies to it)
+    sql_expression: "f.fixed_amount + f.rate * p.eur_amount / 10000"
+```
+
+Without them, a join lives only in the description: nothing can build the query that checks the metric, and the agent has to rebuild the join from prose. With them, `lookup_metric` returns both, and `SELECT <sql_expression> FROM <from_sql>` (`metric_query(metric)`) is a whole query. `validate_metric_from_sql(contract, metrics)` is the CI gate for it, and reports a problem when:
+
+- the contract's own `Validator` refuses it: it does not parse as one statement, reads a table the caller may not read, joins more than `max_joins` allows, and so on. The agent will reuse the join, and the `Validator` is what judges that reuse, so the gate refuses exactly what run time would. Rules the agent satisfies by what it adds around the join (`required_filter`, `required_filter_values`, `require_limit`) are left out, and a `warn` or `log` rule is not a problem;
+- `from_sql` is more than a FROM clause (a WHERE, GROUP BY, ORDER BY, LIMIT or set operation in it), since the agent writes its own around it;
+- `from_sql` does not read the metric's `source_model`;
+- given an `explain_adapter`, the database cannot bind a name in the query, such as an alias `from_sql` does not define or a missing column. Only binding is checked, not the contract's cost or row limits, because a join with no WHERE estimates the full scan the agent's own query will narrow. Without an adapter, names are not checked: without the schema, `info.amount` may be a struct field as well as `alias.column`.
+
+The query includes the metric's `filters` as its WHERE clause, since without them it is a different quantity. `dialect`, `sql_normalizer` and `caller_principal` mean what they mean for `Validator`, and should match what the agent's queries are validated with. The default `caller_principal=None` is an anonymous caller, so a join over a principal-restricted table needs the principal that will reuse it. What the query means still needs a reviewer. A `{{ metric:NAME }}` placeholder in a verified example refuses a metric with `from_sql`, because its expression is written against aliases the example's FROM does not define. Both keys are optional and omitted from a frozen contract when unset, so existing digests do not move. A contract that uses them needs 0.62.0 or later, because earlier versions refuse unknown metric keys.
 
 **dbt** — point to a `manifest.json`:
 ```yaml
@@ -1641,7 +1676,7 @@ Tested for 200+ tables, 300+ metrics, 50+ relationships across multiple schemas.
 ```yaml
 resources:
   cost_limit_usd: 5.00          # max estimated query cost
-  max_retries: 3                 # max blocked queries per session
+  max_retries: 3                 # max failed queries (blocks + execution errors) per session
   token_budget: 50000            # max tokens consumed
   max_query_time_seconds: 30     # max wall-clock query time
   max_rows_scanned: 1000000      # max rows an EXPLAIN may estimate
@@ -1770,13 +1805,14 @@ estimated. Two things follow, both measured on a 500-token budget:
   is issued.
 
 `max_retries` is deliberately **not** mapped onto `request_limit`: ours counts
-blocked queries, theirs counts LLM calls.
+failed queries, theirs counts LLM calls.
 
 Keep catching `ContractSessionLimitError` alongside
 `pydantic_ai.exceptions.UsageLimitExceeded` — the session still enforces
 `max_retries`, `cost_limit_usd` and `max_duration_seconds`, and can be fed from
-outside the run. Sequential turns only: one counter per session is shared
-mutable state.
+outside the run. `pydantic_ai.exceptions.UnexpectedModelBehavior` is reachable
+too, from Pydantic AI's own retries (see the Pydantic AI section above).
+Sequential turns only: one counter per session is shared mutable state.
 
 ## Optional Dependencies
 
@@ -1788,7 +1824,7 @@ mutable state.
 | `postgres` | `psycopg2-binary>=2.9.10` | Driver only — for a `DatabaseAdapter` you write |
 | `agent-sdk` | `claude-agent-sdk>=0.2.96`, `mcp>=1.23.0` | Claude Agent SDK integration |
 | `langchain` | `langchain-core>=1.3.3`, `langchain>=1.2.17`, `langgraph>=1.1.10` | LangChain / deepagents integration |
-| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.0.0` | Pydantic AI integration |
+| `pydantic-ai` | `pydantic-ai-slim[anthropic]>=2.16.0` | Pydantic AI integration |
 | `agent-contracts` | `ai-agent-contracts>=0.3.1` | ai-agent-contracts bridge |
 
 ## Optional: Formal Governance with ai-agent-contracts

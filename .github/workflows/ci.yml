@@ -157,9 +157,9 @@ jobs:
           grep -qE '\[MATCH +\] revenue-by-region' out.txt
 
   test-pydantic-ai-latest:
-    # Early-warning job. pyproject allows pydantic-ai-slim >=2.0 (unbounded), and
+    # Early-warning job. pyproject allows pydantic-ai-slim >=2.16 (unbounded), and
     # Pydantic AI's version policy only guarantees ~3 months between breaking majors.
-    # The `test` job above runs against the locked v2.0; this runs the adapter suite
+    # The `test` job above runs against the locked version; this runs the adapter suite
     # against the newest release allowed by the floor (the next 2.x, and the next
     # major once it ships) so an upstream break surfaces here rather than in a user's
     # install. Intentionally NOT a release gate (omitted from publish.needs).
@@ -173,12 +173,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
       - run: uv python install 3.13
-      # --isolated forces a fresh resolve (ignoring the locked v2.0); --with pins
+      # --isolated forces a fresh resolve (ignoring the locked version); --with pins
       # only the floor, so uv resolves the newest compatible release. Only the
       # extras the adapter suite needs are installed.
       - run: >-
           uv run --isolated --python 3.13
-          --with 'pydantic-ai-slim[anthropic]>=2.0'
+          --with 'pydantic-ai-slim[anthropic]>=2.16'
           --extra pydantic-ai --extra duckdb --extra dev
           pytest tests/test_tools/test_pydantic_ai.py -v
 

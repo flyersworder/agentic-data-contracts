@@ -99,6 +99,17 @@ class MetricDefinition:
     # is the whole metric. Set by the dbt and Cube sources, whose metrics are
     # assembled from parts; an empty expression with no reason is a bug.
     untranslated: str | None = None
+    # The FROM clause ``sql_expression`` is written against, when it reads
+    # more than ``source_model`` (#136): tables and their aliases, joined.
+    # None means the expression reads ``source_model`` alone. With it,
+    # ``SELECT <sql_expression> FROM <from_sql>`` is a whole query, so the
+    # join can be shown to the agent and checked
+    # (``validation.metric_from.validate_metric_from_sql``).
+    from_sql: str | None = None
+    # What one row of the metric's FROM is, in words ("one row per payment
+    # and fee rule that applies to it"). Says how to aggregate when a join
+    # is not one-to-one.
+    grain: str | None = None
 
 
 @dataclass
@@ -725,6 +736,10 @@ def dump_semantic_source(source: SemanticSource) -> dict[str, Any]:
         # tools layer already uses (``_metric_details``).
         if m.untranslated is not None:
             data["untranslated"] = m.untranslated
+        if m.from_sql is not None:
+            data["from_sql"] = m.from_sql
+        if m.grain is not None:
+            data["grain"] = m.grain
         if m.decompositions:
             decompositions: list[dict[str, Any]] = []
             for d in m.decompositions:

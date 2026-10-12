@@ -178,6 +178,24 @@ async def test_run_query_blocked_sql_raises_tool_exception(
 
 
 @pytest.mark.asyncio
+async def test_run_query_execution_error_raises_tool_exception(
+    contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
+) -> None:
+    """The agent's own failed SQL is worded ``ERROR —``, not ``BLOCKED —``, and
+    still reaches the model as ToolMessage(status="error") (#134)."""
+    tools = create_langchain_tools(contract, adapter=adapter, semantic_source=semantic)
+    run_query = next(t for t in tools if t.name == "run_query")
+    with pytest.raises(ToolException) as exc:
+        await run_query.ainvoke(
+            {
+                "sql": "SELECT CAST(tenant_id AS INTEGER) AS n"
+                " FROM analytics.orders WHERE tenant_id = 'acme'"
+            }
+        )
+    assert str(exc.value).startswith("ERROR — Query execution failed")
+
+
+@pytest.mark.asyncio
 async def test_run_query_allowed_sql_returns_content_and_artifact(
     contract: DataContract, adapter: DuckDBAdapter, semantic: YamlSource
 ) -> None:
@@ -319,7 +337,8 @@ async def test_contract_middleware_blocks_disallowed_sql_via_awrap_tool_call(
     from langchain.agents.middleware.types import ToolCallRequest
     from langchain_core.messages import ToolMessage
 
-    mw = ContractMiddleware(contract, adapter=adapter)
+    session = ContractSession(contract)
+    mw = ContractMiddleware(contract, adapter=adapter, session=session)
     request = ToolCallRequest(
         tool_call={
             "name": "run_query",
@@ -341,6 +360,7 @@ async def test_contract_middleware_blocks_disallowed_sql_via_awrap_tool_call(
     assert "BLOCKED" in str(result.content)
     assert "Remaining:" in str(result.content)  # agent must see budget
     assert result.tool_call_id == "tc-1"
+    assert session.blocks == 1
 
 
 @pytest.mark.asyncio
@@ -374,6 +394,40 @@ async def test_contract_middleware_lets_allowed_sql_through(
 
     result = await mw.awrap_tool_call(request, _handler)
     assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_contract_middleware_counts_a_database_rejection_as_an_execution_error(
+    contract: DataContract, adapter: DuckDBAdapter
+) -> None:
+    """A missing column fails EXPLAIN: the agent's error, not a block (#134)."""
+    from langchain.agents.middleware.types import ToolCallRequest
+    from langchain_core.messages import ToolMessage
+
+    session = ContractSession(contract)
+    mw = ContractMiddleware(contract, adapter=adapter, session=session)
+    request = ToolCallRequest(
+        tool_call={
+            "name": "run_query",
+            "args": {
+                "sql": "SELECT nosuchcol FROM analytics.orders WHERE tenant_id = 'acme'"
+            },
+            "id": "tc-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={},
+        runtime=None,  # ty: ignore[invalid-argument-type]
+    )
+
+    async def _handler(_req: ToolCallRequest) -> ToolMessage:  # pragma: no cover
+        raise AssertionError("handler must not run when the database rejects")
+
+    result = await mw.awrap_tool_call(request, _handler)
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert str(result.content).startswith("ERROR — Schema validation failed:")
+    assert (session.blocks, session.execution_errors) == (0, 1)
 
 
 def test_contract_middleware_blocks_disallowed_sql_via_wrap_tool_call_sync(

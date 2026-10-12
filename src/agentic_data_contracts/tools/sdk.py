@@ -29,6 +29,7 @@ from agentic_data_contracts.core.contract import DataContract
 from agentic_data_contracts.core.session import ContractSession, LimitExceededError
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
     _error_response,
@@ -38,8 +39,6 @@ from agentic_data_contracts.tools.factory import (
 
 if TYPE_CHECKING:
     from mcp.types import ToolAnnotations
-
-_BLOCKED_PREFIX = "BLOCKED —"
 
 # Tools that only read — from the contract, the semantic source, or the database
 # catalog. `run_query` is deliberately absent rather than annotated `False`:
@@ -119,9 +118,7 @@ def _wrap_with_session_check(
             session.check_limits()
         except LimitExceededError as e:
             return _error_response(
-                _with_remaining(
-                    f"{_BLOCKED_PREFIX} Session limit exceeded: {e}", session
-                ),
+                _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session),
                 kind="blocked",
             )
         return await inner(args)
@@ -176,7 +173,7 @@ def create_sdk_mcp_server(
             receives a structured error signal on this path too. The
             LangChain adapter instead raises a ``ToolException`` (and its
             middleware returns ``ToolMessage(status="error")``); Pydantic AI
-            raises ``ModelRetry``, or the terminal
+            raises ``ToolFailed``, or the terminal
             ``ContractSessionLimitError`` on a budget breach. All three
             surface the same text; they differ in *shape* — one MCP boolean
             here, native exception types there, which is why the other two

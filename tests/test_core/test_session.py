@@ -26,6 +26,29 @@ def test_session_blocks_on_max_retries(fixtures_dir: Path) -> None:
         session.check_limits()
 
 
+def test_session_separates_blocks_from_execution_errors(fixtures_dir: Path) -> None:
+    # #134: a contract refusal and the agent's own failed SQL are counted
+    # apart, and both spend the one max_retries budget.
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    session.record_block()
+    session.record_execution_error()
+    session.record_execution_error()
+    assert session.blocks == 1
+    assert session.execution_errors == 2
+    assert session.retries == 3
+    with pytest.raises(LimitExceededError, match="retries"):
+        session.check_limits()
+
+
+def test_record_retry_counts_as_neither_kind(fixtures_dir: Path) -> None:
+    # The unclassified call stays for existing callers: budget only.
+    dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
+    session = ContractSession(dc)
+    session.record_retry()
+    assert (session.retries, session.blocks, session.execution_errors) == (1, 0, 0)
+
+
 def test_session_tracks_tokens(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     session = ContractSession(dc)

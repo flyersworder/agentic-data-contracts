@@ -6,18 +6,27 @@ Enforcement is applied **in-tool**, mirroring ``create_langchain_tools``'s
 default path: each wrapped tool pre-checks ``ContractSession`` limits and the
 underlying callables self-validate SQL (see ``run_query`` in
 ``tools/factory.py``). Two enforcement signals are mapped onto Pydantic AI's
-error contract, which distinguishes recoverable from terminal failures:
+error contract:
 
-- **Validation block** (``BLOCKED —`` envelope from a tool — bad SQL, a
-  forbidden operation, a missing required filter, a failed result-check) is
-  *recoverable*: re-raised as ``pydantic_ai.ModelRetry`` so the model can
-  rewrite its arguments and try again.
+- **A failed call** (a ``BLOCKED —`` result: a forbidden operation, a table
+  outside the allowlist, a missing required filter, unparseable SQL, a failed
+  result check; or an ``ERROR —`` result: SQL the database could not run) is
+  raised as ``pydantic_ai.ToolFailed``. The model sees the message as a failed
+  tool result and decides its next step from it, as it does under the
+  LangChain and Claude Agent SDK adapters, which return the same text. The
+  message carries the next step; the exception type does not. ``ToolFailed``
+  spends none of Pydantic AI's per-tool retry budget, so the contract is the
+  one bound: every ``BLOCKED —`` and ``ERROR —`` result counts toward its
+  ``max_retries``, which ends repeated failures with
+  ``ContractSessionLimitError``, and its ``token_budget`` and
+  ``max_duration_seconds`` bound the whole run. With none of them, only
+  Pydantic AI's ``UsageLimits.request_limit`` does (50 model requests by
+  default). ``describe_table`` / ``preview_table`` access denials have no
+  prefix and come back as ordinary results.
 - **Session-limit exhaustion** (``max_retries`` / ``max_duration`` / cost
   budget) is *terminal*: retrying cannot help, so it is raised as
   ``ContractSessionLimitError`` (a plain ``RuntimeError`` subclass) which
-  propagates out of the run instead of consuming a model retry slot. This
-  matches how ``factory.run_query`` already separates the two cases — it
-  records a retry on a validation block but not on a limit breach.
+  propagates out of the run instead of reaching the model.
 
 Pass ``apply_middleware=False`` to skip the per-tool session pre-check (the
 underlying ``run_query`` still self-checks its own limits).
@@ -33,7 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 from weakref import WeakKeyDictionary
 
-from pydantic_ai import ModelRetry, RunContext, Tool
+from pydantic_ai import RunContext, Tool, ToolFailed
 from pydantic_ai.toolsets import FunctionToolset, ToolsetFunc
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -47,14 +56,14 @@ from agentic_data_contracts.core.session import (
 )
 from agentic_data_contracts.semantic.base import SemanticSource
 from agentic_data_contracts.tools.factory import (
+    _FAILURE_PREFIXES,
+    _SESSION_LIMIT_PREFIX,
     RowFormat,
     ToolDef,
     create_tools,
     validate_max_result_rows,
     validate_row_format,
 )
-
-_BLOCKED_PREFIX = "BLOCKED —"
 
 # One carried ``RunUsage`` per ``ContractSession``, so a session's token tally
 # can track a counter that spans every turn instead of per-run snapshots. Weak
@@ -73,11 +82,6 @@ _CARRIED_USAGE: WeakKeyDictionary[ContractSession, RunUsage] = WeakKeyDictionary
 # 600 was recorded as 900, and the inflated tally then blocked a run that was
 # still within budget.
 _CARRIED_SCOPE = "pydantic-ai:carried"
-# Substring marking a *terminal* session-budget breach inside a BLOCKED
-# envelope (vs. a recoverable validation/permission block). Both this adapter's
-# own pre-check and ``factory.run_query``'s self-check emit it, so the sniff
-# below must treat it as terminal regardless of which layer produced it.
-_SESSION_LIMIT_MARKER = "Session limit exceeded"
 
 
 def _with_remaining(message: str, session: ContractSession) -> str:
@@ -190,26 +194,26 @@ def _to_pydantic_ai_tool(
             try:
                 session.check_limits()
             except LimitExceededError as e:
-                # Terminal — do NOT raise ModelRetry; retrying cannot help.
+                # Terminal: retrying cannot help, so end the run.
                 raise ContractSessionLimitError(
-                    _with_remaining(
-                        f"{_BLOCKED_PREFIX} {_SESSION_LIMIT_MARKER}: {e}", session
-                    )
+                    _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}", session)
                 ) from e
 
         text = _unwrap_mcp_text(await inner(kwargs))
 
-        # Every BLOCKED path in tools/factory.py uses the canonical
-        # "BLOCKED —" em-dash prefix. A session-budget breach is terminal even
-        # when it surfaces from a tool's own self-check (run_query's limit
-        # check under apply_middleware=False), so it must NOT become a
-        # recoverable ModelRetry. Everything else BLOCKED (bad SQL, forbidden
-        # op, permission gate, failed result-check) is recoverable: surfaced as
-        # ModelRetry so the model can rewrite its arguments or switch tools.
-        if text.startswith(_BLOCKED_PREFIX):
-            if _SESSION_LIMIT_MARKER in text:
-                raise ContractSessionLimitError(text)
-            raise ModelRetry(text)
+        # A session-budget breach is terminal even when it surfaces from a
+        # tool's own self-check (run_query's limit check under
+        # apply_middleware=False), so it must NOT reach the model as a tool
+        # result. Every other BLOCKED / ERROR is a ToolFailed: the model reads
+        # the message and decides, and the session, not Pydantic AI's retry
+        # budget, counts the failure.
+        # Matched as a prefix, never a substring: a block message can quote the
+        # agent's own SQL (a parse error does), and SQL containing the phrase
+        # is not a spent budget.
+        if text.startswith(_SESSION_LIMIT_PREFIX):
+            raise ContractSessionLimitError(text)
+        if text.startswith(_FAILURE_PREFIXES):
+            raise ToolFailed(text)
 
         return text
 
@@ -314,8 +318,8 @@ def contract_run_kwargs(
     What is deliberately **not** mapped:
 
     - **``max_retries`` is NOT mapped onto ``request_limit``.** They count
-      different things — ``max_retries`` counts *blocked query attempts* here
-      (``record_retry()`` fires on a validation block), while ``request_limit``
+      different things — ``max_retries`` counts *failed query attempts* here
+      (a block or an execution error in ``run_query``), while ``request_limit``
       counts *model requests*. A contract saying ``max_retries: 3`` means
       "three bad queries and you are done", not "three LLM calls". Conflating
       them would silently change what an existing contract means.
@@ -339,7 +343,9 @@ def contract_run_kwargs(
     ``ContractSessionLimitError`` remains reachable — the session still holds
     ``max_retries``, ``cost_limit_usd`` and ``max_duration_seconds``, and can be
     fed from outside the run — so keep that handler alongside
-    ``pydantic_ai.exceptions.UsageLimitExceeded``.
+    ``pydantic_ai.exceptions.UsageLimitExceeded``. ``UnexpectedModelBehavior``
+    is reachable too, from Pydantic AI's own retries (tool arguments it cannot
+    parse, output validation) past the agent's ``retries`` setting.
 
     ``contract`` supplies the budget and ``session`` supplies both the spend
     and the counter, so pass the session built for *that* contract. A
@@ -448,11 +454,11 @@ def create_pydantic_ai_toolset(
         max_result_rows: The most rows ``run_query`` / ``preview_table``
             return (default 1000); ``None`` for no cap. See ``create_tools``.
 
-    Enforcement is identical to :func:`create_pydantic_ai_tools` (a validation
-    block becomes ``ModelRetry``; a session-budget breach becomes the terminal
-    ``ContractSessionLimitError``). The shared config (adapter connection pool,
-    semantic source) stays shared across all users; only the per-user session and
-    principal vary, threaded in via ``deps``.
+    Enforcement is identical to :func:`create_pydantic_ai_tools` (a block or
+    an execution error becomes ``ToolFailed``; a session-budget breach the
+    terminal ``ContractSessionLimitError``). The shared config (adapter
+    connection pool, semantic source) stays shared across all users; only the
+    per-user session and principal vary, threaded in via ``deps``.
     """
     # This function returns a factory that builds tools per run, so deferring
     # to create_tools would push a typo to the first agent run. Check now.

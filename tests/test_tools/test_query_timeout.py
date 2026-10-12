@@ -86,6 +86,7 @@ async def test_run_query_timeout_is_a_blocked_query(adapter: DuckDBAdapter) -> N
     assert "was cancelled" in text
     assert "Remaining:" in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
     # The statement was cancelled in the database, so the connection is free.
     assert len(adapter.execute(FAST_SQL).rows) == 3
 
@@ -166,6 +167,7 @@ async def test_run_query_timeout_falls_back_for_adapters_without_support(
     assert "may still be running" in text
     assert "was cancelled" not in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
 
 
 class _SlowRowLimitAdapterWithoutTimeout:
@@ -232,6 +234,7 @@ async def test_row_limited_path_falls_back_for_adapters_without_timeout_support(
     assert "may still be running" in text
     assert "was cancelled" not in text
     assert session.retries == 1
+    assert (session.blocks, session.execution_errors) == (1, 0)
     assert seen_timeouts == [None]
 
 
@@ -240,8 +243,10 @@ async def test_preview_table_honours_the_limit() -> None:
         def execute_with_timeout(self, sql: str, timeout_seconds: float) -> QueryResult:
             raise QueryTimeoutError(timeout_seconds)
 
+    dc = _contract(0.5)
+    session = ContractSession(dc)
     preview = _tool(
-        create_tools(_contract(0.5), adapter=_build(_AlwaysTimesOut)),
+        create_tools(dc, adapter=_build(_AlwaysTimesOut), session=session),
         "preview_table",
     )
 
@@ -251,6 +256,9 @@ async def test_preview_table_honours_the_limit() -> None:
     text = result["content"][0]["text"]
     assert "max_query_time_seconds" in text
     assert "run_query" in text
+    # A timed-out preview is a block like run_query's: it counts against
+    # max_retries, so repeated previews cannot pile up abandoned scans.
+    assert (session.blocks, session.retries) == (1, 1)
 
 
 def test_warns_at_wiring_when_the_adapter_cannot_cancel(

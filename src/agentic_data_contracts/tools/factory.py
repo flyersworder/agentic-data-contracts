@@ -61,6 +61,18 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
+# The two prefixes the framework wrappers match to turn a tool result into a
+# native, recoverable error. Defined once here, where they are emitted, so a
+# change to the wording cannot leave a wrapper matching the old one.
+_BLOCKED_PREFIX = "BLOCKED —"  # the contract refused the action
+_ERROR_PREFIX = "ERROR —"  # the database could not run SQL the contract allowed
+# What the wrappers match, as one tuple, so no adapter can miss a prefix.
+_FAILURE_PREFIXES = (_BLOCKED_PREFIX, _ERROR_PREFIX)
+# A spent session budget: terminal, unlike any other BLOCKED. Matched as a
+# prefix by the Pydantic AI wrapper, so every emitter must start with it.
+_SESSION_LIMIT_PREFIX = f"{_BLOCKED_PREFIX} Session limit exceeded"
+
+
 def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     """Envelope for a call that did not perform the action it advertises.
 
@@ -84,9 +96,9 @@ def _error_response(text: str, kind: str = "error") -> dict[str, Any]:
     *why* the call didn't perform its advertised action, not just that it
     didn't. ``"blocked"`` means the contract actively refused the action --
     a governance decision, not a failure -- and is reserved for call sites
-    where that is genuinely what happened; a message that merely *says*
-    "BLOCKED" in its text (e.g. an adapter raising during execution) is still
-    an execution failure and keeps the default ``"error"``. Consumed by the
+    where that is genuinely what happened; SQL the database could not run
+    (rejected by EXPLAIN, or raising during execution) is the agent's own
+    error, worded ``ERROR —``, and keeps the default ``"error"``. Consumed by the
     conformance recorder (a later feature), which reads ``_kind`` off the
     envelope to classify a tool call as blocked vs. error instead of treating
     every non-raising return as a successful call.
@@ -476,6 +488,12 @@ def _metric_details(
     # "this metric has no SQL" (#123).
     if metric.untranslated:
         data["untranslated"] = metric.untranslated
+    # The declared join, so the agent writes the query the metric was
+    # written against (#136).
+    if metric.from_sql is not None:
+        data["from_sql"] = metric.from_sql
+    if metric.grain is not None:
+        data["grain"] = metric.grain
     if metric.domains:
         data["domains"] = list(metric.domains)
     if metric.tier:
@@ -1104,6 +1122,9 @@ def create_tools(
                     log_msgs.append(message)
 
             if block_msgs:
+                # A governance block like run_query's: it counts against
+                # max_retries, so a model that keeps hitting the gate is stopped.
+                session.record_block()
                 response = _error_response(
                     f"BLOCKED — preview_table SELECT * gated for caller"
                     f" {_caller_label(principal)!r}:\n"
@@ -1123,6 +1144,9 @@ def create_tools(
                     timeout_adapter=timeout_adapter,
                 )
             except QueryTimeoutError as e:
+                # Counted like run_query's timeout, so repeated previews cannot
+                # pile up scans that may still be running.
+                session.record_block()
                 # The agent wrote no SQL here, so the run_query advice to
                 # narrow a WHERE clause does not apply.
                 response = _error_response(
@@ -1750,7 +1774,7 @@ def create_tools(
                 session.check_limits()
             except LimitExceededError as e:
                 response = _error_response(
-                    _with_remaining(f"BLOCKED — Session limit exceeded: {e}"),
+                    _with_remaining(f"{_SESSION_LIMIT_PREFIX}: {e}"),
                     kind="blocked",
                 )
                 _record(response["_kind"], detail=str(e))
@@ -1761,8 +1785,21 @@ def create_tools(
             # explain_adapter.explain), so offload it to a worker thread to avoid
             # blocking the event loop.
             vresult = await asyncio.to_thread(validator.validate, sql)
+            if vresult.rejected_by_database:
+                # A missing column or binder error: the agent's error, not a
+                # block. Unparseable SQL stays a block, a fail-closed refusal.
+                session.record_execution_error()
+                response = _error_response(
+                    _with_remaining(f"{_ERROR_PREFIX} " + "\n".join(vresult.reasons))
+                )
+                _record(
+                    response["_kind"],
+                    detail="; ".join(vresult.reasons),
+                    relative_time=vresult.relative_time,
+                )
+                return response
             if vresult.blocked:
-                session.record_retry()
+                session.record_block()
                 msg = "BLOCKED — Violations:\n" + "\n".join(
                     f"- {r}" for r in vresult.reasons
                 )
@@ -1803,7 +1840,7 @@ def create_tools(
             except QueryTimeoutError as e:
                 # The contract's own limit stopped the query: a governance
                 # block, counted against max_retries like any other.
-                session.record_retry()
+                session.record_block()
                 response = _error_response(
                     _with_remaining(_timeout_message(e)), kind="blocked"
                 )
@@ -1814,9 +1851,12 @@ def create_tools(
                 )
                 return response
             except Exception as e:  # noqa: BLE001
-                session.record_retry()
+                # The database could not run SQL the contract allowed: the
+                # agent's own error, not a block. It still spends a retry, and
+                # the wrappers treat ``ERROR —`` as recoverable like ``BLOCKED —``.
+                session.record_execution_error()
                 response = _error_response(
-                    _with_remaining(f"BLOCKED — Query execution failed: {e}")
+                    _with_remaining(f"{_ERROR_PREFIX} Query execution failed: {e}")
                 )
                 _record(
                     response["_kind"],
@@ -1833,7 +1873,7 @@ def create_tools(
                 truncated=qresult.truncated,
             )
             if rresult.blocked:
-                session.record_retry()
+                session.record_block()
                 msg = "BLOCKED — Result check violations:\n" + "\n".join(
                     f"- {r}" for r in rresult.reasons
                 )

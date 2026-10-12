@@ -49,6 +49,12 @@ def test_execute(adapter: DuckDBAdapter) -> None:
     assert result.rows[0][0] == 1
 
 
+def test_execute_timestamptz(adapter: DuckDBAdapter) -> None:
+    # DuckDB imports pytz to hand a TIMESTAMP WITH TIME ZONE to Python (#135).
+    result = adapter.execute("SELECT TIMESTAMPTZ '2024-01-01 00:00:00+00' AS t")
+    assert result.rows[0][0].tzinfo is not None
+
+
 def test_explain(adapter: DuckDBAdapter) -> None:
     result = adapter.explain("SELECT id FROM analytics.orders")
     assert result.schema_valid

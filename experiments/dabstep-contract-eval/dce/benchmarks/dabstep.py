@@ -60,10 +60,19 @@ ARMS: tuple[str, ...] = (
 #: `contract_compiled` is `contract` with the contract `dce.compile` produced
 #: from the same two documents in place of the hand-authored one (spec, Part
 #: 5): it separates how a contract was made from which benchmark it runs on.
+#:
+#: `contract_compiled_opus` and `contract_compiled_opus_joins` are
+#: `contract_compiled` with claudeopus5.5 as the compiler model, without and
+#: with declared joins (`dce.frozen.COMPILED_ARM_DIRS`).
+COMPILED_ARMS: tuple[str, ...] = (
+    "contract_compiled",
+    "contract_compiled_opus",
+    "contract_compiled_opus_joins",
+)
 EXTRA_ARMS: tuple[str, ...] = (
     "contract_uninterpreted",
     "manual_resolved",
-    "contract_compiled",
+    *COMPILED_ARMS,
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -85,7 +94,7 @@ DATA_NOTE = (
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
 #: session and the governed-tool counters.
 GOVERNED_ARMS: frozenset[str] = frozenset(
-    {"contract", "contract_hollow", "contract_uninterpreted", "contract_compiled"}
+    {"contract", "contract_hollow", "contract_uninterpreted", *COMPILED_ARMS}
 )
 
 BASE_PROMPT = (
@@ -115,12 +124,14 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
         # The procedural sentence is `dce.tools.CONTRACT_PROCEDURE`.
-        contract = {
-            "contract": load_contract,
-            "contract_hollow": load_hollow_contract,
-            "contract_uninterpreted": load_uninterpreted_contract,
-            "contract_compiled": load_compiled_contract,
-        }[arm]()
+        if arm in COMPILED_ARMS:
+            contract = load_compiled_contract(arm)
+        else:
+            contract = {
+                "contract": load_contract,
+                "contract_hollow": load_hollow_contract,
+                "contract_uninterpreted": load_uninterpreted_contract,
+            }[arm]()
         return governed_arm(BASE_PROMPT, db_path, contract)
 
     raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
@@ -141,8 +152,8 @@ def arm_digest(arm: str) -> str:
         return hollow_digest()
     if arm == "contract_uninterpreted":
         return uninterpreted_digest()
-    if arm == "contract_compiled":
-        return compiled_digest()
+    if arm in COMPILED_ARMS:
+        return compiled_digest(arm)
     return digest()
 
 
@@ -453,22 +464,22 @@ class DABStep:
         return _clean(answer)
 
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
-        if "contract_compiled" not in arms:
-            return
         from dce import frozen
 
-        if not frozen.COMPILED_CONTRACT_PATH.is_file():
-            raise SystemExit(
-                f"no compiled contract at {frozen.COMPILED_CONTRACT_PATH}; run "
-                "`python -m dce.compile --benchmark dabstep` first"
-            )
-        try:
-            # `from_yaml` alone does not open `semantic.yml`; the digest does.
-            frozen.compiled_digest()
-        except Exception as exc:
-            raise SystemExit(
-                f"the compiled DABStep contract does not load: {exc}"
-            ) from exc
+        for arm in (a for a in arms if a in COMPILED_ARMS):
+            path = frozen.compiled_contract_path(arm)
+            if not path.is_file():
+                raise SystemExit(
+                    f"no compiled contract at {path}; run "
+                    "`python -m dce.compile --benchmark dabstep` first"
+                )
+            try:
+                # `from_yaml` alone does not open `semantic.yml`; the digest does.
+                frozen.compiled_digest(arm)
+            except Exception as exc:
+                raise SystemExit(
+                    f"the compiled DABStep contract for {arm} does not load: {exc}"
+                ) from exc
 
     def golds_hash(self) -> str:
         return self._golds_hash

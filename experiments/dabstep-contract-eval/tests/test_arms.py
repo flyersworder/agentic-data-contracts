@@ -59,6 +59,8 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_uninterpreted",
         "manual_resolved",
         "contract_compiled",
+        "contract_compiled_opus",
+        "contract_compiled_opus_joins",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)

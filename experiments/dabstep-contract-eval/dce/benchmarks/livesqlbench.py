@@ -45,6 +45,18 @@ DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
 #: Where the compile commit puts the frozen contracts (spec, Layout).
 DEFAULT_CONTRACTS = Path(__file__).resolve().parents[2] / "contracts" / "livesqlbench"
 
+#: The extra contract arms' contracts, by arm: the claudeopus5.5 compile with
+#: declared joins, and the contract a whole-database author session wrote
+#: (`dce.author`). Each arm is `contract` with its own contract.
+EXTRA_CONTRACTS: dict[str, Path] = {
+    "contract_opus": DEFAULT_CONTRACTS.parent.parent
+    / "contracts-opus-joins"
+    / "livesqlbench",
+    "contract_authored": DEFAULT_CONTRACTS.parent.parent
+    / "contracts-authored"
+    / "livesqlbench",
+}
+
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
 SCORER = "lsb-soft-ex-duckdb/3"
@@ -174,8 +186,8 @@ class LiveSQLBench:
         "manual_compiled",
         "contract",
     )
-    extra_arms: tuple[str, ...] = ()
-    governed_arms: frozenset[str] = frozenset({"contract"})
+    extra_arms: tuple[str, ...] = tuple(EXTRA_CONTRACTS)
+    governed_arms: frozenset[str] = frozenset({"contract", *EXTRA_CONTRACTS})
     roles = {
         "baseline": "schema_only",
         "manual": "manual_prompt",
@@ -197,14 +209,23 @@ class LiveSQLBench:
         records: list[tuple[dict, dict]],
         gold: dict,
         contracts: Path = DEFAULT_CONTRACTS,
+        extra_contracts: dict[str, Path] | None = None,
     ) -> None:
         self._data = data
         self._contracts = contracts
+        self._roots = {"contract": contracts, **(extra_contracts or EXTRA_CONTRACTS)}
         self._records = records  # (public task, frozen entry), in file order
         self._gold = gold
 
     @classmethod
-    def from_data(cls, data: Path, contracts: Path = DEFAULT_CONTRACTS) -> LiveSQLBench:
+    def from_data(
+        cls,
+        data: Path,
+        contracts: Path = DEFAULT_CONTRACTS,
+        *,
+        extra_contracts: dict[str, Path] | None = None,
+        dbs: tuple[str, ...] | list[str] | None = None,
+    ) -> LiveSQLBench:
         frozen = json.loads(
             (data / "tasks_frozen_full_v1.json").read_text(encoding="utf-8")
         )
@@ -218,6 +239,12 @@ class LiveSQLBench:
             if task["instance_id"] in frozen
             and frozen[task["instance_id"]]["set"] in cls.subsets
         ]
+        if dbs:
+            known = {task["selected_database"] for task, _ in records}
+            unknown = sorted(set(dbs) - known)
+            if unknown:
+                raise SystemExit(f"no LiveSQLBench tasks on databases {unknown}")
+            records = [r for r in records if r[0]["selected_database"] in set(dbs)]
         # Checked here, before any spend: a task with no gold would grade as
         # a `scoring_error` on every arm, and a missing database file would
         # fail every task on it the same way.
@@ -243,7 +270,13 @@ class LiveSQLBench:
             raise SystemExit(
                 f"LiveSQLBench databases missing from {data / 'duckdb'}: {missing}"
             )
-        return cls(data=data, records=records, gold=gold, contracts=contracts)
+        return cls(
+            data=data,
+            records=records,
+            gold=gold,
+            contracts=contracts,
+            extra_contracts=extra_contracts,
+        )
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -256,10 +289,16 @@ class LiveSQLBench:
                 "(default $LSB_DATA or ~/data/livesqlbench)"
             ),
         )
+        parser.add_argument(
+            "--lsb-dbs",
+            nargs="+",
+            default=None,
+            help="(livesqlbench) run only the tasks on these databases",
+        )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> LiveSQLBench:
-        return cls.from_data(args.lsb_data)
+        return cls.from_data(args.lsb_data, dbs=getattr(args, "lsb_dbs", None))
 
     def tasks(self) -> list[Task]:
         return [
@@ -294,19 +333,19 @@ class LiveSQLBench:
             f"## Column meanings\n\n{render_column_meanings(meanings)}"
         )
 
-    def _contract_dir(self, db: str) -> Path:
-        return self._contracts / db
+    def _contract_dir(self, db: str, arm: str = "contract") -> Path:
+        return self._roots[arm] / db
 
-    def _contract(self, db: str):
-        return load_contract_at(self._contract_dir(db) / "contract.yml")
+    def _contract(self, db: str, arm: str = "contract"):
+        return load_contract_at(self._contract_dir(db, arm) / "contract.yml")
 
     def build_arm(self, arm: str, task: Task, db: Path) -> ArmSetup:
         name = task.meta["db"]
         prompt = self._context(name)
-        if arm == "contract":
+        if arm in self.governed_arms:
             # No manual: the contract carries the KB text (spec, Arms).
             return governed_arm(
-                prompt, db, self._contract(name), init_sql=AGENT_INIT_SQL
+                prompt, db, self._contract(name, arm), init_sql=AGENT_INIT_SQL
             )
         if arm in ("manual_prompt", "manual_compiled"):
             entries = _read_jsonl(self._db_dir(name) / f"{name}_kb.jsonl")
@@ -328,8 +367,10 @@ class LiveSQLBench:
             files.append(f"{name}_kb.jsonl")
         folder = self._db_dir(name)
         joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
-        if arm in ("manual_compiled", "contract"):
+        if arm == "manual_compiled":
             joined += f"\ncontract {contract_digest(self._contract(name))}"
+        elif arm in self.governed_arms:
+            joined += f"\ncontract {contract_digest(self._contract(name, arm))}"
         return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     def _gold_rows(self, task: Task):
@@ -354,29 +395,38 @@ class LiveSQLBench:
         return extract_sql(answer) or ""
 
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
-        if not {"manual_compiled", "contract"} & set(arms):
-            return
+        dbs = sorted({t.meta["db"] for t in tasks})
+        for arm in ("contract", *self.extra_arms):
+            if arm == "contract":
+                if not {"manual_compiled", "contract"} & set(arms):
+                    continue
+            elif arm not in arms:
+                continue
+            self._check_contracts(arm, dbs, appendix="manual_compiled" in arms)
+
+    def _check_contracts(self, arm: str, dbs: list[str], *, appendix: bool) -> None:
         missing, broken = [], []
-        for db in sorted({t.meta["db"] for t in tasks}):
-            path = self._contract_dir(db) / "contract.yml"
+        for db in dbs:
+            path = self._contract_dir(db, arm) / "contract.yml"
             if not path.is_file():
                 missing.append(db)
                 continue
             # Everything an arm reads at build time: `from_yaml` alone does
             # not open `semantic.yml`; the digest and the appendix do.
             try:
-                contract_digest(self._contract(db))
-                if "manual_compiled" in arms:
+                contract_digest(self._contract(db, arm))
+                if appendix and arm == "contract":
                     render_compiled(self._contract_dir(db))
             except Exception as exc:
                 broken.append(
-                    f"compiled contract for {db} does not load: "
+                    f"{arm}: compiled contract for {db} does not load: "
                     f"{type(exc).__name__}: {exc}"
                 )
         if missing:
             raise SystemExit(
-                f"no compiled contract for {missing} under {self._contracts}; run "
-                "`python -m dce.compile --benchmark livesqlbench` first"
+                f"{arm}: no compiled contract for {missing} under "
+                f"{self._roots[arm]}; run `python -m dce.compile --benchmark "
+                "livesqlbench` (or `dce.author`) first"
             )
         if broken:
             raise SystemExit("\n".join(broken))

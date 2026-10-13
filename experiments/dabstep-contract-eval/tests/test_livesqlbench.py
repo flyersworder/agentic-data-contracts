@@ -69,8 +69,10 @@ def test_class_attributes(bench):
         "manual_compiled",
         "contract",
     )
-    assert LiveSQLBench.extra_arms == ()
-    assert LiveSQLBench.governed_arms == frozenset({"contract"})
+    assert LiveSQLBench.extra_arms == ("contract_opus", "contract_authored")
+    assert LiveSQLBench.governed_arms == frozenset(
+        {"contract", "contract_opus", "contract_authored"}
+    )
     assert LiveSQLBench.roles == {
         "baseline": "schema_only",
         "manual": "manual_prompt",

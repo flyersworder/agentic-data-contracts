@@ -256,7 +256,12 @@ def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
 
 
 def claude_driver(
-    *, system_prompt: str, user_prompt: str, tools, model: str = COMPILER_MODEL
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    tools,
+    model: str = COMPILER_MODEL,
+    request_limit: int = COMPILE_REQUEST_LIMIT,
 ) -> DriverResult:
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends
@@ -293,7 +298,7 @@ def claude_driver(
                 try:
                     agent.run_sync(
                         user_prompt,
-                        usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT),
+                        usage_limits=UsageLimits(request_limit=request_limit),
                         usage=usage,
                     )
                     break

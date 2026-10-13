@@ -205,3 +205,51 @@ def test_the_prompt_carries_the_whole_kb_and_no_task(inputs, tmp_path):
         assert entry.name in text
     assert "shop_1" not in text  # no task id, question or gold
     assert inputs.ddl in text and inputs.column_meanings in text
+
+
+def test_a_call_that_fails_at_the_gateway_is_left_to_rerun(inputs, tmp_path):
+    # A timeout or a dropped connection is not the author's answer: its cost
+    # is logged, and the database is authored again on the next run.
+    def broken(**_):
+        return DriverResult(
+            messages=[],
+            usage={**USAGE, "fatal": True, "error": "ModelAPIError: timed out"},
+        )
+
+    out = tmp_path / "shop"
+    status, spent = author.author_database(inputs, out, broken, spend_cap=1.0)
+    assert (status, spent) == ("error", 0.01)
+    assert not (out / author.LOG).exists()
+    assert author._logged_usd(out) == pytest.approx(0.01)
+    status, _ = author.author_database(inputs, out, scripted(_submit()), spend_cap=1.0)
+    assert status == "done"
+    assert author._logged_usd(out) == pytest.approx(0.02)  # both attempts counted
+
+
+def test_the_cli_gives_the_author_a_long_request_timeout(
+    monkeypatch, lsb_data, tmp_path
+):
+    from dce.compile import run as run_module
+
+    seen = {}
+
+    def fake(inputs, out_dir, driver, **kw):
+        seen.update(driver.keywords)
+        return "done", 0.0
+
+    monkeypatch.setattr(author, "author_database", fake)
+    author.main(
+        [
+            "--db",
+            "shop",
+            "--lsb-data",
+            str(lsb_data),
+            "--out",
+            str(tmp_path),
+            "--max-spend",
+            "1",
+        ]
+    )
+    assert seen["timeout"] == author.AUTHOR_TIMEOUT_S > 300
+    assert seen["request_limit"] == author.AUTHOR_REQUEST_LIMIT
+    assert run_module.claude_driver.__kwdefaults__["timeout"] == 300

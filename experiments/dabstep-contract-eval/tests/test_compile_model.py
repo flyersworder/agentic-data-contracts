@@ -83,3 +83,27 @@ def test_the_cli_refuses_an_unpriced_model(tmp_path):
                 "1",
             ]
         )
+
+
+def test_the_anthropic_route_takes_a_request_timeout(monkeypatch):
+    from dce import agent as agent_module
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
+    default = agent_module._default_agent_factory(
+        model="claudeopus5.5", system_prompt="s", tools=[], retries=1
+    )
+    long = agent_module._default_agent_factory(
+        model="claudeopus5.5", system_prompt="s", tools=[], retries=1, timeout=900
+    )
+    assert default.model_settings["timeout"] == 300
+    assert long.model_settings["timeout"] == 900
+
+
+def test_only_the_anthropic_route_takes_another_timeout():
+    from dce import agent as agent_module
+
+    with pytest.raises(ValueError, match="timeout"):
+        agent_module._default_agent_factory(
+            model="gpt-6-luna", system_prompt="s", tools=[], retries=1, timeout=900
+        )

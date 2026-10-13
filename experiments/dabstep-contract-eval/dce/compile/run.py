@@ -262,6 +262,7 @@ def claude_driver(
     tools,
     model: str = COMPILER_MODEL,
     request_limit: int = COMPILE_REQUEST_LIMIT,
+    timeout: float = 300,
 ) -> DriverResult:
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends
@@ -283,6 +284,9 @@ def claude_driver(
         system_prompt=system_prompt,
         tools=[Tool(t) for t in tools],
         retries=MAX_ATTEMPTS + 2,
+        # Only `dce.author` asks for another timeout; the compile's call is
+        # the one the frozen compiler made.
+        **({} if timeout == 300 else {"timeout": timeout}),
     )
     # Filled in place even when the run raises, as `dce.agent.run_task` relies
     # on: an entry that loops to the request cap is the most expensive kind,

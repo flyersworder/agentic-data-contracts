@@ -43,6 +43,12 @@ MAX_SUBMISSIONS = 6
 #: fix the contract.
 AUTHOR_REQUEST_LIMIT = 80
 LOG = "author-log.jsonl.gz"
+#: Sessions that failed outside the model (a timeout, a dropped connection):
+#: billed, not finished. The database is authored again on the next run.
+SPEND_LOG = "author-spend.jsonl"
+#: Seconds one model request may take. A whole contract is one response,
+#: longer than the agents' shared 300 s allows.
+AUTHOR_TIMEOUT_S = 900
 #: The form a contract takes: the hand-authored DABStep contract, shown as an
 #: example of structure only (another benchmark; nothing of LiveSQLBench).
 EXAMPLE_DIR = Path(__file__).resolve().parents[1] / "contract"
@@ -299,10 +305,13 @@ def _header(inputs: CompileInputs, model: str) -> dict:
 
 
 def _logged_usd(out_dir: Path) -> float:
-    path = out_dir / LOG
-    if not path.exists():
-        return 0.0
-    lines = gzip.decompress(path.read_bytes()).decode("utf-8").splitlines()
+    lines: list[str] = []
+    if (out_dir / LOG).exists():
+        lines += (
+            gzip.decompress((out_dir / LOG).read_bytes()).decode("utf-8").splitlines()
+        )
+    if (out_dir / SPEND_LOG).exists():
+        lines += (out_dir / SPEND_LOG).read_text(encoding="utf-8").splitlines()
     return sum((json.loads(x).get("usage") or {}).get("usd") or 0.0 for x in lines)
 
 
@@ -315,9 +324,11 @@ def author_database(
     spent: float = 0.0,
     model: str = AUTHOR_MODEL,
 ) -> tuple[str, float]:
-    """("done" | "failed" | "skipped" | "capped", spent). A database with a
-    log is finished, accepted or not, and is skipped: re-authoring it is a
-    decision, made by deleting its directory."""
+    """("done" | "failed" | "error" | "skipped" | "capped", spent). A
+    database with a log is finished, accepted or not, and is skipped:
+    re-authoring it is a decision, made by deleting its directory. A session
+    that failed outside the model ("error") writes no log: its cost goes to
+    the spend log and the database is authored again on the next run."""
     if (out_dir / LOG).exists():
         return "skipped", spent
     if spent >= spend_cap:
@@ -334,6 +345,12 @@ def author_database(
     finally:
         db.close()
     out_dir.mkdir(parents=True, exist_ok=True)
+    spent += result.usage.get("usd") or 0.0
+    if result.usage.get("fatal") and session.accepted is None:
+        with (out_dir / SPEND_LOG).open("a", encoding="utf-8") as fh:
+            line = {"usage": result.usage, "submissions": session.submissions}
+            fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+        return "error", spent
     if session.accepted is not None:
         head = HEADER.format(benchmark=inputs.benchmark, db=inputs.db_name, model=model)
         contract_yml, semantic_yml = session.accepted
@@ -365,7 +382,6 @@ def author_database(
             mtime=0,
         )
     )
-    spent += result.usage.get("usd") or 0.0
     return ("done" if session.accepted else "failed"), spent
 
 
@@ -393,6 +409,7 @@ def main(argv: list[str] | None = None) -> None:
         run_module.claude_driver,
         model=args.model,
         request_limit=AUTHOR_REQUEST_LIMIT,
+        timeout=AUTHOR_TIMEOUT_S,
     )
     for name in args.db:
         status, spent = author_database(

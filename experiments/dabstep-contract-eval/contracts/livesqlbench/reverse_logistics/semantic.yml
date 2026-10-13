@@ -1,0 +1,783 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: reverse_logistics, compiler: claudesonnet5
+# inputs: reverse_logistics_kb.jsonl, reverse_logistics_column_meaning_base.json, reverse_logistics_schema.txt, reverse_logistics.duckdb
+metrics:
+- name: total_return_cost_trc
+  description: 'Aggregated monetary outlay incurred to handle a single return from transport to final
+    disposition.
+
+
+    The Total Return Cost is calculated as the sum of Shipping Fee ($S_f$), Restocking Fee ($R_f$), Relabeling
+    Cost ($L_c$), Disposal Cost ($D_c$) and Repair Estimate ($R_e$): $$TRC = S_f + R_f + L_c + D_c + R_e$$.
+
+
+    Built on: shipping_fee, restocking_fee, relabeling_cost, disposal_cost, repair_estimate.
+
+
+    Compiler note: Sums Shipping Fee (from returns.return_details via unique casetag->casenum FK join),
+    Restocking Fee, Relabeling Cost, Disposal Cost, and Repair Estimate, all from cost_breakdown JSON
+    fields in financial_management except shipping fee which lives on the linked returns row.'
+  sql_expression: ((SELECT (r.return_details->'shipping'->>'fee')::real FROM returns r WHERE r.casenum
+    = financial_management.casetag) + (cost_breakdown->'fees'->>'restocking_fee')::real + (cost_breakdown->'fees'->>'relabeling_cost')::real
+    + (cost_breakdown->'disposal'->>'disposal_cost')::real + (cost_breakdown->'repair_costs'->>'repair_estimate')::real)
+  source_model: main.financial_management
+  domains:
+  - calculations
+- name: return_profit_impact_rpi
+  description: 'Net financial impact of a return after accounting for cost and recovery value.
+
+
+    $$RPI = R_v - TRC$$ where $R_v$ is Recovery Value and $TRC$ is Total Return Cost.
+
+
+    Built on: total_return_cost_trc, recovery_value.
+
+
+    Compiler note: RPI = Recovery Value (cost_breakdown.valuation.recovery_value) minus TRC, where TRC
+    is computed per the given sub-metric definition (shipping fee from linked returns row via casetag,
+    plus restocking/relabeling/disposal/repair costs from cost_breakdown).'
+  sql_expression: (cost_breakdown->'valuation'->>'recovery_value')::real - ((SELECT (r.return_details->'shipping'->>'fee')::real
+    FROM returns r WHERE r.casenum = financial_management.casetag) + (cost_breakdown->'fees'->>'restocking_fee')::real
+    + (cost_breakdown->'fees'->>'relabeling_cost')::real + (cost_breakdown->'disposal'->>'disposal_cost')::real
+    + (cost_breakdown->'repair_costs'->>'repair_estimate')::real)
+  source_model: main.financial_management
+  domains:
+  - calculations
+- name: recovery_rate_per_day_rrd
+  description: 'Daily efficiency metric showing value recovered per day elapsed since sale.
+
+
+    $$RRD = \frac{R_v}{D_l}$$ where $R_v$ is Recovery Value and $D_l$ is Days Lapsed.
+
+
+    Built on: recovery_value, days_lapsed.
+
+
+    Compiler note: Recovery Value from financial_management.cost_breakdown->valuation->recovery_value;
+    Days Lapsed from returns.dayslapsed, joined via casetag=casenum (unique match).'
+  sql_expression: (cost_breakdown->'valuation'->>'recovery_value')::real / (SELECT r.dayslapsed FROM returns
+    r WHERE r.casenum = financial_management.casetag)
+  source_model: main.financial_management
+  domains:
+  - calculations
+- name: customer_return_frequency_index_crfi
+  description: 'Rate at which a customer initiates returns relative to their tenure.
+
+
+    $$CRFI = \frac{T_r}{T_y}$$ where $T_r$ is Total Returns and $T_y$ is Customer Tenure in years.
+
+
+    Built on: total_returns, customer_tenure_years.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CRFI depends on Total Returns (requires GROUP BY aggregation across customers, not a row-level
+    expression) and Customer Tenure in Years (requires orders.txndate, which is empty/blank for all rows,
+    so first transaction date cannot be determined). Since neither dependency can be encoded, CRFI cannot
+    be computed over this database.
+- name: sustainability_adjusted_loss_sal
+  description: 'Cost of a return adjusted for environmental impact factors.
+
+
+    $$SAL = TRC + 0.5 \times C_f - R_v$$ where $C_f$ is Carbon Footprint.
+
+
+    Built on: total_return_cost_trc, carbon_footprint, recovery_value.
+
+
+    Compiler note: SAL = TRC + 0.5*Carbon Footprint - Recovery Value. TRC reuses the given subquery for
+    shipping fee from returns joined by casetag=casenum (unique match), plus fees/disposal/repair from
+    cost_breakdown. Carbon footprint and recovery value pulled from cost_breakdown->sustainability and
+    ->valuation respectively.'
+  sql_expression: ((SELECT (r.return_details->'shipping'->>'fee')::real FROM returns r WHERE r.casenum
+    = financial_management.casetag) + (cost_breakdown->'fees'->>'restocking_fee')::real + (cost_breakdown->'fees'->>'relabeling_cost')::real
+    + (cost_breakdown->'disposal'->>'disposal_cost')::real + (cost_breakdown->'repair_costs'->>'repair_estimate')::real)
+    + 0.5 * (cost_breakdown->'sustainability'->>'carbon_footprint')::real - (cost_breakdown->'valuation'->>'recovery_value')::real
+  source_model: main.financial_management
+  domains:
+  - calculations
+- name: average_processing_time_apt
+  description: 'Mean calendar time spent processing a batch of returns at a given facility.
+
+
+    $$APT = \frac{\sum_{i=1}^{n} PT_i}{n}$$ where $PT_i$ is the processing time of each case.
+
+
+    Compiler note: return_processing has one row per facility (LocCode is PK) with a single ProcTime value,
+    not per-case records; so APT is computed as the average of ProcTime across all facility rows.'
+  sql_expression: AVG(proctime)
+  source_model: main.return_processing
+  domains:
+  - calculations
+- name: warranty_claim_ratio_wcr
+  description: 'Proportion of returns that include a valid warranty claim.
+
+
+    $$WCR = \frac{N_{claims}}{T_r}$$ where $N_{claims}$ is the number of authorised warranty claims.
+
+
+    Built on: total_returns.
+
+
+    Compiler note: Computed as an aggregate ratio over the whole returns table: N_claims = count of returns
+    with a non-null warranty_claim, auth_status=''Approved'', and warranty_status=''Valid'' (i.e. an authorised,
+    valid warranty claim), divided by total return count (T_r). Total Returns could not be encoded per-customer,
+    so WCR here is expressed as a global proportion across all returns rows. Needed extra parentheses
+    around each JSON ->> comparison because of operator precedence with AND.'
+  sql_expression: CAST(SUM(CASE WHEN (((return_details->'authorization')->>'warranty_claim') IS NOT NULL)
+    AND (((return_details->'authorization')->>'auth_status') = 'Approved') AND (((return_details->'authorization')->>'warranty_status')
+    = 'Valid') THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
+  source_model: main.returns
+  domains:
+  - calculations
+- name: fraud_flag_severity_score_ffs
+  description: 'Composite score that weights fraud flags by qualitative risk level.
+
+
+    $$FFS = F_f \times w_{risk}$$ where $F_f$ is number of fraud flags and $w_{risk}$ is weight based
+    on Fraud Risk Level.
+
+
+    Built on: Fraud Risk Levels.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The weight w_risk assigned to each Fraud Risk Level ('Low','Medium','High') is not defined
+    anywhere in the documentation or data (no numeric mapping table exists). Without a specified weighting
+    scheme, FFS cannot be computed; encoding an arbitrary guessed mapping (e.g. 1/2/3) would not reflect
+    what the entry actually states.
+- name: regulatory_compliance_penalty_rcp
+  description: 'Additional proportional cost applied when a product is non-compliant with regulations.
+
+
+    If the Regulatory Compliance Status is *Non-compliant* the penalty is $$RCP = 0.2 \times TRC$$, else
+    $$RCP = 0$$.
+
+
+    Built on: total_return_cost_trc, Regulatory Compliance Statuses.
+
+
+    Compiler note: Joined financial_management -> returns (via casetag) -> products (via itemlink) to
+    get regulatory_compliance status, unique per case. Applied 0.2*TRC when status is ''Non-compliant'',
+    else 0 (including when status is NULL).'
+  sql_expression: CASE WHEN (SELECT p.product_traceability->'compliance'->>'regulatory_compliance' FROM
+    returns r JOIN products p ON r.itemlink = p.itemcode WHERE r.casenum = financial_management.casetag)
+    = 'Non-compliant' THEN 0.2 * ((SELECT (r.return_details->'shipping'->>'fee')::real FROM returns r
+    WHERE r.casenum = financial_management.casetag) + (cost_breakdown->'fees'->>'restocking_fee')::real
+    + (cost_breakdown->'fees'->>'relabeling_cost')::real + (cost_breakdown->'disposal'->>'disposal_cost')::real
+    + (cost_breakdown->'repair_costs'->>'repair_estimate')::real) ELSE 0 END
+  source_model: main.financial_management
+  domains:
+  - calculations
+- name: return_channel_cost_index_rcci
+  description: 'Relative shipping expense of a return channel compared to its historical average.
+
+
+    $$RCCI = \frac{S_f}{\overline{S_{channel}}}$$ where $S_f$ is Shipping Fee and $\overline{S_{channel}}$
+    is average Shipping Fee for the same Return Channel.
+
+
+    Built on: shipping_fee, Return Channels.
+
+
+    Compiler note: Shipping Fee extracted from return_details->shipping->fee; channel average computed
+    as scalar subquery grouping by matching return_channel.'
+  sql_expression: (return_details->'shipping'->>'fee')::real / (SELECT AVG((r2.return_details->'shipping'->>'fee')::real)
+    FROM returns r2 WHERE r2.return_channel = returns.return_channel)
+  source_model: main.returns
+  domains:
+  - calculations
+- name: shipping_fee
+  description: 'Cost charged by the logistics provider for transporting a returned item.
+
+
+    A monetary amount reflecting transportation cost incurred for a single return shipment.
+
+
+    Built on: Return Channels.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Shipping Fee is defined as a monetary amount (a calculation/value), not a yes/no predicate.
+    There is no condition stated to encode as a boolean over rows; this should be a scalar calculation
+    (e.g., (return_details->'shipping'->>'fee')::real), not a predicate.
+- name: restocking_fee
+  description: 'Service charge for reintegrating a returned item into inventory.
+
+
+    Fee imposed to cover administrative and handling work required to make the item sellable again.
+
+
+    Built on: Return Channels.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Restocking Fee is a monetary field (financial_management.cost_breakdown->fees->restocking_fee),
+    not a boolean/predicate condition. This entry asks for a boolean condition over table rows, but the
+    definition describes a value, not a yes/no condition.
+- name: relabeling_cost
+  description: 'Expense of printing and applying new labels or packaging identifiers to a returned item.
+
+
+    Direct cost of material and labor associated with correcting item labeling deficiencies.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Relabeling Cost is a monetary value definition (cost_breakdown.fees.relabeling_cost),
+    not a yes/no condition. It cannot be expressed as a boolean predicate over rows; it is a scalar calculation,
+    not a predicate.
+- name: disposal_cost
+  description: 'Fee incurred when discarding a returned item that cannot be resold or refurbished.
+
+
+    Monetary cost of disposing the item through methods such as recycling, landfill, or hazardous-waste
+    processing.
+
+
+    Built on: Disposal Methods.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines "Disposal Cost" as a monetary value (field cost_breakdown->disposal->disposal_cost
+    in financial_management), not a boolean predicate or condition over rows. It cannot be encoded as
+    a yes/no condition as required by this task.
+- name: repair_estimate
+  description: 'Projected expense required to bring a defective return back to sellable condition.
+
+
+    Estimated sum of parts, labor and overhead needed for repair work, agreed before work commences.
+
+
+    Built on: Approval Levels.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines "Repair Estimate" as a monetary value (financial_management.cost_breakdown->repair_costs->repair_estimate),
+    not a yes/no predicate. It describes a computed/stored quantity rather than a condition over rows,
+    so it cannot be encoded as a boolean SQL expression.
+- name: recovery_value
+  description: 'Amount of monetary value recaptured from a return via resale, refurbish, or parts harvesting.
+
+
+    Net revenue expected after processing the return, excluding initial cost.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines "Recovery Value" as a monetary value/field (stored at financial_management.cost_breakdown->'valuation'->>'recovery_value'),
+    not a yes/no condition. The task requires a boolean predicate over rows of a table, but this definition
+    does not state any condition to test - it's a quantity definition, not a filter.
+- name: days_lapsed
+  description: 'Number of calendar days between original transaction and completion of return processing.
+
+
+    Difference in days between transaction date and point at which funds/refund are issued.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines Days Lapsed as a numeric value (difference in days between transaction
+    date and refund completion date), not a yes/no condition. It is already stored as returns.dayslapsed.
+    There is no predicate to encode here.
+- name: total_returns
+  description: 'Lifetime count of items a customer has returned to the business.
+
+
+    Cumulative tally of processed return cases associated with a single customer account.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Total Returns is a cumulative count of return cases per customer (an aggregate scalar
+    per customer), not a yes/no condition over rows of a single table. It cannot be expressed as a boolean
+    predicate; it requires a GROUP BY aggregation (e.g., COUNT(*) of returns joined to orders joined to
+    customers), which is outside the scope of a row-level boolean condition.
+- name: customer_tenure_years
+  description: 'Length of time, in years, a customer has maintained an active account before current date.
+
+
+    Calculated as the difference between current date and the customer''s first recorded transaction,
+    divided by 365.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Customer Tenure requires the customer's first recorded transaction date (orders.txndate),
+    but this column is empty/blank for all 1488 rows in orders (count DISTINCT = 0, all are empty strings).
+    There is no other date field linking customers to their first transaction, so tenure in years cannot
+    be computed from this data.
+- name: carbon_footprint
+  description: 'Estimated kilograms of CO₂-equivalent generated through return processing activities.
+
+
+    Quantifies greenhouse-gas emissions attributable to transportation, handling, and disposal of a single
+    return.
+
+
+    Built on: Disposal Methods.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Carbon Footprint is a numeric value (stored at financial_management.cost_breakdown->'sustainability'->>'carbon_footprint'),
+    not a boolean predicate. The requested format requires a boolean condition over rows, which doesn't
+    apply to this scalar metric.
+tables:
+- schema: main
+  table: case_management
+  columns:
+  - name: casetie
+    type: VARCHAR
+    description: VARCHAR(50). Foreign key to the returns table (CaseNum). PK, FK to returns.
+  - name: satisfscore
+    type: BIGINT
+    description: 'BIGINT. Satisfaction score for the case resolution. Possible values: 1, 2, 3, 4, 5.
+
+
+      Satisfaction Scores: 5-point ordinal scale gauging customer contentment with return resolution.
+
+
+      Use 1-5 to quantify customer'' contentment. Larger number means more satified: 1 - Very Dissatisfied;
+      2 - Dissatisfied; 3 - Neutral; 4 - Satisfied; 5 - Very Satisfied.
+
+
+      Compiler note: Describes the 1-5 ordinal scale of case_management.SatisfScore values.'
+  - name: commstate
+    type: ENUM('Initial', 'In Progress', 'Resolved')
+    description: 'CustomerCommunicationStatus_enum. Current state of communication with the customer.
+      Possible values: In Progress, Initial, Resolved.'
+  - name: resptime
+    type: FLOAT
+    description: 'REAL. Response time for handling the case. Example: 14.8.'
+  - name: resolsatis
+    type: ENUM('Satisfied', 'Neutral', 'Dissatisfied')
+    description: 'ResolutionSatisfaction_enum. Satisfaction level of the customer after case resolution.
+      Possible values: Dissatisfied, Neutral, Satisfied.'
+  - name: hasfeedback
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if feedback was provided by the customer. Possible values: No,
+      Yes.'
+  - name: feedbacktype
+    type: ENUM('Product', 'Process', 'Service', 'None')
+    description: 'FeedbackCategory_enum. Type of feedback provided by the customer. **NULL means no feedback
+      type provided.**. Possible values: Process, Product, Service.'
+  - name: vendornotice
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if the vendor was notified about the case. Possible values: No,
+      Yes.'
+  - name: vendoraction
+    type: ENUM('None', 'Initiated', 'Completed', 'Pending')
+    description: 'SupplierCorrectiveAction_enum. Action taken by the vendor regarding the case. **NULL
+      means no vendor action reported.**. Possible values: Completed, Initiated.'
+  - name: preventopp
+    type: ENUM('Low', 'Medium', 'High')
+    description: 'ReturnPreventionOpportunity_enum. Opportunity for preventing future returns. Possible
+      values: High, Low, Medium.'
+  - name: actionident
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if an action was identified for the case. Possible values: No,
+      Yes.'
+  - name: actionstate
+    type: ENUM('Planned', 'In Progress', 'Completed')
+    description: 'PreventiveActionStatus_enum. Status of the preventive action. Possible values: Completed,
+      In Progress, Planned.'
+  - name: kbupdated
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if the knowledge base was updated after the case. Possible values:
+      No, Yes.'
+  - name: trainident
+    type: VARCHAR
+    description: 'TEXT. Identifies if training was required after the case. Possible values: 0, 1, F,
+      False, N, NO, P, True, Y, YES.'
+  - name: needsprocimprove
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if process improvements are needed. Possible values: No, Yes.'
+  - name: needsdocupdate
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if documentation updates are needed. Possible values: No, Yes.'
+  - name: needssysupdate
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if system updates are needed. Possible values: No, Yes.'
+  - name: reportstate
+    type: ENUM('Pending', 'Generated', 'Reviewed')
+    description: 'ReportGenerationStatus_enum. State of the report generation for the case. Possible values:
+      Generated, Pending, Reviewed.'
+  - name: analysisstate
+    type: ENUM('Not Started', 'In Progress', 'Completed')
+    description: 'DataAnalysisStatus_enum. State of the data analysis for the case. Possible values: Completed,
+      In Progress, Not Started.'
+  - name: hastrendanalysis
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if trend analysis was performed for the case. Possible values:
+      No, Yes.'
+  - name: hascostanalysis
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if cost analysis was performed for the case. Possible values:
+      No, Yes.'
+  - name: recstate
+    type: ENUM('Draft', 'Reviewed', 'Approved')
+    description: 'RecommendationStatus_enum. State of the recommendation for the case. **NULL means no
+      recommendation state provided.**. Possible values: Approved, Draft.'
+  - name: actioncount
+    type: BIGINT
+    description: 'BIGINT. Number of actions taken for the case. Example: 0.'
+  - name: needsfollowup
+    type: ENUM('Yes', 'No')
+    description: 'YesNo_enum. Indicates if follow-up is needed for the case. Possible values: No, Yes.'
+  - name: nextreview
+    type: VARCHAR
+    description: 'TEXT. Date for the next review of the case. Example: 2025-04-28.'
+  - name: closestate
+    type: ENUM('Open', 'Pending', 'Closed')
+    description: 'CaseClosureStatus_enum. Current closure state of the case. Possible values: Closed,
+      Open, Pending.'
+  - name: closedate
+    type: VARCHAR
+    description: 'TEXT. Date when the case was closed. Example: 2025-02-19.'
+  - name: closenotes
+    type: VARCHAR
+    description: 'TEXT. Notes related to the closure of the case. Example: Above suggest statement likely
+      sound..'
+- schema: main
+  table: customers
+  columns:
+  - name: profilenum
+    type: VARCHAR
+    description: VARCHAR(50). Unique identifier for the customer profile. PK.
+  - name: seg_category
+    type: VARCHAR
+    description: 'TEXT. Customer segment category. **NULL means the segment category is not assigned.**.
+      Possible values: Wholesale,Retail,Individual'
+  - name: geographyzone
+    type: VARCHAR
+    description: 'VARCHAR(100). Geographic location zone of the customer. example: Cambodia'
+  - name: return_behavior_profile
+    type: JSON
+    description: 'JSONB column. Captures the customer''s historical return behavior, including frequency
+      and similarity of returns. Fields: {"total_returns": "BIGINT. Total number of returns made by the
+      customer. example: 10", "similar_previous_returns": "BIGINT. Simulated number of returns. **NULL
+      means no previous simulated returns data.**. Possible values: 0.0, 1.0, 2.0, 3.0, 4.0, 5.0.", "return_frequency_score":
+      "BIGINT. Customer''s frequency score based on return behavior."}'
+- schema: main
+  table: financial_management
+  columns:
+  - name: creditref
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for the financial record. PK. Example: CM78914.'
+  - name: casetag
+    type: VARCHAR
+    description: VARCHAR(50). Foreign key to the returns table (CaseNum). FK to returns.
+  - name: dispcost
+    type: FLOAT
+    description: 'REAL. Disposal cost for the return item. Example: $86.84.'
+  - name: cost_breakdown
+    type: JSON
+    description: 'JSONB column. Captures the financial breakdown of refund, recovery, and sustainability-related
+      fees for a return case. Fields: {"refund": {"refund_amount": "REAL. Refund amount for the return.
+      Example: $1,337.51.", "method": "RefundMethod_enum. Method used for refunding the customer. Possible
+      values: Bank Transfer, Original Payment, Store Credit.", "status": "RefundStatus_enum. Current state
+      of the refund. Possible values: Completed, Pending, Processed.", "processing_days": "REAL. Number
+      of days taken to process the refund. Example: 12.8."}, "fees": {"restocking_fee": "REAL. Restocking
+      fee for the return item.", "repackaging_cost": "REAL. Repackaging cost for the return item. Example:
+      $19.53.", "relabeling_cost": "REAL. Relabeling cost for the return item. Example: 10.26.", "qa_fee":
+      "REAL. Quality assurance fee for the return item. Example: 12.33."}, "repair_costs": {"repair_estimate":
+      "REAL. Estimated repair cost for the return item. Example: 490.99.", "parts_fee": "REAL. Parts fee
+      for the return item. Example: 136.63.", "labor_fee": "REAL. Labor fee for the return item. Example:
+      85.38."}, "disposal": {"disposal_cost": "REAL. Disposal fee for the return item. Example: 83.49.",
+      "disposal_method": "DisposalMethod_enum. Method used to dispose of the return item. Possible values:
+      Hazardous Waste, Landfill, Recycle, Return to Vendor.", "environmental_impact": "EnvironmentalImpact_enum.
+      Environmental impact of the disposal method. Possible values: High, Low, Medium.", "recycling_category":
+      "RecyclingCategory_enum. Category of material recycled during disposal. Possible values: Electronics,
+      Metal, Mixed, Plastic."}, "valuation": {"recovery_value": "REAL. Amount recovered from the return.
+      Example: 19.18.", "value_loss_pct": "REAL. Total value loss from the return. Example: 72.3."}, "sustainability":
+      {"sustainability_score": "REAL. Sustainability score for the return item. **NULL means no sustainability
+      score provided.**. Example: 46.0.", "carbon_footprint": "REAL. Carbon footprint of the return item.
+      Example: 32.28.", "efficiency_score": "REAL. Efficiency score for the return item. Example: 98.1.",
+      "cost_efficiency": "REAL. Cost efficiency score for the return item. Example: 45.4."}}
+
+
+      Disposal Methods: Approved pathways for discarding unsellable returns.
+
+
+      ''Recycle'' for materials separated for recycling streams; ''Hazardous Waste'' for components containing
+      batteries, chemicals, or e-waste; ''Landfill'' for non-recyclable residuals; ''Return to Vendor''
+      for supplier agrees to take back for specialised processing.
+
+
+      Compiler note: Describes the enum values for cost_breakdown.disposal.disposal_method field (Recycle,
+      Hazardous Waste, Landfill, Return to Vendor).
+
+
+      Refund Methods: Modalities available for reimbursing customers.
+
+
+      ''Original Payment'' is when credit card/PayPal reversal within payment gateway; ''Bank Transfer''
+      is when direct ACH/SEPA transfer when gateway refund blocked; ''Store Credit'' is when applied to
+      customer account as gift card or voucher on customer request or policy.
+
+
+      Compiler note: Describes values of the refund.method field within cost_breakdown JSONB (Original
+      Payment, Bank Transfer, Store Credit).'
+- schema: main
+  table: orders
+  columns:
+  - name: txnnum
+    type: VARCHAR
+    description: VARCHAR(50). Unique identifier for the order transaction. PK.
+  - name: buyerlink
+    type: VARCHAR
+    description: 'TEXT. Link to the buyer''s account or details. Example: CUS00181.'
+  - name: transaction_value
+    type: FLOAT
+    description: REAL. Total value of the order transaction.
+  - name: txndate
+    type: VARCHAR
+    description: 'TEXT. Date when the transaction was made. Example: Feb 16, 2025.'
+- schema: main
+  table: products
+  columns:
+  - name: itemcode
+    type: VARCHAR
+    description: VARCHAR(50). Unique identifier for the product. PK.
+  - name: itemcategory
+    type: VARCHAR
+    description: VARCHAR(50). Category of the product (e.g., apparel, electronics, Home Goods, Accessories).
+  - name: subcat
+    type: VARCHAR
+    description: 'VARCHAR(50). Subcategory of the product. Possible values: Laptops, Shirts, Shoes, Smartphones.'
+  - name: unit_value
+    type: FLOAT
+    description: REAL. Unit value/price of the product.
+  - name: product_traceability
+    type: JSON
+    description: 'JSONB column. Encapsulates product traceability and compliance metadata including batch,
+      lot, and serial tracking. Fields: {"trace": {"batch_reference": "TEXT. Batch reference for the product.
+      example: BT1693, 6730", "lot_reference": "VARCHAR(50). Lot reference for the product. Example: 4119LO.",
+      "serial_number": "TEXT. Serial number reference for the product. Example: SN258151.", "manufacture_date":
+      "TEXT. Manufacture date of the product."}, "compliance": {"regulatory_compliance": "VARCHAR(50).
+      Regulatory compliance status of the product. **NULL means no regulatory compliance status available.**.
+      Possible values: Compliant, Non-compliant.", "hazardous_material": "VARCHAR(50). Hazardous material
+      information for the product.", "recall_flag": "YesNo_enum. Indicates if the product has been recalled.
+      Possible values: No, Yes."}}
+
+
+      Regulatory Compliance Statuses: Declares adherence of product to applicable regulations.
+
+
+      ''Compliant'' means meeting all relevant safety/environmental standards; ''Non-compliant'' means
+      failing certification, recall notice, or missing documentation, triggering quarantine or disposal
+      penalty.
+
+
+      Compiler note: Describes the values of the regulatory_compliance field nested at product_traceability->compliance->regulatory_compliance
+      (''Compliant''/''Non-compliant''), not a top-level column.'
+- schema: main
+  table: quality_assessment
+  columns:
+  - name: inspectref
+    type: VARCHAR
+    description: VARCHAR(50). Foreign key to the returns table (CaseNum). PK, FK to returns.
+  - name: assessment_summary
+    type: JSON
+    description: 'JSONB column. Summarizes quality inspection, usage, and documentation state for a returned
+      product. Fields: {"condition": {"item_condition": "TEXT. Condition of the item during inspection.
+      Possible values: Damaged, Like New, New, Used.", "package_condition": "VARCHAR(50). Condition of
+      the packaging during inspection.", "completeness": "VARCHAR(50). Completeness state of the item
+      during inspection. Possible values: Accessories Missing, Complete, Missing Parts.", "usage_signs":
+      "VARCHAR(50). Signs of usage observed on the item. **NULL means no usage signs observed.**. Possible
+      values: Heavy, Minor, Significant."}, "defects": {"defect_type": "TEXT. Type of defect found during
+      inspection. **NULL means no defect type reported.**. Possible values: Manufacturing, Shipping, Usage.",
+      "defect_severity": "VARCHAR(50). Severity level of the defect. **NULL means no defect severity reported.**.
+      Possible values: Critical, Major, Minor."}, "results": {"qa_result": "VARCHAR(50). Quality assessment
+      result (e.g., pass, fail).", "functional_test_result": "TEXT. Functional test result for the item.
+      Possible values: Fail, Partial, Pass.", "aesthetic_score": "REAL. Aesthetic score assigned to the
+      item based on inspection. Example: 5.0.", "tech_review_status": "VARCHAR(20). Technical review status
+      of the item. Possible values: Completed, Not Required, Pending."}, "documentation": {"documentation_status":
+      "VARCHAR(50). Completeness status of the product documentation.", "has_photos": "VARCHAR(20). Indicates
+      if the item has supporting photos. Possible values: 0, 1, F, False, N, NO, P, True, Y, YES.", "qa_alert":
+      "VARCHAR(20). Quality assurance alert status. Possible values: No, Yes.", "needs_investigation":
+      "VARCHAR(20). Indicates if further investigation is required. Possible values: No, Yes."}}
+
+
+      Item Condition States: Standardised terms describing physical state of returned merchandise.
+
+
+      There are 4 different states: ''New'', ''Like New'', ''Used'' and ''Damaged''.
+
+
+      Compiler note: Describes the possible values of the item_condition field within assessment_summary.condition
+      JSON (Damaged, Like New, New, Used).'
+- schema: main
+  table: return_processing
+  columns:
+  - name: loccode
+    type: VARCHAR
+    description: 'VARCHAR(50). Location code for the return processing. PK. Example: LOC008.'
+  - name: procprio
+    type: VARCHAR
+    description: 'VARCHAR(50). Processing priority for the return. Possible values: Bulk, Express, Standard.
+
+
+      Processing Priorities: Queue categories dictating speed of return handling.
+
+
+      Use ''Bulk'' for palletised or batch returns processed during low-demand periods; ''Standard'' for
+      default SLA (e.g., 3-5 days); ''Express'' for expedited for VIP customers, high resale value, or
+      paid premium.
+
+
+      Compiler note: Describes the enumerated values (Bulk, Standard, Express) of return_processing.ProcPrio
+      column.'
+  - name: procstate
+    type: ENUM('Received', 'Inspecting', 'Processing', 'Completed')
+    description: 'ProcessingStatus_enum. Current state of the return processing. Possible values: Completed,
+      Inspecting, Processing, Received.'
+  - name: proctime
+    type: FLOAT
+    description: 'REAL. Time taken for processing the return. Example: 15.0.'
+  - name: handreq
+    type: ENUM('Standard', 'Fragile', 'Hazardous', 'Special')
+    description: 'HandlingRequirements_enum. Handling requirements for the return. Possible values: Fragile,
+      Hazardous, Special, Standard.'
+  - name: needsquar
+    type: VARCHAR
+    description: 'VARCHAR(20). Indicates if quarantine is needed for the return. Possible values: No,
+      Yes.'
+  - name: quardays
+    type: BIGINT
+    description: 'BIGINT. Number of days the return item will be quarantined. Example: 14.'
+  - name: handling_notes
+    type: VARCHAR
+    description: TEXT. Notes related to the handling of the return item.
+  - name: dispaction
+    type: VARCHAR
+    description: 'TEXT. Disposition action for the return item. Possible values: Refurbish, Repair, Resell,
+      Scrap.'
+  - name: dispreason
+    type: ENUM('Repairable', 'Too Costly', 'Good Condition', 'Unsalvageable')
+    description: 'DispositionReason_enum. Reason for the return disposition. **NULL means no disposition
+      reason provided.**. Possible values: Good Condition, Repairable, Too Costly, Unsalvageable.'
+  - name: needsrelabel
+    type: VARCHAR
+    description: 'TEXT. Indicates if relabeling is required for the return item. Possible values: 0, 1,
+      F, False, N, NO, P, True, Y, YES.'
+  - name: repairfeas
+    type: ENUM('High', 'Medium', 'Low', 'Not Feasible')
+    description: 'RepairFeasibility_enum. Feasibility of repairing the return item. Possible values: High,
+      Low, Medium, Not Feasible.'
+  - name: estrepairhrs
+    type: FLOAT
+    description: 'REAL. Estimated hours required for repair. Example: 39.8.'
+  - name: partsavail
+    type: ENUM('Available', 'Partial', 'Unavailable')
+    description: 'PartsAvailability_enum. Availability of parts for repairing the return item. Possible
+      values: Available, Partial, Unavailable.'
+  - name: policycomp
+    type: VARCHAR
+    description: 'TEXT. Policy compliance status of the return item. Possible values: Compliant, Non-compliant.'
+  - name: exceptmade
+    type: VARCHAR
+    description: 'VARCHAR(20). Indicates if an exception was made for the return. Possible values: No,
+      Yes.'
+  - name: excepttype
+    type: ENUM('Goodwill', 'Error', 'Customer Value', 'None')
+    description: 'ExceptionReason_enum. Type of exception for the return. **NULL means no exception type
+      provided.**. Possible values: Customer Value, Error, Goodwill.'
+  - name: apprlevel
+    type: ENUM('Automatic', 'Supervisor', 'Manager')
+    description: 'ApprovalLevel_enum. Level of approval required for processing the return. Possible values:
+      Automatic, Manager, Supervisor.
+
+
+      Approval Levels: Hierarchy of sign-off required for exceptional processing steps.
+
+
+      There 3 levels: ''Automatic'', ''Manager'' and ''Supervisor''.
+
+
+      Compiler note: Matches ApprLevel column, enum values Automatic/Manager/Supervisor described in schema.'
+- schema: main
+  table: returns
+  columns:
+  - name: casenum
+    type: VARCHAR
+    description: 'VARCHAR(50). Unique identifier for the return case. PK. Example: RL924605.'
+  - name: logtime
+    type: VARCHAR
+    description: 'VARCHAR(50). Timestamp when the return was logged. Example: 2024/11/04.'
+  - name: srctxn
+    type: VARCHAR
+    description: 'VARCHAR(50). Foreign key to the orders table (TxnNum). FK to orders. Example: ORD89293.'
+  - name: itemlink
+    type: VARCHAR
+    description: 'VARCHAR(50). Foreign key to the products table (ItemCode). FK to products. Example:
+      PRD00023.'
+  - name: revdate
+    type: VARCHAR
+    description: 'TEXT. Date when the return was processed. Example: 2025-01-20.'
+  - name: dayslapsed
+    type: BIGINT
+    description: 'BIGINT. Number of days lapsed since the transaction. Example: 33.'
+  - name: return_channel
+    type: VARCHAR
+    description: 'VARCHAR(50). Channel through which the return was made.
+
+
+      Return Channels: Enumerates the pathways through which customers send items back.
+
+
+      Marked as ''Store'' when customer returns item in person at a retail outlet; ''Courier'' when customer
+      arranges a courier service for doorstep pickup; ''Mail'' when item is posted through the national
+      mail system; ''Locker'' when customer deposits parcel in an automated locker or drop-box; ''Pickup''
+      when retailer schedules a home or office collection for oversized or fragile goods.
+
+
+      Compiler note: Describes the enumerated values of returns.return_channel (Store, Courier, Mail,
+      Locker, Pickup).'
+  - name: return_details
+    type: JSON
+    description: 'JSONB column. Groups together metadata about the return reason, authorization, and shipping
+      logistics. Fields: {"reasoning": {"primary_reason": "VARCHAR(50). Primary reason for the return.
+      Possible values: Changed Mind, Quality Issue, Size/Fit, Wrong Item.", "secondary_reason": "VARCHAR(50).
+      Secondary reason for the return. Possible values: Better Price, Damaged, Defective, Not as Described.",
+      "reason_notes": "TEXT. Notes related to the reasons for the return. Example: Yard which quickly
+      step since half part..", "client_notes": "TEXT. Notes from the client regarding the return. Example:
+      Chance building four loss study. Response actually miss everybody such.."}, "authorization": {"auth_status":
+      "TEXT. Authorization status of the return. Possible values: Approved, Pending, Rejected.", "warranty_status":
+      "VARCHAR(50). Warranty status of the product being returned. Possible values: Expired, Not Applicable,
+      Valid.", "warranty_claim": "TEXT. Warranty claim information. **NULL means no warranty claim information
+      available.**. Example: WC8668."}, "shipping": {"carrier": "VARCHAR(50). Shipping vendor used for
+      the return.", "fee": "REAL. Shipping fee for the return. Example: 64.1.", "insurance_amount": "REAL.
+      Insurance amount associated with the return. Example: 502.73.", "estimated_arrival": "TEXT. Estimated
+      arrival date for the returned item. Example: 2025-03-03.", "tracking_reference": "TEXT. Tracking
+      reference for the return shipment. Example: 83."}, "fraud": {"risk_level": "VARCHAR(50). Fraud risk
+      level for the return. **NULL means no fraud risk level assessed.**", "fraud_flags": "BIGINT. Fraud
+      flags indicating potential issues with the return. Possible values: 0, 1, 2, 3, 4, 5."}}
+
+
+      Fraud Risk Levels: Qualitative grading of suspected fraud severity in a return.
+
+
+      There are 3 different levels: ''Low'', ''Medium'' and ''High''.
+
+
+      Compiler note: Describes the possible values of return_details->fraud->risk_level (Low, Medium,
+      High), a JSON field within returns.return_details.
+
+
+      Warranty Statuses: Indicates whether a product remains under warranty coverage.
+
+
+      ''Valid'' is within manufacturer or retailer warranty period; ''Expired'' is warranty term has lapsed;
+      ''Not Applicable'' is no warranty offered or proof unavailable.
+
+
+      Compiler note: Describes the enumerated values of the warranty_status field nested in return_details
+      JSON (authorization.warranty_status): Valid, Expired, Not Applicable.'

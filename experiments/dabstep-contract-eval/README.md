@@ -219,7 +219,7 @@ uv run python -m dce.stats results/smoke12.jsonl
 | `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data` is LiveSQLBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
-| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted` and `manual_resolved` run only when named. LiveSQLBench: `schema_only manual_prompt`. |
+| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved` and `contract_compiled` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
 | `--models` | `z-ai/glm-5.3-flash` | Any subset of the pinned ids in `dce/pricing.py`. An unpinned id is rejected. |
 | `--out` | `results/results.jsonl` (DABStep), `results/<benchmark>/results.jsonl` otherwise | One JSON row per `(task, arm, model)`. Appended to, never rewritten. A file holds one benchmark's rows; pointing a sweep at another benchmark's file is refused. |
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |
@@ -297,10 +297,45 @@ rules ([`dce/benchmarks/lsb_grade.py`](dce/benchmarks/lsb_grade.py)).
 
 The task set has 302 `primary` tasks and 73 `order_only` tasks, whose gold
 reproduces in DuckDB only as a set. `dce.stats` reports the two subsets in
-separate sections, and `primary` is the pre-registered measure. The arms are
-`schema_only` and `manual_prompt`, the KB as a prose manual; both carry the
-database's DDL and column meanings. `manual_compiled` and `contract` arrive
-with the compiler.
+separate sections, and `primary` is the pre-registered measure. Every arm
+carries the database's DDL and column meanings: `schema_only` nothing more,
+`manual_prompt` the KB as a prose manual, `manual_compiled` the manual and
+then "Compiled definitions" (each compiled metric's SQL and every compiler
+note), and `contract` the compiled contract behind the governed tools, with
+no manual. A sweep asking for either compiled arm stops before any spend if
+a database in its task set has no compiled contract, or one that does not
+load.
+
+### Compiling the contracts
+
+```bash
+set -a; . "$LENS_ENV_FILE"; set +a
+uv run python -m dce.compile --benchmark livesqlbench --all --max-spend 60
+uv run python -m dce.compile --benchmark dabstep --max-spend 10   # Part 5
+uv run python -m dce.compile.audit --benchmark livesqlbench > contracts/livesqlbench/AUDIT.md
+```
+
+The compiler (`dce/compile/`, model `claudesonnet5`) reads each database's
+KB, column meanings and DDL, and queries the database over a read-only
+connection with no file access, at most 50 rows a query. It never opens a
+task, gold or test-case file; a test enforces it. Each KB entry, children
+first, becomes a metric whose SQL must run before it is accepted (3
+attempts; one that never runs is kept, with `untranslated` set) or prose on
+its table, column or domain. A predicate must be BOOLEAN and read a column,
+and no metric may use `random()`; an entry the database cannot answer is
+submitted as `cannot_encode` and kept, `untranslated` with the reason. DABStep's manual is split at its numbered
+headings, one entry per section.
+
+Output goes to `contracts/<benchmark>/<db>/`: `contract.yml`,
+`semantic.yml` and `compile-log.jsonl.gz`, every model turn and query.
+Every finished entry is logged at once, so after a crash or the
+`--max-spend` cap, rerunning the same command resumes: a finished database
+is skipped, and the cap counts what every log already records.
+`--db NAME --recompile ID...` compiles those entries of a finished database
+again, with every entry built on them; the log keeps what the first try
+cost and records the redo. The audit
+drafts per-database counts and a seeded sample of metrics; the verdicts
+are filled in by hand.
 
 ## Arms
 
@@ -309,6 +344,9 @@ with the compiler.
 | `schema_only` | Table and column names only, discovered through the tools. The floor. | `list_tables`, `describe_table`, `execute_sql` (ungoverned) |
 | `manual_prompt` | The above, plus all 22k characters of DABStep's `manual.md` verbatim in the system prompt. The baseline to beat. | same three, ungoverned |
 | `contract` | The library's nine governed tools over a frozen, digest-pinned contract. No manual text. | `lookup_metric`, `lookup_domain`, `inspect_query`, `run_query`, … |
+
+`contract_compiled` is DABStep's extra arm: `contract` with the contract
+`dce.compile` produced from the same two documents (spec, Part 5).
 
 The arms share one row cap (50 rows per tool result, applied identically),
 one token budget, one working copy of the warehouse, and one task order.

@@ -1,0 +1,72 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: mental_health, compiler: claudesonnet5
+# inputs: mental_health_kb.jsonl, mental_health_column_meaning_base.json, mental_health_schema.txt, mental_health.duckdb
+version: '1.0'
+name: livesqlbench-mental_health
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - assessmentbasics
+    - assessmentsocialanddiagnosis
+    - assessmentsymptomsandrisk
+    - clinicians
+    - encounters
+    - facilities
+    - patients
+    - treatmentbasics
+    - treatmentoutcomes
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Treatment Adherence: Illustrates the value of treatment adherence levels.
+
+
+      Ranges from Non-compliant to High/Compliant. Non-compliant indicates no adherence, Low indicates
+      occasional adherence, Medium indicates regular adherence, and High/Compliant indicates consistent
+      adherence.
+
+
+      Compiler note: Checked both treatmentbasics.med_adh and treatmentoutcomes.txprogmet->>''Tx_Adh'':
+      both contain exactly the same value set {Non-compliant, Low, Medium, High}, matching the described
+      range equally well, with neither having a distinct ''Compliant'' value. Since the entry''s value
+      description applies identically to two different columns in two different tables, it cannot be mapped
+      to a single column or table unambiguously.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

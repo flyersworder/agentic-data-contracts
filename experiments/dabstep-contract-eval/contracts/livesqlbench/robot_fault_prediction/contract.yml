@@ -1,0 +1,83 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: robot_fault_prediction, compiler: claudesonnet5
+# inputs: robot_fault_prediction_kb.jsonl, robot_fault_prediction_column_meaning_base.json, robot_fault_prediction_schema.txt, robot_fault_prediction.duckdb
+version: '1.0'
+name: livesqlbench-robot_fault_prediction
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - actuation_data
+    - joint_condition
+    - joint_performance
+    - maintenance_and_fault
+    - mechanical_status
+    - operation
+    - performance_and_safety
+    - robot_details
+    - robot_record
+    - system_controller
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Brake Status Interpretation: Defines the meaning of brake status codes.
+
+
+      Key statuses are: ''Released'' (disengaged for movement), ''Applied'' (engaged to hold position),
+      ''Replaced'' (newly installed component), or ''Slipping'' (fault condition).
+
+
+      Compiler note: Checked mechanical_status.component_status->''brakes''->Jn values: actual distinct
+      values are Error, Normal, Warning (plus null). The entry''s described labels (Released, Applied,
+      Replaced, Slipping) do not correspond to any stored values in the database, so this entry describes
+      no actual table/column.
+
+
+      Mechanical Wear Score Tiers: Categorizes the Mechanical Wear Score into severity levels.
+
+
+      A Mechanical Wear Score is ''Low'' if < 0.5, ''Medium'' if 0.5 - 0.8, and ''High'' if > 0.8.
+
+
+      Compiler note: Mechanical Wear Score is a derived composite metric (not stored in any table/column),
+      computed from Average Joint Vibration and Average Backlash. Its tiering (''Low''/''Medium''/''High'')
+      is a categorization of this computed value, not of any existing column. No single table or column
+      corresponds to this entry.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

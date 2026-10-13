@@ -1,0 +1,1302 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: crypto_exchange, compiler: claudesonnet5
+# inputs: crypto_exchange_kb.jsonl, crypto_exchange_column_meaning_base.json, crypto_exchange_schema.txt, crypto_exchange.duckdb
+metrics:
+- name: spread_percentage
+  description: 'Calculates the spread as a percentage of the midpoint price.
+
+
+    Spread Percentage = \frac{\text{best ask price} - \text{best bid price}}{\text{midpoint price}} \times
+    100, \text{where best ask price is the best ask price, best bid price is the best bid price, and midpoint
+    price is the midpoint price.}
+
+
+    Compiler note: Uses best_ask, best_bid, mid_price from orderbook_metrics JSON fields, all stored as
+    numeric values castable to double precision.'
+  sql_expression: (((orderbook_metrics->>'best_ask')::double precision - (orderbook_metrics->>'best_bid')::double
+    precision) / (orderbook_metrics->>'mid_price')::double precision) * 100
+  source_model: main.marketdata
+  domains:
+  - calculations
+- name: slippage_impact
+  description: 'Calculates the expected price slippage impact for a given order size.
+
+
+    Slippage Impact = \frac{\text{order quantity}}{\text{quantity available at best bid or ask}} \times
+    \text{raw spread}, \text{where order quantity is the order quantity, quantity available at best bid/ask
+    is the quantity available at best bid/ask, and raw spread is the raw spread.}
+
+
+    Compiler note: Order quantity from order_attributes.quantity; quantity available at best bid/ask chosen
+    by side (Buy consumes ask liquidity -> ask_size, Sell consumes bid liquidity -> bid_size) from marketdata.orderbook_metrics
+    joined via exchSpot=EXCH_SPOT (unique on marketdata side); raw spread = orderbook_metrics.spread_abs.'
+  sql_expression: (order_attributes->>'quantity')::double precision / (CASE WHEN order_attributes->>'side'
+    = 'Buy' THEN ((SELECT m.orderbook_metrics->>'ask_size' FROM marketdata m WHERE m."EXCH_SPOT" = exchSpot))::double
+    precision ELSE ((SELECT m.orderbook_metrics->>'bid_size' FROM marketdata m WHERE m."EXCH_SPOT" = exchSpot))::double
+    precision END) * (SELECT (m.orderbook_metrics->>'spread_abs')::double precision FROM marketdata m
+    WHERE m."EXCH_SPOT" = exchSpot)
+  source_model: main.orders
+  domains:
+  - calculations
+- name: position_value_at_risk_pvar
+  description: 'Calculates the value at risk for a position based on current market conditions.
+
+
+    PVaR = \text{notional value of position} \times \text{volatility rating} \times 0.01, \text{where
+    notional value of position is the notional value of position and volatility rating is the volatility
+    or fluctuation rating.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: No field in the database represents a "volatility rating" or "volatility/fluctuation rating".
+    Checked riskandmargin.margin_risk_profile, analyticsindicators.indicator_bundle, marketstats, and
+    marketdata.orderbook_metrics - none contain such a measure (closest candidates like priceShiftDay
+    or bollinger_width_pct are not documented as this metric). Without this input, PVaR cannot be computed.
+- name: arbitrage_potential_score_aps
+  description: 'Quantifies the potential arbitrage opportunity considering multiple factors.
+
+
+    APS = \text{arbitrage potential} + \text{cross-exchange spread} + (\text{funding-rate gap} \times
+    2) + \text{basis gap}, \text{where these components represent different types of arbitrage opportunities.}
+
+
+    Compiler note: Uses cross_venue fields from indicator_bundle JSON: arbitrage_pct (arbitrage potential),
+    cross_exchange_spread_pct, funding_gap_pct (x2), basis_gap_pct.'
+  sql_expression: (indicator_bundle->'cross_venue'->>'arbitrage_pct')::double precision + (indicator_bundle->'cross_venue'->>'cross_exchange_spread_pct')::double
+    precision + ((indicator_bundle->'cross_venue'->>'funding_gap_pct')::double precision * 2) + (indicator_bundle->'cross_venue'->>'basis_gap_pct')::double
+    precision
+  source_model: main.analyticsindicators
+  domains:
+  - calculations
+- name: market_impact_cost_mic
+  description: 'Estimates the market impact cost of executing a large order.
+
+
+    MIC = \text{order quantity} \times \text{limit price} \times \text{large order ratio} \times 0.01,
+    \text{where order quantity is the order quantity from the order''s attributes}, \text{limit price
+    is the order''s specified limit price}, \text{and large order ratio is the rate of large-size trades
+    found in the analytics indicators}.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The large_order_ratio must come from analyticsindicators.indicator_bundle->order_flow->large_order_ratio
+    joined via orders.exchSpot = analyticsindicators.md_ref, but analyticsindicators has multiple rows
+    per md_ref (exchSpot) with no timestamp or other field to pick a unique matching row, and the entry
+    gives no selection rule to disambiguate. Hence a unique scalar subquery cannot be formed.
+- name: liquidity_ratio
+  description: 'Measures the ratio of available liquidity to total market volume.
+
+
+    Liquidity Ratio = \frac{(\text{quantity at best bid} + \text{quantity at best ask}) \times \text{midpoint
+    price}}{\text{24h volume}}, \text{where quantity at best bid and quantity at best ask are quantities
+    at best bid and ask, midpoint price is the midpoint price, and 24h volume is the 24h volume.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: marketstats has multiple rows per md_link (EXCH_SPOT) with differing VOLday values (e.g.
+    EX809 has 6 rows with distinct VOLday), so "24h volume" for a given market snapshot cannot be resolved
+    to a unique value via a scalar subquery, and the entry gives no aggregation/selection rule to pick
+    among them.
+- name: realized_risk_ratio_rrr
+  description: 'Calculates the ratio of realized PnL to position value at risk.
+
+
+    RRR = \frac{\text{realized PnL}}{\text{Position Value at Risk}}, \text{where realized PnL is the realized
+    PnL and Position Value at Risk is the Position Value at Risk.}
+
+
+    Built on: position_value_at_risk_pvar.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'RRR depends on Position Value at Risk (PVaR), which itself cannot be encoded: no field
+    in the database represents a "volatility rating" needed for PVaR. Checked riskandmargin.margin_risk_profile,
+    analyticsindicators.indicator_bundle, marketstats, and marketdata.orderbook_metrics - none contain
+    such a measure. Without PVaR, RRR cannot be computed.'
+- name: margin_utilization
+  description: 'Calculates the percentage of margin being utilized.
+
+
+    Margin Utilization = \frac{\text{initial margin required}}{\text{margin account balance}} \times 100,
+    \text{where initial margin required is the initial margin required and margin account balance is the
+    margin account balance.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Margin account balance would need to be looked up via orders.UserRef -> accountbalances.userTAG,
+    but accountbalances has multiple rows per user (not unique), and the documentation gives no rule for
+    selecting among them. Without a unique mapping from an order/position to a single margin account balance,
+    this ratio cannot be computed deterministically over this schema.
+- name: order_fill_rate
+  description: 'Calculates the percentage of an order that has been filled.
+
+
+    Order Fill Rate = \frac{\text{order quantity} - \text{unfilled units}}{\text{order quantity}} \times
+    100, \text{where order quantity is the order quantity and unfilled units is how many units remain
+    unfilled.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: orders have a one-to-many relationship with orderExecutions (e.g. order OR8194782 has
+    3 execution rows, each with a different remain_amt), and the documentation gives no rule for selecting
+    or aggregating the "unfilled units" value across multiple execution records for the same order. Without
+    a stated selection/aggregation rule, this cannot be unambiguously encoded as a per-order scalar expression.
+- name: market_efficiency_ratio_mer
+  description: 'Measures how efficiently orders are executed compared to expected slippage.
+
+
+    MER = \frac{\text{Slippage Impact}}{\text{average slippage measure}}, \text{where Slippage Impact
+    is the calculated expected slippage and average slippage measure is the average slippage measure.}
+
+
+    Built on: slippage_impact.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The denominator "average slippage measure" would correspond to systemmonitoring.SLIP_ratio,
+    but systemmonitoring has no foreign key or shared column linking its rows to orders (or to markets/exchSpot).
+    There is no way to select the single corresponding average-slippage value for a given order row, so
+    the ratio cannot be computed over the orders table (or any other table) with a well-defined join.
+- name: whale_order
+  description: 'Identifies large orders that could significantly impact market prices.
+
+
+    An order where the order quantity exceeds 10% of the available liquidity (quantity at best bid or
+    ask) at the current best bid or ask price.
+
+
+    Compiler note: Order quantity (order_attributes->>''quantity'') compared to 10% of available liquidity
+    at the current best bid/ask on the order''s market (marketdata.orderbook_metrics, joined via orders.exchSpot
+    = marketdata.EXCH_SPOT, unique 1:1). Side determines which side''s liquidity applies: Buy orders consume
+    ask-side liquidity (ask_size), Sell orders consume bid-side liquidity (bid_size).'
+  sql_expression: "(order_attributes->>'quantity')::double precision > 0.1 * (\n  CASE WHEN order_attributes->>'side'\
+    \ = 'Buy'\n    THEN ((SELECT md.orderbook_metrics->>'ask_size' FROM marketdata md WHERE md.\"EXCH_SPOT\"\
+    \ = orders.\"exchSpot\"))::double precision\n    ELSE ((SELECT md.orderbook_metrics->>'bid_size' FROM\
+    \ marketdata md WHERE md.\"EXCH_SPOT\" = orders.\"exchSpot\"))::double precision\n  END\n)"
+  source_model: main.orders
+  domains:
+  - definitions
+- name: liquidation_risk_level
+  description: 'Categorizes positions based on their proximity to liquidation.
+
+
+    Positions are categorized as ''Safe'' or ''High Risk'' based on how close the current market price
+    is to the liquidation price. A position is ''High Risk'' when liquidation price >= market price *
+    0.95.
+
+
+    Compiler note: liquidation_price stored as text with $ and commas, stripped and cast to double; market
+    price taken as mark_price from marketdata joined via orders.exchSpot (unique match through ordStamp
+    -> ORD_STAMP -> exchSpot -> EXCH_SPOT PK). Categorical label per definition: ''High Risk'' if liquidation_price
+    >= mark_price*0.95, else ''Safe''.'
+  sql_expression: CASE WHEN CAST(REPLACE(REPLACE(margin_risk_profile->>'liquidation_price', '$', ''),
+    ',', '') AS DOUBLE PRECISION) >= (SELECT CAST(md.orderbook_metrics->>'mark_price' AS DOUBLE PRECISION)
+    FROM orders o JOIN marketdata md ON md."EXCH_SPOT" = o."exchSpot" WHERE o."ORD_STAMP" = riskandmargin."ordStamp")
+    * 0.95 THEN 'High Risk' ELSE 'Safe' END
+  source_model: main.riskandmargin
+  domains:
+  - definitions
+- name: arbitrage_window
+  description: 'Identifies time periods with significant arbitrage opportunities across markets.
+
+
+    A market condition where the Arbitrage-Potential Score exceeds 0.05, indicating substantial price
+    discrepancies that can be exploited.
+
+
+    Built on: arbitrage_potential_score_aps.
+
+
+    Compiler note: Encodes Arbitrage-Potential Score (APS) computed from indicator_bundle->cross_venue
+    fields, thresholded at >0.05 per Arbitrage Window definition.'
+  sql_expression: (indicator_bundle->'cross_venue'->>'arbitrage_pct')::double precision + (indicator_bundle->'cross_venue'->>'cross_exchange_spread_pct')::double
+    precision + ((indicator_bundle->'cross_venue'->>'funding_gap_pct')::double precision * 2) + (indicator_bundle->'cross_venue'->>'basis_gap_pct')::double
+    precision > 0.05
+  source_model: main.analyticsindicators
+  domains:
+  - definitions
+- name: over_leveraged_position
+  description: 'Identifies positions with excessive leverage relative to market volatility.
+
+
+    A position where the leverage multiplied by the volatility measure exceeds 500, indicating high risk
+    exposure.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition requires a "volatility rating" for the position's market, multiplied by
+    leverage. The database has no column clearly representing volatility (vol_meter is documented as "Volume-intensity
+    meter reading", not volatility, and other candidates like LIQUIDscore/priceShiftDay/bollinger_width_pct
+    are not identified as volatility either). Moreover, linking a position (riskandmargin/orders) to its
+    market's volatility would go through marketstats via md_link=exchSpot, but marketstats has multiple
+    rows per market symbol with differing values and no stated selection rule, so no unique volatility
+    value can be obtained even if the right column were identified.
+- name: market_maker_activity
+  description: 'Identifies periods of high market maker participation.
+
+
+    Market conditions where execution tuning parameter is predominantly ''Maker'' and maker-order flow
+    is ''High'', indicating strong liquidity provision by market makers.
+
+
+    Compiler note: "Predominantly Maker" is interpreted as a majority (>50%) of execution tuning values
+    equal to ''Maker'' among all order executions tied to orders on the same exchSpot/market as this analyticsindicators
+    row''s md_ref. Combined with maker-order flow (participant_flow.market_maker_note) == ''High''. Aggregation
+    verified via join orders->orderExecutions grouped by exchSpot.'
+  sql_expression: "(indicator_bundle->'participant_flow'->>'market_maker_note') = 'High' AND (\n  SELECT\
+    \ COUNT(*) FILTER (WHERE oe.\"EXECtune\" = 'Maker') > COUNT(*) * 0.5\n  FROM orderExecutions oe\n\
+    \  JOIN orders o ON o.\"ORD_STAMP\" = oe.\"Ord_Link\"\n  WHERE o.\"exchSpot\" = analyticsindicators.md_ref\n\
+    )"
+  source_model: main.analyticsindicators
+  domains:
+  - definitions
+- name: smart_money_flow
+  description: 'Identifies directional bias of sophisticated traders.
+
+
+    Market conditions where smart-money force exceeds both retail-flow share and institutional-flow share
+    by at least 20%, indicating strong directional bias from sophisticated traders.
+
+
+    Compiler note: Interpreted ''exceeds by at least 20%'' as smart_money > retail_flow*1.2 AND smart_money
+    > institutional_flow*1.2, consistent with the Flow Dominance definition''s ''Smart Money Dominant''
+    condition. Fields accessed via indicator_bundle->participant_flow->{smart_money,retail_flow,institutional_flow},
+    cast from jsonb to double precision. Rows with NULL retail_flow or institutional_flow yield NULL (excluded).'
+  sql_expression: (indicator_bundle->'participant_flow'->>'smart_money')::double precision > (indicator_bundle->'participant_flow'->>'retail_flow')::double
+    precision * 1.2 AND (indicator_bundle->'participant_flow'->>'smart_money')::double precision > (indicator_bundle->'participant_flow'->>'institutional_flow')::double
+    precision * 1.2
+  source_model: main.analyticsindicators
+  domains:
+  - definitions
+- name: liquidity_crisis
+  description: 'Identifies periods of severely reduced market liquidity.
+
+
+    Market conditions where the Liquidity Ratio falls below 0.01, indicating insufficient market depth
+    relative to typical trading volume.
+
+
+    Built on: liquidity_ratio.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Depends on Liquidity Ratio, which cannot be encoded: marketstats has multiple rows per
+    md_link (EXCH_SPOT) with differing VOLday values, so "24h volume" for a given market snapshot cannot
+    be resolved to a unique value via a scalar subquery, and no aggregation/selection rule is given. Since
+    Liquidity Ratio is undefined, the Liquidity Crisis threshold condition cannot be computed either.'
+- name: momentum_divergence
+  description: 'Identifies when price action diverges from momentum indicators.
+
+
+    Market condition where price makes new highs/lows while momentum indicators (aggregate buy-side force,
+    aggregate sell-side force) move in the opposite direction.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This requires detecting "new highs/lows" in price over time and comparing against the
+    direction of momentum indicators (buy/sell pressure) also over time - i.e., a time-series trend comparison.
+    The database only holds point-in-time snapshots (one row per market in marketdata/analyticsindicators,
+    daily aggregates in marketstats) with no sequence of historical price/indicator observations to compute
+    "making new highs/lows" or "moving in the opposite direction" against. There is no table of time-ordered
+    price/indicator history to encode this divergence condition.
+- name: margin_call_risk
+  description: 'Identifies accounts at risk of receiving a margin call.
+
+
+    Accounts where the Margin Utilization exceeds 80%, putting them at risk of margin calls if market
+    prices move adversely.
+
+
+    Built on: margin_utilization.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Margin Call Risk depends on Margin Utilization, which requires dividing initial margin
+    required by margin account balance. accountbalances has multiple rows per user (verified: e.g. U485932
+    has 8 rows), and there is no documented rule for selecting a single balance row per user/order. Without
+    a unique margin account balance per position, Margin Utilization, and hence Margin Call Risk, cannot
+    be computed deterministically over this schema.'
+- name: technical_breakout
+  description: 'Identifies when price breaks significant technical levels with volume.
+
+
+    Market condition where price exceeds the day’s high price or falls below the day’s low price with
+    volume (trading volume of the day) at least 50% above the 30-day average.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database only stores a single day's snapshot per market in marketstats (VOLday, HIGH_SPOT_DAY,
+    low_spot_day), with no historical time series. There is no way to compute a "30-day average" volume
+    or a current "price" to compare against the day's high/low from any table, so this breakout condition
+    cannot be encoded.
+- name: risk_adjusted_return
+  description: 'Calculates return on position adjusted for risk exposure.
+
+
+    Risk-Adjusted Return = \frac{\text{realized PnL}}{\text{Position Value at Risk} \times \text{position
+    risk ratio}}, \text{where realized PnL is the realized PnL, Position Value at Risk is the Position
+    Value at Risk, and position risk ratio is the position risk ratio.}
+
+
+    Built on: position_value_at_risk_pvar, realized_risk_ratio_rrr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'Risk-Adjusted Return depends on Position Value at Risk (PVaR), which cannot be encoded:
+    no field in the database represents a "volatility rating" needed for PVaR. Checked riskandmargin.margin_risk_profile,
+    analyticsindicators.indicator_bundle, marketstats, and marketdata.orderbook_metrics - none contain
+    such a measure. Without PVaR, Risk-Adjusted Return cannot be computed.'
+- name: true_cost_of_execution
+  description: 'Calculates the total cost of order execution including fees and slippage.
+
+
+    True Cost of Execution = \text{total fee charged} + (\text{order quantity} \times \text{limit or stop
+    price} \times \text{Slippage Impact} \times 0.01), \text{where total fee charged is the total fee
+    charged and Slippage Impact is the expected price slippage impact for the order size.}
+
+
+    Built on: slippage_impact.
+
+
+    Compiler note: Total fee charged = sum of FEE_TOTAL (stripped of $ and commas) across all fees rows
+    linked to the order (fees.Order_Link is not unique per order, multiple fee rows can exist per order,
+    so summed). Limit/stop price mapped to order_attributes.limit_price (only limit price field available
+    in orders). Slippage Impact reused per its definition (order quantity / available liquidity at best
+    bid/ask side * raw spread_abs), computed inline via marketdata joined on exchSpot (unique per EXCH_SPOT).'
+  sql_expression: "(SELECT SUM(REPLACE(REPLACE(f.\"FEE_TOTAL\", '$', ''), ',', '')::double precision)\
+    \ FROM fees f WHERE f.\"Order_Link\" = orders.\"ORD_STAMP\")\n+\n(\n  (order_attributes->>'quantity')::double\
+    \ precision\n  * COALESCE((order_attributes->>'limit_price')::double precision)\n  *\n  (\n    (order_attributes->>'quantity')::double\
+    \ precision\n    /\n    (CASE WHEN order_attributes->>'side' = 'Buy'\n      THEN (SELECT (m.orderbook_metrics->>'ask_size')::double\
+    \ precision FROM marketdata m WHERE m.\"EXCH_SPOT\" = orders.exchSpot)\n      ELSE (SELECT (m.orderbook_metrics->>'bid_size')::double\
+    \ precision FROM marketdata m WHERE m.\"EXCH_SPOT\" = orders.exchSpot)\n    END)\n    * (SELECT (m.orderbook_metrics->>'spread_abs')::double\
+    \ precision FROM marketdata m WHERE m.\"EXCH_SPOT\" = orders.exchSpot)\n  )\n  * 0.01\n)"
+  source_model: main.orders
+  domains:
+  - calculations
+- name: order_book_imbalance_ratio
+  description: 'Quantifies the imbalance between bid and ask sides of the order book.
+
+
+    Order Book Imbalance Ratio = \frac{\text{deeper bid liquidity} - \text{deeper ask liquidity}}{\text{deeper
+    bid liquidity} + \text{deeper ask liquidity}}, \text{where deeper bid liquidity is the deeper bid
+    liquidity and deeper ask liquidity is the deeper ask liquidity. A positive Imbalance Ratio indicates
+    stronger buying pressure, while negative indicates stronger selling pressure.}
+
+
+    Built on: liquidity_ratio.
+
+
+    Compiler note: Interpreted "deeper bid liquidity" and "deeper ask liquidity" as the bid_depth and
+    ask_depth fields in orderbook_metrics (aggregate depth at bid/ask side). Ratio = (bid_depth - ask_depth)/(bid_depth
+    + ask_depth).'
+  sql_expression: ( ((orderbook_metrics->>'bid_depth')::double precision - (orderbook_metrics->>'ask_depth')::double
+    precision) / ((orderbook_metrics->>'bid_depth')::double precision + (orderbook_metrics->>'ask_depth')::double
+    precision) )
+  source_model: main.marketdata
+  domains:
+  - calculations
+- name: effective_leverage
+  description: 'Calculates the actual leverage considering both explicit leverage setting and position
+    size relative to account balance.
+
+
+    Effective Leverage = \text{position leverage} \times \frac{\text{notional value of position}}{\text{total
+    wallet balance}}, \text{where position leverage is the position leverage, notional value of position
+    is the notional value of position, and total wallet balance is the total wallet balance.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Requires total wallet balance for the user, but accountbalances has multiple rows per
+    userTAG (not unique), and the entry gives no rule for selecting/aggregating among them. A scalar subquery
+    from riskandmargin -> orders -> users -> accountbalances would match multiple rows, so this cannot
+    be encoded unambiguously.
+- name: profit_factor
+  description: 'Measures the ratio of profitable trades to losing trades adjusted for their values.
+
+
+    Profit Factor = \frac{\sum \text{positive realized PnL}}{|\sum \text{negative realized PnL}|}, \text{where
+    realized PnL is the realized PnL, calculated separately for positive and negative values.}
+
+
+    Built on: realized_risk_ratio_rrr.
+
+
+    Compiler note: Realized PnL is accountbalances.REAL_LINE. Profit Factor = sum of positive REAL_LINE
+    values / abs(sum of negative REAL_LINE values), aggregated across all accounts.'
+  sql_expression: SUM(CASE WHEN "REAL_LINE" > 0 THEN "REAL_LINE" ELSE 0 END) / ABS(SUM(CASE WHEN "REAL_LINE"
+    < 0 THEN "REAL_LINE" ELSE 0 END))
+  source_model: main.accountbalances
+  domains:
+  - calculations
+- name: arbitrage_roi
+  description: 'Calculates the potential return on investment for an arbitrage opportunity.
+
+
+    Arbitrage ROI = \frac{\text{Arbitrage Opportunity Score} \times \text{limit or stop price}}{\text{total
+    fee charged} \times 2}, \text{where Arbitrage Opportunity Score is the Arbitrage Opportunity Score
+    and total fee charged is multiplied by 2 to account for fees on both transactions involved in arbitrage.}
+
+
+    Built on: arbitrage_potential_score_aps, true_cost_of_execution.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: Arbitrage ROI requires the Arbitrage Opportunity Score (APS), which is defined over analyticsindicators
+    joined to a market (via md_ref/exchSpot). However, analyticsindicators has multiple rows per md_ref/exchSpot
+    (e.g. EX809 has 6 rows) with no timestamp or other field to select a single matching snapshot for
+    a given order's exchSpot, and the entry states no selection/aggregation rule for this one-to-many
+    relationship. Therefore APS cannot be uniquely resolved per order, and Arbitrage ROI cannot be computed.
+- name: market_depth_ratio
+  description: 'Measures the ratio of order book depth to position size to assess market liquidity for
+    position exit.
+
+
+    Market Depth Ratio = \frac{\text{deeper bid or ask liquidity}}{\text{order quantity}} \times \text{Liquidity
+    Ratio}, \text{where deeper bid/ask liquidity is used depending on position direction (position side),
+    order quantity is the order quantity, and Liquidity Ratio measures available liquidity to total market
+    volume.}
+
+
+    Built on: liquidity_ratio, order_fill_rate.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'This metric depends on Liquidity Ratio, which cannot be encoded: marketstats has multiple
+    rows per md_link (EXCH_SPOT) with differing VOLday values, so "24h volume" cannot be resolved to a
+    unique value via a scalar subquery, and no aggregation/selection rule is given. Since Market Depth
+    Ratio requires Liquidity Ratio as a factor, it inherits this same ambiguity and cannot be encoded
+    either.'
+- name: volatility_adjusted_spread
+  description: 'Normalizes the spread by the market volatility to determine if spread is wide relative
+    to expected price movement.
+
+
+    Volatility-Adjusted Spread = \frac{\text{Spread Percentage}}{\text{volatility rating} \times 0.1},
+    \text{where Spread Percentage is the spread as percentage of midpoint price and volatility rating
+    is the volatility or fluctuation rating.}
+
+
+    Built on: spread_percentage.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: No "volatility rating" field exists in the schema. marketstats has vol_meter (volume-intensity
+    meter) and VOLday (trading volume), but these represent volume, not volatility/fluctuation rating.
+    There is no column capturing price volatility/fluctuation, so Volatility-Adjusted Spread cannot be
+    computed.
+- name: risk_to_reward_ratio
+  description: 'Calculates the ratio of potential risk to potential reward for a position.
+
+
+    Risk-to-Reward Ratio = \frac{|\text{entry price} - (\text{position side} == ''Long'' ? \text{stop
+    price} : \text{advanced trigger price})|}{|\text{entry price} - (\text{position side} == ''Long''
+    ? \text{advanced trigger price} : \text{stop price})|}, \text{where entry price is the entry price,
+    stop price is the stop price, advanced trigger price is the advanced trigger price, and position side
+    determines position direction (Long or Short).}
+
+
+    Built on: market_efficiency_ratio_mer, posedge.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: No column or JSON field in the schema represents "entry price" for a position. riskandmargin.margin_risk_profile
+    contains stop_loss_price and stop_trigger_price (candidates for stop price / advanced trigger price)
+    but no entry price field exists anywhere (orders.order_attributes.limit_price is the order's limit
+    price, not a documented entry price for the resulting position). Without a defined entry price, the
+    Risk-to-Reward Ratio cannot be computed over any table.
+- name: technical_signal_strength
+  description: 'Quantifies the strength of technical signals based on multiple indicators.
+
+
+    Technical Signal Strength = \frac{|\text{RSI indicator} - 50| + |\text{MACD line}| + (\text{Bollinger
+    Band width} \times 0.01)}{3} \times (\text{technical meter} == ''Buy'' ? 1 : \text{technical meter}
+    == ''Sell'' ? -1 : 0), \text{where RSI indicator is the RSI indicator, MACD line is the MACD line,
+    Bollinger Band width is the Bollinger Band width, and technical meter determines direction (Buy, Sell,
+    Hold).}
+
+
+    Built on: momentum_divergence, techmeter.
+
+
+    Compiler note: RSI (rsi_14), MACD (macd_hist), Bollinger width (bollinger_width_pct) all under indicator_bundle->''technical'';
+    technical meter mapped to indicator_bundle->''sentiment''->>''signal'' (Buy/Sell/Hold enum) as per
+    techmeter definition.'
+  sql_expression: ((ABS((indicator_bundle->'technical'->>'rsi_14')::double precision - 50) + ABS((indicator_bundle->'technical'->>'macd_hist')::double
+    precision) + ((indicator_bundle->'technical'->>'bollinger_width_pct')::double precision * 0.01)) /
+    3) * (CASE WHEN indicator_bundle->'sentiment'->>'signal' = 'Buy' THEN 1 WHEN indicator_bundle->'sentiment'->>'signal'
+    = 'Sell' THEN -1 ELSE 0 END)
+  source_model: main.analyticsindicators
+  domains:
+  - calculations
+- name: critically_over_leveraged_position
+  description: 'Identifies positions with extremely dangerous leverage levels requiring immediate risk
+    management.
+
+
+    A position that qualifies as an Over-Leveraged Position where additionally the Effective Leverage
+    exceeds 20 and the Margin Utilization exceeds 90%, creating extreme liquidation risk.
+
+
+    Built on: margin_utilization, effective_leverage.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric depends on both Margin Utilization and Effective Leverage, neither of which
+    can be computed over this schema: both require a unique mapping from a position (via orders.UserRef
+    -> users.USERSTAMP) to a single accountbalances row (for margin account balance / total wallet balance),
+    but accountbalances has multiple rows per userTAG and no rule is given to select among them. Since
+    the prerequisite metrics cannot be encoded, Critically Over-Leveraged Position cannot be encoded either.'
+- name: high_quality_arbitrage_opportunity
+  description: 'Identifies particularly favorable arbitrage opportunities with minimal execution risk.
+
+
+    An Arbitrage Window where the Arbitrage ROI exceeds 0.5% and the Market Efficiency Ratio is less than
+    1.2, indicating high potential return with low execution risk.
+
+
+    Built on: arbitrage_window, arbitrage_roi, market_efficiency_ratio_mer.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on Arbitrage ROI and Market Efficiency Ratio, both of which are not
+    encodable in this schema (Arbitrage ROI requires an uniquely resolvable Arbitrage Opportunity Score
+    per order, which is not possible given analyticsindicators' one-to-many relationship to markets with
+    no selection rule; Market Efficiency Ratio requires systemmonitoring.SLIP_ratio joined to orders/markets,
+    but no join key exists). Since neither sub-metric can be computed, High-Quality Arbitrage Opportunity
+    cannot be encoded either.
+- name: technical_reversal_signal
+  description: 'Identifies strong indications of potential market direction reversal.
+
+
+    A market condition where Technical Signal Strength exceeds 8 in absolute value while simultaneously
+    showing Momentum Divergence, providing reinforcing signals of a potential trend reversal.
+
+
+    Built on: momentum_divergence, technical_signal_strength.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on Momentum Divergence, which cannot be encoded because it requires
+    time-series history of price and momentum indicators (new highs/lows over time) that the database
+    does not hold (only point-in-time snapshots exist). Since Technical Reversal Signal requires Momentum
+    Divergence to hold simultaneously, it cannot be encoded either.
+- name: liquidity_constrained_position
+  description: 'Identifies positions that may be difficult to exit due to insufficient market liquidity.
+
+
+    A position where the Market Depth Ratio is less than 2.0, indicating that the position size is large
+    relative to available market depth, potentially leading to significant slippage upon exit.
+
+
+    Built on: market_depth_ratio.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Market Depth Ratio, which itself depends on Liquidity Ratio. Liquidity Ratio
+    cannot be encoded because marketstats has multiple rows per md_link (EXCH_SPOT) with differing VOLday
+    values, so "24h volume" cannot be resolved to a unique value via a scalar subquery, and no aggregation/selection
+    rule is given. This ambiguity propagates through Market Depth Ratio to Liquidity Constrained Position.
+- name: optimal_trading_window
+  description: 'Identifies periods with ideal conditions for order execution.
+
+
+    Market conditions where the Volatility-Adjusted Spread is less than 1.0 and the Market Maker Activity
+    indicates ''High'', suggesting tight spreads relative to volatility and strong liquidity provision.
+
+
+    Built on: market_maker_activity, volatility_adjusted_spread.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on Volatility-Adjusted Spread, which cannot be encoded because no "volatility
+    rating" field exists in the schema (marketstats.vol_meter and VOLday represent volume, not price volatility/fluctuation).
+    Since Optimal Trading Window requires this unavailable metric to be less than 1.0, it cannot be computed
+    either.
+- name: risk_efficient_position
+  description: 'Identifies positions with favorable risk-adjusted characteristics.
+
+
+    A position where the Risk-Adjusted Return exceeds 1.5 and the Risk-to-Reward Ratio is less than 0.5,
+    indicating strong returns relative to risk exposure and favorable potential profit compared to potential
+    loss.
+
+
+    Built on: risk_adjusted_return, risk_to_reward_ratio.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Depends on Risk-Adjusted Return and Risk-to-Reward Ratio, both uncompiled: Risk-Adjusted
+    Return requires Position Value at Risk, which needs a "volatility rating" field absent from the schema;
+    Risk-to-Reward Ratio requires an "entry price" field absent from the schema. Without these, Risk-Efficient
+    Position cannot be computed.'
+- name: whale_driven_market
+  description: 'Identifies periods where large traders significantly influence price direction.
+
+
+    Market conditions where whale-wallet activity is ''High'' and there is at least one Whale Order in
+    the same direction as the Smart Money Flow, indicating coordinated activity among large market participants.
+
+
+    Built on: whale_order, smart_money_flow, whalemotion.
+
+
+    Compiler note: Market-level predicate over marketdata.EXCH_SPOT. Whale activity ''High'' checked via
+    analyticsindicators.indicator_bundle->participant_flow->whale_activity (multiple analytics rows can
+    exist per market, so a semi-join via IN is used; correlated EXISTS triggered a DuckDB jsonb-cast engine
+    bug, confirmed via run_sql, so IN/semi-join form is used instead, which is logically equivalent).
+    Whale Order reused from its given definition (order quantity > 10% of available liquidity on the relevant
+    side, matched to the order''s own exchSpot market). Smart Money Flow reused from its given definition
+    (smart_money force exceeding both retail-flow and institutional-flow by 20%). Neither Whale Order
+    nor Smart Money Flow carries an explicit directional attribute in their definitions, so ''same direction''
+    is encoded using the only directional signals present: the whale order''s side (Buy/Sell) matched
+    against the sign of the smart_money force value for that market (positive => bullish/Buy, negative
+    => bearish/Sell).'
+  sql_expression: "\"EXCH_SPOT\" IN (\n  SELECT ai.md_ref FROM analyticsindicators ai\n  WHERE ai.indicator_bundle->'participant_flow'->>'whale_activity'\
+    \ = 'High'\n)\nAND \"EXCH_SPOT\" IN (\n  SELECT o.\"exchSpot\"\n  FROM orders o\n  JOIN analyticsindicators\
+    \ ai2 ON ai2.md_ref = o.\"exchSpot\"\n  WHERE ai2.indicator_bundle->'participant_flow'->>'whale_activity'\
+    \ = 'High'\n    AND (o.order_attributes->>'quantity')::double precision > 0.1 * (\n      CASE WHEN\
+    \ o.order_attributes->>'side' = 'Buy'\n        THEN ((SELECT md2.orderbook_metrics->>'ask_size' FROM\
+    \ marketdata md2 WHERE md2.\"EXCH_SPOT\" = o.\"exchSpot\"))::double precision\n        ELSE ((SELECT\
+    \ md2.orderbook_metrics->>'bid_size' FROM marketdata md2 WHERE md2.\"EXCH_SPOT\" = o.\"exchSpot\"\
+    ))::double precision\n      END\n    )\n    AND (ai2.indicator_bundle->'participant_flow'->>'smart_money')::double\
+    \ precision > (ai2.indicator_bundle->'participant_flow'->>'retail_flow')::double precision * 1.2\n\
+    \    AND (ai2.indicator_bundle->'participant_flow'->>'smart_money')::double precision > (ai2.indicator_bundle->'participant_flow'->>'institutional_flow')::double\
+    \ precision * 1.2\n    AND (\n      (o.order_attributes->>'side' = 'Buy' AND (ai2.indicator_bundle->'participant_flow'->>'smart_money')::double\
+    \ precision > 0)\n      OR\n      (o.order_attributes->>'side' = 'Sell' AND (ai2.indicator_bundle->'participant_flow'->>'smart_money')::double\
+    \ precision < 0)\n    )\n)"
+  source_model: main.marketdata
+  domains:
+  - definitions
+- name: liquidation_cascade_risk
+  description: 'Identifies market conditions prone to cascading liquidations.
+
+
+    Market conditions where more than 15% of open positions are classified as Liquidation Risk Level ''High
+    Risk'' and the Order Book Imbalance Ratio exceeds 0.3 in absolute value, indicating concentrated risk
+    and imbalanced liquidity.
+
+
+    Built on: liquidation_risk_level, order_book_imbalance_ratio.
+
+
+    Compiler note: Interpreted "open positions" as the global set of rows in riskandmargin (only 2 rows
+    total in this dataset, each with a unique matching order->marketdata for liquidation_risk_level''s
+    market-price lookup). The 15% high-risk-position threshold is computed globally (not per-market),
+    while the Order Book Imbalance Ratio (bid_depth-ask_depth)/(bid_depth+ask_depth) is evaluated per
+    marketdata row, matching the per-row definition given in the knowledge base.'
+  sql_expression: "(\n  (SELECT CAST(SUM(CASE WHEN CAST(REPLACE(REPLACE(r.margin_risk_profile->>'liquidation_price',\
+    \ '$', ''), ',', '') AS DOUBLE PRECISION) >= (\n        SELECT CAST(md2.orderbook_metrics->>'mark_price'\
+    \ AS DOUBLE PRECISION)\n        FROM orders o2 JOIN marketdata md2 ON md2.\"EXCH_SPOT\" = o2.\"exchSpot\"\
+    \n        WHERE o2.\"ORD_STAMP\" = r.\"ordStamp\"\n      ) * 0.95 THEN 1 ELSE 0 END) AS DOUBLE PRECISION)\
+    \ / COUNT(*)\n   FROM riskandmargin r) > 0.15\n)\nAND\nABS(\n  ((orderbook_metrics->>'bid_depth')::double\
+    \ precision - (orderbook_metrics->>'ask_depth')::double precision)\n  / ((orderbook_metrics->>'bid_depth')::double\
+    \ precision + (orderbook_metrics->>'ask_depth')::double precision)\n) > 0.3"
+  source_model: main.marketdata
+  domains:
+  - definitions
+- name: perfect_technical_setup
+  description: 'Identifies ideal conditions for technical trading strategies.
+
+
+    Market conditions where Technical Signal Strength exceeds 7, the technical meter direction matches
+    market sentiment direction, and no Momentum Divergence is present, indicating strong, consistent technical
+    signals.
+
+
+    Built on: momentum_divergence, mktfeel, techmeter, technical_signal_strength.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Momentum Divergence, which cannot be encoded (requires time-series price history
+    to detect new highs/lows vs momentum indicator direction, not available in this snapshot-based schema).
+    Since Perfect Technical Setup requires "no Momentum Divergence present" as one of its conditions,
+    it cannot be fully encoded either.
+- name: flash_crash_vulnerability
+  description: 'Identifies conditions where markets are susceptible to sudden, severe price drops.
+
+
+    Market conditions where Liquidation Cascade Risk is present, more than 30% of positions qualify as
+    Over-Leveraged Position, and a Liquidity Crisis is developing, creating perfect conditions for a potential
+    flash crash.
+
+
+    Built on: over_leveraged_position, liquidity_crisis, liquidation_cascade_risk.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Over-Leveraged Position and Liquidity Crisis, both of which cannot be encoded
+    over this database (no volatility rating column available, and marketstats has multiple rows per market
+    with no selection rule to resolve a unique 24h volume for Liquidity Ratio). Since these two prerequisite
+    conditions cannot be computed, the ">30% of positions qualify as Over-Leveraged" and "Liquidity Crisis
+    is developing" portions of Flash Crash Vulnerability cannot be encoded either.
+- name: flow_dominance
+  description: 'Categorizes market flow based on which group (smart money, retail, or institutional) has
+    the highest trading volume.
+
+
+    Categorized as ''Smart Money Dominant'' when smart-money force > retail-flow share * 1.2 AND smart-money
+    force > institutional-flow share * 1.2; ''Retail Dominant'' when retail-flow share > smart-money force
+    * 1.2 AND retail-flow share > institutional-flow share * 1.2; ''Institutional Dominant'' when institutional-flow
+    share > smart-money force * 1.2 AND institutional-flow share > retail-flow share * 1.2; otherwise
+    ''Mixed''.
+
+
+    Compiler note: Uses indicator_bundle->participant_flow->{smart_money, retail_flow, institutional_flow}
+    fields from analyticsindicators JSONB, cast to double precision for comparison. Note retail_flow/institutional_flow
+    can be NULL, which yields ''Mixed'' naturally since comparisons with NULL are unknown.'
+  sql_expression: "CASE\n  WHEN (indicator_bundle->'participant_flow'->>'smart_money')::double precision\
+    \ > (indicator_bundle->'participant_flow'->>'retail_flow')::double precision * 1.2\n   AND (indicator_bundle->'participant_flow'->>'smart_money')::double\
+    \ precision > (indicator_bundle->'participant_flow'->>'institutional_flow')::double precision * 1.2\n\
+    \  THEN 'Smart Money Dominant'\n  WHEN (indicator_bundle->'participant_flow'->>'retail_flow')::double\
+    \ precision > (indicator_bundle->'participant_flow'->>'smart_money')::double precision * 1.2\n   AND\
+    \ (indicator_bundle->'participant_flow'->>'retail_flow')::double precision > (indicator_bundle->'participant_flow'->>'institutional_flow')::double\
+    \ precision * 1.2\n  THEN 'Retail Dominant'\n  WHEN (indicator_bundle->'participant_flow'->>'institutional_flow')::double\
+    \ precision > (indicator_bundle->'participant_flow'->>'smart_money')::double precision * 1.2\n   AND\
+    \ (indicator_bundle->'participant_flow'->>'institutional_flow')::double precision > (indicator_bundle->'participant_flow'->>'retail_flow')::double\
+    \ precision * 1.2\n  THEN 'Institutional Dominant'\n  ELSE 'Mixed'\nEND"
+  source_model: main.analyticsindicators
+  domains:
+  - definitions
+- name: smart_money_accuracy
+  description: 'Measures the success rate of smart money flow in predicting the 4-hour price movement
+    direction.
+
+
+    The proportion of times the Smart Money Flow direction matches the 4-hour price movement direction,
+    calculated as: $$ \frac{\text{COUNT(CASE WHEN (smart money force > retail flow AND smart money force
+    > institutional flow AND next\_price\_4h > mid\_price) OR (smart money force < retail flow AND smart
+    money force < institutional flow AND next\_price\_4h < mid\_price) THEN 1 ELSE 0 END)}}{\text{COUNT(*)}}
+    $$
+
+
+    Built on: smart_money_flow.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric requires "next_price_4h" - the market's mid price 4 hours in the future -
+    to compare against the current smart money/retail/institutional flow direction. The database only
+    stores a single current snapshot of market data (marketdata.orderbook_metrics mid_price) with no historical
+    or future time-series of prices, so there is no way to compute a 4-hour-ahead price movement direction.
+- name: effective_leverage_risk_classification
+  description: 'Categorizes positions based on their effective leverage to determine risk exposure.
+
+
+    A position is labeled as ''High Risk'' if its Effective Leverage exceeds 20, otherwise as ''Normal''.
+
+
+    Built on: effective_leverage.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on Effective Leverage, which requires total wallet balance for the
+    user. However, accountbalances has multiple rows per userTAG with no unique mapping or aggregation
+    rule specified, so Effective Leverage cannot be computed unambiguously via a scalar subquery (riskandmargin
+    -> orders -> users -> accountbalances). Since the underlying metric cannot be encoded, this classification
+    built on it cannot be encoded either.
+tables:
+- schema: main
+  table: Exchange_OrderType_Map
+  columns:
+  - name: exchSpot
+    type: VARCHAR
+    description: 'TEXT. Exchange market symbol. PK. Example: EX203.'
+  - name: ORDERtune
+    type: VARCHAR
+    description: TEXT. Order-type tuning parameter. PK.
+- schema: main
+  table: accountbalances
+  columns:
+  - name: ACCTBAL_NODE
+    type: BIGINT
+    description: BIGSERIAL. Unique account-balance record identifier. PK.
+  - name: walletSum
+    type: VARCHAR
+    description: 'TEXT. Total wallet balance as text. Example: $316,482.99 .'
+  - name: AVAIL_SUM
+    type: FLOAT
+    description: 'REAL. Available balance amount. Example: 250957.88.'
+  - name: frozenSum
+    type: FLOAT
+    description: 'REAL. Frozen balance amount. Example: 65525.11.'
+  - name: marg_sum
+    type: FLOAT
+    description: 'REAL. Margin allocated sum. Example: 901343.58.'
+  - name: unrealLINE
+    type: FLOAT
+    description: 'REAL. Unrealised P/L line. Example: 3545.06.'
+  - name: REAL_LINE
+    type: FLOAT
+    description: 'REAL. Realised P/L line. Example: -38455.08.'
+  - name: userTAG
+    type: VARCHAR
+    description: TEXT. User identifier for the balance. FK to users.
+- schema: main
+  table: analyticsindicators
+  columns:
+  - name: ANALYTICS_NODE
+    type: BIGINT
+    description: BIGSERIAL. Unique analytics indicator identifier. PK.
+  - name: md_ref
+    type: VARCHAR
+    description: TEXT. Reference to market data snapshot. FK to marketdata.
+  - name: indicator_bundle
+    type: JSON
+    description: 'JSONB column. Groups together real-time technical, order-flow and sentiment indicators
+      so that trading models can access a single JSONB payload instead of many separate columns. Fields:
+      {"order_flow": {"buy_wall_pct": "REAL. Buy wall band measurement. Example: 0.017.", "sell_wall_pct":
+      "REAL. Sell wall band measurement. Example: 0.0891.", "buy_pressure": "REAL. Aggregate buy-side
+      force. Example: 0.926. Example: 0.926.", "sell_pressure": "REAL. Aggregate sell-side force. Example:
+      0.536.", "order_flow_imbalance": "REAL. Order-flow imbalance. Example: -0.599.", "trade_flow_imbalance":
+      "REAL. Trade imbalance indicator. **NULL means trade imbalance not computed.**. Example: 0.102.
+      Example: 0.102.", "large_order_ratio": "REAL. Rate of large-size trades. Example: 0.683. Example:
+      0.683."}, "technical": {"rsi_14": "REAL. 14-period RSI value. Example: 15.28.", "macd_hist": "REAL.
+      MACD trailing value. Example: 4.77.", "bollinger_width_pct": "REAL. Bollinger-band span. Example:
+      31.69."}, "sentiment": {"market_sentiment": "TEXT. Market sentiment descriptor. Possible values:
+      Bearish, Bullish, Neutral.", "signal": "TEXT. Technical meter indicator. Possible values: Buy, Hold,
+      Sell. Possible values: Buy, Hold, Sell."}, "participant_flow": {"smart_money": "REAL. Smart-money
+      force indicator. Example: 0.449.", "retail_flow": "REAL. Retail-flow share. **NULL means retail
+      flow not measured.**. Example: -0.893.", "institutional_flow": "REAL. Institutional-flow share.
+      Example: -0.04. Example: -0.04.", "whale_activity": "TEXT. Whale-wallet activity descriptor. **NULL
+      means whale motion not assessed.**. Possible values: High, Low, Medium.", "market_maker_note": "TEXT.
+      Maker-order flow descriptor. Possible values: High, Low, Medium."}, "cross_venue": {"arbitrage_pct":
+      "REAL. Arbitrage-potential score. Example: 0.0088.", "cross_exchange_spread_pct": "REAL. Cross-exchange
+      band width. **NULL means band not computed.**. Example: 0.0077.", "funding_gap_pct": "REAL. Funding-rate
+      gap across exchanges. Example: 0.0011.", "basis_gap_pct": "REAL. Basis gap between spot and futures.
+      Example: 0.0009."}}
+
+
+      mktfeel: Illustrates the meaning of different values for the mktfeel enum.
+
+
+      An enum with values ''Bearish'', ''Bullish'', or ''Neutral''. ''Bearish'' indicates negative market
+      sentiment with expectations of price decreases. ''Bullish'' indicates positive market sentiment
+      with expectations of price increases. ''Neutral'' indicates balanced market sentiment with no strong
+      directional bias.
+
+
+      Compiler note: Describes enum values for indicator_bundle.sentiment.market_sentiment field (Bearish/Bullish/Neutral).
+
+
+      techmeter: Illustrates the meaning of different values for the techmeter enum.
+
+
+      An enum with values ''Buy'', ''Sell'', or ''Hold''. ''Buy'' indicates technical indicators suggest
+      purchasing the asset. ''Sell'' indicates technical indicators suggest selling the asset. ''Hold''
+      indicates technical indicators suggest maintaining current positions without new trades.
+
+
+      Compiler note: Describes the enum values (''Buy'',''Sell'',''Hold'') of indicator_bundle->''sentiment''->>''signal''
+      in analyticsindicators, confirmed via distinct values query.
+
+
+      whalemotion: Illustrates the meaning of different values for the whalemotion enum.
+
+
+      An enum with values ''Low'', ''Medium'', or ''High''. ''Low'' indicates minimal activity from large
+      traders. ''Medium'' indicates moderate activity from large traders. ''High'' indicates significant
+      activity from large traders, potentially signaling important market movements.
+
+
+      Compiler note: Describes the whale_activity field (participant_flow.whale_activity) within the indicator_bundle
+      JSONB column, enum values Low/Medium/High.
+
+
+      makermotion: Illustrates the meaning of different values for the makermotion enum.
+
+
+      An enum with values ''Low'', ''Medium'', or ''High''. ''Low'' indicates minimal market maker activity
+      with potentially wider spreads. ''Medium'' indicates normal market maker activity. ''High'' indicates
+      substantial market maker activity, typically resulting in tighter spreads and higher liquidity.
+
+
+      Compiler note: Describes the enum values Low/Medium/High for the participant_flow.market_maker_note
+      field within the indicator_bundle JSONB column.'
+- schema: main
+  table: fees
+  columns:
+  - name: fee_range
+    type: VARCHAR
+    description: 'TEXT. Fee-tier or range descriptor. **NULL means fee range not provided.**. Possible
+      values: Tier1, Tier2, Tier3, Tier4.'
+  - name: FeeRate
+    type: FLOAT
+    description: 'REAL. Applied fee rate (e.g., 0.001 = 0.1 %). Example: 0.0007. Example: 0.0007. Example:
+      0.0007.'
+  - name: FEE_TOTAL
+    type: VARCHAR
+    description: 'TEXT. Total fee amount as text. Example: $26.60 .'
+  - name: FeeCoin
+    type: VARCHAR
+    description: 'TEXT. Currency in which the fee is charged. **NULL means fee currency not specified.**.
+      Possible values: USD, USDC, USDT. Possible values: USD, USDC, USDT.'
+  - name: rebRate
+    type: VARCHAR
+    description: 'TEXT. Rebate rate if applicable. Example: 0.09%.'
+  - name: REB_TOTAL
+    type: VARCHAR
+    description: 'TEXT. Total rebate amount. Example: 34.200126.'
+  - name: Order_Link
+    type: VARCHAR
+    description: TEXT. Related order identifier. FK to orders.
+- schema: main
+  table: marketdata
+  columns:
+  - name: EXCH_SPOT
+    type: VARCHAR
+    description: TEXT. Exchange spot market symbol. PK.
+  - name: TimeTrack
+    type: TIMESTAMP
+    description: TIMESTAMP. Timestamp when the snapshot was taken.
+  - name: exchNote
+    type: VARCHAR
+    description: TEXT. Exchange-specific commentary.
+  - name: mktCombo
+    type: VARCHAR
+    description: TEXT. Market combination or instrument group.
+  - name: orderbook_metrics
+    type: JSON
+    description: 'JSONB column. Captures the complete snapshot of best bid/ask quotes, depths, spreads
+      and reference prices in a single JSONB column for fast order-book analytics. Fields: {"best_bid":
+      "REAL. Best bid price quote. Example: 27069.78.", "best_ask": "REAL. Best ask price quote. Example:
+      27102.24.", "bid_size": "REAL. Bid depth volume in units. Example: 64.091241.", "ask_size": "REAL.
+      Ask depth volume in units. Example: 87.620549.", "bid_depth": "REAL. Aggregate bid depth. Example:
+      202.", "ask_depth": "REAL. Aggregate ask depth. Example: 807.", "spread_abs": "REAL. Absolute spread
+      band. Example: 32.46.", "spread_pct": "TEXT. Relative spread rate. **NULL means spread rate not
+      calculated.**. Example: 11.99%.", "mid_price": "REAL. Mid-price quote. Example: 27086.01. Example:
+      27086.01.", "mark_price": "REAL. Mark price quote. Example: 27088.44.", "index_price": "TEXT. Index
+      price reference. Example: $27,096.65 ."}'
+- schema: main
+  table: marketstats
+  columns:
+  - name: MKT_STATS_MARK
+    type: BIGINT
+    description: BIGSERIAL. Unique market-statistics identifier. PK.
+  - name: fundRate
+    type: FLOAT
+    description: 'REAL. Funding rate applicable to perpetual swaps. Example: 0.0004.'
+  - name: FundSpot
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp of the funding rate. Possible values: 2025/2/19 09:29, 2025/2/19
+      10:29, 2025/2/19 11:29, 2025/2/19 12:29, 2025/2/19 13:29, 2025/2/19 14:29, 2025/2/19 15:29, 2025/2/19
+      16:29. Possible values: 2025/2/19 09:29, 2025/2/19 10:29, 2025/2/19 11:29, 2025/2/19 12:29, 2025/2/19
+      13:29, 2025/2/19 14:29, 2025/2/19 15:29, 2025/2/19 16:29.'
+  - name: openStake
+    type: FLOAT
+    description: 'REAL. Open interest or stake. Example: 808922.74.'
+  - name: VOLday
+    type: FLOAT
+    description: 'REAL. Trading volume of the day. Example: 3045613.27.'
+  - name: TRADE_DAY
+    type: BIGINT
+    description: 'BIGINT. Trading-day counter. **NULL means trade-day not recorded.**. Example: 73628.0.'
+  - name: turnoverDay
+    type: FLOAT
+    description: 'REAL. Turnover for the day. Example: 9406054.28.'
+  - name: priceShiftDay
+    type: VARCHAR
+    description: 'TEXT. Price shift over the day. **NULL means price shift not recorded.**. Example: 7.96%.'
+  - name: HIGH_SPOT_DAY
+    type: FLOAT
+    description: 'REAL. Day’s high price. Example: 27823.67.'
+  - name: low_spot_day
+    type: FLOAT
+    description: 'REAL. Day’s low price. Example: 25912.08.'
+  - name: VwapDay
+    type: FLOAT
+    description: 'REAL. Volume-weighted average price of the day. Example: 26269.45. Example: 26269.45.'
+  - name: mktSIZE
+    type: FLOAT
+    description: 'REAL. Market capitalisation size. Example: 438986638.7.'
+  - name: Circ_Total
+    type: FLOAT
+    description: 'REAL. Circulating supply total. Example: 79417014.51.'
+  - name: TOTAL_SUPPLY
+    type: FLOAT
+    description: 'REAL. Total supply figure. **NULL means total supply not available.**. Example: 96226091.91.'
+  - name: MAXsupPLY
+    type: VARCHAR
+    description: 'TEXT. Maximum supply cap. Example: 188,391,541 tokens.'
+  - name: MktHold
+    type: FLOAT
+    description: 'REAL. Market value held by top addresses. Example: 0.026. Example: 0.026.'
+  - name: tradeRank
+    type: BIGINT
+    description: 'BIGINT. Trading-volume rank across markets. Example: 52.'
+  - name: LIQUIDscore
+    type: FLOAT
+    description: 'REAL. Liquidity score indicator. Example: 0.903.'
+  - name: vol_meter
+    type: VARCHAR
+    description: 'TEXT. Volume-intensity meter reading. **NULL means volume meter not set.**. Example:
+      55.65.'
+  - name: md_link
+    type: VARCHAR
+    description: TEXT. Reference to the underlying market data. FK to marketdata.
+- schema: main
+  table: orderExecutions
+  columns:
+  - name: RecordVault
+    type: VARCHAR
+    description: 'TEXT. Unique execution record identifier. PK. Example: OB333576. Example: OB333576.'
+  - name: ExecMARK
+    type: BIGINT
+    description: BIGSERIAL. Auto-increment execution index.
+  - name: FillAmt
+    type: FLOAT
+    description: 'REAL. Executed fill amount. Example: 1.447931.'
+  - name: remain_amt
+    type: FLOAT
+    description: 'REAL. Remaining order amount. **NULL means remaining amount not recorded.**. Example:
+      0.545024.'
+  - name: fillQuote
+    type: FLOAT
+    description: 'REAL. Execution price quote. Example: 26244.44.'
+  - name: FILL_SUM
+    type: FLOAT
+    description: 'REAL. Cumulative fill value. Example: 38000.14.'
+  - name: expireSpot
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Expiration timestamp for the execution record. Example: 02/22/2025 08:29.'
+  - name: CancelNote
+    type: VARCHAR
+    description: 'TEXT. Cancellation reason or note. **NULL means no cancellation note.**. Possible values:
+      Expired, InsufficientFunds, UserRequested. Possible values: Expired, InsufficientFunds, UserRequested.'
+  - name: EXECtune
+    type: VARCHAR
+    description: 'TEXT. Execution tuning parameter. **NULL means execution tune not specified.**. Possible
+      values: Maker, Taker.
+
+
+      exectune: Illustrates the meaning of different values for the exectune enum.
+
+
+      An enum with values ''Maker'' or ''Taker''. ''Maker'' indicates the order added liquidity to the
+      order book by not matching immediately. ''Taker'' indicates the order removed liquidity from the
+      order book by matching with existing orders immediately upon placement.
+
+
+      Compiler note: EXECtune column holds ''Maker''/''Taker'' values matching the exectune enum description.'
+  - name: Ord_Link
+    type: VARCHAR
+    description: TEXT. Identifier of the parent order. FK to orders.
+- schema: main
+  table: orders
+  columns:
+  - name: ORD_STAMP
+    type: VARCHAR
+    description: 'TEXT. Unique order identifier. PK. Example: OR6015391.'
+  - name: TimeCode
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp when the order was submitted. Possible values: 2025/2/19. Possible
+      values: 2025/2/19.'
+  - name: exchSpot
+    type: VARCHAR
+    description: 'TEXT. Exchange trading pair or market symbol. Example: EX203.'
+  - name: market_note
+    type: VARCHAR
+    description: 'TEXT. Descriptive note about the market context. Example: ETH-USDT.'
+  - name: UserRef
+    type: VARCHAR
+    description: TEXT. User identifier who placed the order. FK to users.
+  - name: created_at
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Record-creation timestamp. Example: 2025-02-18T09:54:51+09:00.'
+  - name: UPDATED_AT
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Last update timestamp for the order record. Possible values: 2025/2/19 08:29.'
+  - name: order_attributes
+    type: JSON
+    description: 'JSONB column. Aggregates the core descriptive parameters of an order (type, side, price,
+      size, status, etc.) into one JSONB field for simpler retrieval and analytics. Fields: {"type": "TEXT.
+      Order-type or tuning parameter. Possible values: Limit, Market, Stop, StopLimit.", "side": "TEXT.
+      Deal-edge or strategy tag. Possible values: Buy, Sell.", "limit_price": "REAL. Executed deal price
+      quote. Example: 27080.39.", "quantity": "REAL. Quantity executed in base units. Example: 1.992955.
+      Example: 1.992955.", "notional_value": "TEXT. Notional trade value. **NULL means notional value
+      not recorded.**. Example: $81,019.90 .", "status": "TEXT. Order-flow direction or category. Possible
+      values: Cancelled, Filled, New, PartiallyFilled.", "time_in_force": "TEXT. Intended order lifespan
+      or validity period. **NULL means lifespan not specified.**. Possible values: FOK, GTC, GTD, IOC.",
+      "source": "TEXT. Base currency origin or funding source. Possible values: API, Bot, Mobile, Web.",
+      "client_order_id": "TEXT. Client-side marker or reference label. Example: CL5311016."}
+
+
+      dealedge: Illustrates the meaning of different values for the dealedge enum.
+
+
+      An enum with values ''Buy'' or ''Sell''. ''Buy'' indicates the order is to purchase the base asset
+      using the quote asset (e.g., buying BTC with USDT). ''Sell'' indicates the order is to sell the
+      base asset for the quote asset (e.g., selling BTC for USDT).
+
+
+      Compiler note: Describes the ''side'' field within order_attributes JSON (values ''Buy''/''Sell'').
+
+
+      orderflow: Illustrates the meaning of different values for the orderflow enum.
+
+
+      An enum with values ''New'', ''PartiallyFilled'', ''Cancelled'', or ''Filled''. ''New'' indicates
+      a newly placed order that hasn''t been matched. ''PartiallyFilled'' means some portion has been
+      executed but not all. ''Cancelled'' means the order was cancelled before full execution. ''Filled''
+      means the order has been completely executed.
+
+
+      Compiler note: Describes the enum values for order_attributes->>''status'' (New, PartiallyFilled,
+      Cancelled, Filled), confirmed in column meanings/sample data.
+
+
+      timespan: Illustrates the meaning of different values for the timespan enum.
+
+
+      An enum with values ''IOC'', ''GTC'', ''GTD'', or ''FOK''. ''IOC'' (Immediate-or-Cancel) means execute
+      immediately available portion or cancel. ''GTC'' (Good-Till-Cancelled) means the order remains active
+      until explicitly cancelled. ''GTD'' (Good-Till-Date) means the order remains active until a specified
+      date. ''FOK'' (Fill-or-Kill) means execute completely immediately or cancel entirely.
+
+
+      Compiler note: Describes enum values of the ''time_in_force'' field within order_attributes JSON
+      (IOC, GTC, GTD, FOK), matching documented possible values.'
+- schema: main
+  table: riskandmargin
+  columns:
+  - name: MARG_FORM
+    type: VARCHAR
+    description: 'TEXT. Unique margin-form identifier. PK. Possible values: Cross, Isolated.'
+  - name: ordStamp
+    type: VARCHAR
+    description: TEXT. Associated order identifier. FK to orders.
+  - name: margin_risk_profile
+    type: JSON
+    description: 'JSONB column. Consolidates leverage, margin requirements, liquidation levels and qualitative
+      risk flags into one JSONB column for quicker position-risk assessment and auditing. Fields: {"leverage":
+      "TEXT. Leverage scale descriptor. Possible values: 1, 2, 3, 5, 10, 20, 50, 100. Possible values:
+      1, 2, 3, 5, 10, 20, 50, 100.", "initial_margin_pct": "REAL. Initial margin requirement. Example:
+      10794.0.", "maintenance_margin_pct": "REAL. Maintenance margin requirement. Example: 5397.0. Example:
+      5397.0.", "liquidation_price": "TEXT. Liquidation price quote. **NULL means liquidation quote not
+      set.**. Example: $28,043.66 .", "stop_loss_price": "REAL. Stop-price quote. Example: 27952.84.",
+      "stop_trigger_price": "REAL. Trigger price quote. Example: 29018.82. Example: 29018.82.", "trailing_delta":
+      "REAL. Trailing difference for stop orders. Example: 0.029.", "iceberg_qty": "REAL. Iceberg order
+      count. Example: 0.778158.", "visible_qty": "REAL. Visible order count. Example: 1.214797.", "liquidation_risk":
+      "TEXT. Liquidation-risk factor. Example: 0.124.", "counterparty_risk": "TEXT. Counter-party-risk
+      factor. Example: 0.191.", "settlement_risk": "TEXT. Settlement-risk factor. Example: 0.387.", "custody_risk":
+      "TEXT. Customer-specific factor. Example: 0.076.", "network_risk": "TEXT. Net-position factor. Example:
+      0.937. Example: 0.937.", "regulatory_risk": "TEXT. Regulatory factor. Example: 0.426.", "position_size":
+      "REAL. Position count. Example: 52.028722. Example: 52.028722.", "position_notional": "REAL. Aggregate
+      position size. Example: 1408958.08.", "position_side": "TEXT. Position edge strategy. **NULL means
+      position edge not defined.**. Possible values: Long, Short.", "leverage_multiplier": "TEXT. Position
+      magnitude description. Possible values: 1, 2, 3, 5, 10, 20, 50, 100. Possible values: 1, 2, 3, 5,
+      10, 20, 50, 100.", "position_risk_pct": "REAL. Position-specific risk rate. Example: 0.762.", "margin_ratio_pct":
+      "TEXT. Margin rate tier. **NULL means margin rate not specified.**. Example: 65.90%.", "margin_call_price":
+      "REAL. Margin call quote. Example: 38557.58.", "bankruptcy_price": "REAL. Break-point quote for
+      liquidation. **NULL means break-point quote not set.**. Example: 20254.06.", "collateral_ratio_pct":
+      "TEXT. Collateral rate. **NULL means collateral rate not specified.**. Example: 48.00%.", "collateral_amount":
+      "TEXT. Collateral sum amount. Example: 750,485.81 USDT.", "collateral_currency": "TEXT. Coin used
+      as collateral. **NULL means collateral coin not specified.**. Possible values: BTC, ETH, USDC, USDT.",
+      "insurance_fund_share": "TEXT. Insurance fund share. Example: $28.51 ."}
+
+
+      posedge: Illustrates the meaning of different values for the posedge enum.
+
+
+      An enum with values ''Long'' or ''Short''. ''Long'' indicates a position that profits from price
+      increases of the underlying asset. ''Short'' indicates a position that profits from price decreases
+      of the underlying asset.
+
+
+      Compiler note: Describes the ''position_side'' field within margin_risk_profile JSONB, which takes
+      values ''Long''/''Short''.
+
+
+      posmagn: Illustrates the meaning of different values for the posmagn enum.
+
+
+      An enum with values ''1'', ''2'', ''3'', ''5'', ''10'', ''20'', ''50'', or ''100'', representing
+      leverage multipliers. For example, ''10'' means the position uses 10x leverage, amplifying both
+      potential profits and losses by a factor of 10 compared to an unleveraged position.
+
+
+      Compiler note: posmagn enum corresponds to the ''leverage_multiplier'' key within margin_risk_profile
+      jsonb (documented as ''Position magnitude description'', values 1,2,3,5,10,20,50,100 matching leverage
+      multipliers).'
+- schema: main
+  table: systemmonitoring
+  columns:
+  - name: SYS_MON_PIVOT
+    type: BIGINT
+    description: BIGSERIAL. Unique system-monitoring record identifier. PK.
+  - name: APIRQTotal
+    type: BIGINT
+    description: 'BIGINT. Total API requests processed. **NULL means API request total not recorded.**.
+      Example: 7728.0.'
+  - name: apiErrTOTAL
+    type: BIGINT
+    description: 'BIGINT. Total API error count. Example: 4.'
+  - name: ApiLatMark
+    type: FLOAT
+    description: 'REAL. API latency marker in milliseconds. **NULL means latency not measured.**. Example:
+      547.0.'
+  - name: WS_STATE
+    type: VARCHAR
+    description: 'TEXT. WebSocket subsystem state. Possible values: Connected, Disconnected.'
+  - name: RateRemain
+    type: BIGINT
+    description: 'BIGINT. Remaining rate-limit quota. Example: 939. Example: 939.'
+  - name: lastUpdNote
+    type: VARCHAR
+    description: 'TEXT. Notes for the last system update. Example: 9340653.'
+  - name: SeqCode
+    type: VARCHAR
+    description: 'TEXT. Sequence code for deployments. **NULL means sequence code not set.**. Example:
+      6559236.0. Example: 6559236.0.'
+  - name: SLIP_ratio
+    type: FLOAT
+    description: 'REAL. Slippage ratio indicator. Example: -0.0077.'
+  - name: ExecTimeSpan
+    type: FLOAT
+    description: 'REAL. Execution time span metric. **NULL means execution time span not captured.**.
+      Example: 203.0. Example: 203.0.'
+  - name: queue_LINE
+    type: BIGINT
+    description: 'BIGINT. Queue length indicator. Example: 810.'
+  - name: mktEffect
+    type: FLOAT
+    description: 'REAL. Market-impact metric. Example: 0.0014.'
+  - name: Price_Effect
+    type: FLOAT
+    description: 'REAL. Price-impact metric. Example: 0.0039.'
+- schema: main
+  table: users
+  columns:
+  - name: USERSTAMP
+    type: VARCHAR
+    description: 'TEXT. Unique user identifier. PK. Example: U583322.'
+  - name: acctScope
+    type: VARCHAR
+    description: 'TEXT. Scope or permission tier of the user account. **NULL means account scope not specified.**.
+      Possible values: Futures, Margin, Options, Spot.'

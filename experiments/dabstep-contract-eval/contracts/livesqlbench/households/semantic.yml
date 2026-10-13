@@ -1,0 +1,834 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: households, compiler: claudesonnet5
+# inputs: households_kb.jsonl, households_column_meaning_base.json, households_schema.txt, households.duckdb
+metrics:
+- name: household_density
+  description: 'Calculates the average number of residents per bedroom in a household.
+
+
+    Calculated as the number of residents divided by the number of bedrooms.
+
+
+    Compiler note: Residents from households.residentcount (via unique houselink->housenum match); bedrooms
+    taken as dwelling_specs.Room_Count (JSON field). Cast to numeric to avoid integer division truncation.'
+  sql_expression: (SELECT h.residentcount FROM households h WHERE h.housenum = properties.houselink)::numeric
+    / (dwelling_specs->>'Room_Count')::numeric
+  source_model: main.properties
+  domains:
+  - calculations
+- name: expenditure_ratio
+  description: 'Calculates the household’s expenditure coefficient relative to its income bracket.
+
+
+    Calculated as the expenditure coefficient divided by a numeric mapping of income bracket.
+
+
+    Built on: Income Classification.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The entry requires dividing Expend_Coeff by "a numeric mapping of income bracket", but
+    no such mapping (numeric value per Income_Bracket value) is defined anywhere in the documentation.
+    The Income Classification entry only describes a qualitative ordering ('Low Income' to 'Very High
+    Income') without assigning numbers to it or to the actual raw Income_Bracket text values stored in
+    the data (e.g. 'More than R$ 1,760 and less than R$ 2,640', 'Has no income', etc.). Without a defined
+    numeric mapping, this ratio cannot be computed.
+- name: infrastructure_quality_score
+  description: 'Calculates a composite score for infrastructure quality.
+
+
+    Calculated as the average of the individual scores for Water Access, Road Surface, and Parking Availability.
+
+
+    Built on: Water Access Type, Road Surface Quality, Parking Availability.
+
+
+    Compiler note: Scored each field per spec: wateraccess values all begin with ''Yes'' (various whitespace)
+    so matched via LIKE ''yes%'' trimmed/lowercased -> 4 pts, else 1. roadsurface values are ''Asphalt,
+    concrete'' variants or ''Gravel surface''; matched asphalt/concrete substrings -> 4 pts, else 1. parkavail
+    trimmed/lowercased ''available'' -> 4 pts, ''not available'' -> 1 pt. Final score is the average of
+    the three.'
+  sql_expression: "(\n  (CASE WHEN lower(trim(wateraccess)) LIKE 'yes%' THEN 4 ELSE 1 END)\n  + (CASE\
+    \ WHEN lower(trim(roadsurface)) LIKE '%asphalt%' OR lower(trim(roadsurface)) LIKE '%concrete%' THEN\
+    \ 4 ELSE 1 END)\n  + (CASE WHEN lower(trim(parkavail)) = 'available' THEN 4 ELSE 1 END)\n) / 3.0"
+  source_model: main.infrastructure
+  domains:
+  - calculations
+- name: vehicle_ownership_index
+  description: 'Calculates the total number of vehicles owned by a household.
+
+
+    Calculated as the sum of car, bicycle, and motorcycle counts.
+
+
+    Compiler note: Sum of Auto_Count, Bike_Count, Motor_Count from vehicleinventory.vehicle_counts JSON
+    field.'
+  sql_expression: (vehicleinventory->'vehicle_counts'->>'Auto_Count')::numeric + (vehicleinventory->'vehicle_counts'->>'Bike_Count')::numeric
+    + (vehicleinventory->'vehicle_counts'->>'Motor_Count')::numeric
+  source_model: main.transportation_assets
+  domains:
+  - calculations
+- name: bathroom_ratio
+  description: 'Calculates the number of bathrooms per resident in a household.
+
+
+    Calculated as the number of bathrooms divided by the number of residents.
+
+
+    Compiler note: Bath_Count extracted from dwelling_specs JSONB cast to numeric; residentcount fetched
+    via unique houselink->housenum match in households; ratio = bathrooms/residents.'
+  sql_expression: (dwelling_specs->>'Bath_Count')::numeric / (SELECT h.residentcount FROM households h
+    WHERE h.housenum = properties.houselink)
+  source_model: main.properties
+  domains:
+  - calculations
+- name: service_support_score
+  description: 'Calculates a score for social service support based on domestic help and social assistance
+    status.
+
+
+    A weighted score combining domestic help availability and social assistance participation status (Yes/No).
+
+
+    Built on: Domestic Help Availability, Social Support Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The entry defines "Service Support Score" only as "a weighted score combining domestic
+    help availability and social assistance participation status" without specifying the actual weights
+    or numeric mapping for the domestic-help categories (e.g. 'Full-time', 'Part-time', 'Occasional',
+    'None', 'Live-in') or for the Yes/No social support indicator. These documented categories also don't
+    match the raw stored text values (e.g. "Yes, regular ", "No domestic workers", etc.), and no scoring
+    rule is given anywhere in the knowledge base to resolve the mapping. Without a defined weighting scheme
+    this cannot be computed deterministically.
+- name: dwelling_capacity
+  description: 'Calculates the potential capacity of a dwelling based on bedrooms and bathrooms.
+
+
+    Calculated as twice the number of bedrooms plus the number of bathrooms.
+
+
+    Compiler note: Room_Count and Bath_Count extracted from dwelling_specs JSONB and cast to numeric;
+    capacity = 2*bedrooms + bathrooms.'
+  sql_expression: 2 * (dwelling_specs->>'Room_Count')::numeric + (dwelling_specs->>'Bath_Count')::numeric
+  source_model: main.properties
+  domains:
+  - calculations
+- name: mobility_score
+  description: 'Calculates a household’s mobility based on vehicle ownership and newest vehicle age.
+
+
+    The product of the vehicle count and a numeric mapping of the newest vehicle year.
+
+
+    Built on: Vehicle Year Range, vehicle_ownership_index.
+
+
+    Compiler note: Vehicle Ownership Index (sum of Auto/Bike/Motor counts) multiplied by a numeric year
+    mapping derived from the messy Newest_Year text: checked distinct normalized values and mapped each
+    decade/range bucket to its representative year (1989, 1992, 1997, 2002, 2007, 2011.5, 2014); ''not
+    applicable''/''n/a''/empty values map to NULL via no match.'
+  sql_expression: "(\n  (vehicleinventory->'vehicle_counts'->>'Auto_Count')::numeric +\n  (vehicleinventory->'vehicle_counts'->>'Bike_Count')::numeric\
+    \ +\n  (vehicleinventory->'vehicle_counts'->>'Motor_Count')::numeric\n) *\nCASE\n  WHEN trim(lower(vehicleinventory->>'Newest_Year'))\
+    \ LIKE '%1989%' THEN 1989\n  WHEN trim(lower(vehicleinventory->>'Newest_Year')) LIKE '%90%94%' THEN\
+    \ 1992\n  WHEN trim(lower(vehicleinventory->>'Newest_Year')) LIKE '%95%99%' THEN 1997\n  WHEN trim(lower(vehicleinventory->>'Newest_Year'))\
+    \ LIKE '%00%04%' THEN 2002\n  WHEN trim(lower(vehicleinventory->>'Newest_Year')) LIKE '%05%09%' THEN\
+    \ 2007\n  WHEN trim(lower(vehicleinventory->>'Newest_Year')) LIKE '%10%13%' THEN 2011.5\n  WHEN trim(lower(vehicleinventory->>'Newest_Year'))\
+    \ LIKE '%2014%' THEN 2014\n  ELSE NULL\nEND"
+  source_model: main.transportation_assets
+  domains:
+  - calculations
+- name: socioeconomic_index
+  description: 'Calculates a composite index for household socioeconomic status.
+
+
+    Calculated as a weighted sum of income score, expenditure ratio, and tenure score.
+
+
+    Built on: Household Tenure Status, expenditure_ratio.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric depends on Expenditure Ratio, which was already found uncompilable (no numeric
+    mapping defined for Income_Bracket), and also requires "income score" and "tenure score" numeric mappings
+    plus explicit weights for the weighted sum, none of which are defined anywhere in the documentation.
+    Without these mappings and weights, the Socioeconomic Index cannot be computed.
+- name: living_condition_score
+  description: 'Calculates a composite score for a household''s living conditions.
+
+
+    Calculated as a 50/50 weighted average of the Dwelling Type score and the Infrastructure Quality Score.
+
+
+    Built on: Dwelling Type, infrastructure_quality_score.
+
+
+    Compiler note: Dwelling Type score: ''brickwork house'' or ''condominium'' (case-insensitive substring
+    match, handles variable casing/whitespace/tab seen in data) = 4, ''apartment'' = 3, else 1. Infrastructure
+    Quality Score computed inline via scalar subquery joining infrastructure on infralink=infraref (unique
+    PK match). Living Condition Score = average of the two.'
+  sql_expression: "(\n  (CASE\n     WHEN lower(trim(dwelling_specs->>'Dwelling_Class')) LIKE '%brickwork%house%'\
+    \ OR lower(trim(dwelling_specs->>'Dwelling_Class')) LIKE '%condominium%' THEN 4\n     WHEN lower(trim(dwelling_specs->>'Dwelling_Class'))\
+    \ LIKE '%apartment%' THEN 3\n     ELSE 1\n   END)\n  +\n  (\n    (SELECT (CASE WHEN lower(trim(i.wateraccess))\
+    \ LIKE 'yes%' THEN 4 ELSE 1 END)\n            + (CASE WHEN lower(trim(i.roadsurface)) LIKE '%asphalt%'\
+    \ OR lower(trim(i.roadsurface)) LIKE '%concrete%' THEN 4 ELSE 1 END)\n            + (CASE WHEN lower(trim(i.parkavail))\
+    \ = 'available' THEN 4 ELSE 1 END)\n     FROM infrastructure i WHERE i.infraref = properties.infralink)\
+    \ / 3.0\n  )\n) / 2.0"
+  source_model: main.properties
+  domains:
+  - calculations
+- name: affluent_household
+  description: 'Defines a household with high socioeconomic status.
+
+
+    A household with a ''Tenure_Type'' of ''OWNED'' and an ''Income_Bracket'' of either ''High Income''
+    or ''Very High Income''.
+
+
+    Built on: Household Tenure Status, Income Classification.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The households.socioeconomic.Income_Bracket field stores raw numeric Reais ranges (e.g.
+    "More than R$ 4,400 and less than R$ 8,800", "Has no income", etc.), not the categorical labels 'High
+    Income'/'Very High Income' referenced by the Income Classification entry. No documented mapping exists
+    from these raw bracket strings to the Low/Medium/High/Very High classification scheme, so which specific
+    bracket values count as 'High' or 'Very High' cannot be determined from the schema or documentation
+    without guessing a threshold the entry does not specify.
+- name: urban_household
+  description: 'Defines a household located in an urban area based on infrastructure.
+
+
+    A household with ''Municipal Piped'' Water Access Type and high-quality Road Surface Quality.
+
+
+    Built on: Water Access Type, Road Surface Quality.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry requires Water Access Type = 'Municipal Piped', but no such value exists in
+    infrastructure.wateraccess; actual values are variants of 'Yes, available...' and 'Yes, but only connected
+    to a tap outside...'. There is no mapping from the documented 'Municipal Piped' label to any stored
+    value, so this predicate cannot be encoded over the actual data.
+- name: mobile_household
+  description: 'Defines a household with high mobility based on vehicle ownership.
+
+
+    A household with a high Vehicle Ownership Index and a recent Vehicle Year Range.
+
+
+    Built on: Vehicle Year Range, vehicle_ownership_index.
+
+
+    Compiler note: "High" vehicle ownership index taken as index >= 2 (above median of distribution: median
+    index is 1, so >=2 covers the upper half). "Recent" vehicle year range taken as any variant of ''2014
+    or newer''/''after 2014'' (normalized by removing non-alphanumeric chars and lowercasing to catch
+    inconsistent capitalization/spacing/punctuation variants like ''2014+'', ''aFteR 2014'', ''2014 oR
+    NEwer'').'
+  sql_expression: ((vehicleinventory->'vehicle_counts'->>'Auto_Count')::numeric + (vehicleinventory->'vehicle_counts'->>'Bike_Count')::numeric
+    + (vehicleinventory->'vehicle_counts'->>'Motor_Count')::numeric) >= 2 AND REGEXP_REPLACE(LOWER(TRIM(vehicleinventory->>'Newest_Year')),
+    '[^a-z0-9]', '', 'g') LIKE '%2014%'
+  source_model: main.transportation_assets
+  domains:
+  - definitions
+- name: supported_household
+  description: 'Defines a household receiving social assistance.
+
+
+    A household with social support status marked as ''Yes''.
+
+
+    Built on: Social Support Status.
+
+
+    Compiler note: socsupport values have inconsistent whitespace ('' Yes'', ''Yes '', ''Yes''); trimmed
+    before comparing. Joined via households.serviceplan -> service_types.serviceref (unique match).'
+  sql_expression: (SELECT trim(st.socsupport) FROM service_types st WHERE st.serviceref = households.serviceplan)
+    = 'Yes'
+  source_model: main.households
+  domains:
+  - definitions
+- name: crowded_household
+  description: 'Defines a household with high occupancy relative to its capacity.
+
+
+    A household with Household Density greater than a threshold.
+
+
+    Built on: household_density.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition references "a threshold" for Household Density without specifying its numeric
+    value anywhere in the documentation or schema, so the boolean condition cannot be concretely encoded.
+- name: modern_dwelling
+  description: 'Defines a dwelling with modern amenities and structure.
+
+
+    A dwelling with specific Dwelling Type and active Cable TV Status.
+
+
+    Built on: Dwelling Type, Cable TV Status.
+
+
+    Compiler note: Dwelling Type''s top tier (4 pts) is ''Brickwork house''/''Condominium'' per entry
+    [6]; data only contains ''brickwork house'' variants (normalized by lowering/trimming/collapsing whitespace,
+    no ''condominium'' rows found). Cable TV Status ''active'' per entry [7] is literally ''avail'',''available'',''yes''
+    (normalized same way); excluded similar-but-undocumented variants like ''y'',''have''. Joined properties.houselink
+    to amenities.houseid, which is a unique 1:1 FK relationship.'
+  sql_expression: lower(trim(regexp_replace(dwelling_specs->>'Dwelling_Class', '\s+', ' ', 'g'))) IN ('brickwork
+    house', 'condominium') AND (SELECT lower(trim(regexp_replace(a.cablestatus, '\s+', ' ', 'g'))) FROM
+    amenities a WHERE a.houseid = properties.houselink) IN ('avail', 'available', 'yes')
+  source_model: main.properties
+  domains:
+  - definitions
+- name: well_equipped_household
+  description: 'Defines a household with high infrastructure and service support.
+
+
+    A household with a high Infrastructure Quality Score and a high Service Support Score.
+
+
+    Built on: infrastructure_quality_score, service_support_score.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry depends on "Service Support Score", which itself cannot be encoded: the knowledge
+    base does not specify the weights or numeric mapping needed to combine domestic help availability
+    and social assistance status into a score, nor how the raw stored text values for domestic help map
+    to the documented categories. Without that score, "high Service Support Score" cannot be computed,
+    so "Well-Equipped Household" cannot be encoded either.'
+- name: economically_stable_household
+  description: 'Defines a household with balanced socioeconomic metrics.
+
+
+    A household with a high Socioeconomic Index and a low Expenditure Ratio.
+
+
+    Built on: expenditure_ratio, socioeconomic_index.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Socioeconomic Index and Expenditure Ratio, both of which were already found
+    uncompilable due to missing numeric mappings for Income_Bracket, tenure score, and undefined weights
+    for the weighted sum. Without those, "high Socioeconomic Index" and "low Expenditure Ratio" thresholds
+    cannot be computed.
+- name: comfortable_living_household
+  description: 'Defines a household with a high standard of living conditions.
+
+
+    A household is considered ''Comfortable'' if its Living Condition Score is greater than 3 AND its
+    Bathroom Ratio is greater than 0.5.
+
+
+    Built on: bathroom_ratio, living_condition_score.
+
+
+    Compiler note: Combines living_condition_score (>3) and bathroom_ratio (>0.5) definitions, both evaluated
+    over properties table using scalar subqueries to households and infrastructure.'
+  sql_expression: "(\n  (\n    (CASE\n       WHEN lower(trim(dwelling_specs->>'Dwelling_Class')) LIKE\
+    \ '%brickwork%house%' OR lower(trim(dwelling_specs->>'Dwelling_Class')) LIKE '%condominium%' THEN\
+    \ 4\n       WHEN lower(trim(dwelling_specs->>'Dwelling_Class')) LIKE '%apartment%' THEN 3\n      \
+    \ ELSE 1\n     END)\n    +\n    (\n      (SELECT (CASE WHEN lower(trim(i.wateraccess)) LIKE 'yes%'\
+    \ THEN 4 ELSE 1 END)\n              + (CASE WHEN lower(trim(i.roadsurface)) LIKE '%asphalt%' OR lower(trim(i.roadsurface))\
+    \ LIKE '%concrete%' THEN 4 ELSE 1 END)\n              + (CASE WHEN lower(trim(i.parkavail)) = 'available'\
+    \ THEN 4 ELSE 1 END)\n       FROM infrastructure i WHERE i.infraref = properties.infralink) / 3.0\n\
+    \    )\n  ) / 2.0\n) > 3\nAND\n((dwelling_specs->>'Bath_Count')::numeric / (SELECT h.residentcount\
+    \ FROM households h WHERE h.housenum = properties.houselink)) > 0.5"
+  source_model: main.properties
+  domains:
+  - definitions
+- name: self_sufficient_household
+  description: 'Defines a household with minimal reliance on external support.
+
+
+    A household with limited Domestic Help Availability, social support status of ''No'', and high Vehicle
+    Ownership Index.
+
+
+    Built on: Domestic Help Availability, Social Support Status, vehicle_ownership_index.
+
+
+    Compiler note: domestichelp values vary in whitespace/case/tabs; treated ''No domestic workers'' and
+    ''occasional'' plans as ''limited'' domestic help (excluding ''regular'' and ''living-in''). socsupport
+    normalized via trim/lower, matched against ''no''. Vehicle Ownership Index computed per definition
+    from transportation_assets; distribution shows values 0-10 with median 1, so >=3 (roughly top 22%
+    of households) chosen as ''high''. serviceplan and housetag both map uniquely to one service_types/transportation_assets
+    row.'
+  sql_expression: "lower(trim((SELECT st.domestichelp FROM service_types st WHERE st.serviceref = households.serviceplan)))\
+    \ ~ '^no\\s*domestic workers'\n  OR lower(trim((SELECT st.domestichelp FROM service_types st WHERE\
+    \ st.serviceref = households.serviceplan))) ~ 'occasional'\n  AND lower(trim((SELECT st.socsupport\
+    \ FROM service_types st WHERE st.serviceref = households.serviceplan))) = 'no'\n  AND (SELECT (ta.vehicleinventory->'vehicle_counts'->>'Auto_Count')::numeric\n\
+    \             + (ta.vehicleinventory->'vehicle_counts'->>'Bike_Count')::numeric\n             + (ta.vehicleinventory->'vehicle_counts'->>'Motor_Count')::numeric\n\
+    \       FROM transportation_assets ta WHERE ta.housetag = households.housenum) >= 3"
+  source_model: main.households
+  domains:
+  - definitions
+- name: purge_incomplete_transport_data
+  description: 'An action to remove transportation asset records that are linked to households with missing
+    or incomplete core economic data.
+
+
+    Delete records from the transportation assets data for any household where the income classification
+    is NULL.
+
+
+    Built on: Income Classification.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a DELETE action (a data modification/maintenance operation) rather
+    than a computation or predicate over existing rows. The contract format only supports read-only SQL
+    expressions evaluated as SELECT/WHERE clauses, not destructive operations like deleting records.
+- name: register_new_household
+  description: 'An action to add a new household’s primary record into the database system.
+
+
+    Insert a new record into the household data with all required information.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes an INSERT action (adding a new household record), not a computation
+    or boolean condition over existing rows. It cannot be encoded as a SQL expression evaluated over a
+    table.
+- name: update_vehicle_inventory
+  description: 'An action to modify a household’s vehicle records, typically after acquiring or selling
+    a vehicle.
+
+
+    Update the vehicle inventory data for a specific household, modifying fields such as newest vehicle
+    year or vehicle counts.
+
+
+    Built on: Vehicle Year Range, vehicle_ownership_index.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a database write action (UPDATE statement to modify vehicle inventory
+    fields for a household), not a computation or boolean predicate over existing rows. It cannot be encoded
+    as a SQL expression evaluated via SELECT.
+- name: compact_household
+  description: 'Defines a household with minimal space requirements and high efficiency.
+
+
+    A household with specific Dwelling Type and a small resident count.
+
+
+    Built on: Dwelling Type.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition references a "specific Dwelling Type" and a "small resident count" without
+    stating which dwelling type(s) qualify or what threshold counts as "small". These are undefined free
+    parameters in the documentation, not computable choices derivable from the data, so this predicate
+    cannot be encoded.
+- name: high_mobility_urban_household
+  description: 'Defines a household in an urban area with significant transportation assets.
+
+
+    A household with specific Residential Zone Type and Vehicle Type Distribution.
+
+
+    Built on: Residential Zone Types, Vehicle Type Distribution.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The definition references "Residential Zone Types" and "Vehicle Type Distribution" as
+    categorical/structural concepts, but gives no concrete rule for which zone type(s) count as urban-qualifying
+    nor what vehicle distribution counts as "significant" transportation assets. Residential Zone Types
+    is not derivable from the schema (no zone classification column exists - locations only has regioncode/zonenum),
+    and no numeric threshold is given for vehicle counts. Cannot encode without guessing these thresholds.
+- name: stable_infrastructure_household
+  description: 'Defines a household with reliable and high-quality infrastructure.
+
+
+    A household with a specific Utility Access Level and Road Surface Quality.
+
+
+    Built on: Road Surface Quality, Utility Access Level.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry requires a household to have "a specific Utility Access Level" AND "a specific
+    Road Surface Quality" but does not state which specific Utility Access Level qualifies (Full/Partial/Basic/None)
+    nor which specific Road Surface Quality is required for "Stable Infrastructure." Utility Access Level
+    itself is not computable from the schema's infrastructure table in an unambiguous way (it is not defined
+    as a precise mapping from wateraccess/cablestatus to Full/Partial/Basic/None), and no threshold is
+    given for which level/surface combination counts as "stable". Without these specific values, the condition
+    cannot be encoded.
+- name: economically_independent_household
+  description: 'Defines a household with minimal reliance on external financial support.
+
+
+    A household with high Income Classification and social support status of ''No''.
+
+
+    Built on: Income Classification, Social Support Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The "Income Classification" entry defines only qualitative labels ('Low Income' ... 'Very
+    High Income') without any documented mapping from these labels to the raw Income_Bracket text values
+    stored in households.socioeconomic (which are free-text R$ ranges with inconsistent whitespace, e.g.
+    'More than R$ 17,600 and less than R$ 22,000', 'Has no income', etc.). There is no threshold or rule
+    anywhere in the documentation or schema that specifies which of the ~11 raw bracket values count as
+    'High Income' versus the other classes, so "high Income Classification" cannot be computed without
+    guessing an arbitrary cutoff.
+- name: well_maintained_dwelling
+  description: 'Defines a residential unit in excellent or good condition with modern amenities.
+
+
+    A dwelling with specific Dwelling Condition Status and Cable TV Status.
+
+
+    Built on: Cable TV Status, Dwelling Condition Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Dwelling Condition Status ('Excellent','Good','Fair','Poor') is not stored in the database
+    schema - there is no column representing property maintenance/condition. Without this attribute, the
+    Well-Maintained Dwelling condition cannot be encoded, even though Cable TV Status (amenities.cablestatus)
+    is available.
+- name: dwelling_type_score
+  description: 'Assigns a numerical score to different dwelling types based on a predefined quality ranking.
+
+
+    A scoring system where ''Brickwork house'' receives 4 points, ''Apartment'' receives 3 points, and
+    all other types receive 1 point. This score is used in broader calculations like the Living Condition
+    Score.
+
+
+    Built on: Dwelling Type.
+
+
+    Compiler note: Dwelling_Class values have inconsistent casing/whitespace/tab chars (e.g. ''Brickwork
+    house'', ''bRiCKwoRk housE'', ''brick\thouse'', ''Apt'', ''ApARTMEnT''). Normalized by stripping non-letters
+    and lowercasing: any variant matching brick...house pattern scores 4, apartment/apt scores 3, everything
+    else (including ''other'', ''shack...'') scores 1, per entry definition (ignoring Condominium since
+    not mentioned here).'
+  sql_expression: "CASE\n  WHEN lower(regexp_replace(trim(dwelling_specs->>'Dwelling_Class'), '[^a-z]',\
+    \ '', 'g')) LIKE '%brick%house%' OR lower(regexp_replace(trim(dwelling_specs->>'Dwelling_Class'),\
+    \ '[^a-z]', '', 'g')) = 'brickworkhouse' THEN 4\n  WHEN lower(regexp_replace(trim(dwelling_specs->>'Dwelling_Class'),\
+    \ '[^a-z]', '', 'g')) IN ('apartment','apt') THEN 3\n  ELSE 1\nEND"
+  source_model: main.properties
+  domains:
+  - calculations
+- name: urban_zone
+  description: 'Defines which zones are considered urban.
+
+
+    A zone is considered urban if its `loczone` is 1.
+
+
+    Compiler note: Encoded directly as stated: a zone is urban if loczone equals 1.'
+  sql_expression: loczone = 1
+  source_model: main.households
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: amenities
+  columns:
+  - name: amenityref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each household amenities and utilities record.
+      EX. 1,2,3
+  - name: houseid
+    type: BIGINT
+    description: Foreign key referencing households.HouseNum with unique constraint, ensuring 1:1 relationship
+      for amenities configuration per household. Ex.3,4,7
+  - name: cablestatus
+    type: VARCHAR
+    description: 'Cable television service availability and subscription status indicating the household''s
+      access to cable TV services. Ex. avail, available,yes
+
+
+      Cable TV Status: Illustrates the availability of cable television.
+
+
+      Values indicating availability, based on schema, are ''avail'', ''available'', and ''yes''.
+
+
+      Compiler note: Describes the categorical values stored in amenities.cablestatus; column contains
+      many case/whitespace variants (e.g. ''avail'', ''available'', ''yes'', ''AVAIL'', ''Have'', ''y'')
+      representing availability, and others (''not available'', ''no'', ''n'', ''dont have'') representing
+      non-availability.'
+- schema: main
+  table: households
+  columns:
+  - name: housenum
+    type: BIGINT
+    description: A BIGINT primary key uniquely identifying each household unit in the database system.
+      EX.3,4,7
+  - name: residentcount
+    type: BIGINT
+    description: Number of people currently residing in the household, representing the total household
+      size including all family members and occupants. EX. 1,2 3
+  - name: locregion
+    type: VARCHAR
+    description: Foreign key referencing locations.RegionCode, indicating the administrative region where
+      this household is located. Part of composite foreign key constraint. EX.Taguatinga,Samambaia
+  - name: loczone
+    type: BIGINT
+    description: Foreign key referencing locations.ZoneNum, indicating the specific macrozone within the
+      administrative region. Part of composite foreign key constraint. EX.315,222,332
+  - name: serviceplan
+    type: BIGINT
+    description: Foreign key referencing service_types.ServiceRef, indicating which social service package
+      or plan the household is enrolled in or eligible for. Contains NULL when household is not enrolled
+      in any social service programs or eligibility has not been determined. EX. 1
+  - name: socioeconomic
+    type: JSON
+    description: 'JSONB column. Groups socioeconomic characteristics of the household including tenure
+      status, income classification, and expenditure patterns for demographic analysis. Fields: {"Tenure_Type":
+      "Household tenure classification indicating the ownership or occupancy status. Contains NULL when
+      tenure status is unknown, transitional, or under legal dispute. Ex. OWNED, RENTED, OCCUPIED", "Income_Bracket":
+      "Income classification level representing the household''s economic status and earning capacity.
+      Contains NULL when income information is not disclosed, not available, or household income is irregular/informal.
+      Ex.More than R$ 1,760 and less than R$ 2,640 ", "Expend_Coeff": "Household expenditure coefficient
+      as a real number representing the spending pattern or consumption multiplier factor for economic
+      analysis. Contains NULL when expenditure data is not available or household spending patterns cannot
+      be reliably calculated. EX.60.6315"}
+
+
+      Household Tenure Status: Illustrates the types of household tenure based on ownership or occupancy.
+
+
+      Values based on schema include ''OWNED'', ''RENTED'', ''OCCUPIED''. The ''OWNED'' status corresponds
+      to owner-occupied properties.
+
+
+      Compiler note: Describes the Tenure_Type field within the socioeconomic JSONB column, which stores
+      values like OWNED/RENTED/OCCUPIED variants (with inconsistent casing/whitespace, plus other categories
+      like ''guest'', ''In Concession'').
+
+
+      Income Classification: Illustrates the income brackets for household economic status.
+
+
+      Ranges from ''Low Income'' to ''Very High Income''. Null indicates undisclosed or irregular income.
+
+
+      Compiler note: Describes the Income_Bracket field within socioeconomic JSONB; actual stored values
+      are raw currency range strings (e.g. ''More than R$ 4,400 and less than R$ 8,800'', ''Has no income'')
+      rather than the ''Low Income''...''Very High Income'' labels, but it documents this field''s semantic
+      categorization.'
+- schema: main
+  table: infrastructure
+  columns:
+  - name: infraref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each infrastructure configuration record in
+      the database. EX. 1,2,3
+  - name: wateraccess
+    type: VARCHAR
+    description: 'Piped water supply access type indicating the household''s water infrastructure connectivity.
+      Part of unique constraint combination. ex.Yes, available at least in one room
+
+
+      Water Access Type: Illustrates water supply types. For scoring, ''Yes'' (piped access) is assigned
+      4 points, while other statuses are assigned 1 point.
+
+
+      Values based on schema include ''Yes'' and other non-piped statuses.
+
+
+      Compiler note: Describes the values stored in infrastructure.wateraccess (e.g. variants of "Yes,
+      available..." vs non-piped statuses); scoring rule (4 pts for ''Yes'' piped access, 1 pt otherwise)
+      is a value/categorization note, not an independently computable entry.'
+  - name: roadsurface
+    type: VARCHAR
+    description: 'Street pavement condition and type describing the road infrastructure quality around
+      the household location. Part of unique constraint combination. EX. Asphalt, concrete;Gravel surface
+
+
+      Road Surface Quality: Illustrates road surface types. For scoring, ''Asphalt'' and ''Concrete''
+      surfaces are assigned 4 points, while others are 1 point.
+
+
+      Values based on schema include ''Asphalt'', ''Concrete'', ''Gravel'', etc.
+
+
+      Compiler note: Describes the values stored in infrastructure.roadsurface, which include variants
+      like ''Asphalt, concrete'' and ''Gravel surface'' (with inconsistent spacing/capitalization). Documents
+      a value classification, not a computed metric.'
+  - name: parkavail
+    type: VARCHAR
+    description: 'Private parking space availability indicating whether households have dedicated parking
+      facilities. Part of unique constraint combination. EX.Available, not available
+
+
+      Parking Availability: Illustrates parking options. For scoring, ''Available'' status is assigned
+      4 points, while ''not available'' is 1 point.
+
+
+      Values based on schema include ''Available'' and ''not available''.
+
+
+      Compiler note: Describes values of infrastructure.parkavail column (''Available''/''Not available'')
+      and scoring mapping; no computed expression, just value documentation.'
+- schema: main
+  table: locations
+  columns:
+  - name: regioncode
+    type: VARCHAR
+    description: Administrative region code or identifier representing the geographic administrative division
+      where households are located. Forms part of composite primary key with ZoneNum. EX. Taguatinga,Samambaia
+  - name: zonenum
+    type: BIGINT
+    description: Macrozone numerical identifier representing specific geographic zones within administrative
+      regions for detailed location classification. Forms part of composite primary key with RegionCode.
+      EX.315,222,332
+- schema: main
+  table: properties
+  columns:
+  - name: propref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each residential property record in the database.
+      EX. 1,2,3
+  - name: houselink
+    type: BIGINT
+    description: Foreign key referencing households.HouseNum with unique constraint, ensuring 1:1 relationship
+      between properties and households. EX.3,4,7
+  - name: infralink
+    type: BIGINT
+    description: Foreign key referencing infrastructure.InfraRef, indicating which infrastructure configuration
+      applies to this property's location and services. EX.1,2
+  - name: dwelling_specs
+    type: JSON
+    description: 'JSONB column. Combines dwelling characteristics including structural type and room specifications
+      for property classification and capacity assessment. Fields: {"Dwelling_Class": "Dwelling type classification
+      describing the structural and architectural category of the residential unit. Contains NULL when
+      dwelling type is non-standard, mixed-use, or classification is pending assessment. Ex. Brickwork
+      house, Apartment", "Bath_Count": "Total number of bathrooms in the residential property, including
+      full bathrooms and half-bathrooms. Contains NULL when bathroom count is not available or property
+      has shared/communal bathroom facilities that cannot be counted per household. Ex. 1, 2, 3", "Room_Count":
+      "Total number of bedrooms in the residential property, representing the sleeping accommodation capacity.
+      Contains NULL when room count is not available or property has non-standard room configurations
+      that cannot be classified as bedrooms. Ex. 1, 2, 3"}
+
+
+      Dwelling Type: Illustrates dwelling categories. For scoring, ''Brickwork house'' and ''Condominium''
+      are 4 points, ''Apartment'' is 3 points, and all other types are 1 point.
+
+
+      Values based on schema include ''Brickwork house'', ''Apartment'', ''Condominium'', etc.
+
+
+      Compiler note: Describes the Dwelling_Class field within properties.dwelling_specs JSONB, which
+      stores values like ''Brickwork house'', ''Apartment'', etc.'
+- schema: main
+  table: service_types
+  columns:
+  - name: serviceref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each social service type or package configuration
+      available to households. Ex. 1,2,3
+  - name: domestichelp
+    type: VARCHAR
+    description: 'Domestic worker service availability indicating whether households have access to or
+      utilize domestic help services. Part of unique constraint combination. EX. No domestic workers,
+      Yes, occasional
+
+
+      Domestic Help Availability: Illustrates the types of domestic worker services for households.
+
+
+      Includes ''Full-time'' (daily), ''Part-time'' (periodic), ''Occasional'' (as-needed), ''None'' (no
+      help), and ''Live-in'' (resident worker). Null indicates informal or undisclosed arrangements.
+
+
+      Compiler note: Column holds domestic help status; actual stored values are variants like ''No domestic
+      workers'', ''Yes, regular'', ''Yes, occasional'', ''Yes, living-in'' (with whitespace/case/tab variations),
+      not literally ''Full-time''/''Part-time''/''None''/''Live-in'' as described, but entry conceptually
+      maps to this column.'
+  - name: socsupport
+    type: VARCHAR
+    description: 'Social assistance program participation indicating the type of government or community
+      support services available. Part of unique constraint combination. Ex. Yes, No
+
+
+      Social Support Status: Indicates whether a household participates in social assistance programs.
+
+
+      Binary indicator where ''Yes'' means the household accepts social assistance and ''No'' means it
+      does not. Part of unique constraint combination.
+
+
+      Compiler note: Column holds Yes/No values (with whitespace variants) matching the binary social
+      support indicator described.
+
+
+      Social Assistance Participation: Indicates household participation in social assistance programs.
+
+
+      Simple Yes/No indicator showing whether the household accepts social assistance, part of a unique
+      constraint combination.
+
+
+      Compiler note: Describes the socsupport column values (Yes/No) in service_types, which is part of
+      the unique constraint combination with domestichelp.'
+- schema: main
+  table: transportation_assets
+  columns:
+  - name: transref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each transportation asset record for households.
+      EX. 1,2,3
+  - name: housetag
+    type: BIGINT
+    description: Foreign key referencing households.HouseNum with unique constraint, ensuring 1:1 relationship
+      for transportation assets per household. EX.3,4,7
+  - name: vehicleinventory
+    type: JSON
+    description: 'JSONB column. Aggregates transportation assets owned by household including counts of
+      different vehicle types and age information for mobility analysis. Fields: {"vehicle_counts": {"Auto_Count":
+      "Number of passenger vehicles owned by the household, defaulting to 0 if no vehicles are owned.
+      Contains NULL when vehicle ownership status is unknown or verification is pending. ex.0", "Bike_Count":
+      "Number of bicycles owned by the household for transportation and recreation, defaulting to 0 if
+      none are owned. Contains NULL when bicycle ownership information is not available or not tracked.
+      ex.0,1", "Motor_Count": "Number of motorcycles, scooters, or motorized two-wheelers owned by the
+      household, defaulting to 0 if none are owned. Contains NULL when motorcycle ownership information
+      is not available or not applicable. EX.0,1,2"}, "Newest_Year": "Year of manufacture for the newest
+      vehicle in the household''s transportation fleet, stored as text to accommodate various date formats
+      and null values. Contains NULL when no vehicles are owned, vehicle age information is not available,
+      or vehicles are too old to have reliable manufacture date records. EX.2012 To 2013, Not applicable,
+      2014 or newer"}
+
+
+      Vehicle Year Range: Illustrates the year ranges for the newest vehicle owned by a household.
+
+
+      Text ranges like ''1995 to 1999'', ''2005 to 2009'', or ''2010 to 2013''. Null indicates no vehicles
+      or unknown age.
+
+
+      Compiler note: Describes the Newest_Year field within the vehicleinventory JSONB column, which stores
+      text year ranges (e.g. ''2000 To 2004'', ''2010-2013'', ''Not Applicable'' variants) for the newest
+      vehicle owned.
+
+
+      Vehicle Type Distribution: Illustrates the structure of vehicle ownership by type for a household.
+
+
+      An array of counts representing vehicle types. Null indicates unknown or unverified ownership.
+
+
+      Compiler note: Describes the structure of the vehicleinventory JSONB field''s vehicle_counts object
+      (Auto_Count, Bike_Count, Motor_Count), i.e. the array/set of counts per vehicle type for a household.'

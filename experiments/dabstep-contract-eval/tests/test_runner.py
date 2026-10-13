@@ -3028,3 +3028,20 @@ def test_a_results_subdirectory_does_not_block_a_resume_or_the_next_sweep(
     _git(repo, "commit", "-q", "-m", "smoke")
     full = experiment / "results" / "livesqlbench" / "full.jsonl"
     assert_clean_tree(out=full, repo_root=repo)  # the next sweep
+
+
+def test_sweep_tasks_checks_the_arms_on_the_sampled_tasks_before_any_spend():
+    from dce.runner import _sweep_tasks
+
+    seen = {}
+
+    class Bench(DABStep):
+        def check_arms(self, arms, tasks):
+            seen["arms"], seen["tasks"] = arms, [t.task_id for t in tasks]
+            raise SystemExit("no compiled contract for ['x']")
+
+    records = [{"task_id": str(i), "question": "q", "level": "hard"} for i in range(5)]
+    bench = Bench(db=Path("d"), golds={}, golds_hash="h", docs={}, records=records)
+    with pytest.raises(SystemExit, match="no compiled contract"):
+        _sweep_tasks(bench, ("contract",), 2)
+    assert seen == {"arms": ("contract",), "tasks": ["0", "1"]}

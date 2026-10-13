@@ -1,0 +1,2103 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: exchange_traded_funds, compiler: claudesonnet5
+# inputs: exchange_traded_funds_kb.jsonl, exchange_traded_funds_column_meaning_base.json, exchange_traded_funds_schema.txt, exchange_traded_funds.duckdb
+metrics:
+- name: annual_fund_outperformance
+  description: "Calculates the excess return of a fund compared to its category benchmark for a given\
+    \ year.\n\n\text{Annual Fund Outperformance} = \text{Fund's annual return} - \text{Category's average\
+    \ annual return}\n\nCompiler note: Fund's annual return (fundperf) minus category's average annual\
+    \ return (categoryperf), both stored per calendaryear row in annual_returns."
+  sql_expression: fundperf - categoryperf
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: relative_expense_ratio
+  description: "Measures the difference between a fund's net expense ratio and its benchmark's expense\
+    \ ratio.\n\n\text{Relative Expense} = \text{Fund's net expense ratio} - \text{Benchmark's expense\
+    \ ratio}\n\nCompiler note: Expense_Net and Benchmark_Exp are stored as decimal fractions in funds.fundmetrics\
+    \ JSONB; difference computed directly."
+  sql_expression: (fundmetrics->>'Expense_Net')::double precision - (fundmetrics->>'Benchmark_Exp')::double
+    precision
+  source_model: main.funds
+  domains:
+  - calculations
+- name: return_on_cost_roc
+  description: "Assesses the fund's one-year performance relative to its cost, indicating how much return\
+    \ is generated per unit of expense.\n\nROC = \frac{\text{Fund's 1-year return}}{\text{Net expense\
+    \ ratio}}\n\nCompiler note: Fund's 1-year return taken from performance.returnmetrics.fund_returns.Return_1Y;\
+    \ net expense ratio taken from funds.fundmetrics.Expense_Net via scalar subquery joining on tickersym=productref\
+    \ (1:1 relationship verified)."
+  sql_expression: (returnmetrics->'fund_returns'->>'Return_1Y')::double / (SELECT (f.fundmetrics->>'Expense_Net')::double
+    FROM funds f WHERE f.tickersym = performance.productref)
+  source_model: main.performance
+  domains:
+  - calculations
+- name: yield_to_expense_ratio_yter
+  description: "Evaluates an income-generating fund's efficiency by comparing its dividend yield to its\
+    \ net expense ratio.\n\nYTER = \frac{\text{Fund's yield rate}}{\text{Net expense ratio}}\n\nCompiler\
+    \ note: Yield_Rate and Expense_Net are nested under fundmetrics JSONB; cast text values to double\
+    \ for division."
+  sql_expression: (fundmetrics->>'Yield_Rate')::double / (fundmetrics->>'Expense_Net')::double
+  source_model: main.funds
+  domains:
+  - calculations
+- name: price_position_in_52_week_range
+  description: "Calculates the current price's position within its 52-week high-low range as a percentage.\n\
+    \n\text{Position} = \frac{\text{Recent price} - \text{52-week low price}}{\text{52-week high price}\
+    \ - \text{52-week low price}} \times 100\n\nCompiler note: Recent price is not stored directly; derived\
+    \ it as Low_52W + Low_Delta, verified it equals High_52W + High_Delta across sample rows. Position\
+    \ = (Recent - Low_52W)/(High_52W - Low_52W) * 100, which simplifies to Low_Delta/(High_52W-Low_52W)*100."
+  sql_expression: (((pricerange52w->'low_metrics'->>'Low_52W')::double precision + (pricerange52w->'low_metrics'->>'Low_Delta')::double
+    precision - (pricerange52w->'low_metrics'->>'Low_52W')::double precision) / ((pricerange52w->'high_metrics'->>'High_52W')::double
+    precision - (pricerange52w->'low_metrics'->>'Low_52W')::double precision)) * 100
+  source_model: main.performance
+  domains:
+  - calculations
+- name: short_term_momentum_indicator
+  description: "A technical indicator that signals short-term trend strength by comparing the 50-day and\
+    \ 200-day moving averages.\n\n\text{Momentum} = \text{50-day moving average} - \text{200-day moving\
+    \ average}\n\nCompiler note: MA_50 and MA_200 are nested under tradingdata->'moving_averages'; computed\
+    \ as MA_50 - MA_200."
+  sql_expression: (tradingdata->'moving_averages'->>'MA_50')::numeric - (tradingdata->'moving_averages'->>'MA_200')::numeric
+  source_model: main.funds
+  domains:
+  - calculations
+- name: information_ratio_simplified
+  description: "Measures a fund's risk-adjusted excess return over its benchmark, using volatility as\
+    \ the measure of risk.\n\nIR = \frac{\text{Fund's 3-year average return} - \text{Benchmark's 3-year\
+    \ average return}}{\text{Fund's 3-year volatility}}\n\nCompiler note: Fund's 3-year average return\
+    \ and volatility taken from risk_metrics.risk3y (Avg_Return_3Y, Volatility_3Y). Benchmark's 3-year\
+    \ average return mapped to performance.returnmetrics.benchmark_returns.Bench_Return_3Y, joined via\
+    \ productref=investmentref (1:1 relationship verified). Cast jsonb text values to double."
+  sql_expression: (CAST(risk3y->'risk_measures_3y'->>'Avg_Return_3Y' AS DOUBLE) - CAST((SELECT p.returnmetrics->'benchmark_returns'->>'Bench_Return_3Y'
+    FROM performance p WHERE p.productref = risk_metrics.investmentref) AS DOUBLE)) / CAST(risk3y->'risk_measures_3y'->>'Volatility_3Y'
+    AS DOUBLE)
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: positive_return_consistency
+  description: "Calculates the percentage of a fund's historical years that have yielded positive returns.\n\
+    \n\text{Consistency} = \frac{\text{Number of years with positive returns}}{\text{number of positive\
+    \ years with positive returns} + \text{number if years with negative returns}} \times 100\n\nCompiler\
+    \ note: Uses histstats.Positive_Years and Negative_Years fields; division guarded against zero denominator\
+    \ with NULLIF."
+  sql_expression: (histstats->>'Positive_Years')::numeric / NULLIF((histstats->>'Positive_Years')::numeric
+    + (histstats->>'Negative_Years')::numeric, 0) * 100
+  source_model: main.performance
+  domains:
+  - calculations
+- name: cost_adjusted_annual_outperformance
+  description: 'Evaluates a fund''s performance by considering both its excess return over its category
+    and its cost relative to its benchmark.
+
+
+    A fund''s performance is adjusted by combining its ''Annual Fund Outperformance'' with its ''Relative
+    Expense Ratio''. A higher positive outperformance and a lower (negative) relative expense are desirable.
+
+
+    Built on: annual_fund_outperformance, relative_expense_ratio.
+
+
+    Compiler note: Combines Annual Fund Outperformance (fundperf - categoryperf, per year) with Relative
+    Expense Ratio (Expense_Net - Benchmark_Exp from funds, joined via unique tickersym). Combination is
+    additive subtraction since higher outperformance and lower (more negative) relative expense are both
+    desirable, matching sign conventions of the two component metrics.'
+  sql_expression: (fundperf - categoryperf) - ((SELECT (f.fundmetrics->>'Expense_Net')::double precision
+    - (f.fundmetrics->>'Benchmark_Exp')::double precision FROM funds f WHERE f.tickersym = annual_returns.portfolioref))
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: total_return_fund
+  description: 'Defines a fund that aims to provide both capital appreciation and income through dividends.
+
+
+    A fund is classified as a Total Return Fund if it has both a non-zero allocation to stocks and a non-zero
+    dividend yield.
+
+
+    Compiler note: Equity_Weight from allocweights.asset_allocation and Yield_Rate from fundmetrics; both
+    must be non-null and non-zero. NULL comparisons naturally yield false/unknown, excluding funds lacking
+    data.'
+  sql_expression: (allocweights->'asset_allocation'->>'Equity_Weight')::double precision <> 0 AND (fundmetrics->>'Yield_Rate')::double
+    precision <> 0
+  source_model: main.funds
+  domains:
+  - definitions
+- name: alpha_generator
+  description: 'A fund that has demonstrated an ability to outperform its benchmark on a risk-adjusted
+    basis.
+
+
+    A fund is considered an Alpha Generator if its 5-year alpha is greater than 0.
+
+
+    Compiler note: Alpha_5Y extracted from risk5y JSON (risk_measures_5y.Alpha_5Y), cast to double; NULLs
+    naturally excluded.'
+  sql_expression: (risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision > 0
+  source_model: main.risk_metrics
+  domains:
+  - definitions
+- name: market_tracking_fund
+  description: 'A fund whose performance is highly correlated with its market benchmark.
+
+
+    A fund is considered a Market-Tracking Fund if its 3-year R-squared value is greater than 90, indicating
+    a strong correlation with its benchmark.
+
+
+    Compiler note: R_Squared_3Y stored as a percentage number (0-100) under risk3y.risk_measures_3y; condition
+    checks value > 90.'
+  sql_expression: ((risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision) > 90
+  source_model: main.risk_metrics
+  domains:
+  - definitions
+- name: low_turnover_strategy
+  description: 'An investment strategy characterized by infrequent trading of portfolio holdings, often
+    associated with long-term, passive, or buy-and-hold approaches.
+
+
+    A fund employs a Low-Turnover Strategy if its annual portfolio turnover is less than 30%.
+
+
+    Compiler note: Turnover_Ratio in fundmetrics is stored as a percentage number (e.g. 6.89 means 6.89%),
+    not a 0-1 fraction (observed values up to 773.84). So ''<30%'' threshold is encoded as < 30.'
+  sql_expression: (fundmetrics->>'Turnover_Ratio')::float < 30
+  source_model: main.funds
+  domains:
+  - definitions
+- name: high_conviction_portfolio
+  description: 'A portfolio where the manager allocates a significant portion of assets to a small number
+    of their best ideas.
+
+
+    A fund is considered to have a High-Conviction Portfolio if the weight of its single largest holding
+    is greater than 8%.
+
+
+    Compiler note: holdingpct stored as fraction (0-1); largest holding identified by positionrank=1,
+    unique per fund. Threshold 8% = 0.08.'
+  sql_expression: (SELECT h.holdingpct FROM holdings h WHERE h.instrumentref = funds.tickersym AND h.positionrank
+    = 1) > 0.08
+  source_model: main.funds
+  domains:
+  - definitions
+- name: efficient_income_generator
+  description: 'A fund that provides a high dividend yield relative to its management cost.
+
+
+    A fund is classified as an Efficient Income Generator if its ''Yield-to-Expense Ratio (YTER)'' is
+    greater than 15.
+
+
+    Built on: yield_to_expense_ratio_yter.
+
+
+    Compiler note: YTER = Yield_Rate/Expense_Net from fundmetrics JSON; predicate checks YTER > 15.'
+  sql_expression: (fundmetrics->>'Yield_Rate')::double / (fundmetrics->>'Expense_Net')::double > 15
+  source_model: main.funds
+  domains:
+  - definitions
+- name: consistent_outperformer
+  description: 'A fund that not only generates alpha but also consistently delivers positive annual returns.
+
+
+    A fund is a Consistent Outperformer if it is an ''Alpha Generator'' and has a ''Positive Return Consistency''
+    score greater than 80.
+
+
+    Built on: alpha_generator, positive_return_consistency.
+
+
+    Compiler note: Joins risk_metrics (1:1 on tickersym) for Alpha Generator (5Y alpha > 0) and performance
+    (1:1 on tickersym) for Positive Return Consistency (>80) via scalar subqueries; both joins verified
+    unique per fund.'
+  sql_expression: '(SELECT (risk5y->''risk_measures_5y''->>''Alpha_5Y'')::double precision FROM risk_metrics
+    WHERE investmentref = funds.tickersym) > 0
+
+    AND (SELECT (histstats->>''Positive_Years'')::numeric / NULLIF((histstats->>''Positive_Years'')::numeric
+    + (histstats->>''Negative_Years'')::numeric, 0) * 100 FROM performance WHERE productref = funds.tickersym)
+    > 80'
+  source_model: main.funds
+  domains:
+  - definitions
+- name: passive_alpha_generator
+  description: 'A rare type of fund that closely tracks a market benchmark but still manages to produce
+    positive alpha.
+
+
+    A fund is a Passive Alpha Generator if it is both a ''Market-Tracking Fund'' and an ''Alpha Generator''.
+
+
+    Built on: market_tracking_fund, alpha_generator.
+
+
+    Compiler note: Combines Market-Tracking Fund (3Y R-Squared > 90) and Alpha Generator (5Y Alpha > 0)
+    predicates over risk_metrics table.'
+  sql_expression: ((risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision > 90) AND ((risk5y->'risk_measures_5y'->>'Alpha_5Y')::double
+    precision > 0)
+  source_model: main.risk_metrics
+  domains:
+  - definitions
+- name: golden_cross_signal
+  description: 'A bullish technical signal indicating potential for a major rally, based on moving average
+    trends.
+
+
+    A Golden Cross Signal occurs for a fund when its ''Short-Term Momentum Indicator'' is positive, suggesting
+    its short-term average price has crossed above its long-term average price.
+
+
+    Built on: short_term_momentum_indicator.
+
+
+    Compiler note: Golden Cross Signal is true when Short-Term Momentum Indicator (MA_50 - MA_200) is
+    positive; NULL MA values yield NULL (unknown), not true.'
+  sql_expression: ((tradingdata->'moving_averages'->>'MA_50')::numeric - (tradingdata->'moving_averages'->>'MA_200')::numeric)
+    > 0
+  source_model: main.funds
+  domains:
+  - definitions
+- name: geographic_focus
+  description: 'Classification of funds based on their primary geographic area of investment.
+
+
+    Funds are categorized by their geographic scope, such as ''UNITED_STATES'', ''International'', ''Global'',
+    ''Pacific/Asia ex-Japan Stk'', and ''Emerging Markets''.
+
+
+    Compiler note: Checked distinct values of fundclass->>''GeoZone_Class'': only US-variants present
+    (United States, U.S., USA, UNITED_STATES, usa, U.S.A., us, US, America), all 2310 rows. Normalized
+    these to ''UNITED_STATES''; other category labels (International, Global, Pacific/Asia ex-Japan Stk,
+    Emerging Markets) pass through unchanged if they appear, since none are present in current data to
+    verify spelling/casing.'
+  sql_expression: CASE WHEN upper(replace(fundclass->>'GeoZone_Class','.','')) IN ('UNITED STATES','US','USA','UNITED_STATES','AMERICA')
+    THEN 'UNITED_STATES' ELSE fundclass->>'GeoZone_Class' END
+  source_model: main.funds
+  domains:
+  - definitions
+- name: high_quality_credit_portfolio
+  description: 'A bond fund that primarily holds securities with very low credit risk.
+
+
+    A fund is defined as having a High-Quality Credit Portfolio if the sum of its allocations to government,
+    AAA, and AA rated bonds exceeds 60% of its total bond holdings.
+
+
+    Compiler note: Sums bond_allocations.allocationpct for ratings matching us_government, aaa, aa (as
+    stored in bond_ratings.creditmark) per fund and checks if sum exceeds 0.6 (60%, since allocationpct
+    is stored as 0-1 fraction).'
+  sql_expression: (SELECT SUM(ba.allocationpct) FROM bond_allocations ba JOIN bond_ratings br ON ba.ratinglink
+    = br.ratekey WHERE ba.fundlink = tickersym AND br.creditmark IN ('us_government','aaa','aa')) > 0.6
+  source_model: main.funds
+  domains:
+  - definitions
+- name: performance_cost_efficiency_score
+  description: "Calculates a fund's efficiency by measuring its annual outperformance relative to its\
+    \ cost compared to peers.\n\n\text{PCES} = \frac{\text{Annual Fund Outperformance}}{\text{Relative\
+    \ Expense Ratio}}\n\nBuilt on: annual_fund_outperformance, relative_expense_ratio.\n\nCompiler note:\
+    \ PCES = Annual Fund Outperformance (fundperf-categoryperf, per annual_returns row) divided by Relative\
+    \ Expense Ratio (funds.fundmetrics Expense_Net - Benchmark_Exp, per fund via scalar subquery matched\
+    \ by tickersym, unique join verified)."
+  sql_expression: (fundperf - categoryperf) / (SELECT (f.fundmetrics->>'Expense_Net')::double precision
+    - (f.fundmetrics->>'Benchmark_Exp')::double precision FROM funds f WHERE f.tickersym = annual_returns.portfolioref)
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: momentum_weighted_price_strength
+  description: "A composite technical indicator that scores a fund based on its current price position,\
+    \ giving more weight to funds with stronger upward momentum.\n\n\text{MWPS} = \text{Price Position}\
+    \ \times (1 + \frac{\text{Momentum}}{\text{200-Day Moving Average}})\n\nBuilt on: price_position_in_52_week_range,\
+    \ short_term_momentum_indicator.\n\nCompiler note: MWPS = Price Position in 52-Week Range (as defined:\
+    \ Low_Delta/(High_52W-Low_52W)*100) times (1 + Momentum/MA_200), where Momentum = MA_50 - MA_200 from\
+    \ funds.tradingdata, joined via performance.productref = funds.tickersym (verified 1:1 join, each\
+    \ productref has a single performance row and tickersym is unique in funds)."
+  sql_expression: "(\n  (((pricerange52w->'low_metrics'->>'Low_52W')::double precision + (pricerange52w->'low_metrics'->>'Low_Delta')::double\
+    \ precision - (pricerange52w->'low_metrics'->>'Low_52W')::double precision)\n   / ((pricerange52w->'high_metrics'->>'High_52W')::double\
+    \ precision - (pricerange52w->'low_metrics'->>'Low_52W')::double precision)) * 100\n) * (\n  1 + (\n\
+    \    (\n      (SELECT (f.tradingdata->'moving_averages'->>'MA_50')::double precision FROM funds f\
+    \ WHERE f.tickersym = performance.productref)\n      -\n      (SELECT (f.tradingdata->'moving_averages'->>'MA_200')::double\
+    \ precision FROM funds f WHERE f.tickersym = performance.productref)\n    )\n    / (SELECT (f.tradingdata->'moving_averages'->>'MA_200')::double\
+    \ precision FROM funds f WHERE f.tickersym = performance.productref)\n  )\n)"
+  source_model: main.performance
+  domains:
+  - calculations
+- name: consistency_adjusted_information_ratio
+  description: "Refines the Information Ratio by factoring in the historical consistency of a fund's positive\
+    \ returns.\n\n\text{CAIR} = \text{Information Ratio} \times \frac{\text{Positive Return Consistency}}{100}\n\
+    \nBuilt on: information_ratio_simplified, positive_return_consistency.\n\nCompiler note: CAIR = Information\
+    \ Ratio (Simplified) * Positive Return Consistency / 100. Information Ratio uses risk_metrics.risk3y\
+    \ Avg_Return_3Y, Volatility_3Y, and performance.returnmetrics Bench_Return_3Y (matched via performance.productref\
+    \ = risk_metrics.investmentref, 1:1 join verified unique). Positive Return Consistency computed from\
+    \ performance.histstats Positive_Years/Negative_Years via the same join."
+  sql_expression: "(\n  (CAST(risk3y->'risk_measures_3y'->>'Avg_Return_3Y' AS DOUBLE) - CAST((SELECT p.returnmetrics->'benchmark_returns'->>'Bench_Return_3Y'\
+    \ FROM performance p WHERE p.productref = risk_metrics.investmentref) AS DOUBLE))\n  / CAST(risk3y->'risk_measures_3y'->>'Volatility_3Y'\
+    \ AS DOUBLE)\n)\n*\n(\n  (SELECT (p.histstats->>'Positive_Years')::numeric / NULLIF((p.histstats->>'Positive_Years')::numeric\
+    \ + (p.histstats->>'Negative_Years')::numeric, 0) * 100\n   FROM performance p WHERE p.productref\
+    \ = risk_metrics.investmentref)\n  / 100\n)"
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: total_value_score
+  description: "A holistic performance score combining risk-adjusted returns, cost-efficiency, and historical\
+    \ consistency.\n\n\text{TVS} = \\sqrt[3]{\text{Return on Cost} \times \text{Information Ratio} \t\
+    imes \text{Positive Return Consistency}}\n\nBuilt on: return_on_cost_roc, information_ratio_simplified,\
+    \ positive_return_consistency.\n\nCompiler note: TVS = cube root of (Return on Cost * Information\
+    \ Ratio (Simplified) * Positive Return Consistency). ROC uses performance.returnmetrics.fund_returns.Return_1Y\
+    \ divided by funds.fundmetrics.Expense_Net (matched via tickersym). Information Ratio uses risk_metrics.risk3y.Avg_Return_3Y\
+    \ minus performance.returnmetrics.benchmark_returns.Bench_Return_3Y, divided by risk_metrics.risk3y.Volatility_3Y\
+    \ (risk_metrics.investmentref matched to performance.productref, verified 1:1 unique join). Positive\
+    \ Return Consistency uses performance.histstats Positive_Years/(Positive_Years+Negative_Years)*100.\
+    \ Used cbrt() to handle potential negative products of the cube root as DuckDB's cbrt handles negative\
+    \ inputs correctly, unlike POWER with fractional exponent."
+  sql_expression: "cbrt(\n  ( (returnmetrics->'fund_returns'->>'Return_1Y')::double precision /\n    (SELECT\
+    \ (f.fundmetrics->>'Expense_Net')::double precision FROM funds f WHERE f.tickersym = performance.productref)\
+    \ )\n  *\n  ( (SELECT (rm.risk3y->'risk_measures_3y'->>'Avg_Return_3Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref = performance.productref)\n    -\n    (returnmetrics->'benchmark_returns'->>'Bench_Return_3Y')::double\
+    \ precision )\n  /\n  (SELECT (rm.risk3y->'risk_measures_3y'->>'Volatility_3Y')::double precision\
+    \ FROM risk_metrics rm WHERE rm.investmentref = performance.productref)\n  *\n  ( (histstats->>'Positive_Years')::numeric\
+    \ / NULLIF((histstats->>'Positive_Years')::numeric + (histstats->>'Negative_Years')::numeric, 0) *\
+    \ 100 )\n)"
+  source_model: main.performance
+  domains:
+  - calculations
+- name: active_manager_value
+  description: "Quantifies the net value an active manager provides by subtracting the fund's relative\
+    \ cost from its demonstrated ability to generate risk-adjusted excess returns.\n\n\text{AMV} = \t\
+    ext{Information Ratio} - (\text{Relative Expense Ratio} \times 10)\n\nBuilt on: information_ratio_simplified,\
+    \ relative_expense_ratio.\n\nCompiler note: AMV = Information Ratio (Simplified) - (Relative Expense\
+    \ Ratio * 10). Information Ratio built from risk_metrics.risk3y Avg_Return_3Y and Volatility_3Y, joined\
+    \ to performance.returnmetrics.benchmark_returns.Bench_Return_3Y via productref=investmentref (1:1\
+    \ match). Relative Expense Ratio built from funds.fundmetrics Expense_Net - Benchmark_Exp, joined\
+    \ via tickersym=investmentref (1:1 match)."
+  sql_expression: "(\n  (CAST(risk3y->'risk_measures_3y'->>'Avg_Return_3Y' AS DOUBLE) - CAST((SELECT p.returnmetrics->'benchmark_returns'->>'Bench_Return_3Y'\
+    \ FROM performance p WHERE p.productref = risk_metrics.investmentref) AS DOUBLE)) / CAST(risk3y->'risk_measures_3y'->>'Volatility_3Y'\
+    \ AS DOUBLE)\n)\n-\n(\n  (\n    (SELECT (f.fundmetrics->>'Expense_Net')::double precision FROM funds\
+    \ f WHERE f.tickersym = risk_metrics.investmentref)\n    -\n    (SELECT (f.fundmetrics->>'Benchmark_Exp')::double\
+    \ precision FROM funds f WHERE f.tickersym = risk_metrics.investmentref)\n  ) * 10\n)"
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: quality_income_score
+  description: 'A metric that assesses income-generating funds on both the efficiency and the credit quality
+    of their yield.
+
+
+    This score is the ''Yield-to-Expense Ratio'' for a fund, but only applies if the fund also qualifies
+    as a ''High-Quality Credit Portfolio''.
+
+
+    Built on: yield_to_expense_ratio_yter, high_quality_credit_portfolio.
+
+
+    Compiler note: Combines Yield-to-Expense Ratio (Yield_Rate/Expense_Net from fundmetrics) with High-Quality
+    Credit Portfolio condition (sum of us_government/aaa/aa allocations > 0.6 from bond_allocations/bond_ratings).
+    Score is NULL (not applicable) when the fund does not qualify as High-Quality Credit Portfolio.'
+  sql_expression: CASE WHEN (SELECT SUM(ba.allocationpct) FROM bond_allocations ba JOIN bond_ratings br
+    ON ba.ratinglink = br.ratekey WHERE ba.fundlink = tickersym AND br.creditmark IN ('us_government','aaa','aa'))
+    > 0.6 THEN (fundmetrics->>'Yield_Rate')::double / (fundmetrics->>'Expense_Net')::double ELSE NULL
+    END
+  source_model: main.funds
+  domains:
+  - calculations
+- name: composite_momentum_strength
+  description: "A score that confirms a bullish technical trend by combining a positive momentum signal\
+    \ with the fund's price strength.\n\n\text{CMS} = \text{Short-Term Momentum Indicator} \times \text{Price\
+    \ Position in 52-Week Range}\n\nBuilt on: short_term_momentum_indicator, price_position_in_52_week_range.\n\
+    \nCompiler note: CMS = Short-Term Momentum Indicator (MA_50-MA_200 from funds.tradingdata) * Price\
+    \ Position in 52-Week Range (from performance.pricerange52w, joined uniquely via productref=tickersym)."
+  sql_expression: "((tradingdata->'moving_averages'->>'MA_50')::numeric - (tradingdata->'moving_averages'->>'MA_200')::numeric)\
+    \ * (\n  SELECT (((p.pricerange52w->'low_metrics'->>'Low_52W')::double precision + (p.pricerange52w->'low_metrics'->>'Low_Delta')::double\
+    \ precision - (p.pricerange52w->'low_metrics'->>'Low_52W')::double precision) / ((p.pricerange52w->'high_metrics'->>'High_52W')::double\
+    \ precision - (p.pricerange52w->'low_metrics'->>'Low_52W')::double precision)) * 100\n  FROM performance\
+    \ p WHERE p.productref = funds.tickersym\n)"
+  source_model: main.funds
+  domains:
+  - calculations
+- name: net_yield_advantage
+  description: "Calculates a fund's final yield advantage or disadvantage after accounting for its cost\
+    \ relative to peers.\n\n\text{NYA} = \text{Yield Rate} - \text{Relative Expense Ratio}\n\nBuilt on:\
+    \ relative_expense_ratio.\n\nCompiler note: Yield Rate from fundmetrics.Yield_Rate; Relative Expense\
+    \ Ratio = Expense_Net - Benchmark_Exp, both from fundmetrics JSON."
+  sql_expression: (fundmetrics->>'Yield_Rate')::double precision - ((fundmetrics->>'Expense_Net')::double
+    precision - (fundmetrics->>'Benchmark_Exp')::double precision)
+  source_model: main.funds
+  domains:
+  - calculations
+- name: holistic_outperformance_metric
+  description: "A comprehensive metric that blends a fund's raw outperformance with its risk-adjusted,\
+    \ cost-adjusted performance.\n\n\text{HOM} = \frac{\text{Annual Fund Outperformance} + \text{Cost-Adjusted\
+    \ Annual Outperformance}}{2}\n\nBuilt on: annual_fund_outperformance, cost_adjusted_annual_outperformance.\n\
+    \nCompiler note: HOM = average of Annual Fund Outperformance and Cost-Adjusted Annual Outperformance,\
+    \ both computed from fundperf-categoryperf, with relative expense pulled from matching funds row via\
+    \ tickersym join (1:1 relationship)."
+  sql_expression: ((fundperf - categoryperf) + ((fundperf - categoryperf) - (SELECT (f.fundmetrics->>'Expense_Net')::double
+    precision - (f.fundmetrics->>'Benchmark_Exp')::double precision FROM funds f WHERE f.tickersym = annual_returns.portfolioref)))
+    / 2
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: risk_return_efficiency_index
+  description: "An index that evaluates how effectively a fund translates risk (volatility) into returns,\
+    \ adjusted for costs.\n\n\text{RREI} = \frac{\text{Return on Cost}}{\text{3-Year Volatility}}\n\n\
+    Built on: return_on_cost_roc.\n\nCompiler note: RREI = Return on Cost (Return_1Y / Expense_Net from\
+    \ funds) divided by 3-Year Volatility (risk3y->risk_measures_3y->Volatility_3Y from risk_metrics).\
+    \ Verified risk_metrics.investmentref is unique per fund, joined via productref/tickersym."
+  sql_expression: ( (returnmetrics->'fund_returns'->>'Return_1Y')::double / (SELECT (f.fundmetrics->>'Expense_Net')::double
+    FROM funds f WHERE f.tickersym = performance.productref) ) / (SELECT (r.risk3y->'risk_measures_3y'->>'Volatility_3Y')::double
+    FROM risk_metrics r WHERE r.investmentref = performance.productref)
+  source_model: main.performance
+  domains:
+  - calculations
+- name: elite_active_manager
+  description: 'Identifies a top-tier fund manager who generates consistent, risk-adjusted outperformance
+    through a high-conviction, concentrated portfolio.
+
+
+    A fund is run by an Elite Active Manager if it qualifies as a ''Consistent Outperformer'' and maintains
+    a ''High-Conviction Portfolio''.
+
+
+    Built on: consistent_outperformer, high_conviction_portfolio.
+
+
+    Compiler note: Combines consistent_outperformer (5Y alpha > 0 AND positive-year percentage > 80) with
+    high_conviction_portfolio (top holding weight > 0.08). Verified risk_metrics and performance are 1:1
+    with funds via tickersym, and holdings has at most one row per fund with positionrank=1.'
+  sql_expression: "(\n  (SELECT (risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ WHERE investmentref = funds.tickersym) > 0\n  AND\n  (SELECT (histstats->>'Positive_Years')::numeric\
+    \ / NULLIF((histstats->>'Positive_Years')::numeric + (histstats->>'Negative_Years')::numeric, 0) *\
+    \ 100 FROM performance WHERE productref = funds.tickersym) > 80\n)\nAND\n(SELECT h.holdingpct FROM\
+    \ holdings h WHERE h.instrumentref = funds.tickersym AND h.positionrank = 1) > 0.08"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: ideal_index_fund
+  description: 'Defines a fund that perfectly embodies the principles of passive investing: low cost,
+    low trading, and tight benchmark tracking.
+
+
+    A fund is an Ideal Index Fund if it is a ''Market-Tracking Fund'', employs a ''Low-Turnover Strategy'',
+    and has a negative ''Relative Expense Ratio''.
+
+
+    Built on: market_tracking_fund, low_turnover_strategy, relative_expense_ratio.
+
+
+    Compiler note: Combines market_tracking_fund (risk_metrics.risk3y R_Squared_3Y > 90, joined 1:1 via
+    investmentref=tickersym), low_turnover_strategy (funds.fundmetrics Turnover_Ratio < 30; verified data
+    stored as percentage-like values e.g. 773.84, 48.35, consistent with threshold 30 not 0.3), and relative_expense_ratio
+    (Expense_Net - Benchmark_Exp) being negative.'
+  sql_expression: '((SELECT (r.risk3y->''risk_measures_3y''->>''R_Squared_3Y'')::double precision FROM
+    risk_metrics r WHERE r.investmentref = funds.tickersym) > 90)
+
+    AND ((fundmetrics->>''Turnover_Ratio'')::float < 30)
+
+    AND (((fundmetrics->>''Expense_Net'')::double precision - (fundmetrics->>''Benchmark_Exp'')::double
+    precision) < 0)'
+  source_model: main.funds
+  domains:
+  - definitions
+- name: premier_income_fund
+  description: 'Identifies a superior income-focused fund that is not only efficient in generating yield
+    but also prioritizes the safety of its underlying bond holdings.
+
+
+    A fund is a Premier Income Fund if it is both an ''Efficient Income Generator'' and has a ''High-Quality
+    Credit Portfolio''.
+
+
+    Built on: efficient_income_generator, high_quality_credit_portfolio.
+
+
+    Compiler note: Combines Efficient Income Generator (Yield_Rate/Expense_Net > 15) and High-Quality
+    Credit Portfolio (sum of us_government/aaa/aa bond allocation > 0.6) via scalar subquery on bond_allocations/bond_ratings
+    joined by tickersym.'
+  sql_expression: ((fundmetrics->>'Yield_Rate')::double / (fundmetrics->>'Expense_Net')::double > 15)
+    AND ((SELECT SUM(ba.allocationpct) FROM bond_allocations ba JOIN bond_ratings br ON ba.ratinglink
+    = br.ratekey WHERE ba.fundlink = tickersym AND br.creditmark IN ('us_government','aaa','aa')) > 0.6)
+  source_model: main.funds
+  domains:
+  - definitions
+- name: rebound_prospect
+  description: 'A fund that has recently underperformed but is showing strong technical signs of a potential
+    turnaround in its price trend.
+
+
+    A fund is a Rebound Prospect if its ''Annual Fund Outperformance'' for the last reported year is negative,
+    but it is currently showing a ''Golden Cross Signal''.
+
+
+    Built on: annual_fund_outperformance, golden_cross_signal.
+
+
+    Compiler note: Golden Cross Signal computed from tradingdata moving averages (MA_50-MA_200 > 0). Last
+    reported year''s Annual Fund Outperformance (fundperf - categoryperf) taken as the row with max calendaryear
+    per fund from annual_returns (verified fund-year pairs are unique); condition requires this value
+    to be negative.'
+  sql_expression: "((tradingdata->'moving_averages'->>'MA_50')::numeric - (tradingdata->'moving_averages'->>'MA_200')::numeric)\
+    \ > 0\nAND (\n  SELECT ar.fundperf - ar.categoryperf\n  FROM annual_returns ar\n  WHERE ar.portfolioref\
+    \ = funds.tickersym\n  ORDER BY ar.calendaryear DESC\n  LIMIT 1\n) < 0"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: high_fee_strategic_bet
+  description: 'Classifies a fund as an expensive, actively-managed portfolio that deviates significantly
+    from market benchmarks, representing a pure play on manager skill.
+
+
+    A fund is a High-Fee Strategic Bet if its ''Relative Expense Ratio'' is positive and it does not qualify
+    as a ''Market-Tracking Fund''.
+
+
+    Built on: relative_expense_ratio, market_tracking_fund.
+
+
+    Compiler note: Relative Expense Ratio = Expense_Net - Benchmark_Exp from fundmetrics, must be >0.
+    Market-Tracking Fund = R_Squared_3Y from risk_metrics (joined by tickersym, 1:1 relationship confirmed)
+    >90; fund qualifies as High-Fee Strategic Bet if it does NOT satisfy this (including funds with no
+    risk_metrics row or NULL R_Squared, treated as not market-tracking via COALESCE false).'
+  sql_expression: "((fundmetrics->>'Expense_Net')::double precision - (fundmetrics->>'Benchmark_Exp')::double\
+    \ precision) > 0\nAND COALESCE((\n  SELECT ((rm.risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double\
+    \ precision) > 90\n  FROM risk_metrics rm WHERE rm.investmentref = funds.tickersym\n), false) = false"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: focused_alpha_leader
+  description: 'An actively managed fund that successfully generates excess returns by taking concentrated
+    bets on its best ideas.
+
+
+    A fund is a Focused Alpha Leader if it is classified as both an ''Alpha Generator'' and a ''High-Conviction
+    Portfolio''.
+
+
+    Built on: alpha_generator, high_conviction_portfolio.
+
+
+    Compiler note: Combines alpha_generator (risk_metrics.risk5y->Alpha_5Y > 0, unique per tickersym)
+    and high_conviction_portfolio (top holding weight > 0.08) via scalar subqueries from funds.'
+  sql_expression: '((SELECT (r.risk5y->''risk_measures_5y''->>''Alpha_5Y'')::double precision FROM risk_metrics
+    r WHERE r.investmentref = funds.tickersym) > 0)
+
+    AND ((SELECT h.holdingpct FROM holdings h WHERE h.instrumentref = funds.tickersym AND h.positionrank
+    = 1) > 0.08)'
+  source_model: main.funds
+  domains:
+  - definitions
+- name: reliable_core_holding
+  description: 'Identifies a fund suitable as a core portfolio holding due to its history of steady returns
+    and its balanced approach to providing both growth and income.
+
+
+    A fund is a Reliable Core Holding if it is a ''Consistent Outperformer'' and is also structured as
+    a ''Total Return Fund''.
+
+
+    Built on: consistent_outperformer, total_return_fund.
+
+
+    Compiler note: Combines Consistent Outperformer (5Y alpha > 0 AND positive-year ratio > 80%) with
+    Total Return Fund (nonzero equity weight AND nonzero yield rate). Verified risk_metrics and performance
+    each join 1:1 to funds via tickersym.'
+  sql_expression: "(\n  (SELECT (risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ WHERE investmentref = funds.tickersym) > 0\n  AND\n  (SELECT (histstats->>'Positive_Years')::numeric\
+    \ / NULLIF((histstats->>'Positive_Years')::numeric + (histstats->>'Negative_Years')::numeric, 0) *\
+    \ 100 FROM performance WHERE productref = funds.tickersym) > 80\n)\nAND\n(\n  (allocweights->'asset_allocation'->>'Equity_Weight')::double\
+    \ precision <> 0\n  AND (fundmetrics->>'Yield_Rate')::double precision <> 0\n)"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: contrarian_value_play
+  description: 'A fund that is currently out of favor with the market but is managed with a patient, low-cost,
+    long-term strategy, making it a potential value investment.
+
+
+    A fund is a Contrarian Value Play if its Price Position in 52-Week Range is below 25%, it follows
+    a Low-Turnover Strategy, and its Relative Expense Ratio is negative.
+
+
+    Built on: price_position_in_52_week_range, low_turnover_strategy, relative_expense_ratio.
+
+
+    Compiler note: Joined performance via productref=tickersym (1:1). Turnover_Ratio and Expense_Net/Benchmark_Exp
+    are stored as 0-1 decimals in fundmetrics (confirmed from sample data, e.g. 0.23), so the stated ''<30%''
+    threshold for Low-Turnover Strategy was reinterpreted as <0.30 to match stored scale. Price Position
+    formula applied exactly as given in dependency definition.'
+  sql_expression: "(fundmetrics->>'Turnover_Ratio')::double precision < 0.30\nAND ((fundmetrics->>'Expense_Net')::double\
+    \ precision - (fundmetrics->>'Benchmark_Exp')::double precision) < 0\nAND (\n  SELECT (((p.pricerange52w->'low_metrics'->>'Low_52W')::double\
+    \ precision + (p.pricerange52w->'low_metrics'->>'Low_Delta')::double precision - (p.pricerange52w->'low_metrics'->>'Low_52W')::double\
+    \ precision)\n    / ((p.pricerange52w->'high_metrics'->>'High_52W')::double precision - (p.pricerange52w->'low_metrics'->>'Low_52W')::double\
+    \ precision)) * 100\n  FROM performance p WHERE p.productref = funds.tickersym\n) < 25"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: global_alpha_specialist
+  description: 'An investment fund that specializes in a non-US market and has demonstrated a skillful
+    ability to outperform its relevant benchmark.
+
+
+    A fund is a Global Alpha Specialist if it is an ''Alpha Generator'' and its ''Geographic Focus'' is
+    anything other than ''UNITED_STATES'' or ''US''.
+
+
+    Built on: alpha_generator, geographic_focus.
+
+
+    Compiler note: Alpha Generator: 5Y alpha >0 pulled via unique scalar subquery on risk_metrics.investmentref=funds.tickersym.
+    Geographic Focus normalizes GeoZone_Class to ''UNITED_STATES'' for various US spellings; condition
+    excludes funds whose normalized focus is UNITED_STATES (the explicit ''US'' check is redundant since
+    normalization already maps it, kept per entry''s exact wording).'
+  sql_expression: "(SELECT (r.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision > 0\n FROM risk_metrics\
+    \ r WHERE r.investmentref = funds.tickersym)\nAND\n(CASE WHEN upper(replace(funds.fundclass->>'GeoZone_Class','.',''))\
+    \ IN ('UNITED STATES','US','USA','UNITED_STATES','AMERICA') THEN 'UNITED_STATES' ELSE funds.fundclass->>'GeoZone_Class'\
+    \ END) NOT IN ('UNITED_STATES','US')"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: high_cost_underperformer
+  description: 'Flags a fund that is both more expensive than its peers and has failed to outperform its
+    category, representing poor value for investors.
+
+
+    A fund is a High-Cost Underperformer if it has a positive ''Relative Expense Ratio'' and a negative
+    ''Annual Fund Outperformance''.
+
+
+    Built on: relative_expense_ratio, annual_fund_outperformance.
+
+
+    Compiler note: Evaluated per fund-year row of annual_returns: Relative Expense Ratio looked up uniquely
+    from funds via tickersym match, and Annual Fund Outperformance computed from that row''s fundperf/categoryperf.
+    A fund-year is flagged if expense exceeds benchmark expense (positive Relative Expense Ratio) and
+    fundperf is below categoryperf (negative Outperformance) for that year.'
+  sql_expression: ((SELECT (f.fundmetrics->>'Expense_Net')::double precision - (f.fundmetrics->>'Benchmark_Exp')::double
+    precision FROM funds f WHERE f.tickersym = annual_returns.portfolioref) > 0) AND ((annual_returns.fundperf
+    - annual_returns.categoryperf) < 0)
+  source_model: main.annual_returns
+  domains:
+  - definitions
+- name: appraisal_ratio
+  description: "Measures a fund manager's skill in stock selection by calculating the alpha generated\
+    \ per unit of specific, unsystematic risk taken.\n\n\text{Appraisal Ratio} = \frac{\text{3-Year Alpha}}{\t\
+    ext{Unsystematic Risk}}, \text{ where Unsystematic Risk} = \text{3-Year Volatility} \times \\sqrt{1\
+    \ - \text{3-Year R-Squared}}\n\nBuilt on: alpha_generator.\n\nCompiler note: R_Squared_3Y is stored\
+    \ on a 0-100 scale (most values >1), so it is divided by 100 to use as a proportion in (1 - R-Squared)\
+    \ before taking the square root, consistent with Volatility_3Y also being a percentage-point number\
+    \ (e.g. 14.93 meaning 14.93%). Alpha_3Y, Volatility_3Y, R_Squared_3Y taken from risk_metrics.risk3y\
+    \ JSON."
+  sql_expression: (risk3y->'risk_measures_3y'->>'Alpha_3Y')::double precision / ((risk3y->'risk_measures_3y'->>'Volatility_3Y')::double
+    precision * sqrt(1 - (risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision / 100))
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: composite_valuation_score
+  description: "Calculates a single score representing a fund's valuation attractiveness by averaging\
+    \ the inverted values of its key price-to-metric ratios.\n\nCVS = \frac{1}{4} \times (\frac{1}{\t\
+    ext{P/E Ratio}} + \frac{1}{\text{P/S Ratio}} + \frac{1}{\text{P/B Ratio}} + \frac{1}{\text{P/CF Ratio}})\n\
+    \nCompiler note: Extracted PE_Ratio, PS_Ratio, PB_Ratio, PCF_Ratio from funds.valuationratios->'valuation_metrics'.\
+    \ CVS = average of reciprocals of the four ratios; if any ratio is NULL, the whole expression is NULL\
+    \ (not applicable), matching documented NULL semantics."
+  sql_expression: "0.25 * (\n  1.0/(valuationratios->'valuation_metrics'->>'PE_Ratio')::double precision\
+    \ +\n  1.0/(valuationratios->'valuation_metrics'->>'PS_Ratio')::double precision +\n  1.0/(valuationratios->'valuation_metrics'->>'PB_Ratio')::double\
+    \ precision +\n  1.0/(valuationratios->'valuation_metrics'->>'PCF_Ratio')::double precision\n)"
+  source_model: main.funds
+  domains:
+  - calculations
+- name: active_management_footprint
+  description: "Quantifies the degree of a fund's active management by measuring its deviation from the\
+    \ benchmark relative to its trading activity.\n\nAMF = \frac{1 - \text{3-Year R-Squared}}{\text{Turnover\
+    \ Ratio}}\n\nBuilt on: market_tracking_fund, low_turnover_strategy.\n\nCompiler note: Uses raw stored\
+    \ values for R_Squared_3Y (risk_metrics.risk3y) and Turnover_Ratio (funds.fundmetrics, matched via\
+    \ tickersym=investmentref, 1:1), with no rescaling, consistent with how market_tracking_fund (>90)\
+    \ and low_turnover_strategy (<30) thresholds are applied directly to these same raw fields."
+  sql_expression: (1 - (risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision) / (SELECT (f.fundmetrics->>'Turnover_Ratio')::double
+    precision FROM funds f WHERE f.tickersym = risk_metrics.investmentref)
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: cost_adjusted_alpha
+  description: "Calculates the fund's alpha after penalizing it for having higher expenses than its benchmark,\
+    \ revealing the true value added by the manager.\n\nCAA = \text{3-Year Alpha} - \text{Relative Expense\
+    \ Ratio}\n\nBuilt on: relative_expense_ratio, alpha_generator.\n\nCompiler note: 3-Year Alpha from\
+    \ risk3y->risk_measures_3y->Alpha_3Y; Relative Expense Ratio computed via scalar subquery joining\
+    \ funds on tickersym (unique match) using Expense_Net - Benchmark_Exp from fundmetrics."
+  sql_expression: (risk3y->'risk_measures_3y'->>'Alpha_3Y')::double precision - (SELECT (f.fundmetrics->>'Expense_Net')::double
+    precision - (f.fundmetrics->>'Benchmark_Exp')::double precision FROM funds f WHERE f.tickersym = risk_metrics.investmentref)
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: momentum_adjusted_information_ratio
+  description: "A dynamic version of the Information Ratio that is enhanced by the fund's current price\
+    \ momentum, rewarding funds that are outperforming on a risk-adjusted basis and are also in a strong\
+    \ uptrend.\n\nMAIR = \text{Information Ratio (Simplified)} \times (1 + \frac{\text{Short-Term Momentum\
+    \ Indicator}}{\text{200-Day Moving Average}})\n\nBuilt on: short_term_momentum_indicator, information_ratio_simplified.\n\
+    \nCompiler note: Combines Information Ratio (Simplified) (3Y avg return minus benchmark 3Y return,\
+    \ divided by 3Y volatility, from risk_metrics joined to performance via tickersym) with Short-Term\
+    \ Momentum Indicator (MA_50 - MA_200 from funds.tradingdata) normalized by MA_200. Verified risk_metrics.investmentref\
+    \ joins 1:1 to funds.tickersym and to performance.productref."
+  sql_expression: "(\n  (SELECT (CAST(r.risk3y->'risk_measures_3y'->>'Avg_Return_3Y' AS DOUBLE) - CAST(p.returnmetrics->'benchmark_returns'->>'Bench_Return_3Y'\
+    \ AS DOUBLE)) / CAST(r.risk3y->'risk_measures_3y'->>'Volatility_3Y' AS DOUBLE)\n   FROM risk_metrics\
+    \ r JOIN performance p ON p.productref = r.investmentref\n   WHERE r.investmentref = funds.tickersym)\n\
+    ) * (1 + (\n  (CAST(funds.tradingdata->'moving_averages'->>'MA_50' AS DOUBLE) - CAST(funds.tradingdata->'moving_averages'->>'MA_200'\
+    \ AS DOUBLE))\n  / CAST(funds.tradingdata->'moving_averages'->>'MA_200' AS DOUBLE)\n))"
+  source_model: main.funds
+  domains:
+  - calculations
+- name: secure_income_efficiency_score
+  description: "A composite score for income funds that measures yield-generating efficiency while heavily\
+    \ weighting for the credit safety of the underlying assets.\n\nSIES = \text{Yield-to-Expense Ratio}\
+    \ \times (\text{Allocation to High-Quality Credit})\n\nBuilt on: yield_to_expense_ratio_yter, high_quality_credit_portfolio.\n\
+    \nCompiler note: SIES = YTER (Yield_Rate/Expense_Net) multiplied by the fund's total allocation to\
+    \ high-quality credit (sum of allocationpct for us_government, aaa, aa rated bonds from bond_allocations/bond_ratings),\
+    \ computed as a scalar subquery per fund."
+  sql_expression: ((fundmetrics->>'Yield_Rate')::double / (fundmetrics->>'Expense_Net')::double) * (SELECT
+    SUM(ba.allocationpct) FROM bond_allocations ba JOIN bond_ratings br ON ba.ratinglink = br.ratekey
+    WHERE ba.fundlink = funds.tickersym AND br.creditmark IN ('us_government','aaa','aa'))
+  source_model: main.funds
+  domains:
+  - calculations
+- name: manager_skill_ratio
+  description: "Measures the amount of alpha a fund manager generates for each dollar of fee charged to\
+    \ investors.\n\nMSR = \frac{\text{3-Year Alpha}}{\text{Net Expense Ratio}}\n\nBuilt on: alpha_generator.\n\
+    \nCompiler note: 3-Year Alpha from risk3y->risk_measures_3y->Alpha_3Y; Net Expense Ratio from funds.fundmetrics->Expense_Net,\
+    \ joined via unique tickersym match."
+  sql_expression: (risk3y->'risk_measures_3y'->>'Alpha_3Y')::double precision / (SELECT (f.fundmetrics->>'Expense_Net')::double
+    precision FROM funds f WHERE f.tickersym = risk_metrics.investmentref)
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: capital_preservation_index
+  description: "Scores a fund on its ability to protect capital by combining its history of avoiding down\
+    \ years with its ability to stay above its 52-week lows.\n\nCPI = (\frac{1}{1 + \text{Negative Years}})\
+    \ \times (1 - \frac{\text{52-Week Low} - \text{Current Price}}{\text{52-Week Low}})\n\nBuilt on: positive_return_consistency.\n\
+    \nCompiler note: Current price = Low_52W + Low_Delta (verified Low_Delta/Low_52W = Low_Delta_Pct in\
+    \ data), so (Low_52W - Current)/Low_52W = -Low_Delta_Pct, giving 1 - that = 1 + Low_Delta_Pct. CPI\
+    \ = (1/(1+Negative_Years)) * (1 + Low_Delta_Pct), using histstats.Negative_Years and pricerange52w.low_metrics.Low_Delta_Pct."
+  sql_expression: (1.0 / (1 + (histstats->>'Negative_Years')::numeric)) * (1 + (pricerange52w->'low_metrics'->>'Low_Delta_Pct')::numeric)
+  source_model: main.performance
+  domains:
+  - calculations
+- name: portfolio_liquidity_pressure
+  description: "Estimates the potential market impact of a fund's trading activity by comparing its annual\
+    \ turnover to its average daily trading volume.\n\nPLP = \frac{\text{Net Worth} \times \text{Turnover\
+    \ Ratio}}{\text{Average Daily Volume (3M) } \times 252}\n\nBuilt on: low_turnover_strategy.\n\nCompiler\
+    \ note: Net_Worth, Turnover_Ratio from fundmetrics JSONB; Vol_3M from tradingdata->volume_metrics\
+    \ JSONB. Turnover_Ratio used as stored (decimal fraction, e.g. 0.23) consistent with its column definition;\
+    \ Net_Worth and Vol_3M used as stored raw numbers."
+  sql_expression: ((fundmetrics->>'Net_Worth')::float * (fundmetrics->>'Turnover_Ratio')::float) / (((tradingdata->'volume_metrics'->>'Vol_3M')::float)
+    * 252)
+  source_model: main.funds
+  domains:
+  - calculations
+- name: growth_value_spectrum_score
+  description: "A quantitative factor score that places a fund on a spectrum from deep value to high growth\
+    \ based on the interplay of its Price-to-Earnings and Price-to-Book ratios.\n\n\text{GVS Score} =\
+    \ \\ln(\frac{\text{P/E Ratio}}{\text{P/B Ratio}})\n\nCompiler note: PE_Ratio and PB_Ratio are extracted\
+    \ from valuationratios->valuation_metrics JSON path and cast to double precision; ln(PE/PB) will be\
+    \ NULL if either ratio is NULL or non-positive."
+  sql_expression: LN((valuationratios->'valuation_metrics'->>'PE_Ratio')::double precision / (valuationratios->'valuation_metrics'->>'PB_Ratio')::double
+    precision)
+  source_model: main.funds
+  domains:
+  - calculations
+- name: closet_indexer
+  description: 'A fund that is marketed as an active fund and charges higher fees, but its portfolio holdings
+    and performance closely track a benchmark index.
+
+
+    A fund is identified as a Closet Indexer if it is a ''Market-Tracking Fund'' but has a positive ''Relative
+    Expense Ratio''.
+
+
+    Built on: relative_expense_ratio, market_tracking_fund.
+
+
+    Compiler note: Relative Expense Ratio = Expense_Net - Benchmark_Exp from funds.fundmetrics; Market-Tracking
+    Fund = R_Squared_3Y > 90 from risk_metrics.risk3y, joined uniquely via tickersym=investmentref. Closet
+    Indexer requires relative expense > 0 AND R_Squared_3Y > 90.'
+  sql_expression: ((fundmetrics->>'Expense_Net')::double precision - (fundmetrics->>'Benchmark_Exp')::double
+    precision) > 0 AND (SELECT ((r.risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision) FROM
+    risk_metrics r WHERE r.investmentref = funds.tickersym) > 90
+  source_model: main.funds
+  domains:
+  - definitions
+- name: strategic_beta_fund
+  description: 'An investment fund that occupies the middle ground between passive and active management,
+    using a rules-based system to target specific factors or market segments beyond simple market-cap
+    weighting.
+
+
+    A fund is classified as Strategic Beta if it employs a ''Low-Turnover Strategy'' but is explicitly
+    not a ''Market-Tracking Fund''.
+
+
+    Built on: market_tracking_fund, low_turnover_strategy.
+
+
+    Compiler note: Combines Low-Turnover Strategy (Turnover_Ratio < 30, per given sub-entry threshold)
+    with NOT Market-Tracking Fund (3Y R-Squared > 90 from risk_metrics, joined 1:1 by ticker via scalar
+    subquery). Funds with no risk_metrics row are treated as not market-tracking (NULL->false).'
+  sql_expression: (fundmetrics->>'Turnover_Ratio')::float < 30 AND COALESCE((SELECT ((r.risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double
+    precision) > 90 FROM risk_metrics r WHERE r.investmentref = funds.tickersym), false) = false
+  source_model: main.funds
+  domains:
+  - definitions
+- name: fallen_angel
+  description: 'A once highly-regarded fund that has seen a significant decline in its performance and
+    ability to generate alpha.
+
+
+    A fund is a Fallen Angel if it was previously considered a ''Consistent Outperformer'' but its most
+    recent 3-year alpha is now negative.
+
+
+    Built on: consistent_outperformer.
+
+
+    Compiler note: Fallen Angel = was a Consistent Outperformer (5Y alpha > 0 AND positive-year ratio
+    > 80%, per that entry''s definition) AND current 3-year alpha (risk3y->risk_measures_3y->Alpha_3Y)
+    is negative. risk_metrics and performance each join uniquely to funds by tickersym.'
+  sql_expression: "(\n  (SELECT (risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ WHERE investmentref = funds.tickersym) > 0\n  AND\n  (SELECT (histstats->>'Positive_Years')::numeric\
+    \ / NULLIF((histstats->>'Positive_Years')::numeric + (histstats->>'Negative_Years')::numeric, 0) *\
+    \ 100 FROM performance WHERE productref = funds.tickersym) > 80\n)\nAND\n(SELECT (risk3y->'risk_measures_3y'->>'Alpha_3Y')::double\
+    \ precision FROM risk_metrics WHERE investmentref = funds.tickersym) < 0"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: quality_growth_at_a_reasonable_price_q_garp
+  description: 'An investment style that seeks to own high-quality, growing companies without overpaying.
+    These funds blend quality, growth, and value characteristics.
+
+
+    A fund follows a Q-GARP strategy if it is a ''Consistent Outperformer'' and has a ''Composite Valuation
+    Score'' in the top 50th percentile of its category.
+
+
+    Built on: consistent_outperformer, composite_valuation_score.
+
+
+    Compiler note: Consistent Outperformer = (5Y Alpha &gt; 0) AND (Positive_Years/(Positive_Years+Negative_Years)*100
+    &gt; 80), using risk_metrics.risk5y and performance.histstats joined by ticker (1:1 relations verified
+    by PK structure). Composite Valuation Score computed from valuationratios JSON fields (PE, PS, PB,
+    PCF), requiring all four to be non-null for a fund to be ranked. Top 50th percentile within productclass
+    category is encoded as: the count of category peers (with complete valuation data) whose composite
+    score is <= this fund''s score is at least half of the total number of category peers with complete
+    valuation data. This equals being at or above the category median composite score. Funds with incomplete
+    valuation data or null alpha/positive-year ratios will evaluate to NULL/false and thus not qualify.'
+  sql_expression: "(\n  (SELECT (histstats->>'Positive_Years')::numeric / NULLIF((histstats->>'Positive_Years')::numeric\
+    \ + (histstats->>'Negative_Years')::numeric, 0) * 100 FROM performance WHERE productref = funds.tickersym)\
+    \ > 80\n  AND (SELECT (risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ WHERE investmentref = funds.tickersym) > 0\n)\nAND (\n  (SELECT COUNT(*) FROM funds f2\n     WHERE\
+    \ f2.productclass = funds.productclass\n       AND (f2.valuationratios->'valuation_metrics'->>'PE_Ratio')\
+    \ IS NOT NULL\n       AND (f2.valuationratios->'valuation_metrics'->>'PS_Ratio') IS NOT NULL\n   \
+    \    AND (f2.valuationratios->'valuation_metrics'->>'PB_Ratio') IS NOT NULL\n       AND (f2.valuationratios->'valuation_metrics'->>'PCF_Ratio')\
+    \ IS NOT NULL\n       AND (\n         0.25*(1.0/(f2.valuationratios->'valuation_metrics'->>'PE_Ratio')::double\
+    \ precision\n             +1.0/(f2.valuationratios->'valuation_metrics'->>'PS_Ratio')::double precision\n\
+    \             +1.0/(f2.valuationratios->'valuation_metrics'->>'PB_Ratio')::double precision\n    \
+    \         +1.0/(f2.valuationratios->'valuation_metrics'->>'PCF_Ratio')::double precision)\n      \
+    \ ) <= (\n         0.25*(1.0/(funds.valuationratios->'valuation_metrics'->>'PE_Ratio')::double precision\n\
+    \             +1.0/(funds.valuationratios->'valuation_metrics'->>'PS_Ratio')::double precision\n \
+    \            +1.0/(funds.valuationratios->'valuation_metrics'->>'PB_Ratio')::double precision\n  \
+    \           +1.0/(funds.valuationratios->'valuation_metrics'->>'PCF_Ratio')::double precision)\n \
+    \      )\n  )::double precision\n  >=\n  0.5 * (SELECT COUNT(*) FROM funds f3\n     WHERE f3.productclass\
+    \ = funds.productclass\n       AND (f3.valuationratios->'valuation_metrics'->>'PE_Ratio') IS NOT NULL\n\
+    \       AND (f3.valuationratios->'valuation_metrics'->>'PS_Ratio') IS NOT NULL\n       AND (f3.valuationratios->'valuation_metrics'->>'PB_Ratio')\
+    \ IS NOT NULL\n       AND (f3.valuationratios->'valuation_metrics'->>'PCF_Ratio') IS NOT NULL\n  )\n\
+    )"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: high_conviction_value_investor
+  description: 'A fund manager who adheres to a strict value discipline, evidenced by attractive valuation
+    metrics, while taking large, concentrated positions in their best ideas.
+
+
+    A fund is a High-Conviction Value Investor if it is a ''High-Conviction Portfolio'' and has a ''Composite
+    Valuation Score'' in the top 25th percentile of its category.
+
+
+    Built on: high_conviction_portfolio, composite_valuation_score.
+
+
+    Compiler note: High-Conviction Portfolio: top holding (positionrank=1) holdingpct > 0.08. Composite
+    Valuation Score (CVS) computed from valuationratios->valuation_metrics PE/PS/PB/PCF ratios as 0.25*sum(1/ratio);
+    rows with any NULL ratio yield NULL CVS and are excluded from both the fund''s own comparison and
+    the category percentile set via NULL propagation. Top 25th percentile within category is encoded as
+    CVS >= 75th percentile (percentile_cont(0.75)) of CVS values among funds sharing the same productclass
+    (category).'
+  sql_expression: "(\n  (SELECT h.holdingpct FROM holdings h WHERE h.instrumentref = funds.tickersym AND\
+    \ h.positionrank = 1) > 0.08\n)\nAND\n(\n  0.25 * (\n    1.0/(funds.valuationratios->'valuation_metrics'->>'PE_Ratio')::double\
+    \ precision +\n    1.0/(funds.valuationratios->'valuation_metrics'->>'PS_Ratio')::double precision\
+    \ +\n    1.0/(funds.valuationratios->'valuation_metrics'->>'PB_Ratio')::double precision +\n    1.0/(funds.valuationratios->'valuation_metrics'->>'PCF_Ratio')::double\
+    \ precision\n  ) >= (\n    SELECT percentile_cont(0.75) WITHIN GROUP (ORDER BY (\n      0.25 * (\n\
+    \        1.0/(f2.valuationratios->'valuation_metrics'->>'PE_Ratio')::double precision +\n        1.0/(f2.valuationratios->'valuation_metrics'->>'PS_Ratio')::double\
+    \ precision +\n        1.0/(f2.valuationratios->'valuation_metrics'->>'PB_Ratio')::double precision\
+    \ +\n        1.0/(f2.valuationratios->'valuation_metrics'->>'PCF_Ratio')::double precision\n     \
+    \ )\n    ))\n    FROM funds f2\n    WHERE f2.productclass = funds.productclass\n  )\n)"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: efficient_core_holding
+  description: 'An ideal fund for the core of a portfolio, characterized by extremely low costs, tight
+    benchmark tracking, and proven efficiency in translating assets into returns.
+
+
+    A fund is an Efficient Core Holding if it qualifies as an ''Ideal Index Fund'' and also exhibits a
+    high ''Return on Cost (ROC)''.
+
+
+    Built on: ideal_index_fund, return_on_cost_roc.
+
+
+    Compiler note: Ideal Index Fund = R_Squared_3Y>90 (Market-Tracking), Turnover_Ratio<30 (Low-Turnover,
+    note: stored as decimal 0-1 but threshold 30 taken as given by prior definition), and Expense_Net
+    - Benchmark_Exp < 0 (negative Relative Expense). "High" ROC (Return_1Y/Expense_Net) is not numerically
+    defined elsewhere, so it is operationalized as above the median ROC computed across all funds with
+    available Return_1Y and Expense_Net data (median ROC ~ 90, computed via scalar subquery joining performance
+    and funds, verified 1:1 join on productref/tickersym).'
+  sql_expression: "(\n  (SELECT (r.risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision FROM\
+    \ risk_metrics r WHERE r.investmentref = funds.tickersym) > 90\n)\nAND ((funds.fundmetrics->>'Turnover_Ratio')::double\
+    \ precision < 30)\nAND (((funds.fundmetrics->>'Expense_Net')::double precision - (funds.fundmetrics->>'Benchmark_Exp')::double\
+    \ precision) < 0)\nAND (\n  (SELECT (p.returnmetrics->'fund_returns'->>'Return_1Y')::double precision\
+    \ / (funds.fundmetrics->>'Expense_Net')::double precision\n   FROM performance p WHERE p.productref\
+    \ = funds.tickersym)\n  >\n  (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY roc) FROM (\n   \
+    \   SELECT (p2.returnmetrics->'fund_returns'->>'Return_1Y')::double precision / (f2.fundmetrics->>'Expense_Net')::double\
+    \ precision AS roc\n      FROM performance p2 JOIN funds f2 ON f2.tickersym = p2.productref\n    \
+    \  WHERE (p2.returnmetrics->'fund_returns'->>'Return_1Y') IS NOT NULL\n        AND (f2.fundmetrics->>'Expense_Net')\
+    \ IS NOT NULL\n  ) t)\n)"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: momentum_driven_growth_fund
+  description: 'A fund that specifically targets high-growth companies that are also exhibiting strong,
+    positive price momentum in the market.
+
+
+    A fund is a Momentum-Driven Growth Fund if its ''Growth-Value Spectrum Score'' indicates a growth
+    tilt and it is also currently signaling a ''Golden Cross Signal''.
+
+
+    Built on: golden_cross_signal, growth_value_spectrum_score.
+
+
+    Compiler note: Growth tilt encoded as Growth-Value Spectrum Score > 0 (ln(PE/PB)>0, i.e. PE>PB, indicating
+    growth characteristics); combined with Golden Cross Signal (MA_50 - MA_200 > 0). Rows with NULL or
+    non-positive PE/PB yield NULL in LN and evaluate to false, consistent with ''indicates a growth tilt''
+    not holding.'
+  sql_expression: LN((valuationratios->'valuation_metrics'->>'PE_Ratio')::double precision / (valuationratios->'valuation_metrics'->>'PB_Ratio')::double
+    precision) > 0 AND ((tradingdata->'moving_averages'->>'MA_50')::numeric - (tradingdata->'moving_averages'->>'MA_200')::numeric)
+    > 0
+  source_model: main.funds
+  domains:
+  - definitions
+- name: defensive_anchor
+  description: 'A fund suitable for mitigating portfolio volatility, characterized by low market sensitivity
+    and a strong track record of preserving capital.
+
+
+    A fund is a Defensive Anchor if its 3-year Beta is less than 0.75 and it has a high ''Capital Preservation
+    Index'' score.
+
+
+    Built on: capital_preservation_index.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry requires a fund to have "a high Capital Preservation Index score" but gives
+    no threshold or percentile cutoff defining "high". Unlike other entries that state explicit numeric
+    thresholds (e.g. ">80", ">0.5"), this one leaves the cutoff undefined, so no SQL condition can be
+    written without inventing an arbitrary threshold the entry does not state.
+- name: true_active_differentiator
+  description: 'A fund that demonstrates genuine active management through significant deviation from
+    its benchmark, skilled stock selection, and a high-conviction approach.
+
+
+    A fund is a True Active Differentiator if it has ''Active Management Footprint'' > 0.5, ''Appraisal
+    Ratio'' > 0.2, and is also a ''High-Conviction Portfolio''.
+
+
+    Built on: high_conviction_portfolio, appraisal_ratio, active_management_footprint.
+
+
+    Compiler note: Combines Active Management Footprint (1-R_Squared_3Y)/Turnover_Ratio from funds &gt;0.5,
+    Appraisal Ratio (Alpha_3Y/(Volatility_3Y*sqrt(1-R_Squared_3Y/100))) &gt;0.2, and High-Conviction Portfolio
+    (top holding positionrank=1 holdingpct &gt;0.08, verified unique per fund in holdings table) joined
+    via tickersym=investmentref.'
+  sql_expression: '((1 - (risk3y->''risk_measures_3y''->>''R_Squared_3Y'')::double precision) / (SELECT
+    (f.fundmetrics->>''Turnover_Ratio'')::double precision FROM funds f WHERE f.tickersym = risk_metrics.investmentref))
+    > 0.5
+
+    AND ((risk3y->''risk_measures_3y''->>''Alpha_3Y'')::double precision / ((risk3y->''risk_measures_3y''->>''Volatility_3Y'')::double
+    precision * sqrt(1 - (risk3y->''risk_measures_3y''->>''R_Squared_3Y'')::double precision / 100)))
+    > 0.2
+
+    AND (SELECT h.holdingpct FROM holdings h WHERE h.instrumentref = risk_metrics.investmentref AND h.positionrank
+    = 1) > 0.08'
+  source_model: main.risk_metrics
+  domains:
+  - definitions
+- name: speculative_turnaround_play
+  description: 'A high-risk, high-reward fund that has been performing poorly and is costly, but is showing
+    technical signs of a potential, albeit uncertain, recovery.
+
+
+    A fund is a Speculative Turnaround Play if it is a ''High-Cost Underperformer'' but has recently triggered
+    a ''Golden Cross Signal''.
+
+
+    Built on: golden_cross_signal, high_cost_underperformer.
+
+
+    Compiler note: Composed from High-Cost Underperformer (relative expense ratio > 0 and Annual Fund
+    Outperformance < 0, using the fund''s most recent reported calendar year in annual_returns, verified
+    unique per fund-year) AND Golden Cross Signal (MA_50 - MA_200 > 0) over funds.'
+  sql_expression: "((fundmetrics->>'Expense_Net')::double precision - (fundmetrics->>'Benchmark_Exp')::double\
+    \ precision > 0)\nAND (\n  (SELECT ar.fundperf - ar.categoryperf\n   FROM annual_returns ar\n   WHERE\
+    \ ar.portfolioref = funds.tickersym\n     AND ar.calendaryear = (SELECT MAX(ar2.calendaryear) FROM\
+    \ annual_returns ar2 WHERE ar2.portfolioref = funds.tickersym)\n  ) < 0\n)\nAND (((tradingdata->'moving_averages'->>'MA_50')::numeric\
+    \ - (tradingdata->'moving_averages'->>'MA_200')::numeric) > 0)"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: year_over_year_performance_trend
+  description: "Calculates the change in a fund's performance relative to its category from one year to\
+    \ the next.\n\n\\Delta_{YoY} = \text{Outperformance}{\text{current year}} - \text{Outperformance}{\t\
+    ext{previous year}}\n\nBuilt on: annual_fund_outperformance.\n\nCompiler note: Outperformance per\
+    \ year is fundperf - categoryperf; YoY trend uses a window LAG over calendaryear partitioned by fund\
+    \ (portfolioref) to get prior year's outperformance, then subtracts it from current year's."
+  sql_expression: (fundperf - categoryperf) - LAG(fundperf - categoryperf) OVER (PARTITION BY portfolioref
+    ORDER BY calendaryear)
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: category_average_duration
+  description: "Calculates the average duration for all funds within the same investment category.\n\n\
+    \bar{D}c = \frac{\\sum \text{Fund Durations}}{\text{Total number of funds}} \text{ for a given category.}\n\
+    \nBuilt on: Duration.\n\nCompiler note: Average duration (allocweights->bond_characteristics->Duration_Yrs)\
+    \ across all funds sharing the same productclass as the current fund row; NULL durations are ignored\
+    \ by AVG."
+  sql_expression: (SELECT AVG((f2.allocweights->'bond_characteristics'->>'Duration_Yrs')::numeric) FROM
+    funds f2 WHERE f2.productclass = funds.productclass)
+  source_model: main.funds
+  domains:
+  - calculations
+- name: duration_advantage
+  description: "Measures how much lower a fund's duration is compared to its category average.\n\nD{\t\
+    ext{adv}} = \text{Category Average Duration} - \text{Fund's Duration}\n\nBuilt on: Duration, category_average_duration.\n\
+    \nCompiler note: Duration Advantage = Category Average Duration (avg of Duration_Yrs over funds sharing\
+    \ productclass) minus the fund's own Duration_Yrs, both extracted from allocweights->bond_characteristics->Duration_Yrs."
+  sql_expression: (SELECT AVG((f2.allocweights->'bond_characteristics'->>'Duration_Yrs')::numeric) FROM
+    funds f2 WHERE f2.productclass = funds.productclass) - (funds.allocweights->'bond_characteristics'->>'Duration_Yrs')::numeric
+  source_model: main.funds
+  domains:
+  - calculations
+- name: average_upside_outperformance
+  description: "Measures a fund's average outperformance during years when its category had positive returns.\n\
+    \n\bar{O}{\text{up}} = \text{Average 'Annual Fund Outperformance' during years with positive category\
+    \ returns.}\n\nBuilt on: annual_fund_outperformance.\n\nCompiler note: Computed per fund (portfolioref)\
+    \ as the average of (fundperf - categoryperf) across rows where categoryperf > 0, using a window function\
+    \ so each fund's rows carry its average upside outperformance; NULL fundperf/categoryperf years are\
+    \ excluded automatically by arithmetic NULL propagation."
+  sql_expression: AVG(fundperf - categoryperf) FILTER (WHERE categoryperf > 0) OVER (PARTITION BY portfolioref)
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: average_downside_outperformance
+  description: "Measures a fund's average outperformance during years when its category had negative returns.\
+    \ A smaller negative number indicates better downside protection.\n\n\bar{O}{\text{down}} = \text{Average\
+    \ 'Annual Fund Outperformance' during years with non-positive category returns.}\n\nBuilt on: annual_fund_outperformance.\n\
+    \nCompiler note: Computed per fund as the average of (fundperf - categoryperf) restricted to years\
+    \ where categoryperf <= 0 ('non-positive category returns'), using a window AVG partitioned by portfolioref\
+    \ so NULLs (years not meeting the condition, or missing data) are excluded from the average per standard\
+    \ SQL AVG/CASE semantics."
+  sql_expression: AVG(CASE WHEN categoryperf <= 0 THEN fundperf - categoryperf END) OVER (PARTITION BY
+    portfolioref)
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: capture_differential
+  description: "Calculates the difference between a fund's average outperformance in up markets versus\
+    \ down markets, indicating its overall adaptability.\n\nC_{\text{diff}} = \text{Average Upside Outperformance}\
+    \ - \text{Average Downside Outperformance}\n\nBuilt on: average_upside_outperformance, average_downside_outperformance.\n\
+    \nCompiler note: Computed as the window-function difference between Average Upside Outperformance\
+    \ and Average Downside Outperformance, both partitioned by portfolioref, matching the component definitions."
+  sql_expression: AVG(fundperf - categoryperf) FILTER (WHERE categoryperf > 0) OVER (PARTITION BY portfolioref)
+    - AVG(CASE WHEN categoryperf <= 0 THEN fundperf - categoryperf END) OVER (PARTITION BY portfolioref)
+  source_model: main.annual_returns
+  domains:
+  - calculations
+- name: average_daily_value_traded_3m
+  description: "Calculates the average monetary value of a fund's shares traded daily over the last 3\
+    \ months.\n\n\text{ADVT}{3M} = \text{Average daily volume (3M)} \times \text{Average share price (e.g.,\
+    \ 200-day MA)}\n\nCompiler note: Vol_3M (3-month average daily volume) from tradingdata.volume_metrics\
+    \ multiplied by MA_200 (200-day moving average price) from tradingdata.moving_averages, as proxy for\
+    \ average share price."
+  sql_expression: (tradingdata->'volume_metrics'->>'Vol_3M')::numeric * (tradingdata->'moving_averages'->>'MA_200')::numeric
+  source_model: main.funds
+  domains:
+  - calculations
+- name: beta_drift
+  description: "Measures the change in a fund's sensitivity to market movements over time.\n\n\\Delta{\b\
+    eta} = \text{Beta}{\text{1st Period}} - \text{Beta}{\text{2nd Period}}"
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The entry refers to "1st Period" and "2nd Period" betas without specifying which actual
+    periods (3Y, 5Y, 10Y) these correspond to. The database only provides Beta_3Y, Beta_5Y, and Beta_10Y
+    as discrete snapshots, not a generic "period 1 vs period 2" pairing, and the documentation gives no
+    rule for choosing which pair to compare. This is an undetermined choice the entry itself does not
+    make, so it cannot be encoded as a single SQL expression without guessing which periods to subtract.
+- name: r_squared_drift
+  description: "Measures the change in a fund's performance correlation with its benchmark over time.\n\
+    \n\\Delta_{R^2} = R^2_{\text{1st Period}} - R^2_{\text{2nd Period}}\n\nCompiler note: Interpreted\
+    \ '1st Period' as the 3-year window and '2nd Period' as the 5-year window (recent vs longer-term,\
+    \ consistent with Style Drift's framing of comparing recent risk characteristics to long-term history).\
+    \ R_Squared_3Y and R_Squared_5Y extracted from risk3y/risk5y JSONB and cast to double precision."
+  sql_expression: (risk3y->'risk_measures_3y'->>'R_Squared_3Y')::double precision - (risk5y->'risk_measures_5y'->>'R_Squared_5Y')::double
+    precision
+  source_model: main.risk_metrics
+  domains:
+  - calculations
+- name: style_drift
+  description: 'A classification of how a fund''s investment style has changed by comparing its recent
+    risk characteristics (Beta, R-Squared) to its long-term history.
+
+
+    A fund is considered to have drifted if its absolute Beta change exceeds 0.15 or its absolute R-Squared
+    change exceeds 10.
+
+
+    Built on: beta_drift, r_squared_drift.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Style Drift depends on Beta Drift, which the documentation leaves undetermined: it references
+    "1st Period" and "2nd Period" betas without specifying which of Beta_3Y, Beta_5Y, Beta_10Y correspond
+    to these periods. Since the underlying Beta Drift component cannot be encoded without guessing the
+    period pairing, Style Drift (which requires an absolute Beta change threshold) cannot be encoded either.'
+- name: composite_score
+  description: "A normalized score that averages a fund's percentile rank across multiple key performance\
+    \ and cost metrics, allowing for peer-group comparison.\n\n\text{Score} = \frac{\text{Percentile Rank}(\t\
+    ext{5Y Alpha}) + \text{Percentile Rank}(\text{3Y Sharpe}) + \text{Percentile Rank}(\text{Inverse Net\
+    \ Expense})}{3}\n\nBuilt on: alpha_generator, Sharpe Ratio, Net Expense Ratio.\n\nCompiler note: Percentile\
+    \ rank for each metric is computed as (count of funds with strictly lower value) / (count of non-null\
+    \ funds - 1), matching PERCENT_RANK() semantics, using funds.tickersym = risk_metrics.investmentref\
+    \ (verified 1:1) to reach Alpha_5Y (risk5y) and Sharpe_Ratio_3Y (risk3y), and funds.fundmetrics->>'Expense_Net'\
+    \ for net expense ratio (inverted so higher=better, consistent with other two metrics where higher\
+    \ is better). The three percentile ranks are averaged."
+  sql_expression: "(\n  COALESCE(\n    (SELECT COUNT(*)::double precision FROM funds f2 JOIN risk_metrics\
+    \ rm2 ON rm2.investmentref=f2.tickersym\n     WHERE (rm2.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double\
+    \ precision < (SELECT (rm.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=funds.tickersym)\n    )\n    / NULLIF((SELECT COUNT(*)-1 FROM funds f3\
+    \ JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk5y->'risk_measures_5y'->>'Alpha_5Y')\
+    \ IS NOT NULL),0)\n  , NULL)\n  +\n  COALESCE(\n    (SELECT COUNT(*)::double precision FROM funds\
+    \ f2 JOIN risk_metrics rm2 ON rm2.investmentref=f2.tickersym\n     WHERE (rm2.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double\
+    \ precision < (SELECT (rm.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=funds.tickersym)\n    )\n    / NULLIF((SELECT COUNT(*)-1 FROM funds f3\
+    \ JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')\
+    \ IS NOT NULL),0)\n  , NULL)\n  +\n  COALESCE(\n    (SELECT COUNT(*)::double precision FROM funds\
+    \ f2\n     WHERE (1.0/(f2.fundmetrics->>'Expense_Net')::double precision) < (1.0/(funds.fundmetrics->>'Expense_Net')::double\
+    \ precision)\n    )\n    / NULLIF((SELECT COUNT(*)-1 FROM funds f3 WHERE (f3.fundmetrics->>'Expense_Net')\
+    \ IS NOT NULL),0)\n  , NULL)\n) / 3"
+  source_model: main.funds
+  domains:
+  - calculations
+- name: category_dominator
+  description: 'Identifies the single best-performing fund within an investment category based on a multi-factor
+    composite score.
+
+
+    The fund with the highest ''Composite Score'' within its investment category, provided the category
+    contains at least 10 funds.
+
+
+    Built on: composite_score.
+
+
+    Compiler note: Encoded Composite Score inline (percentile ranks of 5Y Alpha, 3Y Sharpe, and inverse
+    Net Expense Ratio, averaged over the 3 metrics with NULLs excluded via COALESCE as in its definition).
+    A fund qualifies as Category Dominator if its productclass has >=10 funds and its composite score
+    equals the max composite score among funds sharing its productclass (category). Ties, if any, are
+    not broken further since the definition does not specify a tiebreaker.'
+  sql_expression: "(\n  (SELECT COUNT(*) FROM funds fc WHERE fc.productclass = funds.productclass) >=\
+    \ 10\n)\nAND\n(\n  (\n   COALESCE(\n     (SELECT COUNT(*)::double precision FROM funds f2 JOIN risk_metrics\
+    \ rm2 ON rm2.investmentref=f2.tickersym\n       WHERE (rm2.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double\
+    \ precision < (SELECT (rm.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=funds.tickersym)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds\
+    \ f3 JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk5y->'risk_measures_5y'->>'Alpha_5Y')\
+    \ IS NOT NULL),0)\n   , NULL)\n   +\n   COALESCE(\n     (SELECT COUNT(*)::double precision FROM funds\
+    \ f2 JOIN risk_metrics rm2 ON rm2.investmentref=f2.tickersym\n       WHERE (rm2.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double\
+    \ precision < (SELECT (rm.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=funds.tickersym)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds\
+    \ f3 JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')\
+    \ IS NOT NULL),0)\n   , NULL)\n   +\n   COALESCE(\n     (SELECT COUNT(*)::double precision FROM funds\
+    \ f2\n       WHERE (1.0/(f2.fundmetrics->>'Expense_Net')::double precision) < (1.0/(funds.fundmetrics->>'Expense_Net')::double\
+    \ precision)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds f3 WHERE (f3.fundmetrics->>'Expense_Net')\
+    \ IS NOT NULL),0)\n   , NULL)\n  ) / 3\n)\n=\n(\n  SELECT MAX(\n  (\n   COALESCE(\n     (SELECT COUNT(*)::double\
+    \ precision FROM funds f2 JOIN risk_metrics rm2 ON rm2.investmentref=f2.tickersym\n       WHERE (rm2.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double\
+    \ precision < (SELECT (rm.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=fcat.tickersym)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds f3\
+    \ JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk5y->'risk_measures_5y'->>'Alpha_5Y')\
+    \ IS NOT NULL),0)\n   , NULL)\n   +\n   COALESCE(\n     (SELECT COUNT(*)::double precision FROM funds\
+    \ f2 JOIN risk_metrics rm2 ON rm2.investmentref=f2.tickersym\n       WHERE (rm2.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double\
+    \ precision < (SELECT (rm.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')::double precision FROM risk_metrics\
+    \ rm WHERE rm.investmentref=fcat.tickersym)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds f3\
+    \ JOIN risk_metrics rm3 ON rm3.investmentref=f3.tickersym WHERE (rm3.risk3y->'risk_measures_3y'->>'Sharpe_Ratio_3Y')\
+    \ IS NOT NULL),0)\n   , NULL)\n   +\n   COALESCE(\n     (SELECT COUNT(*)::double precision FROM funds\
+    \ f2\n       WHERE (1.0/(f2.fundmetrics->>'Expense_Net')::double precision) < (1.0/(fcat.fundmetrics->>'Expense_Net')::double\
+    \ precision)\n     )\n     / NULLIF((SELECT COUNT(*)-1 FROM funds f3 WHERE (f3.fundmetrics->>'Expense_Net')\
+    \ IS NOT NULL),0)\n   , NULL)\n  ) / 3\n  )\n  FROM funds fcat\n  WHERE fcat.productclass = funds.productclass\n\
+    )"
+  source_model: main.funds
+  domains:
+  - definitions
+- name: alpha_turnover_slope
+  description: "Calculates the slope of the linear regression line between a fund's alpha (dependent variable,\
+    \ Y) and its turnover ratio (independent variable, X).\n\n\beta_{\\alpha, T} = \text{Slope of regression}(\t\
+    ext{3-Year Alpha}, \text{Turnover Ratio})\n\nBuilt on: alpha_generator, low_turnover_strategy."
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This metric is a regression slope computed across the entire fund population (regressing
+    3-Year Alpha against Turnover Ratio over all funds), not a per-row calculation over a single source_model
+    table. It requires an aggregate statistical computation (regr_slope) across the whole dataset, which
+    cannot be expressed as a row-level SQL expression of the form "SELECT <expr> FROM <source_model>"
+    as required by the contract format (though DuckDB has regr_slope() as an aggregate function, the entry's
+    semantics call for a single dataset-level value rather than a per-fund metric, so it doesn't fit the
+    calculation/predicate pattern this contract captures per row).
+- name: fit_quality
+  description: "Measures how well the turnover ratio explains the variation in alpha in the regression\
+    \ model.\n\nR^2 = \text{R-squared of regression}(\text{3-Year Alpha}, \text{Turnover Ratio})\n\nBuilt\
+    \ on: alpha_generator, low_turnover_strategy.\n\nCompiler note: Computed as the DuckDB aggregate regr_r2(Y,X)\
+    \ over all funds, where Y = 3-Year Alpha (risk_metrics.risk3y->risk_measures_3y->Alpha_3Y, joined\
+    \ 1:1 via investmentref=tickersym) and X = Turnover_Ratio from funds.fundmetrics. This is a dataset-wide\
+    \ regression R^2, evaluated as a single aggregate value over the funds table using a correlated scalar\
+    \ subquery to fetch each fund's alpha."
+  sql_expression: "regr_r2(\n  (SELECT (r.risk3y->'risk_measures_3y'->>'Alpha_3Y')::double FROM risk_metrics\
+    \ r WHERE r.investmentref = funds.tickersym),\n  (funds.fundmetrics->>'Turnover_Ratio')::double\n)"
+  source_model: main.funds
+  domains:
+  - calculations
+- name: valuation_data_availability
+  description: 'A classification that categorizes funds based on whether they disclose key valuation metrics.
+
+
+    A fund is classified as ''Transparent'' if it provides numeric values for both its P/E and P/B ratios;
+    otherwise, it is ''Opaque''.
+
+
+    Compiler note: Checks for non-null numeric values of PE_Ratio and PB_Ratio within valuationratios
+    JSON; classifies as Transparent if both present, else Opaque.'
+  sql_expression: CASE WHEN (valuationratios->'valuation_metrics'->>'PE_Ratio') IS NOT NULL AND (valuationratios->'valuation_metrics'->>'PB_Ratio')
+    IS NOT NULL THEN 'Transparent' ELSE 'Opaque' END
+  source_model: main.funds
+  domains:
+  - definitions
+- name: median_1_year_return
+  description: "Calculates the median (50th percentile) of the 1-year returns for a group of funds.\n\n\
+    M = \text{The 50th percentile of 1-year returns for a specified group of funds.}\n\nCompiler note:\
+    \ Median 1-year return is an aggregate over a group of funds; encoded as PERCENTILE_CONT(0.5) over\
+    \ the Return_1Y field (nested at returnmetrics.fund_returns.Return_1Y, cast to double). The 'specified\
+    \ group' is left to the caller via WHERE/GROUP BY filtering on this base query."
+  sql_expression: PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (returnmetrics->'fund_returns'->>'Return_1Y')::double
+    precision)
+  source_model: main.performance
+  domains:
+  - calculations
+- name: wasted_fee_amount
+  description: "The total dollar amount of fees paid by investors in a Closet Indexer fund that are in\
+    \ excess of the benchmark's expense ratio.\n\nWFA = (\text{Net Expense Ratio} - \text{Benchmark Expense\
+    \ Ratio}) \times \text{Net Worth}\n\nBuilt on: relative_expense_ratio, closet_indexer.\n\nCompiler\
+    \ note: WFA = (Expense_Net - Benchmark_Exp) * Net_Worth, all from funds.fundmetrics JSON. Intended\
+    \ to apply to Closet Indexer funds but formula itself is just this product."
+  sql_expression: ((fundmetrics->>'Expense_Net')::double precision - (fundmetrics->>'Benchmark_Exp')::double
+    precision) * (fundmetrics->>'Net_Worth')::double precision
+  source_model: main.funds
+  domains:
+  - calculations
+- name: family_sector_concentration_profile
+  description: 'An analytical profile that identifies the single economic sector a fund family has the
+    highest average allocation to, across all its funds.
+
+
+    For each fund family, this profile is the economic sector with the highest average weight across all
+    of the family''s funds.
+
+
+    Built on: Sector Weight.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines an analytical profile (the top sector by average allocation per fund
+    family), not a per-row boolean/categorical condition or scalar computation over a single table. It
+    requires a GROUP BY family and sector with aggregation and ranking across funds/sector_allocations,
+    which cannot be expressed as a SQL expression evaluated per-row of one source_model.
+- name: top_tier_family
+  description: 'A classification for a fund family that exhibits desirable risk-return characteristics,
+    specifically low market risk and a proven ability to generate alpha.
+
+
+    A fund family is ''Top-Tier'' if its average 3-year beta is less than 1.0 and it manages 5 or more
+    alpha-generating funds.
+
+
+    Built on: alpha_generator, Beta.
+
+
+    Compiler note: Aggregated over families: joined funds to risk_metrics via tickersym=investmentref,
+    filtered by parentgroup=families.groupname. Average 3-year beta computed from risk3y->risk_measures_3y->Beta_3Y;
+    alpha-generating funds counted using risk5y->risk_measures_5y->Alpha_5Y > 0 per the alpha_generator
+    definition.'
+  sql_expression: "(SELECT AVG((r.risk3y->'risk_measures_3y'->>'Beta_3Y')::double precision)\n   FROM\
+    \ funds f JOIN risk_metrics r ON r.investmentref = f.tickersym\n   WHERE f.parentgroup = families.groupname)\
+    \ < 1.0\nAND\n(SELECT COUNT(*)\n   FROM funds f JOIN risk_metrics r ON r.investmentref = f.tickersym\n\
+    \   WHERE f.parentgroup = families.groupname\n     AND (r.risk5y->'risk_measures_5y'->>'Alpha_5Y')::double\
+    \ precision > 0) >= 5"
+  source_model: main.families
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: annual_returns
+  columns:
+  - name: yearlyid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each annual return record for funds by year.
+  - name: portfolioref
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, indicating which fund the annual return data
+      belongs to.
+  - name: calendaryear
+    type: BIGINT
+    description: Calendar year (YYYY) for which the return performance is recorded.
+  - name: fundperf
+    type: FLOAT
+    description: Fund's return performance for the specific calendar year as decimal (-1 to positive).
+      Contains  NULL when fund performance data is not available for that year (e.g., fund not yet launched).
+  - name: categoryperf
+    type: FLOAT
+    description: Category or benchmark average return performance for the same calendar year for comparison.
+      Contains  NULL when category performance data is not available for comparison.
+- schema: main
+  table: bond_allocations
+  columns:
+  - name: bondallocid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each bond credit rating allocation record for
+      funds.
+  - name: fundlink
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, indicating which fund has this bond allocation.
+  - name: ratinglink
+    type: BIGINT
+    description: Foreign key referencing bond_ratings.RateKey, indicating which credit rating category
+      the allocation applies to.
+  - name: allocationpct
+    type: FLOAT
+    description: Percentage (0-1) of the fund's bond holdings in this credit rating category.
+- schema: main
+  table: bond_ratings
+  columns:
+  - name: ratekey
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each credit rating level for bond classifications
+      in the database.
+  - name: creditmark
+    type: VARCHAR
+    description: 'Unique credit rating designation (e.g., ''AAA'', ''AA'', ''A'', ''BBB'', ''BB'', ''B'',
+      ''Below B'', ''US Government''). Must be unique across all records.
+
+
+      Credit Quality: Illustrates the credit quality of bond holdings.
+
+
+      Indicates the creditworthiness of the bonds a fund holds. ''Government'' is the highest quality.
+      ''AAA'' and ''AA'' are considered high-grade investment quality. Ratings below ''BBB'' are considered
+      speculative or high-yield.
+
+
+      Compiler note: Describes the categorical values stored in bond_ratings.creditmark (e.g., us_government,
+      aaa, aa, bbb, etc.), which represent credit quality tiers of bond holdings.'
+- schema: main
+  table: categories
+  columns:
+  - name: catref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each fund category or investment classification
+      in the database.
+  - name: classtype
+    type: VARCHAR
+    description: Unique fund category classification (e.g., 'Large Cap Growth', 'International Equity',
+      'Bond Index', 'Sector Equity', 'Commodity'). Must be unique across all records.
+- schema: main
+  table: exchanges
+  columns:
+  - name: xchgnum
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each stock exchange or trading venue in the
+      database.
+  - name: marketcode
+    type: VARCHAR
+    description: Unique abbreviated code for the exchange (e.g., 'NYSE', 'NASDAQ', 'LSE'). Must be unique
+      across all records.
+  - name: tradingvenue
+    type: VARCHAR
+    description: Full official name of the stock exchange or trading venue where funds are listed and
+      traded.
+  - name: exchangetime
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: families
+  columns:
+  - name: famcode
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each fund family or asset management company
+      in the database.
+  - name: groupname
+    type: VARCHAR
+    description: Unique name of the fund family or asset management company (e.g., 'Vanguard', 'BlackRock',
+      'Fidelity'). Must be unique across all records.
+- schema: main
+  table: family_categories
+  columns:
+  - name: linkid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each relationship between fund families and
+      categories they offer.
+  - name: familylink
+    type: VARCHAR
+    description: Foreign key referencing families.GroupName, indicating which fund family offers products
+      in this category.
+  - name: categorylink
+    type: VARCHAR
+    description: Foreign key referencing categories.ClassType, indicating which category the fund family
+      operates in.
+- schema: main
+  table: family_exchanges
+  columns:
+  - name: connectref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each relationship between fund families and
+      exchanges they list on.
+  - name: familyref
+    type: VARCHAR
+    description: Foreign key referencing families.GroupName, indicating which fund family has listings
+      on the exchange.
+  - name: exchangeref
+    type: VARCHAR
+    description: Foreign key referencing exchanges.MarketCode, indicating which exchange the fund family
+      lists products on.
+- schema: main
+  table: funds
+  columns:
+  - name: productnum
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each fund product in the database.
+  - name: tickersym
+    type: VARCHAR
+    description: Unique ticker symbol for the fund as traded on exchanges (e.g., 'SPY', 'VTI', 'QQQ').
+      Must be unique across all records.
+  - name: quotemode
+    type: VARCHAR
+    description: ''
+  - name: geozone
+    type: VARCHAR
+    description: ''
+  - name: shortlabel
+    type: VARCHAR
+    description: Abbreviated display name of the fund for user interfaces and brief references. Contains  NULL
+      when short label is not available or fund uses only full description.
+  - name: fulldescription
+    type: VARCHAR
+    description: Complete official name and description of the fund including investment objective and
+      strategy details. Contains  NULL when detailed description is not available or pending.
+  - name: currencybase
+    type: VARCHAR
+    description: ''
+  - name: strategytype
+    type: VARCHAR
+    description: ''
+  - name: capsize
+    type: VARCHAR
+    description: ''
+  - name: parentgroup
+    type: VARCHAR
+    description: Foreign key referencing families.GroupName, indicating which fund family or asset management
+      company manages this fund.
+  - name: listingvenue
+    type: VARCHAR
+    description: Foreign key referencing exchanges.MarketCode, indicating the primary exchange where the
+      fund is listed and traded.
+  - name: productclass
+    type: VARCHAR
+    description: Foreign key referencing categories.ClassType, indicating the fund's investment category
+      classification.
+  - name: networth
+    type: BIGINT
+    description: ''
+  - name: yieldrate
+    type: FLOAT
+    description: ''
+  - name: launchdate
+    type: DATE
+    description: Date when the fund was first established and began operations (YYYY-MM-DD). Contains  NULL
+      when launch date is not available or fund is in pre-launch phase.
+  - name: turnoverratio
+    type: FLOAT
+    description: ''
+  - name: strategynotes
+    type: VARCHAR
+    description: Detailed text description of the fund's investment strategy, objectives, and methodology.
+      Contains  NULL when strategy notes are not available or not provided by fund management.
+  - name: expensenet
+    type: FLOAT
+    description: ''
+  - name: benchmarkexp
+    type: FLOAT
+    description: ''
+  - name: vol3m
+    type: BIGINT
+    description: ''
+  - name: volrecent
+    type: FLOAT
+    description: ''
+  - name: ma50
+    type: FLOAT
+    description: ''
+  - name: ma200
+    type: FLOAT
+    description: ''
+  - name: equityweight
+    type: FLOAT
+    description: ''
+  - name: bondweight
+    type: FLOAT
+    description: ''
+  - name: pb_ratio
+    type: FLOAT
+    description: ''
+  - name: pcf_ratio
+    type: FLOAT
+    description: ''
+  - name: pe_ratio
+    type: FLOAT
+    description: ''
+  - name: ps_ratio
+    type: FLOAT
+    description: ''
+  - name: avgmaturity
+    type: FLOAT
+    description: ''
+  - name: duration
+    type: FLOAT
+    description: ''
+  - name: fundclass
+    type: JSON
+    description: 'JSONB column. Consolidates fund classification and strategy information including geographic
+      focus, investment strategy, market cap focus, and basic fund characteristics. Fields: {"GeoZone_Class":
+      "Geographic region or market focus of the fund (e.g., ''US'', ''International'', ''Emerging Markets'',
+      ''Global''). Contains  NULL when geographic focus is not specified or fund has global diversification
+      without specific regional focus.", "Strategy_Type": "Investment strategy classification (e.g., ''Index'',
+      ''Active'', ''Passive'', ''Smart Beta'') describing the fund''s management approach. Contains  NULL
+      when strategy type is not classified or is proprietary/unique.", "Cap_Size": "Market capitalization
+      focus (e.g., ''Large Cap'', ''Mid Cap'', ''Small Cap'', ''Multi Cap'') indicating the size of companies
+      the fund invests in. Contains  NULL when fund does not focus on specific market cap sizes or invests
+      in non-equity assets.", "Quote_Mode": "Trading quote type or mechanism (e.g., ''NAV'', ''Market'',
+      ''Real-time'') indicating how the fund is priced and quoted. Contains  NULL when quote mode is not
+      specified or uses non-standard pricing mechanisms.", "Currency_Base": "Base currency in which the
+      fund is denominated and reports net asset value (e.g., ''USD'', ''EUR'', ''GBP''). Contains  NULL
+      when currency information is not available."}'
+  - name: fundmetrics
+    type: JSON
+    description: 'JSONB column. Groups fundamental financial metrics and operational data including assets
+      under management, yield rates, expense ratios, and turnover statistics. Fields: {"Net_Worth": "Total
+      net assets under management (AUM) for the fund in the base currency, representing the fund''s total
+      market value. Contains  NULL when AUM data is not available or not reported.", "Yield_Rate": "Current
+      dividend yield percentage (0-1) that the fund distributes to shareholders annually. Contains  NULL
+      when fund does not pay dividends or yield data is not available.", "Turnover_Ratio": "Annual portfolio
+      turnover ratio (0-1) indicating how frequently the fund''s holdings are bought and sold within a
+      year. Contains  NULL when turnover data is not available or not applicable (e.g., for newly launched
+      funds).", "Expense_Net": "Net expense ratio (0-1) representing the annual fee charged to investors
+      as a percentage of assets under management. Contains  NULL when expense ratio is not yet determined
+      or not available.", "Benchmark_Exp": "Benchmark or category average expense ratio for comparison
+      with similar funds in the same category. Contains  NULL when benchmark data is not available for
+      comparison."}
+
+
+      Yield Rate: Illustrates the fund''s annual dividend yield.
+
+
+      Represents the annual dividend per share as a percentage of the share''s price. A value of 0.02
+      signifies a 2% yield. This is a crucial metric for income-focused investors.
+
+
+      Compiler note: Describes the Yield_Rate field within funds.fundmetrics JSONB column (e.g. 0.0031
+      = 0.31% yield), consistent with ''A value of 0.02 signifies a 2% yield.''
+
+
+      Turnover Ratio: Illustrates the fund''s portfolio turnover.
+
+
+      Measures how frequently assets within a fund are bought and sold. A ratio of 1.0 (100%) means the
+      fund replaces its entire portfolio once per year. A low value (<0.3) suggests a buy-and-hold strategy,
+      while a high value (>1.0) indicates active trading.
+
+
+      Compiler note: Describes the Turnover_Ratio field within funds.fundmetrics JSONB column (Turnover_Ratio
+      key documented as annual portfolio turnover ratio).
+
+
+      Net Expense Ratio: Illustrates the fund''s net annual cost (Expense Ratio).
+
+
+      The annual fee charged to investors as a percentage of assets. A value of 0.005 corresponds to a
+      0.5% annual fee. Lower is generally better, as costs directly reduce returns.
+
+
+      Compiler note: Maps to the Expense_Net field within funds.fundmetrics JSONB (e.g., 0.005 = 0.5%
+      annual fee).'
+  - name: tradingdata
+    type: JSON
+    description: 'JSONB column. Aggregates trading and market data including volume metrics and moving
+      averages for technical analysis and liquidity assessment. Fields: {"volume_metrics": {"Vol_3M":
+      "Average daily trading volume over the past 3 months, indicating liquidity and investor interest.
+      Contains  NULL when volume data is not available or fund has insufficient trading history.", "Vol_Recent":
+      "Recent average daily trading volume over a shorter time period (typically 10 days). Contains  NULL
+      when recent volume data is not available."}, "moving_averages": {"MA_50": "50-day moving average
+      price of the fund, used for technical analysis and trend identification. Contains  NULL when insufficient
+      price history exists for calculation.", "MA_200": "200-day moving average price of the fund, used
+      for long-term trend analysis. Contains  NULL when fund has less than 200 days of trading history."}}'
+  - name: allocweights
+    type: JSON
+    description: 'JSONB column. Contains asset allocation percentages and portfolio composition data including
+      equity, bond weights and bond characteristics for portfolio analysis. Fields: {"asset_allocation":
+      {"Equity_Weight": "Percentage (0-1) of the fund''s assets allocated to equity securities (stocks).
+      Contains  NULL when equity allocation data is not available or not applicable for fund type.", "Bond_Weight":
+      "Percentage (0-1) of the fund''s assets allocated to fixed-income securities (bonds). Contains  NULL
+      when bond allocation data is not available or fund does not invest in bonds."}, "bond_characteristics":
+      {"Avg_Maturity": "Average maturity in years of the fund''s bond holdings, applicable for fixed-income
+      funds. Contains  NULL when fund does not hold bonds or maturity data is not available.", "Duration_Yrs":
+      "Average duration in years of the fund''s bond holdings, measuring interest rate sensitivity. Contains  NULL
+      when fund does not hold bonds or duration data is not available."}}
+
+
+      Duration: Illustrates a bond fund''s interest rate sensitivity (Duration).
+
+
+      Measures how much a bond fund''s price is likely to change for every 1% change in interest rates.
+      A duration of 7 years means the fund''s price will likely fall by about 7% if interest rates rise
+      by 1%.
+
+
+      Compiler note: Duration corresponds to the Duration_Yrs field within the bond_characteristics object
+      of funds.allocweights JSONB column (path: allocweights->''bond_characteristics''->>''Duration_Yrs'').
+
+
+      Equity Weight: Illustrates the fund''s allocation to stocks.
+
+
+      The percentage of the fund''s assets invested in equities (stocks). A value of 0.9 indicates that
+      90% of the fund is invested in stocks, suggesting a growth-oriented strategy.
+
+
+      Compiler note: Equity Weight corresponds to the Equity_Weight field within the asset_allocation
+      object of the allocweights JSONB column (path: allocweights->''asset_allocation''->>''Equity_Weight''),
+      representing fraction (0-1) of assets in equities.'
+  - name: valuationratios
+    type: JSON
+    description: 'JSONB column. Consolidates fundamental valuation ratios for equity holdings including
+      price-to-book, price-to-earnings, price-to-cash-flow, and price-to-sales ratios. Fields: {"valuation_metrics":
+      {"PB_Ratio": "Weighted average price-to-book ratio of the fund''s equity holdings, indicating valuation
+      characteristics. Contains  NULL when P/B ratio is not available or not applicable for fund''s holdings.",
+      "PCF_Ratio": "Weighted average price-to-cash-flow ratio of the fund''s equity holdings. Contains  NULL
+      when P/CF ratio is not available or not applicable.", "PE_Ratio": "Weighted average price-to-earnings
+      ratio of the fund''s equity holdings. Contains  NULL when P/E ratio is not available or holdings
+      have negative earnings.", "PS_Ratio": "Weighted average price-to-sales ratio of the fund''s equity
+      holdings. Contains  NULL when P/S ratio is not available or not applicable."}}'
+- schema: main
+  table: holdings
+  columns:
+  - name: holdref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each individual security holding record within
+      funds.
+  - name: instrumentref
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, indicating which fund holds this security.
+  - name: securitykey
+    type: BIGINT
+    description: ''
+  - name: holdingpct
+    type: FLOAT
+    description: Percentage (0-1) of the fund's total assets represented by this individual security holding.
+  - name: positionrank
+    type: BIGINT
+    description: Ranking of this holding within the fund's portfolio (1 = largest holding, 2 = second
+      largest, etc.). Contains  NULL when position ranking is not available or not tracked.
+- schema: main
+  table: performance
+  columns:
+  - name: perfid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each fund performance record.
+  - name: productref
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, ensuring 1:1 relationship for performance data
+      per fund.
+  - name: reportdate
+    type: DATE
+    description: Date when the performance data was calculated or reported (YYYY-MM-DD). Contains  NULL
+      when report date is not available.
+  - name: high52w
+    type: FLOAT
+    description: ''
+  - name: highdelta
+    type: FLOAT
+    description: ''
+  - name: highdeltapct
+    type: FLOAT
+    description: ''
+  - name: low52w
+    type: FLOAT
+    description: ''
+  - name: lowdelta
+    type: FLOAT
+    description: ''
+  - name: lowdeltapct
+    type: FLOAT
+    description: ''
+  - name: rangemove
+    type: FLOAT
+    description: ''
+  - name: rangemovepct
+    type: FLOAT
+    description: ''
+  - name: rytd
+    type: FLOAT
+    description: ''
+  - name: benchrytd
+    type: FLOAT
+    description: ''
+  - name: r1m
+    type: FLOAT
+    description: ''
+  - name: benchr1m
+    type: FLOAT
+    description: ''
+  - name: r3m
+    type: FLOAT
+    description: ''
+  - name: benchr3m
+    type: FLOAT
+    description: ''
+  - name: r1y
+    type: FLOAT
+    description: ''
+  - name: benchr1y
+    type: FLOAT
+    description: ''
+  - name: r3y
+    type: FLOAT
+    description: ''
+  - name: benchr3y
+    type: FLOAT
+    description: ''
+  - name: r5y
+    type: FLOAT
+    description: ''
+  - name: benchr5y
+    type: FLOAT
+    description: ''
+  - name: r10y
+    type: FLOAT
+    description: ''
+  - name: benchr10y
+    type: FLOAT
+    description: ''
+  - name: positiveyears
+    type: FLOAT
+    description: ''
+  - name: negativeyears
+    type: FLOAT
+    description: ''
+  - name: topholdings
+    type: VARCHAR
+    description: ''
+  - name: topweight
+    type: FLOAT
+    description: ''
+  - name: pricerange52w
+    type: JSON
+    description: 'JSONB column. Groups 52-week price range data including highs, lows, deltas, and percentage
+      changes for price movement analysis and volatility assessment. Fields: {"high_metrics": {"High_52W":
+      "Highest price reached by the fund during the past 52 weeks. Contains  NULL when fund has less than
+      52 weeks of trading history.", "High_Delta": "Absolute price difference between current price and
+      52-week high. Contains  NULL when 52-week high is not available.", "High_Delta_Pct": "Percentage
+      difference between current price and 52-week high, expressed as decimal (-1 to 0). Contains  NULL
+      when 52-week high is not available."}, "low_metrics": {"Low_52W": "Lowest price reached by the fund
+      during the past 52 weeks. Contains  NULL when fund has less than 52 weeks of trading history.",
+      "Low_Delta": "Absolute price difference between current price and 52-week low. Contains  NULL when
+      52-week low is not available.", "Low_Delta_Pct": "Percentage difference between current price and
+      52-week low, expressed as decimal (0 to positive). Contains  NULL when 52-week low is not available."},
+      "range_metrics": {"Range_Move": "Absolute price movement range between 52-week high and low. Contains  NULL
+      when 52-week range data is not available.", "Range_Move_Pct": "Percentage movement range between
+      52-week high and low positions. Contains  NULL when 52-week range data is not available."}}'
+  - name: returnmetrics
+    type: JSON
+    description: 'JSONB column. Aggregates fund performance returns across different time periods including
+      fund and benchmark returns for comprehensive performance comparison. Fields: {"fund_returns": {"Return_YTD":
+      "Fund''s year-to-date return performance as decimal (-1 to positive), calculated from January 1st
+      to report date. Contains  NULL when YTD data is not available.", "Return_1M": "Fund''s 1-month return
+      performance as decimal, measuring short-term performance. Contains  NULL when fund has less than
+      1 month of history.", "Return_3M": "Fund''s 3-month return performance as decimal, measuring quarterly
+      performance. Contains  NULL when fund has less than 3 months of history.", "Return_1Y": "Fund''s
+      1-year return performance as decimal, measuring annual performance. Contains  NULL when fund has
+      less than 1 year of history.", "Return_3Y": "Fund''s annualized 3-year return performance as decimal,
+      measuring medium-term performance. Contains  NULL when fund has less than 3 years of history.",
+      "Return_5Y": "Fund''s annualized 5-year return performance as decimal, measuring long-term performance.
+      Contains  NULL when fund has less than 5 years of history.", "Return_10Y": "Fund''s annualized 10-year
+      return performance as decimal, measuring very long-term performance. Contains  NULL when fund has
+      less than 10 years of history."}, "benchmark_returns": {"Bench_Return_YTD": "Benchmark or category
+      average year-to-date return for comparison with fund performance. Contains  NULL when benchmark
+      data is not available.", "Bench_Return_1M": "Benchmark or category average 1-month return for performance
+      comparison. Contains  NULL when benchmark data is not available.", "Bench_Return_3M": "Benchmark
+      or category average 3-month return for performance comparison. Contains  NULL when benchmark data
+      is not available.", "Bench_Return_1Y": "Benchmark or category average 1-year return for performance
+      comparison. Contains  NULL when benchmark data is not available.", "Bench_Return_3Y": "Benchmark
+      or category average annualized 3-year return for performance comparison. Contains  NULL when benchmark
+      data is not available.", "Bench_Return_5Y": "Benchmark or category average annualized 5-year return
+      for performance comparison. Contains  NULL when benchmark data is not available.", "Bench_Return_10Y":
+      "Benchmark or category average annualized 10-year return for performance comparison. Contains  NULL
+      when benchmark data is not available."}}'
+  - name: histstats
+    type: JSON
+    description: 'JSONB column. Consolidates historical performance statistics including positive/negative
+      year counts and top holdings information for fund analysis. Fields: {"Positive_Years": "Number of
+      calendar years with positive returns in the fund''s history, indicating consistency. Contains  NULL
+      when fund has insufficient history or annual return data is not available.", "Negative_Years": "Number
+      of calendar years with negative returns in the fund''s history, indicating volatility periods. Contains  NULL
+      when fund has insufficient history or annual return data is not available.", "Top_Holdings": "Comma-separated
+      list or description of the fund''s largest security holdings for transparency. Contains  NULL when
+      holdings data is not available or not disclosed.", "Top_Weight": "Percentage (0-1) of total assets
+      represented by the single largest holding in the fund. Contains  NULL when holdings data is not
+      available or not disclosed."}'
+- schema: main
+  table: risk_metrics
+  description: 'Beta: Illustrates the fund''s market sensitivity (Beta).
+
+
+    Measures a fund''s volatility in relation to the overall market. Beta > 1 indicates the fund is more
+    volatile than the market. Beta < 1 indicates it is less volatile. Beta = 1 implies its movement matches
+    the market.
+
+
+    Compiler note: Beta appears as Beta_3Y, Beta_5Y, Beta_10Y within the risk3y, risk5y, risk10y jsonb
+    columns respectively, not a single column, so attributed to the table.
+
+
+    R-Squared: Illustrates the fund''s correlation to its benchmark (R-squared).
+
+
+    Represents the percentage of a fund''s movements that can be explained by movements in its benchmark
+    index. A value of 95 means that 95% of the fund''s performance is attributable to the benchmark''s
+    performance.
+
+
+    Compiler note: R-Squared values appear as R_Squared_3Y/5Y/10Y nested fields inside risk3y/risk5y/risk10y
+    JSONB columns, stored as percentage numbers (e.g. 75.96 meaning 75.96%), consistent with the entry''s
+    description. Since the metric spans multiple columns (risk3y, risk5y, risk10y) within this table,
+    it is attributed to the table rather than a single column.
+
+
+    Sharpe Ratio: Illustrates the fund''s risk-adjusted return (Sharpe Ratio).
+
+
+    Measures the fund''s excess return per unit of total risk (volatility). A higher Sharpe Ratio is better.
+    A ratio > 1 is generally considered good, > 2 is very good, and > 3 is excellent.
+
+
+    Compiler note: Sharpe Ratio values are stored as Sharpe_Ratio_3Y/5Y/10Y nested inside the risk3y,
+    risk5y, and risk10y JSONB columns of risk_metrics (confirmed e.g. risk3y->''risk_measures_3y''->>''Sharpe_Ratio_3Y'').
+    No single column holds it since it''s split across three time-horizon columns, so mapped to the table
+    level.'
+  columns:
+  - name: riskid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each risk metrics record for funds.
+  - name: investmentref
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, ensuring 1:1 relationship for risk analysis
+      per fund.
+  - name: alpha3y
+    type: FLOAT
+    description: ''
+  - name: beta3y
+    type: FLOAT
+    description: ''
+  - name: avgreturn3y
+    type: FLOAT
+    description: ''
+  - name: rsquared3y
+    type: FLOAT
+    description: ''
+  - name: volatility3y
+    type: FLOAT
+    description: ''
+  - name: sharperatio3y
+    type: FLOAT
+    description: ''
+  - name: treynorratio3y
+    type: FLOAT
+    description: ''
+  - name: alpha5y
+    type: FLOAT
+    description: ''
+  - name: beta5y
+    type: FLOAT
+    description: ''
+  - name: avgreturn5y
+    type: FLOAT
+    description: ''
+  - name: rsquared5y
+    type: FLOAT
+    description: ''
+  - name: volatility5y
+    type: FLOAT
+    description: ''
+  - name: sharperatio5y
+    type: FLOAT
+    description: ''
+  - name: treynorratio5y
+    type: FLOAT
+    description: ''
+  - name: alpha10y
+    type: FLOAT
+    description: ''
+  - name: beta10y
+    type: FLOAT
+    description: ''
+  - name: avgreturn10y
+    type: FLOAT
+    description: ''
+  - name: rsquared10y
+    type: FLOAT
+    description: ''
+  - name: volatility10y
+    type: FLOAT
+    description: ''
+  - name: sharperatio10y
+    type: FLOAT
+    description: ''
+  - name: treynorratio10y
+    type: FLOAT
+    description: ''
+  - name: risk3y
+    type: JSON
+    description: 'JSONB column. Groups 3-year risk and performance metrics including alpha, beta, returns,
+      volatility, and risk-adjusted ratios for short-term risk analysis. Fields: {"risk_measures_3y":
+      {"Alpha_3Y": "3-year alpha coefficient measuring the fund''s excess return compared to its benchmark,
+      indicating manager skill. Contains  NULL when fund has less than 3 years of history or benchmark
+      data is not available.", "Beta_3Y": "3-year beta coefficient measuring the fund''s sensitivity to
+      market movements (1.0 = same as market). Contains  NULL when fund has less than 3 years of history
+      or market correlation cannot be calculated.", "Avg_Return_3Y": "Average annualized return over 3
+      years as decimal, used for risk-adjusted performance calculations. Contains  NULL when fund has
+      less than 3 years of history.", "R_Squared_3Y": "3-year R-squared statistic (0-1) measuring how
+      closely the fund''s performance correlates with its benchmark. Contains  NULL when fund has less
+      than 3 years of history or benchmark data is not available.", "Volatility_3Y": "3-year standard
+      deviation of returns measuring the fund''s price volatility and risk level. Contains  NULL when
+      fund has less than 3 years of history.", "Sharpe_Ratio_3Y": "3-year Sharpe ratio measuring risk-adjusted
+      return per unit of volatility (higher is better). Contains  NULL when fund has less than 3 years
+      of history or risk-free rate data is not available.", "Treynor_Ratio_3Y": "3-year Treynor ratio
+      measuring risk-adjusted return per unit of systematic risk (beta). Contains  NULL when fund has
+      less than 3 years of history or beta cannot be calculated."}}'
+  - name: risk5y
+    type: JSON
+    description: 'JSONB column. Groups 5-year risk and performance metrics including alpha, beta, returns,
+      volatility, and risk-adjusted ratios for medium-term risk analysis. Fields: {"risk_measures_5y":
+      {"Alpha_5Y": "5-year alpha coefficient measuring the fund''s excess return compared to its benchmark
+      over medium term. Contains  NULL when fund has less than 5 years of history or benchmark data is
+      not available.", "Beta_5Y": "5-year beta coefficient measuring the fund''s market sensitivity over
+      medium term. Contains  NULL when fund has less than 5 years of history or market correlation cannot
+      be calculated.", "Avg_Return_5Y": "Average annualized return over 5 years as decimal for medium-term
+      risk analysis. Contains  NULL when fund has less than 5 years of history.", "R_Squared_5Y": "5-year
+      R-squared statistic measuring medium-term correlation with benchmark. Contains  NULL when fund has
+      less than 5 years of history or benchmark data is not available.", "Volatility_5Y": "5-year standard
+      deviation measuring medium-term volatility and risk characteristics. Contains  NULL when fund has
+      less than 5 years of history.", "Sharpe_Ratio_5Y": "5-year Sharpe ratio for medium-term risk-adjusted
+      performance evaluation. Contains  NULL when fund has less than 5 years of history or risk-free rate
+      data is not available.", "Treynor_Ratio_5Y": "5-year Treynor ratio for medium-term systematic risk-adjusted
+      performance. Contains  NULL when fund has less than 5 years of history or beta cannot be calculated."}}'
+  - name: risk10y
+    type: JSON
+    description: 'JSONB column. Groups 10-year risk and performance metrics including alpha, beta, returns,
+      volatility, and risk-adjusted ratios for long-term risk analysis. Fields: {"risk_measures_10y":
+      {"Alpha_10Y": "10-year alpha coefficient measuring long-term excess return and manager performance.
+      Contains  NULL when fund has less than 10 years of history or benchmark data is not available.",
+      "Beta_10Y": "10-year beta coefficient measuring long-term market sensitivity and systematic risk.
+      Contains  NULL when fund has less than 10 years of history or market correlation cannot be calculated.",
+      "Avg_Return_10Y": "Average annualized return over 10 years as decimal for long-term risk analysis.
+      Contains  NULL when fund has less than 10 years of history.", "R_Squared_10Y": "10-year R-squared
+      statistic measuring long-term correlation with benchmark performance. Contains  NULL when fund has
+      less than 10 years of history or benchmark data is not available.", "Volatility_10Y": "10-year standard
+      deviation measuring long-term volatility and risk profile. Contains  NULL when fund has less than
+      10 years of history.", "Sharpe_Ratio_10Y": "10-year Sharpe ratio for comprehensive long-term risk-adjusted
+      performance evaluation. Contains  NULL when fund has less than 10 years of history or risk-free
+      rate data is not available.", "Treynor_Ratio_10Y": "10-year Treynor ratio for long-term systematic
+      risk-adjusted return measurement. Contains  NULL when fund has less than 10 years of history or
+      beta cannot be calculated."}}'
+- schema: main
+  table: sector_allocations
+  columns:
+  - name: allockey
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each sector allocation record for funds.
+  - name: productlink
+    type: VARCHAR
+    description: Foreign key referencing funds.TickerSym, indicating which fund has this sector allocation.
+  - name: sectorlink
+    type: BIGINT
+    description: Foreign key referencing sectors.SecID, indicating which economic sector the allocation
+      applies to.
+  - name: weightpct
+    type: FLOAT
+    description: 'Percentage (0-1) of the fund''s assets allocated to this specific sector, must sum to
+      1.0 across all sectors for each fund.
+
+
+      Sector Weight: Illustrates the fund''s concentration in a specific economic sector.
+
+
+      The percentage of a fund''s assets invested in a particular sector, like ''technology'' or ''healthcare''.
+      A high value, such as 0.4 (40%), indicates a significant bet on that sector''s performance.
+
+
+      Compiler note: Matches sector_allocations.weightpct, a 0-1 fraction representing a fund''s allocation
+      percentage to a given sector (joined via sectorlink to sectors.industrytag).'
+- schema: main
+  table: sectors
+  columns:
+  - name: secid
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each economic sector or industry classification
+      in the database.
+  - name: industrytag
+    type: VARCHAR
+    description: Unique sector or industry name (e.g., 'Technology', 'Healthcare', 'Financial Services',
+      'Energy', 'Consumer Defensive'). Must be unique across all records.
+- schema: main
+  table: securities
+  columns:
+  - name: securityref
+    type: BIGINT
+    description: A SERIAL primary key uniquely identifying each individual security or holding instrument
+      in the database.
+  - name: securitylabel
+    type: VARCHAR
+    description: Full company name or description of the security (e.g., 'Apple Inc.', 'Microsoft Corporation').

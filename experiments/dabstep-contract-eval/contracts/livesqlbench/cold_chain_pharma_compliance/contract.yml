@@ -1,0 +1,175 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: cold_chain_pharma_compliance, compiler: claudesonnet5
+# inputs: cold_chain_pharma_compliance_kb.jsonl, cold_chain_pharma_compliance_column_meaning_base.json, cold_chain_pharma_compliance_schema.txt, cold_chain_pharma_compliance.duckdb
+version: '1.0'
+name: livesqlbench-cold_chain_pharma_compliance
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - carriers
+    - environmentalmonitoring
+    - incidentandriskmanagement
+    - insuranceclaims
+    - monitoringdevices
+    - productbatches
+    - products
+    - qualitycompliance
+    - reviewsandimprovements
+    - shipments
+    - shipsensorlink
+    - vehicles
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Temperature Sensitivity Tiers: Classifies pharmaceutical products based on their sensitivity to
+      temperature variations.
+
+
+      Products are classified into three sensitivity tiers: ''Low'' (can tolerate up to 24 hours of minor
+      temperature deviations), ''Medium'' (can tolerate up to 8 hours of minor temperature deviations),
+      ''High'' (cannot tolerate temperature deviations beyond 2 hours).
+
+
+      Compiler note: No column stores a temperature-sensitivity tier based on tolerance hours. Products.ProdCat
+      gives category (Vaccines/Biologics/etc.) and ProductBatches has store_cond/tempmin/tempmax, but
+      none encode the Low/Medium/High tolerance-by-hours classification described here. Cannot encode.
+
+
+      Shock Event Significance Levels: Classifies impact events based on their potential to damage pharmaceutical
+      products.
+
+
+      Shock events are classified as: ''Minor'' (unlikely to cause damage), ''Moderate'' (potential to
+      damage if repeated), ''Severe'' (likely to cause damage to product or packaging), with null values
+      indicating no shock monitoring was implemented.
+
+
+      Compiler note: Checked environmentalmonitoring.env_metrics->light_and_shock->shock_monitor: values
+      are only ''Active''/''Passive''/null, not ''Minor''/''Moderate''/''Severe''. No column encodes shock
+      event severity classification; cannot map this entry to any table/column.
+
+
+      Humidity Sensitivity Categories: Classifies pharmaceutical products based on their sensitivity to
+      humidity variations.
+
+
+      Humidity sensitivity categories are: ''Not Sensitive'' (can tolerate wide humidity variations),
+      ''Moderately Sensitive'' (can tolerate limited humidity variations), ''Highly Sensitive'' (requires
+      strict humidity control), with null values indicating humidity sensitivity not specified.
+
+
+      Compiler note: No table/column stores a product humidity-sensitivity classification (''Not Sensitive''/''Moderately
+      Sensitive''/''Highly Sensitive''). Products table has no humidity-related column; EnvironmentalMonitoring.env_metrics.humidity.humidity_monitor
+      only records whether humidity was monitored (No/Partial/Yes), a different concept. Cannot encode.
+
+
+      Qualification Status of Temperature Monitoring Devices: Indicates the validation level of monitoring
+      devices used in pharmaceutical transport.
+
+
+      Monitoring devices can be: ''Fully Qualified'' (calibrated with NIST-traceable standards and validated
+      for pharmaceutical use), ''Partially Qualified'' (calibrated but not fully validated), ''Unqualified''
+      (not formally qualified), with null values indicating qualification status is unknown.
+
+
+      Compiler note: No column in monitoringdevices (or elsewhere) stores a ''Fully Qualified''/''Partially
+      Qualified''/''Unqualified'' qualification label for devices; existing fields (DevAcc, CalibTS, RecIntMin,
+      TempPts) are numeric/timestamp measurements, not this categorical status. Cannot encode.
+
+
+      Package Thermal Efficiency Rating: Measures how effectively a packaging system maintains internal
+      temperature despite external conditions.
+
+
+      Thermal efficiency rating is classified as: ''Basic'' (<24 hours of protection), ''Standard'' (24-48
+      hours of protection), ''Enhanced'' (48-96 hours of protection), ''Extended'' (>96 hours of protection).
+
+
+      Compiler note: No table/column stores packaging thermal protection duration or a classification
+      derived from it. ProductBatches has pack_type, store_cond, tempmin/tempmax but no hours-of-protection
+      metric, so this cannot be encoded over the existing data.
+
+
+      Thermodynamic Stability Class: Categorizes pharmaceutical products based on their thermal stability
+      characteristics.
+
+
+      Products are classified as: Class A (highly stable, can tolerate brief temperature excursions with
+      minimal degradation), Class B (moderately stable), Class C (limited stability, requires strict temperature
+      control), and Class D (highly unstable, no temperature excursions permitted).
+
+
+      Compiler note: No table/column stores a ''Thermodynamic Stability Class'' (A/B/C/D) for products
+      or batches. Products table has prodcat (therapeutic category) and ProductBatches has store_cond/tempmin/tempmax,
+      but none encode this thermal-stability classification scheme. It''s a conceptual framework not represented
+      in the data.
+
+
+      Electronic Monitoring System Tiers: Classification of monitoring systems based on their capabilities
+      and features.
+
+
+      Electronic monitoring systems are classified as: Tier 1 (basic data loggers with manual download),
+      Tier 2 (enhanced loggers with USB or Bluetooth download), Tier 3 (network-connected devices with
+      real-time alerts), and Tier 4 (fully integrated IoT systems with predictive capabilities and automated
+      interventions).
+
+
+      Compiler note: No column or table in the schema records a monitoring system "tier" (Tier 1-4) classification;
+      MonitoringDevices only has calibts, devacc, recintmin, temppts, none of which map to download method,
+      real-time alerts, or IoT capabilities. This is a conceptual classification not represented in the
+      data.
+
+
+      Monitoring Device Calibration Status: Indicates if temperature monitoring devices are properly calibrated
+      for accurate readings.
+
+
+      Calibration status includes: ''Current'' (calibrated within required timeframe, typically 12 months),
+      ''Expired'' (calibration period has elapsed), ''Exempt'' (single-use devices with factory calibration),
+      with null values indicating calibration status is unknown or not documented.
+
+
+      Compiler note: No column stores calibration status categories (''Current''/''Expired''/''Exempt'');
+      MonitoringDevices only has CalibTS (a raw timestamp), not a derived/stored status. Cannot encode
+      as a computation over existing columns without inventing the compliance window logic, and no ''typically
+      12 months'' rule is encoded in the data.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

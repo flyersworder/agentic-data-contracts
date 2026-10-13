@@ -12,20 +12,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 from dce.benchmark import Grade, Task
+from dce.compile.db import CompileDB
+from dce.compile.entries import KBEntry
+from dce.compile.inputs import CompileInputs
 from dce.data import DATASET_REVISION
 from dce.frozen import (
+    compiled_digest,
     digest,
     hollow_digest,
+    load_compiled_contract,
     load_contract,
     load_hollow_contract,
     load_uninterpreted_contract,
     uninterpreted_digest,
 )
 from dce.golds import PLURALITY_THRESHOLD, VERIFIED_WRONG_GOLDS, golds_sha256
-from dce.tools import ArmSetup, _governed_tools, _ungoverned_tools
+from dce.tools import ArmSetup, _ungoverned_tools, governed_arm
 
 #: Where `dce.prepare` puts the vendor's context files; relative to the
 #: experiment directory, as the runner's other default paths are.
@@ -50,7 +56,15 @@ ARMS: tuple[str, ...] = (
 #: contract's author took from the data rather than from the manual. It gives
 #: both arms the same knowledge, so what separates it from `contract` is
 #: delivery alone.
-EXTRA_ARMS: tuple[str, ...] = ("contract_uninterpreted", "manual_resolved")
+#:
+#: `contract_compiled` is `contract` with the contract `dce.compile` produced
+#: from the same two documents in place of the hand-authored one (spec, Part
+#: 5): it separates how a contract was made from which benchmark it runs on.
+EXTRA_ARMS: tuple[str, ...] = (
+    "contract_uninterpreted",
+    "manual_resolved",
+    "contract_compiled",
+)
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
 #: What the contract knows that the manual does not. The manual says a null
@@ -71,7 +85,7 @@ DATA_NOTE = (
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
 #: session and the governed-tool counters.
 GOVERNED_ARMS: frozenset[str] = frozenset(
-    {"contract", "contract_hollow", "contract_uninterpreted"}
+    {"contract", "contract_hollow", "contract_uninterpreted", "contract_compiled"}
 )
 
 BASE_PROMPT = (
@@ -100,20 +114,14 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         # below is the thing `contract_hollow` exists to control for, so it is
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
+        # The procedural sentence is `dce.tools.CONTRACT_PROCEDURE`.
         contract = {
             "contract": load_contract,
             "contract_hollow": load_hollow_contract,
             "contract_uninterpreted": load_uninterpreted_contract,
+            "contract_compiled": load_compiled_contract,
         }[arm]()
-        tools, session, adapter = _governed_tools(db_path, contract=contract)
-        prompt = (
-            f"{BASE_PROMPT}\n\n"
-            "A data contract governs this database. Look up the domain and the "
-            "metrics that apply before writing SQL, and validate every query "
-            "with inspect_query before running it.\n\n"
-            f"{contract.to_system_prompt()}"
-        )
-        return ArmSetup(prompt, tools, session, adapter)
+        return governed_arm(BASE_PROMPT, db_path, contract)
 
     raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
 
@@ -133,6 +141,8 @@ def arm_digest(arm: str) -> str:
         return hollow_digest()
     if arm == "contract_uninterpreted":
         return uninterpreted_digest()
+    if arm == "contract_compiled":
+        return compiled_digest()
     return digest()
 
 
@@ -230,6 +240,68 @@ def _load_golds(path: Path) -> tuple[dict[str, str], str]:
             "been edited since it was written; refusing to score against it"
         )
     return envelope["golds"], computed
+
+
+#: A numbered heading at any level: "## 5. Fees", "###  5.1 Best",
+#: "#### 5.1.2. Choosing", "# 5.1.3 Processing" (the manual's levels are
+#: inconsistent; its numbers are not). Unnumbered headings stay inside the
+#: numbered section above them.
+_SECTION = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s+(\S.*?)\s*$")
+
+
+def manual_sections(manual: str) -> list[KBEntry]:
+    """`manual.md` as neutral entries of kind `section`: the text before
+    the first numbered heading (title and contents), then one entry per
+    numbered heading, each holding its text verbatim."""
+    lines = manual.splitlines()
+    starts = [i for i, line in enumerate(lines) if _SECTION.match(line)]
+    entries = []
+    head = "\n".join(lines[: starts[0] if starts else len(lines)]).strip()
+    if head:
+        title = next(
+            (line.lstrip("#").strip() for line in lines if line.startswith("#")),
+            "Preamble",
+        )
+        entries.append(KBEntry(0, "section", title, head))
+    for n, (start, end) in enumerate(
+        zip(starts, starts[1:] + [len(lines)], strict=True), start=1
+    ):
+        match = _SECTION.match(lines[start])
+        assert match is not None
+        text = "\n".join(lines[start:end]).strip()
+        entries.append(KBEntry(n, "section", f"{match[1]} {match[2]}", text))
+    return entries
+
+
+def compile_inputs(
+    context_dir: Path = CONTEXT_DIR, db: Path = Path("data/dabstep.duckdb")
+) -> CompileInputs:
+    """DABStep's compiler inputs (spec, Part 5): the manual split into
+    sections, `payments-readme.md` as the column meanings, the database.
+    Never `tasks.json` or `golds.json`."""
+    manual_path = context_dir / "manual.md"
+    readme_path = context_dir / "payments-readme.md"
+    readme = readme_path.read_text(encoding="utf-8").strip()
+    cdb = CompileDB(db)
+    try:
+        ddl = cdb.ddl()
+    finally:
+        cdb.close()
+    return CompileInputs(
+        benchmark="dabstep",
+        db_name="dabstep",
+        entries=tuple(manual_sections(manual_path.read_text(encoding="utf-8"))),
+        ddl=ddl,
+        column_meanings=readme,
+        dialect_note="DuckDB's own semantics apply.",
+        db_path=db,
+        init_sql=(),
+        sources=(manual_path, readme_path, db),
+        out_subdir="dabstep",
+        # The readme documents payments.csv; the compiled contract carries
+        # it on that table, as the hand-authored one carries it in prose.
+        table_descriptions={"payments": readme},
+    )
 
 
 def load_docs(context_dir: Path = CONTEXT_DIR) -> dict[str, str]:
@@ -379,6 +451,24 @@ class DABStep:
         from dce.grade import _clean
 
         return _clean(answer)
+
+    def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
+        if "contract_compiled" not in arms:
+            return
+        from dce import frozen
+
+        if not frozen.COMPILED_CONTRACT_PATH.is_file():
+            raise SystemExit(
+                f"no compiled contract at {frozen.COMPILED_CONTRACT_PATH}; run "
+                "`python -m dce.compile --benchmark dabstep` first"
+            )
+        try:
+            # `from_yaml` alone does not open `semantic.yml`; the digest does.
+            frozen.compiled_digest()
+        except Exception as exc:
+            raise SystemExit(
+                f"the compiled DABStep contract does not load: {exc}"
+            ) from exc
 
     def golds_hash(self) -> str:
         return self._golds_hash

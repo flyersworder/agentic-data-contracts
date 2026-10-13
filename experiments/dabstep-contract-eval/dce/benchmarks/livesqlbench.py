@@ -9,8 +9,10 @@ out under `LSB_DATA/hf-full-v1/`. `prep/livesqlbench/` rebuilds the rest.
 Tasks are the frozen Query tasks: 302 `primary` and 73 `order_only`, each a
 `subset`; the 36 excluded tasks are never loaded. Every arm's system prompt
 carries the database's DDL and column meanings, so the arms differ only in
-how the KB reaches the agent; until the compiler lands (PR C) the arms are
-`schema_only` and `manual_prompt`. All their DuckDB connections, and the
+how the KB reaches the agent; the arms are `schema_only`, `manual_prompt`,
+`manual_compiled` (the manual plus the compiled definitions) and `contract`
+(the compiled contract behind governed tools), the last two loading
+`contracts/livesqlbench/<db>/`. All their DuckDB connections, and the
 grader's, run PostgreSQL's NULL ordering and integer division, because the
 gold came from PostgreSQL, and have no file access (`lsb_grade.SAFE_INIT_SQL`).
 """
@@ -24,16 +26,24 @@ import os
 from functools import cache
 from pathlib import Path
 
+from agentic_data_contracts import contract_digest
 from dce.benchmark import Grade, Task
 from dce.benchmarks.lsb_grade import (
+    PG_COMPAT,
     SAFE_INIT_SQL,
     extract_sql,
     gold_digest,
     grade_answer,
 )
-from dce.tools import ArmSetup, _ungoverned_tools
+from dce.compile.emit import render_compiled
+from dce.compile.entries import KBEntry
+from dce.compile.inputs import CompileInputs
+from dce.frozen import load_contract_at
+from dce.tools import ArmSetup, _ungoverned_tools, governed_arm
 
 DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
+#: Where the compile commit puts the frozen contracts (spec, Layout).
+DEFAULT_CONTRACTS = Path(__file__).resolve().parents[2] / "contracts" / "livesqlbench"
 
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
@@ -59,20 +69,23 @@ ANSWER_INSTRUCTION = (
 )
 
 
+def _meaning_text(value) -> str:
+    if isinstance(value, dict):
+        text = str(value.get("column_meaning", "")).strip()
+        fields = value.get("fields_meaning")
+        if fields:
+            text += " Fields: " + json.dumps(fields, ensure_ascii=False)
+        return text
+    return str(value).strip()
+
+
 def render_column_meanings(meanings: dict) -> str:
     """One line per column, `- table.column: meaning`, in the file's order. A
     JSON column's meaning is an object; its field meanings follow as JSON."""
     lines = []
     for key, value in meanings.items():
         _, table, column = key.split("|", 2)
-        if isinstance(value, dict):
-            text = str(value.get("column_meaning", "")).strip()
-            fields = value.get("fields_meaning")
-            if fields:
-                text += " Fields: " + json.dumps(fields, ensure_ascii=False)
-        else:
-            text = str(value).strip()
-        lines.append(f"- {table}.{column}: {text}")
+        lines.append(f"- {table}.{column}: {_meaning_text(value)}")
     return "\n".join(lines)
 
 
@@ -98,12 +111,77 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+#: LiveSQLBench's KB types as the compiler's neutral kinds (spec, Compiler).
+KIND_BY_TYPE: dict[str, str] = {
+    "calculation_knowledge": "calculation",
+    "domain_knowledge": "predicate",
+    "value_illustration": "illustration",
+}
+
+#: How the compiler is told the database's dialect switches.
+DIALECT_NOTE = "The database sorts NULLs and divides integers as PostgreSQL does."
+
+
+def compile_inputs(data: Path, db: str) -> CompileInputs:
+    """The compiler's inputs for one database: its KB, column meanings, DDL
+    and DuckDB file, and nothing else (no task, gold or test-case file)."""
+    folder = data / "hf-full-v1" / db
+    kb_path = folder / f"{db}_kb.jsonl"
+    meanings_path = folder / f"{db}_column_meaning_base.json"
+    schema_path = folder / f"{db}_schema.txt"
+    db_path = data / "duckdb" / f"{db}.duckdb"
+    entries = []
+    for raw in _read_jsonl(kb_path):
+        children = raw.get("children_knowledge")
+        entries.append(
+            KBEntry(
+                id=int(raw["id"]),
+                kind=KIND_BY_TYPE[raw["type"]],
+                name=str(raw["knowledge"]),
+                text=f"{raw['description']}\n\n{raw['definition']}",
+                # -1 in the file means no children.
+                children=tuple(int(c) for c in children)
+                if isinstance(children, list)
+                else (),
+            )
+        )
+    meanings = json.loads(meanings_path.read_text(encoding="utf-8"))
+    return CompileInputs(
+        benchmark="livesqlbench",
+        db_name=db,
+        entries=tuple(entries),
+        ddl=schema_path.read_text(encoding="utf-8").strip(),
+        column_meanings=render_column_meanings(meanings),
+        dialect_note=DIALECT_NOTE,
+        db_path=db_path,
+        init_sql=PG_COMPAT,
+        sources=(kb_path, meanings_path, schema_path, db_path),
+        out_subdir=f"livesqlbench/{db}",
+        column_descriptions={
+            (key.split("|", 2)[1].lower(), key.split("|", 2)[2].lower()): (
+                _meaning_text(value)
+            )
+            for key, value in meanings.items()
+        },
+    )
+
+
 class LiveSQLBench:
     name = "livesqlbench"
-    arms: tuple[str, ...] = ("schema_only", "manual_prompt")
+    arms: tuple[str, ...] = (
+        "schema_only",
+        "manual_prompt",
+        "manual_compiled",
+        "contract",
+    )
     extra_arms: tuple[str, ...] = ()
-    governed_arms: frozenset[str] = frozenset()
-    roles = {"baseline": "schema_only", "manual": "manual_prompt"}
+    governed_arms: frozenset[str] = frozenset({"contract"})
+    roles = {
+        "baseline": "schema_only",
+        "manual": "manual_prompt",
+        "manual_plus": "manual_compiled",
+        "contract": "contract",
+    }
     primary = None
     group_label = "db"
     excluded_tasks: frozenset[str] = frozenset()
@@ -113,14 +191,20 @@ class LiveSQLBench:
     excluded_source = "LiveSQLBench.excluded_tasks"
 
     def __init__(
-        self, *, data: Path, records: list[tuple[dict, dict]], gold: dict
+        self,
+        *,
+        data: Path,
+        records: list[tuple[dict, dict]],
+        gold: dict,
+        contracts: Path = DEFAULT_CONTRACTS,
     ) -> None:
         self._data = data
+        self._contracts = contracts
         self._records = records  # (public task, frozen entry), in file order
         self._gold = gold
 
     @classmethod
-    def from_data(cls, data: Path) -> LiveSQLBench:
+    def from_data(cls, data: Path, contracts: Path = DEFAULT_CONTRACTS) -> LiveSQLBench:
         frozen = json.loads(
             (data / "tasks_frozen_full_v1.json").read_text(encoding="utf-8")
         )
@@ -159,7 +243,7 @@ class LiveSQLBench:
             raise SystemExit(
                 f"LiveSQLBench databases missing from {data / 'duckdb'}: {missing}"
             )
-        return cls(data=data, records=records, gold=gold)
+        return cls(data=data, records=records, gold=gold, contracts=contracts)
 
     @classmethod
     def add_arguments(cls, parser: argparse.ArgumentParser) -> None:
@@ -210,15 +294,28 @@ class LiveSQLBench:
             f"## Column meanings\n\n{render_column_meanings(meanings)}"
         )
 
+    def _contract_dir(self, db: str) -> Path:
+        return self._contracts / db
+
+    def _contract(self, db: str):
+        return load_contract_at(self._contract_dir(db) / "contract.yml")
+
     def build_arm(self, arm: str, task: Task, db: Path) -> ArmSetup:
         name = task.meta["db"]
         prompt = self._context(name)
-        if arm == "schema_only":
-            pass
-        elif arm == "manual_prompt":
+        if arm == "contract":
+            # No manual: the contract carries the KB text (spec, Arms).
+            return governed_arm(
+                prompt, db, self._contract(name), init_sql=AGENT_INIT_SQL
+            )
+        if arm in ("manual_prompt", "manual_compiled"):
             entries = _read_jsonl(self._db_dir(name) / f"{name}_kb.jsonl")
             prompt += "\n\n## Knowledge base\n\n" + render_manual(entries)
-        else:
+            if arm == "manual_compiled":
+                prompt += "\n\n## Compiled definitions\n\n" + render_compiled(
+                    self._contract_dir(name)
+                )
+        elif arm != "schema_only":
             raise ValueError(f"unknown arm: {arm!r}; expected one of {self.arms}")
         return ArmSetup(prompt, _ungoverned_tools(db, init_sql=AGENT_INIT_SQL), None)
 
@@ -227,10 +324,12 @@ class LiveSQLBench:
         # so a re-downloaded schema or KB cannot change an arm unrecorded.
         name = task.meta["db"]
         files = [f"{name}_schema.txt", f"{name}_column_meaning_base.json"]
-        if arm == "manual_prompt":
+        if arm in ("manual_prompt", "manual_compiled"):
             files.append(f"{name}_kb.jsonl")
         folder = self._db_dir(name)
         joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
+        if arm in ("manual_compiled", "contract"):
+            joined += f"\ncontract {contract_digest(self._contract(name))}"
         return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     def _gold_rows(self, task: Task):
@@ -253,6 +352,34 @@ class LiveSQLBench:
     def normalize(self, answer: str) -> str:
         # The SQL the grader ran, so a verdict can be re-checked from the row.
         return extract_sql(answer) or ""
+
+    def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
+        if not {"manual_compiled", "contract"} & set(arms):
+            return
+        missing, broken = [], []
+        for db in sorted({t.meta["db"] for t in tasks}):
+            path = self._contract_dir(db) / "contract.yml"
+            if not path.is_file():
+                missing.append(db)
+                continue
+            # Everything an arm reads at build time: `from_yaml` alone does
+            # not open `semantic.yml`; the digest and the appendix do.
+            try:
+                contract_digest(self._contract(db))
+                if "manual_compiled" in arms:
+                    render_compiled(self._contract_dir(db))
+            except Exception as exc:
+                broken.append(
+                    f"compiled contract for {db} does not load: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+        if missing:
+            raise SystemExit(
+                f"no compiled contract for {missing} under {self._contracts}; run "
+                "`python -m dce.compile --benchmark livesqlbench` first"
+            )
+        if broken:
+            raise SystemExit("\n".join(broken))
 
     def golds_hash(self) -> str:
         digests = {

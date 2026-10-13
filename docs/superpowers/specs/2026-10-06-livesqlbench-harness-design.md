@@ -330,6 +330,27 @@ run once.
   - `illustration` -> prose on the table or column it describes;
   - every metric's `description` contains the KB entry's description and
     definition verbatim, and names its children.
+- Domains: on LiveSQLBench, `calculations` holds the calculation metrics,
+  `definitions` the predicate metrics, and `reference` any illustration
+  that names no single table or column. On DABStep, each manual section is
+  a domain whose description is the section's text verbatim, and the
+  section's metrics belong to it. A section metric's description is the
+  compiler's own, followed by the section it came from: the section text
+  is too long to repeat per metric, and its domain carries it.
+- Notes: whatever the compiler learned from the data (a JSON path, how a
+  value is stored) is written as a final paragraph starting
+  "Compiler note: " on the metric, column, table or domain it concerns.
+  `manual_compiled`'s appendix carries every such note, so both arms see
+  the compiler's knowledge.
+- Names: a metric is named after its entry (lower case, non-alphanumerics
+  as `_`). Entries whose names collide all get `_<id>` appended.
+- Working log: a database in progress is logged to
+  `compile-log.jsonl`; when it finishes, the log is gzipped to
+  `compile-log.jsonl.gz` and the plain file removed. A finished database is
+  skipped on rerun.
+- Before any spend, a sweep that asks for `manual_compiled` or `contract`
+  checks that every database in its task set has a compiled contract that
+  loads (`Benchmark.check_arms`).
 - Validation: each metric's SQL must execute over its source table
   (`SELECT <expr> FROM <source> LIMIT 5`, or the predicate in a `WHERE`).
   Up to 3 attempts; an entry that still fails is kept as prose with
@@ -438,9 +459,13 @@ This run supplies the bridge.
   meanings and `data/dabstep.duckdb` as the database. The compiler opens no
   other file; the file-access test covers `tasks.json` and `golds.json`.
   Output in `contracts/dabstep/`, frozen and audited in the compile commit.
-- **Arm.** `contract_compiled`: the `contract` arm's tools, procedural
-  sentence and `DATA_NOTE`, with the compiled contract in place of the
-  hand-authored one. An extra arm, so DABStep's defaults and the PR A
+- **Arm.** `contract_compiled`: the `contract` arm's tools and procedural
+  sentence, with the compiled contract in place of the hand-authored one.
+  `DATA_NOTE` is not added: the `contract` arm's prompt does not carry it
+  either (it is `manual_resolved`'s), and the arm must differ from
+  `contract` only in the contract (Testing). The empty-list fact
+  `DATA_NOTE` states is in the data, which the compiler can query, as the
+  hand author did. An extra arm, so DABStep's defaults and the PR A
   equivalence checks are unaffected.
 - **Run.** `contract` and `contract_compiled` together, all 450 tasks, k=3,
   pairing within each repeat, on `gpt-6-sol` and `gpt-6-luna`. At the cost

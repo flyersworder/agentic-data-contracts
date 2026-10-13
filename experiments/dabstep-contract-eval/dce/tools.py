@@ -490,3 +490,26 @@ def _governed_tools(db_path: Path, *, contract, init_sql: tuple[str, ...] = ()):
     ]
     tools = create_pydantic_ai_tools(contract, tools=tool_defs, session=session)
     return tools, session, adapter
+
+
+#: The one sentence every governed arm adds before its contract. Written
+#: once: it is the thing DABStep's `contract_hollow` exists to control for,
+#: so a second copy that drifted would silently reintroduce the confound,
+#: and LiveSQLBench's `contract` arm must read exactly as DABStep's does.
+CONTRACT_PROCEDURE = (
+    "A data contract governs this database. Look up the domain and the "
+    "metrics that apply before writing SQL, and validate every query "
+    "with inspect_query before running it."
+)
+
+
+def governed_arm(
+    base_prompt: str, db_path: Path, contract, *, init_sql: tuple[str, ...] = ()
+) -> ArmSetup:
+    """A governed arm: the benchmark's base prompt, the procedure, then the
+    contract's own rendering, over the governed tools."""
+    tools, session, adapter = _governed_tools(
+        db_path, contract=contract, init_sql=init_sql
+    )
+    prompt = f"{base_prompt}\n\n{CONTRACT_PROCEDURE}\n\n{contract.to_system_prompt()}"
+    return ArmSetup(prompt, tools, session, adapter)

@@ -209,3 +209,72 @@ def test_dabstep_builds_from_its_own_command_line_flags(tmp_path: Path, monkeypa
     monkeypatch.chdir(tmp_path)  # CONTEXT_DIR is relative to the experiment directory
     bench = DABStep.from_args(args)
     assert [t.task_id for t in bench.tasks()] == ["1"]
+
+
+def test_contract_compiled_differs_from_contract_only_in_the_contract(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    import dce.frozen as frozen
+    from dce.frozen import CONTRACT_PATH
+
+    # Any loadable contract stands in for the compiled one: the claim is
+    # about the arm's construction, not the contract's content.
+    stand_in = tmp_path / "contracts" / "dabstep"
+    shutil.copytree(CONTRACT_PATH.parent, stand_in)
+    text = (stand_in / "contract.yml").read_text(encoding="utf-8")
+    (stand_in / "contract.yml").write_text(
+        text.replace("name: dabstep-payments", "name: dabstep-compiled"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(frozen, "COMPILED_CONTRACT_PATH", stand_in / "contract.yml")
+    db = tmp_path / "d.duckdb"
+    duckdb.connect(str(db)).close()
+    bench = _bench(tmp=tmp_path)
+    task = DABStep.task(RECORD)
+    hand = bench.build_arm("contract", task, db)
+    compiled = bench.build_arm("contract_compiled", task, db)
+    try:
+        assert compiled.system_prompt == hand.system_prompt.replace(
+            "dabstep-payments", "dabstep-compiled"
+        )
+        assert [t.name for t in compiled.tools] == [t.name for t in hand.tools]
+        assert bench.arm_digest("contract_compiled", task) != bench.arm_digest(
+            "contract", task
+        )
+    finally:
+        hand.close()
+        compiled.close()
+    bench.check_arms(("contract_compiled",), [task])  # present: passes
+
+
+def test_contract_compiled_is_checked_before_any_spend(tmp_path, monkeypatch):
+    import dce.frozen as frozen
+
+    monkeypatch.setattr(frozen, "COMPILED_CONTRACT_PATH", tmp_path / "missing.yml")
+    bench = _bench(tmp=tmp_path)
+    bench.check_arms(DABStep.arms, [])  # the default arms need nothing compiled
+    with pytest.raises(SystemExit, match="dce.compile --benchmark dabstep"):
+        bench.check_arms(("contract_compiled",), [])
+
+
+def test_contract_compiled_check_loads_the_semantic_source(tmp_path, monkeypatch):
+    import shutil
+
+    import dce.frozen as frozen
+    from dce.frozen import CONTRACT_PATH
+
+    stand_in = tmp_path / "contracts" / "dabstep"
+    shutil.copytree(CONTRACT_PATH.parent, stand_in)
+    (stand_in / "contract.yml").write_text(
+        (stand_in / "contract.yml")
+        .read_text(encoding="utf-8")
+        .replace("name: dabstep-payments", "name: dabstep-semantic-check"),
+        encoding="utf-8",
+    )
+    for semantic in stand_in.glob("semantic*.yml"):
+        semantic.unlink()
+    monkeypatch.setattr(frozen, "COMPILED_CONTRACT_PATH", stand_in / "contract.yml")
+    with pytest.raises(SystemExit, match="does not load"):
+        _bench(tmp=tmp_path).check_arms(("contract_compiled",), [])

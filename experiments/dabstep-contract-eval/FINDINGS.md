@@ -581,6 +581,253 @@ the fact, gpt-6-luna's `manual_prompt` handles empty lists in some query of
 48% of fee-family task-runs and is right 25% of the time when it does --
 Qwen-like, not sol-like (56% / 28% and 60% / 76%).
 
+## LiveSQLBench: compiled knowledge, delivered two ways (gpt-6-luna)
+
+The second benchmark asks whether the delivery effect above survives when the
+contract is not written by hand. Each of LiveSQLBench's 22 databases ships a
+knowledge base (KB) of 30-96 entries; an LLM compiler turned every KB into a
+contract once, before any task was run (compile commit `191accb`, audited in
+`contracts/livesqlbench/AUDIT.md`). Four arms, all with the database's DDL and
+column meanings: `schema_only` nothing more; `manual_prompt` the KB as a
+prose manual; `manual_compiled` the manual plus every compiled metric's SQL;
+`contract` the compiled contract behind the governed tools, with no manual.
+k=3, pairing within each repeat, on the run commit `1c1e302` (tag
+`livesqlbench-compiled-contracts`), where the plan and five predictions were
+fixed. 4,500 task-runs, $10.65, no errors after the retry pass (five
+construction errors, each retried once). The primary set is 302 tasks; 73
+order-only tasks are reported separately.
+
+### Knowledge is held equal by construction
+
+The compiler reads only the KB, the column meanings and the database, so it
+adds no knowledge the manual lacks: every one of the 1,369 KB definitions is
+in the compiled contracts verbatim, refused entries with their text and the
+reason. `manual_prompt` and `contract` therefore know the same things and
+differ in delivery -- ready-made, executable definitions behind tools -- which
+is the comparison `manual_resolved` against `contract` makes on DABStep once
+the empty-list fact is added. `manual_compiled` sits between them: the same
+SQL, in the prompt.
+
+| arm | r1 | r2 | r3 | k=3 (primary) | order-only |
+|---|---:|---:|---:|---:|---:|
+| schema_only | 60 | 61 | 60 | 20.0% | 10.5% |
+| manual_prompt | 104 | 111 | 107 | 35.5% | 27.9% |
+| manual_compiled | 110 | 111 | 112 | 36.8% | 25.6% |
+| contract | 112 | 104 | 109 | 35.9% | 25.1% |
+
+Task-level sign tests over the three repeats, on the primary set:
+
+- **(1) holds.** `manual_prompt` beats `schema_only`, 71 tasks to 8
+  (p = 1e-13); `contract` beats it 67 to 9 (p = 4e-12).
+- **(2) holds.** `manual_compiled` is within 3 points of `manual_prompt`
+  (+1.3), 24 tasks to 19 (p = 0.54).
+- **(3) fails.** `contract` does not beat `manual_compiled`: 22 tasks to 25
+  (p = 0.77). The decomposition share is not reported: the contract's lead
+  over the manual is 4 task-runs of 906.
+
+The pre-registered high-level / standard split shows the same three-way tie
+in both halves. Prediction (4) is answered below, under *Qwen 3.8*; (5)
+under *The compiler on DABStep*.
+
+The same kind of delivery, then, gives very different results on the two
+benchmarks with one model:
+
+| gpt-6-luna | knowledge-equal, no SQL | + SQL in the prompt | + SQL behind tools |
+|---|---:|---:|---:|
+| DABStep (`manual_resolved` / `contract`) | 58.8% | -- | 81.1% |
+| LiveSQLBench (`manual_prompt` / `manual_compiled` / `contract`) | 35.5% | 36.8% | 35.9% |
+
+### The contract arm was checked before the null was accepted
+
+A null this far from DABStep could be a setup fault, so the arm was audited
+on the traces rather than assumed:
+
+- every row's digest matches the committed contract for its database;
+- `lookup_domain` and `inspect_query` appear in every contract run and
+  `lookup_metric` in 93%, about two lookups a run;
+- the 28 times `run_query` answered `BLOCKED` in repeat 1 were the agent's own
+  execution errors (failed casts, malformed JSON), not policy; the validator
+  raised no warnings, and its 14 rejections were `SELECT *` (10), a parse
+  error, a misspelt column, and two queries naming tables without the `main.`
+  schema inside nested subqueries;
+- the agent retrieves what the task needs: across the three repeats it looked
+  up 79% of the metrics a task's gold depends on (from the benchmark's private
+  task-to-KB mapping), and still solved only 39% of the runs where it looked
+  up all of them;
+- **the two compiled arms give the same answers**: 255 of the 302 primary
+  tasks score identically over the three repeats, and the other 47 split 22
+  to 25.
+
+### Where the definitions help, and where they do not
+
+Exploratory, from the private task-to-KB mapping; aggregates only. Each
+primary task is grouped by the compile outcome of the KB entries its gold
+uses (task-runs over three repeats):
+
+| task group | task-runs | schema_only | manual_prompt | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| every needed formula compiled | 474 | 17% | 38% | 41% | 39% |
+| some needed entry refused | 222 | 17% | 32% | 27% | 27% |
+| metrics plus prose entries | 123 | 20% | 29% | 32% | 37% |
+| prose entries only | 54 | 43% | 48% | 50% | 43% |
+
+Where every needed formula compiled, the compiled arms are 1-3 points ahead
+of the manual; where the compiler refused a needed entry, both are 5 points
+behind it. The two roughly cancel. The 12 task-runs whose gold uses one of
+the seven metrics the audit found wrong fail in every arm, `manual_prompt`
+included, so this data cannot attribute them to the wrong SQL.
+
+Grading strictness costs every arm alike: 14-15% of each knowledge arm's
+wrong answers are near misses (values within 1% of the gold, the gold's
+columns plus others, right rows in the wrong order, a percentage scaled by
+100), 9% of `schema_only`'s. Counting them right would raise each knowledge
+arm by about 9 points and change no comparison. The rest are wrong values or a
+wrong number of rows. For scale, the official Base-Full v1 leaderboard's top
+entries score 38-48% on a different task mix that includes data-changing
+tasks.
+
+### Why the same delivery helps on DABStep and not here
+
+Hypotheses, not findings; each says what would test it.
+
+1. **The definitions are correct there and partly wrong here.** DABStep's
+   hand-authored definitions pass 40 of 40 certified fee-ID examples; the
+   audit found 7 of 30 sampled compiled metrics wrong and 4 unclear. An
+   agent that trusts a ready-made definition gains only if it is right.
+   Prediction (5) tests this on DABStep itself: `contract_compiled` against
+   the hand-authored `contract`, same tasks, only the authoring changed.
+2. **A DABStep definition carries most of a task; a LiveSQLBench definition
+   is a piece.** DABStep's delivery gain sits in multi-step procedures
+   (per-transaction matching, monthly bands, a summed fee formula) that one
+   definition encodes. Here even full retrieval leaves 61% of runs wrong:
+   composing several definitions with the task's filters, grain and output
+   shape is where the agent fails, and no definition encodes that.
+3. **What the definitions save the model.** DABStep's encode procedures the
+   model gets wrong unaided; many LiveSQLBench formulas are short enough
+   that the model writes them correctly from the KB text, so ready-made SQL
+   saves little.
+
+### Two effects that cancel: exploratory on gpt-6-luna, prediction (6) on Qwen
+
+A blind review checked the 355 compiled metrics that primary tasks depend on.
+The reviewer had the metric, its KB entry and the database, but no tasks, golds
+or results. Verdicts: 247 faithful, 60 wrong in a way that changes results on
+the data, 13 wrong without that, 35 unclear. The most common error is NULL or
+unknown values silently classified or turned into numbers (30 metrics), then
+unit or scale (18). Three of the claims were re-checked against the data, and
+all three held.
+
+`analysis/lsb_root_cause.py` puts each primary task in one group. The groups
+come from the compile, the private task-to-KB mapping and the review, never
+from a model's results:
+
+| group (gpt-6-luna, k=3) | tasks | schema_only | manual_prompt | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| A. every needed metric faithful | 118 | 19.8% | 40.1% | 44.9% | 44.1% |
+| B. a needed entry refused | 77 | 16.5% | 30.3% | 26.0% | 26.0% |
+| C. a needed metric wrong (material) | 47 | 16.3% | 24.8% | 29.1% | 26.2% |
+| D. no compiled metric needed | 25 | 48.0% | 49.3% | 50.7% | 44.0% |
+| E. a needed metric unclear | 35 | 13.3% | 36.2% | 33.3% | 37.1% |
+
+Where the definitions are right, the compiled arms gain 4-5 points over the
+manual: `manual_compiled` 15 tasks to 4 (p = 0.02), `contract` 16 to 7
+(p = 0.09). Where a needed entry was refused, they lose about as much:
+`manual_compiled` 2 to 10 (p = 0.04). The two effects cancel in the total.
+This split was chosen after seeing these runs, so on gpt-6-luna it is
+exploratory. Its summary statistic is fixed here: per task, the mean correct
+runs of the two compiled arms minus those of `manual_prompt`, averaged over A
+minus over B. It is +0.26 correct runs per task of 3 (one-sided permutation
+p = 0.002).
+
+**Prediction (6)** was fixed before any Qwen 3.8 result was looked at by group.
+Per-arm totals of its first two repeats had been seen; the third had not
+finished. On `qwen3.8-27b`, k=3, primary set, the same statistic is above zero
+at one-sided permutation p < 0.05 (100,000 relabellings, seed 2026). The
+groups use the review verdicts as they stand (sha256 in the commit that adds
+this paragraph); no verdict changes after that commit.
+
+### Qwen 3.8: the tie replicates, the two effects do not -- predictions (4) and (6)
+
+`qwen3.8-27b`, the same four arms, k=3, on the run commit `1c1e302`: 4,514
+rows (4,500 plus 14 retried after construction errors), $2.78, two errors
+left after the retry pass (one `schema_only`, one `contract`).
+
+| arm | r1 | r2 | r3 | k=3 (primary) | order-only |
+|---|---:|---:|---:|---:|---:|
+| schema_only | 72 | 69 | 69 | 23.2% | 14.6% |
+| manual_prompt | 115 | 113 | 110 | 37.3% | 34.7% |
+| manual_compiled | 113 | 119 | 110 | 37.7% | 34.7% |
+| contract | 118 | 115 | 109 | 37.7% | 34.7% |
+
+The pattern is luna's: knowledge helps (`manual_prompt` beats `schema_only`
+68 tasks to 13, p = 4e-10; `contract` 66 to 16, p = 2e-8), and how it is
+delivered does not (`manual_compiled` vs `manual_prompt` 24 to 18,
+p = 0.44; `contract` vs `manual_compiled` 22 to 24, p = 0.88). The
+high-level / standard split ties in both halves again.
+
+- **(4) holds in part.** `contract` is at `manual_compiled`, not above it
+  (37.7% each). Its advantage over `manual_compiled` is not smaller than on
+  gpt-6-luna, though: there it was -0.9 points, here 0.0. Both are ties.
+- **(6) fails.** The root-cause statistic -- mean compiled gain over
+  `manual_prompt` on group A minus group B -- is +0.028 correct runs per
+  task of 3 (one-sided permutation p = 0.41), against luna's +0.26
+  (p = 0.002). The private inputs matched the sha256 recorded in `20171bd`.
+
+| group (qwen3.8-27b, k=3) | tasks | schema_only | manual_prompt | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| A. every needed metric faithful | 118 | 27.1% | 46.0% | 44.9% | 46.9% |
+| B. a needed entry refused | 77 | 16.9% | 26.0% | 24.2% | 25.5% |
+| C. a needed metric wrong (material) | 47 | 16.3% | 27.0% | 31.9% | 30.5% |
+| D. no compiled metric needed | 25 | 46.7% | 45.3% | 56.0% | 45.3% |
+| E. a needed metric unclear | 35 | 16.2% | 41.0% | 38.1% | 38.1% |
+
+On Qwen neither effect is there: faithful definitions do not lift group A
+(10 tasks to 10, 15 to 15 against the manual), and refusals do not sink
+group B (1 to 3, 5 to 8). The luna split was exploratory, and on the model
+it was tested on it does not replicate, so the "two effects that cancel"
+account stays a luna observation, not a finding. It is not that Qwen ignores
+the definitions: it looks a metric up in 86% of its contract runs (luna
+93%), 1.8 lookups a run. What both models share is the null at the top: the
+compiled knowledge, however delivered, is worth what the manual is.
+
+### The compiler on DABStep: prediction (5)
+
+The same compiler, run on DABStep's manual (`contracts/dabstep/`),
+gives `contract_compiled`: only the authoring differs from the hand-written
+`contract`. Both arms ran together on `gpt-6-luna`, k=3, paired within each
+repeat, on the run commit. 2,406 task-runs, $8.08, no errors.
+
+| arm | r1 | r2 | r3 | mean |
+|---|---:|---:|---:|---:|
+| contract (hand-authored) | 321 | 318 | 326 | 80.2% |
+| contract_compiled | 180 | 185 | 184 | 45.6% |
+
+| tasks | n | contract | contract_compiled | contract better / worse |
+|---|---:|---:|---:|---:|
+| rule-set families | 60 | 97.2% | 16.7% | 60 / 0 |
+| total-fee families | 45 | 100.0% | 6.7% | 45 / 0 |
+| everything else | 296 | 73.8% | 57.4% | 91 / 18 |
+| all | 401 | 80.2% | 45.6% | 196 / 18 (p = 5e-39) |
+
+- **(5) mostly holds.** `contract_compiled` falls between the earlier runs'
+  `manual_prompt` (45.3%) and `contract` (81.1%), but only just above the
+  lower bound. The hand-authored contract beats it on 196 tasks and loses on
+  18. The loss is concentrated in the rule-set and total-fee families, where
+  the compiled contract is far below even `manual_prompt` (23 of 180 and 18
+  of 135 task-runs there).
+- **The last clause fails.** On the remaining tasks the compiled contract
+  does not stay close: it is 16 points behind, 91 tasks to 18.
+- The hand-authored arm reproduces: 80.2% here against 81.1% in the earlier
+  runs.
+
+So compiled knowledge, delivered the governed way, does what the manual does
+on both benchmarks: 45.6% against 45.3% on DABStep (not paired, different
+runs), 35.9% against 35.5% on LiveSQLBench. On DABStep, the 35-point gain
+belongs to the authored contract, not to the delivery as such. This favours
+hypothesis 1 over the other two: what a definition is worth depends on whether
+someone got it right, with the data open, and wrote down the procedure the
+tasks turn on.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

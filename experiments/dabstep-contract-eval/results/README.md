@@ -78,3 +78,30 @@ findings (formerly `docs/superpowers/specs/`, now in git history only) argue fro
 
 Rows written before those fixes carry the old schema, and lack
 `forced_answer`, `provider_tag`, `quantization` and `reasoning_effort`.
+
+## `dabstep-compiled-luna-r{1,2,3}.jsonl` -- the compiled DABStep contract, gpt-6-luna
+
+`contract` and `contract_compiled` on `gpt-6-luna`, 401 golded tasks, at the
+run commit `1c1e302`. Each repeat holds both arms and pairs within itself.
+Each sweep ran with `--retry-pass`, but no run errored, so every file has
+exactly one row per (task, arm). See FINDINGS.md, *The compiler on DABStep:
+prediction (5)*.
+
+## `livesqlbench/luna-r{1,2,3}.jsonl` -- four arms on LiveSQLBench, gpt-6-luna
+
+`schema_only`, `manual_prompt`, `manual_compiled` and `contract` on
+`gpt-6-luna`, all 375 frozen tasks (302 `primary`, 73 `order_only`), at the
+run commit `1c1e302`. Each repeat holds all four arms and pairs within
+itself. Each sweep ran with `--retry-pass`; five construction errors were
+retried once each, so those (task, arm) pairs have two rows and the loaders
+keep the last. A row carries `gold`, the sha256 of the gold result, never the
+gold itself. See FINDINGS.md, *LiveSQLBench: compiled knowledge, delivered
+two ways*. `livesqlbench/smoke.jsonl` is the 12-task smoke run before it.
+
+## `livesqlbench/qwen38-r{1,2,3}.jsonl` -- four arms on LiveSQLBench, qwen3.8-27b
+
+The same four arms and 375 tasks on `qwen3.8-27b`, at the same run commit
+`1c1e302`, k=3, `--retry-pass` on every repeat (14 construction errors
+retried; the loaders keep the last row per pair). Repeat 2 was resumed once
+after the job's volume filled while archiving traces; no row was rerun. See
+FINDINGS.md, *Qwen 3.8: the tie replicates, the two effects do not*.

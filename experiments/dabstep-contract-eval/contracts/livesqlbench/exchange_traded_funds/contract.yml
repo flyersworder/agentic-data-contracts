@@ -1,0 +1,60 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: exchange_traded_funds, compiler: claudesonnet5
+# inputs: exchange_traded_funds_kb.jsonl, exchange_traded_funds_column_meaning_base.json, exchange_traded_funds_schema.txt, exchange_traded_funds.duckdb
+version: '1.0'
+name: livesqlbench-exchange_traded_funds
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - annual_returns
+    - bond_allocations
+    - bond_ratings
+    - categories
+    - exchanges
+    - families
+    - family_categories
+    - family_exchanges
+    - funds
+    - holdings
+    - performance
+    - risk_metrics
+    - sector_allocations
+    - sectors
+    - securities
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

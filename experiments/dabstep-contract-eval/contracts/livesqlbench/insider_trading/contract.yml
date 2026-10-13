@@ -1,0 +1,75 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: insider_trading, compiler: claudesonnet5
+# inputs: insider_trading_kb.jsonl, insider_trading_column_meaning_base.json, insider_trading_schema.txt, insider_trading.duckdb
+version: '1.0'
+name: livesqlbench-insider_trading
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - corporate_events
+    - enforcement_actions
+    - instruments
+    - manipulation_signals
+    - market_conditions
+    - order_behaviour
+    - order_status_types
+    - reg_compliance
+    - sentiment_analytics
+    - trade_records
+    - trader_relationships
+    - traders
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Pattern Similarity Score Context: Provides context for the pattern similarity score, comparing trading
+      to known illicit behaviors.
+
+
+      A score from 0-1. Values near 1 indicate high similarity to known illicit trading patterns. Values
+      near 0 indicate patterns do not strongly match known manipulative techniques.
+
+
+      Compiler note: No column stores a 0-1 "pattern similarity score". reg_compliance.pat_rec ("pattern-recognition
+      metric") ranges 0-100 (checked min/max), not 0-1, so it doesn''t match this description. No other
+      column represents pattern similarity to known illicit behavior. This entry only provides interpretive
+      context for a concept referenced by other formulas (PAS, UPDR) but is not itself backed by a stored
+      column.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

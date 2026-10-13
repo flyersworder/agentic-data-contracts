@@ -1,0 +1,61 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: polar_equipment, compiler: claudesonnet5
+# inputs: polar_equipment_kb.jsonl, polar_equipment_column_meaning_base.json, polar_equipment_schema.txt, polar_equipment.duckdb
+version: '1.0'
+name: livesqlbench-polar_equipment
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - CabinEnvironment
+    - ChassisAndVehicle
+    - Communication
+    - EngineAndFluids
+    - Equipment
+    - EquipmentType
+    - LightingAndSafety
+    - Location
+    - OperationMaintenance
+    - PowerBattery
+    - Scientific
+    - StationEquipmentType
+    - ThermalSolarWindAndGrid
+    - Transmission
+    - WaterAndWaste
+    - WeatherAndStructure
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

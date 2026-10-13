@@ -1,0 +1,1255 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: cold_chain_pharma_compliance, compiler: claudesonnet5
+# inputs: cold_chain_pharma_compliance_kb.jsonl, cold_chain_pharma_compliance_column_meaning_base.json, cold_chain_pharma_compliance_schema.txt, cold_chain_pharma_compliance.duckdb
+metrics:
+- name: temperature_excursion_duration_ted
+  description: 'The total time a shipment spends outside its required temperature range during transit.
+
+
+    TED = \sum_{i=1}^{n} t_i, \text{where } t_i \text{ is the duration in minutes of each individual temperature
+    excursion event.}
+
+
+    Compiler note: TED is stored directly as env_metrics.temperature.excursion_duration_min (total minutes
+    of temperature deviation), already a sum over excursion events for the shipment.'
+  sql_expression: (env_metrics -> 'temperature' ->> 'excursion_duration_min')::bigint
+  source_model: main.environmentalmonitoring
+  domains:
+  - calculations
+- name: temperature_excursion_severity_index_tesi
+  description: 'Measures the severity of temperature excursions relative to product temperature requirements.
+
+
+    TESI = TED \times \frac{|T_{max} - T_{allowed}| + |T_{min} - T_{allowed}|}{2}, \text{where } T_{max}
+    \text{ and } T_{min} \text{ are the maximum and minimum temperatures recorded during excursions, and
+    } T_{allowed} \text{ is the allowed temperature range midpoint.}
+
+
+    Built on: temperature_excursion_duration_ted.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: TESI requires T_allowed, the midpoint of the product's allowed temperature range (ProductBatches.TempMin/TempMax),
+    to be matched to the shipment whose excursion data (TED, max_c, min_c) lives in EnvironmentalMonitoring.
+    However, there is no foreign key or join path linking Shipments/EnvironmentalMonitoring to ProductBatches
+    (no batch or product reference column on Shipments). Without this link, T_allowed cannot be determined
+    per shipment, so TESI cannot be computed over this schema.
+- name: critical_temperature_exposure
+  description: 'Indicates when a product has been exposed to temperatures that may significantly impact
+    product quality.
+
+
+    An exposure event where the product temperature deviates more than 5°C from its specified temperature
+    range for more than 60 consecutive minutes.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: There is no linkage in the schema between shipments/environmentalmonitoring and productbatches
+    (no batch reference column on shipments), so the "specified temperature range" for the product carried
+    on a given shipment cannot be determined to compute a >5°C deviation. Additionally, env_metrics only
+    stores total excursion_duration_min (and avg/min/max_c), not a per-event consecutive-minutes breakdown,
+    so "more than 60 consecutive minutes" cannot be distinguished from cumulative excursion time. Both
+    gaps make this metric impossible to encode over this database.
+- name: cold_chain_compliance_rate_cccr
+  description: 'Measures the percentage of shipments that maintained required temperature conditions throughout
+    transit.
+
+
+    CCCR = \frac{N_{compliant}}{N_{total}} \times 100\%, \text{where } N_{compliant} \text{ is the number
+    of shipments with zero temperature excursions, and } N_{total} \text{ is the total number of shipments.}
+
+
+    Compiler note: N_total and N_compliant are counted over EnvironmentalMonitoring rows (one per shipment);
+    compliant = temperature.excursion_count == 0 in env_metrics JSON. CCCR expressed as a percentage.'
+  sql_expression: SUM(CASE WHEN (env_metrics->'temperature'->>'excursion_count')::int = 0 THEN 1 ELSE
+    0 END) * 100.0 / COUNT(*)
+  source_model: main.environmentalmonitoring
+  domains:
+  - calculations
+- name: tier_1_cold_chain_products
+  description: 'Identifies the highest value and most temperature-sensitive pharmaceutical products.
+
+
+    Products with both a ''High'' temperature sensitivity and a value exceeding $100,000 USD.
+
+
+    Built on: Temperature Sensitivity Tiers.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The 'High' temperature sensitivity tier is defined by a product's tolerance to minor temperature
+    deviations (≤2 hours), a classification not present in or derivable from the schema. ProductBatches.TempSense
+    describes the temperature-sensing method/device type (High/Medium/Low), not product temperature sensitivity,
+    and checking distinct (store_cond, tempsense) pairs shows no fixed mapping between storage condition
+    and tempsense that could stand in for sensitivity tier. Without a stored or derivable sensitivity-tier
+    classification, the 'High' sensitivity condition cannot be encoded.
+- name: temperature_monitoring_gap
+  description: 'Indicates periods where temperature data is missing during transit.
+
+
+    A period of over 15 minutes where no temperature data points were recorded in a shipment that should
+    have continuous monitoring.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database does not store individual timestamped temperature data points/readings for
+    a shipment—only aggregated metrics per shipment (avg_c, min_c, max_c, excursion_count, excursion_duration_min,
+    alarm_count) in environmentalmonitoring.env_metrics. Detecting a "period of over 15 minutes with no
+    data points recorded" requires access to the raw reading timestamps/intervals, which is not present
+    in this schema (nor is there a reliable "should have continuous monitoring" flag tied to actual recording
+    cadence vs RecIntMin configuration). This cannot be computed from the available data.
+- name: cold_chain_monitoring_compliance_score_ccmcs
+  description: 'Evaluates the completeness and quality of monitoring data for a shipment.
+
+
+    CCMCS = 0.4 \times GPS\% + 0.4 \times Temp\% + 0.2 \times (100 - ER), \text{where GPS\% is the GPS
+    completeness percentage, Temp\% is the percentage of expected temperature readings received, and ER
+    is the error rate of readings.}
+
+
+    Built on: temperature_monitoring_gap.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CCMCS requires Temp% (percentage of expected temperature readings received) and ER (error
+    rate of readings), neither of which can be computed from this schema. environmentalmonitoring.env_metrics
+    only stores aggregated per-shipment metrics (avg_c, min_c, max_c, excursion_count, excursion_duration_min,
+    alarm_count) and gps_completeness_pct, but there is no count of actual vs expected temperature readings,
+    nor any error-rate field for readings. This is the same gap noted for Temperature Monitoring Gap -
+    raw reading-level data is not stored.
+- name: critical_monitoring_failure
+  description: 'Indicates when monitoring systems fail to provide sufficient data to assess product quality.
+
+
+    Occurs when either GPS completeness falls below 80% or when temperature monitoring has gaps exceeding
+    30 minutes during transit.
+
+
+    Built on: temperature_monitoring_gap, cold_chain_monitoring_compliance_score_ccmcs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This is an OR of two conditions: GPS completeness < 80% (encodable from env_metrics.tracking.gps_completeness_pct)
+    and temperature monitoring gaps exceeding 30 minutes (not encodable - the database has no raw timestamped
+    temperature readings, only aggregated per-shipment metrics like excursion_count/excursion_duration_min,
+    which measure out-of-range deviations, not missing-data gaps in recording cadence). Since the predicate
+    is a disjunction and one disjunct cannot be computed from available data, the overall boolean cannot
+    be reliably determined (would produce false negatives for shipments with gaps but good GPS and no
+    excursions). Same underlying data gap as noted for ''Temperature Monitoring Gap''.'
+- name: on_time_delivery_performance_otdp
+  description: 'Measures how accurately shipments meet their planned delivery times.
+
+
+    OTDP = \frac{actual\_duration}{planned\_duration} \times 100\%, \text{where a value of 100\% indicates
+    exact on-time delivery, <100\% is early, and >100\% is late delivery.}
+
+
+    Compiler note: OTDP = actual_duration_hrs / planned_eta_hrs * 100, both from shipment_overview->timing_performance
+    JSON fields.'
+  sql_expression: (shipment_overview->'timing_performance'->>'actual_duration_hrs')::numeric / (shipment_overview->'timing_performance'->>'planned_eta_hrs')::numeric
+    * 100
+  source_model: main.shipments
+  domains:
+  - calculations
+- name: carrier_performance_index_cpi
+  description: 'Measures the overall performance of a carrier across multiple shipments.
+
+
+    CPI = 0.4 \times CCCR + 0.3 \times (100 - ATNR) + 0.2 \times (100 - ASDI) + 0.1 \times DPR, \text{where
+    CCCR is Cold Chain Compliance Rate, ATNR is Average Temperature Non-conformance Rate, ASDI is Average
+    Shock and Damage Incidents, and DPR is Documentation Problem Rate.}
+
+
+    Built on: cold_chain_compliance_rate_cccr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: No link exists in the schema between carriers/vehicles and shipments (no FK from shipments,
+    environmentalmonitoring, or any other table to Vehicles/Carriers), so CPI cannot be computed per carrier.
+    Additionally, ATNR (Average Temperature Non-conformance Rate), ASDI (Average Shock and Damage Incidents),
+    and DPR (Documentation Problem Rate) are not defined as computable metrics elsewhere in the documentation
+    or data.
+- name: major_pharmaceutical_markets
+  description: 'Identifies the primary global pharmaceutical markets for cold chain distribution.
+
+
+    Major pharmaceutical markets include: United States, European Union (specifically Germany, France,
+    Italy, Spain, and United Kingdom), Japan, China, Brazil, India, and Russia.
+
+
+    Compiler note: Encoded as a predicate flagging shipments whose origin or destination nation is one
+    of the listed major markets. Verified exact nation string values in the data (e.g. ''United States
+    of America'' rather than ''United States''; ''Japan'' and ''Russia'' do not appear as origin/destination
+    in current data but are included for completeness). Checked origin/destination nation fields are plain
+    text (not multi-value), so IN-list comparison applies directly.'
+  sql_expression: (shipment_overview->'route'->'origin'->>'nation') IN ('United States of America','Germany','France','Italy','Spain','United
+    Kingdom','Japan','China','Brazil','India','Russia') OR (shipment_overview->'route'->'destination'->>'nation')
+    IN ('United States of America','Germany','France','Italy','Spain','United Kingdom','Japan','China','Brazil','India','Russia')
+  source_model: main.shipments
+  domains:
+  - definitions
+- name: high_risk_shipping_origin_destination_pairs
+  description: 'Identifies shipping routes that historically show elevated risks for cold chain integrity.
+
+
+    Shipping lane combinations that either: 1) cross more than three climate zones, 2) involve more than
+    two carrier transfers, 3) include countries with historical customs delays exceeding 48 hours, or
+    4) have previously documented temperature excursion rates above 15%.
+
+
+    Built on: Route Risk Classification, major_pharmaceutical_markets.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The database has no data on climate zones crossed, number of carrier transfers per shipment,
+    or historical country-level customs delay durations, and no stored "historical excursion rate" per
+    lane. These factors cannot be derived from the available columns (shipment_overview only gives single
+    origin/destination hub+nation, not transfer counts or climate zones), so this condition cannot be
+    encoded.
+- name: packing_integrity_risk_factor_pirf
+  description: 'Quantifies the risk of packaging failure based on product, route, and handling conditions.
+
+
+    PIRF = \frac{S \times D \times T}{P}, \text{where S is the shock event count, D is the distance in
+    thousands of km, T is a temperature factor (1 for 15-25°C, 1.5 for 2-8°C, 2 for -20°C, 2.5 for -70°C),
+    and P is the packaging robustness factor (1-10, with 10 being most robust).}
+
+
+    Built on: Product Storage Classifications.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: PIRF requires P, the packaging robustness factor (1-10), which is not present in the database.
+    ProductBatches.pack_type only gives a categorical packaging type (Ampoule, Container, Vial, Syringe)
+    with no documented numeric robustness mapping, so P cannot be derived. Hence PIRF cannot be computed.
+- name: shipment_risk_score_srs
+  description: 'A comprehensive risk assessment score for cold chain shipments.
+
+
+    SRS = 0.3 \times TESI + 0.25 \times PIRF + 0.25 \times (100 - CCMCS) + 0.2 \times RRF, \text{where
+    TESI is Temperature Excursion Severity Index, PIRF is Packing Integrity Risk Factor, CCMCS is Cold
+    Chain Monitoring Compliance Score, and RRF is Route Risk Factor (1-10 based on Route Risk Classification).}
+
+
+    Built on: temperature_excursion_severity_index_tesi, cold_chain_monitoring_compliance_score_ccmcs,
+    packing_integrity_risk_factor_pirf, Route Risk Classification.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'SRS depends on TESI, PIRF, and CCMCS, none of which can be computed over this schema
+    (as documented in their own entries: TESI lacks a join path from shipments to batch temperature limits;
+    PIRF lacks a packaging robustness factor; CCMCS lacks expected-reading counts and error rate data).
+    Since all three required sub-metrics are uncomputable, SRS cannot be encoded either.'
+- name: temperature_sensitive_product_categories
+  description: 'The main categories of pharmaceutical products requiring temperature-controlled transport.
+
+
+    Temperature-sensitive product categories include: Vaccines, Biologics (including monoclonal antibodies
+    and recombinant proteins), Blood Products (including plasma and platelets), and Insulin products.
+
+
+    Compiler note: Encoded as membership predicate over Products.ProdCat, matching the four documented
+    categories (Vaccines, Biologics, Blood Products, Insulin), which are exactly the possible values of
+    this column.'
+  sql_expression: prodcat IN ('Vaccines', 'Biologics', 'Blood Products', 'Insulin')
+  source_model: main.products
+  domains:
+  - definitions
+- name: time_in_range_percentage_tirp
+  description: 'Calculates the percentage of time a shipment''s temperature stayed within required parameters.
+
+
+    TIRP = \frac{T_{total} - TED}{T_{total}} \times 100\%, \text{where } T_{total} \text{ is the total
+    transit time and TED is the Temperature Excursion Duration.}
+
+
+    Built on: temperature_excursion_duration_ted.
+
+
+    Compiler note: T_total taken as actual_duration_hrs from shipments.shipment_overview.timing_performance
+    (converted to minutes by *60) to match TED units (excursion_duration_min, minutes) from environmentalmonitoring.env_metrics.temperature.
+    Join reckeylink=reckey is 1:1 (both PK/FK unique). TIRP = (T_total_min - TED)/T_total_min * 100.'
+  sql_expression: (( (SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double
+    precision FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60 - (env_metrics->'temperature'->>'excursion_duration_min')::bigint
+    ) / ( (SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double precision
+    FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60 )) * 100
+  source_model: main.environmentalmonitoring
+  domains:
+  - calculations
+- name: mean_kinetic_temperature_mkt
+  description: 'A calculated temperature that expresses the overall effect of temperature fluctuations
+    during storage or transit.
+
+
+    MKT = \frac{-\Delta H/R}{\ln\left(\frac{\sum_{i=1}^{n} e^{-\Delta H/RT_i}}{n}\right)}, \text{where
+    } \Delta H \text{ is the activation energy (usually 83.144 kJ/mol for pharmaceuticals), R is the gas
+    constant (8.3144 J/mol/K), and } T_i \text{ is each temperature point in Kelvin.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: MKT requires the full series of individual temperature readings (T_i) recorded over time
+    for a shipment to compute the sum of exponential terms. The database only stores aggregated avg_c/min_c/max_c
+    per shipment in env_metrics, not the raw time series of temperature points, so this cannot be computed.
+- name: quality_risk_zones
+  description: 'Identifies risk levels for temperature-sensitive products based on excursion metrics.
+
+
+    Quality risk zones are: ''Green Zone'' (TIRP > 98% and no excursions > 30 min), ''Yellow Zone'' (95%
+    ≤ TIRP ≤ 98% or any excursion 30-60 min), ''Red Zone'' (TIRP < 95% or any excursion > 60 min).
+
+
+    Built on: time_in_range_percentage_tirp, temperature_excursion_duration_ted.
+
+
+    Compiler note: Used TIRP and TED definitions provided. The data only records a single aggregated excursion_duration_min
+    per shipment, not per-event durations, so the ''any single excursion 30-60 min'' / ''>60 min'' criteria
+    are approximated using this total excursion duration value as the proxy for the (only) excursion event''s
+    duration. Joined to shipments via reckeylink=reckey (1-1 PK match) to get actual_duration_hrs for
+    TIRP.'
+  sql_expression: "CASE\n  WHEN (\n    ((SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double\
+    \ precision FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60 - (env_metrics->'temperature'->>'excursion_duration_min')::bigint)\n\
+    \    / ((SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double precision\
+    \ FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60) * 100\n  ) < 95 OR (env_metrics->'temperature'->>'excursion_duration_min')::bigint\
+    \ > 60 THEN 'Red Zone'\n  WHEN (\n    ((SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double\
+    \ precision FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60 - (env_metrics->'temperature'->>'excursion_duration_min')::bigint)\n\
+    \    / ((SELECT (s.shipment_overview->'timing_performance'->>'actual_duration_hrs')::double precision\
+    \ FROM shipments s WHERE s.reckey = environmentalmonitoring.reckeylink) * 60) * 100\n  ) <= 98 OR\
+    \ ((env_metrics->'temperature'->>'excursion_duration_min')::bigint >= 30 AND (env_metrics->'temperature'->>'excursion_duration_min')::bigint\
+    \ <= 60) THEN 'Yellow Zone'\n  ELSE 'Green Zone'\nEND"
+  source_model: main.environmentalmonitoring
+  domains:
+  - definitions
+- name: premium_transport_container_types
+  description: 'Identifies specialized containers used for high-value pharmaceutical transport.
+
+
+    Premium transport containers include: Envirotainer RAP e2, Envirotainer RKN e1, va-Q-tainer USx, CSafe
+    RKN, DoKaSch Opticooler, and Sonoco ThermoSafe PharmaPort 360.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: No column in the database stores specific container brand/model names (e.g., Envirotainer
+    RAP e2, CSafe RKN). Vehicles.VehType only has generic categories (Aircraft, Container, Reefer Truck,
+    Van), not these specific premium container models, so this list cannot be matched against any data.
+- name: supply_chain_resilience_score_scrs
+  description: 'Measures a cold chain''s ability to maintain integrity despite disruptions.
+
+
+    SCRS = 0.4 \times ART + 0.3 \times RRD + 0.2 \times SBP + 0.1 \times SMC, \text{where ART is Alternative
+    Route Availability (0-10), RRD is Redundant Resources Depth (0-10), SBP is Supplier Backup Presence
+    (0-10), and SMC is Stock Management Capability (0-10).}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database holds no data on Alternative Route Availability, Redundant Resources Depth,
+    Supplier Backup Presence, or Stock Management Capability. These are supply-chain-level resilience
+    attributes not captured anywhere in the shipments, products, carriers, vehicles, monitoring, quality,
+    incident, insurance, or review tables, so SCRS cannot be computed.
+- name: pharmaceutical_stability_budget
+  description: 'The total allowable time a product can spend outside of ideal conditions before quality
+    is compromised.
+
+
+    The maximum cumulative duration (typically specified in hours or days) that a pharmaceutical product
+    can experience conditions outside its labeled storage requirements without significant impact to its
+    quality, safety, or efficacy. Null values indicate stability budget has not been determined for the
+    product.
+
+
+    Built on: Temperature Sensitivity Tiers, Product Storage Classifications.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This defines a per-product allowable stability budget duration, which is not stored anywhere
+    in the database (no such column/table exists for products or batches). It is a conceptual attribute,
+    not a computation or predicate over existing rows.
+- name: stability_budget_consumption_rate_sbcr
+  description: 'Measures how quickly a shipment is consuming its allocated stability budget during transit.
+
+
+    SBCR = \frac{TED}{SB_{total}} \times 100\%, \text{where TED is the Temperature Excursion Duration
+    and } SB_{total} \text{ is the total stability budget allocated for the product.}
+
+
+    Built on: temperature_excursion_duration_ted, pharmaceutical_stability_budget.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: SBCR requires SB_total (Pharmaceutical Stability Budget), a per-product allowable excursion
+    duration that is not stored anywhere in the database (no such column/table exists for products or
+    batches). Since this dependency cannot be encoded, SBCR itself cannot be computed over this database.
+- name: package_integrity_monitoring_systems
+  description: 'Identifies technologies used to monitor physical integrity of packages during transit.
+
+
+    Package integrity monitoring systems include: Shock Indicators (mechanical devices that show when
+    a package has received an impact), Tilt Indicators (show if a package was tilted beyond acceptable
+    angles), Electronic Impact Recorders (provide detailed shock measurements), and Pressure Indicators
+    (monitor pressure changes in sealed containers).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry lists categories of physical package-integrity monitoring technologies (shock,
+    tilt, electronic impact, pressure indicators) as a general concept, not a value stored in or computable
+    from the database. No table/column records which monitoring technology type was used; it's a taxonomy,
+    not a row-level condition or calculation.
+- name: product_release_decision_framework
+  description: 'Structured approach for determining if temperature-sensitive products can be released
+    for use after transport.
+
+
+    A decision framework considering: 1) Presence of temperature excursions, 2) Stability data for specific
+    excursion profiles, 3) Package integrity, 4) Product appearance, and 5) Analytical testing results
+    if required. Products can be ''Released'' (meets all criteria), ''Released with CAPA'' (meets essential
+    criteria but requires corrective action), ''Quarantined'' (requires further investigation), or ''Rejected''
+    (failed critical criteria).
+
+
+    Built on: quality_risk_zones, pharmaceutical_stability_budget, package_integrity_monitoring_systems.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This is a conceptual decision framework combining five criteria (temperature excursion
+    presence, stability data for excursion profiles, package integrity, product appearance, and analytical
+    testing results) to classify products into release categories. The database does not store stability
+    data profiles, product appearance assessments, or analytical testing results anywhere; only loosely
+    related fields exist (qc_checklist.product_release_status is itself a stored outcome, not a derivable
+    computation of this framework). Since the framework's defining inputs aren't present as columns, it
+    cannot be encoded as a SQL computation/predicate over any single table.
+- name: lane_risk_potential_lrp
+  description: 'Quantifies the risk associated with a specific shipping route based on historical performance.
+
+
+    LRP = \frac{TE_{total} + SD_{total} + CD_{total}}{N_{shipments}}, \text{where } TE_{total} \text{
+    is the total count of temperature excursions, } SD_{total} \text{ is the total count of shipping delays,
+    } CD_{total} \text{ is the total count of customs delays, and } N_{shipments} \text{ is the number
+    of shipments on that lane.}
+
+
+    Built on: temperature_excursion_duration_ted, Delivery Performance Classification.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: LRP requires lane-level aggregation (grouping shipments by origin-destination route) and
+    counts of "shipping delays" and "customs delays" which are not defined as discrete countable events
+    in this schema. Temperature excursion counts exist (env_metrics.temperature.excursion_count), but
+    there is no field tracking a count of "shipping delays" (only a single actual_duration_hrs vs planned_eta_hrs
+    comparison per shipment) nor a count of "customs delays" (qc_checklist.customs_and_regulatory has
+    status fields like 'Delayed' for custom_clearance_status, but no count of delay events). Also this
+    is an aggregate per-lane metric, not a per-row expression over one table, and lanes aren't a materialized
+    grouping key - route_string could serve as lane but SD_total/CD_total definitions are not encodable
+    from available columns.
+- name: storage_temperature_requirements_for_biologics
+  description: 'Specifies the standard temperature storage requirements for biological pharmaceutical
+    products.
+
+
+    Most biologics require storage at either ''2-8°C'' (refrigerated) or ''-20°C'' (frozen), with certain
+    specialized biologic products requiring ''-70°C'' (ultra-low temperature) storage. Room temperature
+    (15-25°C) storage is rarely suitable for biologics unless specifically formulated for stability at
+    those temperatures.
+
+
+    Built on: Product Storage Classifications, temperature_sensitive_product_categories.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a general industry guideline ("most biologics require 2-8°C or -20°C,
+    with some needing -70°C; 15-25°C rarely suitable") rather than a strict, deterministic rule. Terms
+    like "most" and "rarely suitable unless specifically formulated" are not falsifiable conditions over
+    the data - there's no column indicating whether a biologic was "specifically formulated for room-temperature
+    stability", so a predicate like store_cond IN ('2-8°C','-20°C','-70°C') for Biologics would encode
+    a stricter rule than the entry actually states.
+- name: last_mile_delivery_risk
+  description: 'Specific risks associated with the final stage of pharmaceutical product delivery.
+
+
+    Last mile delivery risks include: Lack of temperature-controlled vehicles, Multiple stops increasing
+    door-opening frequency, Variable driver training in handling procedures, Inconsistent receiving procedures
+    at destinations, and Limited monitoring capabilities compared to main transport segments.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry is a descriptive list of qualitative last-mile delivery risk factors (vehicle
+    type availability, driver training variability, receiving procedure consistency, monitoring capability
+    differences), not a measurable condition or computation over any table's columns. No schema fields
+    capture "last mile" segments, driver training, or receiving procedures, so this cannot be encoded
+    as a boolean predicate or SQL expression.
+- name: temperature_profile_categorization
+  description: 'Classifies the pattern of temperature readings during a shipment.
+
+
+    Temperature profiles are categorized as: ''Stable'' (minimal variations within range), ''Cyclic''
+    (regular patterns of variation within range), ''Trend'' (gradual increase or decrease over time),
+    ''Excursion'' (periods outside acceptable range), or ''Erratic'' (unpredictable variations suggesting
+    monitoring issues).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Categorizing temperature profiles as Stable/Cyclic/Trend/Excursion/Erratic requires analyzing
+    the shape/pattern of a time series of individual temperature readings over time (regularity, trend
+    direction, unpredictability). The database only stores aggregate per-shipment statistics (avg_c, min_c,
+    max_c, excursion_count, excursion_duration_min, alarm_count) in environmentalmonitoring.env_metrics
+    - there is no table of individual timestamped temperature readings to detect cyclic patterns, trends,
+    or erratic behavior. This cannot be computed from the available schema.
+- name: excursion_impact_assessment_eia
+  description: 'Evaluates the potential quality impact of temperature excursions on product.
+
+
+    EIA = \sum_{i=1}^{n} (|T_i - T_{limit}| \times t_i), \text{where } T_i \text{ is the temperature during
+    excursion } i, T_{limit} \text{ is the nearest temperature limit (upper or lower), and } t_i \text{
+    is the duration of excursion } i \text{ in hours.}
+
+
+    Built on: temperature_excursion_duration_ted, Product Storage Classifications.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: EIA requires summing |T_i - T_limit| * t_i over each individual excursion event, but the
+    database only stores shipment-level aggregates (max_c, min_c, avg_c, excursion_duration_min as a single
+    total) in environmentalmonitoring.env_metrics, not per-excursion temperature/duration pairs. Additionally,
+    there is no link between shipments and productbatches (no FK), so the allowed temperature range (T_limit)
+    for a shipment's product cannot be determined. Both the per-event granularity and the product-temperature-limit
+    join are missing, so this metric cannot be computed from this schema.
+- name: primary_cold_chain_monitoring_authorities
+  description: 'Key regulatory bodies that oversee cold chain management for pharmaceuticals.
+
+
+    Primary regulatory authorities for pharmaceutical cold chains include: FDA (US Food and Drug Administration),
+    EMA (European Medicines Agency), MHRA (UK Medicines and Healthcare products Regulatory Agency), Health
+    Canada, TGA (Australian Therapeutic Goods Administration), PMDA (Japanese Pharmaceuticals and Medical
+    Devices Agency), and WHO (World Health Organization).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry lists external regulatory authorities (FDA, EMA, MHRA, etc.) that oversee cold
+    chain management. It is reference knowledge about real-world organizations, not a condition or computation
+    derivable from any column or row in this database.
+- name: risk_based_monitoring_intensity
+  description: 'Determines appropriate monitoring frequency based on product risk profile.
+
+
+    High-risk products (biologics, vaccines) require continuous temperature monitoring with 5-minute intervals,
+    medium-risk products should have 15-minute intervals, and low-risk products can use 30-minute intervals,
+    with null values in monitoring frequency indicating unplanned or non-standardized monitoring approaches.
+
+
+    Built on: Temperature Sensitivity Tiers, temperature_sensitive_product_categories.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: There is no relationship in the schema linking products/productbatches (which carry prodcat,
+    the basis for risk-tier classification) to shipments or to monitoringdevices.recintmin (the actual
+    monitoring interval). ProductBatches has no FK to Shipments, and Shipments has no batch reference,
+    so a product's risk profile cannot be joined to the monitoring interval actually used on a shipment.
+    Without this join, the condition "appropriate interval for product's risk tier" cannot be computed
+    over any single table.
+- name: cold_chain_cost_efficiency_ratio_ccer
+  description: 'Measures the relationship between cold chain protection costs and product value.
+
+
+    CCER = \frac{C_{monitoring} + C_{packaging} + C_{transport}}{V_{product}} \times 100\%, \text{where
+    } C_{monitoring}, C_{packaging}, C_{transport} \text{ are the respective costs, and } V_{product}
+    \text{ is the product value.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The database has no columns for monitoring cost, packaging cost, or transport cost (C_monitoring,
+    C_packaging, C_transport). Only product declared value (ValUSD) and insurance value (InsUSD) exist,
+    with no cost-of-protection data, so CCER cannot be computed.
+- name: quality_management_system_maturity_model
+  description: 'Framework for assessing the sophistication of a cold chain quality management system.
+
+
+    QMS maturity levels range from Level 1 (Basic: minimal documentation and reactive approaches) to Level
+    5 (Optimized: fully integrated systems with continuous improvement). Intermediate levels include Level
+    2 (Developing: standard procedures established), Level 3 (Defined: processes are well-documented and
+    followed), and Level 4 (Managed: processes are measured and controlled).
+
+
+    Built on: Quality Agreement Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes a qualitative, external framework for assessing organizational QMS
+    sophistication (5 maturity levels based on documentation practices, process definition, measurement,
+    and continuous improvement). It is not derived from any measurable column or combination of columns
+    in the database - no table tracks "documentation practices," "process control," or "continuous improvement"
+    at this level of abstraction. It describes an assessment methodology/value, not a computation or boolean
+    condition over rows.
+- name: data_logger_reliability_score_dlrs
+  description: 'Assesses the reliability of temperature monitoring devices based on historical performance.
+
+
+    DLRS = 100 - (10 \times F_r + 5 \times F_d + 3 \times F_c + 2 \times F_b), \text{where } F_r \text{
+    is the rate of reading failures, } F_d \text{ is the rate of download failures, } F_c \text{ is the
+    calibration drift rate, and } F_b \text{ is the battery failure rate. All rates are per 100 deployments.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: No data exists for reading failure rate, download failure rate, calibration drift rate,
+    or battery failure rate per deployment for monitoring devices. The schema only has calibration timestamp,
+    accuracy, recording interval and temp points - none of which record failure/drift rates needed for
+    DLRS.
+- name: acceptable_temperature_deviation_limits
+  description: 'Industry standards for tolerable temperature deviations during pharmaceutical transport.
+
+
+    For refrigerated products (2-8°C): brief excursions (< 30 min) to 0-12°C may be acceptable; For frozen
+    products (-20°C): brief excursions to -15°C may be acceptable; For ultra-frozen products (-70°C):
+    brief excursions to -60°C may be acceptable; For controlled room temperature products (15-25°C): brief
+    excursions to 10-30°C may be acceptable.
+
+
+    Built on: Product Storage Classifications, pharmaceutical_stability_budget.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires knowing which product/storage classification (2-8°C, -20°C, -70°C,
+    15-25°C) applies to each shipment's temperature readings, in order to pick the correct acceptable
+    deviation band and brief-excursion duration (<30 min). However, there is no foreign key or join path
+    linking shipments/environmentalmonitoring (which hold env_metrics temperature readings and excursion
+    durations) to productbatches (which holds store_cond). Without a shared key, the storage classification
+    for a given shipment's readings cannot be determined, so the per-classification deviation-limit check
+    cannot be computed over any single table or via scalar subqueries.
+- name: last_mile_delivery_metrics
+  description: 'Key performance indicators specific to final stage pharmaceutical delivery.
+
+
+    Key last mile metrics include: First Attempt Delivery Success Rate, Temperature Deviation Frequency,
+    Receiver Wait Time, Documentation Completion Rate, and Handler Qualification Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines a list of qualitative KPI names/categories for last-mile delivery (First
+    Attempt Delivery Success Rate, Temperature Deviation Frequency, Receiver Wait Time, Documentation
+    Completion Rate, Handler Qualification Status). It is not a single boolean predicate or computation,
+    and the database has no columns capturing first-attempt delivery success, receiver wait time, or handler
+    qualification, so it cannot be encoded as a condition over any one table's rows.
+- name: batch_release_critical_path_elements
+  description: 'The essential components required before a temperature-sensitive product batch can be
+    released.
+
+
+    Critical path elements include: Complete temperature history with no unexplained gaps, Confirmation
+    that any excursions were within stability budgets, Intact security seals or acceptable explanation
+    for compromised seals, Complete chain of custody documentation, and Acceptable visual inspection results.
+
+
+    Built on: pharmaceutical_stability_budget, Security Incident Severity Scale, temperature_monitoring_gap.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry requires: (1) confirming excursions were within a per-product stability budget,
+    which is not stored anywhere in the database (noted as not compiled); (2) detecting unexplained gaps
+    in temperature history, which requires raw timestamped readings not present in the schema (only aggregates
+    like avg_c, excursion_count exist). Since two of the five required critical path elements cannot be
+    computed from available data, the overall predicate cannot be encoded.'
+- name: validation_documentation_requirements
+  description: 'The essential documentation needed to validate cold chain processes and equipment.
+
+
+    Required validation documents include: Validation Master Plan, Risk Assessment, User Requirements
+    Specification, Design Qualification, Installation Qualification, Operational Qualification, Performance
+    Qualification, Temperature Mapping Studies, and Final Validation Report.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry lists required validation documentation categories (Validation Master Plan,
+    Risk Assessment, URS, DQ, IQ, OQ, PQ, Temperature Mapping Studies, Final Validation Report). It names
+    document types that must exist, not a condition over rows of any table in the database; there is no
+    column tracking validation document checklist completion.
+- name: serialization_maturity_model
+  description: 'Framework for assessing pharmaceutical tracking and tracing capabilities.
+
+
+    Serialization maturity levels are: Level 0 (No serialization), Level 1 (Batch-level tracking only),
+    Level 2 (Package-level serialization without systematic verification), Level 3 (Verified package-level
+    serialization), and Level 4 (End-to-end serialized supply chain with real-time visibility).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: No table or column in this database captures serialization/tracking-and-tracing capability
+    data (batch-level vs package-level vs verified vs end-to-end tracking). This framework describes an
+    external maturity classification not derivable from any stored field.
+- name: gdp_corrective_action_categories
+  description: 'Standard categories for corrective actions in Good Distribution Practice.
+
+
+    GDP corrective action categories include: Training Enhancement, Documentation Update, Process Modification,
+    Equipment Upgrade, Supplier Management, Transport Adjustment, Monitoring Improvement, and Regulatory
+    Compliance Actions.
+
+
+    Built on: GDP Certification Status, quality_management_system_maturity_model.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry lists a fixed set of standard GDP corrective action category labels (Training
+    Enhancement, Documentation Update, Process Modification, Equipment Upgrade, Supplier Management, Transport
+    Adjustment, Monitoring Improvement, Regulatory Compliance Actions). It is a reference taxonomy/value
+    list, not a computation or boolean condition over any table's rows; no column in the schema records
+    corrective action category.
+- name: temperature_accuracy_impact_factor_taif
+  description: 'Quantifies the potential error in product status assessment due to monitoring device accuracy
+    limitations.
+
+
+    TAIF = \frac{|T_{max} - T_{upper}|}{A} + \frac{|T_{min} - T_{lower}|}{A}, \text{where } T_{max} \text{
+    and } T_{min} \text{ are the maximum and minimum recorded temperatures, } T_{upper} \text{ and } T_{lower}
+    \text{ are the upper and lower temperature limits, and } A \text{ is the stated accuracy of the monitoring
+    device in °C.}
+
+
+    Built on: data_logger_reliability_score_dlrs, Monitoring Device Calibration Status.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: There is no link between shipments/environmentalmonitoring and productbatches (no shipment-to-batch
+    foreign key in the schema), so the allowed temperature limits (T_upper, T_lower) for a given shipment's
+    product cannot be determined to compute TAIF alongside the recorded max/min temperatures and device
+    accuracy.
+- name: data_integrity_components
+  description: 'Essential elements that ensure cold chain data is reliable for decision-making.
+
+
+    Data integrity components include the ALCOA+ principles: Attributable (traceable to individual/system),
+    Legible (readable and permanent), Contemporaneous (recorded at time of activity), Original (source
+    data or certified copy), Accurate (error-free), plus Complete (all data included), Consistent (expected
+    sequence followed), Enduring (preserved for required period), and Available (accessible when needed).'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry describes the ALCOA+ data integrity principles, a conceptual/qualitative framework
+    for evaluating data reliability. It is not a computation or boolean condition over any table's rows;
+    no column or combination of columns in the database encodes these abstract principles.
+tables:
+- schema: main
+  table: carriers
+  columns:
+  - name: carriertag
+    type: VARCHAR
+    description: 'text. Unique carrier identifier. PK. Example: Rodriguez, Mcintyre and Richards.'
+  - name: carriercert
+    type: VARCHAR
+    description: 'text. Certification credentials or licence ID. **NULL means certification information
+      unavailable.**. Possible values: Both, CEIV Pharma, GDP.
+
+
+      GDP Certification Status: Illustrates the certification levels for carriers in Good Distribution
+      Practice.
+
+
+      Carriers can have one of the following certification statuses: ''None'' (no certification), ''GDP''
+      (Good Distribution Practice certified), ''CEIV Pharma'' (IATA Center of Excellence for Independent
+      Validators certification), or ''Both'' (having both GDP and CEIV Pharma certifications). Null values
+      indicate pending certification status verification.
+
+
+      Compiler note: Describes the categorical values of carriers.carriercert: ''GDP'', ''CEIV Pharma'',
+      ''Both'' observed; blank/null entries (281 rows) correspond to ''None''/pending verification per
+      entry text.'
+- schema: main
+  table: environmentalmonitoring
+  columns:
+  - name: reckeylink
+    type: VARCHAR
+    description: text. Shipment record key this monitoring pertains to. PK. FK to Shipments.
+  - name: devlink
+    type: VARCHAR
+    description: text. Monitoring-device reference. FK to MonitoringDevices.
+  - name: env_metrics
+    type: JSON
+    description: 'JSONB column. Consolidates all temperature, humidity, shock, light and tracking telemetry
+      collected for a shipment into one JSONB object for faster rule-engine evaluation. Fields: {"temperature":
+      {"avg_c": "real. Average temperature recorded (°C). Example: 3.1.", "min_c": "real. Minimum temperature
+      recorded (°C). Example: 0.1.", "max_c": "real. Maximum temperature recorded (°C). Example: 10.0.",
+      "excursion_count": "bigint. Count of temperature deviations beyond limits. Example: 4.", "excursion_duration_min":
+      "bigint. Total minutes of temperature deviation. Example: 48.", "alarm_count": "bigint. Number of
+      temperature alarm events. Possible values: 0, 1, 2, 3, 4, 5."}, "humidity": {"humidity_monitor":
+      "text. Humidity monitoring flag. **NULL means humidity was not monitored.**. Possible values: No,
+      Partial, Yes.", "avg_pct": "real. Average relative humidity percentage. Example: 42.3.", "excursion_count":
+      "bigint. Count of humidity deviations. Possible values: 0, 1, 2, 3, 4, 5."}, "light_and_shock":
+      {"light_monitor_mode": "text. Light-exposure monitoring flag. **NULL means light was not monitored.**.
+      Possible values: Continuous, Periodic.", "shock_monitor": "text. Shock-event monitoring flag. **NULL
+      means shock was not monitored.**. Possible values: Active, Passive.", "shock_event_count": "bigint.
+      Count of shock events detected. Example: 5."}, "tracking": {"location_tracking_state": "text. Location-tracking
+      status indicator. Possible values: Active, Failed, Intermittent.", "gps_completeness_pct": "text.
+      GPS completeness/coverage descriptor. Example: 97.4.", "route_deviation_incidents": "bigint. Number
+      of route deviation incidents. Possible values: 0, 1, 2, 3.", "unscheduled_stops": "bigint. Count
+      of unplanned stops. Possible values: 0, 1, 2, 3, 4, 5.", "stop_duration_min": "bigint. Total minutes
+      spent in unplanned stops. Example: 55."}}
+
+
+      Location Tracking States: Illustrates the possible states of location tracking systems during transit.
+
+
+      Location tracking can be in one of these states: ''Active'' (providing regular updates), ''Intermittent''
+      (occasional gaps in tracking), ''Failed'' (no longer providing location data), or null (tracking
+      was not implemented for this shipment).
+
+
+      Compiler note: Describes values of env_metrics->tracking->location_tracking_state (Active/Intermittent/Failed/null),
+      confirmed present in sample rows.'
+- schema: main
+  table: incidentandriskmanagement
+  columns:
+  - name: reckeyrisk
+    type: VARCHAR
+    description: text. Shipment record key for risk log. PK. FK to Shipments.
+  - name: incident_risk_record
+    type: JSON
+    description: 'JSONB column. Combines stability review, deviation investigation, risk assessment, reporting
+      and impact analysis for a shipment into one JSONB structure to support CAPA and pharmacovigilance
+      workflows. Fields: {"stability_and_quality": {"stability_data_review": "text. Stability-data review
+      summary. Possible values: Completed, Not Required, Pending.", "stability_impact_assessment": "text.
+      Assessment of stability impact. **NULL means impact not assessed.**. Possible values: Major, Minor.",
+      "product_quality_impact": "text. Product-quality impact summary. **NULL means impact not assessed.**.
+      Possible values: Confirmed, Possible."}, "batch_decision": {"batch_release_decision": "text. Decision
+      on batch release. Possible values: Approved, Pending, Rejected."}, "deviation_investigation": {"investigation_status":
+      "text. Deviation investigation status. **NULL means investigation not started.**. Possible values:
+      Completed, Ongoing.", "corrective_actions": "text. Corrective actions taken. **NULL means actions
+      not defined.**. Possible values: Implemented, Pending.", "preventive_actions": "text. Preventive
+      actions planned. **NULL means actions not defined.**. Possible values: Implemented, Planned."},
+      "risk": {"risk_assessment_status": "text. Overall risk-assessment status. Possible values: Completed,
+      Ongoing, Required.", "risk_level": "text. Assigned risk level. **NULL means level not set.**. Possible
+      values: High, Low, Medium."}, "reporting_notification": {"incident_report_status": "text. Incident-reporting
+      status. **NULL means report not filed.**. Possible values: Draft, Reviewed, Submitted.", "health_authority_notification":
+      "text. Health-authority notification status. Possible values: Completed, Not Required, Pending.",
+      "authority_response": "text. Authority response summary. **NULL means no response yet.**. Possible
+      values: Acknowledged, Investigation.", "customer_notification": "text. Customer notification status.
+      Possible values: Completed, Not Required, Pending.", "customer_response": "text. Customer response
+      summary. **NULL means no response yet.**. Possible values: Accepted, Rejected."}, "impact": {"patient_impact":
+      "text. Assessment of patient impact. **NULL means impact not assessed.**. Possible values: Confirmed,
+      Possible.", "market_impact": "text. Assessment of market impact. **NULL means impact not assessed.**.
+      Possible values: Limited, Significant.", "reputation_impact": "text. Reputation impact statement.
+      **NULL means impact not assessed.**. Possible values: Major, Minor."}, "lessons_learned": "text.
+      Lessons learned documentation reference. Possible values: In Progress, No, Yes."}'
+- schema: main
+  table: insuranceclaims
+  columns:
+  - name: reckeyclaim
+    type: VARCHAR
+    description: text. Shipment record key for insurance. PK. FK to Shipments.
+  - name: claimneed
+    type: VARCHAR
+    description: 'text. Indicator whether a claim is required. Possible values: No, Under Review, Yes.'
+  - name: claimstat
+    type: VARCHAR
+    description: 'text. Current claim status. **NULL means claim not initiated.**. Possible values: Approved,
+      Filed, Rejected.'
+  - name: claimusd
+    type: FLOAT
+    description: 'real. Amount claimed in USD. Example: 79419.22.'
+  - name: costimpactusd
+    type: FLOAT
+    description: 'real. Total cost impact in USD. Example: 47835.32.'
+  - name: respparty
+    type: VARCHAR
+    description: 'text. Responsible party for loss. **NULL means not yet assigned.**. Possible values:
+      Carrier, Receiver, Shipper, Unknown.'
+- schema: main
+  table: monitoringdevices
+  columns:
+  - name: mondevref
+    type: VARCHAR
+    description: 'text. Unique monitoring-device reference. PK. Example: MD9886.'
+  - name: calibts
+    type: TIMESTAMP
+    description: 'timestamp. Timestamp of last calibration. Example: 2024/10/6.'
+  - name: devacc
+    type: VARCHAR
+    description: 'text. Device accuracy specification. Example: 0.31.'
+  - name: recintmin
+    type: BIGINT
+    description: 'bigint. Recording interval in minutes. **NULL means interval not configured.**. Possible
+      values: 5.0, 10.0, 15.0, 30.0.'
+  - name: temppts
+    type: BIGINT
+    description: 'bigint. Number of temperature points that can be stored. Example: 891.'
+- schema: main
+  table: productbatches
+  columns:
+  - name: batchtag
+    type: VARCHAR
+    description: 'text. Unique production batch identifier. PK. Example: BT909380.'
+  - name: prodlink
+    type: VARCHAR
+    description: text. Product code this batch belongs to. FK to Products.
+  - name: mfg_ts
+    type: TIMESTAMP
+    description: 'timestamp. Manufacturing timestamp for the batch. Example: 2-Aug-24.'
+  - name: exp_ts
+    type: TIMESTAMP
+    description: 'timestamp. Expiry timestamp for the batch. Example: 09/30/2026.'
+  - name: store_cond
+    type: VARCHAR
+    description: 'text. Textual description of required storage conditions. Possible values: -20°C, -70°C,
+      15-25°C, 2-8°C.
+
+
+      Product Storage Classifications: Standardized temperature ranges for pharmaceutical product storage.
+
+
+      Four standard storage classifications: ''2-8°C'' (refrigerated), ''-20°C'' (frozen), ''-70°C'' (ultra-low
+      temperature), and ''15-25°C'' (controlled room temperature).
+
+
+      Compiler note: Matches the four possible values of ProductBatches.store_cond: ''2-8°C'', ''-20°C'',
+      ''-70°C'', ''15-25°C''.'
+  - name: tempmin
+    type: FLOAT
+    description: 'real. Minimum allowable temperature (°C). Possible values: -70, -20, 2, 15.'
+  - name: tempmax
+    type: FLOAT
+    description: 'real. Maximum allowable temperature (°C). Example: 12.'
+  - name: tempsense
+    type: VARCHAR
+    description: 'text. Temperature-sensing method or device type. Possible values: High, Low, Medium.'
+  - name: pack_type
+    type: VARCHAR
+    description: 'text. Packaging type for the shipment units. Possible values: Ampoule, Container, Syringe,
+      Vial.'
+  - name: pack_cnt
+    type: BIGINT
+    description: 'bigint. Number of saleable packs in the batch. Example: 936.'
+  - name: valusd
+    type: VARCHAR
+    description: 'text. Declared commercial value in USD. Example: $57,421.85 .'
+  - name: insusd
+    type: FLOAT
+    description: 'real. Insurance coverage value in USD. **NULL means no insurance value set.**. Example:
+      226483.74.'
+- schema: main
+  table: products
+  columns:
+  - name: prodcode
+    type: VARCHAR
+    description: 'text. Unique product code. PK. Example: PH75271.'
+  - name: prodlabel
+    type: VARCHAR
+    description: 'text. Commercial product label. Example: strategize value-added deliverables.'
+  - name: prodcat
+    type: VARCHAR
+    description: 'text. Product category or therapeutic class. Possible values: Biologics, Blood Products,
+      Insulin, Vaccines.'
+  - name: maker
+    type: VARCHAR
+    description: 'text. Manufacturer name. **NULL means manufacturer not specified.**. Example: York Ltd.'
+- schema: main
+  table: qualitycompliance
+  description: 'Quality Agreement Status: Illustrates the current state of quality agreements between
+    parties in the cold chain.
+
+
+    Quality agreements can have the following statuses: ''Active'' (current agreement in force), ''Expired''
+    (agreement has lapsed), ''Pending'' (agreement under review), or null (no formal agreement exists).
+
+
+    Compiler note: Describes values of qc_checklist->''gdp_quality''->>''quality_agreement_status'' (Active/Expired/Pending/null),
+    verified via run_sql on qualitycompliance.qc_checklist.'
+  columns:
+  - name: reckeyqc
+    type: VARCHAR
+    description: text. Shipment record key for QC. PK. FK to Shipments.
+  - name: qc_checklist
+    type: JSON
+    description: 'JSONB column. Bundles seal integrity, product/pack condition, documentation and regulatory
+      checks plus release status into a single JSONB field for one-click quality-decision review. Fields:
+      {"security": {"seal_status": "text. Security seal status. **NULL means seal status not captured.**.
+      Possible values: Broken, Intact, Suspicious.", "security_incident": "text. Security incident notes.
+      Possible values: 0, 1, 2."}, "product_integrity": {"product_intact_check": "text. Product-integrity
+      check result. Possible values: Conditional, Failed, Passed.", "pack_condition": "text. Packaging
+      condition assessment. **NULL means packaging condition not assessed.**. Possible values: Compromised,
+      Damaged, Good.", "label_condition": "text. Label condition assessment. Possible values: Clear, Damaged,
+      Illegible."}, "documentation": {"documentation_complete": "text. Documentation completeness status.
+      Possible values: Complete, Incomplete, Partial.", "certification_status": "text. Certification status
+      at reception. Possible values: Complete, Expired, Missing."}, "customs_and_regulatory": {"custom_clearance_status":
+      "text. Customs-clearance status. Possible values: Cleared, Delayed, Pending.", "import_permit_status":
+      "text. Import-permit compliance status. Possible values: Not Required, Pending, Valid.", "regulatory_compliance_status":
+      "text. Regulatory compliance status. Possible values: Compliant, Non-compliant, Under Review."},
+      "gdp_quality": {"sop_compliance": "text. Standard operating procedure compliance status. Possible
+      values: Full, Non-compliant, Partial.", "gdp_compliance": "text. Good distribution practice compliance
+      status. Possible values: Full, Non-compliant, Partial.", "quality_agreement_status": "text. Quality
+      agreement status with partners. Possible values: Active, Expired, Pending.", "quality_review_status":
+      "text. Quality review status. Possible values: Approved, Pending, Rejected.", "responsible_person":
+      "text. Responsible quality person. Example: Scott Alexander.", "quality_approval_ts": "timestamp.
+      Timestamp of quality approval. **NULL means approval pending.**. Example: 2025/1/23."}, "release":
+      {"product_release_status": "text. Product release status. Possible values: Quarantined, Rejected,
+      Released.", "release_ts": "timestamp. Product release timestamp. Possible values: 2025/2/19.", "quarantine_reason":
+      "text. Reason for quarantine if applicable. **NULL means product not quarantined.**. Possible values:
+      Damage, Documentation, Temperature Deviation."}}
+
+
+      Regulatory Compliance Status Definitions: Explains the different compliance status classifications
+      used in quality assessment.
+
+
+      Compliance statuses are defined as: ''Compliant'' (meets all regulatory requirements), ''Non-compliant''
+      (fails to meet one or more critical requirements), ''Under Review'' (compliance being assessed),
+      or null (compliance status not yet determined).
+
+
+      Compiler note: Describes the value set for the regulatory_compliance_status field within qc_checklist->customs_and_regulatory
+      (Compliant, Non-compliant, Under Review, null). Verified via distinct values query.
+
+
+      Security Incident Severity Scale: Categorizes security events during pharmaceutical transport by
+      their severity.
+
+
+      Security incidents are classified on a scale of 0-4: ''0'' (No security concerns), ''1'' (Minor
+      procedural deviation), ''2'' (Moderate security concern without evidence of tampering), ''3'' (Clear
+      evidence of attempted tampering), ''4'' (Confirmed breach with product access), with null values
+      indicating security assessment was not performed.
+
+
+      Compiler note: Maps to qc_checklist->security->security_incident. Data only contains values 0,1,2
+      (no 3 or 4 observed), and no NULLs present, but this is the field the entry describes.'
+- schema: main
+  table: reviewsandimprovements
+  columns:
+  - name: reckeyrev
+    type: VARCHAR
+    description: text. Shipment record key for review. PK. FK to Shipments.
+  - name: procimprove
+    type: VARCHAR
+    description: 'text. Process improvement actions. Possible values: In Progress, No, Yes.'
+  - name: trainneeds
+    type: VARCHAR
+    description: 'text. Training needs identified. Possible values: No, Under Review, Yes.'
+  - name: sop_update
+    type: VARCHAR
+    description: 'text. SOP updates required. Possible values: No, Under Review, Yes.'
+  - name: vendorimpact
+    type: VARCHAR
+    description: 'text. Impact on vendor performance. **NULL means none recorded.**. Possible values:
+      Disqualification, Warning.'
+  - name: nextshipchg
+    type: VARCHAR
+    description: 'text. Changes for next shipment. **NULL means none planned.**. Possible values: Major,
+      Minor.'
+  - name: monfreqchg
+    type: VARCHAR
+    description: 'text. Monitoring-frequency changes. Possible values: Decreased, Increased, No Change.'
+  - name: routeriskreassess
+    type: VARCHAR
+    description: 'text. Route risk reassessment outcome. Possible values: Completed, Not Required, Required.'
+  - name: packspecrev
+    type: VARCHAR
+    description: 'text. Packaging specification revision. Possible values: Completed, Not Required, Required.'
+  - name: lanequalstat
+    type: VARCHAR
+    description: 'text. Transport lane quality status. **NULL means status not set.**. Possible values:
+      Invalid, Review Required, Valid.'
+  - name: techupgrade
+    type: VARCHAR
+    description: 'text. Planned technology upgrades. Possible values: No, Under Evaluation, Yes.'
+  - name: costoptpot
+    type: VARCHAR
+    description: 'text. Cost-optimisation opportunities. **NULL means none identified.**. Possible values:
+      High, Low, Medium.'
+  - name: sustainimpact
+    type: VARCHAR
+    description: 'text. Sustainability impact assessment. **NULL means not assessed.**. Possible values:
+      Negative, Neutral, Positive.'
+  - name: carbonkg
+    type: FLOAT
+    description: 'real. Estimated carbon footprint in kg CO₂-e. **NULL means footprint not calculated.**.
+      Example: 2617.3.'
+  - name: energyscore
+    type: VARCHAR
+    description: 'text. Energy efficiency score. **NULL means score not set.**. Example: 81.0.'
+  - name: docformat
+    type: VARCHAR
+    description: 'text. Review document format. Possible values: Electronic, Hybrid, Paper.'
+  - name: dataintegrity
+    type: VARCHAR
+    description: 'text. Data integrity verification status. Possible values: Compromised, Under Review,
+      Verified.'
+  - name: audittrailcomplete
+    type: VARCHAR
+    description: 'text. Audit-trail completeness status. Example: 91.0.'
+  - name: e_sigstat
+    type: VARCHAR
+    description: 'text. Electronic-signature compliance status. Possible values: Invalid, Not Required,
+      Valid.'
+  - name: sysaccessctrl
+    type: VARCHAR
+    description: 'text. System access-control status. Possible values: Adequate, Compromised, Limited.'
+  - name: databackupstat
+    type: VARCHAR
+    description: 'text. Data backup status. **NULL means backup not confirmed.**. Possible values: Current,
+      Failed, Pending.'
+  - name: reportgenstat
+    type: VARCHAR
+    description: 'text. Report generation status. Possible values: Completed, In Progress, Pending.'
+  - name: distlist
+    type: VARCHAR
+    description: 'text. Distribution list details. Possible values: Extended, Limited, Standard.'
+  - name: archivestat
+    type: VARCHAR
+    description: 'text. Archiving status for review records. Possible values: Completed, Not Required,
+      Pending.'
+  - name: reviewnotes
+    type: VARCHAR
+    description: 'text. Free-text review notes. Example: Agent usually ten food focus. Throughout return
+      mean..'
+  - name: nextrevts
+    type: TIMESTAMP
+    description: 'timestamp. Scheduled timestamp for next review. Example: 2025/3/13.'
+  - name: closestat
+    type: VARCHAR
+    description: 'text. Review closure status. Possible values: Closed, Open, Under Review.'
+- schema: main
+  table: shipments
+  columns:
+  - name: reckey
+    type: VARCHAR
+    description: 'text. Unique shipment record key. PK. Example: CC381686.'
+  - name: log_ts
+    type: TIMESTAMP
+    description: 'timestamp. Log-creation timestamp for this record. **NULL means record creation time
+      not captured.**. Example: 2025-01-29T16:01:15.'
+  - name: shiptok
+    type: VARCHAR
+    description: 'text. Human-friendly shipment token (unique within system). Example: SH88875.'
+  - name: shipment_overview
+    type: JSON
+    description: 'JSONB column. Groups routing, timing and risk-performance metadata of a single cold-chain
+      shipment so that dashboards can fetch a complete lane summary from one JSONB field. Fields: {"route":
+      {"origin": {"hub": "text. Code of the originating logistics hub. Example: Gonzales-Lopez Facility.",
+      "address": "text. Street-level origin address. Example: 0131 Johnson Station\nNew Tinatown, FL 65757.",
+      "nation": "text. ISO country code of origin. **NULL means country not provided.**. Example: Fiji."},
+      "destination": {"hub": "text. Code of the destination logistics hub. Example: Williams-Aguilar Hospital.",
+      "address": "text. Street-level destination address. Example: 7209 West Flats\nEast Tonya, OR 13658.",
+      "nation": "text. ISO country code of destination. **NULL means country not provided.**. Example:
+      Bouvet Island (Bouvetoya)."}, "route_string": "text. Encoded string of planned route waypoints.
+      Example: Fiji -> Bouvet Island (Bouvetoya).", "risk_note": "text. Qualitative notes on route-specific
+      risks. Possible values: High, Low, Medium."}, "timing_performance": {"go_time_ts": "timestamp. Planned
+      departure timestamp. Example: 2025/2/17 19:29.", "planned_eta_hrs": "bigint. Estimated transit time
+      in hours. Example: 27.6.", "actual_duration_hrs": "bigint. Actual transit time in hours. **NULL
+      means actual hours not yet recorded.**. Example: 10.2.", "end_time_ts": "timestamp. Actual arrival
+      timestamp. Possible values: 2025/2/19 08:29.", "distance_km": "bigint. Total kilometres travelled
+      for the shipment. Example: 2608."}}
+
+
+      Route Risk Classification: Categorizes shipping routes based on their risk level for temperature
+      excursions.
+
+
+      Routes are classified as: ''Low Risk'' (0-1 historical excursion events per 10 shipments), ''Medium
+      Risk'' (2-4 historical excursion events per 10 shipments), ''High Risk'' (5+ historical excursion
+      events per 10 shipments).
+
+
+      Compiler note: Describes the categorical values (''Low''/''Medium''/''High'') stored at shipment_overview->route->risk_note,
+      which already holds exactly these three labels for route risk level; verified via query showing
+      only Low/Medium/High (plus nulls) present.
+
+
+      Delivery Performance Classification: Categorizes delivery performance based on variance from expected
+      delivery time.
+
+
+      Shipments are classified as: ''Early'' (>2 hours before scheduled time), ''On-Time'' (within ±2
+      hours of scheduled time), ''Delayed'' (2-24 hours after scheduled time), ''Severely Delayed'' (>24
+      hours after scheduled time).
+
+
+      Compiler note: Classification is computable from shipment_overview->''timing_performance'' fields
+      (actual_duration_hrs vs planned_eta_hrs, or end_time_ts vs go_time_ts+planned_eta_hrs) within the
+      shipments table; no other table needed.'
+- schema: main
+  table: shipsensorlink
+  columns:
+  - name: shpnode
+    type: VARCHAR
+    description: text. Shipment record key in link. PK. FK to Shipments.
+  - name: devnode
+    type: VARCHAR
+    description: text. Monitoring-device reference in link. PK. FK to MonitoringDevices.
+- schema: main
+  table: vehicles
+  columns:
+  - name: vehref
+    type: VARCHAR
+    description: 'text. Unique vehicle reference identifier. PK. Example: VH6122.'
+  - name: carrierbond
+    type: VARCHAR
+    description: text. Carrier identifier to which the vehicle belongs. FK to Carriers.
+  - name: vehtype
+    type: VARCHAR
+    description: 'text. Vehicle type (e.g., van, truck, reefer). Possible values: Aircraft, Container,
+      Reefer Truck, Van.'
+  - name: veh_qual
+    type: VARCHAR
+    description: 'text. Qualitative vehicle qualification/status. Possible values: Qualified, Under Review,
+      Validated.
+
+
+      Cold Chain Vehicle Qualification Status: Illustrates the validation levels of vehicles used in pharmaceutical
+      transport.
+
+
+      Vehicles can be classified as: ''Validated'' (fully validated through performance and temperature
+      mapping studies), ''Qualified'' (basic qualification but not fully validated), ''Unqualified'' (not
+      formally qualified for pharmaceutical transport).
+
+
+      Compiler note: Checked distinct values: Qualified, Validated, Under Review. Entry describes ''Validated'',
+      ''Qualified'', ''Unqualified'' categories which don''t exactly match (actual data has ''Under Review''
+      instead of ''Unqualified''), but this column is clearly the one being described (vehicle qualification/validation
+      status).'
+  - name: temp_mon_sys
+    type: VARCHAR
+    description: 'text. Temperature-monitoring system installed. Possible values: Continuous, Interval,
+      Manual.
+
+
+      Vehicle Temperature Monitoring Types: Methods used to monitor temperatures in transport vehicles.
+
+
+      Vehicle temperature monitoring types include: ''Continuous'' (uninterrupted monitoring throughout
+      transport), ''Interval'' (periodic checks at predetermined times), ''None'' (no active monitoring),
+      with null values indicating monitoring type was not specified in documentation.
+
+
+      Compiler note: Column stores vehicle temperature monitoring method. Actual distinct values are ''Continuous'',
+      ''Interval'', ''Manual'' (plus NULL), not ''None'' as the entry states - likely a naming mismatch
+      for the same concept (no active monitoring).'

@@ -1685,6 +1685,20 @@ def _sweep_locked(
     )
 
 
+def _sweep_tasks(benchmark: Benchmark, arms: tuple[str, ...], n: int) -> list[Task]:
+    """The tasks a sweep runs, checked before any spend."""
+    # Resolve the scorer now: it is imported lazily, and a missing one found
+    # mid-sweep turns every task into a `construction_error` row until the
+    # circuit breaker trips, instead of one clear error before any spend.
+    benchmark.scorer()
+    tasks = benchmark.tasks()
+    if n:
+        tasks = _stratified_sample(tasks, n)
+    # The same for an arm's artifact -- a contract not yet compiled.
+    benchmark.check_arms(arms, tasks)
+    return tasks
+
+
 def _stratified_sample(tasks: list[Task], n: int) -> list[Task]:
     """`n` tasks split across groups (DABStep's `level`) by the
     largest-remainder rule, so a smoke
@@ -1971,13 +1985,7 @@ def main() -> None:
         )
 
     benchmark = spec.from_args(args)
-    # Resolve the scorer now: it is imported lazily, and a missing one found
-    # mid-sweep turns every task into a `construction_error` row until the
-    # circuit breaker trips, instead of one clear error before any spend.
-    benchmark.scorer()
-    tasks = benchmark.tasks()
-    if args.n:
-        tasks = _stratified_sample(tasks, args.n)
+    tasks = _sweep_tasks(benchmark, arms, args.n)
 
     trace_dir = (
         None

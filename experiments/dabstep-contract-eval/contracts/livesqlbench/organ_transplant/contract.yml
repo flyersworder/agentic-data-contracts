@@ -1,0 +1,147 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: organ_transplant, compiler: claudesonnet5
+# inputs: organ_transplant_kb.jsonl, organ_transplant_column_meaning_base.json, organ_transplant_schema.txt, organ_transplant.duckdb
+version: '1.0'
+name: livesqlbench-organ_transplant
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - administrative_and_review
+    - allocation_details
+    - clinical
+    - compatibility_metrics
+    - data_source_and_quality
+    - demographics
+    - function_and_recovery
+    - hla_info
+    - logistics
+    - medical_history
+    - recipients_demographics
+    - recipients_immunology
+    - risk_evaluation
+    - transplant_matching
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  - name: reference
+    summary: Value explanations that belong to no single table or column
+    description: 'Explanations of values from the knowledge base.
+
+
+      Body Mass Index (BMI) Categories: Illustrates the standard weight status categories based on BMI
+      values.
+
+
+      BMI provides a general indicator of body fatness. A value < 18.5 is considered underweight, 18.5-24.9
+      is normal weight, 25.0-29.9 is overweight, and > 30.0 indicates obesity. This is a factor in Size
+      Compatibility Score.
+
+
+      Compiler note: This entry describes illustrative BMI categorical thresholds (underweight/normal/overweight/obesity),
+      not a computation or predicate over any specific table. It is reference/knowledge-base content supporting
+      Size Compatibility Score, not an encodable metric itself.
+
+
+      Panel Reactive Antibody (PRA) Score Interpretation: Illustrates the meaning of different PRA score
+      percentages.
+
+
+      A PRA score reflects a recipient''s sensitization level. A score of 0-10% indicates low sensitization,
+      making it easier to find a compatible donor. A score > 80% indicates high Immunological Sensitization,
+      meaning the patient is likely to be incompatible with over 80% of potential donors.
+
+
+      Compiler note: This entry is illustrative/explanatory text describing how to interpret PRA score
+      ranges (0-10% low, >80% high sensitization). It does not define a single computable metric or predicate
+      beyond what is already captured by the related "high PRA" threshold entry (pra_score >= 80). It
+      describes general knowledge/value interpretation rather than a specific calculation or condition
+      over recipients_immunology rows, so it cannot be mapped to a single table/column entry.
+
+
+      HLA Mismatch Levels: Illustrates the significance of the number of HLA mismatches.
+
+
+      The number of mismatches impacts rejection risk. A ''0-mismatch'' is a perfect HLA match and is
+      ideal. A ''6-mismatch'' is a complete mismatch across the A, B, and DR loci, representing the highest
+      immunological barrier outside of ABO or positive crossmatch issues.
+
+
+      Compiler note: This entry is illustrative/explanatory text about interpreting HLA mismatch counts
+      (0 vs 6), not a computation or condition over any table''s rows. It references the hla_mismatch_score
+      metric conceptually but doesn''t define a new encodable expression or describe a specific column/table
+      itself.
+
+
+      Cause of Death Impact: Illustrates how a donor''s cause of death can affect organ quality.
+
+
+      The mechanism of death influences organ viability. For example, death due to Anoxia (oxygen deprivation)
+      can compromise the function of oxygen-sensitive organs like the heart and kidneys. In contrast,
+      death from head trauma may leave abdominal organs in optimal condition.
+
+
+      Compiler note: This is an illustrative/explanatory entry about how cause of death affects organ
+      quality generally; it does not state a specific computation, predicate, or single column value to
+      encode. It references don_co_desc conceptually but provides no concrete condition applicable beyond
+      what''s already captured by the "anoxia" predicate it builds on. No SQL expression can be derived.
+
+
+      Cost-Effectiveness Thresholds: Illustrates typical thresholds for considering a medical intervention
+      as cost-effective.
+
+
+      A common benchmark for the Cost-Effectiveness Ratio (CER) in the US is $50,000 to $150,000 per Quality-Adjusted
+      Life Year (QALY) gained. Interventions below this threshold are generally considered a good value.
+
+
+      Compiler note: This entry describes a general illustrative benchmark for CER thresholds ($50k-$150k/QALY),
+      not a computation over any specific table/column. CER itself cannot be computed from this database
+      (no life expectancy data), and this entry adds no new encodable condition - it''s purely explanatory
+      knowledge.
+
+
+      Liver Function Test (LFT) Values: Illustrates how LFT results can indicate liver health.
+
+
+      Key markers like ALT and AST assess liver cell injury. Normal ranges are typically below 40-50 U/L.
+      Elevated levels, such as an ALT of 200 U/L, can indicate significant liver inflammation or damage,
+      affecting a donor organ''s suitability.
+
+
+      Compiler note: No ALT/AST numeric lab values exist in the schema. function_and_recovery.organfuncassess
+      only has a categorical Liv_Func field (Mild/Moderate/Normal/Severe), not quantitative U/L measurements
+      as described in this entry. Cannot encode.'
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

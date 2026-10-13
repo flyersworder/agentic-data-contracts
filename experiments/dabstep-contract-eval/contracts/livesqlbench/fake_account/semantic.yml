@@ -1,0 +1,1914 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: fake_account, compiler: claudesonnet5
+# inputs: fake_account_kb.jsonl, fake_account_column_meaning_base.json, fake_account_schema.txt, fake_account.duckdb
+metrics:
+- name: account_activity_frequency_aaf
+  description: 'Measures how frequently an account engages in platform activities relative to its age.
+
+
+    It is defined as: AAF = session countthe age of an account.
+
+
+    Compiler note: session_count extracted from session_telemetry->session_stats->session_count; account
+    age from accounts.AGE_D via unique FK match; verified no zero/null AGE_D values that would cause division
+    issues.'
+  sql_expression: (session_telemetry->'session_stats'->>'session_count')::numeric / (SELECT a.AGE_D FROM
+    accounts a WHERE a.acct_ref = security_sessions.acct_gate)
+  source_model: main.security_sessions
+  domains:
+  - calculations
+- name: content_authenticity_score_cas
+  description: 'Aggregates multiple authenticity indicators into a single score.
+
+
+    It is computed as 0.3 * authenticity score + 0.3 * content uniqueness score + 0.4 * conversation naturalness
+    value; all three components are first scaled to the 0 to 1 range.
+
+
+    Compiler note: authenticity_score (risk_profile.risk_scores.authenticity_score), content_uniqueness
+    (content_metrics.content_quality.content_uniqueness), and ConvNat are all already stored in the 0-1
+    range (verified min/max for authenticity_score), so no additional scaling applied. Joined via scalar
+    subqueries since each account has exactly one row in each related table (1:1 PK/FK).'
+  sql_expression: '0.3 * (SELECT (r.risk_profile->''risk_scores''->>''authenticity_score'')::float FROM
+    risk_and_moderation r WHERE r.acct_risk = acct_ref)
+
+    + 0.3 * (SELECT (c.content_metrics->''content_quality''->>''content_uniqueness'')::float FROM content_activity
+    c WHERE c.acct_slot = acct_ref)
+
+    + 0.4 * (SELECT i."ConvNat" FROM interaction_metrics i WHERE i.acct_dm = acct_ref)'
+  source_model: main.accounts
+  domains:
+  - calculations
+- name: network_growth_velocity_ngv
+  description: 'Measures the rate of network growth considering both followers and following.
+
+
+    It is the Euclidean length of an account''s growth vector, calculated as the square root of (follower
+    growth rate² + following growth rate²).
+
+
+    Compiler note: FollGrow = follower growth rate, FingGrow = following growth rate; NGV = Euclidean
+    norm of these two.'
+  sql_expression: sqrt(power("FollGrow", 2) + power("FingGrow", 2))
+  source_model: main.network_metrics
+  domains:
+  - calculations
+- name: bot_behavior_index_bbi
+  description: 'Combines multiple bot-detection metrics into a single score.
+
+
+    BBI = 0.4 * bot likelihood score + 0.3 * automated behavior score + 0.3 * (1 - conversation naturalness
+    value)
+
+
+    Compiler note: bot_likelihood and automated_behavior taken from behavioral_anomaly_scores->automation_spam
+    JSON (0-1 scale); conversation naturalness value is interaction_metrics.ConvNat, joined via acct_dm
+    = acct_beh (1:1 PK-FK relationship).'
+  sql_expression: 0.4 * (behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double + 0.3
+    * (behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double + 0.3 * (1 - (SELECT
+    ConvNat FROM interaction_metrics WHERE acct_dm = acct_beh))
+  source_model: main.behavioral_scores
+  domains:
+  - calculations
+- name: security_risk_score_srs
+  description: 'Calculates overall security risk based on multiple factors.
+
+
+    SRS = 0.4 * risk value + 0.3 * (1 - trust value) + 0.3 * impact value
+
+
+    Compiler note: SRS = 0.4*risk_value + 0.3*(1-trust_score) + 0.3*impact_score, all sourced from risk_profile->risk_scores
+    JSON fields in risk_and_moderation table.'
+  sql_expression: 0.4 * (risk_profile->'risk_scores'->>'risk_value')::double + 0.3 * (1 - (risk_profile->'risk_scores'->>'trust_score')::double)
+    + 0.3 * (risk_profile->'risk_scores'->>'impact_score')::double
+  source_model: main.risk_and_moderation
+  domains:
+  - calculations
+- name: profile_credibility_index_pci
+  description: 'Evaluates overall profile credibility.
+
+
+    PCI = 0.3 * credibility score + 0.3 * reputation score + 0.4 * profile completeness'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: PCI requires a "profile completeness" component. The knowledge base (entry 26) only describes
+    the qualitative meaning/range of profile completeness, not a formula or stored column, and no table
+    holds a precomputed completeness value. Without a defined computation (e.g., which profile fields
+    count toward completeness and how), this cannot be encoded over the database.
+- name: coordinated_activity_score_cas
+  description: 'Measures the likelihood that a set of accounts are acting in a coordinated manner by combining
+    structural coordination and influence.
+
+
+    CAS = 0.5 * coordination score + 0.3 * network influence centrality + 0.2 * cluster size
+
+
+    Compiler note: Computed at cluster level: CoordScore maps to coordination score, NetInfl maps to network
+    influence (used directly as the cluster-level influence measure, since NIC''s account-level formula
+    does not apply to a cluster), ClusterQty maps to cluster size. No normalization applied beyond raw
+    stored values, as none of these fields documented a different scale.'
+  sql_expression: 0.5 * CoordScore + 0.3 * NetInfl + 0.2 * ClusterQty
+  source_model: main.cluster_analysis
+  domains:
+  - calculations
+- name: technical_evasion_index_tei
+  description: 'Quantifies attempts to evade detection.
+
+
+    TEI = 0.4 * VPN ratio + 0.3 * proxy count divided by 10 + 0.3 * login country count divided by 20
+
+
+    Compiler note: vpn_usage_pct stored as text percentage string (e.g. ''0.00%''); stripped ''%'' and
+    divided by 100 to get ratio. proxy_hits and country_count read from ip_reputation sub-object as numbers.'
+  sql_expression: 0.4 * (REPLACE(session_telemetry->'vpn_usage_pct'->>0, '%','')::double / 100) + 0.3
+    * ((session_telemetry->'ip_reputation'->>'proxy_hits')::double / 10) + 0.3 * ((session_telemetry->'ip_reputation'->>'country_count')::double
+    / 20)
+  source_model: main.security_sessions
+  domains:
+  - calculations
+- name: content_manipulation_score_cms
+  description: 'Evaluates content manipulation patterns.
+
+
+    CMS = 0.4 * (1 - content uniqueness score) + 0.3 * media reuse ratio + 0.3 * (1 - text uniqueness)
+
+
+    Compiler note: CMS = 0.4*(1-content_uniqueness) + 0.3*media_reuse_rate + 0.3*(1-text_uniqueness).
+    content_uniqueness and media_reuse_rate taken from content_activity.content_metrics JSON; text_uniqueness
+    (TxtUniq) taken from interaction_metrics via scalar subquery on acct_dm (PK, 1:1 match with acct_slot).'
+  sql_expression: 0.4 * (1 - CAST(content_metrics->'content_quality'->>'content_uniqueness' AS DOUBLE))
+    + 0.3 * CAST(content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE) + 0.3 * (1 - (SELECT TxtUniq
+    FROM interaction_metrics WHERE acct_dm = acct_slot))
+  source_model: main.content_activity
+  domains:
+  - calculations
+- name: moderation_priority_score_mps
+  description: 'Calculates priority for moderation review.
+
+
+    MPS = 0.3 * abuse report count divided by 1000 + 0.4 * impact value + 0.3 * risk value
+
+
+    Compiler note: abuse_count, impact_score, risk_value extracted from risk_profile JSON fields violation_history.abuse_count,
+    risk_scores.impact_score, risk_scores.risk_value respectively.'
+  sql_expression: 0.3 * (risk_profile->'violation_history'->>'abuse_count')::numeric / 1000 + 0.4 * (risk_profile->'risk_scores'->>'impact_score')::numeric
+    + 0.3 * (risk_profile->'risk_scores'->>'risk_value')::numeric
+  source_model: main.risk_and_moderation
+  domains:
+  - calculations
+- name: high_risk_account
+  description: 'Identifies accounts requiring immediate attention.
+
+
+    An account with SRS > 0.8 and at least one active security detection with threatlvl = ''Critical''
+
+
+    Built on: security_risk_score_srs.
+
+
+    Compiler note: SRS computed inline from risk_profile JSON per the given formula. ''active security
+    detection'' interpreted as existence of a monitoring record with InvestState=''Active'' for the account
+    (monitoring is the only table representing security detections); threatlvl=''Critical'' matched to
+    risk_profile.risk_scores.threat_level, the only threat-level field in the schema. Table alias used
+    to avoid ambiguous column resolution in correlated EXISTS.'
+  sql_expression: '(0.4 * (risk_profile->''risk_scores''->>''risk_value'')::double + 0.3 * (1 - (risk_profile->''risk_scores''->>''trust_score'')::double)
+    + 0.3 * (risk_profile->''risk_scores''->>''impact_score'')::double) > 0.8
+
+    AND (risk_profile->''risk_scores''->>''threat_level'') = ''Critical''
+
+    AND EXISTS (SELECT 1 FROM monitoring m WHERE m.acct_mon = risk_and_moderation.acct_risk AND m.InvestState
+    = ''Active'')'
+  source_model: main.risk_and_moderation
+  domains:
+  - definitions
+- name: bot_network
+  description: 'Identifies coordinated bot activity.
+
+
+    A cluster where clustsize > 10 and average BBI > 0.7 for all accounts in cluster
+
+
+    Built on: bot_behavior_index_bbi.
+
+
+    Compiler note: Cluster size taken as ClusterQty column; "average BBI for all accounts in cluster"
+    computed as mean of per-account BBI (per entry [3] definition) over accounts linked via account_clusters
+    to this cluster, joining behavioral_scores and interaction_metrics (for ConvNat) by account id.'
+  sql_expression: "ClusterQty > 10 AND (\n  SELECT AVG(\n    0.4 * (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ precision\n    + 0.3 * (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ precision\n    + 0.3 * (1 - im.ConvNat)\n  )\n  FROM account_clusters ac\n  JOIN behavioral_scores\
+    \ bs ON bs.acct_beh = ac.acct_bridge\n  JOIN interaction_metrics im ON im.acct_dm = ac.acct_bridge\n\
+    \  WHERE ac.clu_ref = CLSTR_PIN\n) > 0.7"
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: trusted_account
+  description: 'Identifies highly trustworthy accounts.
+
+
+    An account with PCI > 0.8 and no security detections in the past 180 days
+
+
+    Built on: profile_credibility_index_pci.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Trusted Account requires PCI > 0.8, but PCI needs a "profile completeness" component (entry
+    26) that is only described qualitatively (range/meaning), with no formula or stored column defining
+    how to compute it from the schema. Without that, PCI cannot be computed, so Trusted Account cannot
+    be encoded either.
+- name: content_farm
+  description: 'Identifies accounts mass-producing similar content.
+
+
+    An account with CMS > 0.7 and post over 50 posts per day
+
+
+    Built on: content_manipulation_score_cms.
+
+
+    Compiler note: CMS computed inline from content_metrics JSON (content_uniqueness, media_reuse_rate)
+    and interaction_metrics.TxtUniq (unique match on acct_dm=acct_slot). Posts per day read from content_metrics->posting->posts_per_day.'
+  sql_expression: (0.4 * (1 - CAST(content_metrics->'content_quality'->>'content_uniqueness' AS DOUBLE))
+    + 0.3 * CAST(content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE) + 0.3 * (1 - (SELECT TxtUniq
+    FROM interaction_metrics WHERE acct_dm = acct_slot))) > 0.7 AND CAST(content_metrics->'posting'->>'posts_per_day'
+    AS DOUBLE) > 50
+  source_model: main.content_activity
+  domains:
+  - definitions
+- name: sockpuppet_network
+  description: 'Identifies related accounts used for manipulation.
+
+
+    A group of accounts where the number of linked accounts is greater than 5 and the coordinated activity
+    score is above 0.8
+
+
+    Built on: coordinated_activity_score_cas.
+
+
+    Compiler note: Interpreted ''linked accounts'' as ClusterQty (cluster size) and ''coordinated activity
+    score'' using the CAS formula from cluster_analysis (0.5*CoordScore + 0.3*NetInfl + 0.2*ClusterQty),
+    evaluated per cluster row.'
+  sql_expression: ClusterQty > 5 AND (0.5 * CoordScore + 0.3 * NetInfl + 0.2 * ClusterQty) > 0.8
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: dormant_bot
+  description: 'Identifies inactive bot accounts.
+
+
+    An account with account status = ''Dormant''.
+
+
+    Built on: bot_behavior_index_bbi.
+
+
+    Compiler note: "Dormant Bot" is defined purely by account status = ''Dormant'', mapped to accounts.StateFlag
+    column.'
+  sql_expression: StateFlag = 'Dormant'
+  source_model: main.accounts
+  domains:
+  - definitions
+- name: vpn_abuser
+  description: 'Identifies accounts systematically using VPNs.
+
+
+    An account with TEI > 0.8 and at least 3 different countries in login locations
+
+
+    Built on: technical_evasion_index_tei.
+
+
+    Compiler note: TEI computed inline per its definition over session_telemetry fields; condition requires
+    TEI > 0.8 and country_count >= 3 (at least 3 different countries).'
+  sql_expression: (0.4 * (REPLACE(session_telemetry->'vpn_usage_pct'->>0, '%','')::double / 100) + 0.3
+    * ((session_telemetry->'ip_reputation'->>'proxy_hits')::double / 10) + 0.3 * ((session_telemetry->'ip_reputation'->>'country_count')::double
+    / 20)) > 0.8 AND (session_telemetry->'ip_reputation'->>'country_count')::bigint >= 3
+  source_model: main.security_sessions
+  domains:
+  - definitions
+- name: engagement_manipulator
+  description: 'Identifies artificial engagement patterns.
+
+
+    An account where engagement authenticity < 0.3 and temporal interaction pattern = ''Automated''
+
+
+    Compiler note: engagement authenticity maps to network_metrics.EngAuth; temporal interaction pattern
+    maps to network_metrics.TempIntPtn.'
+  sql_expression: '"EngAuth" < 0.3 AND "TempIntPtn" = ''Automated'''
+  source_model: main.network_metrics
+  domains:
+  - definitions
+- name: serial_violator
+  description: 'Identifies repeat policy violators.
+
+
+    An account with suspicious history count > 2 and warning count > 5
+
+
+    Compiler note: Interpreted "suspicious history count" as risk_profile.violation_history.suspension_history_json,
+    which is stored as a scalar integer (0-5) rather than a list; "warning count" is violation_history.warning_count.
+    Both cast from jsonb text to integer.'
+  sql_expression: CAST(risk_profile->'violation_history'->>'suspension_history_json' AS INTEGER) > 2 AND
+    CAST(risk_profile->'violation_history'->>'warning_count' AS INTEGER) > 5
+  source_model: main.risk_and_moderation
+  domains:
+  - definitions
+- name: amplification_network
+  description: 'Identifies coordinated content amplification.
+
+
+    A cluster where cluster role = ''Amplifier'' and coordination score > 0.8'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The entry requires cluster role = 'Amplifier', but cluster_analysis.CluRole has no such
+    value (only Botnet, Community, InfluenceNetwork, SocialGroup, SpamRing exist in the data). The condition
+    cannot be satisfied/encoded as stated.
+- name: cross_platform_risk_index_cpri
+  description: 'Evaluates risk across multiple platform types for the same account.
+
+
+    It is defined as: CPRI = SRS * (1 + 0.2 *  login country count).
+
+
+    Built on: security_risk_score_srs.
+
+
+    Compiler note: CPRI = SRS * (1 + 0.2 * login country count). SRS computed inline per its definition
+    using risk_profile fields. Login country count taken from security_sessions.session_telemetry->ip_reputation->country_count,
+    matched via acct_gate = acct_risk (1:1 relationship verified).'
+  sql_expression: (0.4 * (risk_profile->'risk_scores'->>'risk_value')::double + 0.3 * (1 - (risk_profile->'risk_scores'->>'trust_score')::double)
+    + 0.3 * (risk_profile->'risk_scores'->>'impact_score')::double) * (1 + 0.2 * (SELECT (s.session_telemetry->'ip_reputation'->>'country_count')::double
+    FROM security_sessions s WHERE s.acct_gate = acct_risk))
+  source_model: main.risk_and_moderation
+  domains:
+  - calculations
+- name: network_manipulation_index_nmi
+  description: 'Measures the extent of network manipulation considering bot behavior and coordination.
+
+
+    It is defined as: NMI = 0.6 * BBI + 0.4 * CAS.
+
+
+    Built on: bot_behavior_index_bbi, coordinated_activity_score_cas.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: NMI combines BBI (per-account, from behavioral_scores) with CAS (per-cluster, from cluster_analysis).
+    Accounts belong to multiple clusters (e.g. up to 3 each in account_clusters), and the entry gives
+    no rule for selecting or aggregating which cluster's CAS to use for a given account, so the join cannot
+    be made unique and NMI cannot be encoded as a single-row scalar expression per account.
+- name: enhanced_trust_score_ets
+  description: 'Calculates trust score considering both profile credibility and content authenticity.
+
+
+    It is defined as: ETS = 0.5 * PCI + 0.5 * CAS.
+
+
+    Built on: profile_credibility_index_pci, content_authenticity_score_cas.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: ETS = 0.5*PCI + 0.5*CAS depends on PCI, which cannot be encoded (PCI requires a "profile
+    completeness" component with no defined formula or stored column in the database). Since ETS requires
+    PCI, it cannot be encoded either.
+- name: coordinated_bot_risk_cbr
+  description: 'Assesses risk from coordinated bot networks.
+
+
+    It is defined as: CBR = BBI * CAS * cluster size.
+
+
+    Built on: bot_behavior_index_bbi, coordinated_activity_score_cas.
+
+
+    Compiler note: CBR = BBI(account) * CAS(cluster) * cluster size, evaluated per account-cluster membership
+    row (account_clusters PK (acct_bridge, clu_ref) is unique). BBI uses behavioral_scores (PK acct_beh,
+    unique) and interaction_metrics (PK acct_dm, unique) for the given account; CAS and cluster size (=ClusterQty)
+    use cluster_analysis (PK CLSTR_PIN, unique) for the given cluster.'
+  sql_expression: "(0.4 * (SELECT (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ FROM behavioral_scores bs WHERE bs.acct_beh = account_clusters.acct_bridge)\n + 0.3 * (SELECT (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ FROM behavioral_scores bs WHERE bs.acct_beh = account_clusters.acct_bridge)\n + 0.3 * (1 - (SELECT\
+    \ im.ConvNat FROM interaction_metrics im WHERE im.acct_dm = account_clusters.acct_bridge)))\n*\n(0.5\
+    \ * (SELECT ca.CoordScore FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)\n\
+    \ + 0.3 * (SELECT ca.NetInfl FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)\n\
+    \ + 0.2 * (SELECT ca.ClusterQty FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref))\n\
+    *\n(SELECT ca.ClusterQty FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)"
+  source_model: main.account_clusters
+  domains:
+  - calculations
+- name: content_security_index_csi
+  description: 'Evaluates content security considering manipulation and authenticity.
+
+
+    It is defined as: CSI = 0.7 * (1 - CMS) + 0.3 * CAS.
+
+
+    Built on: content_manipulation_score_cms, content_authenticity_score_cas.
+
+
+    Compiler note: CSI = 0.7*(1-CMS) + 0.3*CAS, computed over content_activity (acct_slot) since both
+    CMS and CAS reference content_metrics for the same account; CAS''s content_uniqueness term reused
+    directly from content_metrics instead of a redundant self-join subquery. interaction_metrics and risk_and_moderation
+    joined via unique PK (acct_dm/acct_risk = acct_slot).'
+  sql_expression: "0.7 * (1 - (\n    0.4 * (1 - CAST(content_metrics->'content_quality'->>'content_uniqueness'\
+    \ AS DOUBLE))\n  + 0.3 * CAST(content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE)\n  + 0.3\
+    \ * (1 - (SELECT i.\"TxtUniq\" FROM interaction_metrics i WHERE i.acct_dm = acct_slot))\n)) + 0.3\
+    \ * (\n    0.3 * (SELECT (r.risk_profile->'risk_scores'->>'authenticity_score')::DOUBLE FROM risk_and_moderation\
+    \ r WHERE r.acct_risk = acct_slot)\n  + 0.3 * CAST(content_metrics->'content_quality'->>'content_uniqueness'\
+    \ AS DOUBLE)\n  + 0.4 * (SELECT i.\"ConvNat\" FROM interaction_metrics i WHERE i.acct_dm = acct_slot)\n\
+    )"
+  source_model: main.content_activity
+  domains:
+  - calculations
+- name: automated_behavior_score_abs
+  description: 'Measures degree of automation in account behavior.
+
+
+    It is defined as: ABS = 0.4 * BBI + 0.3 * TEI + 0.3 * (1 - CAS).
+
+
+    Built on: bot_behavior_index_bbi, technical_evasion_index_tei, content_authenticity_score_cas.
+
+
+    Compiler note: ABS = 0.4*BBI + 0.3*TEI + 0.3*(1-CAS), computed via scalar subqueries from accounts,
+    reusing the BBI, TEI, and CAS definitions from the knowledge base. Verified each join (behavioral_scores.acct_beh,
+    security_sessions.acct_gate, risk_and_moderation.acct_risk, content_activity.acct_slot, interaction_metrics.acct_dm)
+    is 1:1 with accounts.acct_ref.'
+  sql_expression: "0.4 * (\n  (SELECT 0.4 * (b.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\n\
+    \        + 0.3 * (b.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\n\
+    \        + 0.3 * (1 - (SELECT i.ConvNat FROM interaction_metrics i WHERE i.acct_dm = accounts.acct_ref))\n\
+    \   FROM behavioral_scores b WHERE b.acct_beh = accounts.acct_ref)\n) + 0.3 * (\n  (SELECT 0.4 * (REPLACE(s.session_telemetry->'vpn_usage_pct'->>0,\
+    \ '%','')::double / 100)\n        + 0.3 * ((s.session_telemetry->'ip_reputation'->>'proxy_hits')::double\
+    \ / 10)\n        + 0.3 * ((s.session_telemetry->'ip_reputation'->>'country_count')::double / 20)\n\
+    \   FROM security_sessions s WHERE s.acct_gate = accounts.acct_ref)\n) + 0.3 * (\n  1 - (\n    0.3\
+    \ * (SELECT (r.risk_profile->'risk_scores'->>'authenticity_score')::float FROM risk_and_moderation\
+    \ r WHERE r.acct_risk = accounts.acct_ref)\n    + 0.3 * (SELECT (c.content_metrics->'content_quality'->>'content_uniqueness')::float\
+    \ FROM content_activity c WHERE c.acct_slot = accounts.acct_ref)\n    + 0.4 * (SELECT i.\"ConvNat\"\
+    \ FROM interaction_metrics i WHERE i.acct_dm = accounts.acct_ref)\n  )\n)"
+  source_model: main.accounts
+  domains:
+  - calculations
+- name: network_trust_score_nts
+  description: 'Evaluates trustworthiness of account''s network connections.
+
+
+    It is defined as: NTS = PCI * (1 - NGV) * (1 - CBR).
+
+
+    Built on: profile_credibility_index_pci, network_growth_velocity_ngv, coordinated_bot_risk_cbr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: NTS depends on PCI, which cannot be encoded (requires a "profile completeness" component
+    with no defined formula or stored column in the database). Since NTS = PCI * (1 - NGV) * (1 - CBR)
+    requires PCI, NTS cannot be encoded either.
+- name: content_impact_score_cis
+  description: 'Estimates the potential impact of manipulated content by blending manipulation intensity,
+    moderation priority, and account influence.
+
+
+    It is defined as: CIS = cms * mps * network influence centrality nic.
+
+
+    Built on: content_manipulation_score_cms, moderation_priority_score_mps.
+
+
+    Compiler note: CIS = CMS * MPS * NIC. CMS and MPS reused from given dependency formulas, reaching
+    content_activity/interaction_metrics/risk_and_moderation via unique acct_ref scalar subqueries. NIC
+    = 0.4*ConnQual + 0.3*network influence score + 0.3*IntDiv (network_metrics, unique per account); ''network
+    influence score'' is taken as cluster_analysis.NetInfl (column documented as ''Network influence score''),
+    averaged across all clusters an account belongs to via account_clusters, since an account can link
+    to multiple clusters.'
+  sql_expression: "(\n  0.4 * (1 - CAST((SELECT content_metrics->'content_quality'->>'content_uniqueness'\
+    \ FROM content_activity WHERE acct_slot = acct_ref) AS DOUBLE))\n  + 0.3 * CAST((SELECT content_metrics->'link_media'->>'media_reuse_rate'\
+    \ FROM content_activity WHERE acct_slot = acct_ref) AS DOUBLE)\n  + 0.3 * (1 - (SELECT TxtUniq FROM\
+    \ interaction_metrics WHERE acct_dm = acct_ref))\n)\n*\n(\n  0.3 * (SELECT (risk_profile->'violation_history'->>'abuse_count')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = acct_ref) / 1000\n  + 0.4 * (SELECT (risk_profile->'risk_scores'->>'impact_score')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = acct_ref)\n  + 0.3 * (SELECT (risk_profile->'risk_scores'->>'risk_value')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = acct_ref)\n)\n*\n(\n  0.4 * (SELECT ConnQual FROM network_metrics\
+    \ WHERE acct_node = acct_ref)\n  + 0.3 * (SELECT AVG(ca.NetInfl) FROM account_clusters ac JOIN cluster_analysis\
+    \ ca ON ac.clu_ref = ca.CLSTR_PIN WHERE ac.acct_bridge = acct_ref)\n  + 0.3 * (SELECT IntDiv FROM\
+    \ network_metrics WHERE acct_node = acct_ref)\n)"
+  source_model: main.accounts
+  domains:
+  - calculations
+- name: authentication_risk_score_ars
+  description: 'Assesses authentication-related risks.
+
+
+    It is defined as: ARS = 0.5 * TEI + 0.3 * (1 - PCI) + 0.2 * SRS.
+
+
+    Built on: technical_evasion_index_tei, profile_credibility_index_pci, security_risk_score_srs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: ARS depends on PCI (0.3 * (1-PCI) term), and PCI itself cannot be encoded because it requires
+    a "profile completeness" component that has no defined formula or stored column in this database (per
+    entry 26, only qualitative meaning is given). Since PCI cannot be computed, ARS cannot be computed
+    either.
+- name: behavioral_anomaly_score_bas
+  description: 'Quantifies unusual behavior patterns.
+
+
+    It is defined as: BAS = 0.4 * BBI + 0.4 * AAF + 0.2 * NGV.
+
+
+    Built on: bot_behavior_index_bbi, account_activity_frequency_aaf, network_growth_velocity_ngv.
+
+
+    Compiler note: BAS = 0.4*BBI + 0.4*AAF + 0.2*NGV, computed over accounts (acct_ref) joining scalar
+    subqueries to behavioral_scores, interaction_metrics, security_sessions, network_metrics (each verified
+    to have at most one matching row per account). AAF uses accounts.AGE_D as the age denominator per
+    its definition.'
+  sql_expression: "0.4 * (\n  0.4 * (SELECT (b.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ FROM behavioral_scores b WHERE b.acct_beh = accounts.acct_ref)\n  + 0.3 * (SELECT (b.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ FROM behavioral_scores b WHERE b.acct_beh = accounts.acct_ref)\n  + 0.3 * (1 - (SELECT i.ConvNat\
+    \ FROM interaction_metrics i WHERE i.acct_dm = accounts.acct_ref))\n) + 0.4 * (\n  (SELECT (s.session_telemetry->'session_stats'->>'session_count')::numeric\
+    \ FROM security_sessions s WHERE s.acct_gate = accounts.acct_ref)\n  / accounts.AGE_D\n) + 0.2 * (\n\
+    \  SELECT sqrt(power(n.FollGrow,2) + power(n.FingGrow,2)) FROM network_metrics n WHERE n.acct_node\
+    \ = accounts.acct_ref\n)"
+  source_model: main.accounts
+  domains:
+  - calculations
+- name: high_risk_bot_network
+  description: 'Identifies dangerous coordinated bot networks.
+
+
+    A Bot Network with CBR > 0.8 and SRS > 0.7
+
+
+    Built on: coordinated_bot_risk_cbr, security_risk_score_srs.
+
+
+    Compiler note: Evaluated per account_clusters row (an account-cluster membership). Bot Network check
+    uses ClusterQty>10 for the cluster plus avg BBI (0.4*bot_likelihood+0.3*automated_behavior+0.3*(1-ConvNat))
+    over all member accounts of that cluster >0.7. CBR and SRS reuse the formulas from the knowledge base;
+    CBR uses the row''s own acct_bridge/clu_ref pairing and SRS uses the account''s risk_and_moderation
+    record. Verified account_clusters.clu_ref groups match cluster_analysis.ClusterQty counts.'
+  sql_expression: "-- Bot Network condition on the cluster this row belongs to: ClusterQty > 10 and average\
+    \ BBI across all member accounts > 0.7\n(SELECT ca.ClusterQty FROM cluster_analysis ca WHERE ca.CLSTR_PIN\
+    \ = account_clusters.clu_ref) > 10\nAND\n(SELECT AVG(\n    0.4 * (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\n\
+    \    + 0.3 * (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\n  \
+    \  + 0.3 * (1 - (SELECT im.ConvNat FROM interaction_metrics im WHERE im.acct_dm = ac2.acct_bridge))\n\
+    \  )\n  FROM account_clusters ac2\n  JOIN behavioral_scores bs ON bs.acct_beh = ac2.acct_bridge\n\
+    \  WHERE ac2.clu_ref = account_clusters.clu_ref\n) > 0.7\nAND\n-- CBR for this specific account-cluster\
+    \ row > 0.8\n(\n  (0.4 * (SELECT (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ FROM behavioral_scores bs WHERE bs.acct_beh = account_clusters.acct_bridge)\n   + 0.3 * (SELECT\
+    \ (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double FROM behavioral_scores\
+    \ bs WHERE bs.acct_beh = account_clusters.acct_bridge)\n   + 0.3 * (1 - (SELECT im.ConvNat FROM interaction_metrics\
+    \ im WHERE im.acct_dm = account_clusters.acct_bridge)))\n  *\n  (0.5 * (SELECT ca.CoordScore FROM\
+    \ cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)\n   + 0.3 * (SELECT ca.NetInfl\
+    \ FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)\n   + 0.2 * (SELECT ca.ClusterQty\
+    \ FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref))\n  *\n  (SELECT ca.ClusterQty\
+    \ FROM cluster_analysis ca WHERE ca.CLSTR_PIN = account_clusters.clu_ref)\n) > 0.8\nAND\n-- SRS for\
+    \ the account in this row > 0.7\n(\n  0.4 * (SELECT (rm.risk_profile->'risk_scores'->>'risk_value')::double\
+    \ FROM risk_and_moderation rm WHERE rm.acct_risk = account_clusters.acct_bridge)\n  + 0.3 * (1 - (SELECT\
+    \ (rm.risk_profile->'risk_scores'->>'trust_score')::double FROM risk_and_moderation rm WHERE rm.acct_risk\
+    \ = account_clusters.acct_bridge))\n  + 0.3 * (SELECT (rm.risk_profile->'risk_scores'->>'impact_score')::double\
+    \ FROM risk_and_moderation rm WHERE rm.acct_risk = account_clusters.acct_bridge)\n) > 0.7"
+  source_model: main.account_clusters
+  domains:
+  - definitions
+- name: trusted_content_creator
+  description: 'Identifies reliable content creators.
+
+
+    An account with ETS > 0.8 and CIS < 0.2
+
+
+    Built on: enhanced_trust_score_ets, content_impact_score_cis.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Trusted Content Creator requires ETS > 0.8, and ETS = 0.5*PCI + 0.5*CAS depends on PCI
+    (Profile Credibility Index), which itself requires a "profile completeness" component with no defined
+    formula or stored column in this database. Since ETS cannot be encoded, this entry cannot be encoded
+    either.
+- name: authentication_risk_account
+  description: 'Identifies accounts with suspicious authentication patterns.
+
+
+    An account with ARS > 0.7 and at least one VPN Abuser detection
+
+
+    Built on: authentication_risk_score_ars, vpn_abuser.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric requires ARS > 0.7, but ARS depends on PCI (via the 0.3*(1-PCI) term), and
+    PCI itself cannot be computed because its "profile completeness" component has no defined formula
+    or stored column in this database. Since ARS cannot be computed, this condition cannot be encoded.
+- name: network_security_threat
+  description: 'Identifies accounts posing network-level security risks.
+
+
+    An account with NTS < 0.3 and is part of a Bot Network
+
+
+    Built on: network_trust_score_nts, bot_network.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Network Security Threat requires NTS < 0.3, but NTS depends on PCI which cannot be encoded
+    (requires a "profile completeness" component with no defined formula or stored column in the database).
+    Since NTS cannot be computed, this predicate cannot be encoded either.
+- name: content_manipulation_ring
+  description: 'Identifies coordinated content manipulation groups.
+
+
+    A Sockpuppet Network where all accounts have CMS > 0.7
+
+
+    Built on: sockpuppet_network, content_manipulation_score_cms.
+
+
+    Compiler note: Content Manipulation Ring = Sockpuppet Network (ClusterQty>5 AND 0.5*CoordScore+0.3*NetInfl+0.2*ClusterQty>0.8)
+    where no member account has CMS<=0.7 (i.e. all members have CMS>0.7). CMS computed per member via
+    account_clusters join to content_activity and interaction_metrics (acct_dm unique per account, acct_slot
+    unique per account, so subqueries match at most one row).'
+  sql_expression: "ClusterQty > 5\nAND (0.5 * CoordScore + 0.3 * NetInfl + 0.2 * ClusterQty) > 0.8\nAND\
+    \ NOT EXISTS (\n    SELECT 1\n    FROM account_clusters ac\n    JOIN content_activity ca ON ac.acct_bridge\
+    \ = ca.acct_slot\n    WHERE ac.clu_ref = CLSTR_PIN\n      AND (\n            0.4 * (1 - CAST(ca.content_metrics->'content_quality'->>'content_uniqueness'\
+    \ AS DOUBLE))\n          + 0.3 * CAST(ca.content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE)\n\
+    \          + 0.3 * (1 - (SELECT TxtUniq FROM interaction_metrics im WHERE im.acct_dm = ac.acct_bridge))\n\
+    \          ) <= 0.7\n)"
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: automated_spam_network
+  description: 'Identifies automated spam distribution networks.
+
+
+    A Bot Network where average ABS > 0.8 and all accounts are Content Farms
+
+
+    Built on: bot_network, automated_behavior_score_abs, content_farm.
+
+
+    Compiler note: Automated Spam Network = Bot Network (ClusterQty>10 and avg BBI>0.7) AND average ABS
+    over cluster members >0.8 AND every account in the cluster satisfies the Content Farm predicate (CMS>0.7
+    and posts_per_day>50). Reused ABS, BBI, and Content Farm formulas as defined in the knowledge base,
+    resolving each account''s component scores via scalar subqueries keyed to acct_bridge.'
+  sql_expression: "ClusterQty > 10\nAND (\n  SELECT AVG(\n    0.4 * (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ precision\n    + 0.3 * (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ precision\n    + 0.3 * (1 - im.ConvNat)\n  )\n  FROM account_clusters ac\n  JOIN behavioral_scores\
+    \ bs ON bs.acct_beh = ac.acct_bridge\n  JOIN interaction_metrics im ON im.acct_dm = ac.acct_bridge\n\
+    \  WHERE ac.clu_ref = CLSTR_PIN\n) > 0.7\nAND (\n  SELECT AVG(\n    0.4 * (\n      (SELECT 0.4 * (b.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ precision\n            + 0.3 * (b.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ precision\n            + 0.3 * (1 - (SELECT i.ConvNat FROM interaction_metrics i WHERE i.acct_dm\
+    \ = ac.acct_bridge))\n       FROM behavioral_scores b WHERE b.acct_beh = ac.acct_bridge)\n    ) +\
+    \ 0.3 * (\n      (SELECT 0.4 * (REPLACE(s.session_telemetry->'vpn_usage_pct'->>0, '%','')::double\
+    \ precision / 100)\n            + 0.3 * ((s.session_telemetry->'ip_reputation'->>'proxy_hits')::double\
+    \ precision / 10)\n            + 0.3 * ((s.session_telemetry->'ip_reputation'->>'country_count')::double\
+    \ precision / 20)\n       FROM security_sessions s WHERE s.acct_gate = ac.acct_bridge)\n    ) + 0.3\
+    \ * (\n      1 - (\n        0.3 * (SELECT (r.risk_profile->'risk_scores'->>'authenticity_score')::double\
+    \ precision FROM risk_and_moderation r WHERE r.acct_risk = ac.acct_bridge)\n        + 0.3 * (SELECT\
+    \ (c.content_metrics->'content_quality'->>'content_uniqueness')::double precision FROM content_activity\
+    \ c WHERE c.acct_slot = ac.acct_bridge)\n        + 0.4 * (SELECT i.\"ConvNat\" FROM interaction_metrics\
+    \ i WHERE i.acct_dm = ac.acct_bridge)\n      )\n    )\n  )\n  FROM account_clusters ac\n  WHERE ac.clu_ref\
+    \ = CLSTR_PIN\n) > 0.8\nAND NOT EXISTS (\n  SELECT 1\n  FROM account_clusters ac\n  JOIN content_activity\
+    \ c ON c.acct_slot = ac.acct_bridge\n  LEFT JOIN interaction_metrics i ON i.acct_dm = ac.acct_bridge\n\
+    \  WHERE ac.clu_ref = CLSTR_PIN\n  AND NOT (\n    (0.4 * (1 - CAST(c.content_metrics->'content_quality'->>'content_uniqueness'\
+    \ AS DOUBLE))\n     + 0.3 * CAST(c.content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE)\n\
+    \     + 0.3 * (1 - i.TxtUniq)) > 0.7\n    AND CAST(c.content_metrics->'posting'->>'posts_per_day'\
+    \ AS DOUBLE) > 50\n  )\n)"
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: cross_platform_threat
+  description: 'Identifies threats operating across multiple platforms.
+
+
+    A High-Risk Account with CPRI > 0.9 and is part of a Sockpuppet Network
+
+
+    Built on: high_risk_account, cross_platform_risk_index_cpri, sockpuppet_network.
+
+
+    Compiler note: Combines High-Risk Account (SRS>0.8, threat_level=''Critical'', active investigation
+    as proxy for ''active security detection''), CPRI>0.9 using country_count from security_sessions,
+    and membership in a cluster meeting Sockpuppet Network''s definition (ClusterQty>5 and coordination
+    formula >0.8) via account_clusters join.'
+  sql_expression: "(0.4 * (risk_profile->'risk_scores'->>'risk_value')::double + 0.3 * (1 - (risk_profile->'risk_scores'->>'trust_score')::double)\
+    \ + 0.3 * (risk_profile->'risk_scores'->>'impact_score')::double) > 0.8\nAND (risk_profile->'risk_scores'->>'threat_level')\
+    \ = 'Critical'\nAND EXISTS (SELECT 1 FROM monitoring m WHERE m.acct_mon = risk_and_moderation.acct_risk\
+    \ AND m.InvestState = 'Active')\nAND (0.4 * (risk_profile->'risk_scores'->>'risk_value')::double +\
+    \ 0.3 * (1 - (risk_profile->'risk_scores'->>'trust_score')::double) + 0.3 * (risk_profile->'risk_scores'->>'impact_score')::double)\
+    \ * (1 + 0.2 * (SELECT (s.session_telemetry->'ip_reputation'->>'country_count')::double FROM security_sessions\
+    \ s WHERE s.acct_gate = risk_and_moderation.acct_risk)) > 0.9\nAND EXISTS (\n    SELECT 1 FROM account_clusters\
+    \ ac\n    JOIN cluster_analysis ca ON ca.CLSTR_PIN = ac.clu_ref\n    WHERE ac.acct_bridge = risk_and_moderation.acct_risk\n\
+    \      AND ca.ClusterQty > 5\n      AND (0.5 * ca.CoordScore + 0.3 * ca.NetInfl + 0.2 * ca.ClusterQty)\
+    \ > 0.8\n)"
+  source_model: main.risk_and_moderation
+  domains:
+  - definitions
+- name: behavioral_anomaly_cluster
+  description: 'Identifies groups showing unusual behavior patterns.
+
+
+    A cluster where average BAS > 0.8 and contains at least one Bot Network
+
+
+    Built on: behavioral_anomaly_score_bas, bot_network.
+
+
+    Compiler note: Interpreted "cluster" as a row of cluster_analysis. Average BAS is computed over all
+    member accounts (joined via account_clusters) using the BAS formula (AAF uses session_count/AGE_D,
+    NGV uses sqrt(FollGrow^2+FingGrow^2)). Since clusters have no sub-cluster structure in this schema,
+    "contains at least one Bot Network" is interpreted as the cluster itself satisfying the Bot Network
+    predicate (ClusterQty>10 and avg BBI-component score >0.7), reusing the bot_network definition''s
+    subquery logic inline.'
+  sql_expression: "(\n  SELECT AVG(\n    0.4 * (\n      0.4 * (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ precision\n      + 0.3 * (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ precision\n      + 0.3 * (1 - im.ConvNat)\n    )\n    + 0.4 * (\n      (ss.session_telemetry->'session_stats'->>'session_count')::numeric\
+    \ / a.AGE_D\n    )\n    + 0.2 * (\n      sqrt(power(nm.FollGrow,2) + power(nm.FingGrow,2))\n    )\n\
+    \  )\n  FROM account_clusters ac\n  JOIN accounts a ON a.acct_ref = ac.acct_bridge\n  JOIN behavioral_scores\
+    \ bs ON bs.acct_beh = ac.acct_bridge\n  JOIN interaction_metrics im ON im.acct_dm = ac.acct_bridge\n\
+    \  JOIN security_sessions ss ON ss.acct_gate = ac.acct_bridge\n  JOIN network_metrics nm ON nm.acct_node\
+    \ = ac.acct_bridge\n  WHERE ac.clu_ref = cluster_analysis.CLSTR_PIN\n) > 0.8\nAND\n(\n  cluster_analysis.ClusterQty\
+    \ > 10\n  AND (\n    SELECT AVG(\n      0.4 * (bs.behavioral_anomaly_scores->'automation_spam'->>'bot_likelihood')::double\
+    \ precision\n      + 0.3 * (bs.behavioral_anomaly_scores->'automation_spam'->>'automated_behavior')::double\
+    \ precision\n      + 0.3 * (1 - im.ConvNat)\n    )\n    FROM account_clusters ac\n    JOIN behavioral_scores\
+    \ bs ON bs.acct_beh = ac.acct_bridge\n    JOIN interaction_metrics im ON im.acct_dm = ac.acct_bridge\n\
+    \    WHERE ac.clu_ref = cluster_analysis.CLSTR_PIN\n  ) > 0.7\n)"
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: mass_manipulation_campaign
+  description: 'Identifies large-scale manipulation efforts.
+
+
+    A Content Manipulation Ring where CIS > 0.8 for all accounts
+
+
+    Built on: content_manipulation_ring, content_impact_score_cis.
+
+
+    Compiler note: Mass Manipulation Campaign = Content Manipulation Ring (built on content_manipulation_ring
+    definition over cluster_analysis: ClusterQty>5, coordination formula>0.8, no member with CMS<=0.7)
+    AND no member with CIS<=0.8 (CIS computed as content_impact_score_cis * mps-like term * nic-like term,
+    per-account as defined). Evaluated per cluster row in cluster_analysis; all per-account subqueries
+    (content_activity, interaction_metrics, risk_and_moderation, network_metrics) are keyed on account
+    PK so unique.'
+  sql_expression: "ClusterQty > 5\nAND (0.5 * CoordScore + 0.3 * NetInfl + 0.2 * ClusterQty) > 0.8\nAND\
+    \ NOT EXISTS (\n    SELECT 1\n    FROM account_clusters ac\n    JOIN content_activity ca ON ac.acct_bridge\
+    \ = ca.acct_slot\n    WHERE ac.clu_ref = CLSTR_PIN\n      AND (\n            0.4 * (1 - CAST(ca.content_metrics->'content_quality'->>'content_uniqueness'\
+    \ AS DOUBLE))\n          + 0.3 * CAST(ca.content_metrics->'link_media'->>'media_reuse_rate' AS DOUBLE)\n\
+    \          + 0.3 * (1 - (SELECT TxtUniq FROM interaction_metrics im WHERE im.acct_dm = ac.acct_bridge))\n\
+    \          ) <= 0.7\n)\nAND NOT EXISTS (\n    SELECT 1\n    FROM account_clusters ac2\n    WHERE ac2.clu_ref\
+    \ = CLSTR_PIN\n      AND (\n        (\n          0.4 * (1 - CAST((SELECT content_metrics->'content_quality'->>'content_uniqueness'\
+    \ FROM content_activity WHERE acct_slot = ac2.acct_bridge) AS DOUBLE))\n          + 0.3 * CAST((SELECT\
+    \ content_metrics->'link_media'->>'media_reuse_rate' FROM content_activity WHERE acct_slot = ac2.acct_bridge)\
+    \ AS DOUBLE)\n          + 0.3 * (1 - (SELECT TxtUniq FROM interaction_metrics WHERE acct_dm = ac2.acct_bridge))\n\
+    \        )\n        *\n        (\n          0.3 * (SELECT (risk_profile->'violation_history'->>'abuse_count')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = ac2.acct_bridge) / 1000\n          + 0.4 * (SELECT (risk_profile->'risk_scores'->>'impact_score')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = ac2.acct_bridge)\n          + 0.3 * (SELECT (risk_profile->'risk_scores'->>'risk_value')::numeric\
+    \ FROM risk_and_moderation WHERE acct_risk = ac2.acct_bridge)\n        )\n        *\n        (\n \
+    \         0.4 * (SELECT ConnQual FROM network_metrics WHERE acct_node = ac2.acct_bridge)\n       \
+    \   + 0.3 * (SELECT AVG(ca3.NetInfl) FROM account_clusters ac3 JOIN cluster_analysis ca3 ON ac3.clu_ref\
+    \ = ca3.CLSTR_PIN WHERE ac3.acct_bridge = ac2.acct_bridge)\n          + 0.3 * (SELECT IntDiv FROM\
+    \ network_metrics WHERE acct_node = ac2.acct_bridge)\n        )\n      ) <= 0.8\n)"
+  source_model: main.cluster_analysis
+  domains:
+  - definitions
+- name: advanced_persistent_threat
+  description: 'Identifies sophisticated, persistent security threats.
+
+
+    A High-Risk Bot Network with NMI > 0.9 and TEI > 0.8
+
+
+    Built on: high_risk_bot_network, network_manipulation_index_nmi, technical_evasion_index_tei.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry requires NMI > 0.9, but NMI (Network Manipulation Index) was itself marked
+    as not encodable: it combines a per-account BBI with a per-cluster CAS, and accounts belong to multiple
+    clusters with no rule given to pick/aggregate which cluster''s CAS applies. Since Advanced Persistent
+    Threat depends on NMI, it cannot be encoded either.'
+- name: temporal_pattern_deviation_score_tpds
+  description: 'Measures deviation from established temporal activity patterns.
+
+
+    It is calculated by comparing the observed hourly activity of an account with its expected pattern:
+    for each of the 24 hours, take the percentage deviation between observed and expected frequency, square
+    these deviations, sum them for all hours, and finally take the square root of that total.
+
+
+    Built on: account_activity_frequency_aaf, behavioral_anomaly_score_bas.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: TPDS requires observed hourly activity counts for 24 hours compared against an expected/baseline
+    hourly pattern. The database has no per-hour activity data (only a 3-bucket Morning/Afternoon/Night
+    split in session_telemetry.activity_pattern.activity_spread_code) and no stored "expected pattern"
+    baseline to compare against. This cannot be computed from the available schema.
+- name: network_influence_centrality_nic
+  description: 'Quantifies account''s position and influence in interaction network.
+
+
+    It is defined as: NIC = 0.4 * connection quality score + 0.3 * network influence score + 0.3 * interaction
+    diversity.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: NIC requires a "network influence score" per account. The only candidate field matching
+    that description is cluster_analysis.NetInfl, but accounts link to multiple clusters via account_clusters
+    (e.g. ACC7210284 belongs to 3 clusters), so there is no unique NetInfl value per account and no aggregation
+    rule is stated to resolve ties across clusters. Without a defined selection/aggregation rule across
+    an account's clusters, this cannot be encoded as a single-row scalar subquery.
+- name: multi_account_correlation_index_maci
+  description: 'Measures behavioral correlation across linked accounts.
+
+
+    It is the average behavioural correlation across every pair of linked accounts, computed as the mean
+    Pearson correlation coefficient for the chosen activity metric.
+
+
+    Built on: automated_behavior_score_abs, network_manipulation_index_nmi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: MACI requires computing a Pearson correlation coefficient of an activity metric over time
+    for each pair of linked accounts, then averaging across pairs. The database has no time-series/per-timestamp
+    activity data per account (only single aggregate snapshot values per account in security_sessions,
+    content_activity, etc.), so no correlation across time can be computed, and account_clusters only
+    gives cluster membership, not pairwise linkage with repeated observations. This cannot be encoded
+    as a scalar SQL expression over any single table here.
+- name: reputation_volatility_index_rvi
+  description: 'Quantifies stability of account reputation over time.
+
+
+    It is the coefficient of variation (standard deviation divided by mean) of the account''s reputation
+    score over time, scaled by the relative rate of change during the measurement window.
+
+
+    Built on: profile_credibility_index_pci, security_risk_score_srs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: RVI requires reputation score values measured over time (a time series) to compute a coefficient
+    of variation and a rate of change across a "measurement window". The database only stores a single,
+    static reputation_score per account (risk_profile->risk_scores->reputation_score) with no historical/time-series
+    records of reputation scores. There is no table tracking reputation over multiple timestamps, so standard
+    deviation, mean, and rate of change over time cannot be computed.
+- name: content_distribution_pattern_score_cdps
+  description: 'Analyzes patterns in content posting and sharing.
+
+
+    It is defined as: CDPS = 0.4 * entropy of post times + 0.3 * burstiness + 0.3 * (1 - periodicity).
+
+
+    Built on: content_manipulation_score_cms, content_impact_score_cis.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CDPS requires "entropy of post times", "burstiness", and "periodicity" metrics derived
+    from timestamped posting/sharing event data. The database has no such time-series data (only aggregate
+    fields like total_posts, posts_per_day, post_gap_variability in content_metrics); none of these approximate
+    entropy, burstiness, or periodicity as defined. Cannot encode.
+- name: behavioral_consistency_score_bcs
+  description: 'Measures consistency of account behavior patterns.
+
+
+    It is defined as: BCS = (1 - TPDS) * (1 - RVI) * (1 − behavior pattern deviation divided by 100).
+
+
+    Built on: temporal_pattern_deviation_score_tpds, reputation_volatility_index_rvi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: BCS depends on TPDS and RVI, both of which cannot be computed from this database (no hourly
+    activity data/expected baseline for TPDS, no time-series reputation data for RVI). Since BCS is a
+    direct product of these two uncomputable components (plus a behavior pattern deviation term), it cannot
+    be encoded either.
+- name: network_synchronization_index_nsi
+  description: 'Quantifies synchronized activities across account clusters.
+
+
+    It is the mean time synchronisation score for all unique account pairs in the cluster, multiplied
+    by the multi-account correlation index, thereby emphasising both pair-wise synchronicity and overall
+    behavioural alignment.
+
+
+    Built on: multi_account_correlation_index_maci, network_manipulation_index_nmi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: NSI requires a "mean time synchronisation score" across all unique account pairs in a
+    cluster (no definition or source data for pairwise time synchronization exists in the schema - no
+    per-timestamp activity series are available) and the Multi-Account Correlation Index (MACI), which
+    itself cannot be encoded since the database has no time-series activity data per account to compute
+    Pearson correlations across linked account pairs. Without either component computable, NSI cannot
+    be encoded as a scalar SQL expression over any single table here.
+- name: content_amplification_effect_cae
+  description: 'Measures the cascade effect of content sharing.
+
+
+    It is defined as: CAE = cis * NIC * log(1 + reshare count).
+
+
+    Built on: content_impact_score_cis, network_influence_centrality_nic.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'CAE depends on NIC, which cannot be encoded (per its own entry note: accounts can belong
+    to multiple clusters via account_clusters with no defined rule to pick/aggregate a single NetInfl
+    value). Additionally, CAE requires a "reshare count" per account, which does not exist anywhere in
+    the schema (no content_metrics field, no network_metrics field tracks reshare counts - only rate fields
+    like ShareRt exist, not a count). Both missing pieces make CAE impossible to encode over this database.'
+- name: authentication_pattern_score_aps
+  description: 'Evaluates consistency of authentication behaviors.
+
+
+    It is defined as: APS = (1 - TEI) * BCS * (1 - authentication anomaly count divided by 100).
+
+
+    Built on: technical_evasion_index_tei, behavioral_consistency_score_bcs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: APS = (1 - TEI) * BCS * (1 - authentication anomaly count / 100). BCS cannot be computed
+    because it depends on TPDS (requires hourly activity data and an expected baseline, not present) and
+    RVI (requires time-series reputation data, not present). Also "authentication anomaly count" is not
+    available in any table. Since APS is a direct product involving these uncomputable components, it
+    cannot be encoded over this database.
+- name: cross_platform_correlation_score_cpcs
+  description: 'Measures behavioral correlation across platforms.
+
+
+    It is defined as: CPCS = CPRI * MACI * (1 + platform link count divided by 10).
+
+
+    Built on: cross_platform_risk_index_cpri, multi_account_correlation_index_maci.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'CPCS = CPRI * MACI * (1 + platform link count / 10). MACI (Multi-Account Correlation
+    Index) cannot be computed over this database: it requires a Pearson correlation coefficient of an
+    activity metric across time for each pair of linked accounts, but the database only stores single
+    aggregate snapshot values per account (no per-timestamp time series). Since CPCS multiplies by MACI,
+    it inherits this limitation and cannot be encoded as a SQL expression either.'
+- name: coordinated_influence_operation
+  description: 'Identifies sophisticated influence campaigns.
+
+
+    A network where NSI > 0.8 and CAE > 0.7 and contains at least one Content Manipulation Ring
+
+
+    Built on: network_synchronization_index_nsi, content_amplification_effect_cae, content_manipulation_ring.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on NSI and CAE, neither of which can be encoded over this database
+    (NSI needs pairwise time-synchronization data and MACI's Pearson correlations across time-series activity,
+    none of which exist in the schema; CAE needs NIC, itself unencodable, and a reshare count field absent
+    from the schema). Since the required components NSI > 0.8 and CAE > 0.7 cannot be computed, the overall
+    condition cannot be encoded.
+- name: behavioral_pattern_anomaly
+  description: 'Identifies accounts with inconsistent behavioral patterns.
+
+
+    An account with BCS < 0.3 and TPDS > 0.7 and is not a Trusted Account
+
+
+    Built on: behavioral_consistency_score_bcs, temporal_pattern_deviation_score_tpds, trusted_account.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This metric depends on BCS and Trusted Account, both already determined to be uncomputable
+    from this schema. BCS requires TPDS (needs 24-hour observed vs expected activity baseline, not available
+    - only Morning/Afternoon/Night buckets exist) and RVI (needs time-series reputation data, not available).
+    Trusted Account requires PCI, which needs profile completeness, a component with no defined formula
+    or column in the schema. Since Behavioral Pattern Anomaly is a direct boolean combination of these
+    uncomputable components, it cannot be encoded.
+- name: cross_platform_bot_network
+  description: 'Identifies coordinated bot activity across platforms.
+
+
+    A Bot Network where CPCS > 0.8 and all accounts have similar MACI patterns
+
+
+    Built on: bot_network, cross_platform_correlation_score_cpcs, multi_account_correlation_index_maci.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on CPCS, which depends on MACI. MACI requires a Pearson correlation coefficient
+    of an activity metric over time for each pair of linked accounts, but the database only stores single
+    aggregate snapshot values per account (no per-timestamp time series). Since CPCS and this metric inherit
+    that limitation, neither can be encoded as a SQL expression over this database.
+- name: authentication_anomaly_cluster
+  description: 'Identifies groups with suspicious authentication patterns.
+
+
+    A cluster where average APS < 0.3 and contains at least one Authentication Risk Account
+
+
+    Built on: authentication_pattern_score_aps, authentication_risk_account.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on APS and Authentication Risk Account, both of which are not computable in this
+    database (APS requires BCS, which requires TPDS and RVI, needing time-series/hourly activity data
+    not present; also "authentication anomaly count" is not stored. Authentication Risk Account requires
+    ARS, which requires PCI's "profile completeness" component, not defined/stored). Since the cluster
+    condition is built entirely on these uncomputable metrics, it cannot be encoded over this database.
+- name: network_influence_hub
+  description: 'Identifies accounts with unusual influence patterns.
+
+
+    An account with NIC > 0.8 and CAE > 0.7 that is part of a Coordinated Influence Operation
+
+
+    Built on: network_influence_centrality_nic, content_amplification_effect_cae, coordinated_influence_operation.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on NIC, CAE, and Coordinated Influence Operation, none of which can
+    be encoded over this database. NIC cannot be resolved to a single value per account (accounts belong
+    to multiple clusters via account_clusters with no aggregation rule for NetInfl). CAE additionally
+    requires a "reshare count" field that does not exist anywhere in the schema. Coordinated Influence
+    Operation requires NSI, which needs pairwise time-synchronization and Pearson-correlation data (MACI)
+    not present in the schema. Since NIC > 0.8, CAE > 0.7, and membership in a Coordinated Influence Operation
+    are all unencodable, the full condition cannot be expressed as a SQL predicate over this database.
+- name: reputation_manipulation_ring
+  description: 'Identifies coordinated reputation manipulation.
+
+
+    A Content Manipulation Ring where all accounts have RVI > 0.7 and similar CDPS patterns
+
+
+    Built on: content_manipulation_ring, reputation_volatility_index_rvi, content_distribution_pattern_score_cdps.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Reputation Manipulation Ring requires RVI > 0.7 for all accounts in a Content Manipulation
+    Ring, plus "similar CDPS patterns" across those accounts. Both RVI and CDPS are themselves marked
+    not compiled: RVI needs a time series of reputation scores (database only has one static reputation_score
+    per account), and CDPS needs entropy/burstiness/periodicity derived from timestamped posting events
+    (database only has aggregate fields like total_posts, posts_per_day, post_gap_variability). Without
+    these base metrics, the "all accounts have RVI > 0.7" condition and the "similar CDPS patterns" condition
+    cannot be computed, so this entry cannot be encoded.'
+- name: synchronized_behavior_cluster
+  description: 'Identifies groups with highly synchronized activities.
+
+
+    A cluster where NSI > 0.9 and all accounts have similar BCS patterns
+
+
+    Built on: network_synchronization_index_nsi, behavioral_consistency_score_bcs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on NSI and BCS, neither of which can be computed from this database (NSI requires
+    pairwise time-synchronization and MACI's Pearson correlation across time-series activity data; BCS
+    requires TPDS hourly activity baselines and RVI time-series reputation data - none of which exist
+    in the schema). Without these components, "cluster where NSI > 0.9 and all accounts have similar BCS
+    patterns" cannot be encoded.
+- name: multi_platform_threat_network
+  description: 'Identifies sophisticated cross-platform threats.
+
+
+    A Cross-Platform Threat where CPCS > 0.8 and all accounts are part of a Synchronized Behavior Cluster
+
+
+    Built on: cross_platform_threat, cross_platform_correlation_score_cpcs, synchronized_behavior_cluster.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on CPCS (requires MACI, a Pearson correlation across per-account time series data
+    not present in this schema - only single aggregate snapshots exist per account) and on Synchronized
+    Behavior Cluster (requires NSI and BCS, which themselves depend on MACI and on TPDS/RVI time-series
+    baselines not present in the schema). Since this entry requires CPCS > 0.8 AND membership in a Synchronized
+    Behavior Cluster, both unencodable, it cannot be encoded as a SQL expression.
+- name: advanced_influence_campaign
+  description: 'Identifies sophisticated influence operations.
+
+
+    A Mass Manipulation Campaign containing at least one Network Influence Hub and high NSI
+
+
+    Built on: mass_manipulation_campaign, network_influence_hub, network_synchronization_index_nsi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires Network Influence Hub and NSI (Network Synchronization Index), neither
+    of which can be encoded over this database. Network Influence Hub depends on NIC (not resolvable to
+    a single per-account value since accounts belong to multiple clusters with no aggregation rule), CAE
+    (requires a "reshare count" field absent from the schema), and Coordinated Influence Operation (needs
+    NSI). NSI itself requires pairwise time-synchronization scores and MACI (Pearson correlation across
+    linked accounts over time), neither of which can be computed since no time-series/per-timestamp activity
+    data exists in the schema. Since both required building blocks are unencodable, the full condition
+    cannot be expressed as a SQL predicate.
+- name: persistent_pattern_anomaly
+  description: 'Identifies sustained abnormal behavior patterns.
+
+
+    A Behavioral Pattern Anomaly that persists for over 30 days and maintains high TPDS
+
+
+    Built on: behavioral_pattern_anomaly, temporal_pattern_deviation_score_tpds.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Depends on Behavioral Pattern Anomaly and TPDS, both already determined uncomputable from
+    this schema (no 24-hour activity baseline data, no reputation time-series, no profile completeness
+    formula). Additionally, "persists for over 30 days" requires a time-series of anomaly detections over
+    a duration, which this schema does not track. Cannot be encoded.
+- name: tei_quartile
+  description: 'Categorizes accounts into four groups based on their TEI values.
+
+
+    Assign each account to one of four quartiles based on its TEI distribution: quartile-1 for the lowest
+    25 percent of TEI values, quartile-2 for the next 25 percent, quartile-3 for the third quartile, and
+    quartile-4 for the top 25 percent.
+
+
+    Built on: technical_evasion_index_tei.
+
+
+    Compiler note: Computed TEI per account from session_telemetry fields (vpn_usage_pct stored as percent
+    string, proxy_hits, country_count), then used NTILE(4) window function ordered ascending by TEI to
+    split accounts into four equal-sized quartile groups, labeled quartile-1 (lowest TEI) to quartile-4
+    (highest TEI).'
+  sql_expression: "CASE NTILE(4) OVER (ORDER BY (0.4 * (REPLACE(session_telemetry->'vpn_usage_pct'->>0,\
+    \ '%','')::double / 100) + 0.3 * ((session_telemetry->'ip_reputation'->>'proxy_hits')::double / 10)\
+    \ + 0.3 * ((session_telemetry->'ip_reputation'->>'country_count')::double / 20)))\n  WHEN 1 THEN 'quartile-1'\n\
+    \  WHEN 2 THEN 'quartile-2'\n  WHEN 3 THEN 'quartile-3'\n  WHEN 4 THEN 'quartile-4'\nEND"
+  source_model: main.security_sessions
+  domains:
+  - calculations
+- name: latest_bot_likelihood_score_lbs
+  description: 'The most recent bot likelihood score for an account based on security detection timestamps.
+
+
+    For an account, use the bot-likelihood score that was recorded at its most recent detection timestamp.
+
+
+    Built on: bot-likely score.
+
+
+    Compiler note: Each account has at most one monitoring record (checked: acct_mon has no duplicates)
+    and behavioral_scores stores a single static bot_likelihood value per account rather than a time series
+    tied to detection timestamps. Thus ''most recent detection timestamp'' selection reduces to simply
+    reading the account''s bot_likelihood value from behavioral_anomaly_scores.automation_spam.bot_likelihood.'
+  sql_expression: (behavioral_anomaly_scores -> 'automation_spam' ->> 'bot_likelihood')::real
+  source_model: main.behavioral_scores
+  domains:
+  - calculations
+- name: reputational_risk
+  description: 'Measures the potential risk to an account''s reputation based on past moderation actions
+    and low reputation scores.
+
+
+    An account with reputscore < 30 and high abuserepnum, prioritized by the top quartile of abuse reports.
+
+
+    Compiler note: reputation_score is stored on a 0-1 scale, so the stated threshold ''reputscore < 30''
+    is interpreted as reputation_score < 0.3. ''high abuserepnum, prioritized by top quartile'' is encoded
+    as abuse_count being in the top quartile (>= 75th percentile of abuse_count across all accounts, computed
+    as 73.0 via quantile_cont).'
+  sql_expression: (risk_profile->'risk_scores'->>'reputation_score')::float < 0.3 AND (risk_profile->'violation_history'->>'abuse_count')::float
+    >= (SELECT quantile_cont((risk_profile->'violation_history'->>'abuse_count')::float, 0.75) FROM risk_and_moderation)
+  source_model: main.risk_and_moderation
+  domains:
+  - definitions
+- name: high_impact_amplifier
+  description: 'Identifies accounts that exert strong influence while posting at a high daily rate, acting
+    as key amplifiers in coordinated networks.
+
+
+    An account with nic > 0.8 and posts per day > 30.
+
+
+    Compiler note: NIC = 0.4*ConnQual + 0.3*avg(NetInfl across account''s clusters, since accounts belong
+    to multiple clusters via account_clusters many-to-many join) + 0.3*IntDiv, all from network_metrics/cluster_analysis.
+    posts_per_day taken from content_activity.content_metrics->posting->posts_per_day (NULL/''nan'' treated
+    as 0, so condition fails for those).'
+  sql_expression: "(\n  0.4 * (SELECT ConnQual FROM network_metrics WHERE acct_node = acct_ref)\n  + 0.3\
+    \ * (SELECT AVG(ca.NetInfl) FROM account_clusters ac JOIN cluster_analysis ca ON ac.clu_ref = ca.CLSTR_PIN\
+    \ WHERE ac.acct_bridge = acct_ref)\n  + 0.3 * (SELECT IntDiv FROM network_metrics WHERE acct_node\
+    \ = acct_ref)\n) > 0.8\nAND\nCAST(REPLACE((SELECT content_metrics->'posting'->>'posts_per_day' FROM\
+    \ content_activity WHERE acct_slot = acct_ref), 'nan', '0') AS DOUBLE) > 30"
+  source_model: main.accounts
+  domains:
+  - definitions
+- name: high_activity_account_74
+  description: 'Identifies accounts with elevated engagement levels based on the number of sessions or
+    total posting frequency.
+
+
+    An account with session_count > 1000 or total_post_frequency > 50.
+
+
+    Compiler note: session_count taken from security_sessions.session_telemetry->session_stats->session_count
+    (1-1 with accounts via acct_gate); total_post_frequency taken as posts_per_day from content_activity.content_metrics->posting->posts_per_day
+    (1-1 with accounts via acct_slot). Both tables have unique PK per account so scalar subqueries are
+    safe.'
+  sql_expression: '(SELECT (session_telemetry->''session_stats''->>''session_count'')::bigint FROM security_sessions
+    WHERE acct_gate = acct_ref) > 1000
+
+    OR (SELECT (content_metrics->''posting''->>''posts_per_day'')::double precision FROM content_activity
+    WHERE acct_slot = acct_ref) > 50'
+  source_model: main.accounts
+  domains:
+  - definitions
+- name: session_count_sc
+  description: 'Measures the total number of session records associated with an account.
+
+
+    Session count equals the number of session entries where session profile reference matches the profile
+    key and profile account reference equals the target account.
+
+
+    Compiler note: The database has one row per account in security_sessions (not a per-session entries
+    table joined via profile keys as the text describes); the stored session_count field in session_telemetry.session_stats
+    directly holds the total number of session records for the account, so it is used directly.'
+  sql_expression: (session_telemetry->'session_stats'->>'session_count')::bigint
+  source_model: main.security_sessions
+  domains:
+  - calculations
+- name: total_post_frequency_tpf
+  description: 'Measures the total posting frequency across all sessions for an account.
+
+
+    Total post frequency equals the sum of post frequencies from all content entries where content session
+    reference matches session reference, session profile reference equals the profile key, and profile
+    account reference equals the target account.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'The entry describes joining via "session profile reference", "profile key", and "content
+    session reference" columns linking session, profile, and content tables in a one-to-many fashion.
+    This schema has no such keys: content_activity and security_sessions each hold exactly one row per
+    account (keyed directly by acct_slot/acct_gate to accounts.acct_ref), with no session-reference or
+    profile-reference columns, and content_metrics.posting.posts_per_day is a single scalar per account
+    rather than multiple content entries to sum. There is no way to encode a sum over "all content entries"
+    per account in this schema.'
+- name: high_activity_account_77
+  description: 'Identifies accounts with elevated engagement levels based on the number of sessions or
+    total posting frequency.
+
+
+    An account with session count > 1000 or total post frequency > 50.
+
+
+    Built on: session_count_sc, total_post_frequency_tpf.
+
+
+    Compiler note: session_count taken from session_telemetry.session_stats.session_count. True ''Total
+    Post Frequency'' (sum across session-linked content entries) cannot be built since this schema has
+    one content row per account with no session/profile linking keys; used content_activity.posting.posts_per_day
+    (the only per-account posting-frequency scalar, joined 1:1 via acct_slot=acct_gate) as the closest
+    available proxy for total post frequency.'
+  sql_expression: (session_telemetry->'session_stats'->>'session_count')::bigint > 1000 OR (SELECT (c.content_metrics->'posting'->>'posts_per_day')::double
+    precision FROM content_activity c WHERE c.acct_slot = acct_gate) > 50
+  source_model: main.security_sessions
+  domains:
+  - definitions
+- name: influence_ranking_by_nic
+  description: 'A ranking system that orders accounts based on their NIC scores from highest to lowest.
+
+
+    The rank of an account is equal to the number of other accounts with higher network influence centrality
+    score, plus one.
+
+
+    Built on: network_influence_centrality_nic.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'This ranking depends on Network Influence Centrality (NIC), which itself cannot be encoded:
+    NIC requires a "network influence score" per account, but accounts link to multiple clusters via account_clusters
+    (e.g. ACC7210284 belongs to 3 clusters) each with its own NetInfl value, with no stated rule to select/aggregate
+    a single value per account. Without a well-defined NIC per account, no ranking by NIC can be computed.'
+- name: tei_risk_category
+  description: 'A categorical risk level assigned based on an account''s TEI Quartile.
+
+
+    A category assigned as ''Low Risk'' (Quartile 1), ''Moderate Risk'' (Quartile 2), ''High Risk'' (Quartile
+    3), or ''Very High Risk'' (Quartile 4) based on the account''s calculated TEI Quartile.
+
+
+    Built on: tei_quartile.
+
+
+    Compiler note: Reuses TEI quartile definition (NTILE(4) over TEI = 0.4*vpn_ratio + 0.3*proxy_hits/10
+    + 0.3*country_count/20, computed from session_telemetry JSON fields vpn_usage_pct (text percent, ''%''
+    stripped), ip_reputation.proxy_hits, ip_reputation.country_count) and maps quartile 1-4 to the stated
+    risk labels.'
+  sql_expression: "CASE NTILE(4) OVER (ORDER BY (0.4 * (REPLACE(session_telemetry->>'vpn_usage_pct', '%','')::double\
+    \ / 100) + 0.3 * ((session_telemetry->'ip_reputation'->>'proxy_hits')::double / 10) + 0.3 * ((session_telemetry->'ip_reputation'->>'country_count')::double\
+    \ / 20)))\n  WHEN 1 THEN 'Low Risk'\n  WHEN 2 THEN 'Moderate Risk'\n  WHEN 3 THEN 'High Risk'\n  WHEN\
+    \ 4 THEN 'Very High Risk'\nEND"
+  source_model: main.security_sessions
+  domains:
+  - definitions
+- name: cluster_identifier
+  description: 'A key used to group related accounts identified as part of the same network or cluster.
+
+
+    In this context, the platform identifier (`platident`) associated with the accounts in the potential
+    Amplification Network is the cluster identifier.
+
+
+    Built on: amplification_network.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry defines a grouping key concept (using platform identifier as cluster identifier),
+    not a boolean/computable condition. It also depends on "Amplification Network" which itself cannot
+    be encoded since cluster_analysis.CluRole has no 'Amplifier' value. There is no row-level predicate
+    to express here.
+- name: member_count
+  description: 'The total number of unique accounts within an identified cluster.
+
+
+    It is defined as: Calculated using COUNT(DISTINCT account_index) for accounts grouped by the cluster
+    identifier.
+
+
+    Built on: cluster_identifier.
+
+
+    Compiler note: Member count computed as the number of distinct accounts linked to the cluster via
+    account_clusters.clu_ref matching cluster_analysis.CLSTR_PIN, consistent with the stated COUNT(DISTINCT
+    account_index) grouped by cluster identifier definition.'
+  sql_expression: (SELECT COUNT(DISTINCT acct_bridge) FROM account_clusters WHERE clu_ref = CLSTR_PIN)
+  source_model: main.cluster_analysis
+  domains:
+  - calculations
+- name: maximum_coordination_score
+  description: 'The highest coordination score observed among the members of an identified cluster.
+
+
+    It refers to the maximum coordination score value among all accounts within the given cluster.
+
+
+    Built on: cluster_identifier.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This entry depends on "cluster identifier," which was not compiled (it relies on a platform-identifier-based
+    grouping tied to the non-encodable "Amplification Network" concept). Additionally, coordination score
+    (CoordScore) in this database is stored as a single value per cluster in cluster_analysis, not per
+    individual member account, so there is no member-level coordination score column to take a MAX over
+    via account_clusters joins. There is no computable row-level aggregation to express here.
+- name: member_account_ids
+  description: 'A collection (array) of the unique account indexes belonging to an identified cluster.
+
+
+    It refers to the list of account identifiers for all members included in a specific cluster.
+
+
+    Built on: cluster_identifier.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: This entry depends on "cluster identifier", which is itself not encodable (it relies on
+    platform identifier as a stand-in for Amplification Network clusters, a concept that cannot be expressed
+    since cluster_analysis.CluRole has no 'Amplifier' value). Without a valid cluster identifier, there
+    is no computable grouping key to aggregate member account IDs over.
+- name: last_activity_proxy_time
+  description: 'An estimated timestamp of the last known activity for an account, used when direct session
+    timestamps are unavailable or insufficient.
+
+
+    It is defined as: Derived as max(detect time) from associated securitydetection records for an account.
+
+
+    Compiler note: Monitoring table holds the security-detection records (snap_ts = detect time, acct_mon
+    = account). Verified each account has at most one monitoring row, but used MAX() as a safe aggregate
+    to get the latest detect time per account, computed as a correlated scalar subquery against accounts.
+    Cast to timestamp to avoid timezone-handling error.'
+  sql_expression: (SELECT MAX(m.snap_ts)::timestamp FROM monitoring m WHERE m.acct_mon = accounts.acct_ref)
+  source_model: main.accounts
+  domains:
+  - calculations
+- name: account_inactivity
+  description: 'A condition indicating that an account has not demonstrated recent activity based on available
+    data proxies.
+
+
+    Condition met when: last activity proxy time < (current date - 90 days)
+
+
+    Built on: last_activity_proxy_time.
+
+
+    Compiler note: last activity proxy time defined as MAX(monitoring.snap_ts) for the account; compared
+    against current_date - 90 days. If an account has no monitoring rows, the subquery returns NULL and
+    the condition evaluates to NULL (not matched), which is consistent with ''available data proxies''
+    being absent.'
+  sql_expression: (SELECT MAX(m.snap_ts) FROM monitoring m WHERE m.acct_mon = accounts.acct_ref) < (CURRENT_DATE
+    - INTERVAL '90 days')
+  source_model: main.accounts
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: account_clusters
+  columns:
+  - name: acct_bridge
+    type: VARCHAR
+    description: TEXT. Account reference for the cluster. PK. FK to accounts.
+  - name: clu_ref
+    type: VARCHAR
+    description: TEXT. Cluster reference identifier. PK. FK to cluster_analysis.
+- schema: main
+  table: accounts
+  columns:
+  - name: acct_ref
+    type: VARCHAR
+    description: 'TEXT. Unique account reference. PK. Example: ACC7210284.'
+  - name: plt_key
+    type: VARCHAR
+    description: TEXT. Platform code reference. FK to platforms.
+  - name: OrigStamp
+    type: DATE
+    description: 'DATE. Original account creation timestamp. **NULL means account creation timestamp not
+      provided.**. Example: 26-Dec-23.'
+  - name: AGE_D
+    type: BIGINT
+    description: 'BIGINT. Age of the account in days. Example: 393.'
+  - name: StateFlag
+    type: VARCHAR
+    description: 'TEXT. Current state of the account. Possible values: Active, Deleted, Dormant, Suspended.'
+  - name: acct_form
+    type: VARCHAR
+    description: 'TEXT. Account form or type. Possible values: Bot, Business, Hybrid, Personal.'
+  - name: VerifyMark
+    type: VARCHAR
+    description: 'TEXT. Verification status of the account. Possible values: Failed, Pending, Suspicious,
+      Unverified.'
+  - name: ProfileScore
+    type: FLOAT
+    description: 'REAL. Profile score of the account. Example: 0.167.
+
+
+      profile completeness degree: Illustrates profile completeness scoring.
+
+
+      Ranges from 0 to 1. Values above 0.8 indicate well-maintained profiles, while values below 0.4 suggest
+      placeholder or abandoned profiles.
+
+
+      Compiler note: ProfileScore in accounts ranges from ~0.005 to ~0.999, matching the described 0-1
+      range for profile completeness degree.'
+- schema: main
+  table: behavioral_scores
+  columns:
+  - name: acct_beh
+    type: VARCHAR
+    description: TEXT. Account reference for behavioral scores. PK. FK to accounts.
+  - name: behavioral_anomaly_scores
+    type: JSON
+    description: 'JSONB column. Consolidates all automated-behaviour, spam, pattern-anomaly and commercial-intent
+      scores so model pipelines can ingest a single JSONB document per account. Fields: {"automation_spam":
+      {"automated_behavior": "REAL. Automatic behavior score. Example: 0.789.", "bot_likelihood": "REAL.
+      Bot likelihood score. **NULL means bot likelihood not calculated.**. Example: 0.203.", "spam_score":
+      "REAL. Spam score. Example: 0.315."}, "commercial_intent_score": "REAL. Communication intensity
+      score. **NULL means communication intensity not recorded.**. Example: 0.558.", "pattern_scores":
+      {"behavior_pattern": "REAL. Behavior pattern score. Example: 0.087.", "temporal_pattern": "REAL.
+      Temporary behavior pattern score. **NULL means temporary pattern not recorded.**. Example: 0.883.",
+      "network_pattern": "REAL. Network behavior pattern score. Example: 0.307.", "content_pattern": "REAL.
+      Content pattern score. Example: 0.178.", "profile_pattern": "REAL. Profile behavior pattern score.
+      Example: 0.869.", "technical_pattern": "REAL. Technical behavior pattern score. Example: 0.246."}}'
+- schema: main
+  table: cluster_analysis
+  columns:
+  - name: CLSTR_PIN
+    type: VARCHAR
+    description: 'TEXT. Unique cluster identifier. PK. Example: CL0029.'
+  - name: ClusterQty
+    type: BIGINT
+    description: 'BIGINT. Number of accounts in the cluster. Example: 5.'
+  - name: CluRole
+    type: VARCHAR
+    description: 'TEXT. Role or function of the cluster. Possible values: Botnet, Community, InfluenceNetwork,
+      SocialGroup, SpamRing.'
+  - name: NetInfl
+    type: FLOAT
+    description: 'REAL. Network influence score. Example: 0.362.'
+  - name: CoordScore
+    type: FLOAT
+    description: 'REAL. Coordination score. Example: 0.363.
+
+
+      coordination score: Illustrates coordination score meaning.
+
+
+      Ranges from 0 to 1. Scores above 0.7 strongly indicate coordinated behavior, while scores below
+      0.2 suggest independent actions.
+
+
+      Compiler note: Matches CoordScore (0-1 range coordination score) in cluster_analysis table.'
+- schema: main
+  table: content_activity
+  columns:
+  - name: acct_slot
+    type: VARCHAR
+    description: TEXT. Account reference for content activity. PK. FK to accounts.
+  - name: content_metrics
+    type: JSON
+    description: 'JSONB column. Packs post-rate, linguistic diversity, hashtag / mention patterns and
+      media-sharing ratios into one JSONB blob for real-time content-quality scoring. Fields: {"posting":
+      {"total_posts": "BIGINT. Total number of posts. Example: 3713.", "posts_per_day": "REAL. Posting
+      frequency. Example: 28.6.", "post_gap_variability": "REAL. Variation in post gaps. Example: 0.835."},
+      "content_quality": {"content_similarity": "REAL. Content similarity score. Example: 0.789.", "content_uniqueness":
+      "REAL. Content uniqueness score. Example: 0.858.", "content_diversity": "REAL. Content diversity
+      score. Example: 0.153.", "topic_entropy": "REAL. Top entity identification score. Example: 0.859."},
+      "language_tags": {"language_count": "BIGINT. Number of languages used. Possible values: 1, 2, 3,
+      4, 5.", "hashtag_pattern": "TEXT. Tag pattern description. Possible values: Normal, Random, Spam,
+      Trending.", "hashtag_ratio": "REAL. Tag relevance score. Example: 0.829.", "mention_pattern": "TEXT.
+      Mention pattern. Possible values: Normal, Random, Spam, Targeted.", "mention_ratio": "TEXT. Mention
+      response rate. Example: 0.40%."}, "link_media": {"url_freq": "REAL. URL frequency in content. **NULL
+      means URL frequency not recorded.**. Example: 0.734.", "url_diversity": "REAL. URL diversity score.
+      Example: 0.028.", "media_upload_rate": "REAL. Media upload rate. Example: 0.733.", "media_reuse_rate":
+      "REAL. Media response rate. **NULL means media response rate not recorded.**. Example: 0.109."}}
+
+
+      content uniqueness scoring: Illustrates content uniqueness scoring.
+
+
+      Ranges from 0 to 1. Scores above 0.8 indicate highly unique content, while scores below 0.3 suggest
+      duplicate or templated content.
+
+
+      Compiler note: Describes the content_uniqueness field within content_metrics->content_quality->content_uniqueness,
+      which holds values in [0,1] as stated (verified via sample query).'
+- schema: main
+  table: interaction_metrics
+  columns:
+  - name: acct_dm
+    type: VARCHAR
+    description: TEXT. Account reference for direct messaging metrics. PK. FK to accounts.
+  - name: MsgSim
+    type: FLOAT
+    description: 'REAL. Message similarity score. Example: 0.041.'
+  - name: MsgFreq
+    type: FLOAT
+    description: 'REAL. Message frequency. Example: 60.1.'
+  - name: MsgTargetDiv
+    type: FLOAT
+    description: 'REAL. Message target diversity. Example: 0.498.'
+  - name: RespTimePtn
+    type: VARCHAR
+    description: 'TEXT. Response time pattern. **NULL means response time pattern not recorded.**. Possible
+      values: Delayed, Instant, Natural, Random.'
+  - name: ConvNat
+    type: FLOAT
+    description: 'REAL. Conversation nature score. Example: 0.825.
+
+
+      conversation naturalness value: Illustrates conversation naturalness value.
+
+
+      Ranges from 0 to 1. Values above 0.7 indicate natural human conversation, while values below 0.3
+      suggest automated or scripted responses.
+
+
+      Compiler note: ConvNat ranges 0.002-0.999, matching described 0-1 range for conversation naturalness
+      value.'
+  - name: SentVar
+    type: FLOAT
+    description: 'REAL. Sentiment variance score. Example: 0.005.'
+  - name: LangSoph
+    type: FLOAT
+    description: 'REAL. Language sophistication score. Example: 0.03.'
+  - name: TxtUniq
+    type: FLOAT
+    description: 'REAL. Text uniqueness score. Example: 0.44.'
+  - name: KeyPtnHit
+    type: FLOAT
+    description: 'REAL. Key pattern hit score. **NULL means key pattern hit not recorded.**. Example:
+      0.589.'
+  - name: TopCoh
+    type: FLOAT
+    description: 'REAL. Top coherence score. Example: 0.856.'
+- schema: main
+  table: monitoring
+  columns:
+  - name: RecKey
+    type: VARCHAR
+    description: 'TEXT. Unique monitoring record key. PK. Example: FA410087.'
+  - name: snap_ts
+    type: TIMESTAMP WITH TIME ZONE
+    description: 'TIMESTAMPTZ. Snapshot timestamp. **NULL means snapshot timestamp not recorded.**. Example:
+      2024-08-21T08:30:21.'
+  - name: acct_mon
+    type: VARCHAR
+    description: TEXT. Account reference for monitoring. FK to accounts.
+  - name: DetectSrc
+    type: VARCHAR
+    description: 'TEXT. Source of detection. Possible values: Algorithm, Manual Review, Pattern Match,
+      User Report.'
+  - name: DetectConf
+    type: FLOAT
+    description: 'REAL. Detection confidence score. **NULL means detection confidence not recorded.**.
+      Example: 0.132.
+
+
+      detection score: Illustrates confidence value in detection scores.
+
+
+      Ranges from 0 to 1. Values above 0.8 indicate high-confidence detections, while values below 0.3
+      suggest uncertain results requiring manual review.
+
+
+      Compiler note: DetectConf values range from 0 to ~1, matching the described 0-1 confidence scale
+      for detection score.'
+  - name: MonPrio
+    type: VARCHAR
+    description: 'TEXT. Monitoring priority. Possible values: High, Low, Medium, Urgent.'
+  - name: InvestState
+    type: VARCHAR
+    description: 'TEXT. Investigation state. Possible values: Active, Completed, Pending.'
+  - name: ActionDone
+    type: VARCHAR
+    description: 'TEXT. Action taken. **NULL means no action recorded.**. Possible values: Restriction,
+      Suspension, Warning.'
+  - name: RevFreq
+    type: VARCHAR
+    description: 'TEXT. Review frequency. Possible values: Daily, Monthly, Quarterly, Weekly.'
+  - name: LastRev
+    type: DATE
+    description: 'DATE. Last review date. Example: 2025/1/1.'
+  - name: NextRev
+    type: DATE
+    description: 'DATE. Next review date. Example: 2025/4/10.'
+  - name: ConfScore
+    type: FLOAT
+    description: 'REAL. Confidence score. **NULL means confidence score not assigned.**. Example: 0.253.'
+  - name: FPP
+    type: FLOAT
+    description: 'REAL. False positive probability. Example: 0.692.'
+  - name: MethRel
+    type: FLOAT
+    description: 'REAL. Method reliability score. Example: 0.927.'
+  - name: ModelVer
+    type: VARCHAR
+    description: 'TEXT. Model version used. Example: v1.5.'
+  - name: FeatVer
+    type: VARCHAR
+    description: 'TEXT. Feature version used. Example: f1.7.'
+  - name: LastUp
+    type: TIMESTAMP WITH TIME ZONE
+    description: 'TIMESTAMPTZ. Last update timestamp. Example: 2025/2/18 12:00.'
+  - name: UpFreqH
+    type: BIGINT
+    description: 'BIGINT. Update frequency in hours. Example: 3.'
+- schema: main
+  table: network_metrics
+  columns:
+  - name: acct_node
+    type: VARCHAR
+    description: TEXT. Account reference for network metrics. PK. FK to accounts.
+  - name: FollowNum
+    type: BIGINT
+    description: 'BIGINT. Number of followers. Example: 32353.'
+  - name: FollowgNum
+    type: BIGINT
+    description: 'BIGINT. Number of followees. Example: 53330.'
+  - name: FollGrow
+    type: FLOAT
+    description: 'REAL. Follower growth rate. Example: 0.697.'
+  - name: FingGrow
+    type: FLOAT
+    description: 'REAL. Following growth rate. Example: 0.899.'
+  - name: FollRatio
+    type: FLOAT
+    description: 'REAL. Follower-followee ratio. Example: 5.162.'
+  - name: MutConn
+    type: FLOAT
+    description: 'REAL. Mutual connections count. Example: 0.964.'
+  - name: ConnGrowPtn
+    type: VARCHAR
+    description: 'TEXT. Connection growth pattern. Possible values: Bot-like, Burst, Organic, Suspicious.'
+  - name: ConnQual
+    type: FLOAT
+    description: 'REAL. Connection quality score. Example: 0.819.'
+  - name: EngRate
+    type: FLOAT
+    description: 'REAL. Engagement rate. Example: 0.132.'
+  - name: EngAuth
+    type: FLOAT
+    description: 'REAL. Engagement authority score. Example: 0.954.
+
+
+      engagement authenticity score: Illustrates engagement authenticity score.
+
+
+      Ranges from 0 to 1. Scores above 0.9 indicate highly authentic engagement, while scores below 0.4
+      suggest artificial or automated engagement.
+
+
+      Compiler note: EngAuth column values range from ~0.002 to ~0.995, consistent with the described
+      0-1 scale for engagement authenticity score.'
+  - name: LikeRt
+    type: FLOAT
+    description: 'REAL. Like rate score. Example: 0.738.'
+  - name: ComRt
+    type: FLOAT
+    description: 'REAL. Comment rate score. **NULL means comment rate not recorded.**. Example: 0.282.'
+  - name: ShareRt
+    type: FLOAT
+    description: 'REAL. Share rate score. Example: 0.696.'
+  - name: IntRecip
+    type: FLOAT
+    description: 'REAL. Interaction reciprocity score. Example: 0.817.'
+  - name: IntDiv
+    type: FLOAT
+    description: 'REAL. Interaction diversity score. Example: 0.681.'
+  - name: TempIntPtn
+    type: VARCHAR
+    description: 'TEXT. Temporary interaction pattern. Possible values: Automated, Natural, Periodic,
+      Random.'
+- schema: main
+  table: platforms
+  columns:
+  - name: PLT_CODE
+    type: VARCHAR
+    description: 'TEXT. Unique platform code. PK. Example: PL331.'
+  - name: PLT_KIND
+    type: VARCHAR
+    description: 'TEXT. Type of the platform. Not NULL. Possible values: Forum, Microblog, Social Network,
+      Video Platform.'
+- schema: main
+  table: profiles
+  columns:
+  - name: acct_anchor
+    type: VARCHAR
+    description: TEXT. Account reference. PK. FK to accounts.
+  - name: HandleMask
+    type: VARCHAR
+    description: 'TEXT. Masked handle of the user. Possible values: Natural, Random, Sequential, Template.'
+  - name: usrn_Ent
+    type: FLOAT
+    description: 'REAL. User entry value. Example: 0.835.'
+  - name: USR_LEN
+    type: BIGINT
+    description: 'BIGINT. Length of the username. Example: 13.'
+  - name: UsrPtn
+    type: VARCHAR
+    description: 'TEXT. User pattern description. Possible values: AlphaNum, Generated, Meaningful, Random.'
+  - name: DispChg
+    type: BIGINT
+    description: 'BIGINT. Displacement change value. **NULL means displacement change not recorded.**.
+      Example: 8.0.'
+  - name: pic_form
+    type: VARCHAR
+    description: 'TEXT. Picture format. **NULL means picture format not specified.**. Possible values:
+      AI Generated, Celebrity, Real, Stock.'
+  - name: PicScore
+    type: FLOAT
+    description: 'REAL. Profile picture score. Example: 0.772.'
+  - name: BIO_L
+    type: BIGINT
+    description: 'BIGINT. Length of bio information. Example: 118.0.'
+  - name: BioLang
+    type: VARCHAR
+    description: 'TEXT. Bio language type. Possible values: en, mixed, multiple, unknown.'
+  - name: BioLinks
+    type: BIGINT
+    description: 'BIGINT. Number of bio links. Possible values: 0, 1, 2, 3, 4, 5.'
+  - name: BioKwHit
+    type: VARCHAR
+    description: 'TEXT. Bio keyword hits. **NULL means bio keyword hits not counted.**. Possible values:
+      Normal, Promo, Spam, Suspicious.'
+  - name: LocFlag
+    type: VARCHAR
+    description: 'TEXT. Location flag status. Possible values: Fake, Multiple, No, Yes.'
+  - name: LOC_MOV
+    type: BIGINT
+    description: 'BIGINT. Location movement count. Example: 2.'
+  - name: mail_dom
+    type: VARCHAR
+    description: 'TEXT. Email domain. Possible values: Custom, Disposable, Free, Unknown.'
+  - name: TelState
+    type: VARCHAR
+    description: 'TEXT. Telephone state. **NULL means telephone state not recorded.**. Possible values:
+      Invalid, VOIP, Valid.'
+- schema: main
+  table: risk_and_moderation
+  columns:
+  - name: acct_risk
+    type: VARCHAR
+    description: TEXT. Account reference for risk and moderation data. PK. FK to accounts.
+  - name: risk_profile
+    type: JSON
+    description: 'JSONB column. Bundles risk, authenticity / credibility, violation history and overall
+      reputation into one JSONB field for faster trust-and-safety look-ups and enforcement rules. Fields:
+      {"risk_scores": {"risk_value": "REAL. Risk value score. **NULL means risk value not assigned.**.
+      Example: 0.155.", "threat_level": "TEXT. Threat level description. Possible values: Critical, High,
+      Low, Medium.", "authenticity_score": "REAL. Authorization score. Example: 0.15.", "credibility_score":
+      "REAL. Credit score. Example: 0.441.", "reputation_score": "REAL. Reputation score. Example: 0.23.",
+      "trust_score": "REAL. Trust value score. Example: 0.353.", "impact_score": "REAL. Impact value score.
+      Example: 0.544."}, "violation_history": {"abuse_count": "BIGINT. Abuse count against the account.
+      Example: 24.", "violation_distribution_json": "JSONB. Violations distribution details. Example:
+      {''Spam'': 0.9353273606557855, ''Fake'': 0.4490233249279981, ''Abuse'': 0.08219689664928109}.",
+      "suspension_history_json": "JSONB. Suspension history data. Possible values: 0, 1, 2, 3, 4, 5.",
+      "warning_count": "BIGINT. Warning count. Example: 0.", "appeal_count": "BIGINT. Appeal count. Possible
+      values: 0, 1, 2, 3, 4, 5."}}
+
+
+      trust value: Illustrates trust value meaning.
+
+
+      Ranges from 0 to 1. Values above 0.7 indicate highly trusted accounts, while values below 0.3 suggest
+      untrusted or suspicious accounts.
+
+
+      Compiler note: Maps to risk_profile->''risk_scores''->>''trust_score'', a REAL in [0,1] (checked
+      sample values 0-1); describes meaning of this JSON field''s value range.
+
+
+      impact value: Illustrates impact value meaning.
+
+
+      Ranges from 0 to 1. Values above 0.7 indicate high-impact violations requiring immediate attention,
+      while values below 0.3 suggest low-priority issues.
+
+
+      Compiler note: Describes the impact_score field inside risk_profile.risk_scores.impact_score (range
+      0-1, example 0.544), matching the described thresholds.'
+- schema: main
+  table: security_sessions
+  columns:
+  - name: acct_gate
+    type: VARCHAR
+    description: TEXT. Account reference for session. PK. FK to accounts.
+  - name: session_telemetry
+    type: JSON
+    description: 'JSONB column. Aggregates IP reputation, device-mix, VPN / proxy usage and log-in behaviour
+      so threat-detection jobs can retrieve the full session context from one JSONB column. Fields: {"ip_reputation":
+      {"registration_ip": "INET. Registered IP address. **NULL means IP not recorded.**. Example: 186.221.8.216.",
+      "ip_reputation_score": "REAL. IP reputation score. Example: 0.729.", "country_count": "BIGINT. Country
+      of the IP address. Example: 14.", "proxy_hits": "BIGINT. Proxy hits during session. **NULL means
+      proxy hits not recorded.**. Example: 98.0.", "tor_flag": "TEXT. Tor usage flag. Possible values:
+      No, Suspected, Yes."}, "vpn_usage_pct": "TEXT. VPN usage percentage. Example: 0.00%.", "device_profile":
+      {"device_count": "BIGINT. Device number. Example: 20.", "device_mix_json": "JSONB. Device mix used
+      in session. Example: {''Mobile'': 0.8966897433246256, ''Desktop'': 0.5115558690500416, ''Tablet'':
+      0.3299024746948329}.", "browser_diversity_idx": "REAL. Browser mix score. Example: 0.016.", "ua_consistency":
+      "REAL. User agent consistency score. Example: 0.639."}, "login_behavior": {"login_chronology": "TEXT.
+      Login chronology or history. **NULL means login chronology not available.**. Possible values: Bot-like,
+      Burst, Random, Regular.", "login_freq_per_day": "TEXT. Login frequency descriptor. Possible values:
+      High, Low, Medium, Suspicious.", "location_variability": "REAL. Location variance during session.
+      Example: 0.311."}, "session_stats": {"avg_session_duration_min": "REAL. Session duration. Example:
+      2766.0.", "session_count": "BIGINT. Number of sessions during the account lifecycle. Example: 419."},
+      "activity_pattern": {"activity_regularity": "REAL. Activity registration score. Example: 0.313.",
+      "activity_spread_code": "TEXT. Activity spread during the session. Example: {''Morning'': 0.08864600070960105,
+      ''Afternoon'': 0.7421617693224358, ''Night'': 0.3718840943461962}."}}
+
+
+      reputation scoring: Illustrates IP reputation scoring.
+
+
+      Ranges from 0 to 1. Scores above 0.8 indicate trusted IPs, while scores below 0.3 suggest potentially
+      malicious or compromised IPs.
+
+
+      Compiler note: Describes the ip_reputation_score field nested at session_telemetry->''ip_reputation''->''ip_reputation_score''
+      (range 0-1), confirmed via sample query.'

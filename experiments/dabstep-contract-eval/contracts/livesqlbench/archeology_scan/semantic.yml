@@ -1,0 +1,1495 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: archeology_scan, compiler: claudesonnet5
+# inputs: archeology_scan_kb.jsonl, archeology_scan_column_meaning_base.json, archeology_scan_schema.txt, archeology_scan.duckdb
+metrics:
+- name: scan_resolution_index_sri
+  description: 'A sophisticated compound index measuring the overall resolution quality of a scan based
+    on resolution and point density.
+
+
+    SRI = \frac{\log_{10}(\text{Scan Resolution (mm)} \times 10^3)}{\log_{10}(\text{Point Density (points/m²)})}
+    \times 5, \text{ where lower values indicate higher quality resolution and more balanced scanning
+    parameters.}
+
+
+    Compiler note: Scan Resolution (mm) = cloud_metrics->>''Scan_Resol_Mm'', Point Density = cloud_metrics->>''Point_Dense''.
+    Computed as log10(resolution*1000)/log10(point_density)*5.'
+  sql_expression: LOG(10, (cloud_metrics->>'Scan_Resol_Mm')::numeric * 1000) / LOG(10, (cloud_metrics->>'Point_Dense')::numeric)
+    * 5
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: scan_coverage_effectiveness_sce
+  description: 'Measures how effectively a scan covers its target area considering both coverage percentage
+    and overlap redundancy.
+
+
+    SCE = \text{Coverage (%)} \times \left(1 + \frac{\text{Overlap (%)}}{100} \times \left(1 - \frac{\text{Coverage
+    (%)}}{100}\right)\right), \text{ where higher values indicate more effective coverage with appropriate
+    overlap.}
+
+
+    Compiler note: Coverage (%) mapped to cloud_metrics->>''Cover_Pct'' and Overlap (%) mapped to cloud_metrics->>''Lap_Pct'',
+    both cast from jsonb text to numeric.'
+  sql_expression: (cloud_metrics->>'Cover_Pct')::numeric * (1 + ((cloud_metrics->>'Lap_Pct')::numeric/100)
+    * (1 - (cloud_metrics->>'Cover_Pct')::numeric/100))
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: point_cloud_density_ratio_pcdr
+  description: 'Evaluates the relationship between total points and cloud density, used to assess scan
+    efficiency and data distribution.
+
+
+    PCDR = \frac{\text{Total Points}}{\text{Point-Cloud Density Code} \times \text{Surface Area (m²)}},
+    \text{ where higher values suggest more efficient and spatially consistent scanning techniques.}
+
+
+    Compiler note: Total Points = cloud_metrics.Total_Pts, Point-Cloud Density Code = cloud_metrics.Cloud_Dense,
+    Surface Area = spatial.spatial_dims.Area_M2 joined via matching arcref AND crewref (unique match verified;
+    joining on arcref alone is not unique).'
+  sql_expression: (cloud_metrics->>'Total_Pts')::numeric / ((cloud_metrics->>'Cloud_Dense')::numeric *
+    (SELECT (s.spatial_dims->>'Area_M2')::numeric FROM spatial s WHERE s.arcref = pointcloud.arcref AND
+    s.crewref = pointcloud.crewref))
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: scan_quality_score_sqs
+  description: 'Comprehensive quality metric combining resolution, coverage, and noise factors with weighted
+    importance.
+
+
+    SQS = \left(\frac{10}{\text{SRI}}\right)^{1.5} \times \left(\frac{\text{SCE}}{100}\right) \times \left(1
+    - \frac{\text{Noise Level (dB)}}{30}\right)^2, \text{ where higher values indicate exponentially better
+    overall scan quality with emphasis on resolution.}
+
+
+    Built on: scan_resolution_index_sri, scan_coverage_effectiveness_sce.
+
+
+    Compiler note: SQS = (10/SRI)^1.5 * (SCE/100) * (1 - Noise_Db/30)^2, with SRI and SCE computed inline
+    from pointcloud.cloud_metrics fields (Scan_Resol_Mm, Point_Dense, Cover_Pct, Lap_Pct, Noise_Db) per
+    their respective definitions.'
+  sql_expression: POWER(10.0 / (LOG(10, (cloud_metrics->>'Scan_Resol_Mm')::numeric * 1000) / LOG(10, (cloud_metrics->>'Point_Dense')::numeric)
+    * 5), 1.5) * (((cloud_metrics->>'Cover_Pct')::numeric * (1 + ((cloud_metrics->>'Lap_Pct')::numeric/100)
+    * (1 - (cloud_metrics->>'Cover_Pct')::numeric/100))) / 100) * POWER(1 - (cloud_metrics->>'Noise_Db')::numeric
+    / 30, 2)
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: mesh_complexity_ratio_mcr
+  description: 'Measures the topological complexity of a mesh relative to its resolution, helping identify
+    overly complex or simplified archaeological models.
+
+
+    MCR = \frac{\text{Mesh Faces}}{\text{Mesh Vertices} \times \text{Mesh Resolution (mm)}^2} \times 10^3,
+    \text{ where higher values indicate more complex meshes for a given resolution, capturing finer archaeological
+    details.}
+
+
+    Compiler note: MCR = Facet_Faces / (Facet_Verts * Facet_Res_Mm^2) * 1000, using mesh_specs JSON fields
+    Facet_Faces, Facet_Verts, Facet_Res_Mm.'
+  sql_expression: ((mesh_specs->>'Facet_Faces')::numeric / ((mesh_specs->>'Facet_Verts')::numeric * ((mesh_specs->>'Facet_Res_Mm')::numeric
+    ^ 2))) * 1000
+  source_model: main.mesh
+  domains:
+  - calculations
+- name: texture_density_index_tdi
+  description: 'Evaluates the pixel density of textures relative to mesh resolution for assessing surface
+    detail preservation.
+
+
+    TDI = \frac{\text{Texture Size (px)}}{\sqrt{\text{Mesh Faces}} \times \text{Mesh Resolution (mm)}}
+    \times 10^{-2}, \text{ where higher values indicate more detailed textures relative to geometric complexity.}
+
+
+    Compiler note: TDI = Tex_Pix / (sqrt(Facet_Faces) * Facet_Res_Mm) * 1e-2, computed from mesh_specs
+    JSON fields.'
+  sql_expression: ((mesh_specs->>'Tex_Pix')::numeric / (SQRT((mesh_specs->>'Facet_Faces')::numeric) *
+    (mesh_specs->>'Facet_Res_Mm')::numeric)) * 1e-2
+  source_model: main.mesh
+  domains:
+  - calculations
+- name: model_fidelity_score_mfs
+  description: 'Combines mesh complexity, texture quality, and geometric accuracy to assess overall 3D
+    model fidelity for archaeological analysis.
+
+
+    MFS = \text{MCR} \times \left(\frac{\text{TDI}}{10}\right) \times \left(1 + \exp\left(-\text{Geometric
+    Accuracy (mm)}\right)\right), \text{ where higher values indicate more accurate and detailed models
+    with appropriate complexity.}
+
+
+    Built on: mesh_complexity_ratio_mcr, texture_density_index_tdi.
+
+
+    Compiler note: MFS = MCR * (TDI/10) * (1 + exp(-Geometric Accuracy)), using mesh_specs fields Facet_Faces,
+    Facet_Verts, Facet_Res_Mm (resolution mm), Tex_Pix, and Geom_Delta_Mm as geometric accuracy (mm).
+    MCR and TDI computed inline per their definitions.'
+  sql_expression: (((mesh_specs->>'Facet_Faces')::numeric / ((mesh_specs->>'Facet_Verts')::numeric * ((mesh_specs->>'Facet_Res_Mm')::numeric
+    ^ 2))) * 1000) * ((((mesh_specs->>'Tex_Pix')::numeric / (SQRT((mesh_specs->>'Facet_Faces')::numeric)
+    * (mesh_specs->>'Facet_Res_Mm')::numeric)) * 1e-2) / 10) * (1 + EXP(-1 * (mesh_specs->>'Geom_Delta_Mm')::numeric))
+  source_model: main.mesh
+  domains:
+  - calculations
+- name: environmental_suitability_index_esi
+  description: 'Evaluates how suitable environmental conditions were for scanning operations using weighted
+    parameters.
+
+
+    ESI = 100 - 2.5 \times \left|\text{Ambient Temperature (C)} - 20\right| - \left|\frac{\text{Relative
+    Humidity (%)} - 50}{2}\right|^{1.5} - \frac{600}{\text{Light Conditions (lux)} + 100}, \text{ where
+    higher values indicate more ideal scanning conditions adjusted for relative importance.}
+
+
+    Compiler note: Mapped Ambient Temperature to Ambic_Temp, Relative Humidity to Hume_Pct, Light Conditions
+    (lux) to Illume_Lux, all from ambient_cond JSONB.'
+  sql_expression: 100 - 2.5*ABS((ambient_cond->>'Ambic_Temp')::double - 20) - POWER(ABS(((ambient_cond->>'Hume_Pct')::double
+    - 50)/2), 1.5) - 600.0/((ambient_cond->>'Illume_Lux')::double + 100)
+  source_model: main.environment
+  domains:
+  - calculations
+- name: processing_efficiency_ratio_per
+  description: 'Measures the efficiency of scan processing by comparing processing time to data complexity
+    and size.
+
+
+    PER = \frac{\text{File Size (GB)} \times \log_{10}(\text{Total Points})}{\text{Processing Time (hours)}
+    \times (\text{CPU Usage (%)} + \text{GPU Usage (%)})/200}, \text{ where higher values indicate more
+    efficient processing relative to data complexity.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: PER requires File Size and Total Points (Total Points) from scans/pointcloud combined
+    with Processing Time/CPU/GPU from processing. These tables have no direct foreign key relationship
+    to each other (processing links via equipref+zoneref, scans via arcref+crewref+zoneref, pointcloud
+    via crewref+arcref), and joining them via zoneref alone produces multiple matching rows per processing
+    record (not unique), so there is no well-defined join to compute this metric over a single row.
+- name: archaeological_documentation_completeness_adc
+  description: 'Comprehensive score for how completely a site has been documented through scanning with
+    weighted importance factors.
+
+
+    ADC = \left(\text{SQS} \times 0.4\right) + \left(\text{MFS} \times 0.4\right) + \left(\text{SCE} \times
+    0.2\right) - 5 \times \sqrt{\frac{\text{Noise Level (dB)}}{10}}, \text{ where higher values indicate
+    more complete documentation with multiple quality factors.}
+
+
+    Built on: scan_quality_score_sqs, model_fidelity_score_mfs, scan_coverage_effectiveness_sce.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: ADC combines SQS/SCE (computed per pointcloud record, keyed by project+crew) with MFS
+    (computed per mesh record, keyed by site+equipment). The schema has no relationship linking a specific
+    pointcloud record to a specific mesh record (projects table has no site reference, and pointcloud/mesh
+    share no foreign key), so there is no way to join these per-row quantities into one well-defined,
+    uniquely-matched expression over a single source table.
+- name: high_resolution_scan
+  description: 'Defines what constitutes a high-resolution archaeological scan based on quantitative parameters.
+
+
+    A scan with \text{Scan Resolution (mm)} \leq 1.0 and \text{Point Density (points/m²)} \geq 1000, allowing
+    for sub-millimeter precision in archaeological documentation and feature detection.
+
+
+    Compiler note: Scan Resolution (mm) mapped to cloud_metrics->>''Scan_Resol_Mm'' and Point Density
+    (points/m²) mapped to cloud_metrics->>''Point_Dense'' in pointcloud.cloud_metrics jsonb.'
+  sql_expression: (cloud_metrics->>'Scan_Resol_Mm')::numeric <= 1.0 AND (cloud_metrics->>'Point_Dense')::numeric
+    >= 1000
+  source_model: main.pointcloud
+  domains:
+  - definitions
+- name: comprehensive_coverage
+  description: 'Defines the standard for comprehensive scan coverage of an archaeological site or artifact
+    with statistical confidence.
+
+
+    A scan with \text{Coverage (%)} \geq 95 and \text{Overlap (%)} \geq 30, ensuring minimal data gaps
+    and sufficient overlap for accurate registration with 95% confidence interval for spatial measurements.
+
+
+    Compiler note: Coverage (%) and Overlap (%) map to pointcloud.cloud_metrics Cover_Pct and Lap_Pct
+    fields respectively.'
+  sql_expression: (cloud_metrics->>'Cover_Pct')::numeric >= 95 AND (cloud_metrics->>'Lap_Pct')::numeric
+    >= 30
+  source_model: main.pointcloud
+  domains:
+  - definitions
+- name: premium_quality_scan
+  description: 'Defines the criteria for a premium quality archaeological scan suitable for conservation
+    planning and scholarly publication.
+
+
+    A scan that is both a High Resolution Scan and has Comprehensive Coverage with \text{SQS} > 7.5, where
+    SQS is the Scan Quality Score, producing data suitable for detailed analysis and conservation planning.
+
+
+    Built on: high_resolution_scan, comprehensive_coverage, scan_quality_score_sqs.
+
+
+    Compiler note: Combines High Resolution Scan (Scan_Resol_Mm<=1.0 and Point_Dense>=1000), Comprehensive
+    Coverage (Cover_Pct>=95 and Lap_Pct>=30), and SQS>7.5 computed from cloud_metrics fields.'
+  sql_expression: (cloud_metrics->>'Scan_Resol_Mm')::numeric <= 1.0 AND (cloud_metrics->>'Point_Dense')::numeric
+    >= 1000 AND (cloud_metrics->>'Cover_Pct')::numeric >= 95 AND (cloud_metrics->>'Lap_Pct')::numeric
+    >= 30 AND POWER(10.0 / (LOG(10, (cloud_metrics->>'Scan_Resol_Mm')::numeric * 1000) / LOG(10, (cloud_metrics->>'Point_Dense')::numeric)
+    * 5), 1.5) * (((cloud_metrics->>'Cover_Pct')::numeric * (1 + ((cloud_metrics->>'Lap_Pct')::numeric/100)
+    * (1 - (cloud_metrics->>'Cover_Pct')::numeric/100))) / 100) * POWER(1 - (cloud_metrics->>'Noise_Db')::numeric
+    / 30, 2) > 7.5
+  source_model: main.pointcloud
+  domains:
+  - definitions
+- name: high_fidelity_mesh
+  description: 'Defines criteria for high-fidelity 3D mesh models in archaeological documentation suitable
+    for analytical studies.
+
+
+    A mesh with \text{MCR} > 5.0, \text{Mesh Resolution (mm)} < 1.0, and \text{Geometric Accuracy (mm)}
+    < 0.5, where MCR is the Mesh Complexity Ratio, capable of representing fine archaeological details
+    and surface morphology.
+
+
+    Built on: mesh_complexity_ratio_mcr.
+
+
+    Compiler note: MCR computed per given formula from mesh_specs JSON fields Facet_Faces, Facet_Verts,
+    Facet_Res_Mm; Mesh Resolution = Facet_Res_Mm; Geometric Accuracy = Geom_Delta_Mm. Combined with AND
+    per definition.'
+  sql_expression: "(((mesh_specs->>'Facet_Faces')::numeric / ((mesh_specs->>'Facet_Verts')::numeric *\
+    \ ((mesh_specs->>'Facet_Res_Mm')::numeric ^ 2))) * 1000) > 5.0\n  AND (mesh_specs->>'Facet_Res_Mm')::numeric\
+    \ < 1.0\n  AND (mesh_specs->>'Geom_Delta_Mm')::numeric < 0.5"
+  source_model: main.mesh
+  domains:
+  - definitions
+- name: degradation_risk_zone
+  description: 'Identifies archaeological sites at risk of degradation requiring urgent conservation intervention
+    based on multiple factors.
+
+
+    A site with \text{Preservation Status} containing ''Poor'' or ''Critical'' and \text{Structural Stability}
+    not containing ''Stable'', signaling immediate conservation needs due to active deterioration processes.
+
+
+    Built on: Structural Stability.
+
+
+    Compiler note: Preservation Status comes from sites.site_status->>''Pres_Stat'' (joined via unique
+    zoneregistry PK). Structural Stability is conservation.structstate, a free-text field; checked distinct
+    values: ''Stable condition, structure secure for access'', ''Unstable condition, restricted access
+    for safety'', ''Moderate condition, careful monitoring required''. Case-sensitive LIKE ''%Stable%''
+    correctly matches only the ''Stable condition...'' value (since ''Unstable'' is lowercase ''stable''),
+    so NOT LIKE ''%Stable%'' selects Unstable/Moderate rows as ''not containing Stable''. Evaluated per
+    conservation record since a site can have multiple conservation rows with differing structstate, and
+    the entry gives no aggregation rule.'
+  sql_expression: ((SELECT s.site_status->>'Pres_Stat' FROM sites s WHERE s.zoneregistry = conservation.zoneref)
+    IN ('Poor','Critical')) AND (structstate NOT LIKE '%Stable%')
+  source_model: main.conservation
+  domains:
+  - definitions
+- name: optimal_scanning_conditions
+  description: 'Defines the environmental conditions considered optimal for archaeological scanning based
+    on instrument sensitivity profiles.
+
+
+    Conditions with \text{ESI} > 85, where ESI is the Environmental Suitability Index (knowledge #7),
+    characterized by moderate temperature, humidity around 50%, and good illumination, minimizing environmental
+    interference with scanning accuracy.
+
+
+    Built on: environmental_suitability_index_esi.
+
+
+    Compiler note: Encodes ESI > 85 using the ESI formula over environment.ambient_cond fields (Ambic_Temp,
+    Hume_Pct, Illume_Lux).'
+  sql_expression: 100 - 2.5*ABS((ambient_cond->>'Ambic_Temp')::double - 20) - POWER(ABS(((ambient_cond->>'Hume_Pct')::double
+    - 50)/2), 1.5) - 600.0/((ambient_cond->>'Illume_Lux')::double + 100) > 85
+  source_model: main.environment
+  domains:
+  - definitions
+- name: digital_conservation_priority
+  description: 'Classification system for prioritizing digital conservation efforts based on site conditions,
+    historical significance, and preservation status.
+
+
+    A scoring system where sites in Degradation Risk Zones with \text{Estimated Date} older than 1000
+    BCE or with \text{Site Type} = ''Rare'' or ''Unique'' receive highest priority for digital preservation
+    through Premium Quality Scans, requiring immediate allocation of scanning resources.
+
+
+    Built on: premium_quality_scan, degradation_risk_zone.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This classification requires combining three tables that do not have a unique join path:
+    Degradation Risk Zone is defined per conservation record (joined to sites via zoneref), but conservation
+    has multiple rows per zoneref (e.g. SC2706 has 2 rows), so "site is in a Degradation Risk Zone" cannot
+    be resolved to a single boolean per site without an unstated aggregation rule. Additionally, Premium
+    Quality Scan is defined over pointcloud records (joined to projects via arcref), and there is no direct
+    or unique relationship between a site (sites.zoneregistry) and a specific project/pointcloud scan
+    - sites connect to projects only indirectly through scans/conservation/spatial tables with no 1:1
+    cardinality. Since the entry ties site-level attributes (Estimated Date, Site Type, Risk Zone) to
+    scan-level attributes (Premium Quality Scan) without a well-defined unique join, this cannot be encoded
+    as a single boolean expression over one table''s rows.'
+- name: processing_bottleneck
+  description: 'Identifies processing workflows that are experiencing resource constraints using performance
+    metrics.
+
+
+    A processing record with \text{PER} < 0.5, where PER is the Processing Efficiency Ratio, indicating
+    potential hardware limitations affecting processing speed and output quality, requiring workflow optimization.
+
+
+    Built on: processing_efficiency_ratio_per.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Processing Bottleneck depends on PER, which cannot be computed: it requires File Size
+    and Total Points from scans/pointcloud combined with Processing Time/CPU/GPU from processing, but
+    these tables have no direct foreign key relationship (processing links via equipref+zoneref; scans/pointcloud
+    via arcref+crewref+zoneref), and joining via zoneref alone yields multiple matching rows per processing
+    record, so there is no well-defined unique join to compute PER over a single processing row.'
+- name: registration_quality_threshold
+  description: 'Defines the quality threshold for scan registration in archaeological documentation based
+    on error propagation analysis.
+
+
+    A registration with \text{Registration Accuracy (mm)} < 1.0 and \text{Error Value (mm)} < 2.0, ensuring
+    sufficient accuracy for reliable spatial analysis with maximum tolerable error below the significant
+    feature size threshold.
+
+
+    Compiler note: Registration Accuracy = reg_accuracy->>''Log_Accu_Mm'' (mm), Error Value = reg_accuracy->>''Err_Val_Mm''
+    (mm). Threshold: accuracy < 1.0mm and error value < 2.0mm.'
+  sql_expression: (reg_accuracy->>'Log_Accu_Mm')::numeric < 1.0 AND (reg_accuracy->>'Err_Val_Mm')::numeric
+    < 2.0
+  source_model: main.registration
+  domains:
+  - definitions
+- name: full_archaeological_digital_twin
+  description: 'Defines the comprehensive digital representation of an archaeological site meeting all
+    quality standards for research and preservation.
+
+
+    A site with Premium Quality Scans, High Fidelity Mesh, Registration Quality Threshold met, and \text{ADC}
+    > 85, where ADC is Archaeological Documentation Completeness, representing a complete digital twin
+    suitable for research, conservation, and visualization purposes.
+
+
+    Built on: premium_quality_scan, high_fidelity_mesh, registration_quality_threshold, archaeological_documentation_completeness_adc.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry requires ADC (Archaeological Documentation Completeness), which itself cannot
+    be encoded: ADC combines SQS/SCE (per pointcloud record, keyed by project+crew) with MFS (per mesh
+    record, keyed by site+equipment), but there is no foreign key or join path linking a specific pointcloud
+    record to a specific mesh record in this schema (projects has no site reference, and pointcloud/mesh
+    share no common key). Without that join, ADC cannot be computed per site/scan, so Full Archaeological
+    Digital Twin (which requires ADC > 85) cannot be encoded either.'
+- name: scan_time_efficiency_ste
+  description: 'Measures how efficiently scanning time was used relative to data quality and completeness
+    metrics.
+
+
+    STE = \frac{\text{SQS} \times \sqrt{\text{Coverage (%)}}}{\text{Scan Duration (min)} \times \sqrt{\text{Number
+    of Scans}}}, \text{ where SQS is the Scan Quality Score and higher STE values indicate more efficient
+    use of scanning time relative to coverage achieved.}
+
+
+    Built on: scan_quality_score_sqs.
+
+
+    Compiler note: SQS computed inline from pointcloud.cloud_metrics (Scan_Resol_Mm, Point_Dense, Cover_Pct,
+    Lap_Pct, Noise_Db). Scan Duration (min) derived as Size(GB)*1024/Scanning_Rate(MB/min) and Number
+    of Scans parsed as leading integer from scans.scancount, joined to pointcloud via (arcref,crewref)
+    which is a verified 1-1 join (697 matching rows, no duplicates on either side).'
+  sql_expression: "(\n  (\n    POWER(10.0 / (LOG(10, (cloud_metrics->>'Scan_Resol_Mm')::numeric * 1000)\
+    \ / LOG(10, (cloud_metrics->>'Point_Dense')::numeric) * 5), 1.5)\n    * (((cloud_metrics->>'Cover_Pct')::numeric\
+    \ * (1 + ((cloud_metrics->>'Lap_Pct')::numeric/100) * (1 - (cloud_metrics->>'Cover_Pct')::numeric/100)))\
+    \ / 100)\n    * POWER(1 - (cloud_metrics->>'Noise_Db')::numeric / 30, 2)\n  )\n  * SQRT((cloud_metrics->>'Cover_Pct')::numeric)\n\
+    )\n/\n(\n  (\n    (SELECT split_part(s.size, ' ', 1)::numeric FROM scans s WHERE s.arcref = pointcloud.arcref\
+    \ AND s.crewref = pointcloud.crewref) * 1024\n    / (SELECT split_part(s.scanning_rate, ' ', 1)::numeric\
+    \ FROM scans s WHERE s.arcref = pointcloud.arcref AND s.crewref = pointcloud.crewref)\n  )\n  * SQRT((SELECT\
+    \ split_part(s.scancount, ' ', 1)::numeric FROM scans s WHERE s.arcref = pointcloud.arcref AND s.crewref\
+    \ = pointcloud.crewref))\n)"
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: environmental_impact_factor_eif
+  description: 'Quantifies how environmental conditions affected scan quality using statistical correlation
+    analysis.
+
+
+    EIF = \frac{\text{SQS}}{\text{ESI} + 10} \times 100, \text{ where SQS is the Scan Quality Score and
+    ESI is the Environmental Suitability Index. Values closer to 100 indicate minimal environmental interference
+    with data acquisition.}
+
+
+    Built on: scan_quality_score_sqs, environmental_suitability_index_esi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'EIF combines SQS (defined over pointcloud, keyed by arcref/crewref) and ESI (defined
+    over environment, keyed by zoneref/equipref). There is no direct or unique join path between pointcloud
+    and environment: pointcloud has no zoneref, and the only intermediary (scans, linking arcref to zoneref)
+    maps a single arcref to multiple zonerefs (and vice versa), so no scalar subquery can uniquely pair
+    a point cloud record with a single environmental record. This metric cannot be encoded over this schema.'
+- name: feature_extraction_efficiency_fee
+  description: 'Measures the efficiency of feature identification in scan data relative to point cloud
+    density and complexity.
+
+
+    FEE = \frac{\text{Number of Detected Features} + \text{Artifact Count}}{\text{PCDR} \times \sqrt{\text{Point-Cloud
+    Density Code}}} \times 10^3, \text{ where PCDR is the Point Cloud Density Ratio and higher values
+    indicate more effective feature extraction from point cloud data relative to spatial distribution
+    efficiency.}
+
+
+    Built on: point_cloud_density_ratio_pcdr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: 'FEE requires joining pointcloud (keyed by arcref+crewref) with features (keyed by zoneref+equipref,
+    holding Trait_Count and Arti_Count) to get "Number of Detected Features + Artifact Count" alongside
+    PCDR computed from pointcloud/spatial. There is no foreign key or reliable join path between pointcloud
+    and features: pointcloud has no zoneref/equipref, and even going through scans (arcref,crewref->zoneref)
+    does not uniquely match a single pointcloud row (some arcref/crewref pairs have multiple scans/zones),
+    nor does it supply equipref to match features. Hence this metric cannot be computed as a single-row
+    scalar expression over any one table in this schema.'
+- name: registration_accuracy_ratio_rar
+  description: 'Evaluates registration accuracy relative to scan resolution using propagation of uncertainty
+    principles.
+
+
+    RAR = \frac{\text{Scan Resolution (mm)}}{\text{Registration Accuracy (mm)} \times \sqrt{1 + \frac{\text{Error
+    Value (mm)}}{\text{Registration Accuracy (mm)}}}}, \text{ where values > 1 indicate registration accuracy
+    exceeds scan resolution, a desirable outcome for precise spatial analysis.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: RAR requires combining Scan Resolution (from pointcloud.cloud_metrics) with Registration
+    Accuracy and Error Value (from registration.reg_accuracy). These live in separate tables related only
+    indirectly through projects.arcref, and that relationship is one-to-many on both sides (multiple pointcloud
+    and multiple registration records per project), so there is no unique, well-defined pairing of a point
+    cloud record with a registration record to compute this ratio over either table as source_model.
+- name: spatial_density_index_sdi
+  description: 'Assesses point cloud density relative to site dimensions for spatial sampling adequacy.
+
+
+    SDI = \frac{\text{Total Points}}{\text{Surface Area (m²)} \times 10^4} \times \left(\frac{\text{Point
+    Density (points/m²)}}{\text{Point-Cloud Density Code}}\right)^{0.5}
+
+
+    Compiler note: Joined pointcloud to spatial via (arcref, crewref) which is unique; Total_Pts, Point_Dense,
+    Cloud_Dense from pointcloud.cloud_metrics, Area_M2 from spatial.spatial_dims via scalar subquery.'
+  sql_expression: (cloud_metrics->>'Total_Pts')::numeric / (((SELECT s.spatial_dims->>'Area_M2' FROM spatial
+    s WHERE s.arcref = pointcloud.arcref AND s.crewref = pointcloud.crewref)::numeric) * 10000) * sqrt(((cloud_metrics->>'Point_Dense')::numeric)
+    / ((cloud_metrics->>'Cloud_Dense')::numeric))
+  source_model: main.pointcloud
+  domains:
+  - calculations
+- name: conservation_priority_index_cpi
+  description: 'Quantifies the urgency of conservation efforts based on site condition, historical significance
+    and structural stability.
+
+
+    CPI = \begin{cases} 100 - PS + AF \times \left(1 + \frac{TS}{10}\right), & \text{if in a Degradation
+    Risk Zone} \\ 50 - PS + AF \times \left(1 + \frac{TS}{20}\right), & \text{otherwise} \end{cases},
+    \text{ where PS is 0-100 based on \text{Preservation Status} condition (''Excellent''=10, ''Good''=30,
+    ''Fair''=50, ''Poor''=70, ''Critical''=90), AF is approximate age in millennia derived from \text{Estimated
+    Date}, and TS is 0-10 based on \text{Site Type} rarity.}
+
+
+    Built on: degradation_risk_zone, Estimated Dating.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: The formula requires TS, a 0-10 score "based on Site Type rarity", but no mapping from
+    the many sites.typesite values (Burial, Fort, Temple, Workshop, Village, Shrine, etc. in varying cases/abbreviations)
+    to a 0-10 rarity score is defined anywhere in the documentation. Without a documented or data-derived
+    mapping, this scoring is a guess, so this entry cannot be encoded.
+- name: mesh_to_point_ratio_mpr
+  description: 'Evaluates the efficiency of mesh generation from point cloud data for optimal decimation
+    determination.
+
+
+    MPR = \frac{\text{Mesh Vertices}}{\text{Total Points}} \times 100 \times \left(\frac{\text{MCR}}{10}\right)^{0.3},
+    \text{ where MCR is the Mesh Complexity Ratio and values around 25-30 indicate optimal decimation
+    for archaeological purposes with appropriate feature preservation.}
+
+
+    Built on: mesh_complexity_ratio_mcr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: MPR requires Mesh Vertices (from mesh.mesh_specs) and Total Points (from pointcloud.cloud_metrics),
+    but mesh and pointcloud have no shared foreign key or join path (mesh links to sites/equipment via
+    zoneref/equipref, while pointcloud links to projects/personnel via arcref/crewref). There is no way
+    to uniquely associate a mesh record with a corresponding point cloud record, so this metric cannot
+    be computed over this schema.
+- name: processing_resource_utilization_pru
+  description: 'Measures the efficiency of computing resource utilization during scan processing relative
+    to data complexity.
+
+
+    PRU = \frac{\text{Processing Time (hours)} \times (\text{CPU Usage (%)} + \text{GPU Usage (%)}) /
+    2}{\text{File Size (GB)} \times 10 \times \log_{10}(\text{Mesh Vertices} + 10^4)}, \text{ where lower
+    values indicate more efficient use of computing resources relative to mesh complexity.}'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: PRU requires File Size (GB) for the processing record, but processing only links to a
+    site/zone (zoneref), and scans (which holds file size) has multiple records per zoneref with no equipment
+    reference to disambiguate - the join from processing to scans is not unique (e.g. several scans per
+    zone), so file size cannot be unambiguously attributed to a given processing record.
+- name: digital_preservation_quality_dpq
+  description: 'Comprehensive metric for evaluating digital preservation quality for archaeological sites
+    with weighted quality factors.
+
+
+    DPQ = (0.3 \times \text{ADC}) + (0.3 \times \text{MFS}) + (0.2 \times \text{RAR}) + (0.2 \times \text{SCE})
+    - 2 \times \sqrt{\frac{\text{Error Value (mm)}}{\text{Scan Resolution (mm)}}}, \text{ where ADC is
+    Archaeological Documentation Completeness, MFS is Model Fidelity Score, RAR is Registration Accuracy
+    Ratio, and SCE is Scan Coverage Effectiveness.}
+
+
+    Built on: archaeological_documentation_completeness_adc, model_fidelity_score_mfs, registration_accuracy_ratio_rar,
+    scan_coverage_effectiveness_sce.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: DPQ depends on ADC and RAR, both of which cannot be encoded over this schema. ADC requires
+    combining SQS/SCE (per pointcloud record, keyed by project+crew) with MFS (per mesh record, keyed
+    by site+equipment) with no join path between pointcloud and mesh records. RAR requires combining Scan
+    Resolution (pointcloud.cloud_metrics) with Registration Accuracy/Error Value (registration.reg_accuracy),
+    related only via projects.arcref which is one-to-many on both sides, so no unique pairing exists.
+    Since DPQ's formula requires ADC and RAR as inputs over the same row, and no single source table can
+    supply all needed per-row quantities (ADC, MFS, RAR, SCE, Error Value, Scan Resolution) with a unique
+    join, DPQ cannot be encoded.
+- name: equipment_effectiveness_ratio_eer
+  description: 'Evaluates how effectively equipment was utilized based on power consumption and scan quality
+    relative to equipment capability.
+
+
+    EER = \frac{\text{SQS} \times EquipStatus\_value}{\text{Battery Level (%)} \times (101 - EquipAge\_days)
+    / 365} \times 25, \text{ where SQS is the Scan Quality Score, EquipStatus_value is 1.0 for ''Excellent''
+    to 0.2 for ''Poor'', and EquipAge_days is days since \text{Calibration Date}, with higher values indicating
+    more efficient use of equipment relative to condition.}
+
+
+    Built on: scan_quality_score_sqs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: EER requires joining a scan's SQS (from pointcloud) to the specific equipment unit that
+    performed it (for Battery Level, Equipment Status, and Calibration Date). The pointcloud table has
+    no equipref column and no zoneref, and none of the other tables provide a unique mapping from a pointcloud
+    record to a single equipment unit. Equipment is only linked to processing/mesh/features/environment
+    via zoneref, not to pointcloud. Without this join, EER cannot be computed over this schema.
+- name: spatially_complex_site
+  description: 'Defines sites with complex spatial characteristics requiring specialized scanning approaches
+    based on dimensional analysis.
+
+
+    A site with \text{Surface Area (m²)} > 100 and \text{SDI} > 50, where SDI is the Spatial Density Index,
+    requiring strategic planning for comprehensive documentation with multiple scanning stations and methodologies
+    to capture complex spatial relationships.
+
+
+    Built on: spatial_density_index_sdi.
+
+
+    Compiler note: No direct link exists between sites (zoneregistry) and spatial/pointcloud tables; both
+    Surface Area and SDI are computed via the arcref+crewref join from pointcloud to spatial, which is
+    unique per pair, consistent with the SDI definition''s source_model (pointcloud). Treated ''site''
+    as the pointcloud/spatial-joined project-crew unit for this metric.'
+  sql_expression: '((SELECT s.spatial_dims->>''Area_M2'' FROM spatial s WHERE s.arcref = pointcloud.arcref
+    AND s.crewref = pointcloud.crewref)::numeric) > 100
+
+    AND
+
+    ((cloud_metrics->>''Total_Pts'')::numeric / (((SELECT s.spatial_dims->>''Area_M2'' FROM spatial s
+    WHERE s.arcref = pointcloud.arcref AND s.crewref = pointcloud.crewref)::numeric) * 10000) * sqrt(((cloud_metrics->>''Point_Dense'')::numeric)
+    / ((cloud_metrics->>''Cloud_Dense'')::numeric))) > 50'
+  source_model: main.pointcloud
+  domains:
+  - definitions
+- name: texture_critical_artifact
+  description: 'Identifies artifacts where texture documentation is critical for analysis based on surface
+    morphology characteristics.
+
+
+    Features with \text{Texture Analysis} containing ''Detailed'' or ''Critical'' and \text{TDI} > 8.0,
+    where TDI is the Texture Density Index, requiring specialized imaging techniques such as photometric
+    stereo or multi-spectral imaging for complete surface characterization.
+
+
+    Built on: texture_density_index_tdi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The "Texture Analysis" field referenced (features.feature_analysis->Analysis_Status->Texture_Study)
+    only ever takes values 'Completed', 'Not Required', or 'Partial' in this database — there is no 'Detailed'
+    or 'Critical' value to match against, so the textual condition cannot be encoded. Additionally, TDI
+    is defined over mesh table fields (Tex_Pix, Facet_Faces, Facet_Res_Mm) which have no unique 1:1 correspondence
+    to features rows (features and mesh are both linked only via zoneref/equipref, a one-to-many relationship),
+    so TDI cannot be unambiguously attached to a features row either.
+- name: conservation_emergency
+  description: 'Identifies sites requiring immediate conservation intervention based on multiple risk
+    factors and structural assessment.
+
+
+    A site that is in a Degradation Risk Zone with \text{CPI} > 75, where CPI is the Conservation Priority
+    Index, requiring immediate protective measures and priority documentation with at least Premium Quality
+    Scans before any intervention to establish baseline condition.
+
+
+    Built on: degradation_risk_zone, conservation_priority_index_cpi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on CPI (Conservation Priority Index), which cannot be encoded because
+    its TS factor requires a 0-10 rarity score mapping from sites.typesite values that is not defined
+    anywhere in the documentation or data. Since CPI cannot be computed, "Conservation Emergency" (which
+    requires CPI > 75) cannot be encoded either.
+- name: processing_optimized_workflow
+  description: 'Defines optimized processing workflows balancing quality and resource use through benchmarked
+    performance metrics.
+
+
+    A processing workflow with \text{PRU} < 5.0 while maintaining \text{MFS} > 7.0, where PRU is Processing
+    Resource Utilization and MFS is Model Fidelity Score, representing an efficient balance of resource
+    use and output quality through optimized algorithm selection and hardware allocation.
+
+
+    Built on: processing_resource_utilization_pru, model_fidelity_score_mfs.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry requires PRU (Processing Resource Utilization), which itself cannot be computed:
+    PRU needs File Size (GB) attributed to a specific processing record, but processing links only to
+    a zoneref, and scans (holding file size) has multiple records per zoneref with no equipment reference
+    to disambiguate - so the join from processing to scans is not unique. Since PRU cannot be encoded,
+    this metric (which depends on PRU < 5.0) cannot be encoded either.'
+- name: registration_confidence_level
+  description: 'Classification system for registration confidence based on multiple factors and error
+    propagation analysis.
+
+
+    A classification where ''High Confidence'' registrations have \text{RAR} > 1.5 and \text{Registration
+    Method} containing ''Target'', where RAR is Registration Accuracy Ratio, ''Medium Confidence'' have
+    RAR between 1.0-1.5, and ''Low Confidence'' otherwise, determining appropriate use cases for spatial
+    analysis and interpretive visualization.
+
+
+    Built on: registration_accuracy_ratio_rar.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This classification depends on RAR (Registration Accuracy Ratio), which cannot be encoded:
+    RAR requires pairing a pointcloud.cloud_metrics record (Scan Resolution) with a registration.reg_accuracy
+    record (Registration Accuracy, Error Value) via projects.arcref, but that relationship is one-to-many
+    on both sides, so there is no unique pairing to compute RAR per row. Since Registration Confidence
+    Level is defined entirely in terms of RAR (and Registration Method), it cannot be computed either.'
+- name: environmental_challenge_scan
+  description: 'Identifies scans conducted under challenging environmental conditions requiring expertise
+    and specialized equipment adaptation.
+
+
+    A scan with \text{EIF} > 120, where EIF is Environmental Impact Factor, indicating successful data
+    capture despite suboptimal environmental conditions through adaptive scanning methodologies and operator
+    expertise in field condition compensation.
+
+
+    Built on: environmental_impact_factor_eif.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This metric depends on EIF, which requires joining SQS (defined over pointcloud, keyed
+    by arcref/crewref) with ESI (defined over environment, keyed by zoneref/equipref). There is no unique
+    join path between pointcloud and environment: pointcloud has no zoneref, and the only intermediary
+    (scans) maps a single arcref to multiple zonerefs and vice versa, so no scalar subquery can uniquely
+    pair a point cloud record with a single environmental record. Since EIF cannot be computed, the Environmental
+    Challenge Scan predicate (EIF > 120) cannot be encoded over this schema either.'
+- name: high_temporal_value_site
+  description: 'Identifies sites with exceptional historical significance based on age and context for
+    prioritized research attention.
+
+
+    A site with \text{Estimated Date} containing dates before 500 CE and \text{CPI} > 60, where CPI is
+    Conservation Priority Index, representing locations of exceptional chronological significance requiring
+    specialized documentation protocols to capture temporally significant features.
+
+
+    Built on: conservation_priority_index_cpi, Estimated Dating.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry requires CPI (Conservation Priority Index), which itself cannot be encoded
+    because it needs TS, a 0-10 rarity score derived from Site Type, with no documented mapping from the
+    many sites.typesite values to such a score. Without CPI, "CPI > 60" cannot be computed, so this entry
+    cannot be encoded either.
+- name: resource_intensive_model
+  description: 'Identifies 3D models requiring substantial computing resources for visualization and analysis
+    based on complexity metrics.
+
+
+    A model with \text{Mesh Faces} > 2,000,000 and \text{MPR} < 15, where MPR is Mesh-to-Point Ratio,
+    requiring specialized hardware for effective interaction and analytical software optimized for large-scale
+    geometric processing with hierarchical level-of-detail implementation.
+
+
+    Built on: mesh_to_point_ratio_mpr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'Depends on MPR, which cannot be computed over this schema: MPR requires Mesh Vertices
+    (mesh.mesh_specs) and Total Points (pointcloud.cloud_metrics), but mesh and pointcloud have no shared
+    join path (mesh links via zoneref/equipref to sites/equipment, pointcloud links via arcref/crewref
+    to projects/personnel), so no unique association between a mesh record and a point cloud record exists.'
+- name: multi_phase_documentation_project
+  description: 'Defines complex archaeological projects requiring multiple scanning phases with integrated
+    documentation strategy.
+
+
+    A project with multiple scans where the total \text{ADC} < 70 for individual scans but \text{DPQ}
+    > 80 when combined, where ADC is Archaeological Documentation Completeness and DPQ is Digital Preservation
+    Quality, indicating comprehensive documentation achieved through multiple phases with coherent registration
+    strategy for holistic interpretation.
+
+
+    Built on: archaeological_documentation_completeness_adc, digital_preservation_quality_dpq.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on ADC and DPQ, both of which were previously determined to be non-encodable
+    over this schema (no join path exists linking pointcloud, mesh, and registration records uniquely
+    to compute SQS/MFS/RAR/SCE together). Since Multi-Phase Documentation Project requires computing ADC
+    per individual scan and DPQ for the combined set, and neither base metric can be encoded, this condition
+    cannot be encoded either.
+- name: equipment_optimization_opportunity
+  description: 'Identifies scenarios where equipment settings could be optimized for better results based
+    on performance analysis.
+
+
+    Scanning scenarios where \text{EER} < 30 but \text{ESI} > 80, where EER is Equipment Effectiveness
+    Ratio and ESI is Environmental Suitability Index, indicating potential for improved equipment utilization
+    in favorable conditions through calibration adjustment and scanning parameter optimization.
+
+
+    Built on: equipment_effectiveness_ratio_eer, environmental_suitability_index_esi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This entry depends on EER, which is not computable in this schema (no join from pointcloud/scans
+    to a specific equipment unit with Battery Level, Equipment Status, and Calibration Date). Since EER
+    cannot be encoded, the EER<30 AND ESI>80 condition cannot be encoded either.
+- name: environmental_condition_classification_system_eccs
+  description: 'A comprehensive classification system for archaeological site environments based on their
+    suitability for scanning operations.
+
+
+    A four-tier classification where ''Optimal Scanning Conditions'' have \text{ESI} > 85, ''Good Scanning
+    Conditions'' have ESI between 70-85, ''Acceptable Scanning Conditions'' have ESI between 50-70, and
+    ''Challenging Scanning Conditions'' have ESI < 50. This classification guides scanning schedule planning
+    and equipment selection to maximize data quality.
+
+
+    Built on: environmental_suitability_index_esi, optimal_scanning_conditions.
+
+
+    Compiler note: ECCS classifies rows of environment by ESI computed from ambient_cond JSON fields (Ambic_Temp,
+    Hume_Pct, Illume_Lux). Tiers: >85 Optimal, [70,85] Good, [50,70) Acceptable, <50 Challenging, matching
+    the boundary definitions given (treating 70 and 50 as inclusive lower bounds for Good/Acceptable per
+    the ''between'' wording).'
+  sql_expression: "CASE\n  WHEN (100 - 2.5*ABS((ambient_cond->>'Ambic_Temp')::double - 20) - POWER(ABS(((ambient_cond->>'Hume_Pct')::double\
+    \ - 50)/2), 1.5) - 600.0/((ambient_cond->>'Illume_Lux')::double + 100)) > 85 THEN 'Optimal Scanning\
+    \ Conditions'\n  WHEN (100 - 2.5*ABS((ambient_cond->>'Ambic_Temp')::double - 20) - POWER(ABS(((ambient_cond->>'Hume_Pct')::double\
+    \ - 50)/2), 1.5) - 600.0/((ambient_cond->>'Illume_Lux')::double + 100)) >= 70 THEN 'Good Scanning\
+    \ Conditions'\n  WHEN (100 - 2.5*ABS((ambient_cond->>'Ambic_Temp')::double - 20) - POWER(ABS(((ambient_cond->>'Hume_Pct')::double\
+    \ - 50)/2), 1.5) - 600.0/((ambient_cond->>'Illume_Lux')::double + 100)) >= 50 THEN 'Acceptable Scanning\
+    \ Conditions'\n  ELSE 'Challenging Scanning Conditions'\nEND"
+  source_model: main.environment
+  domains:
+  - definitions
+- name: workflow_efficiency_classification
+  description: 'A standardized categorization system for assessing processing workflow efficiency based
+    on Processing Resource Utilization (PRU) values.
+
+
+    A three-tier classification where ''Optimized'' workflows have \text{PRU} < 5.0 (highly efficient
+    resource usage), ''Acceptable'' workflows have PRU between 5.0-10.0 (reasonable efficiency), and ''Needs
+    Optimization'' workflows have PRU > 10.0 (inefficient resource usage requiring intervention). This
+    classification guides processing workflow improvements and resource allocation decisions.
+
+
+    Built on: processing_resource_utilization_pru.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This classification depends on PRU, which cannot be encoded: PRU requires File Size (GB)
+    attributed to a specific processing record, but processing only links to a site/zone (zoneref), and
+    scans (holding file size) has multiple rows per zoneref with no equipment reference to disambiguate
+    - the join from processing to scans is not unique. Since PRU cannot be computed, the Optimized/Acceptable/Needs
+    Optimization thresholds built on it cannot be encoded either.'
+- name: risk_zone_category
+  description: 'Classification system that evaluates archaeological sites for degradation risk based on
+    preservation status and structural condition.
+
+
+    Categorizes archaeological sites into two main groups: ''Degradation Risk Zone'' and ''Not in Risk
+    Zone''. ''Not in Risk Zone'' means that the site is not in a Degradation Risk Zone.
+
+
+    Built on: degradation_risk_zone, Structural Stability.
+
+
+    Compiler note: Uses degradation_risk_zone predicate: preservation status Poor/Critical (from sites.site_status->>''Pres_Stat''
+    joined on zoneref) AND structstate not containing ''Stable''. Labels sites as ''Degradation Risk Zone''
+    or ''Not in Risk Zone''.'
+  sql_expression: CASE WHEN ((SELECT s.site_status->>'Pres_Stat' FROM sites s WHERE s.zoneregistry = conservation.zoneref)
+    IN ('Poor','Critical')) AND (structstate NOT LIKE '%Stable%') THEN 'Degradation Risk Zone' ELSE 'Not
+    in Risk Zone' END
+  source_model: main.conservation
+  domains:
+  - definitions
+- name: mesh_quality_classification
+  description: 'A standardized system for categorizing archaeological site documentation based on the
+    presence and quality of 3D mesh models.
+
+
+    A three-tier classification where ''Has High-Fidelity Meshes'' indicates sites with at least one mesh
+    meeting high-fidelity criteria, ''Standard Mesh Quality'' indicates sites with meshes that don''t
+    meet high-fidelity standards, and ''No Mesh Data'' indicates sites lacking 3D mesh documentation entirely.
+    This classification helps prioritize additional documentation efforts and determines appropriate analytical
+    approaches for different sites.
+
+
+    Built on: high_fidelity_mesh.
+
+
+    Compiler note: Classification per site (sites.zoneregistry) based on mesh rows joined via mesh.zoneref.
+    High-Fidelity Mesh criteria (MCR>5.0, Facet_Res_Mm<1.0, Geom_Delta_Mm<0.5) computed from mesh_specs
+    JSON fields; checked that all mesh.zoneref values match a sites.zoneregistry.'
+  sql_expression: "CASE\n  WHEN EXISTS (\n    SELECT 1 FROM mesh m\n    WHERE m.zoneref = sites.zoneregistry\n\
+    \      AND (((m.mesh_specs->>'Facet_Faces')::numeric / ((m.mesh_specs->>'Facet_Verts')::numeric *\
+    \ ((m.mesh_specs->>'Facet_Res_Mm')::numeric ^ 2))) * 1000) > 5.0\n      AND (m.mesh_specs->>'Facet_Res_Mm')::numeric\
+    \ < 1.0\n      AND (m.mesh_specs->>'Geom_Delta_Mm')::numeric < 0.5\n  ) THEN 'Has High-Fidelity Meshes'\n\
+    \  WHEN EXISTS (SELECT 1 FROM mesh m WHERE m.zoneref = sites.zoneregistry) THEN 'Standard Mesh Quality'\n\
+    \  ELSE 'No Mesh Data'\nEND"
+  source_model: main.sites
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: conservation
+  columns:
+  - name: cureregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for conservation record. PK = Conservation(CureRegistry).
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site requiring conservation attention. FK to Sites.
+  - name: harmassess
+    type: VARCHAR
+    description: 'TEXT. Damage assessment evaluation results. **NULL means damage assessment not conducted
+      or evaluation pending.**. Possible values: Minor, Moderate, Severe.'
+  - name: curerank
+    type: VARCHAR
+    description: 'TEXT. Conservation priority ranking classification. Possible values: Critical priority,
+      immediate conservation required.'
+  - name: structstate
+    type: VARCHAR
+    description: 'TEXT. Structural stability assessment status. Possible values: Moderate condition, careful
+      monitoring required.
+
+
+      Structural Stability: Illustrates structural state classifications in archaeological conservation.
+
+
+      A categorical assessment with specific values: ''Stable'' indicates structures that maintain integrity
+      under normal conditions, ''Unstable'' indicates structures showing signs of deterioration requiring
+      intervention, and ''Critical'' indicates structures at imminent risk of collapse requiring emergency
+      stabilization.
+
+
+      Compiler note: structstate holds free-text structural condition descriptions; actual distinct values
+      are ''Stable condition, structure secure for access'', ''Moderate condition, careful monitoring
+      required'', ''Unstable condition, restricted access for safety'' - no explicit ''Critical'' value
+      exists, but this is the column representing structural stability classification described by the
+      entry.'
+  - name: intervhistory
+    type: VARCHAR
+    description: 'TEXT. History of previous conservation interventions. **NULL means no prior conservation
+      interventions recorded or documentation unavailable.**. Possible values: Major, Minor.'
+  - name: priordocs
+    type: VARCHAR
+    description: 'TEXT. Previous documentation and records available. **NULL means no previous documentation
+      exists or records not accessible.**. Possible values: Complete, Partial.'
+- schema: main
+  table: environment
+  columns:
+  - name: airregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for environmental record. PK = Environment(AirRegistry).
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site where environmental data was recorded. FK to Sites.
+  - name: equipref
+    type: VARCHAR
+    description: TEXT. Reference to equipment used for environmental monitoring. FK to Equipment.
+  - name: photomap
+    type: VARCHAR
+    description: 'TEXT. Photogrammetry overlap percentage settings. Possible values: 60%, 70%, 80%, 90%.'
+  - name: imgcount
+    type: VARCHAR
+    description: 'TEXT. Number of images captured during session per minutes. Example: 248 imgs/mins.'
+  - name: ambient_cond
+    type: JSON
+    description: 'JSONB column. Environmental conditions during scanning including temperature, humidity,
+      lighting, and connectivity status Fields: {"Ambic_Temp": "REAL. Ambient air temperature in degrees
+      Celsius. Example: 25.3.", "Hume_Pct": "REAL. Relative humidity percentage during scanning. Example:
+      60.4.", "Illume_Lux": "BIGINT. Light intensity conditions in lux units. Example: 86054.", "Geo_Signal":
+      "TEXT. GPS signal quality and reception status. **NULL means GPS signal monitoring not available
+      or receiver malfunction.**. Possible values: Excellent, Good, Poor.", "Track_Status": "TEXT. RTK
+      positioning system status and accuracy. **NULL means RTK system not operational or status monitoring
+      unavailable.**. Possible values: Fixed, Float.", "Link_Status": "TEXT. Network connectivity status
+      during scanning. Possible values: Connected, Disconnected, Limited."}'
+- schema: main
+  table: equipment
+  columns:
+  - name: equipregistry
+    type: VARCHAR
+    description: 'TEXT. Unique serial number identifier for scanning equipment. PK = Equipment(EquipRegistry).
+      Example: SN20065.'
+  - name: equipform
+    type: VARCHAR
+    description: 'TEXT. Type classification of scanning equipment. Example: LiDAR scanner, precise 3D
+      measurement technology.'
+  - name: equipdesign
+    type: VARCHAR
+    description: 'TEXT. Model designation of scanning equipment. Example: Model-669.'
+  - name: equiptune
+    type: DATE
+    description: 'DATE. Date of last equipment calibration or maintenance. Examprle: 2024-11-01.'
+  - name: equipstatus
+    type: VARCHAR
+    description: TEXT. Current operational condition of equipment. Excellent condition, optimal performance
+      guaranteed.
+  - name: powerlevel
+    type: VARCHAR
+    description: 'TEXT. Battery charge level as percentage. Example: 62% battery, extended operation available.'
+  - name: transport_speed
+    type: VARCHAR
+    description: 'TEXT. Transportation speed for equipment delivery. Example: 85 km/h.'
+  - name: coverage_rate
+    type: VARCHAR
+    description: 'TEXT. Area coverage rate during scanning. Example: 12 m²/hr.'
+  - name: point_generation_rate
+    type: VARCHAR
+    description: 'TEXT. Point cloud generation efficiency. Example: 62000 pts/min.'
+  - name: cost_per_area
+    type: VARCHAR
+    description: 'TEXT. Cost efficiency per unit area. Example: 45 USD/m².'
+  - name: accuracy_per_time
+    type: VARCHAR
+    description: 'TEXT. Accuracy improvement over scanning time. Example: 3 mm/hr.'
+  - name: power_consumption
+    type: VARCHAR
+    description: 'TEXT. Equipment power consumption rate. Example: 125 W/hr.'
+  - name: battery_drain
+    type: VARCHAR
+    description: 'TEXT. Battery consumption rate during operation. Example: 8%/hr.'
+  - name: storage_usage_rate
+    type: VARCHAR
+    description: 'TEXT. Storage space consumption during scanning. Example: 2.8 GB/hr.'
+- schema: main
+  table: features
+  columns:
+  - name: traitregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for feature analysis record. PK = Features(TraitRegistry).
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site where features were analyzed. FK to Sites.
+  - name: equipref
+    type: VARCHAR
+    description: TEXT. Reference to equipment used for feature extraction. FK to Equipment.
+  - name: traitextract
+    type: VARCHAR
+    description: 'TEXT. Method used for feature extraction analysis. Possible values: Automatic, Manual,
+      Semi-automatic.'
+  - name: feature_analysis
+    type: JSON
+    description: 'JSONB column. Archaeological feature analysis results including counts, material classification,
+      and analysis completion status Fields: {"Trait_Count": "BIGINT. Number of features identified in
+      analysis. Example: 516.", "Arti_Count": "BIGINT. Number of artifacts detected or counted. Example:
+      71.", "Struct_Kind": "TEXT. Type of structure identified in analysis. Possible values: Artifact,
+      Complex, Floor, Foundation, Wall.", "Mat_Kind": "TEXT. Material type classification of analyzed
+      features. Possible values: Ceramic, Metal, Mixed, Organic, Stone.", "Analysis_Status": {"Hue_Study":
+      "TEXT. Color analysis results and classification. Possible values: Completed, Not Required, Partial.",
+      "Texture_Study": "TEXT. Texture analysis results and patterns. Possible values: Completed, Not Required,
+      Partial.", "Pattern_Note": "TEXT. Pattern recognition analysis and observations. Possible values:
+      Completed, Not Required, Partial."}}'
+- schema: main
+  table: mesh
+  columns:
+  - name: facetregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for mesh record. PK = Mesh(FacetRegistry).
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site where mesh was generated. FK to Sites.
+  - name: equipref
+    type: VARCHAR
+    description: TEXT. Reference to equipment used for mesh generation. FK to Equipment.
+  - name: mesh_specs
+    type: JSON
+    description: 'JSONB column. 3D mesh specifications including geometry, texture properties, and accuracy
+      measurements Fields: {"Facet_Verts": "BIGINT. Number of vertices in the 3D mesh. Example: 7234721.",
+      "Facet_Faces": "BIGINT. Number of faces in the 3D mesh. Example: 5997318.", "Facet_Res_Mm": "REAL.
+      Mesh resolution in millimeters. Example: 3.2.", "Tex_Dist": "TEXT. Texture resolution classification
+      or setting. **NULL means texture resolution not specified or texture mapping not applied.**. Possible
+      values: 1K, 2K, 4K.", "Tex_Pix": "BIGINT. Texture size in pixels. Possible values: 1024, 2048, 4096,
+      8192.", "UV_Map_Qual": "TEXT. UV mapping quality assessment. Possible values: High, Low, Medium.",
+      "Geom_Delta_Mm": "REAL. Geometric accuracy measurement in millimeters. Example: 2.74."}
+
+
+      Geometric Accuracy: Illustrates the significance of geometric accuracy in 3D models for measurement
+      reliability.
+
+
+      Measured in millimeters, representing the average deviation between the scan data and final 3D model.
+      Values below 0.1mm indicate museum-quality accuracy, while values around 1.0mm are suitable for
+      general documentation but introduce uncertainty in fine feature analysis.
+
+
+      Compiler note: Describes Geom_Delta_Mm field within mesh.mesh_specs JSONB, representing geometric
+      accuracy (deviation in mm between scan and final mesh model).'
+- schema: main
+  table: personnel
+  columns:
+  - name: crewregistry
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for operator personnel registration. PK = Personnel(CrewRegistry).
+      Example: OP4641.'
+  - name: crewlabel
+    type: VARCHAR
+    description: 'TEXT. Name or designation of the operator personnel. Example: Joel Wallace.'
+  - name: leadregistry
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for supervisor personnel registration. Example: SV7658.'
+  - name: leadlabel
+    type: VARCHAR
+    description: 'TEXT. Name or designation of the supervisor personnel. Example: Michael Kaiser.'
+- schema: main
+  table: pointcloud
+  columns:
+  - name: cloudregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for point cloud record. PK = PointCloud(CloudRegistry).
+  - name: crewref
+    type: VARCHAR
+    description: TEXT. Reference to operator who generated point cloud. FK to Personnel.
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: cloud_metrics
+    type: JSON
+    description: 'JSONB column. Point cloud quality and density measurements including resolution, coverage,
+      overlap, and noise analysis Fields: {"Scan_Resol_Mm": "REAL. Scanning resolution in millimeters.
+      Example: 2.4.", "Point_Dense": "BIGINT. Point density per square meter. Example: 42812.", "Cover_Pct":
+      "REAL. Percentage of surface area covered by scan. Example: 91.2.", "Total_Pts": "BIGINT. Total
+      number of points in the point cloud. Example: 46562436.", "Cloud_Dense": "BIGINT. Point cloud density
+      measurement. Example: 9449.", "Lap_Pct": "REAL. Overlap percentage between scan segments. Example:
+      31.3.", "Noise_Db": "REAL. Noise level measurement in decibels. Example: 1.318.", "Ref_Pct": "REAL.
+      Surface reflectivity percentage measurement. Example: 11.0."}
+
+
+      Scan Resolution: Illustrates the significance of scan resolution measurements in archaeological
+      scanning for feature detection.
+
+
+      Measured in millimeters, representing the smallest feature that can be distinguished in the scan.
+      Values like 0.5mm enable documentation of fine tool marks on artifacts, while 2.0mm might only capture
+      general shape and macroscopic features.
+
+
+      Compiler note: Describes the Scan_Resol_Mm field within pointcloud.cloud_metrics JSONB column, which
+      stores scan resolution in millimeters.
+
+
+      Point Density: Illustrates the significance of point density in archaeological point clouds for
+      information richness.
+
+
+      Measured as points per square meter. Values around 100 capture basic site topography, 1,000 can
+      document structural details, while 10,000+ enables analysis of surface textures and fine engravings
+      across multiple scales of inquiry.
+
+
+      Compiler note: Describes the Point_Dense field within pointcloud.cloud_metrics JSONB (points per
+      square meter), as documented in column meanings for pointcloud.Cloud_Metrics.
+
+
+      Noise Level: Illustrates the impact of noise levels in point cloud data on feature recognition accuracy.
+
+
+      Measured in decibels, representing signal-to-noise ratio in scan data. Values below 1.0 indicate
+      clean data suitable for detailed analysis, while values above 3.0 suggest significant noise that
+      may obscure small features and introduce measurement uncertainty.
+
+
+      Compiler note: Describes the Noise_Db field inside pointcloud.cloud_metrics JSONB (decibel noise
+      level, e.g. row1 Noise_Db=1.318), consistent with values clustering below/above the 1.0/3.0 thresholds
+      mentioned.
+
+
+      Coverage Percentage: Illustrates the significance of coverage percentage in archaeological scans
+      for site completeness assessment.
+
+
+      Percentage of target area successfully captured in scan data. Values above 95% indicate near-complete
+      documentation, while 80% might have significant gaps requiring additional scanning or interpolation
+      methods for comprehensive site analysis.
+
+
+      Compiler note: Describes the Cover_Pct field within the cloud_metrics JSONB column, which stores
+      coverage percentage of target area captured by scan (e.g., 91.2, 98.1, 88.3 in sample rows).'
+- schema: main
+  table: processing
+  columns:
+  - name: flowregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for processing record. PK = Processing(FlowRegistry).
+  - name: equipref
+    type: VARCHAR
+    description: TEXT. Reference to equipment used for data processing. FK to Equipment.
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site where data was processed. FK to Sites.
+  - name: flowsoft
+    type: VARCHAR
+    description: 'TEXT. Software application used for data processing. **NULL means processing software
+      not specified or custom processing pipeline used.**. Example: RealityCapture.'
+  - name: stashloc
+    type: VARCHAR
+    description: 'TEXT. Storage location for processed data files. Possible values: Cloud, Local, Network.'
+  - name: safebak
+    type: VARCHAR
+    description: 'TEXT. Backup status and redundancy measures. Possible values: Completed, In Progress,
+      Pending.'
+  - name: datalevel
+    type: VARCHAR
+    description: 'TEXT. Data access level and security classification. Possible values: Confidential,
+      Public, Restricted.'
+  - name: metabench
+    type: VARCHAR
+    description: 'TEXT. Metadata standard compliance and format. Possible values: CIDOC CRM, Custom, Dublin
+      Core.'
+  - name: coordframe
+    type: VARCHAR
+    description: 'TEXT. Coordinate system used for spatial reference. Possible values: CUSTOM, Custom,
+      LOCAL, Local, WGS84, Wgs84, custom, local, wgs84.'
+  - name: elevref
+    type: VARCHAR
+    description: 'TEXT. Elevation reference datum used for measurements. Possible values: Arbitrary, Local,
+      Sea Level.'
+  - name: flowstage
+    type: VARCHAR
+    description: 'TEXT. Current processing stage or workflow step. Possible values: Aligned, Final, Meshed,
+      Raw, Textured.
+
+
+      Processing Stage: Illustrates the progression of data processing in archaeological scanning workflows.
+
+
+      A sequential classification system with defined stages: ''Raw'' (unprocessed scan data), ''Aligned''
+      (multiple scans registered together), ''Cleaned'' (noise and artifacts removed), ''Meshed'' (point
+      cloud converted to polygon mesh), and ''Textured'' (surface textures applied to mesh). Each stage
+      represents a discrete processing milestone.
+
+
+      Compiler note: Matches processing.flowstage column, whose possible values (Aligned, Final, Meshed,
+      Raw, Textured) correspond to this classification (though ''Cleaned'' isn''t an observed value, and
+      ''Final'' appears instead).'
+  - name: processing_rate
+    type: VARCHAR
+    description: 'TEXT. Data processing throughput rate. Example: 2.3 MB/s.'
+  - name: system_usage
+    type: JSON
+    description: 'JSONB column. Computing system resource utilization during data processing including
+      CPU, memory, GPU usage and processing time Fields: {"Flow_Hrs": "REAL. Processing time duration
+      in hours. Example: 21.9.", "Proc_CPU": "BIGINT. CPU usage percentage during processing. Example:
+      81.", "Mem_Usage_Gb": "REAL. Memory usage in gigabytes during processing. Example: 70.3.", "Proc_GPU":
+      "BIGINT. GPU usage percentage during processing. Example: 84.", "Remain_Gb": "REAL. Remaining storage
+      space in gigabytes. Example: 983.5."}'
+  - name: calib_status
+    type: JSON
+    description: 'JSONB column. Calibration and correction status for various processing components including
+      camera, lens, and color adjustments Fields: {"Station_Link": "TEXT. Total station integration status
+      and connectivity. **NULL means total station not integrated or integration status not monitored.**.
+      Example: Partial.", "Cam_Cal": "TEXT. Camera calibration status and accuracy. Possible values: Calibrated,
+      Invalid, Required.", "Lens_Dist": "TEXT. Lens distortion correction status. Possible values: Corrected,
+      Uncorrected, Unknown.", "Color_Tune": "TEXT. Color balance and calibration status. **NULL means
+      color calibration not performed or status not documented.**. Possible values: Adjusted, Required."}'
+- schema: main
+  table: projects
+  columns:
+  - name: arcregistry
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for archeologys project registration. PK = Projects(ArcRegistry).
+      Example: PR7509.'
+  - name: vesseltag
+    type: VARCHAR
+    description: 'TEXT. Project name or designation label. Example: Project Happy.'
+  - name: fundflux
+    type: VARCHAR
+    description: 'TEXT. Source of project funding or financial backing. Possible values: Government, Grant,
+      Private, University.'
+  - name: authpin
+    type: VARCHAR
+    description: 'TEXT. Official permit or authorization number for excavation. Example: PMT4719.'
+  - name: authhalt
+    type: VARCHAR
+    description: 'TEXT. Permit expiration date or authorization termination date. Example: 05/12/2025.'
+- schema: main
+  table: qualitycontrol
+  columns:
+  - name: qualregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for quality control record. PK = QualityControl(QualRegistry).
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: crewref
+    type: VARCHAR
+    description: TEXT. Reference to operator who performed quality control. FK to Personnel.
+  - name: accucheck
+    type: VARCHAR
+    description: 'TEXT. Accuracy assessment evaluation results. Possible values: Accuracy check not required,
+      standard quality sufficient.'
+  - name: ctrlstate
+    type: VARCHAR
+    description: 'TEXT. Quality control status and validation state. Possible values: Failed, Passed,
+      Pending.'
+  - name: valimeth
+    type: VARCHAR
+    description: 'TEXT. Validation method used for quality assessment. Possible values: Automated, Hybrid,
+      Visual.'
+  - name: valistate
+    type: VARCHAR
+    description: 'TEXT. Validation status and completion state. Possible values: Validation rejected,
+      data quality issues identified.'
+  - name: archstat
+    type: VARCHAR
+    description: 'TEXT. Archival status for long-term data preservation. **NULL means archival process
+      not initiated or status not determined.**. Example: Verified.'
+  - name: pubstat
+    type: VARCHAR
+    description: 'TEXT. Publication status and dissemination readiness. Possible values: Draft status,
+      preparation for submission.'
+  - name: copystat
+    type: VARCHAR
+    description: 'TEXT. Copyright status and intellectual property rights. **NULL means copyright status
+      not established or legal review pending.**. Example: Open Access.'
+  - name: refmention
+    type: VARCHAR
+    description: 'TEXT. Data citation format and attribution requirements. Example: Citation-8447.'
+  - name: remark
+    type: VARCHAR
+    description: 'TEXT. Additional notes and observations for quality control. **NULL means no additional
+      notes recorded or observations not documented.**. Example: Sell shoulder understand serious degree
+      particular game..'
+- schema: main
+  table: registration
+  columns:
+  - name: logregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for registration record. PK = Registration(LogRegistry).
+  - name: crewref
+    type: VARCHAR
+    description: TEXT. Reference to operator who performed registration. FK to Personnel.
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: reg_accuracy
+    type: JSON
+    description: 'JSONB column. Registration accuracy metrics including reference points, error measurements,
+      and transformation parameters Fields: {"Log_Accu_Mm": "REAL. Registration accuracy measurement in
+      millimeters. Example: 0.84.", "Ref_Mark": "TEXT. Reference markers used for registration process.
+      Example: 40.", "Ctrl_Pts": "TEXT. Control points used for geometric registration. Example: 73.",
+      "Log_Method": "TEXT. Registration method or algorithm used. Possible values: Feature-based, Hybrid,
+      Target-based.", "Transform": "TEXT. Transformation matrix applied during registration. Example:
+      Matrix-47.", "Err_Scale": "TEXT. Error metrics and measurement standards. Possible values: Cloud-to-Cloud,
+      Cloud-to-Mesh, RMSE.", "Err_Val_Mm": "REAL. Error value measurement in millimeters. Example: 6.962."}'
+- schema: main
+  table: scans
+  columns:
+  - name: questregistry
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for scan session record. PK = Scans(QuestRegistry). Example:
+      ASD409481.'
+  - name: chronotag
+    type: VARCHAR
+    description: 'TEXT. Precise timestamp when scan was performed. Example: 2024-09-03 07:20:28.479288
+      GMT+8.'
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: crewref
+    type: VARCHAR
+    description: TEXT. Reference to operator who performed the scan. FK to Personnel.
+  - name: zoneref
+    type: VARCHAR
+    description: TEXT. Reference to site where scan was conducted. FK to Sites.
+  - name: scancount
+    type: VARCHAR
+    description: 'TEXT. Total number of individual scans in session. Example: 5 scans, moderate coverage
+      session.'
+  - name: climtune
+    type: VARCHAR
+    description: 'TEXT. Weather conditions during scanning session. **NULL means weather conditions not
+      recorded or monitoring equipment unavailable.**. Example: Windy conditions, potential equipment
+      stability issues.'
+  - name: huecatch
+    type: VARCHAR
+    description: 'TEXT. Color capture mode or settings used during scan. **NULL means color capture not
+      enabled or settings not recorded.**. Possible values: Grayscale, RGB.'
+  - name: fmtfile
+    type: VARCHAR
+    description: 'TEXT. File format used for storing scan data. Example: PTS.'
+  - name: size
+    type: VARCHAR
+    description: 'TEXT. Total file size of scan data in gigabytes. Example: 24.71 GB.'
+  - name: scan_cost
+    type: VARCHAR
+    description: 'TEXT. Equipment cost per GB. Example: 3.22 USD/GB.'
+  - name: scanning_rate
+    type: VARCHAR
+    description: 'TEXT. Data acquisition rate during scanning. Example: 63 MB/min.'
+- schema: main
+  table: sites
+  columns:
+  - name: zoneregistry
+    type: VARCHAR
+    description: 'TEXT. Unique site code identifier for archeologys zone. PK = Sites(ZoneRegistry). Example:
+      SC9016.'
+  - name: zonelabel
+    type: VARCHAR
+    description: 'TEXT. Descriptive name of the archeologys site. Example: Site-North Alexanderville.'
+  - name: digunit
+    type: VARCHAR
+    description: 'TEXT. Excavation unit designation within the site. Example: Unit-C9.'
+  - name: gridtrace
+    type: VARCHAR
+    description: 'TEXT. Grid reference system coordinates for site location. Example: S29-E8.'
+  - name: phasefactor
+    type: VARCHAR
+    description: 'TEXT. Cultural period or chronological phase classification. **NULL means cultural period
+      classification is undetermined or analysis incomplete.**. Example: Iron Age.
+
+
+      Cultural Period: Illustrates the significance of cultural period classification in archaeological
+      sites.
+
+
+      Classifies archaeological sites into standardized chronological/cultural periods. Values like ''Neolithic''
+      (10,000-4,500 BCE), ''Bronze Age'' (3,300-1,200 BCE), ''Roman'' (27 BCE-476 CE), or ''Medieval''
+      (476-1453 CE) determine applicable research methodologies, conservation approaches, and contextual
+      interpretation frameworks.
+
+
+      Compiler note: phasefactor stores cultural/chronological period labels (e.g. Iron Age, Bronze Age,
+      Neolithic, Medieval, Classical) in varied free-text forms, matching the Cultural Period concept.'
+  - name: guessdate
+    type: VARCHAR
+    description: 'TEXT. Estimated date or age of archeologys materials. Example: -2929 BCE.
+
+
+      Estimated Dating: Illustrates dating conventions in archaeological classification for chronological
+      placement.
+
+
+      Values like ''3500-3000 BCE'', ''1st c. CE'', or ''ca. 1450 CE'' represent estimated chronological
+      placement based on excavation findings. Precision varies from specific years to century-level estimates
+      depending on available evidence and dating methodologies employed.
+
+
+      Compiler note: guessdate stores estimated dates as single year values with BCE/CE suffix (e.g. ''-2929
+      BCE'', ''1046 CE''), not ranges or century-level strings as in the entry''s examples, but it is
+      the column representing estimated dating/chronological placement for a site.'
+  - name: typesite
+    type: VARCHAR
+    description: 'TEXT. Classification of archeologys site type. **NULL means site type classification
+      is pending or cannot be determined.**. Example: Bur..'
+  - name: guardhint
+    type: VARCHAR
+    description: 'TEXT. Weather protection measures in place at site. **NULL means weather protection
+      assessment not completed or not applicable.**. Possible values: Permanent, Temporary.'
+  - name: geo_position
+    type: JSON
+    description: 'JSONB column. Geographic positioning data including coordinates, elevation, and excavation
+      depth measurements Fields: {"Geo_X": "REAL. Latitude coordinate in decimal degrees. Example: -9.602135.",
+      "Geo_Y": "REAL. Longitude coordinate in decimal degrees. Example: -2.756411.", "Height_M": "REAL.
+      Altitude above sea level in meters. Example: 4391.4.", "Depth_C": "REAL. Excavation depth below
+      surface in centimeters. Example: 329.9."}'
+  - name: site_status
+    type: JSON
+    description: 'JSONB column. Site condition and security assessment including preservation, access,
+      safety, and risk evaluation status Fields: {"Pres_Stat": "TEXT. Current preservation status of archeologys
+      remains. Possible values: Critical, Excellent, Fair, Good, Poor.", "Entry_Stat": "TEXT. Site accessibility
+      status for personnel and equipment. Possible values: Closed, Open, Restricted.", "Safe_Rank": "TEXT.
+      Security level classification for site protection. **NULL means security assessment not completed
+      or classification pending.**. Example: Minimal.", "Insur_Stat": "TEXT. Insurance coverage status
+      for site operations. Possible values: Active, Expired, Pending.", "Risk_Eval": "TEXT. Risk assessment
+      status for site safety evaluation. **NULL means risk assessment not conducted or evaluation incomplete.**.
+      Example: Req..", "Health_Eval": "TEXT. Health and safety evaluation status for site conditions.
+      Possible values: Approved, Pending, Review.", "Env_Haz": "TEXT. Environmental risk factors present
+      at the site. Possible values: High, Low, Medium."}'
+- schema: main
+  table: spatial
+  columns:
+  - name: domainregistry
+    type: BIGINT
+    description: BIGSERIAL. Auto-generated unique identifier for spatial measurement record. PK = Spatial(DomainRegistry).
+  - name: arcref
+    type: VARCHAR
+    description: TEXT. Reference to associated archeologys project. FK to Projects.
+  - name: crewref
+    type: VARCHAR
+    description: TEXT. Reference to operator who performed spatial measurements. FK to Personnel.
+  - name: spatial_dims
+    type: JSON
+    description: 'JSONB column. Spatial dimensions and measurements including area, volume, bounding box
+      coordinates, and orientation angles Fields: {"Area_M2": "REAL. Surface area measurement in square
+      meters. Example: 78.01.", "Vol_M3": "REAL. Volume measurement in cubic meters. Example: 76.7.",
+      "Bounding_Box": {"Box_X": "REAL. Bounding box X-dimension in meters. Example: 40.12.", "Box_Y":
+      "REAL. Bounding box Y-dimension in meters. Example: 1.06.", "Box_Z": "REAL. Bounding box Z-dimension
+      in meters. Example: 8.74."}, "Angles": {"Angle_Az": "REAL. Azimuth orientation angle in degrees.
+      Example: 342.4.", "Angle_Tilt": "REAL. Tilt angle measurement in degrees. Example: 23.9."}, "Ground_Span":
+      "REAL. Ground sampling distance in millimeters. Example: 4.13."}'

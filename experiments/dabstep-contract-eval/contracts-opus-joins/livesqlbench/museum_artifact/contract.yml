@@ -1,0 +1,60 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: museum_artifact, compiler: claudeopus5.5 (joins)
+# inputs: museum_artifact_kb.jsonl, museum_artifact_column_meaning_base.json, museum_artifact_schema.txt, museum_artifact.duckdb
+version: '1.0'
+name: livesqlbench-museum_artifact
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - AirQualityReadings
+    - ArtifactRatings
+    - ArtifactSecurityAccess
+    - ArtifactsCore
+    - ConditionAssessments
+    - ConservationAndMaintenance
+    - EnvironmentalReadingsCore
+    - ExhibitionHalls
+    - LightAndRadiationReadings
+    - Monitor_Showcase_Map
+    - RiskAssessments
+    - SensitivityData
+    - Showcases
+    - SurfaceAndPhysicalReadings
+    - UsageRecords
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

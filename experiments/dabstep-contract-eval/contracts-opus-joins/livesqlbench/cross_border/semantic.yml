@@ -1,0 +1,1923 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: cross_border, compiler: claudeopus5.5 (joins)
+# inputs: cross_border_kb.jsonl, cross_border_column_meaning_base.json, cross_border_schema.txt, cross_border.duckdb
+metrics:
+- name: data_transfer_efficiency_dte
+  description: 'Measures how efficiently information is transferred, considering success rate and error
+    volume.
+
+
+    DTE = (successful transfers rate) divided by (number of transfer errors plus one)
+
+
+    Compiler note: Inputs read from DataFlow.flow_overview JSON: performance.success_pct (numeric, percentage
+    0-100, kept as-is) and performance.error_count (integer). Cast to DOUBLE to avoid integer division.
+    36 rows lack performance data and yield NULL.'
+  sql_expression: CAST(flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)
+  source_model: main.DataFlow
+  domains:
+  - calculations
+- name: bandwidth_saturation_index_bsi
+  description: 'Shows how close a transfer is to using up all available network resources.
+
+
+    BSI = (percentage of network used) multiplied by (amount of data sent divided by time spent sending)
+
+
+    Compiler note: Inputs come from DataFlow.flow_overview.performance: bandwidth_util_pct (stored as
+    a percentage, 0.01 to 99.99, used as is), data_size_mb and duration_min (MB divided by minutes). All
+    three are cast to DOUBLE. No duration is zero, but NULLIF guards anyway. BSI is NULL when data_size_mb
+    (179 rows) or duration_min (36 rows) is NULL.'
+  sql_expression: CAST(flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(flow_overview->'performance'->>'duration_min' AS DOUBLE), 0))
+  source_model: main.DataFlow
+  domains:
+  - calculations
+- name: risk_exposure_score_res
+  description: 'Represents the overall level of risk by combining risk estimation and the strength of
+    controls in place.
+
+
+    RES = (risk level) multiplied by (one divided by control effectiveness)
+
+
+    Compiler note: Risk level = assessment.risk_score; control effectiveness = assessment.control_effectiveness_pct
+    (stored as a percentage, 0.07-99.92, no zeros; NULL in 128 of 870 rows, giving NULL RES). Used the
+    raw values as stored, not rescaled. NULLIF guards against division by zero.'
+  sql_expression: (risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))
+  source_model: main.RiskManagement
+  domains:
+  - calculations
+- name: compliance_cost_ratio_ccr
+  description: 'Compares the cost spent on following regulations to the potential penalties.
+
+
+    CCR = (total cost for compliance) divided by (potential penalty amount plus one)
+
+
+    Compiler note: Cost = risk_management_profile.financial_impact.cost_usd; penalty = financial_impact.penalties_usd.
+    Stored as JSON numbers, some integer and some double, so both are cast to DOUBLE to avoid integer
+    division.'
+  sql_expression: CAST(risk_management_profile->'financial_impact'->>'cost_usd' AS DOUBLE) / (CAST(risk_management_profile->'financial_impact'->>'penalties_usd'
+    AS DOUBLE) + 1)
+  source_model: main.RiskManagement
+  domains:
+  - calculations
+- name: data_sensitivity_index_dsi
+  description: 'Shows how sensitive a batch of information is, based on volume and sensitivity rating.
+
+
+    DSI = (amount of data) multiplied by (3 if sensitivity is high, 2 if medium, 1 if low)
+
+
+    Compiler note: Uses DataProfile.vol_gb (GB) and dataSense. The stored values are Low, Medium, High
+    and Critical; mapped High=3, Medium=2, Low=1 as written. The entry does not give a weight for ''Critical''
+    (217 rows), so those rows return NULL rather than a guessed weight.'
+  sql_expression: vol_gb * CASE "dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1
+    END
+  source_model: main.DataProfile
+  domains:
+  - calculations
+- name: security_robustness_score_srs
+  description: 'Reflects how strong the protections are for keeping data safe.
+
+
+    SRS = 3 if all data is encrypted and only trusted users can access; 2 if either full encryption or
+    strong access control is present; 1 otherwise
+
+
+    Compiler note: Full encryption = enc_state ''Full''; strong access control = acl_state ''Strong''
+    (values checked: enc_state Full/Partial/NULL, acl_state Weak/Adequate/Strong). NULL enc_state falls
+    to the non-full branches.'
+  sql_expression: CASE WHEN enc_state = 'Full' AND acl_state = 'Strong' THEN 3 WHEN enc_state = 'Full'
+    OR acl_state = 'Strong' THEN 2 ELSE 1 END
+  source_model: main.SecurityProfile
+  domains:
+  - calculations
+- name: vendor_reliability_index_vri
+  description: 'Evaluates how trustworthy a partner organization is, considering both their security and
+    contract status.
+
+
+    VRI = (security rating value) multiplied by (1 if contract is active, 0.5 otherwise)
+
+
+    Compiler note: vendSecRate is stored as letters A-D; mapped to numeric values per the Vendor Security
+    Rating entry (A=4 top tier, B=3, C=2, D=1). Only contrState=''Active'' counts as active; Expired,
+    Under Review and NULL (unknown) take 0.5.'
+  sql_expression: (CASE "vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1
+    END) * (CASE WHEN "contrState" = 'Active' THEN 1.0 ELSE 0.5 END)
+  source_model: main.VendorManagement
+  domains:
+  - calculations
+- name: audit_finding_severity_afs
+  description: 'Indicates how serious audit findings are, especially critical issues.
+
+
+    AFS = (number of critical issues) divided by (total findings plus one)
+
+
+    Compiler note: Both columns are bigint, so I cast to DOUBLE to avoid integer division. 38 of the 240
+    rows have NULL critFindNum (documented as ''no critical findings recorded''). The entry does not say
+    how to treat NULL, so AFS comes out NULL for those rows rather than being set to 0. Explicit 0 values
+    also occur. FINDTALLY has no NULLs.'
+  sql_expression: CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1)
+  source_model: main.AuditAndCompliance
+  domains:
+  - calculations
+- name: data_subject_request_load_dsrl
+  description: 'Shows how many requests people made about their own data.
+
+
+    DSRL = (number of access requests) + (number of deletion requests) + (number of correction requests)
+    + (number of data transfer requests)
+
+
+    Compiler note: Per audit record: access (AccReqNum) + deletion (DEL_REQ_NUM) + rectification/correction
+    (rect_req_num) + portability/data transfer (PORTREQNUM) counts. All four columns are non-null in all
+    240 rows.'
+  sql_expression: '"AccReqNum" + "DEL_REQ_NUM" + rect_req_num + "PORTREQNUM"'
+  source_model: main.AuditAndCompliance
+  domains:
+  - calculations
+- name: cross_border_risk_factor_cbrf
+  description: 'Measures the extra risk when sending data between different countries.
+
+
+    CBRF = (overall risk score) multiplied by (2 if source country and target country are different, 1
+    if the same)
+
+
+    Built on: risk_exposure_score_res.
+
+
+    Compiler note: I took "overall risk score" to mean the Risk Exposure Score (RES) entry this one builds
+    on. Countries come from DataFlow.flow_overview routing.origin_country and destination_country, joined
+    on flow_link, which is unique (870 risk rows, 870 distinct flows). In 35 rows at least one country
+    is NULL. For those the multiplier, and so CBRF, is left NULL, not guessed. Only 7 rows have the same
+    origin and destination country.'
+  sql_expression: ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement r JOIN main.DataFlow d ON d.RecordRegistry = r.flow_link
+  grain: one row per risk-management record, with its data flow
+  domains:
+  - calculations
+- name: high_risk_data_flow
+  description: 'Labels a transfer as high-risk if both risk and sensitivity are above the threshold.
+
+
+    A transfer where risk score is above 0.7 and data sensitivity index is above 100
+
+
+    Built on: risk_exposure_score_res, data_sensitivity_index_dsi.
+
+
+    Compiler note: "Risk score" is read as the Risk Exposure Score (the dependency given), threshold 0.7;
+    DSI > 100. Joined DataProfile.riskJoin -> RiskManagement.RISKTRACE (PK); checked 1:1 (870 profiles,
+    870 distinct riskJoin). DSI CASE has no ''Critical'' branch, as in the dependency, so Critical rows
+    get NULL DSI and are not flagged. Null control effectiveness also gives NULL, so those rows are not
+    flagged.'
+  sql_expression: ((rm.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((rm.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) > 0.7 AND (dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low'
+    THEN 1 END) > 100
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON dp."riskJoin" = rm."RISKTRACE"
+  grain: one row per data profile (transfer), with its risk-management record
+  domains:
+  - definitions
+- name: secure_data_flow
+  description: 'Marks a transfer as secure if the protections are at the highest level.
+
+
+    A transfer where security robustness score equals 3
+
+
+    Built on: security_robustness_score_srs.
+
+
+    Compiler note: SRS equals 3 exactly when enc_state = ''Full'' and acl_state = ''Strong'', so this
+    condition is the SRS = 3 case of the security_robustness_score_srs entry written out directly.'
+  sql_expression: enc_state = 'Full' AND acl_state = 'Strong'
+  source_model: main.SecurityProfile
+  domains:
+  - definitions
+- name: non_compliant_vendor
+  description: 'Marks a partner as non-compliant if they fail key requirements.
+
+
+    A partner marked as non-compliant in policy or process
+
+
+    Compiler note: Values are stored exactly as ''Non-compliant'' in pol_comp and procComp. When procComp
+    is NULL (not assessed), the row is flagged only if pol_comp is ''Non-compliant''.'
+  sql_expression: pol_comp = 'Non-compliant' OR "procComp" = 'Non-compliant'
+  source_model: main.VendorManagement
+  domains:
+  - definitions
+- name: critical_audit_issue
+  description: 'Flags an audit when the severity of findings is high.
+
+
+    An audit where audit finding severity is greater than 0.5
+
+
+    Built on: audit_finding_severity_afs.
+
+
+    Compiler note: This reuses the audit_finding_severity_afs expression and keeps rows above 0.5. When
+    critFindNum is NULL (no critical findings recorded), the result is NULL, so the row is not flagged.
+    Treating it as 0 would give the same outcome.'
+  sql_expression: CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1) > 0.5
+  source_model: main.AuditAndCompliance
+  domains:
+  - definitions
+- name: sensitive_data_exposure
+  description: 'Highlights situations where sensitive information is not well-protected.
+
+
+    A case where data sensitivity index is above 100 and security robustness score is less than 2
+
+
+    Built on: data_sensitivity_index_dsi, security_robustness_score_srs.
+
+
+    Compiler note: Joins SecurityProfile to DataProfile on profile_key = profileTrace, which is the data
+    profile''s primary key, so each security row gets at most one data profile. DSI and SRS are written
+    exactly as their upstream entries define them. In DSI, ''Critical'' sensitivity has no weight, so
+    DSI is NULL for those rows and they never match.'
+  sql_expression: (d.vol_gb * CASE d."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN
+    1 END) > 100 AND (CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state
+    = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile s JOIN main.DataProfile d ON d."profileTrace" = s.profile_key
+  grain: one row per security profile, with its linked data profile
+  domains:
+  - definitions
+- name: cross_border_compliance_gap
+  description: 'Labels situations where compliance issues occur in cross-country transfers.
+
+
+    A compliance record where compliance with regulations is missing in at least one country and the transfer
+    is international
+
+
+    Compiler note: "Compliance missing" is read as any of the four regulation columns (GDPR, CCPA, PIPL,
+    local law) being ''Non-compliant''; none of them are NULL in the data. "International" means the routing
+    origin_country differs from destination_country in the DataFlow JSON. The compliance record reaches
+    its flow through risk_tie -> RiskManagement.flow_link. That join is 1:1 (240 rows in, 240 out).'
+  sql_expression: ('Non-compliant' IN (c."gdprComp", c."CCPA_COMP", c."PIPLcomp", c.loc_law_comp)) AND
+    (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+  source_model: main.Compliance
+  from_sql: main."Compliance" c JOIN main."RiskManagement" r ON r."RISKTRACE" = c.risk_tie JOIN main."DataFlow"
+    d ON d."RecordRegistry" = r.flow_link
+  grain: one row per compliance record, with its risk record and data flow
+  domains:
+  - definitions
+- name: vendor_risk_tier
+  description: 'Sorts partners into risk levels based on reliability.
+
+
+    High risk if vendor reliability index < 2, medium if ≥ 2 and < 3, low if ≥ 3
+
+
+    Built on: vendor_reliability_index_vri.
+
+
+    Compiler note: Inlines the VRI expression. vendSecRate is always A-D in the data. A NULL contrState
+    counts as not active (factor 0.5), as the VRI entry says. If VRI were NULL, the label would be NULL.'
+  sql_expression: CASE WHEN ((CASE "vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN
+    'D' THEN 1 END) * (CASE WHEN "contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) < 2 THEN 'High' WHEN
+    ((CASE "vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) * (CASE
+    WHEN "contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) < 3 THEN 'Medium' WHEN ((CASE "vendSecRate" WHEN
+    'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) * (CASE WHEN "contrState" = 'Active'
+    THEN 1.0 ELSE 0.5 END)) >= 3 THEN 'Low' END
+  source_model: main.VendorManagement
+  domains:
+  - definitions
+- name: data_integrity_failure
+  description: 'Shows data batches that failed integrity or checksum checks.
+
+
+    A case where integrity check or verification fails
+
+
+    Compiler note: Failure values stored exactly as ''Failed'' in both Int_check and CSUMVERIFY (checked
+    distinct values). ''Partial'' integrity and NULL (check not performed) are not treated as failures.'
+  sql_expression: '"Int_check" = ''Failed'' OR "CSUMVERIFY" = ''Failed'''
+  source_model: main.DataProfile
+  domains:
+  - definitions
+- name: overloaded_data_flow
+  description: 'Flags transfers that use too much bandwidth and are inefficient.
+
+
+    A transfer where bandwidth saturation index > 50 and data transfer efficiency < 1.0
+
+
+    Built on: data_transfer_efficiency_dte, bandwidth_saturation_index_bsi.
+
+
+    Compiler note: Combines the BSI and DTE definitions it builds on, unchanged. Both use the same JSON
+    performance fields from DataFlow.'
+  sql_expression: CAST(flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(flow_overview->'performance'->>'duration_min' AS DOUBLE), 0)) > 50 AND CAST(flow_overview->'performance'->>'success_pct'
+    AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count' AS DOUBLE) + 1) < 1.0
+  source_model: main.DataFlow
+  domains:
+  - definitions
+- name: regulatory_risk_exposure
+  description: 'Flags data flows with high risk due to cross-border rules and compliance gaps.
+
+
+    A transfer where cross-border risk factor > 1.5 and there is a compliance gap
+
+
+    Built on: cross_border_risk_factor_cbrf, cross_border_compliance_gap.
+
+
+    Compiler note: Combines the CBRF expression (> 1.5) with the cross-border compliance gap predicate.
+    Uses the compliance-record grain because that is where the gap is defined; the joins Compliance→RiskManagement→DataFlow
+    go through primary keys, so they do not duplicate rows. 93 of 240 rows match. Rows where control effectiveness
+    is NULL or 0 get a NULL CBRF and are not flagged.'
+  sql_expression: (((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END > 1.5) AND ('Non-compliant' IN (c."gdprComp", c."CCPA_COMP", c."PIPLcomp", c.loc_law_comp))
+    AND (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+  source_model: main.Compliance
+  from_sql: main."Compliance" c JOIN main."RiskManagement" r ON r."RISKTRACE" = c.risk_tie JOIN main."DataFlow"
+    d ON d."RecordRegistry" = r.flow_link
+  grain: one row per compliance record, with its risk record and data flow
+  domains:
+  - definitions
+- name: data_flow_reliability_score_dfrs
+  description: 'Measures how reliable a transfer is, considering both efficiency and retry attempts.
+
+
+    DFRS = (transfer efficiency) multiplied by (one minus number of retries divided by errors plus one)
+
+
+    Built on: data_transfer_efficiency_dte, Error Count.
+
+
+    Compiler note: DTE (success_pct / (error_count + 1)) multiplied by (1 - retry_count / (error_count
+    + 1)). I read "errors plus one" as the denominator, the same way DTE does. Values are taken from flow_overview.performance
+    and cast to DOUBLE so integer division cannot happen.'
+  sql_expression: (CAST(flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))
+  source_model: main.DataFlow
+  domains:
+  - calculations
+- name: security_control_cost_ratio_sccr
+  description: 'Shows if security protections are cost-effective.
+
+
+    SCCR = (security strength score) divided by (compliance cost plus one)
+
+
+    Built on: security_robustness_score_srs.
+
+
+    Compiler note: I read ''compliance cost'' as the Compliance Cost Ratio (CCR = cost_usd / (penalties_usd
+    + 1)) from the risk JSON, so SCCR = SRS / (CCR + 1). The risk record is joined through SecurityProfile.RISKKEY,
+    which gives one match per row. cost_usd and penalties_usd are stored as JSON numbers that are sometimes
+    integers and sometimes decimals, so both are cast to DOUBLE.'
+  sql_expression: (CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state =
+    'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END)::DOUBLE / ((CAST(r.risk_management_profile->'financial_impact'->>'cost_usd'
+    AS DOUBLE) / (CAST(r.risk_management_profile->'financial_impact'->>'penalties_usd' AS DOUBLE) + 1))
+    + 1)
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile s JOIN main.RiskManagement r ON s."RISKKEY" = r."RISKTRACE"
+  grain: one row per security profile, with its linked risk-management record
+  domains:
+  - calculations
+- name: vendor_compliance_burden_vcb
+  description: 'Shows how much burden a partner faces from compliance, considering findings and security.
+
+
+    VCB = (audit severity) multiplied by (5 minus security rating)
+
+
+    Built on: audit_finding_severity_afs, Vendor Security Rating.
+
+
+    Compiler note: vendSecRate is stored as letters A/B/C/D (all non-null). Mapped A=4 (top tier), B=3,
+    C=2, D=1 to match the documented security rating values. Audit rows join to vendors through VendJoin;
+    all 240 audit rows have a matching vendor.'
+  sql_expression: (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (5 - CASE v."vendSecRate"
+    WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.VendorManagement v ON v."Vendor_Trace" = a."VendJoin"
+  grain: one row per audit record, with its linked vendor-management record
+  domains:
+  - calculations
+- name: cross_border_data_volume_risk_cdvr
+  description: 'Measures risk from sending large amounts of data between countries.
+
+
+    CDVR = (cross-border risk factor) multiplied by (data volume)
+
+
+    Built on: cross_border_risk_factor_cbrf, Data Volume.
+
+
+    Compiler note: Data volume = DataProfile.vol_gb (GB). Joined profile to risk via riskJoin (1:1: 870
+    profiles, 870 distinct risk records); p.Flow_Sign always equals r.flow_link, so the flow join is consistent.
+    CBRF inlined from its contract entry.'
+  sql_expression: (((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END) * p.vol_gb
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.RiskManagement r ON r.RISKTRACE = p.riskJoin JOIN main.DataFlow
+    d ON d.RecordRegistry = r.flow_link
+  grain: one row per data profile, with its risk-management record and data flow
+  domains:
+  - calculations
+- name: data_subject_request_pressure_dsrp
+  description: 'Measures how much pressure comes from responding to data subject requests.
+
+
+    DSRP = (total number of data subject requests) multiplied by (response time)
+
+
+    Built on: data_subject_request_load_dsrl, Response Time.
+
+
+    Compiler note: DSRL (the sum of access, deletion, rectification and portability request counts) multiplied
+    by resp_time_day, the average response time in days. Both are columns of AuditAndCompliance.'
+  sql_expression: ("AccReqNum" + "DEL_REQ_NUM" + rect_req_num + "PORTREQNUM") * resp_time_day
+  source_model: main.AuditAndCompliance
+  domains:
+  - calculations
+- name: encryption_coverage_ratio_ecr
+  description: 'Measures how much sensitive information is actually encrypted.
+
+
+    ECR = (security robustness score) multiplied by (sensitivity index)
+
+
+    Built on: data_sensitivity_index_dsi, security_robustness_score_srs.
+
+
+    Compiler note: Joined SecurityProfile to DataProfile on profile_key = profileTrace. Checked: all 430
+    security rows match exactly one data profile, and each profile_key appears once. SRS and DSI are reused
+    as already defined, so DSI (and so ECR) is NULL when dataSense is ''Critical''.'
+  sql_expression: (CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state =
+    'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) * (d.vol_gb * CASE d."dataSense" WHEN 'High' THEN
+    3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)
+  source_model: main.SecurityProfile
+  from_sql: main."SecurityProfile" s JOIN main."DataProfile" d ON d."profileTrace" = s.profile_key
+  grain: one row per security profile, with its linked data profile
+  domains:
+  - calculations
+- name: audit_remediation_load_arl
+  description: 'Shows how much work is needed to fix audit issues, based on findings and request pressure.
+
+
+    ARL = (audit severity) multiplied by (number of data subject requests)
+
+
+    Built on: audit_finding_severity_afs, data_subject_request_load_dsrl, GDPR Compliance Status.
+
+
+    Compiler note: This is AFS multiplied by DSRL. Both come from the existing entries over AuditAndCompliance
+    and are used as written. Rows with a NULL critFindNum (no critical findings recorded) get a NULL result,
+    the same as in AFS.'
+  sql_expression: (CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1)) * ("AccReqNum" + "DEL_REQ_NUM" +
+    rect_req_num + "PORTREQNUM")
+  source_model: main.AuditAndCompliance
+  domains:
+  - calculations
+- name: bandwidth_risk_factor_brf
+  description: 'Measures risk from overusing network resources with sensitive data.
+
+
+    BRF = (bandwidth saturation index) multiplied by (data sensitivity index)
+
+
+    Built on: bandwidth_saturation_index_bsi, data_sensitivity_index_dsi.
+
+
+    Compiler note: Joined DataProfile to DataFlow on Flow_Sign = RecordRegistry. Checked: Flow_Sign is
+    unique (870 profiles, 870 distinct flows, out of 999 flows), so each row is one profile with its flow.
+    BSI and DSI are inlined from their own definitions. DSI gives NULL when dataSense is ''Critical'',
+    as its definition does.'
+  sql_expression: (CAST(f.flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(f.flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(f.flow_overview->'performance'->>'duration_min' AS DOUBLE), 0))) * (p.vol_gb
+    * CASE p."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.DataFlow f ON p."Flow_Sign" = f."RecordRegistry"
+  grain: one row per data profile, with its data flow
+  domains:
+  - calculations
+- name: vendor_risk_amplification_vra
+  description: 'Shows how much risk grows due to vendor issues.
+
+
+    VRA = (vendor reliability index) multiplied by (risk exposure score)
+
+
+    Built on: risk_exposure_score_res, vendor_reliability_index_vri.
+
+
+    Compiler note: Vendor rows are joined to risk rows through VendorManagement.riskassoc, the FK to the
+    RiskManagement primary key RISKTRACE, so each vendor row has exactly one risk row. The VRI and RES
+    expressions are reused unchanged from the entries this one builds on. VRA is NULL where control effectiveness
+    is NULL or zero.'
+  sql_expression: ((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) * ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0)))
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement v JOIN main.RiskManagement r ON v.riskassoc = r."RISKTRACE"
+  grain: one row per vendor-management record, with its linked risk-management record
+  domains:
+  - calculations
+- name: critical_data_flow_risk
+  description: 'Labels a transfer as highly risky and unreliable if both risk and reliability scores are
+    out of bounds.
+
+
+    A transfer where risk exposure score is above 0.7 and reliability score is below 0.5
+
+
+    Built on: risk_exposure_score_res, data_flow_reliability_score_dfrs.
+
+
+    Compiler note: I joined RiskManagement to DataFlow on flow_link = RecordRegistry. I checked that flow_link
+    is unique (870 distinct values out of 870 rows). The reliability score is DFRS, as defined in the
+    dependency. Flows with no risk record are left out. Rows where control effectiveness is NULL or 0
+    give a NULL RES and do not qualify.'
+  sql_expression: ((rm.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((rm.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) > 0.7 AND ((CAST(df.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(df.flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) < 0.5
+  source_model: main.DataFlow
+  from_sql: main.DataFlow AS df JOIN main.RiskManagement AS rm ON rm.flow_link = df.RecordRegistry
+  grain: one row per data flow that has a risk-management record (flow_link is unique in RiskManagement,
+    870 of 999 flows)
+  domains:
+  - definitions
+- name: overburdened_compliance_flow
+  description: 'Highlights transfers that are expensive to keep compliant and need a lot of remediation
+    work.
+
+
+    A transfer where compliance cost ratio is above 0.8 and audit remediation load is above 10
+
+
+    Built on: compliance_cost_ratio_ccr, audit_remediation_load_arl.
+
+
+    Compiler note: Audit linked to risk via AuditAndCompliance.COMP_JOIN -> Compliance.risk_tie -> RiskManagement;
+    checked that for all 240 audits this path gives the same risk record as the DataProfile (profjoin->riskJoin)
+    and VendorManagement (VendJoin->riskassoc) paths, so the join is 1:1.'
+  sql_expression: CAST(r.risk_management_profile->'financial_impact'->>'cost_usd' AS DOUBLE) / (CAST(r.risk_management_profile->'financial_impact'->>'penalties_usd'
+    AS DOUBLE) + 1) > 0.8 AND (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (a."AccReqNum"
+    + a."DEL_REQ_NUM" + a.rect_req_num + a."PORTREQNUM") > 10
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.Compliance c ON a."COMP_JOIN" = c."complianceTrace" JOIN
+    main.RiskManagement r ON c.risk_tie = r."RISKTRACE"
+  grain: one row per audit record, with its compliance record and linked risk-management record
+  domains:
+  - definitions
+- name: unprotected_sensitive_data
+  description: 'Marks cases where highly sensitive data is not well encrypted.
+
+
+    A case where data sensitivity index is above 100 and encryption coverage ratio is below 2
+
+
+    Built on: data_sensitivity_index_dsi, encryption_coverage_ratio_ecr.
+
+
+    Compiler note: Built directly from the DSI and ECR entries over the SecurityProfile–DataProfile join.
+    ECR = SRS (1 to 3) × DSI, so any row with DSI > 100 has ECR ≥ 100, and this condition can never be
+    true as written. Encoded as stated anyway. ''Critical'' sensitivity gives a NULL DSI, which follows
+    the base DSI entry.'
+  sql_expression: (d.vol_gb * CASE d."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN
+    1 END) > 100 AND ((CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state
+    = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) * (d.vol_gb * CASE d."dataSense" WHEN 'High'
+    THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) < 2
+  source_model: main.SecurityProfile
+  from_sql: main."SecurityProfile" s JOIN main."DataProfile" d ON d."profileTrace" = s.profile_key
+  grain: one row per security profile, with its linked data profile
+  domains:
+  - definitions
+- name: high_pressure_data_flow
+  description: 'Flags data transfers under both heavy request pressure and high bandwidth usage.
+
+
+    A transfer where data subject request pressure is above 50 and bandwidth saturation index is above
+    50
+
+
+    Built on: bandwidth_saturation_index_bsi, data_subject_request_pressure_dsrp.
+
+
+    Compiler note: Audit joined to its flow via profjoin -> DataProfile.Flow_Sign -> DataFlow; checked:
+    all 240 audits match exactly one flow, and the path agrees with record_registry.'
+  sql_expression: (a."AccReqNum" + a."DEL_REQ_NUM" + a.rect_req_num + a."PORTREQNUM") * a.resp_time_day
+    > 50 AND CAST(f.flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(f.flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(f.flow_overview->'performance'->>'duration_min' AS DOUBLE), 0)) > 50
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.DataProfile p ON p."profileTrace" = a.profjoin JOIN main.DataFlow
+    f ON f."RecordRegistry" = p."Flow_Sign"
+  grain: one row per audit record, with its data profile and data flow
+  domains:
+  - definitions
+- name: vendor_driven_risk_flow
+  description: 'Highlights data flows with extra risk due to partner issues.
+
+
+    A transfer where vendor risk amplification is above 3 and vendor compliance burden is above 2
+
+
+    Built on: vendor_compliance_burden_vcb, vendor_risk_amplification_vra.
+
+
+    Compiler note: Combines VRA (vendor + risk via VendorManagement.riskassoc) and VCB (audit + vendor
+    via AuditAndCompliance.VendJoin) on one audit-row grain; joins are FK-to-PK, checked 240 rows = 240
+    distinct audits. Rows with NULL inputs (e.g. control effectiveness or critical findings) do not qualify.'
+  sql_expression: ((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) * ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0)))
+    > 3 AND (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (5 - CASE v."vendSecRate" WHEN 'A'
+    THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) > 2
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.VendorManagement v ON v."Vendor_Trace" = a."VendJoin"
+    JOIN main.RiskManagement r ON v.riskassoc = r."RISKTRACE"
+  grain: one row per audit record, with its linked vendor-management record and that vendor's risk-management
+    record
+  domains:
+  - definitions
+- name: cross_border_audit_risk
+  description: 'Flags international transfers with large volume and audit issues.
+
+
+    A transfer where cross-border data volume risk is above 1000 and audit finding severity is above 0.5
+
+
+    Built on: audit_finding_severity_afs, cross_border_data_volume_risk_cdvr.
+
+
+    Compiler note: Audit links to its data profile through profjoin, which is unique per audit row (240
+    audits, 240 distinct profiles), so each audit row has exactly one CDVR. Reuses the CDVR and AFS expressions
+    as defined. Rows with a NULL CDVR or AFS are not flagged.'
+  sql_expression: ((((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END) * p.vol_gb) > 1000 AND (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) > 0.5
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.DataProfile p ON p.profileTrace = a.profjoin JOIN main.RiskManagement
+    r ON r.RISKTRACE = p.riskJoin JOIN main.DataFlow d ON d.RecordRegistry = r.flow_link
+  grain: one row per audit record, with its data profile, risk-management record and data flow
+  domains:
+  - definitions
+- name: insecure_high_volume_flow
+  description: 'Highlights large data batches with weak protections.
+
+
+    A case where data volume is above 500 and security robustness score is below 2
+
+
+    Built on: security_robustness_score_srs, Data Volume.
+
+
+    Compiler note: Data volume is DataProfile.vol_gb (GB). Joined on SecurityProfile.profile_key = DataProfile.profileTrace;
+    every one of the 430 security profiles matches exactly one data profile. SRS is copied from the security_robustness_score_srs
+    entry.'
+  sql_expression: d.vol_gb > 500 AND (CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3
+    WHEN s.enc_state = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile s JOIN main.DataProfile d ON d.profileTrace = s.profile_key
+  grain: one row per security profile, with its linked data profile
+  domains:
+  - definitions
+- name: regulatory_overload_flow
+  description: 'Labels cases where both regulatory risk and compliance failure exist together.
+
+
+    A transfer where there is regulatory risk exposure and compliance is marked non-compliant
+
+
+    Built on: regulatory_risk_exposure, GDPR Compliance Status.
+
+
+    Compiler note: Reuses the regulatory_risk_exposure condition unchanged. I read "compliance marked
+    non-compliant" as GDPR compliance status (the dependency listed), so it adds gdprComp = ''Non-compliant'';
+    that value is stored exactly like this (80 of 240 rows).'
+  sql_expression: ((((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END > 1.5) AND ('Non-compliant' IN (c."gdprComp", c."CCPA_COMP", c."PIPLcomp", c.loc_law_comp))
+    AND (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country'))
+    AND c."gdprComp" = 'Non-compliant'
+  source_model: main.Compliance
+  from_sql: main."Compliance" c JOIN main."RiskManagement" r ON r."RISKTRACE" = c.risk_tie JOIN main."DataFlow"
+    d ON d."RecordRegistry" = r.flow_link
+  grain: one row per compliance record, with its risk record and data flow
+  domains:
+  - definitions
+- name: bandwidth_constrained_risk
+  description: 'Flags cases where risk is worsened by bandwidth overuse.
+
+
+    A transfer where bandwidth risk factor is above 100 and risk exposure score is above 0.7
+
+
+    Built on: risk_exposure_score_res, bandwidth_risk_factor_brf.
+
+
+    Compiler note: Combines the BRF and RES expressions as given. Risk is joined through DataProfile.riskJoin,
+    a foreign key to the RiskManagement primary key, so each profile gets at most one risk row. If any
+    input is NULL (for example dataSense ''Critical'', or control effectiveness missing or 0), the condition
+    is NULL and the row does not qualify.'
+  sql_expression: ((CAST(f.flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(f.flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(f.flow_overview->'performance'->>'duration_min' AS DOUBLE), 0))) * (p.vol_gb
+    * CASE p."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) > 100 AND ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0)))
+    > 0.7
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.DataFlow f ON p."Flow_Sign" = f."RecordRegistry" JOIN main.RiskManagement
+    r ON p."riskJoin" = r."RISKTRACE"
+  grain: one row per data profile, with its data flow and its linked risk-management record
+  domains:
+  - definitions
+- name: incident_resolution_efficiency_ire
+  description: 'Shows how quickly incidents get resolved compared to expectations.
+
+
+    IRE = (percentage of incidents resolved on time) divided by (average resolution time plus one)
+
+
+    Compiler note: Uses risk_management_profile.incident_statistics.sla_compliance_pct (on-time %) and
+    avg_resolution_hrs; JSON values are numeric (some stored as integers), cast to DOUBLE to avoid integer
+    division.'
+  sql_expression: CAST(risk_management_profile->'incident_statistics'->>'sla_compliance_pct' AS DOUBLE)
+    / (CAST(risk_management_profile->'incident_statistics'->>'avg_resolution_hrs' AS DOUBLE) + 1)
+  source_model: main.RiskManagement
+  domains:
+  - calculations
+- name: incident_prone_data_flow
+  description: 'Flags data flows with both slow incident resolution and high risk.
+
+
+    A transfer where incident resolution efficiency is below 0.5 and high-risk data flow is true
+
+
+    Built on: high_risk_data_flow, data_flow_reliability_score_dfrs.
+
+
+    Compiler note: IRE = incident_statistics.sla_compliance_pct / (incident_statistics.avg_resolution_hrs
+    + 1), taken from the risk_management_profile JSON. sla_compliance_pct is stored on a 0-100 scale (e.g.
+    97.28) and is used as stored. The high-risk data flow condition is inlined from its existing definition
+    over the same join.'
+  sql_expression: ((rm.risk_management_profile->'incident_statistics'->>'sla_compliance_pct')::DOUBLE
+    / ((rm.risk_management_profile->'incident_statistics'->>'avg_resolution_hrs')::DOUBLE + 1)) < 0.5
+    AND ((rm.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((rm.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) > 0.7 AND (dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low'
+    THEN 1 END) > 100
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON dp."riskJoin" = rm."RISKTRACE"
+  grain: one row per data profile (transfer), with its risk-management record
+  domains:
+  - definitions
+- name: data_flow_stability_index_dfsi
+  description: 'Shows how stable a transfer is, considering reliability and errors.
+
+
+    DFSI = (data flow reliability score) multiplied by (success percentage divided by error count plus
+    one)
+
+
+    Built on: Success Percentage, Error Count, data_flow_reliability_score_dfrs.
+
+
+    Compiler note: Computed per row of DataFlow. DFRS is written out inline, using the same expression
+    as data_flow_reliability_score_dfrs. That is multiplied by success_pct / (error_count + 1). Both values
+    come from flow_overview.performance and are cast to DOUBLE to avoid integer division.'
+  sql_expression: ((CAST(flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) * (CAST(flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))
+  source_model: main.DataFlow
+  domains:
+  - calculations
+- name: compliance_overhead_ratio_cor
+  description: 'Measures the extra burden compliance puts on operations.
+
+
+    COR = (data subject request pressure) divided by (compliance cost plus one)
+
+
+    Built on: data_subject_request_pressure_dsrp.
+
+
+    Compiler note: Compliance cost is taken as RiskManagement.risk_management_profile.financial_impact.cost_usd
+    (stored as JSON text, cast to double). Reached via AuditAndCompliance.COMP_JOIN -> Compliance.risk_tie.
+    All 240 audit rows match the same risk record through profjoin->DataProfile.riskJoin and VendJoin->VendorManagement.riskassoc
+    too, and no cost_usd values are null.'
+  sql_expression: ((a."AccReqNum" + a."DEL_REQ_NUM" + a.rect_req_num + a."PORTREQNUM") * a.resp_time_day)
+    / (CAST(r.risk_management_profile->'financial_impact'->>'cost_usd' AS DOUBLE) + 1)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.Compliance c ON a."COMP_JOIN" = c."complianceTrace" JOIN
+    main.RiskManagement r ON r."RISKTRACE" = c.risk_tie
+  grain: one row per audit record, with its compliance record and linked risk-management record
+  domains:
+  - calculations
+- name: security_posture_maturity_spm
+  description: 'Shows how mature security protections are, combining encryption coverage and log retention.
+
+
+    SPM = (encryption coverage ratio) multiplied by (number of days logs are kept divided by 365)
+
+
+    Built on: Audit Log Retention, encryption_coverage_ratio_ecr.
+
+
+    Compiler note: Reuses the ECR expression and join. Days logs are kept = SecurityProfile.LogRetDays
+    (bigint), divided by 365.0 so the division is not truncated to an integer. The join on DataProfile''s
+    primary key gives at most one profile per security row.'
+  sql_expression: ((CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state
+    = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) * (d.vol_gb * CASE d."dataSense" WHEN 'High'
+    THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) * (s."LogRetDays" / 365.0)
+  source_model: main.SecurityProfile
+  from_sql: main."SecurityProfile" s JOIN main."DataProfile" d ON d."profileTrace" = s.profile_key
+  grain: one row per security profile, with its linked data profile
+  domains:
+  - calculations
+- name: vendor_risk_concentration_vrc
+  description: 'Measures how much a single partner''s risk issues affect the whole system.
+
+
+    VRC = (vendor risk amplification) multiplied by (one minus vendor reliability index)
+
+
+    Built on: vendor_reliability_index_vri, vendor_risk_amplification_vra.
+
+
+    Compiler note: Built by combining the existing VRA and VRI expressions over the same vendor-risk join.
+    Nothing new was checked in the data.'
+  sql_expression: (((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) * ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0))))
+    * (1 - ((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)
+    * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)))
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement v JOIN main.RiskManagement r ON v.riskassoc = r."RISKTRACE"
+  grain: one row per vendor-management record, with its linked risk-management record
+  domains:
+  - calculations
+- name: cross_border_compliance_exposure_cbce
+  description: 'Measures compliance risk for international transfers based on volume and regulatory gaps.
+
+
+    CBCE = (cross-border data volume risk) multiplied by (2 if compliance is non-compliant, 1 otherwise)
+
+
+    Built on: GDPR Compliance Status, cross_border_data_volume_risk_cdvr.
+
+
+    Compiler note: "Compliance" is read as GDPR Compliance Status (Compliance.gdprComp), whose stored
+    value is ''Non-compliant''. Compliance is joined on risk_tie = RISKTRACE. risk_tie is unique (240
+    rows, 240 distinct values), so the join cannot duplicate profiles. It is a LEFT JOIN: of 870 profiles,
+    only 240 have a compliance record, and profiles without one get factor 1 under "otherwise".'
+  sql_expression: ((((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END) * p.vol_gb) * CASE WHEN c."gdprComp" = 'Non-compliant' THEN 2 ELSE 1 END
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.RiskManagement r ON r.RISKTRACE = p.riskJoin JOIN main.DataFlow
+    d ON d.RecordRegistry = r.flow_link LEFT JOIN main.Compliance c ON c.risk_tie = r.RISKTRACE
+  grain: one row per data profile, with its risk-management record, data flow, and (if any) compliance
+    record
+  domains:
+  - calculations
+- name: incident_impact_factor_iif
+  description: 'Measures the potential impact of an incident, combining risk and how well it is resolved.
+
+
+    IIF = (risk exposure score) multiplied by (one minus incident resolution efficiency)
+
+
+    Built on: risk_exposure_score_res, incident_resolution_efficiency_ire.
+
+
+    Compiler note: Built from the RES and IRE expressions it depends on, both over RiskManagement. The
+    result is NULL when control effectiveness is NULL or 0.'
+  sql_expression: ((risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * (1 - (CAST(risk_management_profile->'incident_statistics'->>'sla_compliance_pct' AS DOUBLE)
+    / (CAST(risk_management_profile->'incident_statistics'->>'avg_resolution_hrs' AS DOUBLE) + 1)))
+  source_model: main.RiskManagement
+  domains:
+  - calculations
+- name: data_retention_risk_score_drrs
+  description: 'Measures risk from keeping sensitive data too long.
+
+
+    DRRS = (data sensitivity index) multiplied by (days data is kept divided by 365)
+
+
+    Built on: data_sensitivity_index_dsi.
+
+
+    Compiler note: Reuses the DSI expression as given: ''Critical'' sensitivity is not mapped there, so
+    DSI and DRRS come out NULL for those rows. ret_days is a bigint, so I divide by 365.0 to avoid integer
+    division.'
+  sql_expression: (vol_gb * CASE "dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1
+    END) * (ret_days / 365.0)
+  source_model: main.DataProfile
+  domains:
+  - calculations
+- name: audit_compliance_pressure_acp
+  description: 'Shows how much pressure audit findings and compliance put on operations.
+
+
+    ACP = (audit remediation load) multiplied by (audit finding severity)
+
+
+    Built on: audit_finding_severity_afs, audit_remediation_load_arl.
+
+
+    Compiler note: Built from the existing ARL and AFS expressions on the same AuditAndCompliance row,
+    which compute AFS and ARL the same way. NULL critFindNum is handled as in those entries: it passes
+    through as NULL.'
+  sql_expression: ((CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1)) * ("AccReqNum" + "DEL_REQ_NUM"
+    + rect_req_num + "PORTREQNUM")) * (CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1))
+  source_model: main.AuditAndCompliance
+  domains:
+  - calculations
+- name: bandwidth_compliance_risk_bcr
+  description: 'Shows compliance risk when bandwidth is overused.
+
+
+    BCR = (bandwidth risk factor) multiplied by (1.5 if compliance is partial, 2 if non-compliant, 1 otherwise)
+
+
+    Built on: GDPR Compliance Status, bandwidth_risk_factor_brf.
+
+
+    Compiler note: Compliance is the GDPR compliance status (Compliance.gdprComp, values Compliant/Non-compliant/Partial).
+    Compliance is joined to the profile via risk_tie = DataProfile.riskJoin; risk_tie is unique (240 compliance
+    rows, 240 distinct risk_tie values), and the joined risk record''s flow_link always matches the profile''s
+    flow. Only 240 of the 870 profiles have a compliance record. The join is a LEFT JOIN, so profiles
+    without one fall under ''otherwise'' and get a multiplier of 1. The BRF part is reused unchanged,
+    so it is NULL for ''Critical'' sensitivity, as in the DSI mapping.'
+  sql_expression: ((CAST(f.flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(f.flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(f.flow_overview->'performance'->>'duration_min' AS DOUBLE), 0))) * (p.vol_gb
+    * CASE p."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) * CASE c."gdprComp"
+    WHEN 'Partial' THEN 1.5 WHEN 'Non-compliant' THEN 2 ELSE 1 END
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.DataFlow f ON p."Flow_Sign" = f."RecordRegistry" LEFT JOIN main.Compliance
+    c ON c.risk_tie = p."riskJoin"
+  grain: one row per data profile, with its data flow and its compliance record (if any)
+  domains:
+  - calculations
+- name: vendor_security_cost_index_vsci
+  description: 'Compares the compliance burden from a partner to the cost of protections.
+
+
+    VSCI = (vendor compliance burden) divided by (security control cost ratio plus one)
+
+
+    Built on: security_control_cost_ratio_sccr, vendor_compliance_burden_vcb.
+
+
+    Compiler note: Linked VCB (audit+vendor) to SCCR (security profile+risk) through VendorManagement.SEC_JOIN
+    -> SecurityProfile -> RISKKEY. Every join is many-to-one along a foreign key. All 240 audits match
+    a security profile and a risk record, and in every row vendor riskassoc equals the security profile''s
+    RISKKEY, so either path to the risk record gives the same result.'
+  sql_expression: ((CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (5 - CASE v."vendSecRate"
+    WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)) / (((CASE WHEN s.enc_state =
+    'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state = 'Full' OR s.acl_state = 'Strong' THEN
+    2 ELSE 1 END)::DOUBLE / ((CAST(r.risk_management_profile->'financial_impact'->>'cost_usd' AS DOUBLE)
+    / (CAST(r.risk_management_profile->'financial_impact'->>'penalties_usd' AS DOUBLE) + 1)) + 1)) + 1)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.VendorManagement v ON v."Vendor_Trace" = a."VendJoin"
+    JOIN main.SecurityProfile s ON s."SECURITY_TRACE" = v."SEC_JOIN" JOIN main.RiskManagement r ON s."RISKKEY"
+    = r."RISKTRACE"
+  grain: one row per audit record, with its vendor, the vendor's security profile, and that profile's
+    risk-management record
+  domains:
+  - calculations
+- name: unstable_high_risk_flow
+  description: 'Flags highly risky data transfers that are unstable.
+
+
+    A transfer where data flow stability index is below 0.5 and critical data flow risk exists
+
+
+    Built on: critical_data_flow_risk, data_flow_stability_index_dfsi.
+
+
+    Compiler note: Combines DFSI < 0.5 with the critical_data_flow_risk predicate, using that entry''s
+    join of DataFlow to RiskManagement.'
+  sql_expression: (((CAST(df.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(df.flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) * (CAST(df.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) < 0.5 AND ((rm.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0
+    / NULLIF((rm.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0))) >
+    0.7 AND ((CAST(df.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(df.flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(df.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) < 0.5
+  source_model: main.DataFlow
+  from_sql: main.DataFlow AS df JOIN main.RiskManagement AS rm ON rm.flow_link = df.RecordRegistry
+  grain: one row per data flow that has a risk-management record (flow_link is unique in RiskManagement)
+  domains:
+  - definitions
+- name: overloaded_security_flow
+  description: 'Highlights cases where security protections are weak and compliance risk is high.
+
+
+    A transfer where security posture maturity is below 1 and cross-border compliance exposure is above
+    100
+
+
+    Built on: security_posture_maturity_spm, cross_border_compliance_exposure_cbce.
+
+
+    Compiler note: Combines the SPM and CBCE definitions on one join: security profile -> data profile
+    (profile_key unique in SecurityProfile; s.RISKKEY always equals p.riskJoin) -> risk -> flow, with
+    compliance LEFT JOINed on risk_tie (unique per risk record, so no fan-out).'
+  sql_expression: (((CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state
+    = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) * (p.vol_gb * CASE p."dataSense" WHEN 'High'
+    THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) * (s."LogRetDays" / 365.0)) < 1 AND ((((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0)))
+    * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END) * p.vol_gb) * CASE WHEN c."gdprComp" = 'Non-compliant' THEN 2 ELSE 1 END > 100
+  source_model: main.SecurityProfile
+  from_sql: main."SecurityProfile" s JOIN main."DataProfile" p ON p."profileTrace" = s.profile_key JOIN
+    main."RiskManagement" r ON r."RISKTRACE" = p."riskJoin" JOIN main."DataFlow" d ON d."RecordRegistry"
+    = r.flow_link LEFT JOIN main."Compliance" c ON c.risk_tie = r."RISKTRACE"
+  grain: one row per security profile, with its data profile, risk-management record, data flow, and (if
+    any) compliance record
+  domains:
+  - definitions
+- name: excessive_retention_risk
+  description: 'Flags cases where very sensitive data is kept for too long.
+
+
+    A case where data retention risk score is above 50 and data sensitivity index is above 100
+
+
+    Built on: data_sensitivity_index_dsi, data_retention_risk_score_drrs.
+
+
+    Compiler note: Reuses the DSI and DRRS definitions given above, unchanged. Rows with dataSense ''Critical''
+    get a NULL DSI/DRRS under those definitions, so they are not flagged.'
+  sql_expression: ((vol_gb * CASE "dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN
+    1 END) * (ret_days / 365.0)) > 50 AND (vol_gb * CASE "dataSense" WHEN 'High' THEN 3 WHEN 'Medium'
+    THEN 2 WHEN 'Low' THEN 1 END) > 100
+  source_model: main.DataProfile
+  domains:
+  - definitions
+- name: vendor_compliance_risk_cluster
+  description: 'Flags partners who create clusters of compliance risk.
+
+
+    A partner where vendor risk concentration is above 2 and vendor compliance burden is above 2
+
+
+    Built on: vendor_compliance_burden_vcb, vendor_risk_concentration_vrc.
+
+
+    Compiler note: Combines VRC (vendor+risk) and VCB (audit+vendor) at vendor grain. Checked: AuditAndCompliance.VendJoin
+    is unique (240 audits, 240 distinct vendors, 240 vendor records), so the join to audit keeps one row
+    per vendor.'
+  sql_expression: ((((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) * ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0))))
+    * (1 - ((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)
+    * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)))) > 2 AND ((CAST(a."critFindNum" AS
+    DOUBLE) / (a."FINDTALLY" + 1)) * (5 - CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C'
+    THEN 2 WHEN 'D' THEN 1 END)) > 2
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement v JOIN main.RiskManagement r ON v.riskassoc = r."RISKTRACE" JOIN main.AuditAndCompliance
+    a ON a."VendJoin" = v."Vendor_Trace"
+  grain: one row per vendor-management record, with its linked risk-management record and its audit record
+  domains:
+  - definitions
+- name: incident_prone_compliance_flow
+  description: 'Flags data flows with high incident impact and compliance problems.
+
+
+    A transfer where incident impact factor is above 0.8 and compliance is non-compliant
+
+
+    Built on: GDPR Compliance Status, incident_impact_factor_iif.
+
+
+    Compiler note: Compliance is GDPR compliance status (Compliance.gdprComp, stored as ''Non-compliant'').
+    Joined Compliance to RiskManagement on risk_tie = RISKTRACE; risk_tie is unique (240 rows, 240 distinct),
+    so each row is one transfer.'
+  sql_expression: ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * (1 - (CAST(r.risk_management_profile->'incident_statistics'->>'sla_compliance_pct' AS DOUBLE)
+    / (CAST(r.risk_management_profile->'incident_statistics'->>'avg_resolution_hrs' AS DOUBLE) + 1)))
+    > 0.8 AND c."gdprComp" = 'Non-compliant'
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement r JOIN main.Compliance c ON c.risk_tie = r.RISKTRACE
+  grain: one row per compliance record, with its risk-management record (risk_tie is unique in Compliance)
+  domains:
+  - definitions
+- name: audit_stressed_data_flow
+  description: 'Shows transfers under stress from both audit findings and compliance.
+
+
+    A transfer where audit compliance pressure is above 5 and compliance overhead ratio is above 0.5
+
+
+    Built on: compliance_overhead_ratio_cor, audit_compliance_pressure_acp.
+
+
+    Compiler note: Combines the ACP and COR expressions as they are already defined, over the COR join
+    (audit -> compliance -> risk).'
+  sql_expression: ((CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (a."AccReqNum" + a."DEL_REQ_NUM"
+    + a.rect_req_num + a."PORTREQNUM")) * (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) > 5
+    AND ((a."AccReqNum" + a."DEL_REQ_NUM" + a.rect_req_num + a."PORTREQNUM") * a.resp_time_day) / (CAST(r.risk_management_profile->'financial_impact'->>'cost_usd'
+    AS DOUBLE) + 1) > 0.5
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.Compliance c ON a."COMP_JOIN" = c."complianceTrace" JOIN
+    main.RiskManagement r ON r."RISKTRACE" = c.risk_tie
+  grain: one row per audit record, with its compliance record and linked risk-management record
+  domains:
+  - definitions
+- name: bandwidth_limited_compliance_risk
+  description: 'Flags cases where bandwidth issues make compliance worse.
+
+
+    A transfer where bandwidth compliance risk is above 50 and cross-border compliance gap exists
+
+
+    Built on: cross_border_compliance_gap, bandwidth_compliance_risk_bcr.
+
+
+    Compiler note: I combined both parent entries over the BCR join (profile → flow, with compliance LEFT
+    JOINed on risk_tie = riskJoin). I checked that Compliance.risk_tie is unique (240 rows, 240 distinct).
+    I also checked that every profile''s Flow_Sign equals its risk record''s flow_link (0 mismatches),
+    so the countries from the profile''s flow match the gap entry''s flow. A profile with no compliance
+    record gets no gap and is not flagged.'
+  sql_expression: (((CAST(f.flow_overview->'performance'->>'bandwidth_util_pct' AS DOUBLE) * (CAST(f.flow_overview->'performance'->>'data_size_mb'
+    AS DOUBLE) / NULLIF(CAST(f.flow_overview->'performance'->>'duration_min' AS DOUBLE), 0))) * (p.vol_gb
+    * CASE p."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)) * CASE c."gdprComp"
+    WHEN 'Partial' THEN 1.5 WHEN 'Non-compliant' THEN 2 ELSE 1 END > 50) AND ('Non-compliant' IN (c."gdprComp",
+    c."CCPA_COMP", c."PIPLcomp", c.loc_law_comp)) AND (f.flow_overview->'routing'->>'origin_country')
+    <> (f.flow_overview->'routing'->>'destination_country')
+  source_model: main.DataProfile
+  from_sql: main.DataProfile p JOIN main.DataFlow f ON p."Flow_Sign" = f."RecordRegistry" LEFT JOIN main.Compliance
+    c ON c.risk_tie = p."riskJoin"
+  grain: one row per data profile, with its data flow and its compliance record (if any)
+  domains:
+  - definitions
+- name: costly_vendor_risk_flow
+  description: 'Flags flows where partner risk and cost are both high.
+
+
+    A transfer where vendor security cost index is above 1 and vendor risk amplification is above 3
+
+
+    Built on: vendor_risk_amplification_vra, vendor_security_cost_index_vsci.
+
+
+    Compiler note: Combines the VSCI and VRA expressions at the VSCI grain (audit record joined through
+    vendor and security profile to risk). VRA joins risk on v.riskassoc and VSCI on s.RISKKEY. I checked
+    that v.riskassoc = s.RISKKEY on all 240 joined rows, so one risk join serves both.'
+  sql_expression: (((CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (5 - CASE v."vendSecRate"
+    WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)) / (((CASE WHEN s.enc_state =
+    'Full' AND s.acl_state = 'Strong' THEN 3 WHEN s.enc_state = 'Full' OR s.acl_state = 'Strong' THEN
+    2 ELSE 1 END)::DOUBLE / ((CAST(r.risk_management_profile->'financial_impact'->>'cost_usd' AS DOUBLE)
+    / (CAST(r.risk_management_profile->'financial_impact'->>'penalties_usd' AS DOUBLE) + 1)) + 1)) + 1))
+    > 1 AND (((CASE v."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)
+    * (CASE WHEN v."contrState" = 'Active' THEN 1.0 ELSE 0.5 END)) * ((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE
+    * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE, 0))))
+    > 3
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance a JOIN main.VendorManagement v ON v."Vendor_Trace" = a."VendJoin"
+    JOIN main.SecurityProfile s ON s."SECURITY_TRACE" = v."SEC_JOIN" JOIN main.RiskManagement r ON s."RISKKEY"
+    = r."RISKTRACE"
+  grain: one row per audit record, with its vendor, the vendor's security profile, and that profile's
+    risk-management record
+  domains:
+  - definitions
+- name: sensitive_unstable_flow
+  description: 'Flags unstable transfers involving highly sensitive data.
+
+
+    A transfer where data flow stability index is below 0.5 and sensitive data exposure exists
+
+
+    Built on: sensitive_data_exposure, data_flow_stability_index_dfsi.
+
+
+    Compiler note: DFSI is taken from the data flow, joined on s.flowKey = f.RecordRegistry. I checked
+    that s.flowKey always equals d.Flow_Sign (0 mismatches in 430 rows) and that each flowKey is unique,
+    so the join keeps one row per security profile.'
+  sql_expression: (((CAST(f.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(f.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1)) * (1 - CAST(f.flow_overview->'performance'->>'retry_count' AS DOUBLE) / (CAST(f.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) * (CAST(f.flow_overview->'performance'->>'success_pct' AS DOUBLE) / (CAST(f.flow_overview->'performance'->>'error_count'
+    AS DOUBLE) + 1))) < 0.5 AND (d.vol_gb * CASE d."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2
+    WHEN 'Low' THEN 1 END) > 100 AND (CASE WHEN s.enc_state = 'Full' AND s.acl_state = 'Strong' THEN 3
+    WHEN s.enc_state = 'Full' OR s.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile s JOIN main.DataProfile d ON d."profileTrace" = s.profile_key JOIN main.DataFlow
+    f ON f."RecordRegistry" = s."flowKey"
+  grain: one row per security profile, with its linked data profile and data flow
+  domains:
+  - definitions
+- name: high_impact_audit_risk_flow
+  description: 'Flags flows with severe audit and regulatory risk.
+
+
+    A transfer where regulatory risk exposure exists and audit compliance pressure is above 5
+
+
+    Built on: regulatory_risk_exposure, audit_compliance_pressure_acp.
+
+
+    Compiler note: Audit linked to compliance via COMP_JOIN, then compliance->risk via risk_tie, risk->flow
+    via flow_link (as in regulatory_risk_exposure). Verified join yields one row per audit record (240
+    rows, 240 distinct audits).'
+  sql_expression: ((((r.risk_management_profile->'assessment'->>'risk_score')::DOUBLE * (1.0 / NULLIF((r.risk_management_profile->'assessment'->>'control_effectiveness_pct')::DOUBLE,
+    0))) * CASE WHEN (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country')
+    THEN 2 WHEN (d.flow_overview->'routing'->>'origin_country') = (d.flow_overview->'routing'->>'destination_country')
+    THEN 1 END > 1.5) AND ('Non-compliant' IN (c."gdprComp", c."CCPA_COMP", c."PIPLcomp", c.loc_law_comp))
+    AND (d.flow_overview->'routing'->>'origin_country') <> (d.flow_overview->'routing'->>'destination_country'))
+    AND (((CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) * (a."AccReqNum" + a."DEL_REQ_NUM" +
+    a.rect_req_num + a."PORTREQNUM")) * (CAST(a."critFindNum" AS DOUBLE) / (a."FINDTALLY" + 1)) > 5)
+  source_model: main.AuditAndCompliance
+  from_sql: main."AuditAndCompliance" a JOIN main."Compliance" c ON c."complianceTrace" = a."COMP_JOIN"
+    JOIN main."RiskManagement" r ON r."RISKTRACE" = c.risk_tie JOIN main."DataFlow" d ON d."RecordRegistry"
+    = r.flow_link
+  grain: one row per audit record, with its compliance record, risk record and data flow
+  domains:
+  - definitions
+- name: transfer_path
+  description: 'Describes the direction of the data transfer, from source to target.
+
+
+    A string in the format: source country, an arrow, and destination country'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: Transfer Path defines a string value (origin country, an arrow, destination country),
+    not a yes/no condition over rows. A predicate would mean inventing a condition the entry never states.
+    As a calculation it would be (flow_overview->'routing'->>'origin_country') || ' -> ' || (flow_overview->'routing'->>'destination_country')
+    over DataFlow, but it cannot be evaluated in a WHERE clause.
+- name: request_breakdown
+  description: 'Lists the types and numbers of requests individuals made about their data.
+
+
+    A list that includes: access requests, deletion requests, correction requests, and transfer requests,
+    with their respective counts'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'The entry describes a display value: a list of the four data-subject request counts (AccReqNum,
+    DEL_REQ_NUM, rect_req_num, PORTREQNUM in AuditAndCompliance), each with its label. It gives no yes/no
+    condition over rows, so there is nothing to encode as a boolean predicate. Writing a condition here
+    would mean inventing one.'
+- name: integrity_failure_count_ifc
+  description: 'Counts failed checks on a batch of data.
+
+
+    IFC = 1 if the integrity check fails, 0 otherwise, plus 1 if verification fails, 0 otherwise
+
+
+    Compiler note: Integrity check = Int_check, verification = CSUMVERIFY (checksum verification). Checked
+    values: both use the literal ''Failed''. NULL Int_check (not performed) and ''Partial'' count as 0.'
+  sql_expression: (CASE WHEN "Int_check" = 'Failed' THEN 1 ELSE 0 END) + (CASE WHEN "CSUMVERIFY" = 'Failed'
+    THEN 1 ELSE 0 END)
+  source_model: main.DataProfile
+  domains:
+  - calculations
+- name: failure_types_list
+  description: 'Lists the reasons for data batch check failures.
+
+
+    A comma-separated list: ''integrity check'' if integrity fails, ''verification'' if checksum fails
+
+
+    Compiler note: This entry assigns a label (a list of failure reasons), so it is encoded as a categorical
+    CASE. Checked the data: integrity fails when Int_check = ''Failed'' (other values are Partial, Passed
+    or NULL, and NULL means the check was not performed), and checksum fails when CSUMVERIFY = ''Failed''
+    (other values are Pending and Success). The labels are joined with '', '' in the order integrity check,
+    then verification. A row with neither failure gets an empty string.'
+  sql_expression: CASE WHEN "Int_check" = 'Failed' AND "CSUMVERIFY" = 'Failed' THEN 'integrity check,
+    verification' WHEN "Int_check" = 'Failed' THEN 'integrity check' WHEN "CSUMVERIFY" = 'Failed' THEN
+    'verification' ELSE '' END
+  source_model: main.DataProfile
+  domains:
+  - definitions
+- name: high_audit_compliance_pressure
+  description: 'Flags data transfers with heavy audit-related workload.
+
+
+    A transfer where audit compliance pressure is above 5
+
+
+    Built on: audit_compliance_pressure_acp.
+
+
+    Compiler note: Uses the audit_compliance_pressure_acp expression and keeps rows where it is above
+    5. Rows with a NULL critFindNum come out NULL, so they are not flagged.'
+  sql_expression: ((CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1)) * ("AccReqNum" + "DEL_REQ_NUM"
+    + rect_req_num + "PORTREQNUM")) * (CAST("critFindNum" AS DOUBLE) / ("FINDTALLY" + 1)) > 5
+  source_model: main.AuditAndCompliance
+  domains:
+  - definitions
+- name: cross_border_data_flow
+  description: 'Labels data transfers where source and target countries are not the same.
+
+
+    A transfer where the countries for sending and receiving data are different
+
+
+    Compiler note: Countries read from flow_overview JSON at $.routing.origin_country and $.routing.destination_country.
+    36 of 999 rows have no country, and those rows come out as not flagged (the comparison gives NULL).
+    954 rows are flagged as cross-border.'
+  sql_expression: json_extract_string(flow_overview, '$.routing.origin_country') <> json_extract_string(flow_overview,
+    '$.routing.destination_country')
+  source_model: main.DataFlow
+  domains:
+  - definitions
+- name: slow_remediation_timeline
+  description: 'Labels cases where the deadline to fix an issue has already passed.
+
+
+    A case where the current date minus the fix deadline is greater than zero
+
+
+    Compiler note: REMED_DUE is a DATE column (remediation due date); date minus date gives days in DuckDB.
+    Rows with NULL REMED_DUE are not flagged.'
+  sql_expression: CURRENT_DATE - "REMED_DUE" > 0
+  source_model: main.AuditAndCompliance
+  domains:
+  - definitions
+- name: nearing_remediation_deadline
+  description: 'Highlights transfers close to their fix deadline.
+
+
+    A case where the time until the fix deadline is between minus five and zero
+
+
+    Compiler note: I took time until the fix deadline to be REMED_DUE (a DATE column) minus the current
+    date, in days. DuckDB returns an integer day count when you subtract two dates. The definition says
+    between minus five and zero, inclusive. Read literally, that keeps only deadlines that passed 0 to
+    5 days ago. Rows where REMED_DUE is NULL are excluded.'
+  sql_expression: ("REMED_DUE" - CURRENT_DATE) BETWEEN -5 AND 0
+  source_model: main.AuditAndCompliance
+  domains:
+  - definitions
+- name: high_vendor_risk_concentration
+  description: 'Flags partners with many risk issues over time.
+
+
+    A case where the current date minus the fix deadline is greater than zero
+
+
+    Compiler note: The entry''s own definition is "current date minus the fix deadline > 0", so I encoded
+    that over AuditAndCompliance.REMED_DUE (the remediation due date, type DATE). In DuckDB, subtracting
+    one date from another gives a whole number of days. Rows with a NULL REMED_DUE are not flagged. This
+    is the same condition as Slow Remediation Timeline, even though the name and description talk about
+    vendors.'
+  sql_expression: CURRENT_DATE - "REMED_DUE" > 0
+  source_model: main.AuditAndCompliance
+  domains:
+  - definitions
+tables:
+- schema: main
+  table: AuditAndCompliance
+  columns:
+  - name: AUDIT_TRACE
+    type: BIGINT
+    description: BIGINT. Unique audit record identifier. PK.
+  - name: profjoin
+    type: BIGINT
+    description: BIGINT. Linked data-profile identifier. FK to DataProfile.
+  - name: COMP_JOIN
+    type: BIGINT
+    description: BIGINT. Linked compliance identifier. FK to Compliance.
+  - name: VendJoin
+    type: BIGINT
+    description: BIGINT. Linked vendor-management identifier. FK to VendorManagement.
+  - name: record_registry
+    type: VARCHAR
+    description: TEXT. Record registry reference string.
+  - name: AudtrailState
+    type: VARCHAR
+    description: 'TEXT. Audit-trail state descriptor. Possible values: Complete, Missing, Partial. Possible
+      values: Complete, Missing, Partial.'
+  - name: FINDTALLY
+    type: BIGINT
+    description: 'BIGINT. Total findings tally. Example: 3. Example: 3.'
+  - name: critFindNum
+    type: BIGINT
+    description: 'BIGINT. Number of critical findings. **NULL means no critical findings recorded.**.
+      Example: 6.0. Example: 6.0.'
+  - name: remed_state
+    type: VARCHAR
+    description: 'TEXT. Remediation state descriptor. Possible values: Completed, In Progress, Not Started.
+      Possible values: Completed, In Progress, Not Started.'
+  - name: REMED_DUE
+    type: DATE
+    description: 'DATE. Remediation due date. Example: 2025-03-16. Example: 2025-03-16.'
+  - name: authNotify
+    type: VARCHAR
+    description: 'TEXT. Authority-notification status. **NULL means authority not notified.**. Possible
+      values: Not Required, Required, Submitted. Possible values: Not Required, Required, Submitted.'
+  - name: border_mech
+    type: VARCHAR
+    description: 'TEXT. Cross-border mechanism descriptor. Possible values: Adequacy Decision, BCRs, Derogations,
+      SCCs. Possible values: Adequacy Decision, BCRs, Derogations, SCCs.'
+  - name: TRANSIMPASSESS
+    type: VARCHAR
+    description: 'TEXT. Transfer impact assessment status. **NULL means assessment not performed.**. Possible
+      values: Completed, In Progress, Required. Possible values: Completed, In Progress, Required.'
+  - name: localReqs
+    type: VARCHAR
+    description: 'TEXT. Local requirements descriptor. Possible values: Met, Not Met, Partial. Possible
+      values: Met, Not Met, Partial.'
+  - name: data_map_state
+    type: VARCHAR
+    description: 'TEXT. Data-mapping state. Possible values: Complete, Outdated, Partial. Possible values:
+      Complete, Outdated, Partial.'
+  - name: SYSINTSTATE
+    type: VARCHAR
+    description: 'TEXT. System-integration state. Possible values: Fully Integrated, Manual, Partial.
+      Possible values: Fully Integrated, Manual, Partial.'
+  - name: AccReqNum
+    type: BIGINT
+    description: 'BIGINT. Data-access request count. Example: 959. Example: 959.'
+  - name: DEL_REQ_NUM
+    type: BIGINT
+    description: 'BIGINT. Deletion request count. Example: 409. Example: 409.'
+  - name: rect_req_num
+    type: BIGINT
+    description: 'BIGINT. Rectification request count. Example: 76. Example: 76.'
+  - name: PORTREQNUM
+    type: BIGINT
+    description: 'BIGINT. Portability request count. Example: 53. Example: 53.'
+  - name: resp_time_day
+    type: FLOAT
+    description: 'REAL. Average response time in days. Example: 4.5. Example: 4.5.
+
+
+      Response Time: Shows how many days it takes to reply to a request.
+
+
+      Lower means faster response; higher means delays.
+
+
+      Compiler note: This entry describes the average response time in days for data subject requests.'
+- schema: main
+  table: Compliance
+  columns:
+  - name: complianceTrace
+    type: BIGINT
+    description: BIGINT. Unique compliance record identifier. PK.
+  - name: risk_tie
+    type: BIGINT
+    description: BIGINT. Linked risk-management identifier. FK to RiskManagement.
+  - name: vendorTie
+    type: BIGINT
+    description: BIGINT. Linked vendor-management identifier. FK to VendorManagement.
+  - name: recordRegistry
+    type: VARCHAR
+    description: TEXT. Record registry reference string.
+  - name: LEGALBASE
+    type: VARCHAR
+    description: 'TEXT. Legal basis for processing. **NULL means legal basis not determined.**. Possible
+      values: Consent, Contract, Legal Obligation, Legitimate Interest. Possible values: Consent, Contract,
+      Legal Obligation, Legitimate Interest.'
+  - name: consent_state
+    type: VARCHAR
+    description: 'TEXT. Consent state descriptor. Possible values: Expired, Not Required, Pending, Valid.
+      Possible values: Expired, Not Required, Pending, Valid.'
+  - name: ConsentColl
+    type: DATE
+    description: 'DATE. Date when consent was collected. Example: 13 Sep 2024. Example: 13 Sep 2024.'
+  - name: consent_exp
+    type: DATE
+    description: 'DATE. Consent expiration date. Example: 05/17/2026. Example: 05/17/2026.'
+  - name: purp_limit
+    type: VARCHAR
+    description: 'TEXT. Purpose-limitation indicator. Possible values: General, Multiple, Specific. Possible
+      values: General, Multiple, Specific.'
+  - name: PURP_DESC
+    type: VARCHAR
+    description: 'TEXT. Description of data-processing purpose. Possible values: Business Operations,
+      Compliance, Marketing, Research. Possible values: Business Operations, Compliance, Marketing, Research.'
+  - name: gdprComp
+    type: VARCHAR
+    description: 'TEXT. GDPR compliance indicator. Possible values: Compliant, Non-compliant, Partial.
+      Possible values: Compliant, Non-compliant, Partial.
+
+
+      GDPR Compliance Status: Shows how well the requirements for data protection are met.
+
+
+      Values: compliant, non-compliant, or partial.
+
+
+      Compiler note: Describes the GDPR compliance indicator; values stored as ''Compliant'', ''Non-compliant'',
+      ''Partial''.'
+  - name: CCPA_COMP
+    type: VARCHAR
+    description: 'TEXT. CCPA compliance indicator. Possible values: Compliant, Non-compliant, Partial.
+      Possible values: Compliant, Non-compliant, Partial.'
+  - name: PIPLcomp
+    type: VARCHAR
+    description: 'TEXT. PIPL compliance indicator. Possible values: Compliant, Non-compliant, Partial.
+      Possible values: Compliant, Non-compliant, Partial.'
+  - name: loc_law_comp
+    type: VARCHAR
+    description: 'TEXT. Local-law compliance indicator. Possible values: Compliant, Non-compliant, Partial.
+      Possible values: Compliant, Non-compliant, Partial.'
+  - name: RegApprovals
+    type: VARCHAR
+    description: 'TEXT. Regulatory approvals information. Possible values: Not Required, Obtained, Pending.
+      Possible values: Not Required, Obtained, Pending.'
+  - name: priv_imp_assess
+    type: VARCHAR
+    description: 'TEXT. Privacy-impact assessment status. Possible values: Completed, In Progress, Required.
+      Possible values: Completed, In Progress, Required.'
+  - name: Datasubjright
+    type: VARCHAR
+    description: 'TEXT. Data-subject rights fulfilment status. Possible values: Fully Supported, Limited,
+      Partial. Possible values: Fully Supported, Limited, Partial.'
+- schema: main
+  table: DataFlow
+  columns:
+  - name: RecordRegistry
+    type: VARCHAR
+    description: 'TEXT. Unique data-flow record identifier. PK. Example: CB932064.'
+  - name: FLOWSTAMP
+    type: VARCHAR
+    description: 'TEXT. Timestamp string representing when the flow was logged. Example: 2024-03-11T11:43:31.
+      Example: 2024-03-11T11:43:31.'
+  - name: flow_overview
+    type: JSON
+    description: 'JSONB column. Encapsulates the end-to-end characteristics of a single data-transfer
+      stream—routing details, classification, security flagging, and real-time performance statistics—so
+      dashboards and analytics engines can retrieve everything from one JSONB document. Fields: {"routing":
+      {"origin_country": "TEXT. Origin location or system name. Example: Niue. Example: Niue.", "destination_country":
+      "TEXT. Destination nation or region code. Example: Djibouti. Example: Djibouti.", "origin_actor":
+      "TEXT. Actor or system initiating the transfer. Example: Hill Ltd. Example: Hill Ltd.", "destination_actor":
+      "TEXT. Destination actor or receiving system. **NULL means destination actor not recorded.**. Example:
+      Davis, Harper and Weber. Example: Davis, Harper and Weber.", "protocol": "TEXT. Communication-channel
+      protocol (e.g., HTTPS, SFTP). Possible values: Blockchain, HTTPS, Private Network, SFTP. Possible
+      values: Blockchain, HTTPS, Private Network, SFTP.", "transfer_frequency": "TEXT. Frequency or schedule
+      of the data channel. Possible values: Daily, Hourly, Real-time, Weekly. Possible values: Daily,
+      Hourly, Real-time, Weekly."}, "classification": {"flow_tag": "TEXT. Human-readable tag assigned
+      to the flow. Example: DF7811.", "data_category": "TEXT. Logical category of the data (e.g., HR,
+      Finance). Possible values: Commercial, Financial, Industrial, Medical, Personal.", "sensitivity_level":
+      "TEXT. Data-sensitivity classification level. Possible values: Critical, High, Low, Medium.", "encryption_status":
+      "TEXT. Encryption status of the flow. **NULL means encryption status not specified.**. Possible
+      values: Full, Partial."}, "performance": {"data_size_mb": "REAL. Amount of data transferred in megabytes.
+      **NULL means data size not measured.**. Example: 42668.42. Example: 42668.42.", "duration_min":
+      "BIGINT. Transfer duration in minutes. Example: 1068.03. Example: 1068.03.", "bandwidth_util_pct":
+      "REAL. Percentage of channel bandwidth utilised. Example: 68.81. Example: 68.81.", "success_pct":
+      "REAL. Successful-transfer percentage. Example: 99.93. Example: 99.93.", "error_count": "BIGINT.
+      Count of transfer error events. Example: 39. Example: 39.", "retry_count": "BIGINT. Count of transfer
+      retries. Example: 1. Example: 1."}}
+
+
+      Success Percentage: Shows how often data transfers succeed.
+
+
+      Ranges from 0 to 100. Higher means more reliable transfers.
+
+
+      Compiler note: Describes JSON field flow_overview->''performance''->>''success_pct'' (REAL, percent
+      0-100). Observed range 90.01–100.0.
+
+
+      Error Count: Shows how many errors happened during data transfers.
+
+
+      A higher value means more problems.
+
+
+      Compiler note: Describes the JSON field flow_overview->''performance''->''error_count'' (BIGINT,
+      count of transfer error events) in the DataFlow.flow_overview column.'
+- schema: main
+  table: DataProfile
+  columns:
+  - name: profileTrace
+    type: BIGINT
+    description: BIGINT. Unique data-profile identifier. PK.
+  - name: Flow_Sign
+    type: VARCHAR
+    description: TEXT. Associated data-flow identifier for this profile. FK to DataFlow.
+  - name: riskJoin
+    type: BIGINT
+    description: BIGINT. Linked risk-management identifier. FK to RiskManagement.
+  - name: Record_Registry
+    type: VARCHAR
+    description: TEXT. Record registry reference string.
+  - name: DATATYPE
+    type: VARCHAR
+    description: 'TEXT. Primary data-type description. Possible values: Commercial, Financial, Industrial,
+      Medical, Personal.'
+  - name: dataSense
+    type: VARCHAR
+    description: 'TEXT. Data-sensitivity description. Possible values: Critical, High, Low, Medium.'
+  - name: vol_gb
+    type: FLOAT
+    description: 'REAL. Volume of data in gigabytes. Example: 1093.6. Example: 1093.6.
+
+
+      Data Volume: Shows the size of the data batch, in gigabytes.
+
+
+      Ranges from small amounts (like 0.1) to large ones (like 1000).
+
+
+      Compiler note: Data volume in gigabytes corresponds to DataProfile.vol_gb.'
+  - name: REC_TALLY
+    type: BIGINT
+    description: 'BIGINT. Total number of data records. Example: 2629296. Example: 2629296.'
+  - name: subjectTally
+    type: BIGINT
+    description: 'BIGINT. Count of data subjects represented. Example: 754585. Example: 754585.'
+  - name: ret_days
+    type: BIGINT
+    description: 'BIGINT. Data-retention period in days. Example: 2208. Example: 2208.'
+  - name: FormatType
+    type: VARCHAR
+    description: 'TEXT. Data-format type (e.g., CSV, Parquet). Possible values: Mixed, Structured, Unstructured.
+      Possible values: Mixed, Structured, Unstructured.'
+  - name: qlty_score
+    type: FLOAT
+    description: 'REAL. Data quality score. Example: 52.45. Example: 52.45.'
+  - name: Int_check
+    type: VARCHAR
+    description: 'TEXT. Data-integrity check result. **NULL means integrity check not performed.**. Possible
+      values: Failed, Partial, Passed. Possible values: Failed, Partial, Passed.'
+  - name: CSUMVERIFY
+    type: VARCHAR
+    description: 'TEXT. Checksum-verification status. Possible values: Failed, Pending, Success. Possible
+      values: Failed, Pending, Success.'
+  - name: srcValState
+    type: VARCHAR
+    description: 'TEXT. Source-validation state. **NULL means source validation not performed.**. Possible
+      values: Failed, Pending, Verified. Possible values: Failed, Pending, Verified.'
+  - name: DEST_VAL_state
+    type: VARCHAR
+    description: 'TEXT. Destination-validation state. Possible values: Failed, Pending, Verified. Possible
+      values: Failed, Pending, Verified.'
+- schema: main
+  table: RiskManagement
+  columns:
+  - name: RISKTRACE
+    type: BIGINT
+    description: BIGINT. Unique risk-management record identifier. PK.
+  - name: flow_link
+    type: VARCHAR
+    description: TEXT. Identifier of the related data-flow record. FK to DataFlow.
+  - name: recordRegistry
+    type: VARCHAR
+    description: TEXT. Redundant record registry reference string.
+  - name: risk_management_profile
+    type: JSON
+    description: 'JSONB column. Bundles quantitative risk scores, mitigation progress, incident history,
+      cost exposure and compliance-maturity indicators into one JSONB structure for quick reporting and
+      comparative risk analytics. Fields: {"assessment": {"risk_score": "REAL. Quantitative risk-assessment
+      score. Example: 75.89. Example: 75.89.", "residual_risk_level": "TEXT. Residual risk-level descriptor.
+      Possible values: High, Low, Medium. Possible values: High, Low, Medium.", "control_effectiveness_pct":
+      "REAL. Control effectiveness score. **NULL means control effectiveness not evaluated.**. Example:
+      30.51. Example: 30.51.", "compliance_score": "REAL. Compliance score. Example: 76.41. Example: 76.41.",
+      "maturity_level": "TEXT. Process-maturity level descriptor. Possible values: Initial, Managed, Optimized.
+      Possible values: Initial, Managed, Optimized."}, "mitigation": {"mitigation_state": "TEXT. Current
+      risk-mitigation state. Possible values: Implemented, Partial, Pending. Possible values: Implemented,
+      Partial, Pending.", "secure_action": "TEXT. Security action plan description. Possible values: Adequate,
+      Insufficient, Strong. Possible values: Adequate, Insufficient, Strong.", "breach_notification":
+      "TEXT. Breach-notification status. Possible values: Established, Missing, Partial. Possible values:
+      Established, Missing, Partial.", "incident_plan_status": "TEXT. Incident-response plan descriptor.
+      Possible values: Active, Missing, Outdated. Possible values: Active, Missing, Outdated.", "plan_state":
+      "TEXT. Risk-management plan state. **NULL means plan state not set.**. Possible values: Delayed,
+      Not Started, On Track. Possible values: Delayed, Not Started, On Track.", "next_review_date": "DATE.
+      Next scheduled risk review date. Example: 2025-06-02. Example: 2025-06-02."}, "incident_statistics":
+      {"incident_count": "BIGINT. Total number of recorded incidents. Example: 8. Example: 8.", "breach_count":
+      "BIGINT. Number of data breaches. **NULL means no breaches recorded.**. Example: 1.0. Example: 1.0.",
+      "near_miss_count": "BIGINT. Near-miss incident count. **NULL means near-miss count unavailable.**.
+      Example: 1.0. Example: 1.0.", "avg_resolution_hrs": "REAL. Average incident resolution time in hours.
+      Example: 42.7. Example: 42.7.", "sla_compliance_pct": "REAL. Service-level agreement compliance
+      percentage. Example: 97.28. Example: 97.28."}, "financial_impact": {"cost_usd": "REAL. Financial
+      cost incurred (USD). Example: 62143.31. Example: 62143.31.", "penalties_usd": "REAL. Penalty amount
+      incurred (USD). Example: 1035760.69. Example: 1035760.69.", "insurance_coverage_state": "TEXT. Insurance
+      or coverage state descriptor. **NULL means coverage state not set.**. Possible values: Adequate,
+      Limited. Possible values: Adequate, Limited."}}
+
+
+      Risk Assessment Score: Shows the overall risk level determined in an assessment.
+
+
+      Ranges from 0 to 100. Higher means greater risk.
+
+
+      Compiler note: Describes the JSON field assessment.risk_score inside risk_management_profile (path
+      $.assessment.risk_score). Observed range 0.08–99.76, consistent with the 0–100 scale.
+
+
+      Control Effectiveness Score: Shows how well controls are working to reduce risk.
+
+
+      Higher score means stronger controls.
+
+
+      Compiler note: Describes the JSON field assessment.control_effectiveness_pct inside RiskManagement.risk_management_profile
+      (REAL; NULL means not evaluated).'
+- schema: main
+  table: SecurityProfile
+  columns:
+  - name: SECURITY_TRACE
+    type: BIGINT
+    description: BIGINT. Unique security-profile identifier. PK.
+  - name: flowKey
+    type: VARCHAR
+    description: TEXT. Associated data-flow identifier. FK to DataFlow.
+  - name: RISKKEY
+    type: BIGINT
+    description: BIGINT. Linked risk-management identifier. FK to RiskManagement.
+  - name: profile_key
+    type: BIGINT
+    description: BIGINT. Linked data-profile identifier. FK to DataProfile.
+  - name: RecordRegistry
+    type: VARCHAR
+    description: 'TEXT. Record registry reference string. Example: CB932064.'
+  - name: enc_state
+    type: VARCHAR
+    description: 'TEXT. Overall encryption state descriptor. Possible values: Full, Partial.
+
+
+      Encryption Status: Shows whether all data is fully encrypted or only partially encrypted.
+
+
+      Options: full encryption or partial encryption.
+
+
+      Compiler note: Two candidates hold Full/Partial values: SecurityProfile.enc_state ("overall encryption
+      state") and the JSON field DataFlow.flow_overview.classification.encryption_status. Picked enc_state
+      because it is a real column that stores the overall encryption state, and the security-strength
+      score (SRS) uses it. Both have NULLs: 125 of 430 in enc_state, 349 of 999 in the JSON field.'
+  - name: ENCMETH
+    type: VARCHAR
+    description: 'TEXT. Encryption method applied. **NULL means encryption method not specified.**. Possible
+      values: AES-256, Custom, RSA-2048, SM4. Possible values: AES-256, Custom, RSA-2048, SM4.'
+  - name: keyManState
+    type: VARCHAR
+    description: 'TEXT. Key-management state descriptor. **NULL means key management state not recorded.**.
+      Possible values: Centralized, Distributed, Hybrid. Possible values: Centralized, Distributed, Hybrid.'
+  - name: MASK_LEVEL
+    type: VARCHAR
+    description: 'TEXT. Data-masking level applied. **NULL means masking level not specified.**. Possible
+      values: Full, Partial. Possible values: Full, Partial.'
+  - name: anonMeth
+    type: VARCHAR
+    description: 'TEXT. Anonymisation method employed. Possible values: K-Anonymity, L-Diversity, T-Closeness.
+      Possible values: K-Anonymity, L-Diversity, T-Closeness.'
+  - name: PSYMSTATE
+    type: VARCHAR
+    description: 'TEXT. Pseudonymisation state. **NULL means pseudonymisation not applied.**. Possible
+      values: Applied, Partial. Possible values: Applied, Partial.'
+  - name: authMeth
+    type: VARCHAR
+    description: 'TEXT. Authentication method used. Possible values: Basic, MFA, SSO. Possible values:
+      Basic, MFA, SSO.'
+  - name: AUTHZ_FRAME
+    type: VARCHAR
+    description: 'TEXT. Authorisation framework employed. Possible values: ABAC, Custom, RBAC. Possible
+      values: ABAC, Custom, RBAC.'
+  - name: acl_state
+    type: VARCHAR
+    description: 'TEXT. Access-control-list state descriptor. Possible values: Adequate, Strong, Weak.
+      Possible values: Adequate, Strong, Weak.'
+  - name: APISECSTATE
+    type: VARCHAR
+    description: 'TEXT. API security state descriptor. **NULL means API security not assessed.**. Possible
+      values: Review Required, Secure, Vulnerable. Possible values: Review Required, Secure, Vulnerable.'
+  - name: logIntCheck
+    type: VARCHAR
+    description: 'TEXT. Logging integrity-check status. Possible values: Failed, Passed, Pending. Possible
+      values: Failed, Passed, Pending.'
+  - name: LogRetDays
+    type: BIGINT
+    description: 'BIGINT. Log-retention period in days. Example: 905. Example: 905.
+
+
+      Audit Log Retention: Shows for how many days logs are kept.
+
+
+      Higher means longer history is available.
+
+
+      Compiler note: Log-retention period in days (BIGINT).'
+  - name: bkp_state
+    type: VARCHAR
+    description: 'TEXT. Backup state descriptor. **NULL means backup state not documented.**. Possible
+      values: Current, Failed, Outdated. Possible values: Current, Failed, Outdated.'
+  - name: DRECSTATE
+    type: VARCHAR
+    description: 'TEXT. Data-recovery state descriptor. Possible values: Missing, Tested, Untested. Possible
+      values: Missing, Tested, Untested.'
+  - name: bc_state
+    type: VARCHAR
+    description: 'TEXT. Business-continuity or blockchain state descriptor. Possible values: Active, Outdated,
+      Review Required. Possible values: Active, Outdated, Review Required.'
+- schema: main
+  table: VendorManagement
+  columns:
+  - name: Vendor_Trace
+    type: BIGINT
+    description: BIGINT. Unique vendor-management record identifier. PK.
+  - name: SEC_JOIN
+    type: BIGINT
+    description: BIGINT. Associated security-profile identifier. FK to SecurityProfile.
+  - name: riskassoc
+    type: BIGINT
+    description: BIGINT. Linked risk-management identifier. FK to RiskManagement.
+  - name: recordregistry
+    type: VARCHAR
+    description: TEXT. Record registry reference string.
+  - name: VENDASSESS
+    type: VARCHAR
+    description: 'TEXT. Vendor security assessment result. **NULL means vendor assessment not completed.**.
+      Possible values: Completed, Due, In Progress. Possible values: Completed, Due, In Progress.'
+  - name: vendSecRate
+    type: VARCHAR
+    description: 'TEXT. Vendor security rating. Possible values: A, B, C, D. Possible values: A, B, C,
+      D.
+
+
+      Vendor Security Rating: Shows a partner''s security score, where a higher value means better protection.
+
+
+      Possible values: 4 for top tier, 3 for good, 2 for average, 1 for weak.
+
+
+      Compiler note: The column is stored as letters A, B, C and D (no NULLs seen). The entry''s numbers
+      4 (top tier), 3 (good), 2 (average) and 1 (weak) are assumed to map to A=4, B=3, C=2, D=1.'
+  - name: VEND_AUD_DATE
+    type: DATE
+    description: 'DATE. Date of the most recent vendor audit. Example: 2024-05-30. Example: 2024-05-30.'
+  - name: contrState
+    type: VARCHAR
+    description: 'TEXT. Contract state descriptor. **NULL means contract state unknown.**. Possible values:
+      Active, Expired, Under Review. Possible values: Active, Expired, Under Review.'
+  - name: CONTR_EXPIRE
+    type: DATE
+    description: 'DATE. Contract expiration date. Example: 2027-01-12. Example: 2027-01-12.'
+  - name: dpa_state
+    type: VARCHAR
+    description: 'TEXT. Data-processing-agreement state. Possible values: Pending, Required, Signed. Possible
+      values: Pending, Required, Signed.'
+  - name: SCCSTATE
+    type: VARCHAR
+    description: 'TEXT. Standard Contractual Clauses state. Possible values: Implemented, Not Required,
+      Partial. Possible values: Implemented, Not Required, Partial.'
+  - name: bcr_state
+    type: VARCHAR
+    description: 'TEXT. Binding Corporate Rules state. Possible values: Approved, Not Applicable, Pending.
+      Possible values: Approved, Not Applicable, Pending.'
+  - name: docuState
+    type: VARCHAR
+    description: 'TEXT. Documentation status descriptor. Possible values: Complete, Incomplete, Partial.
+      Possible values: Complete, Incomplete, Partial.'
+  - name: pol_comp
+    type: VARCHAR
+    description: 'TEXT. Policy-compliance status. Possible values: Full, Non-compliant, Partial. Possible
+      values: Full, Non-compliant, Partial.'
+  - name: procComp
+    type: VARCHAR
+    description: 'TEXT. Process-compliance status. **NULL means process compliance not assessed.**. Possible
+      values: Full, Non-compliant, Partial. Possible values: Full, Non-compliant, Partial.'
+  - name: train_state
+    type: VARCHAR
+    description: 'TEXT. Training compliance state. Possible values: Current, Due, Overdue. Possible values:
+      Current, Due, Overdue.'
+  - name: certState
+    type: VARCHAR
+    description: 'TEXT. Certification state descriptor. **NULL means certification state not recorded.**.
+      Possible values: Expired, Pending, Valid. Possible values: Expired, Pending, Valid.'
+  - name: MONSTATE
+    type: VARCHAR
+    description: 'TEXT. Ongoing monitoring state. Possible values: Active, Inactive, Partial. Possible
+      values: Active, Inactive, Partial.'
+  - name: rep_state
+    type: VARCHAR
+    description: 'TEXT. Reporting state descriptor. Possible values: Current, Delayed, Overdue. Possible
+      values: Current, Delayed, Overdue.'
+  - name: stakeComm
+    type: VARCHAR
+    description: 'TEXT. Stakeholder communication status. Possible values: Limited, Poor, Regular. Possible
+      values: Limited, Poor, Regular.'

@@ -1,0 +1,52 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: cross_border, compiler: claudeopus5.5 (joins)
+# inputs: cross_border_kb.jsonl, cross_border_column_meaning_base.json, cross_border_schema.txt, cross_border.duckdb
+version: '1.0'
+name: livesqlbench-cross_border
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+    expected_extras: []
+  allowed_tables:
+  - schema: main
+    preferred: true
+    tables:
+    - AuditAndCompliance
+    - Compliance
+    - DataFlow
+    - DataProfile
+    - RiskManagement
+    - SecurityProfile
+    - VendorManagement
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: calculations
+    summary: Computed measures defined in the knowledge base
+    description: Calculations from the knowledge base, each a metric. Look a metric up by name for its
+      definition and SQL.
+  - name: definitions
+    summary: Business conditions defined in the knowledge base
+    description: Definitions from the knowledge base, each a metric whose SQL is a boolean condition over
+      the rows of its table.
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Computations must follow the metric definitions in the semantic source rather than an
+      ad-hoc formula.
+    enforcement: warn

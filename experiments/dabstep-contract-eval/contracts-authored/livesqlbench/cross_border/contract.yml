@@ -1,0 +1,192 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cross_border, author: claudeopus5.5
+version: '1.0'
+name: cross-border-data-transfers
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Cross-border data-transfer governance database: data flows (DataFlow, JSON flow_overview),
+      their risk records (RiskManagement, JSON risk_management_profile), data profiles, security profiles,
+      vendor management, compliance and audit records.'
+    preferred: true
+    tables:
+    - DataFlow
+    - RiskManagement
+    - DataProfile
+    - SecurityProfile
+    - VendorManagement
+    - Compliance
+    - AuditAndCompliance
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_model
+    summary: How the seven tables join, JSON access, and NULL conventions
+    description: 'JOIN CHAIN (verified on the data: every one of the 240 audit records joins consistently
+      through the whole chain): AuditAndCompliance a (a.COMP_JOIN = c.complianceTrace) -> Compliance c
+      (c.vendorTie = vm.Vendor_Trace) -> VendorManagement vm (vm.SEC_JOIN = sp.SECURITY_TRACE) -> SecurityProfile
+      sp (sp.profile_key = dp.profileTrace) -> DataProfile dp (dp.riskJoin = rm.RISKTRACE) -> RiskManagement
+      rm (rm.flow_link = df.RecordRegistry) -> DataFlow df. Shortcuts that agree with the chain: dp.Flow_Sign
+      = df.RecordRegistry, sp.RISKKEY = rm.RISKTRACE, sp.flowKey = df.RecordRegistry, vm.riskassoc = rm.RISKTRACE,
+      c.risk_tie = rm.RISKTRACE, a.profjoin = dp.profileTrace, a.VendJoin = vm.Vendor_Trace. Row counts:
+      DataFlow 999, RiskManagement 870 (one per flow), DataProfile 870, SecurityProfile 430, VendorManagement
+      240, Compliance 240, AuditAndCompliance 240. Metrics use the aliases df, rm, dp, sp, vm, c, a.
+
+      JSON: flow_overview and risk_management_profile are DuckDB JSON. Read a field with ->> and a JSON
+      path, then CAST numerics, e.g. CAST(df.flow_overview->>''$.performance.success_pct'' AS DOUBLE).
+      Wrap `x->>''path''` in parentheses before comparing with = or <> (operator precedence otherwise
+      breaks the query). 36 DataFlow rows have a NULL flow_overview, so every flow-performance metric
+      is NULL for them.
+
+      NULL meanings (from the column docs): Int_check NULL = integrity check not performed; srcValState
+      NULL = source validation not performed; ENCMETH NULL = method not specified; keyManState NULL =
+      not recorded; MASK_LEVEL NULL = not specified; PSYMSTATE NULL = pseudonymisation not applied; APISECSTATE
+      NULL = API security not assessed; bkp_state NULL = backup state not documented; VENDASSESS NULL
+      = vendor assessment not completed; contrState NULL = contract state unknown; procComp NULL = process
+      compliance not assessed; certState NULL = not recorded; LEGALBASE NULL = legal basis not determined;
+      critFindNum NULL = no critical findings recorded (treat as 0); authNotify NULL = authority not notified;
+      TRANSIMPASSESS NULL = assessment not performed; destination_actor NULL = not recorded; encryption_status
+      NULL = not specified; data_size_mb NULL = not measured; control_effectiveness_pct NULL = not evaluated;
+      plan_state NULL = not set; breach_count NULL = no breaches recorded; near_miss_count NULL = unavailable;
+      insurance_coverage_state NULL = not set. sp.enc_state is NULL in 125 of 430 rows.
+
+      '
+    tables:
+    - main.DataFlow
+    - main.RiskManagement
+    - main.DataProfile
+    - main.SecurityProfile
+    - main.VendorManagement
+    - main.Compliance
+    - main.AuditAndCompliance
+  - name: flow_performance
+    summary: Transfer efficiency, bandwidth, reliability and stability of data flows
+    description: 'Success Percentage (flow_overview performance.success_pct) shows how often data transfers
+      succeed; ranges 0 to 100, higher means more reliable (data: 90.01-100). Error Count (performance.error_count)
+      is how many errors happened during transfers; higher means more problems. Metrics: data_transfer_efficiency
+      (DTE), bandwidth_saturation_index (BSI), data_flow_reliability_score (DFRS), data_flow_stability_index
+      (DFSI), overloaded_data_flow (BSI > 50 and DTE < 1.0), transfer_path.
+
+      '
+    tables:
+    - main.DataFlow
+  - name: risk
+    summary: Risk exposure, cross-border risk, incident resolution and risk flags
+    description: 'Risk Assessment Score (risk_management_profile assessment.risk_score) shows the overall
+      risk level determined in an assessment; ranges 0 to 100, higher means greater risk. Control Effectiveness
+      Score (assessment.control_effectiveness_pct) shows how well controls reduce risk; higher means stronger
+      controls. THRESHOLD SCALE: the documented thresholds "risk score above 0.7" (High-Risk Data Flow)
+      and "risk exposure score above 0.7" are applied literally as written (> 0.7) even though risk_score
+      is stored on a 0-100 scale (data 0.08-99.76); do not rescale. Metrics: risk_exposure_score, cross_border_risk_factor,
+      incident_resolution_efficiency, incident_impact_factor, high_risk_data_flow, critical_data_flow_risk,
+      unstable_high_risk_flow, incident_prone_data_flow, bandwidth_constrained_risk, compliance_cost_ratio.
+
+      '
+    tables:
+    - main.RiskManagement
+    - main.DataFlow
+  - name: data_sensitivity
+    summary: Data volume, sensitivity index, integrity failures and retention risk
+    description: 'Data Volume (DataProfile.vol_gb) is the size of the data batch in gigabytes, from small
+      (like 0.1) to large (like 1000). Data Sensitivity Index weights volume by DataProfile.dataSense:
+      3 if High, 2 if Medium, 1 if Low (and 1 for any other value, including ''Critical'', which the definition
+      does not list). Integrity failures: integrity check (Int_check) ''Failed'' or checksum verification
+      (CSUMVERIFY) ''Failed''. Metrics: data_sensitivity_index, data_integrity_failure, integrity_failure_count,
+      failure_types_list, data_retention_risk_score, excessive_retention_risk.
+
+      '
+    tables:
+    - main.DataProfile
+  - name: security
+    summary: Security robustness, encryption coverage and security posture
+    description: 'Encryption Status shows whether all data is fully encrypted or only partially: options
+      full or partial (SecurityProfile.enc_state ''Full'' / ''Partial''; also flow_overview classification.encryption_status).
+      Security Robustness Score = 3 when all data is encrypted (enc_state = ''Full'') AND only trusted
+      users can access (acl_state = ''Strong''); 2 if exactly either is present; 1 otherwise. Audit Log
+      Retention (SecurityProfile.LogRetDays) is how many days logs are kept; higher means longer history.
+      Metrics: security_robustness_score, secure_data_flow, sensitive_data_exposure, encryption_coverage_ratio,
+      unprotected_sensitive_data, insecure_high_volume_flow, security_posture_maturity, security_control_cost_ratio,
+      sensitive_unstable_flow.
+
+      '
+    tables:
+    - main.SecurityProfile
+    - main.DataProfile
+  - name: vendor
+    summary: Vendor reliability, risk tiers, compliance burden
+    description: 'Vendor Security Rating: higher value means better protection; 4 for top tier, 3 good,
+      2 average, 1 weak. Stored as letters in VendorManagement.vendSecRate: A = 4, B = 3, C = 2, D = 1.
+      Contract active means contrState = ''Active'' (NULL = unknown, counts as not active). Vendor Risk
+      Tier: High if VRI < 2, Medium if >= 2 and < 3, Low if >= 3. Non-Compliant Vendor: pol_comp = ''Non-compliant''
+      OR procComp = ''Non-compliant''. Metrics: vendor_security_rating_value, vendor_reliability_index,
+      vendor_risk_tier, non_compliant_vendor, vendor_compliance_burden, vendor_risk_amplification, vendor_risk_concentration,
+      vendor_security_cost_index, vendor_driven_risk_flow, vendor_compliance_risk_cluster, costly_vendor_risk_flow,
+      high_vendor_risk_concentration.
+
+      '
+    tables:
+    - main.VendorManagement
+  - name: compliance_audit
+    summary: Compliance status, cross-border gaps, audit severity, data subject requests, remediation
+    description: 'GDPR Compliance Status (Compliance.gdprComp) shows how well data protection requirements
+      are met: ''Compliant'', ''Non-compliant'', ''Partial''. Where a definition says "compliance is non-compliant
+      / partial" without naming a law, it means gdprComp. Cross-Border Compliance Gap: compliance with
+      regulations missing (''Non-compliant'') in at least one jurisdiction — read as gdprComp = ''Non-compliant''
+      OR loc_law_comp = ''Non-compliant'' — AND the transfer is international (origin_country <> destination_country).
+      Response Time (AuditAndCompliance.resp_time_day) is days to reply to a request; lower is faster.
+      Audit Finding Severity = critFindNum / (FINDTALLY + 1), NULL critFindNum counted as 0. Remediation
+      timing uses CURRENT_DATE - REMED_DUE in days (DuckDB date subtraction returns an integer day count).
+      Metrics: audit_finding_severity, critical_audit_issue, data_subject_request_load, request_breakdown,
+      data_subject_request_pressure, audit_remediation_load, audit_compliance_pressure, high_audit_compliance_pressure,
+      compliance_overhead_ratio, cross_border_compliance_gap, regulatory_risk_exposure, regulatory_overload_flow,
+      cross_border_compliance_exposure, bandwidth_compliance_risk, slow_remediation_timeline, nearing_remediation_deadline
+      and the flow flags built on these.
+
+      '
+    tables:
+    - main.Compliance
+    - main.AuditAndCompliance
+  - name: cross_border
+    summary: International transfers and their volume/risk
+    description: 'Cross-Border Data Flow: a transfer whose sending and receiving countries differ, (flow_overview->>''$.routing.origin_country'')
+      <> (flow_overview->>''$.routing.destination_country''). Only 9 of 963 flows with JSON are domestic.
+      Transfer Path is ''origin -> destination''. Metrics: is_cross_border_flow, transfer_path, cross_border_risk_factor,
+      cross_border_data_volume_risk, cross_border_audit_risk.
+
+      '
+    tables:
+    - main.DataFlow
+  rules:
+  - name: use_declared_metrics
+    description: 'Compute every documented KPI and flag with the metric SQL in semantic.yml (formulas,
+      the +1 denominators, the A-D rating mapping, the sensitivity weights and the literal thresholds),
+      not an ad-hoc formula.
+
+      '
+    enforcement: warn
+  - name: literal_thresholds
+    description: 'Apply thresholds exactly as documented (strict > / < as stated; >= only where stated,
+      e.g. vendor tier bounds). risk_score > 0.7 and risk_exposure_score > 0.7 are applied on the stored
+      scale without rescaling.
+
+      '
+    enforcement: warn
+  - name: float_division
+    description: 'Integer columns (error_count, retry_count, counts, days) must be divided as DOUBLE;
+      the database divides integers like PostgreSQL (truncating).
+
+      '
+    enforcement: warn

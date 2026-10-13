@@ -1,0 +1,2008 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: livesqlbench, database: museum_artifact, compiler: claudeopus5.5 (joins)
+# inputs: museum_artifact_kb.jsonl, museum_artifact_column_meaning_base.json, museum_artifact_schema.txt, museum_artifact.duckdb
+metrics:
+- name: conservation_priority_index_cpi
+  description: 'Calculates the overall conservation priority for an artifact based on multiple factors.
+
+
+    Calculated as: ((Historical Significance Rating + Research Value Rating + Cultural Score) * (10 -
+    Conservation Status Value)) / 30, where the conservation status is numerically mapped: Excellent=1,
+    Good=3, Fair=5, Poor=7, Critical=10.
+
+
+    Compiler note: Historical Significance Rating is taken from ArtifactRatings.HIST_sign: it is the only
+    historical-significance field, and its values are 1-10, which fits the 1-10 scale in entry [22]. Research
+    Value comes from rating_profile.research_score and Cultural Score from rating_profile.cultural_score;
+    both are stored as JSON numbers. Conservation status comes from ArtifactsCore.conserve_status, joined
+    on ART_link, which is unique in ArtifactRatings (10 rows, 10 distinct). The division uses 30.0 so
+    the result is not truncated by integer division. If conserve_status is NULL, the CPI is NULL.'
+  sql_expression: ((r."HIST_sign" + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score'
+    AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair'
+    THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0
+  source_model: main.ArtifactRatings
+  from_sql: main."ArtifactRatings" r JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link"
+  grain: one row per artifact rating, with its artifact
+  domains:
+  - calculations
+- name: environmental_risk_factor_erf
+  description: 'Quantifies the overall environmental risk to an artifact based on its sensitivities.
+
+
+    Calculated as the average of an artifact''s various environmental sensitivity scores. These scores
+    are derived by converting qualitative ratings (e.g., ''Low'', ''High'') to numbers using ''Sensitivity
+    Weight Values''.
+
+
+    Built on: Sensitivity Weight Values.
+
+
+    Compiler note: Environmental sensitivities taken as the five keys under env_handling_sensitivity->''environment''
+    (light, temperature, humidity, vibration, pollutants), mapped Low=1, Medium=5, High=10; AVG ignores
+    NULL ratings (JSON nulls present in data). Biological/handling/context groups excluded as not environmental.
+    One row per artifact sensitivity record.'
+  sql_expression: (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM
+    (VALUES (env_handling_sensitivity->'environment'->>'light'), (env_handling_sensitivity->'environment'->>'temperature'),
+    (env_handling_sensitivity->'environment'->>'humidity'), (env_handling_sensitivity->'environment'->>'vibration'),
+    (env_handling_sensitivity->'environment'->>'pollutants')) AS t(v))
+  source_model: main.SensitivityData
+  domains:
+  - calculations
+- name: artifact_vulnerability_score_avs
+  description: 'Comprehensive score indicating how vulnerable an artifact is based on its conservation
+    priority and environmental sensitivities.
+
+
+    Calculated by multiplying the ''Conservation Priority Index (CPI)'' by the ''Environmental Risk Factor
+    (ERF)''. Higher scores indicate artifacts requiring more urgent attention.
+
+
+    Built on: conservation_priority_index_cpi, environmental_risk_factor_erf.
+
+
+    Compiler note: AVS = CPI * ERF, using the CPI and ERF definitions as given. I checked that both ArtifactRatings
+    and SensitivityData have exactly one row per artifact (ART_link is distinct in each), so the join
+    does not duplicate rows. Only 3 artifacts have sensitivity data, so the inner join returns 3 rows.'
+  sql_expression: (((r."HIST_sign" + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score'
+    AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair'
+    THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0) * (SELECT AVG(CASE v WHEN 'Low' THEN
+    1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'),
+    (s.env_handling_sensitivity->'environment'->>'temperature'), (s.env_handling_sensitivity->'environment'->>'humidity'),
+    (s.env_handling_sensitivity->'environment'->>'vibration'), (s.env_handling_sensitivity->'environment'->>'pollutants'))
+    AS t(v))
+  source_model: main.ArtifactRatings
+  from_sql: main."ArtifactRatings" r JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link" JOIN main."SensitivityData"
+    s ON s."ART_link" = r."ART_link"
+  grain: one row per artifact rating, with its artifact and its sensitivity profile
+  domains:
+  - calculations
+- name: display_safety_duration_dsd
+  description: 'Calculates the recommended maximum display duration for an artifact based on its sensitivities.
+
+
+    Calculated as: (Base Duration * (10 - Light Sensitivity Weight) * (10 - Temperature Sensitivity Weight)
+    * (10 - Humidity Sensitivity Weight)) / 1000. The Base Duration is typically 36 months, and sensitivity
+    weights are based on ''Sensitivity Weight Values''.
+
+
+    Built on: Sensitivity Weight Values.
+
+
+    Compiler note: Sensitivities read from SensitivityData.env_handling_sensitivity JSON paths environment.light
+    / environment.temperature / environment.humidity (values ''Low'',''Medium'',''High'' or null). Weights
+    Low=1, Medium=5, High=10; base duration 36 months. Divided by 1000.0 to avoid integer truncation.
+    Result is NULL when any of the three sensitivities is missing. Result in months.'
+  sql_expression: (36 * (10 - CASE env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1
+    WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0
+  source_model: main.SensitivityData
+  domains:
+  - calculations
+- name: showcase_environmental_stability_rating_sesr
+  description: 'Measures how well a showcase maintains stable environmental conditions.
+
+
+    Calculated as: 10 - ((24-hour Temperature Variation + (24-hour Humidity Variation / 5) + Leak Rate)
+    / 3). Higher scores indicate more stable showcases.
+
+
+    Compiler note: Temperature/humidity variation come from EnvironmentalReadingsCore (tempVar24, RHvar);
+    leak rate from Showcases.case_environment_profile physical_state.leak_rate_per_day (numeric JSON,
+    cast to DOUBLE). RHvar is bigint so divided by 5.0 to avoid integer division. Joined via case_link
+    -> caseID (every reading has a case_link). NULL inputs yield NULL.'
+  sql_expression: 10 - ((e."tempVar24" + (e."RHvar" / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day'
+    AS DOUBLE)) / 3.0)
+  source_model: main.EnvironmentalReadingsCore
+  from_sql: main."EnvironmentalReadingsCore" e JOIN main."Showcases" s ON s."caseID" = e.case_link
+  grain: one row per environmental reading, with the showcase it was taken in
+  domains:
+  - calculations
+- name: artifact_exhibition_compatibility_aec
+  description: 'Determines how compatible an artifact is with its current showcase environment.
+
+
+    Calculated as: 10 - the absolute difference between the artifact''s ''Environmental Risk Factor (ERF)''
+    and the showcase''s ''Showcase Environmental Stability Rating (SESR)''. A score closer to 10 indicates
+    better compatibility.
+
+
+    Built on: environmental_risk_factor_erf, showcase_environmental_stability_rating_sesr.
+
+
+    Compiler note: An artifact''s current showcase comes from ConditionAssessments (art_exam -> case_exam).
+    The showcase''s readings come from EnvironmentalReadingsCore.case_link. ERF and SESR are written inline
+    from the entries this one builds on. SensitivityData has only 3 rows, and each joins to exactly one
+    assessment and one reading, so 3 rows come out.'
+  sql_expression: 10 - ABS((SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN
+    10 END) FROM (VALUES (sd.env_handling_sensitivity->'environment'->>'light'), (sd.env_handling_sensitivity->'environment'->>'temperature'),
+    (sd.env_handling_sensitivity->'environment'->>'humidity'), (sd.env_handling_sensitivity->'environment'->>'vibration'),
+    (sd.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) - (10 - ((e."tempVar24" + (e."RHvar"
+    / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day' AS DOUBLE)) / 3.0)))
+  source_model: main.SensitivityData
+  from_sql: main."SensitivityData" sd JOIN main."ConditionAssessments" c ON c.art_exam = sd."ART_link"
+    JOIN main."EnvironmentalReadingsCore" e ON e.case_link = c.case_exam JOIN main."Showcases" s ON s."caseID"
+    = e.case_link
+  grain: one row per artifact sensitivity profile paired with each environmental reading of a showcase
+    the artifact was examined in (via ConditionAssessments art_exam/case_exam)
+  domains:
+  - calculations
+- name: material_deterioration_rate_mdr
+  description: 'Estimates the rate of material deterioration based on environmental factors.
+
+
+    Calculated as: (Artifact Age in Years * Environmental Risk Factor * (Relative Humidity - 50)^2 * Temperature
+    in Celsius) / 100000. Higher values indicate faster deterioration.
+
+
+    Built on: environmental_risk_factor_erf.
+
+
+    Compiler note: Artifact age comes from ArtifactsCore.ageYears, ERF from SensitivityData (the existing
+    ERF expression), and RH and temperature from EnvironmentalReadingsCore. There is no direct link from
+    an artifact to a reading, so I went through ConditionAssessments (art_exam, case_exam) to the showcase
+    and on to its readings by case_link. SensitivityData has only 3 rows, and the join gives 3 rows, each
+    artifact matched to one reading. I used POWER and divided by 100000.0 so integer division can''t cut
+    off the result.'
+  sql_expression: (a."ageYears" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High'
+    THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),
+    (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),
+    (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e."RH" - 50, 2) * e."TEMPc")
+    / 100000.0
+  source_model: main.SensitivityData
+  from_sql: main."SensitivityData" s JOIN main."ArtifactsCore" a ON a."ARTregID" = s."ART_link" JOIN main."ConditionAssessments"
+    ca ON ca.art_exam = a."ARTregID" JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per environmental reading of a showcase in which an artifact with a sensitivity profile
+    was assessed (artifact × showcase reading)
+  domains:
+  - calculations
+- name: light_exposure_risk_ler
+  description: 'Quantifies the risk from light exposure based on artifact sensitivity and current light
+    levels.
+
+
+    Calculated as: (Light Level in Lux * Light Sensitivity Weight * Visible Light Exposure in Lux-Hours)
+    / 1000. The light sensitivity weight is based on ''Sensitivity Weight Values''.
+
+
+    Built on: Sensitivity Weight Values.
+
+
+    Compiler note: Artifact-to-light linkage via ConditionAssessments.light_link (unique per assessment,
+    1000 rows). Light sensitivity from SensitivityData.env_handling_sensitivity->''environment''->>''light''
+    mapped Low=1, Medium=5, High=10. SensitivityData holds only 3 rows (one per artifact; ENVsense is
+    PK), so LER is NULL for artifacts without sensitivity data or with NULL light rating. Divided by 1000.0
+    to avoid integer division (lux and visLxh are bigint).'
+  sql_expression: (lr.lux * CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN
+    1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.SensitivityData sd ON sd.ART_link = ca.art_exam
+  grain: one row per condition assessment (an artifact paired with its light/radiation reading), with
+    the artifact's sensitivity profile if any
+  domains:
+  - calculations
+- name: conservation_budget_efficiency_cbe
+  description: 'Measures the efficiency of conservation budget allocation relative to artifact importance.
+
+
+    Calculated as the average of the product of each artifact''s ''Conservation Priority Index (CPI)''
+    and its allocated budget ratio. The budget ratio is the proportion of the total conservation budget
+    allocated to that artifact.
+
+
+    Built on: conservation_priority_index_cpi.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CBE needs each artifact's share of the total conservation budget, which means a numeric
+    budget amount per artifact. The database has none. ConservationAndMaintenance.budget_alloc holds only
+    the categories Adequate, Insufficient and Review Required. budget_stat holds only Available, Limited
+    and Depleted. Neither column has an amount, so no budget proportion can be computed. Turning these
+    labels into numbers would be an invented mapping that the entry does not give.
+- name: visitor_impact_risk_vir
+  description: 'Assesses the risk posed by visitor traffic to artifacts in exhibition halls.
+
+
+    Calculated as: (Daily Visitor Count * Visitor Flow Rate * Average Dwell Time in Minutes) / 1000. The
+    visitor flow rate is numerically mapped: Low=1, Medium=3, High=5.
+
+
+    Compiler note: Inputs come from the JSON security_visitor_overview.visitor_statistics: avg_daily_visitors,
+    visitor_flow (Low/Medium/High), avg_dwell_minutes. All are plain integers stored as text. Cast to
+    double so the division by 1000 isn''t integer division. One hall has a NULL visitor_flow, so its VIR
+    is NULL.'
+  sql_expression: (CAST(security_visitor_overview->'visitor_statistics'->>'avg_daily_visitors' AS DOUBLE)
+    * CASE security_visitor_overview->'visitor_statistics'->>'visitor_flow' WHEN 'Low' THEN 1 WHEN 'Medium'
+    THEN 3 WHEN 'High' THEN 5 END * CAST(security_visitor_overview->'visitor_statistics'->>'avg_dwell_minutes'
+    AS DOUBLE)) / 1000
+  source_model: main.ExhibitionHalls
+  domains:
+  - calculations
+- name: high_value_artifact
+  description: 'Identifies artifacts with exceptional historical, cultural, or monetary value requiring
+    special attention.
+
+
+    An artifact is considered high-value if its insurance value exceeds $1,000,000 OR if both its historical
+    significance and cultural scores are in the top 10% of all artifacts.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'The insurance value (ArtifactSecurityAccess.insUSD) can''t be tied to an artifact. ArtifactSecurityAccess
+    has 3 rows keyed only by loan_stat (Available / Not Available / On Loan), and no column links it to
+    ArtifactsCore. So the ''> $1,000,000 insurance'' half of the OR can''t be evaluated per artifact.
+    (The maximum stored insUSD is 968,368, so even that half is not well defined.) The historical significance
+    half is also weak: ArtifactRatings.HIST_sign is documented as the table''s primary-key identifier
+    (values 1-10), not as a rating. Encoding only the cultural-score half would quietly drop part of the
+    definition.'
+- name: conservation_emergency
+  description: 'Identifies artifacts requiring immediate conservation intervention.
+
+
+    A situation where an artifact''s conservation status is ''Critical'' AND its treatment priority is
+    ''Urgent''.
+
+
+    Compiler note: Treatment priority is ConservationAndMaintenance.prio_tag (''Urgent'' is one of its
+    values). No direct FK links artifacts to maintenance, so the path is ConditionAssessments.art_exam
+    → light_link → LightAndRadiationReadings.env_link → ConservationAndMaintenance.monitor_link. This
+    gives 1002 rows for 1000 assessments and 995 artifacts, and 37 rows match. An artifact can appear
+    in more than one row, so count DISTINCT a."ARTregID" when counting artifacts.'
+  sql_expression: a.conserve_status = 'Critical' AND m.prio_tag = 'Urgent'
+  source_model: main.ArtifactsCore
+  from_sql: main."ArtifactsCore" a JOIN main."ConditionAssessments" ca ON ca.art_exam = a."ARTregID" JOIN
+    main."LightAndRadiationReadings" l ON l.rad_id = ca.light_link JOIN main."ConservationAndMaintenance"
+    m ON m.monitor_link = l.env_link
+  grain: one row per artifact × its maintenance record, linked through the artifact's condition assessment
+    → light reading → environmental monitor reading
+  domains:
+  - definitions
+- name: environmental_instability_event
+  description: 'Identifies periods when showcase environmental conditions fluctuate beyond acceptable
+    parameters.
+
+
+    Occurs when the 24-hour temperature variation exceeds 1°C OR the 24-hour humidity variation exceeds
+    3% within a 24-hour period.
+
+
+    Compiler note: One row per environmental reading. tempVar24 (°C, 0–2, 150 NULLs, no NaN) and RHvar
+    (% points, integer 0–5) are already 24-hour variations; NULL tempVar24 doesn''t trigger the temperature
+    condition.'
+  sql_expression: '"tempVar24" > 1 OR "RHvar" > 3'
+  source_model: main.EnvironmentalReadingsCore
+  domains:
+  - definitions
+- name: accelerated_deterioration_scenario
+  description: 'Identifies conditions that could lead to rapid artifact deterioration.
+
+
+    Occurs when an artifact''s ''Material Deterioration Rate (MDR)'' score is greater than 5 AND it has
+    at least two environmental sensitivities rated as ''High''.
+
+
+    Built on: material_deterioration_rate_mdr.
+
+
+    Compiler note: Uses the MDR expression and join from the entry it builds on. I took "environmental
+    sensitivities" to mean the five fields under env_handling_sensitivity.environment (light, temperature,
+    humidity, vibration, pollutants), the same five the MDR''s ERF uses. A NULL rating does not count
+    as ''High''.'
+  sql_expression: ((a."ageYears" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High'
+    THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),
+    (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),
+    (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e."RH" - 50, 2) * e."TEMPc")
+    / 100000.0) > 5 AND ((CASE WHEN s.env_handling_sensitivity->'environment'->>'light' = 'High' THEN
+    1 ELSE 0 END) + (CASE WHEN s.env_handling_sensitivity->'environment'->>'temperature' = 'High' THEN
+    1 ELSE 0 END) + (CASE WHEN s.env_handling_sensitivity->'environment'->>'humidity' = 'High' THEN 1
+    ELSE 0 END) + (CASE WHEN s.env_handling_sensitivity->'environment'->>'vibration' = 'High' THEN 1 ELSE
+    0 END) + (CASE WHEN s.env_handling_sensitivity->'environment'->>'pollutants' = 'High' THEN 1 ELSE
+    0 END)) >= 2
+  source_model: main.SensitivityData
+  from_sql: main."SensitivityData" s JOIN main."ArtifactsCore" a ON a."ARTregID" = s."ART_link" JOIN main."ConditionAssessments"
+    ca ON ca.art_exam = a."ARTregID" JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per environmental reading of a showcase in which an artifact with a sensitivity profile
+    was assessed (artifact × showcase reading)
+  domains:
+  - definitions
+- name: exhibition_rotation_candidate
+  description: 'Identifies artifacts that should be considered for rotation out of display.
+
+
+    An artifact is a rotation candidate when its current display duration exceeds 75% of its ''Display
+    Safety Duration (DSD)'' OR its ''Light Exposure Risk (LER)'' score is greater than 7.
+
+
+    Built on: display_safety_duration_dsd, light_exposure_risk_ler.
+
+
+    Compiler note: Current display duration = UsageRecords.displayMonths, linked through the light reading''s
+    env_link (UsageRecords.env_link = LightAndRadiationReadings.env_link). One reading (MM381334) has
+    two usage records (2 and 7 months), so I aggregate with MAX per env_link. That is a conservative choice:
+    the artifact is flagged if any of its records exceeds the threshold. DSD and LER are inlined from
+    their dependency entries. SensitivityData has one row per artifact.'
+  sql_expression: (u.display_months > 0.75 * ((36 * (10 - CASE sd.env_handling_sensitivity->'environment'->>'light'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0)) OR ((lr.lux * CASE sd.env_handling_sensitivity->'environment'->>'light'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 > 7)
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.SensitivityData sd ON sd.ART_link = ca.art_exam LEFT JOIN (SELECT env_link, MAX("displayMonths")
+    AS display_months FROM main.UsageRecords GROUP BY env_link) u ON u.env_link = lr.env_link
+  grain: one row per condition assessment (artifact paired with its light/radiation reading), with the
+    artifact's sensitivity profile and the display months of the usage record on the same environmental
+    reading
+  domains:
+  - definitions
+- name: showcase_failure_risk
+  description: 'Identifies showcases at risk of failing to maintain proper environmental conditions.
+
+
+    Occurs when a showcase''s ''Showcase Environmental Stability Rating (SESR)'' is less than 4 OR at
+    least three maintenance indicators (e.g., seal condition, maintenance status, filter status) are in
+    a critical state.
+
+
+    Built on: showcase_environmental_stability_rating_sesr.
+
+
+    Compiler note: SESR is reused from the existing entry and taken per reading. A "critical state" is
+    the worst value each indicator has in the data: seal_state ''Poor'', maint_status ''Overdue'', filter_status
+    ''Replace Now'', and silica_status ''Replace Now''. silica_status is added because it is the other
+    maintenance indicator in the JSON and the entry''s list is given only as examples. A NULL indicator
+    does not count as critical. A NULL SESR (from missing variations or leak rate) does not trigger the
+    condition by itself.'
+  sql_expression: (10 - ((e."tempVar24" + (e."RHvar" / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day'
+    AS DOUBLE)) / 3.0)) < 4 OR ((CASE WHEN s.case_environment_profile->'physical_state'->>'seal_state'
+    = 'Poor' THEN 1 ELSE 0 END) + (CASE WHEN s.case_environment_profile->'maintenance'->>'maint_status'
+    = 'Overdue' THEN 1 ELSE 0 END) + (CASE WHEN s.case_environment_profile->'maintenance'->>'filter_status'
+    = 'Replace Now' THEN 1 ELSE 0 END) + (CASE WHEN s.case_environment_profile->'maintenance'->>'silica_status'
+    = 'Replace Now' THEN 1 ELSE 0 END)) >= 3
+  source_model: main.EnvironmentalReadingsCore
+  from_sql: main."EnvironmentalReadingsCore" e JOIN main."Showcases" s ON s."caseID" = e.case_link
+  grain: one row per environmental reading, with the showcase it was taken in
+  domains:
+  - definitions
+- name: conservation_budget_crisis
+  description: 'Identifies when conservation budget allocation is insufficient for high-priority artifacts.
+
+
+    Occurs when the ''Conservation Budget Efficiency (CBE)'' score is less than 0.5 AND at least one artifact
+    has a ''Critical'' conservation status and an ''Insufficient'' budget allocation status.
+
+
+    Built on: conservation_budget_efficiency_cbe.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'The condition requires ''Conservation Budget Efficiency (CBE)'' < 0.5. CBE cannot be
+    computed over this database: it needs each artifact''s numeric share of the total conservation budget,
+    and the database stores no budget amounts. ConservationAndMaintenance.budget_alloc holds only the
+    categories Adequate/Insufficient/Review Required, and budget_stat holds only Available/Limited/Depleted.
+    The second half of the condition (an artifact with conserve_status ''Critical'' and budget_alloc ''Insufficient'')
+    could be checked. Encoding only that half would leave out the required CBE condition, so the entry
+    as stated cannot be encoded.'
+- name: dynasty_value_artifact
+  description: 'Identifies artifacts from historically significant dynasties with higher research and
+    cultural value.
+
+
+    Artifacts from specific historically significant dynasties (e.g., ''Ming'', ''Han'', ''Tang'') that
+    also have a research value rating greater than 8.
+
+
+    Compiler note: The dynasty list is the entry''s own examples (Ming, Han, Tang); the other values in
+    the data are Qing, Song and Yuan. Research value rating = rating_profile.research_score, stored as
+    a JSON integer. ART_link is unique in ArtifactRatings (10 rows, 10 distinct values).'
+  sql_expression: a."DYNASTY" IN ('Ming', 'Han', 'Tang') AND CAST(r.rating_profile->>'research_score'
+    AS INTEGER) > 8
+  source_model: main.ArtifactRatings
+  from_sql: main."ArtifactRatings" r JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link"
+  grain: one row per artifact rating (ART_link is unique in ArtifactRatings, so one row per rated artifact),
+    with its core artifact record
+  domains:
+  - definitions
+- name: visitor_crowd_risk
+  description: 'Identifies exhibition halls where high visitor numbers pose risks to artifact safety.
+
+
+    Occurs when the ''Visitor Impact Risk (VIR)'' score is greater than 5 AND any artifact in the hall
+    has the lowest security level rating.
+
+
+    Built on: visitor_impact_risk_vir.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The condition needs each artifact's security level, but the database doesn't link security
+    levels to artifacts. SEC_LEVEL is stored only in ArtifactSecurityAccess, which has 3 rows keyed by
+    loan_stat ('On Loan', 'Available', 'Not Available'). That table has no artifact or hall reference,
+    and no other table holds a loan status per artifact. So 'any artifact in the hall has the lowest security
+    level' cannot be evaluated per hall. The VIR > 5 part alone would be computable over ExhibitionHalls.
+- name: organic_material_vulnerability
+  description: 'Identifies organic materials requiring special environmental conditions.
+
+
+    Artifacts made of organic materials like ''Wood'', ''Textile'', or ''Paper'' that also have a ''High''
+    overall environmental sensitivity rating. These require specialized environmental controls.
+
+
+    Compiler note: The overall environmental sensitivity rating is SensitivityData.ENVsense (values High/Low/Medium).
+    I checked that ART_link is unique in SensitivityData, so the join keeps one row per artifact. The
+    table has only 3 rows, one per rating, so few artifacts can match. The organic materials are the MatKind
+    values Wood, Textile and Paper.'
+  sql_expression: a.MatKind IN ('Wood', 'Textile', 'Paper') AND s.ENVsense = 'High'
+  source_model: main.ArtifactsCore
+  from_sql: main.ArtifactsCore a LEFT JOIN main.SensitivityData s ON s.ART_link = a.ARTregID
+  grain: one row per artifact, with its sensitivity record (if any)
+  domains:
+  - definitions
+- name: total_environmental_threat_level_tetl
+  description: 'Comprehensive measurement of all environmental threats to an artifact based on multiple
+    risk factors.
+
+
+    Calculated as: ''Environmental Risk Factor (ERF)'' + ''Light Exposure Risk (LER)'' + (''Material Deterioration
+    Rate (MDR)'' * 2).
+
+
+    Built on: environmental_risk_factor_erf, light_exposure_risk_ler, material_deterioration_rate_mdr.
+
+
+    Compiler note: Combines ERF, LER and MDR exactly as the existing entries define them, over one join.
+    The light reading comes from ca.light_link and the environmental reading from the showcase that was
+    assessed (case_exam). SensitivityData has one row per artifact (3 rows), so the join gives 3 rows.'
+  sql_expression: '(SELECT AVG(CASE v WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High'' THEN 10
+    END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''), (s.env_handling_sensitivity->''environment''->>''temperature''),
+    (s.env_handling_sensitivity->''environment''->>''humidity''), (s.env_handling_sensitivity->''environment''->>''vibration''),
+    (s.env_handling_sensitivity->''environment''->>''pollutants'')) AS t(v))
+
+    + (lr.lux * CASE s.env_handling_sensitivity->''environment''->>''light'' WHEN ''Low'' THEN 1 WHEN
+    ''Medium'' THEN 5 WHEN ''High'' THEN 10 END * lr."visLxh") / 1000.0
+
+    + 2 * ((a."ageYears" * (SELECT AVG(CASE v WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High''
+    THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''), (s.env_handling_sensitivity->''environment''->>''temperature''),
+    (s.env_handling_sensitivity->''environment''->>''humidity''), (s.env_handling_sensitivity->''environment''->>''vibration''),
+    (s.env_handling_sensitivity->''environment''->>''pollutants'')) AS t(v)) * POWER(e."RH" - 50, 2) *
+    e."TEMPc") / 100000.0)'
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    JOIN main.SensitivityData s ON s."ART_link" = ca.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID"
+    = ca.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per condition assessment (artifact with sensitivity profile and its light reading) ×
+    environmental reading of the assessed showcase
+  domains:
+  - calculations
+- name: showcase_protection_adequacy_spa
+  description: 'Measures how well a showcase protects its artifacts based on its stability and the artifacts''
+    requirements.
+
+
+    Calculated as: ''Showcase Environmental Stability Rating (SESR)'' - (''Environmental Risk Factor (ERF)''
+    * 0.5). Positive values indicate adequate protection.
+
+
+    Built on: showcase_environmental_stability_rating_sesr, environmental_risk_factor_erf.
+
+
+    Compiler note: SPA = SESR - 0.5*ERF. The artifact is linked to its showcase through ConditionAssessments
+    (art_exam, case_exam), since no other table links the two directly. Each (art_exam, case_exam) pair
+    occurs only once. Only 3 artifacts have SensitivityData, so the join returns 3 rows.'
+  sql_expression: (10 - ((e."tempVar24" + (e."RHvar" / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day'
+    AS DOUBLE)) / 3.0)) - (0.5 * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High'
+    THEN 10 END) FROM (VALUES (sd.env_handling_sensitivity->'environment'->>'light'), (sd.env_handling_sensitivity->'environment'->>'temperature'),
+    (sd.env_handling_sensitivity->'environment'->>'humidity'), (sd.env_handling_sensitivity->'environment'->>'vibration'),
+    (sd.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)))
+  source_model: main.EnvironmentalReadingsCore
+  from_sql: main."EnvironmentalReadingsCore" e JOIN main."Showcases" s ON s."caseID" = e.case_link JOIN
+    main."ConditionAssessments" ca ON ca.case_exam = s."caseID" JOIN main."SensitivityData" sd ON sd."ART_link"
+    = ca.art_exam
+  grain: one row per environmental reading of a showcase, paired with each artifact assessed in that showcase
+    (via ConditionAssessments) and that artifact's sensitivity profile
+  domains:
+  - calculations
+- name: conservation_backlog_risk_cbr
+  description: 'Quantifies the risk associated with delayed conservation treatments.
+
+
+    Calculated as: (''Conservation Priority Index (CPI)'' * (Days since last cleaning date - Cleaning
+    interval days)) / 100. Higher values indicate higher risk.
+
+
+    Built on: conservation_priority_index_cpi.
+
+
+    Compiler note: Maintenance records link to artifacts via monitor_link -> EnvironmentalReadingsCore.case_link
+    -> ConditionAssessments.case_exam -> art_exam; only 10 artifacts have ratings (needed for CPI), giving
+    11 joined rows (showcase SC9391 has two monitor readings / maintenance records). Days since last cleaning
+    = CURRENT_DATE - lastClean; cleaning interval days = the cleanDays column. If cleanDays or conserve_status
+    is NULL, the result is NULL.'
+  sql_expression: (((r."HIST_sign" + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score'
+    AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair'
+    THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0) * ((CURRENT_DATE - m."lastClean")
+    - m."cleanDays") / 100.0
+  source_model: main.ConservationAndMaintenance
+  from_sql: main."ConservationAndMaintenance" m JOIN main."EnvironmentalReadingsCore" e ON e.monitor_code
+    = m.monitor_link JOIN main."ConditionAssessments" c ON c.case_exam = e.case_link JOIN main."ArtifactRatings"
+    r ON r."ART_link" = c.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link"
+  grain: one row per conservation/maintenance record, with the rated artifact assessed in the showcase
+    its monitor reading belongs to
+  domains:
+  - calculations
+- name: visitor_capacity_safety_factor_vcsf
+  description: 'Determines the safe visitor capacity for exhibition halls containing sensitive artifacts.
+
+
+    Calculated as: ''Visitor Impact Risk (VIR)'' / (''Artifact Vulnerability Score (AVS)'' * 0.1). Lower
+    values indicate safer visitor capacities.
+
+
+    Built on: visitor_impact_risk_vir, artifact_vulnerability_score_avs.
+
+
+    Compiler note: Artifact-to-hall link taken from RiskAssessments (art_concern -> hall_concern); checked
+    that for all rated artifacts it is unique and matches the hall reached via ConditionAssessments.case_exam
+    -> Showcases.hall_ref. Deduplicated (art, hall) pairs in a derived table. NULLIF guards division by
+    zero AVS.'
+  sql_expression: ((CAST(h.security_visitor_overview->'visitor_statistics'->>'avg_daily_visitors' AS DOUBLE)
+    * CASE h.security_visitor_overview->'visitor_statistics'->>'visitor_flow' WHEN 'Low' THEN 1 WHEN 'Medium'
+    THEN 3 WHEN 'High' THEN 5 END * CAST(h.security_visitor_overview->'visitor_statistics'->>'avg_dwell_minutes'
+    AS DOUBLE)) / 1000) / NULLIF(((((r."HIST_sign" + CAST(r.rating_profile->>'research_score' AS DOUBLE)
+    + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent'
+    THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0)
+    * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES
+    (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),
+    (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),
+    (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v))) * 0.1, 0)
+  source_model: main.ArtifactRatings
+  from_sql: main."ArtifactRatings" r JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link" JOIN main."SensitivityData"
+    s ON s."ART_link" = r."ART_link" JOIN (SELECT DISTINCT art_concern, hall_concern FROM main."RiskAssessments")
+    ra ON ra.art_concern = r."ART_link" JOIN main."ExhibitionHalls" h ON h."Hall_ID" = ra.hall_concern
+  grain: one row per artifact rating, with its artifact, its sensitivity profile and the exhibition hall
+    it is assessed in (via RiskAssessments)
+  domains:
+  - calculations
+- name: exhibition_safety_quotient_esq
+  description: 'Comprehensive safety rating for an exhibition based on artifacts, showcases, and visitor
+    factors.
+
+
+    Calculated as the average of three components: (10 - ''Artifact Vulnerability Score''), ''Artifact
+    Exhibition Compatibility'', and (10 - ''Visitor Impact Risk''). Higher values are safer.
+
+
+    Built on: artifact_vulnerability_score_avs, artifact_exhibition_compatibility_aec, visitor_impact_risk_vir.
+
+
+    Compiler note: ESQ = average of (10 - AVS), AEC and (10 - VIR). The three formulas are copied from
+    the dependency entries. They are joined through ConditionAssessments: art_exam links the artifact''s
+    ratings, core record and sensitivity profile, and case_exam links the showcase''s environmental readings,
+    the showcase and its hall (hall_ref). I checked that ArtifactRatings and SensitivityData each have
+    one row per artifact (10 and 3 rows), so these joins don''t add duplicate rows. The full join returns
+    only 3 rows, because only 3 artifacts have sensitivity data.'
+  sql_expression: "(\n  (10 - (((r.\"HIST_sign\" + CAST(r.rating_profile->>'research_score' AS DOUBLE)\
+    \ + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent'\
+    \ THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) /\
+    \ 30.0) * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM\
+    \ (VALUES (sd.env_handling_sensitivity->'environment'->>'light'), (sd.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (sd.env_handling_sensitivity->'environment'->>'humidity'), (sd.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (sd.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)))\n  + (10 - ABS((SELECT AVG(CASE\
+    \ v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (sd.env_handling_sensitivity->'environment'->>'light'),\
+    \ (sd.env_handling_sensitivity->'environment'->>'temperature'), (sd.env_handling_sensitivity->'environment'->>'humidity'),\
+    \ (sd.env_handling_sensitivity->'environment'->>'vibration'), (sd.env_handling_sensitivity->'environment'->>'pollutants'))\
+    \ AS t(v)) - (10 - ((e.\"tempVar24\" + (e.\"RHvar\" / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day'\
+    \ AS DOUBLE)) / 3.0))))\n  + (10 - (CAST(h.security_visitor_overview->'visitor_statistics'->>'avg_daily_visitors'\
+    \ AS DOUBLE) * CASE h.security_visitor_overview->'visitor_statistics'->>'visitor_flow' WHEN 'Low'\
+    \ THEN 1 WHEN 'Medium' THEN 3 WHEN 'High' THEN 5 END * CAST(h.security_visitor_overview->'visitor_statistics'->>'avg_dwell_minutes'\
+    \ AS DOUBLE)) / 1000)\n) / 3.0"
+  source_model: main.ConditionAssessments
+  from_sql: main."ConditionAssessments" c JOIN main."ArtifactRatings" r ON r."ART_link" = c.art_exam JOIN
+    main."ArtifactsCore" a ON a."ARTregID" = c.art_exam JOIN main."SensitivityData" sd ON sd."ART_link"
+    = c.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = c.case_exam JOIN main."Showcases"
+    s ON s."caseID" = e.case_link JOIN main."ExhibitionHalls" h ON h."Hall_ID" = s.hall_ref
+  grain: one row per condition assessment (artifact examined in a showcase) paired with each environmental
+    reading of that showcase, with the artifact's rating, sensitivity profile, the showcase and its exhibition
+    hall
+  domains:
+  - calculations
+- name: conservation_resource_allocation_efficiency_crae
+  description: 'Measures how efficiently conservation resources are allocated based on priorities and
+    budget.
+
+
+    Calculated as: ''Conservation Budget Efficiency (CBE)'' * (1 - (''Conservation Backlog Risk (CBR)''
+    / 10)). Higher values indicate more efficient allocation.
+
+
+    Built on: conservation_budget_efficiency_cbe, conservation_backlog_risk_cbr.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: CRAE = CBE * (1 - CBR/10). CBE (Conservation Budget Efficiency) cannot be computed over
+    this database. It needs each artifact's share of the total conservation budget, which requires a numeric
+    budget amount per artifact. ConservationAndMaintenance.budget_alloc (Adequate/Insufficient/Review
+    Required) and budget_stat (Available/Limited/Depleted) are categorical labels only, with no amounts.
+    Without CBE, CRAE cannot be encoded, and substituting a value for CBE would be an invented placeholder.
+- name: material_aging_projection_map
+  description: 'Projects the rate of artifact aging based on material type and environmental conditions.
+
+
+    Calculated as: ''Material Deterioration Rate (MDR)'' * (1 + (''Total Environmental Threat Level (TETL)''
+    / 20)). Higher values indicate faster projected aging.
+
+
+    Built on: material_deterioration_rate_mdr, total_environmental_threat_level_tetl.
+
+
+    Compiler note: Uses the TETL grain (it holds everything MDR needs) and drops in the existing MDR and
+    TETL expressions unchanged; divides by 20.0 to keep the division non-integer.'
+  sql_expression: "((a.\"ageYears\" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High'\
+    \ THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e.\"RH\" - 50, 2) *\
+    \ e.\"TEMPc\") / 100000.0)\n* (1 + (\n  (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5\
+    \ WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v))\n  + (lr.lux * CASE s.env_handling_sensitivity->'environment'->>'light'\
+    \ WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END * lr.\"visLxh\") / 1000.0\n  + 2\
+    \ * ((a.\"ageYears\" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN\
+    \ 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e.\"RH\" - 50, 2) *\
+    \ e.\"TEMPc\") / 100000.0)\n) / 20.0)"
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    JOIN main.SensitivityData s ON s."ART_link" = ca.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID"
+    = ca.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per condition assessment (artifact with sensitivity profile and its light reading) ×
+    environmental reading of the assessed showcase
+  domains:
+  - calculations
+- name: exhibition_rotation_priority_score_erps
+  description: 'Calculates priority for rotating artifacts in and out of exhibition based on multiple
+    factors.
+
+
+    Calculated as: (''Display Safety Duration'' - Months on Display) * (''Light Exposure Risk'' + 1) *
+    (''Conservation Priority Index'' + 1) / 100. Lower values indicate higher rotation priority.
+
+
+    Built on: display_safety_duration_dsd, light_exposure_risk_ler, conservation_priority_index_cpi.
+
+
+    Compiler note: Months on Display = UsageRecords.displayMonths, reached through the light reading''s
+    monitor (env_link). One monitor (MM381334) has two usage records and two light readings. In all 1000
+    rows usage_id equals rad_id for the same env_link, so the join also matches usage_id = rad_id, which
+    makes it unique. SensitivityData holds only 3 rows and ArtifactRatings 10, so LEFT JOINs keep every
+    assessment, and ERPS is NULL where the inputs are missing. DSD, LER and CPI are inlined from their
+    entries.'
+  sql_expression: ((36 * (10 - CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN
+    1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0 - u."displayMonths") * ((lr.lux
+    * CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5
+    WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 + 1) * (((r."HIST_sign" + CAST(r.rating_profile->>'research_score'
+    AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN
+    'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10
+    END)) / 30.0 + 1) / 100.0
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.UsageRecords u ON u.env_link = lr.env_link AND u.usage_id = lr.rad_id LEFT JOIN main.SensitivityData
+    sd ON sd.ART_link = ca.art_exam LEFT JOIN main.ArtifactRatings r ON r.ART_link = ca.art_exam LEFT
+    JOIN main.ArtifactsCore a ON a.ARTregID = ca.art_exam
+  grain: one row per condition assessment (artifact paired with its light/radiation reading), with the
+    usage record of that reading's monitor, and the artifact's sensitivity profile, rating and core record
+    if any
+  domains:
+  - calculations
+- name: environmental_compliance_index_eci
+  description: 'Measures how well current environmental conditions meet the requirements for an artifact.
+
+
+    Calculated as: 10 - (absolute difference in temperature from ideal + absolute difference in humidity
+    from ideal / 5 + ''Environmental Risk Factor'' / 2). Higher values are better.
+
+
+    Built on: environmental_risk_factor_erf.
+
+
+    Compiler note: The entry does not give the ideal values. I used 20°C, the midpoint of the 18-22°C
+    ideal range in Temperature Reading Implications, and 50% RH, the midpoint of the 45-55% ideal range
+    in Relative Humidity Implications; the MDR entry also uses 50 as its RH reference. I linked each artifact
+    to its readings through ConditionAssessments (art_exam to case_exam) and then EnvironmentalReadingsCore.case_link.
+    Only 3 SensitivityData rows exist, and the join gives 3 rows. ERF is the dependency''s average over
+    the five environment sensitivities, weighted Low=1, Medium=5, High=10. I divide by 5.0 and 2.0 so
+    the division is not integer division.'
+  sql_expression: 10 - (ABS(e."TEMPc" - 20) + ABS(e."RH" - 50) / 5.0 + (SELECT AVG(CASE v WHEN 'Low' THEN
+    1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'),
+    (s.env_handling_sensitivity->'environment'->>'temperature'), (s.env_handling_sensitivity->'environment'->>'humidity'),
+    (s.env_handling_sensitivity->'environment'->>'vibration'), (s.env_handling_sensitivity->'environment'->>'pollutants'))
+    AS t(v)) / 2.0)
+  source_model: main.SensitivityData
+  from_sql: main.SensitivityData s JOIN main.ConditionAssessments c ON c.art_exam = s.ART_link JOIN main.EnvironmentalReadingsCore
+    e ON e.case_link = c.case_exam
+  grain: one row per artifact sensitivity profile paired with each environmental reading of a showcase
+    in which that artifact was assessed
+  domains:
+  - calculations
+- name: security_risk_exposure_sre
+  description: 'Quantifies an artifact''s exposure to security risks based on value and security measures.
+
+
+    Calculated as: (Insurance Value / 100000) * (10 - ''Visitor Impact Risk'') / 10. Higher values indicate
+    greater security risk.
+
+
+    Built on: visitor_impact_risk_vir.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - calculations
+  untranslated: SRE combines an artifact's insurance value with the Visitor Impact Risk of the hall it
+    is in. Insurance value (insUSD) is only in ArtifactSecurityAccess. That table has just 3 rows, keyed
+    by loan_stat ('On Loan', 'Available', 'Not Available'), and has no column or foreign key linking it
+    to ArtifactsCore, RiskAssessments or ExhibitionHalls. So no artifact's insurance value can be found,
+    or paired with its hall's VIR.
+- name: critical_conservation_alert
+  description: 'Identifies artifacts in critical condition requiring immediate intervention.
+
+
+    An artifact that meets the ''Conservation Emergency'' criteria AND has an ''Artifact Vulnerability
+    Score (AVS)'' greater than 8.
+
+
+    Built on: conservation_emergency, artifact_vulnerability_score_avs.
+
+
+    Compiler note: Combines the conservation_emergency and AVS joins on the artifact ID. ArtifactRatings
+    and SensitivityData each have at most one row per artifact (10 and 3 rows, all distinct ART_link),
+    so the join does not multiply rows. As defined, Critical status maps to 10, so CPI = 0 and AVS = 0,
+    which means this predicate can never be true. It is encoded exactly as the entry states.'
+  sql_expression: a.conserve_status = 'Critical' AND m.prio_tag = 'Urgent' AND (((r."HIST_sign" + CAST(r.rating_profile->>'research_score'
+    AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN
+    'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10
+    END)) / 30.0) * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)
+    FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),
+    (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),
+    (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) > 8
+  source_model: main.ArtifactsCore
+  from_sql: main."ArtifactsCore" a JOIN main."ConditionAssessments" ca ON ca.art_exam = a."ARTregID" JOIN
+    main."LightAndRadiationReadings" l ON l.rad_id = ca.light_link JOIN main."ConservationAndMaintenance"
+    m ON m.monitor_link = l.env_link JOIN main."ArtifactRatings" r ON r."ART_link" = a."ARTregID" JOIN
+    main."SensitivityData" s ON s."ART_link" = a."ARTregID"
+  grain: one row per artifact × its maintenance record (via condition assessment → light reading → monitor
+    reading), with its rating and sensitivity profile
+  domains:
+  - definitions
+- name: high_deterioration_risk_artifact
+  description: 'Identifies artifacts at high risk of rapid deterioration due to environmental factors.
+
+
+    An artifact that has a ''Total Environmental Threat Level (TETL)'' greater than 15 AND falls under
+    the ''Accelerated Deterioration Scenario''.
+
+
+    Built on: total_environmental_threat_level_tetl, accelerated_deterioration_scenario.
+
+
+    Compiler note: Combines the TETL > 15 condition with the Accelerated Deterioration Scenario (MDR >
+    5 and at least 2 environment sensitivities ''High''), using the TETL entry''s join. That join covers
+    every column the scenario needs. Checked that the query runs: 1 row matches.'
+  sql_expression: '((SELECT AVG(CASE v WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High'' THEN 10
+    END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''), (s.env_handling_sensitivity->''environment''->>''temperature''),
+    (s.env_handling_sensitivity->''environment''->>''humidity''), (s.env_handling_sensitivity->''environment''->>''vibration''),
+    (s.env_handling_sensitivity->''environment''->>''pollutants'')) AS t(v))
+
+    + (lr.lux * CASE s.env_handling_sensitivity->''environment''->>''light'' WHEN ''Low'' THEN 1 WHEN
+    ''Medium'' THEN 5 WHEN ''High'' THEN 10 END * lr."visLxh") / 1000.0
+
+    + 2 * ((a."ageYears" * (SELECT AVG(CASE v WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High''
+    THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''), (s.env_handling_sensitivity->''environment''->>''temperature''),
+    (s.env_handling_sensitivity->''environment''->>''humidity''), (s.env_handling_sensitivity->''environment''->>''vibration''),
+    (s.env_handling_sensitivity->''environment''->>''pollutants'')) AS t(v)) * POWER(e."RH" - 50, 2) *
+    e."TEMPc") / 100000.0)) > 15
+
+    AND ((a."ageYears" * (SELECT AVG(CASE v WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High'' THEN
+    10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''), (s.env_handling_sensitivity->''environment''->>''temperature''),
+    (s.env_handling_sensitivity->''environment''->>''humidity''), (s.env_handling_sensitivity->''environment''->>''vibration''),
+    (s.env_handling_sensitivity->''environment''->>''pollutants'')) AS t(v)) * POWER(e."RH" - 50, 2) *
+    e."TEMPc") / 100000.0) > 5
+
+    AND ((CASE WHEN s.env_handling_sensitivity->''environment''->>''light'' = ''High'' THEN 1 ELSE 0 END)
+    + (CASE WHEN s.env_handling_sensitivity->''environment''->>''temperature'' = ''High'' THEN 1 ELSE
+    0 END) + (CASE WHEN s.env_handling_sensitivity->''environment''->>''humidity'' = ''High'' THEN 1 ELSE
+    0 END) + (CASE WHEN s.env_handling_sensitivity->''environment''->>''vibration'' = ''High'' THEN 1
+    ELSE 0 END) + (CASE WHEN s.env_handling_sensitivity->''environment''->>''pollutants'' = ''High'' THEN
+    1 ELSE 0 END)) >= 2'
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    JOIN main.SensitivityData s ON s."ART_link" = ca.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID"
+    = ca.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per condition assessment (artifact with sensitivity profile and its light reading) ×
+    environmental reading of the assessed showcase
+  domains:
+  - definitions
+- name: exhibition_rotation_urgency
+  description: 'Identifies artifacts that should be immediately removed from exhibition.
+
+
+    Occurs when an artifact is an ''Exhibition Rotation Candidate'' AND has an ''Exhibition Rotation Priority
+    Score (ERPS)'' less than 0.
+
+
+    Built on: exhibition_rotation_candidate, exhibition_rotation_priority_score_erps.
+
+
+    Compiler note: Combines the two dependency definitions as written: Exhibition Rotation Candidate AND
+    ERPS < 0. The dependencies join UsageRecords in different ways, and I kept both. The candidate part
+    uses MAX(displayMonths) per env_link (alias um). The ERPS part uses the usage record whose usage_id
+    = rad_id (alias u). Checks against the data: SensitivityData and ArtifactRatings each have at most
+    one row per ART_link, so those joins don''t duplicate rows. Only one env_link (MM381334) has two usage
+    records and two light readings, so the two joins give different display months only there.'
+  sql_expression: ((um.display_months > 0.75 * ((36 * (10 - CASE sd.env_handling_sensitivity->'environment'->>'light'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0)) OR ((lr.lux * CASE sd.env_handling_sensitivity->'environment'->>'light'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 > 7)) AND (((36
+    * (10 - CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1 WHEN 'Medium'
+    THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0 - u."displayMonths") * ((lr.lux
+    * CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5
+    WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 + 1) * (((r."HIST_sign" + CAST(r.rating_profile->>'research_score'
+    AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN
+    'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10
+    END)) / 30.0 + 1) / 100.0 < 0)
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.UsageRecords u ON u.env_link = lr.env_link AND u.usage_id = lr.rad_id LEFT JOIN (SELECT
+    env_link, MAX("displayMonths") AS display_months FROM main.UsageRecords GROUP BY env_link) um ON um.env_link
+    = lr.env_link LEFT JOIN main.SensitivityData sd ON sd.ART_link = ca.art_exam LEFT JOIN main.ArtifactRatings
+    r ON r.ART_link = ca.art_exam LEFT JOIN main.ArtifactsCore a ON a.ARTregID = ca.art_exam
+  grain: one row per condition assessment (artifact paired with its light/radiation reading), with the
+    usage record paired to that reading (and the max display months over the reading's monitor), plus
+    the artifact's sensitivity profile, rating and core record
+  domains:
+  - definitions
+- name: showcase_compatibility_issue
+  description: 'Identifies incompatible artifact-showcase pairings requiring adjustment.
+
+
+    Occurs when the ''Showcase Protection Adequacy (SPA)'' score is less than 0 AND the artifact is classified
+    as a ''High-Value Artifact''.
+
+
+    Built on: showcase_protection_adequacy_spa, high_value_artifact.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This condition requires the artifact to be a ''High-Value Artifact'', and that cannot
+    be evaluated over this database. Its insurance half needs ArtifactSecurityAccess.insUSD per artifact.
+    That table has only 3 rows, keyed by loan_stat, with no column linking it to ArtifactsCore, and its
+    highest insUSD is 968,368, which is below the $1,000,000 threshold. Its historical-significance half
+    has no real rating column: ArtifactRatings.HIST_sign is the table''s primary-key identifier. The SPA
+    < 0 half can be computed, but leaving out the High-Value half would change what the entry means.'
+- name: conservation_resource_crisis
+  description: 'Identifies serious conservation resource allocation problems.
+
+
+    Occurs when the ''Conservation Resource Allocation Efficiency (CRAE)'' is less than 0.3 AND there
+    is a ''Conservation Budget Crisis''.
+
+
+    Built on: conservation_resource_allocation_efficiency_crae, conservation_budget_crisis.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'The condition needs CRAE < 0.3 and a Conservation Budget Crisis, and both depend on Conservation
+    Budget Efficiency (CBE). CBE needs each artifact''s numeric share of the total conservation budget.
+    The database stores no budget amounts: ConservationAndMaintenance.budget_alloc holds only Adequate/Insufficient/Review
+    Required, and budget_stat holds only Available/Limited/Depleted. So neither CRAE nor the budget crisis
+    can be computed, and this entry cannot be encoded without inventing a placeholder.'
+- name: dynasty_artifact_at_risk
+  description: 'Identifies historically significant dynasty artifacts at conservation risk.
+
+
+    An artifact that qualifies as a ''Dynasty Value Artifact'' AND has a ''Material Aging Projection (MAP)''
+    score greater than 3.
+
+
+    Built on: dynasty_value_artifact, material_aging_projection_map.
+
+
+    Compiler note: Combines dynasty_value_artifact and material_aging_projection_map over MAP''s join
+    plus ArtifactRatings joined on art_exam. I checked that ART_link is unique in both ArtifactRatings
+    and SensitivityData, so adding the ratings join does not change the MAP grain.'
+  sql_expression: "a.\"DYNASTY\" IN ('Ming', 'Han', 'Tang') AND CAST(r.rating_profile->>'research_score'\
+    \ AS INTEGER) > 8 AND (((a.\"ageYears\" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN\
+    \ 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e.\"RH\" - 50, 2) *\
+    \ e.\"TEMPc\") / 100000.0)\n* (1 + (\n  (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5\
+    \ WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v))\n  + (lr.lux * CASE s.env_handling_sensitivity->'environment'->>'light'\
+    \ WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END * lr.\"visLxh\") / 1000.0\n  + 2\
+    \ * ((a.\"ageYears\" * (SELECT AVG(CASE v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN\
+    \ 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'), (s.env_handling_sensitivity->'environment'->>'temperature'),\
+    \ (s.env_handling_sensitivity->'environment'->>'humidity'), (s.env_handling_sensitivity->'environment'->>'vibration'),\
+    \ (s.env_handling_sensitivity->'environment'->>'pollutants')) AS t(v)) * POWER(e.\"RH\" - 50, 2) *\
+    \ e.\"TEMPc\") / 100000.0)\n) / 20.0)) > 3"
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    JOIN main.SensitivityData s ON s."ART_link" = ca.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID"
+    = ca.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam JOIN main."ArtifactRatings"
+    r ON r."ART_link" = ca.art_exam
+  grain: one row per condition assessment (artifact with sensitivity profile, ratings and its light reading)
+    × environmental reading of the assessed showcase
+  domains:
+  - definitions
+- name: environmental_control_failure
+  description: 'Identifies situations where environmental controls are failing to protect artifacts.
+
+
+    Occurs when the ''Environmental Compliance Index (ECI)'' is less than 4 AND there is an ''Environmental
+    Instability Event''.
+
+
+    Built on: environmental_compliance_index_eci, environmental_instability_event.
+
+
+    Compiler note: Combines the ECI expression (< 4) with the Environmental Instability Event condition,
+    both evaluated on the same environmental reading row, over the ECI join grain.'
+  sql_expression: (10 - (ABS(e."TEMPc" - 20) + ABS(e."RH" - 50) / 5.0 + (SELECT AVG(CASE v WHEN 'Low'
+    THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'),
+    (s.env_handling_sensitivity->'environment'->>'temperature'), (s.env_handling_sensitivity->'environment'->>'humidity'),
+    (s.env_handling_sensitivity->'environment'->>'vibration'), (s.env_handling_sensitivity->'environment'->>'pollutants'))
+    AS t(v)) / 2.0)) < 4 AND (e."tempVar24" > 1 OR e."RHvar" > 3)
+  source_model: main.SensitivityData
+  from_sql: main.SensitivityData s JOIN main.ConditionAssessments c ON c.art_exam = s.ART_link JOIN main.EnvironmentalReadingsCore
+    e ON e.case_link = c.case_exam
+  grain: one row per artifact sensitivity profile paired with each environmental reading of a showcase
+    in which that artifact was assessed
+  domains:
+  - definitions
+- name: high_security_priority_artifact
+  description: 'Identifies artifacts requiring enhanced security measures.
+
+
+    An artifact that is classified as a ''High-Value Artifact'' AND has a ''Security Risk Exposure (SRE)''
+    score greater than 5.
+
+
+    Built on: high_value_artifact, security_risk_exposure_sre.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'This entry needs both ''High-Value Artifact'' and ''Security Risk Exposure (SRE)'', and
+    neither can be computed per artifact here. Both depend on the artifact''s insurance value (ArtifactSecurityAccess.insUSD).
+    That table has only 3 rows, keyed by loan_stat (Available / Not Available / On Loan), and no column
+    or foreign key links it to ArtifactsCore, RiskAssessments or ExhibitionHalls. So no artifact can be
+    given an insurance value, and SRE cannot pair that value with its hall''s Visitor Impact Risk. Also,
+    ''historical significance'' has no rating column: ArtifactRatings.HIST_sign is the primary-key identifier.
+    Encoding only part of the condition would misstate the definition.'
+- name: visitor_traffic_safety_concern
+  description: 'Identifies situations where visitor traffic poses safety concerns for exhibitions.
+
+
+    Occurs when the ''Visitor Capacity Safety Factor (VCSF)'' is greater than 2 AND there is a ''Visitor
+    Crowd Risk'' situation.
+
+
+    Built on: visitor_capacity_safety_factor_vcsf, visitor_crowd_risk.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: This condition requires 'Visitor Crowd Risk', and that cannot be computed over this database.
+    Visitor Crowd Risk needs to know whether any artifact in a hall has the lowest security level. SEC_LEVEL
+    is stored only in ArtifactSecurityAccess, which has 3 rows keyed by loan_stat ('On Loan', 'Available',
+    'Not Available'). That table has no artifact or hall reference, and no other table records a loan
+    status for each artifact, so security levels cannot be linked to artifacts or halls. Only the VCSF
+    > 2 part could be computed, and submitting that alone would misstate the entry.
+- name: organic_material_emergency
+  description: 'Identifies emergency situations for organic materials.
+
+
+    Occurs when an artifact falls under the ''Organic Material Vulnerability'' classification AND has
+    a ''Total Environmental Threat Level (TETL)'' greater than 12.
+
+
+    Built on: organic_material_vulnerability, total_environmental_threat_level_tetl.
+
+
+    Compiler note: Combines organic_material_vulnerability (MatKind in Wood/Textile/Paper AND ENVsense=''High'')
+    with TETL > 12, over the TETL join grain. That join already includes the same SensitivityData and
+    ArtifactsCore rows (the sensitivity table has one record per artifact), so both conditions apply to
+    the same row.'
+  sql_expression: a."MatKind" IN ('Wood', 'Textile', 'Paper') AND s."ENVsense" = 'High' AND ((SELECT AVG(CASE
+    v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'),
+    (s.env_handling_sensitivity->'environment'->>'temperature'), (s.env_handling_sensitivity->'environment'->>'humidity'),
+    (s.env_handling_sensitivity->'environment'->>'vibration'), (s.env_handling_sensitivity->'environment'->>'pollutants'))
+    AS t(v)) + (lr.lux * CASE s.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1 WHEN
+    'Medium' THEN 5 WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 + 2 * ((a."ageYears" * (SELECT AVG(CASE
+    v WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->'environment'->>'light'),
+    (s.env_handling_sensitivity->'environment'->>'temperature'), (s.env_handling_sensitivity->'environment'->>'humidity'),
+    (s.env_handling_sensitivity->'environment'->>'vibration'), (s.env_handling_sensitivity->'environment'->>'pollutants'))
+    AS t(v)) * POWER(e."RH" - 50, 2) * e."TEMPc") / 100000.0)) > 12
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    JOIN main.SensitivityData s ON s."ART_link" = ca.art_exam JOIN main."ArtifactsCore" a ON a."ARTregID"
+    = ca.art_exam JOIN main."EnvironmentalReadingsCore" e ON e.case_link = ca.case_exam
+  grain: one row per condition assessment (artifact with sensitivity profile and its light reading) ×
+    environmental reading of the assessed showcase
+  domains:
+  - definitions
+- name: high_value_category
+  description: 'Classification system for categorizing high-value artifacts based on their monetary or
+    cultural/historical significance.
+
+
+    An artifact is ''Monetary High-Value'' if its insurance value exceeds $1,000,000. It is ''Cultural/Historical
+    High-Value'' if its significance and cultural scores are in the top 10%. Otherwise, it is in the ''Other''
+    category. This is derived from the ''High-Value Artifact'' criteria.
+
+
+    Built on: high_value_artifact.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: The 'Monetary High-Value' label depends on each artifact's insurance value, and this database
+    can't supply it per artifact. ArtifactSecurityAccess.insUSD sits in a 3-row table keyed only by loan_stat
+    (On Loan 968368, Available 36135, Not Available 776900). Nothing links that table to ArtifactsCore.
+    The 'Cultural/Historical High-Value' label needs a historical significance score, but the only candidate,
+    ArtifactRatings.HIST_sign, is that table's primary-key identifier, not a rating. This entry is derived
+    from 'High-Value Artifact', which could not be compiled for the same reasons. A CASE using only the
+    cultural score would quietly drop part of the definition.
+- name: erps_decision_threshold
+  description: 'Converts ERPS scores into conservation actions.
+
+
+    An ''Exhibition Rotation Priority Score (ERPS)'' less than 0 triggers an ''Immediate Rotation'' recommendation;
+    otherwise, the recommendation is ''Monitor''.
+
+
+    Built on: exhibition_rotation_priority_score_erps.
+
+
+    Compiler note: The entry assigns two labels, so this is a categorical CASE rather than a plain boolean.
+    It reuses the ERPS expression and join from the existing exhibition_rotation_priority_score_erps entry.
+    ERPS < 0 gives ''Immediate Rotation''. Every other row gives ''Monitor'', as the entry''s ''otherwise''
+    says, and that includes rows where ERPS is NULL because inputs are missing.'
+  sql_expression: CASE WHEN ((36 * (10 - CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN
+    'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'temperature'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END) * (10 - CASE sd.env_handling_sensitivity->'environment'->>'humidity'
+    WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5 WHEN 'High' THEN 10 END)) / 1000.0 - u."displayMonths") * ((lr.lux
+    * CASE sd.env_handling_sensitivity->'environment'->>'light' WHEN 'Low' THEN 1 WHEN 'Medium' THEN 5
+    WHEN 'High' THEN 10 END * lr."visLxh") / 1000.0 + 1) * (((r."HIST_sign" + CAST(r.rating_profile->>'research_score'
+    AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS DOUBLE)) * (10 - CASE a.conserve_status WHEN
+    'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10
+    END)) / 30.0 + 1) / 100.0 < 0 THEN 'Immediate Rotation' ELSE 'Monitor' END
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.UsageRecords u ON u.env_link = lr.env_link AND u.usage_id = lr.rad_id LEFT JOIN main.SensitivityData
+    sd ON sd.ART_link = ca.art_exam LEFT JOIN main.ArtifactRatings r ON r.ART_link = ca.art_exam LEFT
+    JOIN main.ArtifactsCore a ON a.ARTregID = ca.art_exam
+  grain: one row per condition assessment (artifact paired with its light/radiation reading), with the
+    usage record of that reading's monitor, and the artifact's sensitivity profile, rating and core record
+    if any
+  domains:
+  - definitions
+- name: light_exposure_thresholds
+  description: 'Defines maximum safe light exposure levels for artifacts based on material sensitivity.
+
+
+    High sensitivity artifacts (e.g., textiles, paper) must not exceed 50 lux; Medium sensitivity artifacts
+    (e.g., paintings, wood) must not exceed 200 lux.
+
+
+    Built on: light_exposure_risk_ler, Conservation Status Categories.
+
+
+    Compiler note: True when the light threshold is exceeded. Sensitivity is read from SensitivityData.env_handling_sensitivity->''environment''->>''light''
+    (values ''High''/''Medium''/''Low''), joined to the light reading the same way as LER. I checked that
+    SensitivityData has one row per artifact. The entry gives no limit for Low sensitivity, so those rows,
+    and rows with no sensitivity value, never violate. In the current data only 3 artifacts have sensitivity
+    rows.'
+  sql_expression: (sd.env_handling_sensitivity->'environment'->>'light' = 'High' AND lr.lux > 50) OR (sd.env_handling_sensitivity->'environment'->>'light'
+    = 'Medium' AND lr.lux > 200)
+  source_model: main.ConditionAssessments
+  from_sql: main.ConditionAssessments ca JOIN main.LightAndRadiationReadings lr ON lr.rad_id = ca.light_link
+    LEFT JOIN main.SensitivityData sd ON sd.ART_link = ca.art_exam
+  grain: one row per condition assessment (an artifact paired with its light/radiation reading), with
+    the artifact's sensitivity profile if any
+  domains:
+  - definitions
+- name: conservation_environment_chronology_cec
+  description: 'A methodological approach to segment environmental monitoring data into chronological
+    intervals.
+
+
+    Involves grouping environmental readings by fixed time intervals (such as by year) to discern patterns
+    and inform conservation strategies.'
+  sql_expression: ''
+  source_model: ''
+  domains:
+  - definitions
+  untranslated: 'CEC describes a method: grouping environmental readings into fixed time intervals, such
+    as by year. It is not a yes/no condition over rows, so no boolean predicate can stand for it. The
+    interval is also left open (''such as by year''). An analyst can apply it directly with GROUP BY date_trunc(''year'',
+    "readTS") on EnvironmentalReadingsCore.'
+- name: artifact_rarity_valuation_arv
+  description: 'Establishes criteria for identifying artifacts of exceptional rarity and valuation.
+
+
+    Artifacts are categorized with high rarity and valuation if their insurance value exceeds $1,000,000.
+
+
+    Compiler note: Insurance value is ArtifactSecurityAccess.insUSD (REAL, in USD). The table has no artifact
+    key: its primary key is loan_stat, and it has only 3 rows, none above 1,000,000 (the highest is 968,368).
+    So no row qualifies right now, and these rows can''t be joined to ArtifactsCore.'
+  sql_expression: '"insUSD" > 1000000'
+  source_model: main.ArtifactSecurityAccess
+  domains:
+  - definitions
+- name: conservation_priority_level
+  description: 'Classifies artifacts into priority levels based on their CPI scores.
+
+
+    Based on the ''Conservation Priority Index (CPI)'': ''High Priority'' for scores > 7, ''Medium Priority''
+    for scores between 4 and 7, and ''Low Priority'' for scores <= 4.
+
+
+    Built on: conservation_priority_index_cpi.
+
+
+    Compiler note: Reuses the CPI expression as written. The entry''s ranges overlap at exactly 4, so
+    the more specific rule wins there: <=4 is Low, which makes Medium 4 < CPI <= 7 and High > 7. A NULL
+    CPI (missing conservation status or score) gets no label (NULL) instead of falling into Low.'
+  sql_expression: CASE WHEN ((r."HIST_sign" + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score'
+    AS DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair'
+    THEN 5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0 > 7 THEN 'High Priority' WHEN ((r."HIST_sign"
+    + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS
+    DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN
+    5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0 > 4 THEN 'Medium Priority' WHEN ((r."HIST_sign"
+    + CAST(r.rating_profile->>'research_score' AS DOUBLE) + CAST(r.rating_profile->>'cultural_score' AS
+    DOUBLE)) * (10 - CASE a.conserve_status WHEN 'Excellent' THEN 1 WHEN 'Good' THEN 3 WHEN 'Fair' THEN
+    5 WHEN 'Poor' THEN 7 WHEN 'Critical' THEN 10 END)) / 30.0 <= 4 THEN 'Low Priority' END
+  source_model: main.ArtifactRatings
+  from_sql: main."ArtifactRatings" r JOIN main."ArtifactsCore" a ON a."ARTregID" = r."ART_link"
+  grain: one row per artifact rating, with its artifact
+  domains:
+  - definitions
+- name: humidity_exposure_thresholds
+  description: 'Defines maximum safe humidity exposure levels for artifacts based on material sensitivity.
+
+
+    High sensitivity artifacts must not exceed 55% RH; Medium sensitivity artifacts must not exceed 60%
+    RH.
+
+
+    Built on: Humidity Sensitivity Levels.
+
+
+    Compiler note: The predicate is true when a reading goes over the limit (High-sensitivity artifacts
+    above 55% RH, Medium above 60% RH), so it flags violations of the threshold; ''Exposure Status'' builds
+    on this the same way. Low sensitivity has no limit, so it is never flagged. Humidity sensitivity is
+    read from env_handling_sensitivity->''environment''->>''humidity''. Artifacts are linked to readings
+    through ConditionAssessments: art_exam gives the showcase in case_exam, which matches EnvironmentalReadingsCore.case_link.
+    RH is a whole-number percentage. SensitivityData holds only 3 rows.'
+  sql_expression: (s.env_handling_sensitivity->'environment'->>'humidity' = 'High' AND e."RH" > 55) OR
+    (s.env_handling_sensitivity->'environment'->>'humidity' = 'Medium' AND e."RH" > 60)
+  source_model: main.SensitivityData
+  from_sql: main."SensitivityData" s JOIN main."ConditionAssessments" c ON c.art_exam = s."ART_link" JOIN
+    main."EnvironmentalReadingsCore" e ON e.case_link = c.case_exam
+  grain: one row per artifact sensitivity profile paired with an environmental reading from a showcase
+    where that artifact was assessed
+  domains:
+  - definitions
+- name: exposure_status
+  description: 'Determines whether an artifact''s current humidity exceeds its defined sensitivity threshold.
+
+
+    Classified as ''Over Exposure'' if the current relative humidity exceeds the ''Humidity Exposure Thresholds''
+    defined for its sensitivity level, otherwise ''Within Limits''.
+
+
+    Built on: humidity_exposure_thresholds.
+
+
+    Compiler note: Reuses the humidity_exposure_thresholds condition and join. Low sensitivity has no
+    threshold, so those rows fall to ''Within Limits'', as do rows with NULL sensitivity or RH. In the
+    data, the join yields only Medium (2) and High (1) humidity sensitivities.'
+  sql_expression: CASE WHEN (s.env_handling_sensitivity->'environment'->>'humidity' = 'High' AND e."RH"
+    > 55) OR (s.env_handling_sensitivity->'environment'->>'humidity' = 'Medium' AND e."RH" > 60) THEN
+    'Over Exposure' ELSE 'Within Limits' END
+  source_model: main.SensitivityData
+  from_sql: main."SensitivityData" s JOIN main."ConditionAssessments" c ON c.art_exam = s."ART_link" JOIN
+    main."EnvironmentalReadingsCore" e ON e.case_link = c.case_exam
+  grain: one row per artifact sensitivity profile paired with an environmental reading from a showcase
+    where that artifact was assessed
+  domains:
+  - calculations
+- name: secondary_stability_threshold
+  description: 'Defines a less stringent stability threshold for identifying showcases at risk.
+
+
+    A risk assessment level using a less stringent ''Showcase Environmental Stability Rating (SESR)''
+    threshold (e.g., a score < 5 instead of < 4) to prompt deeper evaluation.
+
+
+    Built on: showcase_environmental_stability_rating_sesr.
+
+
+    Compiler note: Boolean flag: true when SESR (as defined in the entry it builds on) is below the less
+    strict threshold of 5, which the entry gives in place of the standard < 4. Returns NULL when any SESR
+    input is NULL.'
+  sql_expression: (10 - ((e."tempVar24" + (e."RHvar" / 5.0) + CAST(s.case_environment_profile->'physical_state'->>'leak_rate_per_day'
+    AS DOUBLE)) / 3.0)) < 5
+  source_model: main.EnvironmentalReadingsCore
+  from_sql: main."EnvironmentalReadingsCore" e JOIN main."Showcases" s ON s."caseID" = e.case_link
+  grain: one row per environmental reading, with the showcase it was taken in
+  domains:
+  - calculations
+- name: compliance_level
+  description: 'Categorizes the Environmental Compliance Index (ECI) score into human-readable levels.
+
+
+    Assigns a level based on the ''Environmental Compliance Index (ECI)'' score: ''Excellent'' for scores
+    > 7, ''Good'' for scores between 4 and 7 (inclusive), and ''Poor'' for scores <= 4.
+
+
+    Built on: environmental_compliance_index_eci.
+
+
+    Compiler note: Labels the ECI expression it builds on. The entry gives a score of exactly 4 both to
+    ''Good'' (4–7 inclusive) and to ''Poor'' (<=4). Branches are checked in the order listed, so 4 becomes
+    ''Good'' and ''Poor'' covers < 4. A NULL ECI (e.g. missing TEMPc) gets a NULL label.'
+  sql_expression: 'CASE WHEN (10 - (ABS(e."TEMPc" - 20) + ABS(e."RH" - 50) / 5.0 + (SELECT AVG(CASE v
+    WHEN ''Low'' THEN 1 WHEN ''Medium'' THEN 5 WHEN ''High'' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''),
+    (s.env_handling_sensitivity->''environment''->>''temperature''), (s.env_handling_sensitivity->''environment''->>''humidity''),
+    (s.env_handling_sensitivity->''environment''->>''vibration''), (s.env_handling_sensitivity->''environment''->>''pollutants''))
+    AS t(v)) / 2.0)) IS NULL THEN NULL
+
+    WHEN (10 - (ABS(e."TEMPc" - 20) + ABS(e."RH" - 50) / 5.0 + (SELECT AVG(CASE v WHEN ''Low'' THEN 1
+    WHEN ''Medium'' THEN 5 WHEN ''High'' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''),
+    (s.env_handling_sensitivity->''environment''->>''temperature''), (s.env_handling_sensitivity->''environment''->>''humidity''),
+    (s.env_handling_sensitivity->''environment''->>''vibration''), (s.env_handling_sensitivity->''environment''->>''pollutants''))
+    AS t(v)) / 2.0)) > 7 THEN ''Excellent''
+
+    WHEN (10 - (ABS(e."TEMPc" - 20) + ABS(e."RH" - 50) / 5.0 + (SELECT AVG(CASE v WHEN ''Low'' THEN 1
+    WHEN ''Medium'' THEN 5 WHEN ''High'' THEN 10 END) FROM (VALUES (s.env_handling_sensitivity->''environment''->>''light''),
+    (s.env_handling_sensitivity->''environment''->>''temperature''), (s.env_handling_sensitivity->''environment''->>''humidity''),
+    (s.env_handling_sensitivity->''environment''->>''vibration''), (s.env_handling_sensitivity->''environment''->>''pollutants''))
+    AS t(v)) / 2.0)) >= 4 THEN ''Good''
+
+    ELSE ''Poor'' END'
+  source_model: main.SensitivityData
+  from_sql: main.SensitivityData s JOIN main.ConditionAssessments c ON c.art_exam = s.ART_link JOIN main.EnvironmentalReadingsCore
+    e ON e.case_link = c.case_exam
+  grain: one row per artifact sensitivity profile paired with each environmental reading of a showcase
+    in which that artifact was assessed
+  domains:
+  - definitions
+- name: overdue_days
+  description: 'Calculates the number of days a scheduled maintenance task is past its due date.
+
+
+    Calculated as the difference between the current date and the scheduled next cleaning date. A positive
+    value indicates the number of days overdue.
+
+
+    Compiler note: nextClean is a DATE column, so subtracting it from CURRENT_DATE gives a whole number
+    of days. Positive = overdue; NULL when nextClean is NULL.'
+  sql_expression: CURRENT_DATE - "nextClean"
+  source_model: main.ConservationAndMaintenance
+  domains:
+  - calculations
+tables:
+- schema: main
+  table: AirQualityReadings
+  columns:
+  - name: aq_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each air quality reading. PK.
+  - name: env_link
+    type: VARCHAR
+    description: TEXT. Reference to the environmental reading. FK to EnvironmentalReadingsCore.monitor_code.
+  - name: air_quality_metrics
+    type: JSON
+    description: 'JSONB column. Stores all gaseous-pollutant and particulate measurements from a single
+      sensor snapshot so downstream analytics can ingest one JSONB blob instead of many columns. Fields:
+      {"gases_ppm_ppb": {"co2_ppm": "TEXT. CO2 concentration in ppm. **NULL means CO2 data not available.**.
+      Example: 794 ppm.", "tvoc_ppb": "BIGINT. Total Volatile Organic Compounds (TVOC) in ppb. Example:
+      89.0.", "ozone_ppb": "BIGINT. Ozone concentration in ppb. Example: 11.0.", "so2_ppb": "BIGINT. Sulfur
+      dioxide concentration in ppb. Example: 12.0.", "no2_ppb": "BIGINT. Nitrogen dioxide concentration
+      in ppb. Example: 27.", "formaldehyde_mg_m3": "REAL. Formaldehyde concentration in µg/m³. Example:
+      0.014."}, "particulates": {"pm25_ug_m3": "REAL. Particulate Matter (PM2.5) concentration in µg/m³.
+      Example: 16.7.", "pm10_ug_m3": "REAL. Particulate Matter (PM10) concentration in µg/m³. Example:
+      29.0."}, "air_flow": {"air_exchange_rate_h": "REAL. Air exchange rate. **NULL means air exchange
+      rate not recorded.**. Example: 6.4.", "air_velocity_ms": "REAL. Air velocity in the environment.
+      **NULL means air velocity not measured.**. Example: 0.18."}}
+
+
+      Fine Particulate Matter Implications: Illustrates fine particulate matter measurements and their
+      conservation implications.
+
+
+      Represents PM2.5 concentration. Clean museum air should be below 5 µg/m³. Values above 15 indicate
+      potential risk, and above 30 are hazardous.
+
+
+      Compiler note: PM2.5 is stored in the JSONB field particulates.pm25_ug_m3 of air_quality_metrics,
+      in µg/m³. Sample values are 16.7, 10.7 and 5.4.'
+- schema: main
+  table: ArtifactRatings
+  columns:
+  - name: HIST_sign
+    type: BIGINT
+    description: 'BIGINT. Unique historical identifier for the artifact rating. PK. Possible values: 1,
+      2, 3, 4, 5, 6, 7, 8, 9, 10.
+
+
+      Historical Significance Ratings: Illustrates the historical significance rating scale.
+
+
+      A numerical scale typically ranging from 1-10, where 1-3 indicates minor historical significance,
+      4-7 indicates moderate significance, and 8-10 indicates exceptional historical importance.
+
+
+      Compiler note: HIST_sign means historical significance. It holds values 1-10 across 10 rows, which
+      matches the 1-10 rating scale. It is also the table''s primary key.'
+  - name: ART_link
+    type: VARCHAR
+    description: TEXT. Reference to the artifact in ArtifactsCore. FK to ArtifactsCore.ARTregID.
+  - name: rating_profile
+    type: JSON
+    description: 'JSONB column. Collects every curatorial and conservation-planning rating for an artifact
+      into one JSONB payload so that significance, display priority, and treatment difficulty can be queried
+      together. Fields: {"research_score": "BIGINT. Research score of the artifact. Possible values: 1.0,
+      2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0.", "exhibit_value": "BIGINT. Exhibition value score
+      of the artifact. Possible values: 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0.", "cultural_score":
+      "BIGINT. Cultural significance score of the artifact. Example: 25.", "public_access_rating": "BIGINT.
+      Public access rating for the artifact. Possible values: 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+      9.0, 10.0.", "educational_value": "BIGINT. Educational value of the artifact. Possible values: 1,
+      2, 3, 4, 5, 6, 7, 8, 9, 10.", "conservation_difficulty": "TEXT. Description of the conservation
+      differences. Possible values: High, Low, Medium.", "treatment_complexity": "TEXT. Complexity of
+      conservation treatment. Possible values: Complex, Moderate, Simple.", "material_stability": "TEXT.
+      Material stability rating of the artifact. Possible values: Moderate, Stable, Unstable.", "deterioration_rate":
+      "TEXT. Rate of deterioration of the artifact. Possible values: Moderate, Rapid, Slow."}'
+- schema: main
+  table: ArtifactSecurityAccess
+  columns:
+  - name: loan_stat
+    type: VARCHAR
+    description: 'TEXT. Loan status of the artifact. PK. Possible values: Available, Not Available, On
+      Loan.'
+  - name: insUSD
+    type: FLOAT
+    description: 'REAL. Insurance value in USD for the artifact. Example: 968368.'
+  - name: SEC_LEVEL
+    type: VARCHAR
+    description: 'TEXT. Security level for the artifact. Possible values: Level 1, Level 2, Level 3.'
+  - name: access_restrict
+    type: VARCHAR
+    description: 'TEXT. Restrictions on access to the artifact. Possible values: Limited, Public, Restricted.'
+  - name: docu_stat
+    type: VARCHAR
+    description: 'TEXT. Documentation status for the artifact. Possible values: Complete, Partial, Updating.'
+  - name: photo_docu
+    type: VARCHAR
+    description: 'TEXT. Photo documentation status for the artifact. Possible values: Outdated, Recent,
+      Required.'
+  - name: cond_report
+    type: VARCHAR
+    description: 'TEXT. Condition report status for the artifact. Possible values: Current, Due, Overdue.'
+  - name: conserve_rec
+    type: VARCHAR
+    description: 'TEXT. Conservation record for the artifact. Possible values: Pending, Review Required,
+      Updated.'
+  - name: research_access
+    type: VARCHAR
+    description: 'TEXT. Research access status for the artifact. Possible values: Available, Limited,
+      Restricted.'
+  - name: digital_rec
+    type: VARCHAR
+    description: 'TEXT. Digital record status for the artifact. Possible values: Complete, In Progress,
+      Partial.'
+- schema: main
+  table: ArtifactsCore
+  columns:
+  - name: ARTregID
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for each artifact. PK. Example: ART54317.'
+  - name: art_title
+    type: VARCHAR
+    description: 'TEXT. Title of the artifact. **NULL means no title provided.**. Example: Culture Painting.'
+  - name: DYNASTY
+    type: VARCHAR
+    description: 'TEXT. Dynasty or period the artifact belongs to. Possible values: Han, Ming, Qing, Song,
+      Tang, Yuan.'
+  - name: ageYears
+    type: BIGINT
+    description: 'BIGINT. Age of the artifact in years. Example: 943.'
+  - name: MatKind
+    type: VARCHAR
+    description: 'TEXT. Material type of the artifact. Possible values: Bronze, Ceramic, Jade, Paper,
+      Stone, Textile, Wood.'
+  - name: conserve_status
+    type: VARCHAR
+    description: 'TEXT. Current conservation status of the artifact. **NULL means no conservation status
+      provided.**. Possible values: Critical, Excellent, Fair, Good, Poor.
+
+
+      Conservation Status Categories: Illustrates the conservation status values and their meanings.
+
+
+      Values range from ''Excellent'' (recently conserved, no issues), ''Good'' (stable with minor issues),
+      ''Fair'' (stable but with noticeable issues), ''Poor'' (active deterioration), to ''Critical'' (severe
+      deterioration requiring immediate intervention).
+
+
+      Compiler note: ArtifactsCore.conserve_status takes the values Critical, Excellent, Fair, Good and
+      Poor, which are the five categories this entry describes.'
+- schema: main
+  table: ConditionAssessments
+  columns:
+  - name: cond_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each condition assessment. PK.
+  - name: art_exam
+    type: VARCHAR
+    description: TEXT. Reference to the artifact being examined. FK to ArtifactsCore.ARTregID.
+  - name: case_exam
+    type: VARCHAR
+    description: TEXT. Reference to the showcase being examined. FK to Showcases.caseID.
+  - name: light_link
+    type: BIGINT
+    description: BIGINT. Reference to light and radiation readings. FK to LightAndRadiationReadings.rad_id.
+  - name: score
+    type: BIGINT
+    description: 'BIGINT. Score for the condition assessment. Example: 93.'
+  - name: assess_date
+    type: DATE
+    description: 'DATE. Date when the assessment was done. Example: Sep-15-2024.'
+  - name: next_due
+    type: DATE
+    description: 'DATE. Date when the next assessment is due. Example: 2025/4/17.'
+- schema: main
+  table: ConservationAndMaintenance
+  columns:
+  - name: maint_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each conservation and maintenance record. PK.
+  - name: monitor_link
+    type: VARCHAR
+    description: TEXT. Reference to the environmental reading linked to maintenance. FK to EnvironmentalReadingsCore.monitor_code.
+  - name: surf_link
+    type: BIGINT
+    description: BIGINT. Reference to the surface and physical readings linked to maintenance. FK to SurfaceAndPhysicalReadings.surf_id.
+  - name: treat_stat
+    type: VARCHAR
+    description: 'TEXT. Treatment status of the artifact or worksite. Possible values: In Progress, Not
+      Required, Scheduled.'
+  - name: prio_tag
+    type: VARCHAR
+    description: 'TEXT. Priority tag for the conservation or maintenance action. Possible values: High,
+      Low, Medium, Urgent.'
+  - name: lastClean
+    type: DATE
+    description: 'DATE. Date when the artifact or worksite was last cleaned. Example: 16-Dec-24.'
+  - name: nextClean
+    type: DATE
+    description: 'DATE. Date when the next cleaning is due. Example: 2025/5/10.'
+  - name: cleanDays
+    type: BIGINT
+    description: 'BIGINT. Number of days since the last cleaning. Example: 83.0.'
+  - name: maintLog
+    type: VARCHAR
+    description: 'TEXT. Maintenance log details. Possible values: Pending, Review, Updated.'
+  - name: incident_stat
+    type: VARCHAR
+    description: 'TEXT. Status of any incidents related to the artifact or worksite. Possible values:
+      Closed, Open.'
+  - name: drill_stat
+    type: VARCHAR
+    description: 'TEXT. Status of any drills conducted for emergency preparedness. Possible values: Current,
+      Due, Overdue.'
+  - name: train_stat
+    type: VARCHAR
+    description: 'TEXT. Training status for maintenance personnel. Possible values: Current, Due, Overdue.'
+  - name: budget_alloc
+    type: VARCHAR
+    description: 'TEXT. Budget allocated for conservation and maintenance. Possible values: Adequate,
+      Insufficient, Review Required.'
+  - name: budget_stat
+    type: VARCHAR
+    description: 'TEXT. Status of the maintenance budget. Possible values: Available, Depleted, Limited.'
+  - name: conserveFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of conservation activities. Possible values: Frequent, Occasional, Rare.'
+  - name: history
+    type: VARCHAR
+    description: 'TEXT. Historical data related to conservation and maintenance. Possible values: Extensive,
+      Minimal, Moderate.'
+  - name: prevTreat
+    type: BIGINT
+    description: 'BIGINT. Reference to previous treatment or maintenance action. Example: 4.'
+  - name: treatEffect
+    type: VARCHAR
+    description: 'TEXT. Effectiveness of the treatment applied. Possible values: High, Low, Medium.'
+  - name: reversePot
+    type: VARCHAR
+    description: 'TEXT. Potential for reversing damage or deterioration. Possible values: High, Low, Medium.'
+- schema: main
+  table: EnvironmentalReadingsCore
+  columns:
+  - name: monitor_code
+    type: VARCHAR
+    description: TEXT. Unique identifier for each environmental reading. PK.
+  - name: readTS
+    type: TIMESTAMP
+    description: 'TIMESTAMP. Timestamp of when the environmental reading was taken. Not NULL. Example:
+      2024-08-06T08:38:48.'
+  - name: case_link
+    type: VARCHAR
+    description: TEXT. Reference to the showcase. FK to Showcases.caseID.
+  - name: TEMPc
+    type: BIGINT
+    description: 'BIGINT. Temperature reading in Celsius. **NULL means no temperature data available.**.
+      Example: 21.73.
+
+
+      Temperature Reading Implications: Illustrates temperature readings and their conservation implications.
+
+
+      Ideal for most collections is 18-22°C. Fluctuations greater than 2°C within 24 hours can stress
+      materials. Values outside 10-30°C may indicate control failure.
+
+
+      Compiler note: The entry explains how to read temperature values in Celsius: an ideal range, a range
+      that may signal control failure, and a note on 24h fluctuation, which relates to tempVar24. The
+      main subject is the temperature reading itself, which is EnvironmentalReadingsCore.TEMPc.'
+  - name: tempVar24
+    type: FLOAT
+    description: 'REAL. Temperature variation over 24 hours. **NULL means no temperature variation recorded.**.
+      Example: 0.85.'
+  - name: RH
+    type: BIGINT
+    description: 'BIGINT. Relative humidity reading. Example: 53.28.
+
+
+      Relative Humidity Implications: Illustrates relative humidity readings and their conservation implications.
+
+
+      Ideal for mixed collections is 45-55%. Fluctuations greater than 5% within 24 hours are risky. Readings
+      below 30% or above 65% indicate significant risk.
+
+
+      Compiler note: The entry explains what relative humidity readings mean (ideal 45-55%, risky below
+      30% or above 65%), so it belongs to the RH reading column. The part about fluctuations over 24 hours
+      also touches RHvar.'
+  - name: RHvar
+    type: BIGINT
+    description: 'BIGINT. Relative humidity variation. **NULL means no humidity variation recorded.**.
+      Example: 2.54.'
+  - name: air_press
+    type: FLOAT
+    description: 'REAL. Air pressure reading. **NULL means no air pressure data available.**. Example:
+      1020.0.'
+- schema: main
+  table: ExhibitionHalls
+  columns:
+  - name: Hall_ID
+    type: VARCHAR
+    description: 'TEXT. Unique identifier for each exhibition hall. PK. Example: Hall-3.'
+  - name: security_visitor_overview
+    type: JSON
+    description: 'JSONB column. Combines hall-level security system states with visitor statistics to
+      support risk analysis and staffing optimisation. Fields: {"security": {"cctv_coverage": "TEXT. CCTV
+      coverage status in the exhibition hall. Possible values: Full, Limited, Partial.", "motion_detection":
+      "TEXT. Motion detection status in the hall. Possible values: Active, Maintenance, Partial.", "alarm_status":
+      "TEXT. Alarm system status in the exhibition hall. Possible values: Armed, Maintenance, Partial.",
+      "access_control": "TEXT. Access control status for the exhibition hall. Possible values: Active,
+      Maintenance, Partial."}, "visitor_statistics": {"avg_daily_visitors": "BIGINT. Daily visitor count
+      for the exhibition hall. Example: 308.", "visitor_flow": "TEXT. Visitor flow data in the hall. Possible
+      values: High, Low, Medium.", "avg_dwell_minutes": "BIGINT. Dwell time of visitors in minutes. Example:
+      16."}, "behaviour_notes": "TEXT. Notes on visitor behavior in the hall. Possible values: Fair, Good,
+      Poor."}
+
+
+      CCTV Coverage Levels: Illustrates CCTV coverage classifications.
+
+
+      ''Full'' indicates 100% space coverage, ''Partial'' indicates 60-90% coverage, and ''Limited'' indicates
+      less than 60% coverage.
+
+
+      Compiler note: Describes the values of the JSON field security.cctv_coverage (Full/Partial/Limited)
+      in ExhibitionHalls.security_visitor_overview.'
+- schema: main
+  table: LightAndRadiationReadings
+  columns:
+  - name: rad_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each light and radiation reading. PK.
+  - name: env_link
+    type: VARCHAR
+    description: TEXT. Reference to the environmental reading. FK to EnvironmentalReadingsCore.monitor_code.
+  - name: lux
+    type: BIGINT
+    description: 'BIGINT. Light intensity in lux. Example: 138.0.
+
+
+      Light Intensity Implications: Illustrates light intensity measurements and their conservation implications.
+
+
+      Conservation standards recommend 50 lux for highly sensitive materials, 150-200 lux for medium sensitivity
+      materials, and up to 300 lux for low sensitivity materials.
+
+
+      Compiler note: The entry explains what light intensity readings in lux mean for conservation, and
+      LightAndRadiationReadings.lux holds those readings.'
+  - name: UV_uW
+    type: FLOAT
+    description: 'REAL. Ultraviolet (UV) radiation in microwatts. Example: 32.58.'
+  - name: IR_W
+    type: FLOAT
+    description: 'REAL. Infrared radiation in watts. Example: 7.51.'
+  - name: visLxh
+    type: BIGINT
+    description: 'BIGINT. Visible light intensity in lux-hours. Example: 71166.'
+- schema: main
+  table: Monitor_Showcase_Map
+  columns:
+  - name: mon_ID
+    type: VARCHAR
+    description: 'TEXT. Monitor identifier. PK. Example: MM191823.'
+  - name: case_ID
+    type: VARCHAR
+    description: 'TEXT. Showcase case identifier. PK. FK to Showcases.caseID. Example: SC9857.'
+- schema: main
+  table: RiskAssessments
+  columns:
+  - name: risk_id
+    type: VARCHAR
+    description: TEXT. Unique identifier for each risk assessment. PK.
+  - name: art_concern
+    type: VARCHAR
+    description: TEXT. Reference to the artifact being assessed for risk. FK to ArtifactsCore.ARTregID.
+  - name: hall_concern
+    type: VARCHAR
+    description: TEXT. Reference to the exhibition hall being assessed for risk. FK to ExhibitionHalls.Hall_ID.
+  - name: risk_level
+    type: VARCHAR
+    description: 'TEXT. Level of risk associated with the artifact or hall. Possible values: High, Low,
+      Medium.'
+  - name: emerg_plan
+    type: VARCHAR
+    description: 'TEXT. Emergency plan related to the risk. Possible values: Review Required, Under Revision,
+      Updated.'
+  - name: evacPrio
+    type: VARCHAR
+    description: 'TEXT. Evacuation priority level for the artifact or hall. Possible values: Priority
+      1, Priority 2, Priority 3.'
+  - name: handle_rules
+    type: VARCHAR
+    description: 'TEXT. Handling rules for the artifact or hall. Possible values: Minimal, Strict.'
+  - name: conserve_score
+    type: BIGINT
+    description: 'BIGINT. Conservation score for the artifact or hall. Example: 85.0.'
+- schema: main
+  table: SensitivityData
+  columns:
+  - name: ENVsense
+    type: VARCHAR
+    description: 'TEXT. Environmental sensitivity identifier for the artifact. PK. Possible values: High,
+      Low, Medium.'
+  - name: ART_link
+    type: VARCHAR
+    description: TEXT. Reference to the artifact in ArtifactsCore. FK to ArtifactsCore.ARTregID.
+  - name: env_handling_sensitivity
+    type: JSON
+    description: 'JSONB column. Bundles the full multi-factor sensitivity profile (environmental, pest,
+      handling, transport, display, storage) needed for preventive-conservation decision-making. Fields:
+      {"environment": {"light": "TEXT. Light sensitivity data for the artifact. **NULL means no light
+      sensitivity data provided.**. Possible values: High, Low, Medium.", "temperature": "TEXT. Temperature
+      sensitivity data for the artifact. Possible values: High, Low, Medium.", "humidity": "TEXT. Humidity
+      sensitivity data for the artifact. Possible values: High, Low, Medium.", "vibration": "TEXT. Vibration
+      sensitivity data for the artifact. Possible values: High, Low, Medium.", "pollutants": "TEXT. Pollution
+      sensitivity data for the artifact. Possible values: High, Low, Medium."}, "biological": {"pest":
+      "TEXT. Pest sensitivity data for the artifact. Possible values: High, Low, Medium."}, "handling_transport":
+      {"handling": "TEXT. Handling sensitivity data for the artifact. Possible values: High, Low, Medium.",
+      "transport": "TEXT. Sensitivity to transportation for the artifact. Possible values: High, Low,
+      Medium."}, "context": {"display": "TEXT. Display sensitivity data for the artifact. Possible values:
+      High, Low, Medium.", "storage": "TEXT. Storage sensitivity data for the artifact. Possible values:
+      High, Low, Medium."}}
+
+
+      Sensitivity Weight Values: Numerical weights for sensitivity calculations.
+
+
+      A mapping of qualitative sensitivity ratings to numerical values for calculation purposes. For example:
+      Low=1, Medium=5, High=10 for various environmental factors like light, temperature, and humidity.
+
+
+      Compiler note: The mapping Low=1, Medium=5, High=10 assigns numbers to the qualitative ratings for
+      each factor (light, temperature, humidity, etc.). Those ratings are stored in the env_handling_sensitivity
+      JSONB, under environment.light, environment.temperature, environment.humidity and the other keys.
+
+
+      Light Sensitivity Levels: Illustrates light sensitivity classifications and their implications.
+
+
+      Values include ''Low'' (can tolerate up to 300 lux), ''Medium'' (should be limited to 150-200 lux),
+      and ''High'' (restricted to 50 lux or less).
+
+
+      Compiler note: Describes the Low/Medium/High values of the light sensitivity rating, stored at JSON
+      path environment.light inside SensitivityData.env_handling_sensitivity.
+
+
+      Humidity Sensitivity Levels: Illustrates humidity sensitivity classifications and their implications.
+
+
+      Values include ''Low'' (can tolerate a wide range of humidity), ''Medium'' (requires a controlled
+      humidity range), and ''High'' (requires a very stable and narrow humidity range).
+
+
+      Compiler note: Describes the values of the JSON field environment.humidity in env_handling_sensitivity
+      (Low/Medium/High), per the column''s documented fields.'
+- schema: main
+  table: Showcases
+  columns:
+  - name: caseID
+    type: VARCHAR
+    description: TEXT. Unique identifier for each showcase. PK.
+  - name: hall_ref
+    type: VARCHAR
+    description: TEXT. Reference to the exhibition hall where the showcase is located. FK to ExhibitionHalls.Hall_ID.
+  - name: case_environment_profile
+    type: JSON
+    description: 'JSONB column. Packs the showcase’s physical condition, filtration/adsorption capacity,
+      leak performance and safety-power states into a single field for monitoring dashboards. Fields:
+      {"physical_state": {"airtightness_factor": "REAL. Airtightness level of the showcase. Example: 95.1.",
+      "construction_material": "TEXT. Material of the showcase. **NULL means no material specified.**.
+      Possible values: Acrylic, Glass, Tempered Glass.", "seal_state": "TEXT. Seal state of the showcase.
+      Possible values: Excellent, Fair, Good, Poor.", "leak_rate_per_day": "REAL. Leak rate of the showcase.
+      Example: 0.41.", "internal_pressure_pa": "BIGINT. Pressure level inside the showcase. Example: -2.6."},
+      "maintenance": {"maint_status": "TEXT. Maintenance status of the showcase. Possible values: Due,
+      Good, Overdue.", "filter_status": "TEXT. Filter status in the showcase. Possible values: Clean,
+      Replace Now, Replace Soon.", "silica_status": "TEXT. Silica gel status in the showcase. Possible
+      values: Active, Replace Now, Replace Soon.", "silica_last_replaced": "DATE. Date when silica gel
+      was last replaced. Example: 09/15/2024."}, "buffer_capacity": {"humidity_capacity_g": "BIGINT. Humidity
+      capacity of the showcase. Example: 81.0.", "pollutant_capacity_mg": "REAL. Pollutant capacity of
+      the showcase. Example: 79.8."}, "safety_and_power": {"inert_gas_state": "TEXT. Inert gas status
+      inside the showcase. Possible values: Active, Maintenance, Standby.", "fire_system_state": "TEXT.
+      Fire system status in the showcase. Possible values: Active, Maintenance, Standby.", "primary_power_state":
+      "TEXT. Power status for the showcase. Possible values: Active, Standby, Testing.", "backup_power_state":
+      "TEXT. Backup system status for the showcase. Possible values: Maintenance, Ready, Testing."}}
+
+
+      Showcase Airtightness Levels: Illustrates showcase airtightness measurement.
+
+
+      A numerical value representing air changes per day. Museum-grade showcases typically have values
+      below 0.1, while values up to 5.0 indicate poor airtightness.
+
+
+      Compiler note: Describes air changes per day (values below 0.1 for museum grade, up to 5.0 for poor).
+      That matches physical_state.leak_rate_per_day in this JSONB, whose observed range is 0.0-0.5. It
+      does not match airtightness_factor, which ranges 90-100.'
+- schema: main
+  table: SurfaceAndPhysicalReadings
+  columns:
+  - name: surf_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each surface and physical reading. PK.
+  - name: env_link
+    type: VARCHAR
+    description: TEXT. Reference to the environmental reading. FK to EnvironmentalReadingsCore.monitor_code.
+  - name: vibra_mms2
+    type: FLOAT
+    description: 'REAL. Vibration measurements in millimeters squared. Example: 0.461.'
+  - name: noise_dB
+    type: BIGINT
+    description: 'BIGINT. Noise level measurement in decibels. Example: 47.'
+  - name: dust_Mg_m2
+    type: FLOAT
+    description: 'REAL. Dust level in milligrams per square meter. Example: 1.74.'
+  - name: microbe_CFU
+    type: BIGINT
+    description: 'BIGINT. Microbial colony-forming units (CFU) detected. Example: 234.0.'
+  - name: moldIdx
+    type: FLOAT
+    description: 'REAL. Mold index indicating the level of mold presence. Example: 0.1.'
+  - name: pestActivity
+    type: VARCHAR
+    description: 'TEXT. Recorded pest activity level. **NULL means no pest activity reported.**. Possible
+      values: High, Low, Medium.'
+  - name: pestTrap
+    type: BIGINT
+    description: 'BIGINT. Number of pest traps set. Example: 10.'
+  - name: pestSpecies
+    type: VARCHAR
+    description: 'TEXT. Species of pests detected. **NULL means no species identified.**. Possible values:
+      Beetles, Booklice, Moths, Silverfish.'
+  - name: surface_pH
+    type: FLOAT
+    description: 'REAL. pH level of the surface. Example: 6.7.'
+  - name: moist_pct
+    type: FLOAT
+    description: 'REAL. Moisture percentage on the surface. Example: 10.3.'
+  - name: saltRisk
+    type: VARCHAR
+    description: 'TEXT. Risk level due to salt exposure. Possible values: High, Low, Medium.'
+  - name: metalCorr
+    type: FLOAT
+    description: 'REAL. Metal corrosion rate on the surface. Example: 0.04.'
+  - name: organicDeg
+    type: FLOAT
+    description: 'REAL. Organic degradation rate. Example: 0.47.'
+  - name: deltaE
+    type: FLOAT
+    description: 'REAL. Color difference in surface due to environmental factors. Example: 1.99.'
+  - name: surfTemp
+    type: FLOAT
+    description: 'REAL. Temperature of the surface. Example: 19.11.'
+  - name: surfRH
+    type: FLOAT
+    description: 'REAL. Relative humidity on the surface. Example: 45.46.'
+  - name: condRisk
+    type: VARCHAR
+    description: 'TEXT. Risk of damage due to environmental conditions. Possible values: High, Low, Medium.'
+  - name: thermalImg
+    type: VARCHAR
+    description: 'TEXT. Thermal image data of the surface. **NULL means no thermal image provided.**.
+      Possible values: Attention Required, Critical, Normal.'
+  - name: structStable
+    type: VARCHAR
+    description: 'TEXT. Structural stability condition. **NULL means no stability data provided.**. Possible
+      values: Major Issues, Minor Issues, Stable.'
+  - name: crackNote
+    type: VARCHAR
+    description: 'TEXT. Notes about any cracks detected on the surface. Possible values: Minor Changes,
+      No Changes, Significant Changes.'
+  - name: deform_mm
+    type: FLOAT
+    description: 'REAL. Deformation in millimeters. Example: 0.08.'
+  - name: wtPct
+    type: FLOAT
+    description: 'REAL. Weight percentage of certain materials on the surface. Example: -0.001.'
+  - name: surfDust
+    type: BIGINT
+    description: 'BIGINT. Amount of dust detected on the surface. Example: 5.7.'
+  - name: O2_pct
+    type: FLOAT
+    description: 'REAL. Oxygen percentage in the surface environment. Example: 20.8.'
+  - name: N2_pct
+    type: FLOAT
+    description: 'REAL. Nitrogen percentage in the surface environment. Example: 78.75.'
+- schema: main
+  table: UsageRecords
+  columns:
+  - name: usage_id
+    type: BIGINT
+    description: BIGSERIAL. Unique identifier for each usage record. PK.
+  - name: env_link
+    type: VARCHAR
+    description: TEXT. Reference to the environmental reading linked to usage. FK to EnvironmentalReadingsCore.monitor_code.
+  - name: rotate_sched
+    type: VARCHAR
+    description: 'TEXT. Schedule for rotating artifacts or exhibits. Possible values: Active, Permanent,
+      Resting.'
+  - name: displayMonths
+    type: BIGINT
+    description: 'BIGINT. Number of months the artifact or exhibit is displayed. Example: 1.'
+  - name: restMonths
+    type: BIGINT
+    description: 'BIGINT. Number of months the artifact or exhibit is in rest or storage. Example: 22.0.'
+  - name: dispReqs
+    type: VARCHAR
+    description: 'TEXT. Requirements for displaying the artifact or exhibit. Possible values: Custom,
+      Special, Standard.'
+  - name: storeReqs
+    type: VARCHAR
+    description: 'TEXT. Requirements for storing the artifact or exhibit. Possible values: Custom, Special,
+      Standard.'
+  - name: handleReqs
+    type: VARCHAR
+    description: 'TEXT. Requirements for handling the artifact or exhibit. Possible values: Custom, Special,
+      Standard.'
+  - name: transportReqs
+    type: VARCHAR
+    description: 'TEXT. Transportation requirements for the artifact or exhibit. Possible values: Custom,
+      Special, Standard.'
+  - name: packReqs
+    type: VARCHAR
+    description: 'TEXT. Packaging requirements for the artifact or exhibit. Possible values: Custom, Special,
+      Standard.'
+  - name: resAccess
+    type: VARCHAR
+    description: 'TEXT. Restrictions on access to the artifact or exhibit. Possible values: Frequent,
+      Occasional, Rare.'
+  - name: publicDisp
+    type: VARCHAR
+    description: 'TEXT. Public display status of the artifact or exhibit. Possible values: Frequent, Occasional,
+      Rare.'
+  - name: loanFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of loans for the artifact or exhibit. Possible values: Frequent, Occasional,
+      Rare.'
+  - name: handleFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of handling the artifact or exhibit. Possible values: Frequent, Occasional,
+      Rare.'
+  - name: docuFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of documentation updates for the artifact or exhibit. Possible values:
+      Frequent, Occasional, Rare.'
+  - name: monitorFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of monitoring for the artifact or exhibit. Possible values: Daily, Monthly,
+      Weekly.'
+  - name: assessFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of condition assessments for the artifact or exhibit. Possible values:
+      Annually, Monthly, Quarterly.'
+  - name: conserveFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of conservation treatments for the artifact or exhibit. Possible values:
+      Frequent, Occasional, Rare.'
+  - name: maintFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of maintenance activities for the artifact or exhibit. Possible values:
+      Monthly, Quarterly, Weekly.'
+  - name: inspectFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of inspections for the artifact or exhibit. Possible values: Daily,
+      Monthly, Weekly.'
+  - name: calibFreq
+    type: VARCHAR
+    description: 'TEXT. Frequency of calibration for monitoring equipment. Possible values: Annually,
+      Monthly, Quarterly.'
+  - name: certStatus
+    type: VARCHAR
+    description: 'TEXT. Certification status for the artifact or exhibit. Possible values: Current, Expired,
+      Pending.'
+  - name: complianceStatus
+    type: VARCHAR
+    description: 'TEXT. Compliance status for regulations or standards. Possible values: Compliant, Non-compliant,
+      Partial.'
+  - name: auditStatus
+    type: VARCHAR
+    description: 'TEXT. Audit status for the artifact or exhibit. Possible values: Failed, Passed, Pending.'
+  - name: qualityStatus
+    type: VARCHAR
+    description: 'TEXT. Quality status for the artifact or exhibit. Possible values: Failed, Passed, Review.'

@@ -1,0 +1,200 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: insider_trading, author: claudeopus5.5
+version: '1.0'
+name: insider-trading
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Insider-trading / market-abuse surveillance database. One trade record (trade_records.REC_KEY,
+      e.g. ''IT291460'') is the hub: market_conditions.REC_PIN, order_behaviour.REC_NODE, manipulation_signals.REC_TAG,
+      sentiment_analytics.REC_SA, corporate_events.REC_EVT, reg_compliance.REC_COMP and enforcement_actions.REC_ENF
+      all carry the SAME key value as trade_records.REC_KEY (1:1). trade_records.tr_anchor -> traders.TR_KEY
+      = trader_relationships.rel_root; trade_records.sym_anchor -> instruments.SYM_KEY; order_behaviour.OST_ref
+      -> order_status_types.STAT_TOKEN (OST_ref is NULL in every row, so that join yields nothing).'
+    preferred: true
+    tables:
+    - traders
+    - instruments
+    - trader_relationships
+    - trade_records
+    - market_conditions
+    - order_status_types
+    - sentiment_analytics
+    - order_behaviour
+    - manipulation_signals
+    - corporate_events
+    - reg_compliance
+    - enforcement_actions
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_formats
+    summary: 'How values are stored: JSON columns, text-with-units, NULLs, joins'
+    description: 'All *_data / *_info / *_links / *_perf / *_metrics / *_signals / *_status / enf_actions
+      columns are DuckDB JSON. Extract with ->> and ALWAYS parenthesise the extraction, e.g. (tr.trader_fin_data->>''risk_lvl'')
+      = ''Aggressive'' -- without parentheses ->> binds looser than comparison operators and the query
+      fails or misparses. Cast numeric fields: CAST((x->>''field'') AS DOUBLE). JSON nulls come back as
+      SQL NULL. traders.trader_fin_data->>''usd_bal'' is text like ''$4,692,991 '' (dollar sign, thousands
+      commas, trailing space); parse with CAST(replace(replace(trim((tr.trader_fin_data->>''usd_bal'')),''$'',''''),'','','''')
+      AS DOUBLE). manipulation_signals.manip_signals->>''spoof_prob'' is text like ''0.88%'' but the number
+      is already a 0-1 probability (observed range 0.0-1.0); strip the ''%'' and compare the number directly
+      (0.75 threshold means 0.75, not 0.0075). Unit-suffixed text columns (bal_turnover ''x times/day'',
+      vol_adj_lev, risk_adj_lev, impactVal ''0.05%'', ofi_density, liq_imp, price_accel, iv_rank, short_press_int,
+      info_leak_rate, reg_alert_conc, reg_resp_spd, insider_net_str) must be parsed with TRY_CAST(regexp_extract(col,
+      ''-?[0-9.,]+'') ... after removing commas) before arithmetic. trade_records.snap_ts is VARCHAR holding
+      fragments like ''12:24.1'' (minutes:seconds), not a real timestamp; NULL in 400 of 998 rows. corporate_events.announce_time
+      values are ''Pre-market hrs before'', ''Intraday hrs before'', ''Post-market hrs before'' (match
+      with LIKE ''Pre-market%'' etc.). Empty-looking cells in samples are SQL NULL (not ''''); ''nan''
+      in samples is NULL. Integer division follows PostgreSQL: divide by 365.0, not 365. Use LEFT JOINs
+      from trade_records: 998 trade records, 999 market_conditions keys, 995 traders; 994 distinct traders
+      have trades. GREATEST/LEAST skip NULLs in DuckDB, so Max(k, x) formulas guard x IS NULL explicitly
+      where x is a nullable input.
+
+      '
+    tables:
+    - main.trade_records
+    - main.traders
+    - main.manipulation_signals
+    - main.corporate_events
+  - name: trading_activity
+    summary: Trader profile, turnover, leverage, holding style, order types, venues
+    description: 'Daily Turnover Rate (DTR) = daily trading volume (trade_records.vol_day) / account balance
+      (usd_bal). The stored text column bal_turnover does NOT equal this ratio in the data; use the metric
+      daily_turnover_rate. Trader Leverage Exposure (TLE) = trade_perf->>''lev_ratio''. Order Modification
+      Intensity (OMI) = mod_freq / (1 - cancel_pct), undefined if cancel_pct = 1. High-Risk Trader Profile:
+      TLE > 5.0 AND risk_lvl ''Aggressive'' OR DTR > 0.5 (AND binds before OR, i.e. (TLE>5 AND Aggressive)
+      OR DTR>0.5). High-Frequency High-Risk Trader: High-Risk profile AND freq_tag = ''High''. HOLDING
+      STYLE (hold_span): ''Intraday'' same-day trades; ''Swing'' a few days to weeks; ''Position'' weeks
+      to months; ''Long-term'' months or years. DARK POOLS (dark_use): private exchanges (e.g. Alternative
+      Trading Systems) used for large orders to reduce market impact; usage patterns can be analysed for
+      regulatory compliance or signs of avoiding market transparency. OFF-MARKET (off_mkt): trades not
+      on lit exchanges; ''internal crosses'' are a broker matching buy/sell orders from its own clients
+      internally, which requires monitoring for fairness. ORDER TYPES (order_status_types.order_status->>''spread_type''):
+      ''Market'' orders prioritize speed; ''Limit'' orders prioritize price; ''Mixed'' suggests a combination
+      of strategies.
+
+      '
+    tables:
+    - main.trade_records
+    - main.traders
+    - main.order_behaviour
+    - main.order_status_types
+  - name: manipulation
+    summary: Suspicious activity, layering/spoofing, wash trading, ignition, marking the close
+    description: 'Suspicious Activity Index (SAI): weighted sum of normalized risk indicators including
+      spoofing probability, front-running, wash trading and confirmed layering. The documentation gives
+      no weights; the metric uses equal weights 0.25 (see its description). Pattern Anomaly Score (PAS)
+      = |Pattern Similarity Score - Peer Correlation|. Pattern similarity score is a 0-1 score (near 1
+      = high similarity to known illicit patterns; near 0 = does not strongly match known manipulative
+      techniques); it is stored in reg_compliance.pat_rec on a 0-100 scale, so the contract uses pat_rec/100.
+      Layering/Spoofing pattern: layer_idx = ''Confirmed'' OR (spoof_prob > 0.75 AND OMI > 1.0). Wash
+      Trading Alert: wash_flag = ''High''. MOMENTUM IGNITION (ignite_sig): attempts to create false price
+      movement; ''Strong'' clear patterns of manipulative intent, ''Weak'' less evident. MARKING THE CLOSE
+      (close_mark): trading near market close to manipulate the closing price; ''Frequent'' repeated,
+      ''Occasional'' infrequent. This is a prohibited practice. Peer Correlation Z-Score: (record peer_corr
+      - average peer_corr of the trader''s category typeFlag) / standard deviation for that category;
+      0 if the standard deviation is zero or not applicable.
+
+      '
+    tables:
+    - main.manipulation_signals
+    - main.market_conditions
+    - main.order_behaviour
+    - main.reg_compliance
+  - name: insider_events
+    summary: Corporate events, information leakage, options activity, event-driven traders
+    description: 'Information leakage score (corporate_events.leak_score) is 0-100: < 20 little evidence
+      of informed trading; 20-50 moderate, warrants attention; > 50 strongly suggests trading on non-public
+      information and requires investigation. Potential Insider Trading Flag: leak_score > 50.0 AND linked
+      to a corporate event (evt_near IS NOT NULL) AND announcement timing ''Pre-market'' or ''Intraday''.
+      Event-Driven Trader: > 30% of the trader''s transactions linked to a corporate event. UNUSUAL OPTIONS
+      ACTIVITY (uo_act): ''High'' significant deviations, a potential flag for insider information; ''Moderate''
+      some unusual activity, less pronounced; NULL none recorded.
+
+      '
+    tables:
+    - main.corporate_events
+    - main.sentiment_analytics
+    - main.trade_records
+  - name: sentiment_market
+    summary: Sentiment divergence, short interest, option volume
+    description: 'Sentiment Divergence Factor = |news_score - soc_sent|. Relative Short Interest = short_rt
+      / inst_own (undefined if inst_own is 0). Sentiment-Weighted Option Volume = opt_vol * (1 + SDF).
+      Sentiment-Driven Leakage Risk = SWOV * leak_score; > 1000 is a High SDLR Transaction.
+
+      '
+    tables:
+    - main.sentiment_analytics
+    - main.market_conditions
+  - name: network
+    summary: Trader relationship circles and collusion
+    description: 'Collusion Network Indicator: circ_size > 5 AND group behavior score (trader_links->>''grp_score'')
+      > 0.6 AND commPath = ''Regular''. grp_score is stored on a 0-100 scale (observed 0.23-99.87); the
+      documented threshold 0.6 is applied literally, so it is met by almost every non-null score. commPath
+      NULL means not mapped (not ''Regular'').
+
+      '
+    tables:
+    - main.trader_relationships
+  - name: compliance
+    summary: Compliance cases, scrutiny, recidivism, compliance grades, restrictions
+    description: 'Compliance Recidivism Score = prev_viol / Max(1, age_days/365). Investigation Intensity
+      Index = 0.6*behav_score + 0.4*net_score. Elevated Regulatory Scrutiny: alert_lvl ''High'' or ''Critical''
+      AND invest_prior ''High'' AND mon_inten ''Intensive''. Problematic Compliance History: prev_viol
+      > 3 OR comp_rate ''C''/''D'' OR CRS > 1.0. Chronic Compliance Violator: problematic history AND
+      CRS > 1.5. COMPLIANCE RATING GRADE (compliance_data->>''comp_rate''): ''A'' excellent compliance;
+      ''B'' good compliance with minor issues; ''C'' significant compliance deficiencies; ''D'' serious
+      or repeated compliance failures. TRADING RESTRICTION (restrict_win): ''Blackout'' a complete prohibition
+      on trading; ''Special'' other specific restrictions tailored to a case, such as position size limits
+      or pre-trade approvals; NULL not defined.
+
+      '
+    tables:
+    - main.reg_compliance
+    - main.traders
+  - name: enforcement
+    summary: Enforcement actions, penalties, financial impact, resolution rule
+    description: 'Enforcement Financial Impact Ratio = pen_amt / trader account balance (usd_bal) of the
+      trader on the related transaction. Significant Enforcement Action: penalty impact (enf_actions->>''pen_flag'')
+      ''Fine'' or ''Ban'' OR act_taken ''Suspension'' OR biz_restrict ''Full''. Financially Impactful
+      Enforcement Case: significant AND EFIR > 0.1. PREMATURE RESOLUTION BLOCK (business rule): an enforcement
+      action must not be marked ''Resolved'' (enf_actions->>''res_state'') if its linked Investigation
+      Intensity Index is greater than 75, so high-risk cases receive sufficient review.
+
+      '
+    tables:
+    - main.enforcement_actions
+    - main.traders
+  rules:
+  - name: use_declared_definitions
+    description: 'Every documented index, score and flag must be computed with the metric of the same
+      name in semantic.yml (reuse its sql_expression over its from_sql), not an ad-hoc formula.
+
+      '
+    enforcement: warn
+  - name: parenthesise_json_extraction
+    description: 'Wrap every JSON ->> extraction in parentheses before comparing or casting it; ->> binds
+      looser than =, >, IN in DuckDB.
+
+      '
+    enforcement: warn
+  - name: premature_resolution_block
+    description: 'Block an enforcement action from being marked ''Resolved'' if its linked Investigation
+      Intensity Index (0.6*behav_score + 0.4*net_score of the same record) is greater than 75. Records
+      already ''Resolved'' with III > 75 are violations (metric premature_resolution_violation).
+
+      '
+    enforcement: warn

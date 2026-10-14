@@ -66,6 +66,8 @@ ARMS: tuple[str, ...] = (
 #: `contract_compiled` with claudeopus5.5 as the compiler model, without and
 #: with declared joins (`dce.frozen.COMPILED_ARM_DIRS`).
 #:
+#: `manual_summed` is `manual_resolved` plus `SUM_NOTE` (see there).
+#:
 #: `contract_text` is the hand-authored contract's two files, verbatim, in
 #: the prompt, over the ungoverned tools `manual_resolved` has (experiment
 #: 5): the contract's knowledge delivered as a document rather than behind
@@ -81,6 +83,7 @@ EXTRA_ARMS: tuple[str, ...] = (
     "manual_resolved",
     *COMPILED_ARMS,
     "contract_text",
+    "manual_summed",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -97,6 +100,22 @@ DATA_NOTE = (
     "`merchant_category_code` are never null. A rule that applies to all values "
     "of such a field stores an empty list instead. Treat an empty list the way "
     "the manual treats null: the rule applies to all values of that field."
+)
+
+#: The second thing the contract knows that the manual does not, found after
+#: experiment 5's first runs: how the fees of overlapping rules combine. The
+#: manual defines the fee of a transaction under one rule and the null
+#: wildcard, and never says what happens when several rules match one
+#: transaction. The contract's `total_transaction_fees` sums over every matched
+#: (transaction, rule) pair, the gold convention, without marking it as an
+#: INTERPRETATION. `manual_summed` is `manual_resolved` plus this note, so that
+#: it and the contract know the same things again. As with `DATA_NOTE`: the
+#: fact only, in words; fixed before the arm's first run, never reworded.
+SUM_NOTE = (
+    "Several fee rules can match the same transaction; when they do, each of "
+    "them applies. Total fees over a set of transactions are the fees summed "
+    "over every matching (transaction, rule) pair. A transaction that no rule "
+    "matches adds nothing."
 )
 
 #: Introduces the contract files in `contract_text`. Fixed before the arm's
@@ -125,13 +144,15 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
     if arm == "schema_only":
         return ArmSetup(BASE_PROMPT, _ungoverned_tools(db_path), None)
 
-    if arm in ("manual_prompt", "manual_resolved"):
+    if arm in ("manual_prompt", "manual_resolved", "manual_summed"):
         prompt = (
             f"{BASE_PROMPT}\n\n## Domain manual\n\n{docs['manual']}\n\n"
             f"## Payments table reference\n\n{docs['payments_readme']}"
         )
-        if arm == "manual_resolved":
+        if arm in ("manual_resolved", "manual_summed"):
             prompt += f"\n\n## Data note\n\n{DATA_NOTE}"
+        if arm == "manual_summed":
+            prompt += f"\n\n## Fee note\n\n{SUM_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
     if arm == "contract_text":

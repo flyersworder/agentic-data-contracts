@@ -13,6 +13,7 @@ from dce.arms import (
     ARMS,
     DATA_NOTE,
     EXTRA_ARMS,
+    SUM_NOTE,
     build_arm,
     check_and_restore,
     make_working_copy,
@@ -62,6 +63,7 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_compiled_opus",
         "contract_compiled_opus_joins",
         "contract_text",
+        "manual_summed",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -77,6 +79,27 @@ def test_manual_resolved_is_the_manual_prompt_plus_the_data_note(db):
     )
     assert [t.name for t in resolved.tools] == [t.name for t in manual.tools]
     assert resolved.session is None
+
+
+def test_manual_summed_is_manual_resolved_plus_the_sum_note(db):
+    """The second fact the contract carries and the manual lacks: how the
+    fees of overlapping rules combine. Nothing else may differ."""
+    resolved = build_arm("manual_resolved", db, DOCS)
+    summed = build_arm("manual_summed", db, DOCS)
+    assert summed.system_prompt == (
+        f"{resolved.system_prompt}\n\n## Fee note\n\n{SUM_NOTE}"
+    )
+    assert [t.name for t in summed.tools] == [t.name for t in resolved.tools]
+    assert summed.session is None
+
+
+def test_the_sum_note_states_the_convention_and_no_sql():
+    note = " ".join(SUM_NOTE.split())
+    assert "each of them applies" in note
+    assert "every matching (transaction, rule) pair" in note
+    assert "adds nothing" in note
+    assert "SUM(" not in note.upper()
+    assert "SELECT" not in note.upper()
 
 
 def test_contract_text_is_the_whole_contract_in_the_prompt_over_plain_tools(db):

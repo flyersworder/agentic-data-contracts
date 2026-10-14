@@ -219,7 +219,7 @@ uv run python -m dce.stats results/smoke12.jsonl
 | `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data` is LiveSQLBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
-| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved` and `contract_compiled` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
+| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved`, the `contract_compiled*` arms and `contract_text` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
 | `--models` | `z-ai/glm-5.3-flash` | Any subset of the pinned ids in `dce/pricing.py`. An unpinned id is rejected. |
 | `--out` | `results/results.jsonl` (DABStep), `results/<benchmark>/results.jsonl` otherwise | One JSON row per `(task, arm, model)`. Appended to, never rewritten. A file holds one benchmark's rows; pointing a sweep at another benchmark's file is refused. |
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |

@@ -61,6 +61,7 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_compiled",
         "contract_compiled_opus",
         "contract_compiled_opus_joins",
+        "contract_text",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -76,6 +77,29 @@ def test_manual_resolved_is_the_manual_prompt_plus_the_data_note(db):
     )
     assert [t.name for t in resolved.tools] == [t.name for t in manual.tools]
     assert resolved.session is None
+
+
+def test_contract_text_is_the_whole_contract_in_the_prompt_over_plain_tools(db):
+    """Experiment 5: the contract's files verbatim, delivered as text, with
+    the ungoverned tools `manual_resolved` has. Only the route differs from
+    `contract`."""
+    from dce.frozen import CONTRACT_PATH
+
+    text = build_arm("contract_text", db, DOCS)
+    manual = build_arm("manual_resolved", db, DOCS)
+    for name in ("contract.yml", "semantic.yml"):
+        body = (CONTRACT_PATH.parent / name).read_text(encoding="utf-8").strip()
+        assert body in text.system_prompt
+    assert [t.name for t in text.tools] == [t.name for t in manual.tools]
+    assert text.session is None
+    assert DOCS["manual"] not in text.system_prompt
+
+
+def test_contract_text_carries_the_contract_digest():
+    from dce.benchmarks.dabstep import arm_digest
+    from dce.frozen import digest
+
+    assert arm_digest("contract_text") == digest()
 
 
 def test_the_data_note_states_the_fact_and_no_sql():

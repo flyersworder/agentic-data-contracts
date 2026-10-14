@@ -21,6 +21,7 @@ from dce.compile.entries import KBEntry
 from dce.compile.inputs import CompileInputs
 from dce.data import DATASET_REVISION
 from dce.frozen import (
+    CONTRACT_PATH,
     compiled_digest,
     digest,
     hollow_digest,
@@ -64,6 +65,12 @@ ARMS: tuple[str, ...] = (
 #: `contract_compiled_opus` and `contract_compiled_opus_joins` are
 #: `contract_compiled` with claudeopus5.5 as the compiler model, without and
 #: with declared joins (`dce.frozen.COMPILED_ARM_DIRS`).
+#:
+#: `contract_text` is the hand-authored contract's two files, verbatim, in
+#: the prompt, over the ungoverned tools `manual_resolved` has (experiment
+#: 5): the contract's knowledge delivered as a document rather than behind
+#: the governed tools, so it separates what the contract says from how the
+#: agent reaches it.
 COMPILED_ARMS: tuple[str, ...] = (
     "contract_compiled",
     "contract_compiled_opus",
@@ -73,6 +80,7 @@ EXTRA_ARMS: tuple[str, ...] = (
     "contract_uninterpreted",
     "manual_resolved",
     *COMPILED_ARMS,
+    "contract_text",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -89,6 +97,14 @@ DATA_NOTE = (
     "`merchant_category_code` are never null. A rule that applies to all values "
     "of such a field stores an empty list instead. Treat an empty list the way "
     "the manual treats null: the rule applies to all values of that field."
+)
+
+#: Introduces the contract files in `contract_text`. Fixed before the arm's
+#: first run.
+CONTRACT_TEXT_NOTE = (
+    "The data contract for this database follows: its two files, verbatim. "
+    "They define the tables, the metrics as SQL, and how the domain's rules "
+    "are to be read."
 )
 
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
@@ -116,6 +132,15 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         if arm == "manual_resolved":
             prompt += f"\n\n## Data note\n\n{DATA_NOTE}"
+        return ArmSetup(prompt, _ungoverned_tools(db_path), None)
+
+    if arm == "contract_text":
+        files = "\n\n".join(
+            f"### {path.name}\n\n```yaml\n"
+            f"{path.read_text(encoding='utf-8').strip()}\n```"
+            for path in (CONTRACT_PATH, CONTRACT_PATH.parent / "semantic.yml")
+        )
+        prompt = f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
     if arm in GOVERNED_ARMS:

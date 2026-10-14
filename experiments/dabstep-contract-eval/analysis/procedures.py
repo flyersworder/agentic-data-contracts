@@ -1,0 +1,144 @@
+"""Experiment 4: a controlled test of knowledge type.
+
+Reproduces FINDINGS.md, *Knowledge type, controlled: predictions (22)-(24)*.
+Three LiveSQLBench databases each carry a rule-matching procedure (R) and a
+composite (C), both determined by their text (`prep/procedures/`); ten
+matched questions per piece per database, 60 in all. Arms schema_only,
+manual_prompt, manual_compiled and contract (the dce.author contract,
+checked against the reference implementation), on gpt-6-luna and
+gpt-6-sol, k=3, run together in each repeat.
+
+A task scores 0-6 per arm (two models, three repeats); sign tests are over
+tasks.
+
+  (22) On R, contract beats manual_prompt: one-sided sign test p < 0.05.
+  (23) On C, contract and manual_prompt tie: within 5 points and two-sided
+       sign test p >= 0.10.
+  (24) The delivery gain (contract minus manual_prompt, per task) is larger
+       on R than on C: one-sided permutation test p < 0.05 (100,000
+       relabellings, seed 2026).
+
+Manipulation check, reported with them: manual_prompt beats schema_only on
+R and on C (the questions need the knowledge). Secondary: each model alone;
+manual_compiled against manual_prompt and contract; each database.
+
+Run:  uv run python analysis/procedures.py
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+from scipy.stats import binomtest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from dce.stats import load  # noqa: E402
+
+RESULTS = ROOT / "results" / "procedures"
+MODELS = {"gpt-6-luna": "exp4-luna-r{}.jsonl", "gpt-6-sol": "exp4-sol-r{}.jsonl"}
+ARMS = ("schema_only", "manual_prompt", "manual_compiled", "contract")
+TIE_POINTS = 0.05
+PIECE = re.compile(r"_([RC])\d+$")
+
+
+def piece_of(task_id: str) -> str:
+    m = PIECE.search(task_id)
+    if not m:
+        raise ValueError("not an experiment 4 task id: " + task_id)
+    return m.group(1)
+
+
+def pool(files: list[list[dict]]) -> dict[str, Counter[str]]:
+    """arm -> task -> correct runs, over every file given."""
+    score: dict[str, Counter[str]] = {}
+    for rows in files:
+        for r in rows:
+            score.setdefault(r["arm"], Counter())[r["task_id"]] += (
+                r["verdict"] == "correct"
+            )
+    return score
+
+
+def is_tie(gap: float, p: float) -> bool:
+    return abs(gap) <= TIE_POINTS and p >= 0.10
+
+
+def _sign(score, a: str, b: str, tasks, alternative: str):
+    up = sum(score[a][t] > score[b][t] for t in tasks)
+    down = sum(score[a][t] < score[b][t] for t in tasks)
+    n = up + down
+    p = binomtest(up, n, 0.5, alternative=alternative).pvalue if n else 1.0
+    return up, down, p
+
+
+def _acc(score, arm: str, tasks, runs: int) -> float:
+    return sum(score[arm][t] for t in tasks) / (runs * len(tasks))
+
+
+def report(score, runs: int, label: str) -> dict:
+    tasks = sorted(score["contract"])
+    by = {p: [t for t in tasks if piece_of(t) == p] for p in ("R", "C")}
+    print(f"== {label}: {len(tasks)} tasks, {runs} runs each")
+    for p, ts in by.items():
+        print(
+            f"   {p} ({len(ts)}): "
+            + "  ".join(f"{a} {_acc(score, a, ts, runs):.1%}" for a in ARMS)
+        )
+        for a, b in (
+            ("manual_prompt", "schema_only"),
+            ("contract", "manual_prompt"),
+            ("manual_compiled", "manual_prompt"),
+            ("contract", "manual_compiled"),
+        ):
+            up, down, pv = _sign(score, a, b, ts, "two-sided")
+            print(f"      {a} vs {b}: {up} / {down}, two-sided p = {pv:.2g}")
+    return by
+
+
+def main() -> None:
+    from procedural_load import permutation_p
+
+    files = {
+        m: [load(RESULTS / pattern.format(i)) for i in (1, 2, 3)]
+        for m, pattern in MODELS.items()
+    }
+    for model, rows in files.items():
+        report(pool(rows), 3, model)
+    score = pool([r for rows in files.values() for r in rows])
+    runs = 3 * len(MODELS)
+    by = report(score, runs, "both models")
+    r, c = by["R"], by["C"]
+    up, down, p22 = _sign(score, "contract", "manual_prompt", r, "greater")
+    print(f"(22) {'holds' if p22 < 0.05 else 'fails'}: {up} / {down}, p = {p22:.2g}")
+    up, down, p23 = _sign(score, "contract", "manual_prompt", c, "two-sided")
+    gap = _acc(score, "contract", c, runs) - _acc(score, "manual_prompt", c, runs)
+    print(
+        f"(23) {'holds' if is_tie(gap, p23) else 'fails'}: gap {gap:+.1%}, "
+        f"{up} / {down}, two-sided p = {p23:.2g}"
+    )
+    gains = {
+        t: (score["contract"][t] - score["manual_prompt"][t]) / runs for t in r + c
+    }
+    p24 = permutation_p(gains, r, c)
+    diff = sum(gains[t] for t in r) / len(r) - sum(gains[t] for t in c) / len(c)
+    print(
+        f"(24) {'holds' if p24 < 0.05 else 'fails'}: gain R minus C "
+        f"{diff:+.3f}, one-sided permutation p = {p24:.2g}"
+    )
+    for db in sorted({t.rsplit("_", 1)[0] for t in r + c}):
+        ts = [t for t in r + c if t.rsplit("_", 1)[0] == db]
+        for p in ("R", "C"):
+            sub = [t for t in ts if piece_of(t) == p]
+            manual = _acc(score, "manual_prompt", sub, runs)
+            contract = _acc(score, "contract", sub, runs)
+            print(f"   {db} {p}: manual_prompt {manual:.0%} contract {contract:.0%}")
+
+
+if __name__ == "__main__":
+    main()

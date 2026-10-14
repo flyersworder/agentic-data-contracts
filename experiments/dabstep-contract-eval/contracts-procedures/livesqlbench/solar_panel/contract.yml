@@ -1,0 +1,268 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: solar_panel, author: claudeopus5.5
+version: '1.0'
+name: solar-panel
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Solar plant fleet: plants, panel models, per-snapshot records (plant_record) with one-to-one
+      JSON snapshots (electrical_performance, environmental_conditions, mechanical_condition), operational_metrics
+      and alert per snapshot, an inspection table (4 rows, one per inspection mode, NOT linked to any
+      plant or snapshot), and the module warranty settlement schedule (warranty_settle_rules, 520 rules).'
+    preferred: true
+    tables:
+    - plants
+    - panel_models
+    - plant_panel_model
+    - plant_record
+    - electrical_performance
+    - environmental_conditions
+    - mechanical_condition
+    - operational_metrics
+    - alert
+    - inspection
+    - warranty_settle_rules
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_access
+    summary: 'How the data is stored: joins, JSON paths, text-encoded numbers, NULLs'
+    description: 'JOINS. A snapshot is a row of plant_record (998 rows, snapkey). Its plant is plants.sitekey
+      = plant_record.sitetie (every snapshot has a plant). The plant''s panel model is panel_models.modkey
+      = plants.modhook (every plant has one). The plant_panel_model bridge table exists but the documented
+      definitions use plants.modhook, not plant_panel_model. electrical_performance.snaplink, environmental_conditions.snapref,
+      mechanical_condition.snapmk, operational_metrics.snapops and alert.snapalrt each equal plant_record.snapkey,
+      one row per snapshot (998 each). JSON. The three snapshot columns are DuckDB JSON. Read a field
+      as text with ->> and cast: (e.elec_perf_snapshot->''energy_yield''->>''energy_yield_kwh'')::DOUBLE.
+      ALWAYS wrap a JSON access in parentheses before comparing it ((x->''a''->>''b'') = ''v''): without
+      them DuckDB''s operator precedence applies = / AND to the wrong operand and the query fails with
+      a conversion error. Some numbers are stored as JSON integers (e.g. specific_yield_kwh_kw = 6), so
+      always go through ->> and a cast to DOUBLE before arithmetic. JSON null comes back as SQL NULL through
+      ->>. TEXT-ENCODED VALUES (verified): operational_metrics.revloss is text like ''$13,375.59 '' (dollar
+      sign, thousands commas, trailing space) - parse with CAST(replace(replace(trim(revloss),''$'',''''),'','','''')
+      AS DOUBLE); all rows parse. alert.alrtcnt is text like ''6 events'' (0-9) - parse with CAST(regexp_replace(alrtcnt,''[^0-9]'','''',''g'')
+      AS INTEGER). panel_models.nomoptempc is text like ''45.7 °C''. efficiency.spectral_mismatch is text
+      like ''100.50%'' (percent, i.e. factor 1.005). iv_curve.series_res_ohm is text like ''0.17 Ω''.
+      NULLS (verified): alert.alrtstate NULL in 594 rows (no alert state; never empty string), alert.maintprio
+      NULL in 399, plants.warrstate NULL in 378, panel_models.makertag NULL in 228 models, operational_metrics.mtbfh
+      NULL in 400, panel_models.tempcoeff has NULLs, energy_yield.performance_ratio NULL in 400, power.power_now_w
+      NULL in 400, power.power_loss_w NULL in 398, cell_temp_c NULL in 398. NULL means the encoder did
+      not report the value or data is missing. DATES. plant_record.snapts runs 2015-03 to 2025-02; plants.goliveon
+      2015-03 to 2024-02. 445 snapshots are dated BEFORE their plant''s goliveon, so age-based metrics
+      can be negative for them.
+
+      '
+    tables:
+    - main.plant_record
+    - main.plants
+    - main.panel_models
+    - main.electrical_performance
+    - main.environmental_conditions
+    - main.mechanical_condition
+    - main.operational_metrics
+    - main.alert
+    - main.plant_panel_model
+  - name: performance
+    summary: Yield, capacity factor, PR, thermal and inverter losses, power loss
+    description: 'Specific Yield Y_S = E_out / P_rated (E_out kWh, P_rated in kW). Power Capacity Factor
+      CF = E_out / (P_rated x T_period) x 100%, T_period = hours in the period. Performance Ratio PR =
+      Specific Yield / (H_POA / G_ref), H_POA total in-plane irradiance in kWh/m2, G_ref = 1 kW/m2. Soiling
+      Loss Index: percentage reduction in power output caused by soiling (10% = current power 10% lower
+      than if perfectly clean); stored as efficiency.soil_loss_pct. Thermal Loss Factor L_T = (T_cell
+      - T_ref) x |gamma|, T_ref typically 25 C, gamma the panel''s temperature coefficient of power. Temperature-Corrected
+      Performance P_corrected = P_actual / (1 - Thermal Loss Factor). Inverter Efficiency Loss L_inv =
+      100% - inverter efficiency %. System Power Loss Ratio R_loss = P_loss / (P_output + P_loss). Effective
+      Power Output P_eff = P_gross x (1 - System Power Loss Ratio). Underperforming Asset: Performance
+      Ratio below a minimum acceptable threshold, such as 0.75. Severe Soiling Condition: Soiling Loss
+      Index greater than a significant threshold, for example 15% (in this data soil_loss_pct max is 14.99,
+      so no snapshot qualifies at 15). The data stores per-snapshot KPIs in elec_perf_snapshot.energy_yield
+      (energy_yield_kwh, specific_yield_kwh_kw, capacity_factor_pct, performance_ratio, availability_pct);
+      no period-integrated H_POA exists (only instantaneous poa_irr_w_m2), so PR and CF are read from
+      the stored fields. See metrics.
+
+      '
+    tables:
+    - main.electrical_performance
+    - main.environmental_conditions
+    - main.plants
+    - main.panel_models
+  - name: degradation
+    summary: ADR, IV-curve degradation factors, degradation-adjusted capacity, high-degradation models
+    description: 'Annual Degradation Rate ADR = Cumulative Degradation Pct / Age in Years. Fill Factor
+      Degradation FF_deg = FF_initial - FF_now (higher = more degraded). Voltage Degradation Factor V_deg
+      = (Vmp_initial - Vmp_now)/Vmp_initial. Current Degradation Factor I_deg = (Imp_initial - Imp_now)/Imp_initial.
+      Degradation-Adjusted Capacity P_adj = P_rated x (1 - ADR x Age). High Degradation Panel Model: officially
+      specified annual power degradation rate (panel_models.degyrrate, in percent per year) exceeds a
+      threshold, for example 0.7%. Major Module Degradation: multiple signs of severe physical wear present
+      - ''Severe'' busbar corrosion, ''Major'' delamination and a high count of microcracks (e.g. > 5).
+      Accelerated Aging Asset: high ADR AND Major Module Degradation. Lifetime Revenue Loss Projection
+      LRL = ADR x Annual Energy Production x Energy Price x Remaining Lifetime - NOT ENCODABLE as a metric:
+      no energy price, annual production or remaining lifetime is stored; supply them from the question.
+
+      '
+    tables:
+    - main.electrical_performance
+    - main.mechanical_condition
+    - main.panel_models
+    - main.plants
+  - name: reliability_costs
+    summary: Unavailability/availability, OPEX index, maintenance/revenue ratio, mean repair cost
+    description: 'System Unavailability U = MTTR / (MTBF + MTTR). System Availability A = 1 - U (99% means
+      non-operational 1% of the time). Chronic Downtime Asset: System Availability below a critical threshold,
+      for example 95%. Operational Expenditure Index OEI = (C_maint + C_clean + C_replace) / P_rated.
+      High-Cost Asset: OEI exceeds a predefined value (the documentation gives no number - take it from
+      the question and compare operational_expenditure_index to it). Maintenance Cost to Revenue Impact
+      Ratio = Total Maintenance Cost / Total Revenue Loss; < 1 suggests repair cost was less than revenue
+      saved by returning the system to operation. Mean Repair Cost = Total Maintenance Cost / (Total Time
+      / MTBF). MTBF: average operating time before a failure, in hours; high (> 8000 h) = highly reliable,
+      low (< 1000 h) = fails frequently. Note the JSON field energy_yield.availability_pct is a separately
+      stored availability (min 95.0); the documented System Availability is the MTBF/MTTR one.
+
+      '
+    tables:
+    - main.operational_metrics
+    - main.plants
+  - name: condition_flags
+    summary: Tracker, structure, electrical integrity, priority, alert and inspection flags
+    description: 'Tracker Malfunction: tracker_state ''Error'' or ''Maintenance''. Tracker states: ''Normal''
+      (actively tracking), ''Maintenance'' (undergoing service), ''Error'' (malfunctioning), ''Stow''
+      (locked safe due to high wind; not present in data). Structural Integrity Warning: mount_structure_status
+      ''Unstable'' or ''Check Required''. Electrical Integrity Failure: grounding_status ''Failed'' OR
+      bypass_diode_status non-normal (anything other than ''Normal'', i.e. ''Failed'' or ''Partial'').
+      Critical Mechanical Health: Structural Integrity Warning AND Tracker Malfunction simultaneously.
+      High Maintenance Priority: alert.maintprio = ''High''. High Replacement Priority: alert.replprio
+      = ''High''. Critical Alert: BOTH High Maintenance Priority AND High Replacement Priority (this is
+      not the same as alert.alrtstate = ''Critical''). Data Quality Concern: quality score below a minimum,
+      for instance < 50 out of 100 (inspection.dqscore). Overdue Critical Maintenance: inspection result
+      ''Major Issues'' AND maintenance schedule ''Overdue''. Neglected Asset: active Critical Alert AND
+      subject to Overdue Critical Maintenance AND has a Data Quality Concern. Decommissioning Candidate:
+      a plant that is BOTH a Neglected Asset AND a High-Cost Asset (neglected_asset AND operational_expenditure_index
+      > the question''s predefined OEI threshold; no default threshold is documented). INSPECTION LINKAGE:
+      inspection has 4 rows (Visual, IR Thermal, IV Curve, EL Imaging) and no key to plants or snapshots.
+      Only ''IR Thermal'' (Major Issues, Overdue, dqscore 19.9) is overdue-critical and the only row below
+      50. INTERPRETATION: the inspection conditions are evaluated as fleet-level EXISTS over the inspection
+      table, so for asset flags they hold for every snapshot. Busbar corrosion levels: ''None'', ''Light''
+      (minor discoloration), ''Visible'' (clear corrosion of small areas), ''Severe'' (widespread, can
+      disrupt conductivity and reduce output); data holds only ''Visible'', ''Severe'' or NULL.
+
+      '
+    tables:
+    - main.mechanical_condition
+    - main.alert
+    - main.inspection
+    - main.operational_metrics
+  - name: risk_compliance
+    summary: Environmental risk site and warranty claim risk
+    description: 'High Environmental Risk Site: plants.envtag = ''High'' (extreme weather, high pollution
+      or other external risks). Warranty Claim Risk: plants.warrstate = ''Claimed'' AND plants.warrclaims
+      high, e.g. more than 2 (> 2).
+
+      '
+    tables:
+    - main.plants
+  - name: warranty_settlement
+    summary: 'Module warranty settlement: capacity band, claim volume tier, rule match, amount'
+    description: 'Settlement Capacity Band from plants.cap_mw of the snapshot''s plant: ''Small'' if cap_mw
+      < 100; ''Mid'' if 100 <= cap_mw < 300; ''Large'' if cap_mw >= 300 (exactly 100 is Mid, exactly 300
+      is Large). Manufacturer Monthly Claim Volume V_s: number of plant_record rows with the same calendar
+      month (year+month of snapts) and the same manufacturer group as s, s included (V_s >= 1). Manufacturer
+      group = panel_models.makertag via plants.modhook (NOT plant_panel_model); NULL makertag forms group
+      ''Unlisted''. Claim Volume Tier: ''Single'' if V_s = 1; ''Moderate'' if 2 or 3; ''Bulk'' if >= 4.
+      Rule match: a criterion is satisfied when it is NULL (matches anything, including missing) or equals
+      the snapshot value exactly: maker_tag vs makertag, pnl_kind vs pnlkind, alrt_state vs alert.alrtstate,
+      warr_state vs plants.warrstate, cap_band vs Settlement Capacity Band, vol_tier vs Claim Volume Tier.
+      A non-NULL criterion is never satisfied by a NULL snapshot value (''Unlisted'', no alert state,
+      no warranty state satisfy only a NULL criterion). A rule matches when all six are satisfied. Specificity
+      = number of non-NULL criteria (0-6); highest specificity governs, tie -> lowest rule_id. No match
+      -> Standard Settlement Terms: fixed fee 300.00 USD and cover 5.00%, used in place of fixed_fee_usd
+      and cover_pct, rule reported as none (NULL). Settlement amount S = F + c/100 x C_repl (F fixed_fee_usd,
+      c cover_pct of the governing rule or standard terms, C_repl operational_metrics.replcost in USD,
+      NULL as 0). Not rounded per snapshot; every plant_record row is settled; totals (e.g. a manufacturer''s
+      monthly settlement by group incl. ''Unlisted'' and calendar month of snapts) sum unrounded amounts
+      and round only the result to 2 decimals. Use the metric warranty_settlement_amount and its from_sql.
+
+      '
+    tables:
+    - main.warranty_settle_rules
+    - main.plant_record
+    - main.plants
+    - main.panel_models
+    - main.alert
+    - main.operational_metrics
+  - name: energy_loss
+    summary: Potential yield, recoverable loss, technology monthly loss ratio and band
+    description: 'Potential Snapshot Yield E_pot = E / ((A/100) x (1 - L_soil/100)), E = energy_yield.energy_yield_kwh,
+      A = energy_yield.availability_pct, L_soil = efficiency.soil_loss_pct from electrical_performance.elec_perf_snapshot;
+      read via ->> and cast to DOUBLE (some are stored as integers). kWh; A and L_soil are 0-100 percentages.
+      Any of the three NULL -> no potential yield. Not rounded. Recoverable Energy Loss E_loss = E_pot
+      - E, defined only where E_pot is. Technology Monthly Energy Loss Ratio R = 100 x SUM(E_loss)/SUM(E_pot)
+      per panel technology (panel_models.pnlkind via plants.modhook, not plant_panel_model) and calendar
+      month (year+month of snapts), over snapshots having E_pot. A ratio of sums, not an average of ratios,
+      so snapshots with more potential energy weigh more. Report rounded to 2 decimals, classify unrounded.
+      A technology with no snapshot in a month has no ratio (not zero). Energy Loss Band (unrounded R):
+      ''Low'' R < 6; ''Moderate'' 6 <= R < 10; ''Elevated'' 10 <= R < 14; ''Severe'' R >= 14; it belongs
+      to the technology-month and every snapshot in that group carries it. Technology Recoverable Energy
+      E_rec = SUM(E_loss) over a technology''s snapshots whose snapts is in the period, kWh, rounded to
+      2 decimals only after summing; over a month it is R''s numerator. Interpretation: R = 12% means
+      of every 100 kWh that could have been yielded with full availability and clean panels, 12 kWh were
+      lost and 88 delivered. Below 6% indicates a well-maintained clean fleet; 14% or more points to systematic
+      soiling or downtime that cleaning or repair should address.
+
+      '
+    tables:
+    - main.electrical_performance
+    - main.plant_record
+    - main.plants
+    - main.panel_models
+  - name: reference_values
+    summary: Meaning of power factor, temp coefficient, fill factor, UV, DQS, NOCT, THD
+    description: 'Power Factor: dimensionless, -1 to 1, real power / apparent power; 1.0 perfect, 0.95
+      typical for high-efficiency systems; lower = more reactive power, which does no work. Temperature
+      Coefficient of Power: power decrease per degree C above reference (usually 25 C); typical -0.39
+      %/C (output drops 0.39% per 1 C rise). IV Curve Fill Factor: squareness of the IV curve, ratio of
+      maximum actual power to theoretical maximum power; higher (e.g. > 0.8) = higher quality cell with
+      low internal losses. UV Index: open-ended scale, 1-2 Low, 3-5 Moderate, 6-7 High, 8-10 Very High,
+      11+ Extreme. Data Quality Score: typically 0-100, assessing quality, completeness and consistency;
+      95-100 high quality; below 50 might be unreliable. NOCT: temperature of open-circuited cells under
+      800 W/m2 irradiance, 20 C ambient, 1 m/s wind; typical about 45 C; more realistic than STC. Total
+      Harmonic Distortion: ratio of the sum of the powers of all harmonics to the power of the fundamental;
+      low (< 5%) desirable, higher may harm connected equipment.
+
+      '
+    tables:
+    - main.electrical_performance
+    - main.environmental_conditions
+    - main.panel_models
+    - main.inspection
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Compute documented KPIs, flags, settlement amounts and energy-loss ratios with the metric
+      SQL in semantic.yml (joins via plants.modhook, JSON via ->> and DOUBLE casts, parsed text values)
+      rather than ad-hoc formulas.
+
+      '
+    enforcement: warn
+  - name: round_only_final
+    description: 'Settlement amounts, energy-loss ratios and recoverable energy are summed unrounded;
+      round only the reported result to 2 decimal places. Classify bands on unrounded values.
+
+      '
+    enforcement: warn

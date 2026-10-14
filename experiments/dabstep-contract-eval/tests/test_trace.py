@@ -1,6 +1,7 @@
 """Transcripts: they capture what a row cannot, and they never cost a row."""
 
 import gzip
+import json
 from pathlib import Path
 
 from dce.trace import MAX_TRACE_BYTES, read_trace, trace_name, write_trace
@@ -357,3 +358,33 @@ def test_reasoning_tokens_degrade_to_zero_rather_than_breaking_a_paid_row():
     assert _reasoning_tokens(NoDetails()) == 0
     assert _reasoning_tokens(Weird()) == 0
     assert _reasoning_tokens(None) == 0
+
+
+def test_provider_urls_are_dropped_from_dumped_messages():
+    """A response's provider_url names the gateway's host, which must not
+    reach a committed log or a published trace."""
+    from dce.trace import drop_provider_urls
+
+    dumped = [
+        {"kind": "response", "provider_url": "https://internal.example", "parts": []},
+        {"kind": "request", "parts": [{"content": "provider_url stays in text"}]},
+    ]
+    assert drop_provider_urls(dumped) == [
+        {"kind": "response", "parts": []},
+        {"kind": "request", "parts": [{"content": "provider_url stays in text"}]},
+    ]
+
+
+def test_a_written_trace_carries_no_provider_url(tmp_path):
+    from dce.trace import read_trace, write_trace
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    message = ModelResponse(
+        parts=[TextPart("hi")], provider_url="https://internal.example"
+    )
+    rel = write_trace(
+        tmp_path / "t", task_id="1", arm="a", model="m", messages=[message]
+    )
+    assert rel is not None
+    text = json.dumps(read_trace(tmp_path / rel))
+    assert "internal.example" not in text

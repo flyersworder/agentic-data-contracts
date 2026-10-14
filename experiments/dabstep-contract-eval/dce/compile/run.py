@@ -278,6 +278,7 @@ def claude_driver(
 
     from dce import agent as agent_module
     from dce.pricing import cost
+    from dce.trace import drop_provider_urls
 
     agent = agent_module._default_agent_factory(
         model=model,
@@ -330,6 +331,8 @@ def claude_driver(
     if fatal:
         out["fatal"] = True
     return DriverResult(
-        messages=ModelMessagesTypeAdapter.dump_python(messages, mode="json"),
+        messages=drop_provider_urls(
+            ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+        ),
         usage=out,
     )

@@ -59,6 +59,20 @@ def _slug(value: str) -> str:
     return _SLUG.sub("-", str(value)).strip("-") or "unknown"
 
 
+def drop_provider_urls(value):
+    """`value` (dumped model messages) without any `provider_url` key: a
+    response records the URL of the provider it came from, which names the
+    gateway's host, and neither a committed log nor a published trace may
+    carry it. Text that merely mentions the word is left alone."""
+    if isinstance(value, dict):
+        return {
+            k: drop_provider_urls(v) for k, v in value.items() if k != "provider_url"
+        }
+    if isinstance(value, list):
+        return [drop_provider_urls(v) for v in value]
+    return value
+
+
 def trace_name(task_id: str, arm: str, model: str) -> str:
     """The (task, arm, model) triple is the same key `dce.runner` resumes on,
     so a trace is findable from a result row without an index."""
@@ -85,7 +99,13 @@ def write_trace(
         directory = Path(trace_dir)
         directory.mkdir(parents=True, exist_ok=True)
         try:
-            payload = ModelMessagesTypeAdapter.dump_json(messages)
+            payload = json.dumps(
+                drop_provider_urls(
+                    ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+                ),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
         except Exception:
             # A transcript pydantic-ai cannot serialise is still worth
             # something: fall back to a readable shape rather than no trace.

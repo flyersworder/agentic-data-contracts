@@ -924,6 +924,65 @@ in these three LiveSQLBench KBs plays that role. The order-only tasks, where
 `manual_prompt` solves 2 of 5 every repeat and the contract arms almost
 none, are too few to read.
 
+### Knowledge reuse: not what separates the benchmarks
+
+An account that fits both benchmarks after the fact: a contract pays when one
+piece of knowledge is needed by many tasks, is easy to get wrong from the
+prose, and can be held exactly as a definition. DABStep's fee formula is all
+three. The first condition is countable without a run
+(`analysis/knowledge_reuse.py`; aggregates of the private mapping only).
+
+On DABStep the fee-matching procedure (which fee rules apply to a payment or
+merchant) answers every one of the 11 macro families, 176 of 401 tasks (44%).
+Split three ways, gpt-6-luna, k=3 (`manual_prompt` and `contract` from
+`luna-resolved`, the compiles from experiment 1):
+
+| tasks | n | manual_prompt | contract | Sonnet compile | Opus compile | Opus + joins |
+|---|---:|---:|---:|---:|---:|---:|
+| fee matching: rule-set / total-fee | 105 | 13.0% | 98.1% | 16.8% | 14.9% | 92.7% |
+| fee matching: the other five families | 71 | 60.1% | 95.3% | 70.9% | 68.1% | 92.5% |
+| no family | 225 | 55.7% | 68.7% | 54.1% | 56.0% | 64.0% |
+
+About half of the 12 points the joins added outside "the fee families" in
+(8) comes from the other five fee families (one-table Opus compile 68.1%,
+with joins 92.5%); the other half is spread over the 225 tasks with no
+family (56.0% to 64.0%).
+
+On LiveSQLBench a task's knowledge is the KB entries its gold uses, closed
+over the entries they are defined in terms of. Reuse is not low once the
+size of a database is allowed for. Of 1,369 entries, 555 serve some primary
+task; most serve one (340), 35 serve five or more, and none more than ten. But a
+database has 14 primary tasks on average, and its most reused entry serves a
+median 32% of them (18% to 62%), against DABStep's 44%. And the contract's
+gain does not rise with reuse, on either model: binned by the task's most
+reused entry, `contract` minus `manual_prompt` is within noise in every bin
+(luna, 5+ tasks: 33.0% against 30.2%, 10 tasks to 6; Qwen, 3-4 tasks: 35.4%
+against 40.0%, 4 to 12, p = 0.08).
+
+The second condition is there too. On 63 primary tasks (luna; 72 on Qwen)
+some entry serves three or more tasks and the manual is right in at most a
+fifth of their runs: knowledge that is reused and failed from the prose.
+There the compiled contract does not rescue it: schema-only 6.3%, manual
+7.9%, contract 12.2% (Qwen: 8.8%, 7.9%, 9.7%). The selection is on the
+manual's failures, which flatters every other arm, so even that small gain
+is an upper bound. As on DABStep, the knowledge the prose gets wrong is the
+knowledge the Sonnet compiler gets wrong: 23 of the 63 need an entry it
+refused (group B; 25% of all tasks, 37% of these) and 19 one the blind review
+judged materially wrong (group C; 16% of all, 30% here). Only 14 are in group
+A.
+
+The difference is the third condition. On DABStep a stronger author repairs
+the knowledge and the tasks follow (15% to 93%). On the 29 of these tasks in
+experiment 2's databases, it does not: manual 9.2%, Sonnet compile 16.1%,
+Opus compile 17.2%, Opus author 10.3%. And schema-only is as good as the
+manual on them (6.3% against 7.9%): the manual's text adds nothing on these
+tasks either. Either the Opus definitions of this knowledge are wrong as
+well (they have not been reviewed), or what fails on these tasks is not the
+knowledge. Reuse, then, is not what separates the benchmarks, and "hard
+knowledge the contract holds correctly" is so far shown only on DABStep. Which
+of the two it is on LiveSQLBench is the question a failure audit of these
+tasks would settle.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by
@@ -2791,6 +2850,7 @@ uv run python analysis/leniency.py                        # exposure + transfer
 uv run python analysis/group_consistency.py               # the gold-free check
 uv run python analysis/replay.py                          # answer vs its own query
 uv run python analysis/stronger_author.py                 # predictions (7)-(12)
+uv run python analysis/knowledge_reuse.py                 # reuse; needs the private LSB mapping
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

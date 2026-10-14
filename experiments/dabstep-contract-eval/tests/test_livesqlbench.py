@@ -271,6 +271,23 @@ def test_builds_from_its_command_line_flag(data):
     assert [t.task_id for t in LiveSQLBench.from_args(args).tasks()][0] == "shop_1"
 
 
+def test_the_contracts_root_has_a_flag(data, tmp_path):
+    """Experiment 4 runs the same arms on its own data and contracts."""
+    import argparse
+
+    from dce.benchmarks.livesqlbench import DEFAULT_CONTRACTS
+
+    parser = argparse.ArgumentParser()
+    LiveSQLBench.add_arguments(parser)
+    args = parser.parse_args(["--lsb-data", str(data)])
+    assert LiveSQLBench.from_args(args)._contracts == DEFAULT_CONTRACTS
+    args = parser.parse_args(
+        ["--lsb-data", str(data), "--lsb-contracts", str(tmp_path / "c")]
+    )
+    bench = LiveSQLBench.from_args(args)
+    assert bench._contract_dir("shop") == tmp_path / "c" / "shop"
+
+
 def test_no_gold_reaches_a_row(bench, data, tmp_path):
     """A full run_task row, through a fake model, carries the gold digest and
     never a gold value."""

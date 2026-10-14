@@ -308,10 +308,23 @@ class LiveSQLBench:
             default=None,
             help="(livesqlbench) run only the tasks on these databases",
         )
+        parser.add_argument(
+            "--lsb-contracts",
+            type=Path,
+            default=DEFAULT_CONTRACTS,
+            help=(
+                "(livesqlbench) the contracts the contract and manual_compiled "
+                "arms load, one folder per database (default: the compiled ones)"
+            ),
+        )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> LiveSQLBench:
-        return cls.from_data(args.lsb_data, dbs=getattr(args, "lsb_dbs", None))
+        return cls.from_data(
+            args.lsb_data,
+            contracts=getattr(args, "lsb_contracts", DEFAULT_CONTRACTS),
+            dbs=getattr(args, "lsb_dbs", None),
+        )
 
     def tasks(self) -> list[Task]:
         return [

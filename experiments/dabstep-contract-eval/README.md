@@ -216,7 +216,7 @@ uv run python -m dce.stats results/smoke12.jsonl
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data` is LiveSQLBench's. |
+| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data`, `--lsb-dbs` and `--lsb-contracts` (the contracts root, one folder per database) are LiveSQLBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
 | `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved`, the `contract_compiled*` arms and `contract_text` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |

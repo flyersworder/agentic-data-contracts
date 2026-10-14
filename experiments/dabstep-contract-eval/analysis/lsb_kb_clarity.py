@@ -16,11 +16,18 @@ Mann-Whitney U, and Fisher's exact test on "ever solved"; overall and within
 the hard (29) and the other (26) tasks. Agreement: Cohen's kappa on
 settled / not settled.
 
+The same test over all 302 primary tasks (`--all`): the other 247 were rated
+the same way (two raters each, plan extended before any of them was read),
+and the outcome is the main runs -- gpt-6-luna and qwen3.8-27b, three
+repeats, the three knowledge arms (18 runs a task). Confound check: if
+undetermined tasks were merely harder, the KB's own gain (knowledge arms
+minus schema_only, per task) would not depend on the group.
+
 Prints aggregates only. Inputs outside the repository (`$LSB_AUDIT`, default
 ~/data/dce-held-results/failure-audit): the two raters' files, the key from
 anonymous id to task, and the hard set's dossier index.
 
-Run:  uv run python analysis/lsb_kb_clarity.py
+Run:  uv run python analysis/lsb_kb_clarity.py [--all]
 """
 
 from __future__ import annotations
@@ -143,5 +150,93 @@ def main() -> None:
         )
 
 
+MAIN_RUNS = {"gpt-6-luna": "luna-r{}", "qwen3.8-27b": "qwen38-r{}"}
+KNOWLEDGE_ARMS = ("manual_prompt", "manual_compiled", "contract")
+
+
+def all_ratings() -> tuple[dict[str, dict], dict[str, dict]]:
+    """task -> rating, for each of the two rater roles, over all 302."""
+    first, second = {}, {}
+    key = json.loads((AUDIT / "blind-key.json").read_text(encoding="utf-8"))
+    a, b = _ratings("A"), _ratings("B")
+    for i, t in key.items():
+        first[t], second[t] = a[i], b[i]
+    key = json.loads((AUDIT / "blind302-key.json").read_text(encoding="utf-8"))
+    for role, out in (("r1", first), ("r2", second)):
+        for path in sorted(AUDIT.glob(f"blind302-{role}-c*.jsonl")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    out[key[r["id"]]] = r
+    return first, second
+
+
+def main_all() -> None:
+    first, second = all_ratings()
+    tasks = sorted(set(first) & set(second))
+    group = {t: consensus(first[t], second[t]) for t in tasks}
+    print(f"== {len(tasks)} primary tasks, two blind raters each")
+    for name, r in (("first", first), ("second", second)):
+        print(
+            f"{name}: "
+            + ", ".join(
+                f"{k} {v}"
+                for k, v in Counter(r[t]["kb_clarity"] for t in tasks).most_common()
+            )
+        )
+    same4 = sum(first[t]["kb_clarity"] == second[t]["kb_clarity"] for t in tasks)
+    k = kappa([settled(first[t]) for t in tasks], [settled(second[t]) for t in tasks])
+    print(
+        f"agreement: four values {same4 / len(tasks):.0%}; "
+        f"settled or not, kappa {k:.2f}"
+    )
+    print(
+        "groups: " + ", ".join(f"{g} {n}" for g, n in Counter(group.values()).items())
+    )
+    score: dict[str, dict[str, Counter[str]]] = {}
+    for model, pattern in MAIN_RUNS.items():
+        s: dict[str, Counter[str]] = {}
+        for i in (1, 2, 3):
+            path = ROOT / "results/livesqlbench" / (pattern.format(i) + ".jsonl")
+            for r in load(path):
+                if r["subset"] == "primary":
+                    s.setdefault(r["arm"], Counter())[r["task_id"]] += (
+                        r["verdict"] == "correct"
+                    )
+        score[model] = s
+    know = {
+        t: sum(score[m][a][t] for m in MAIN_RUNS for a in KNOWLEDGE_ARMS) / 18
+        for t in tasks
+    }
+    base = {t: sum(score[m]["schema_only"][t] for m in MAIN_RUNS) / 6 for t in tasks}
+    gain = {t: know[t] - base[t] for t in tasks}
+    _test(know, group, set(tasks), "knowledge arms")
+    for model in MAIN_RUNS:
+        acc = {t: sum(score[model][a][t] for a in KNOWLEDGE_ARMS) / 9 for t in tasks}
+        _test(acc, group, set(tasks), model)
+    det = [t for t in tasks if group[t] == "determined"]
+    und = [t for t in tasks if group[t] == "undetermined"]
+    p = mannwhitneyu(
+        [gain[t] for t in det], [gain[t] for t in und], alternative="greater"
+    ).pvalue
+    mean = lambda d, ts: sum(d[t] for t in ts) / len(ts)  # noqa: E731
+    print(
+        f"confound check: schema_only {mean(base, det):.0%} determined, "
+        f"{mean(base, und):.0%} undetermined; KB gain {mean(gain, det):+.0%} "
+        f"against {mean(gain, und):+.0%}, Mann-Whitney p={p:.2g}"
+    )
+    for model in MAIN_RUNS:
+        for g, ts in (("determined", set(det)), ("undetermined", set(und))):
+            better = sum(
+                score[model]["contract"][t] > score[model]["manual_prompt"][t]
+                for t in ts
+            )
+            worse = sum(
+                score[model]["contract"][t] < score[model]["manual_prompt"][t]
+                for t in ts
+            )
+            print(f"  {model} {g}: contract vs manual_prompt {better} / {worse}")
+
+
 if __name__ == "__main__":
-    main()
+    main_all() if "--all" in sys.argv[1:] else main()

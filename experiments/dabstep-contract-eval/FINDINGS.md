@@ -1022,7 +1022,35 @@ gives, which of two columns holds a quantity, and per-record against
 per-entity grain. The benchmark's task-to-KB mapping misses what the gold
 uses on 10 or 11 tasks (8 by both raters).
 
-By arm, on determined against undetermined tasks: `manual_prompt` 53% and
+**On all 302 primary tasks.** The blind test was extended to the other 247
+primary tasks, rated the same way by two raters each, with the analysis
+plan extended before any of them was read; the outcome is the main runs
+(gpt-6-luna and qwen3.8-27b, three repeats, the three knowledge arms: 18
+runs a task). Agreement is 83% on the four-way label, kappa 0.79 on
+settled-or-not. Each rater calls the KB clear on 136 and 132 tasks,
+ambiguous on 109 each, contradicted by the gold on 43 and 45, silent on what
+the gold needs on 14 and 16.
+
+| tasks (all 302) | n | knowledge arms, 18 runs | ever solved | schema_only |
+|---|---:|---:|---:|---:|
+| determined | 138 | 60% | 105 of 138 | 39% |
+| undetermined | 132 | 14% | 43 of 132 | 6% |
+| raters split | 32 | 32% | -- | -- |
+
+Determined tasks are solved far more often (one-sided Mann-Whitney
+p = 3e-18; Fisher on ever-solved p = 4e-13), on each model alike (luna 60%
+against 13%, Qwen 60% against 15%). Determined tasks are also easier
+without any knowledge (schema_only 39% against 6%), so part of the gap is
+difficulty. The confound check separates the two: the knowledge's own gain
+over schema_only is larger where the KB settles the gold, +21 points against
++8 (one-sided p = 0.002). Delivery still does not matter there: on
+determined tasks `contract` against `manual_prompt` is 9 tasks to 12 on luna
+and 15 to 13 on Qwen. On LiveSQLBench, then, the knowledge helps where it is
+determined and helps little where it is not, and how it is delivered does
+not change that.
+
+Back on experiment 2's 55 tasks, by arm, on determined against
+undetermined tasks: `manual_prompt` 53% and
 11%, `contract` 58% and 19%, `contract_opus` 69% and 18%,
 `contract_authored` 67% and 12%. On determined tasks the Opus contracts lead
 the manual by 14-16 points, but on 3 tasks to 1 each (two-sided p = 0.62):
@@ -2950,7 +2978,7 @@ uv run python analysis/replay.py                          # answer vs its own qu
 uv run python analysis/stronger_author.py                 # predictions (7)-(12)
 uv run python analysis/knowledge_reuse.py                 # reuse; needs the private LSB mapping
 uv run python analysis/lsb_distinct_regrade.py            # DISTINCT stripping; needs the private golds
-uv run python analysis/lsb_kb_clarity.py                  # blind test; needs the private audit files
+uv run python analysis/lsb_kb_clarity.py [--all]          # blind test (55, or all 302); needs the private audit files
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

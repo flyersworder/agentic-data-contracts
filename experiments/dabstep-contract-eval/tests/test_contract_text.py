@@ -19,8 +19,15 @@ def test_tie_needs_both_a_small_gap_and_no_significant_sign_test():
 
 
 def test_each_model_reads_its_own_repeats():
-    assert ct.FILES["luna"] == "exp5-luna-r{}.jsonl"
-    assert ct.FILES["qwen"] == "exp5-qwen-r{}.jsonl"
+    # luna's manual_summed ran after the other three arms, in its own files,
+    # paired by task and repeat; Qwen's four arms run together.
+    assert ct.FILES["luna"] == ("exp5-luna-r{}.jsonl", "exp5b-luna-r{}.jsonl")
+    assert ct.FILES["qwen"] == ("exp5-qwen-r{}.jsonl",)
+
+
+def test_the_summed_predictions_are_labelled_per_model():
+    assert ct.SUMMED_LABELS == {"luna": ("(28)", "(29)"), "qwen": ("(28Q)", "(29Q)")}
+    assert "manual_summed" in ct.ARMS
 
 
 def test_qwen_predicts_the_tools_add_to_the_text():

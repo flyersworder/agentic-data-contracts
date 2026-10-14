@@ -57,6 +57,13 @@ EXTRA_CONTRACTS: dict[str, Path] = {
     / "livesqlbench",
 }
 
+#: The corrected arms: `manual_prompt` reading a corrected KB, and a governed
+#: arm reading a corrected contract. The corrections are derived from the
+#: gold, so they live with it under `LSB_DATA/corrected/` (`kb/<db>_kb.jsonl`,
+#: `contracts/<db>/`) and never in the repository; a row records them only by
+#: digest.
+CORRECTED_ARMS: tuple[str, ...] = ("manual_corrected", "contract_corrected")
+
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
 SCORER = "lsb-soft-ex-duckdb/3"
@@ -186,8 +193,10 @@ class LiveSQLBench:
         "manual_compiled",
         "contract",
     )
-    extra_arms: tuple[str, ...] = tuple(EXTRA_CONTRACTS)
-    governed_arms: frozenset[str] = frozenset({"contract", *EXTRA_CONTRACTS})
+    extra_arms: tuple[str, ...] = (*EXTRA_CONTRACTS, *CORRECTED_ARMS)
+    governed_arms: frozenset[str] = frozenset(
+        {"contract", *EXTRA_CONTRACTS, "contract_corrected"}
+    )
     roles = {
         "baseline": "schema_only",
         "manual": "manual_prompt",
@@ -213,7 +222,11 @@ class LiveSQLBench:
     ) -> None:
         self._data = data
         self._contracts = contracts
-        self._roots = {"contract": contracts, **(extra_contracts or EXTRA_CONTRACTS)}
+        self._roots = {
+            "contract": contracts,
+            "contract_corrected": data / "corrected" / "contracts",
+            **(extra_contracts or EXTRA_CONTRACTS),
+        }
         self._records = records  # (public task, frozen entry), in file order
         self._gold = gold
 
@@ -347,8 +360,8 @@ class LiveSQLBench:
             return governed_arm(
                 prompt, db, self._contract(name, arm), init_sql=AGENT_INIT_SQL
             )
-        if arm in ("manual_prompt", "manual_compiled"):
-            entries = _read_jsonl(self._db_dir(name) / f"{name}_kb.jsonl")
+        if arm in ("manual_prompt", "manual_compiled", "manual_corrected"):
+            entries = _read_jsonl(self._kb_path(name, arm))
             prompt += "\n\n## Knowledge base\n\n" + render_manual(entries)
             if arm == "manual_compiled":
                 prompt += "\n\n## Compiled definitions\n\n" + render_compiled(
@@ -357,6 +370,11 @@ class LiveSQLBench:
         elif arm != "schema_only":
             raise ValueError(f"unknown arm: {arm!r}; expected one of {self.arms}")
         return ArmSetup(prompt, _ungoverned_tools(db, init_sql=AGENT_INIT_SQL), None)
+
+    def _kb_path(self, db: str, arm: str) -> Path:
+        if arm == "manual_corrected":
+            return self._data / "corrected" / "kb" / f"{db}_kb.jsonl"
+        return self._db_dir(db) / f"{db}_kb.jsonl"
 
     def arm_digest(self, arm: str, task: Task) -> str:
         # Every file the arm's prompt is built from, for the task's database,
@@ -367,6 +385,8 @@ class LiveSQLBench:
             files.append(f"{name}_kb.jsonl")
         folder = self._db_dir(name)
         joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
+        if arm == "manual_corrected":
+            joined += f"\ncorrected kb {_sha256(self._kb_path(name, arm))}"
         if arm == "manual_compiled":
             joined += f"\ncontract {contract_digest(self._contract(name))}"
         elif arm in self.governed_arms:
@@ -396,7 +416,18 @@ class LiveSQLBench:
 
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
         dbs = sorted({t.meta["db"] for t in tasks})
+        if "manual_corrected" in arms:
+            missing = [
+                db for db in dbs if not self._kb_path(db, "manual_corrected").is_file()
+            ]
+            if missing:
+                raise SystemExit(
+                    f"manual_corrected: no corrected KB for {missing} under "
+                    f"{self._data / 'corrected' / 'kb'}"
+                )
         for arm in ("contract", *self.extra_arms):
+            if arm == "manual_corrected":
+                continue
             if arm == "contract":
                 if not {"manual_compiled", "contract"} & set(arms):
                     continue

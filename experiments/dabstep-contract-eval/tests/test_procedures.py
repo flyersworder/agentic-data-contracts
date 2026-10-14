@@ -30,3 +30,12 @@ def test_tie_rule():
     assert pr.is_tie(0.03, 0.5)
     assert not pr.is_tie(0.08, 0.5)
     assert not pr.is_tie(0.0, 0.05)
+
+
+def test_qwen_is_analysed_alone_and_labelled_apart():
+    assert pr.MODEL_SETS["registered"] == {
+        "gpt-6-luna": "exp4-luna-r{}.jsonl",
+        "gpt-6-sol": "exp4-sol-r{}.jsonl",
+    }
+    assert pr.MODEL_SETS["qwen"] == {"qwen3.8-27b": "exp4-qwen-r{}.jsonl"}
+    assert pr.LABEL_SUFFIX == {"registered": "", "qwen": "Q"}

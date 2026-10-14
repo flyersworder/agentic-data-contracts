@@ -25,7 +25,10 @@ Manipulation check, reported with them: manual_prompt beats schema_only on
 R and on C (the questions need the knowledge). Secondary: each model alone;
 manual_compiled; each database.
 
-Run:  uv run python analysis/procedures.py
+`--set qwen` applies the same four tests to qwen3.8-27b alone, k=3 (a task
+scores 0-3), as (22Q)-(25Q): added after gpt-6-luna and gpt-6-sol were seen.
+
+Run:  uv run python analysis/procedures.py [--set registered|qwen]
 """
 
 from __future__ import annotations
@@ -44,7 +47,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dce.stats import load  # noqa: E402
 
 RESULTS = ROOT / "results" / "procedures"
-MODELS = {"gpt-6-luna": "exp4-luna-r{}.jsonl", "gpt-6-sol": "exp4-sol-r{}.jsonl"}
+MODEL_SETS = {
+    "registered": {
+        "gpt-6-luna": "exp4-luna-r{}.jsonl",
+        "gpt-6-sol": "exp4-sol-r{}.jsonl",
+    },
+    "qwen": {"qwen3.8-27b": "exp4-qwen-r{}.jsonl"},
+}
+LABEL_SUFFIX = {"registered": "", "qwen": "Q"}
 ARMS = (
     "schema_only",
     "manual_prompt",
@@ -112,17 +122,28 @@ def report(score, runs: int, label: str) -> dict:
 
 
 def main() -> None:
+    import argparse
+
     from procedural_load import permutation_p
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--set", choices=sorted(MODEL_SETS), default="registered")
+    which = parser.parse_args().set
+    models = MODEL_SETS[which]
+
+    def label(n: int) -> str:
+        return f"({n}{LABEL_SUFFIX[which]})"
 
     files = {
         m: [load(RESULTS / pattern.format(i)) for i in (1, 2, 3)]
-        for m, pattern in MODELS.items()
+        for m, pattern in models.items()
     }
-    for model, rows in files.items():
-        report(pool(rows), 3, model)
+    if len(models) > 1:
+        for model, rows in files.items():
+            report(pool(rows), 3, model)
     score = pool([r for rows in files.values() for r in rows])
-    runs = 3 * len(MODELS)
-    by = report(score, runs, "both models")
+    runs = 3 * len(models)
+    by = report(score, runs, " and ".join(models))
     r, c = by["R"], by["C"]
 
     def per_task(a: str, b: str) -> dict[str, float]:
@@ -139,13 +160,14 @@ def main() -> None:
         )
 
     up, down, p22 = _sign(score, "contract", "manual_styled", r, "greater")
-    print(f"(22) {'holds' if p22 < 0.05 else 'fails'}: {up} / {down}, p = {p22:.2g}")
-    interaction("(23)", "manual_prompt", "manual_styled")
-    interaction("(24)", "contract", "manual_styled")
+    verdict = "holds" if p22 < 0.05 else "fails"
+    print(f"{label(22)} {verdict}: {up} / {down}, p = {p22:.2g}")
+    interaction(label(23), "manual_prompt", "manual_styled")
+    interaction(label(24), "contract", "manual_styled")
     up, down, p25 = _sign(score, "contract", "manual_prompt", r, "two-sided")
     gap = _acc(score, "contract", r, runs) - _acc(score, "manual_prompt", r, runs)
     print(
-        f"(25) {'holds' if is_tie(gap, p25) else 'fails'}: gap {gap:+.1%}, "
+        f"{label(25)} {'holds' if is_tie(gap, p25) else 'fails'}: gap {gap:+.1%}, "
         f"{up} / {down}, two-sided p = {p25:.2g}"
     )
     for db in sorted({t.rsplit("_", 1)[0] for t in r + c}):

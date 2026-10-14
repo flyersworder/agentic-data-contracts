@@ -1,9 +1,9 @@
 """Experiment 5: does the contract need its tools, or only its text?
 
-Reproduces FINDINGS.md, *Text or tools: predictions (20)-(21)*. gpt-6-luna,
-k=3, the 401 golded DABStep tasks; manual_resolved, contract_text (the
-contract's two files verbatim in the prompt, over plain tools) and contract,
-run together in each repeat.
+Reproduces FINDINGS.md, *Text or tools: predictions (20)-(21)* and its
+Qwen replication, *(26)-(27)*. k=3, the 401 golded DABStep tasks;
+manual_resolved, contract_text (the contract's two files verbatim in the
+prompt, over plain tools) and contract, run together in each repeat.
 
 Primary subset: the rule-matching tasks of the procedural-load test, those
 both blind raters marked `rule_matching` (`procedural_load.py`; the ratings
@@ -13,9 +13,15 @@ are private, `$PROCEDURAL_LOAD`).
   (21) contract and contract_text tie there: within 5 points and two-sided
        sign test p >= 0.10.
 
+qwen3.8-27b (`--model qwen`):
+
+  (26) as (20).
+  (27) contract beats contract_text there, one-sided p < 0.05: on a weaker
+       model the governed tools add to the text.
+
 Prints aggregates only.
 
-Run:  uv run python analysis/contract_text.py
+Run:  uv run python analysis/contract_text.py [--model luna|qwen]
 """
 
 from __future__ import annotations
@@ -32,7 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dce.stats import _as_e2e, _graded, load  # noqa: E402
 
-FILES = "exp5-luna-r{}.jsonl"
+FILES = {"luna": "exp5-luna-r{}.jsonl", "qwen": "exp5-qwen-r{}.jsonl"}
+#: model -> (label of the text-vs-prose test, label of the tools-vs-text
+#: test, what the second predicts: a tie, or contract ahead).
+PREDICTIONS = {"luna": ("(20)", "(21)", "tie"), "qwen": ("(26)", "(27)", "greater")}
 ARMS = ("manual_resolved", "contract_text", "contract")
 TIE_POINTS = 0.05
 
@@ -50,10 +59,11 @@ def is_tie(gap: float, p: float) -> bool:
     return abs(gap) <= TIE_POINTS and p >= 0.10
 
 
-def scores() -> dict[str, Counter[str]]:
+def scores(model: str) -> dict[str, Counter[str]]:
     score: dict[str, Counter[str]] = {a: Counter() for a in ARMS}
     for i in (1, 2, 3):
-        for r in _as_e2e(_graded(load(ROOT / "results" / FILES.format(i)))):
+        path = ROOT / "results" / FILES[model].format(i)
+        for r in _as_e2e(_graded(load(path))):
             if r["arm"] in score:
                 score[r["arm"]][str(r["task_id"])] += r["verdict"] == "correct"
     return score
@@ -71,9 +81,15 @@ def _sign(score, a: str, b: str, tasks: set[str], alternative: str):
 
 
 def main() -> None:
+    import argparse
+
     import procedural_load as pl
 
-    score = scores()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", choices=sorted(FILES), default="luna")
+    model = parser.parse_args().model
+    text_label, tools_label, tools_kind = PREDICTIONS[model]
+    score = scores(model)
     tasks = set(score["contract"])
     first = pl.read_ratings(pl.RATINGS, "r1")["dabstep"]
     second = pl.read_ratings(pl.RATINGS, "r2")["dabstep"]
@@ -95,12 +111,17 @@ def main() -> None:
             print(f"    {a} vs {b}: {up} / {down}, two-sided p = {p:.2g}")
     up, down, p20 = _sign(score, "contract_text", "manual_resolved", rm, "greater")
     verdict = "holds" if p20 < 0.05 else "fails"
-    print(f"(20) {verdict}: {up} / {down}, one-sided p = {p20:.2g}")
-    up, down, p21 = _sign(score, "contract", "contract_text", rm, "two-sided")
+    print(f"{text_label} {verdict}: {up} / {down}, one-sided p = {p20:.2g}")
     gap = acc["rule-matching"]["contract"] - acc["rule-matching"]["contract_text"]
+    if tools_kind == "tie":
+        up, down, p = _sign(score, "contract", "contract_text", rm, "two-sided")
+        holds, sided = is_tie(gap, p), "two-sided"
+    else:
+        up, down, p = _sign(score, "contract", "contract_text", rm, "greater")
+        holds, sided = p < 0.05, "one-sided"
     print(
-        f"(21) {'holds' if is_tie(gap, p21) else 'fails'}: gap {gap:+.1%}, "
-        f"{up} / {down}, two-sided p = {p21:.2g}"
+        f"{tools_label} {'holds' if holds else 'fails'}: gap {gap:+.1%}, "
+        f"{up} / {down}, {sided} p = {p:.2g}"
     )
 
 

@@ -1163,6 +1163,85 @@ tasks, and a held-out task meets them only through the benchmark's
 task-to-KB mapping, which the blind raters found off on about one task in
 seven. And 28 held-out tasks make every test here weak.
 
+### Is the gain where the knowledge carries procedure? Predictions (16)-(19)
+
+The account's second condition -- the knowledge is easy to get wrong from
+prose -- had so far been read off the outcome. This test measures it without
+the outcome. Two blind raters per task rated the procedural load (0-3) of the
+knowledge each question needs (`analysis/procedural_load_rubric.md`): 401
+DABStep tasks with `manual_resolved`'s manual, and LiveSQLBench's 302 primary
+tasks with the KB entries the mapping lists. They saw no answer, query,
+contract or result, and the two benchmarks were shuffled together under
+anonymous ids, so each rater used one scale. The plan, the rubric and the
+analysis were committed in `143e009` before any rating existed. The outcome
+is the delivery gain with knowledge held equal: `contract` minus
+`manual_resolved` on DABStep (three models, 9 runs a task); `contract` minus
+`manual_prompt` on LiveSQLBench (luna and Qwen, 6 runs), on the 138 tasks the
+blind clarity test calls determined. A task is high-load at a mean rating of
+2 or more. `analysis/procedural_load.py` prints every number here.
+
+The raters agree closely: quadratic-weighted kappa 0.96 (DABStep) and 0.93
+(LiveSQLBench), kappa 0.82 and 0.86 on high or not. Both are instances of
+one model, though, and on one batch they matched on all 71 loads with
+different notes, so this agreement overstates how reliable a human rater
+would be.
+
+| tasks | n | high-load | prose | contract | gain, high vs other | permutation p |
+|---|---:|---:|---:|---:|---|---:|
+| (16) DABStep | 401 | 239 | 51.0% / 83.0% | 71.7% / 82.9% | +0.207 vs -0.001 | 1e-5 |
+| (17) DABStep, no fee family | 225 | 139 | 41.8% / 91.0% | 54.6% / 89.8% | +0.128 vs -0.012 | 1e-5 |
+| (18) LiveSQLBench, determined | 138 | 39 | 58.1% / 60.6% | 57.3% / 59.8% | -0.009 vs -0.008 | 0.54 |
+
+(Prose and contract give high-load / other accuracy.)
+
+- **(16) holds.** On DABStep the gain sits on the high-load tasks (119
+  tasks to 20) and is zero on the rest.
+- **(17) holds.** The same holds outside the fee-matching families (52 to 8).
+- **(18) fails, with enough tasks to count.** The 39 high-load determined
+  LiveSQLBench tasks gain nothing (8 to 5, p = 0.58). Their prose arm is
+  right 58% of the time, so the null is not a ceiling. Neither secondary
+  split changes this: all 302 tasks (+0.017, p = 0.27), and determined tasks
+  whose needed compiled metrics were judged faithful (21 high-load, 5 to 3,
+  p = 0.6). The compiled contract's own errors do not hide a gain.
+- **(19) holds.** High-load tasks are 60% of DABStep and 48% of LiveSQLBench
+  (p = 0.001). The difference is real but small, and does not explain the
+  null by itself.
+
+As fixed in advance, (16) holding with (18) failing means **procedural load,
+as rated, does not explain LiveSQLBench's null**. The condition holds within
+DABStep and does not carry across.
+
+**Exploratory, chosen after (18) failed.** By load level, the gain is
+confined to the top level, on both benchmarks:
+
+| load (mean of two) | DABStep: n, gain, sign | LiveSQLBench determined: n, gain, sign |
+|---|---|---|
+| 0-0.5 | 71, -0.025, 7 / 13 | 48, -0.003, 7 / 5 |
+| 1-1.5 | 91, +0.017, 34 / 37 | 51, -0.013, 6 / 7 |
+| 2 (a composite) | 40, -0.008, 3 / 6 | 34, -0.025, 6 / 5 |
+| 2.5-3 (a procedure) | 199, +0.250, 116 / 14 | 5, +0.100, 2 / 0 |
+
+Composite knowledge -- several dependent formulas, bands, a change of grain
+-- gains nothing from delivery on either benchmark (DABStep 3 tasks to 6,
+LiveSQLBench 6 to 5). The whole DABStep gain is on the 199 tasks at the top
+level. Those are exactly the tasks both raters marked as matching each
+record against a table of rules, and every one of them is DABStep's fee
+procedure: matching payments to fee rules on several fields, with monthly
+volume and fraud bands and the fee formula. 102 of them lie outside the 11
+macro families, which is why (17) holds (49 tasks to 3 there). LiveSQLBench
+has almost no such knowledge: 4 of its 302 tasks are marked rule matching by
+both raters, and 5 determined tasks reach the top level.
+
+So the second condition, sharpened, is not "complex knowledge" but **a
+procedure that applies rules record by record**. Composite formulas, which
+LiveSQLBench has plenty of, come through prose as well as through a
+contract. The limit is the evidence: on these two benchmarks that kind of
+knowledge is one procedure, DABStep's fee matching. "A rule-matching
+procedure" and "this procedure" cannot be told apart here, and telling them
+apart needs a second, independent procedure -- another benchmark, or one
+built for the purpose. The ratings, the key and the packets stay private
+(they encode the task-to-KB mapping); see `results/README.md`.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

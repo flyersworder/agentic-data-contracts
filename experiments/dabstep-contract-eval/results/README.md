@@ -140,3 +140,14 @@ f0557d7a467241eb, `exp3-luna-r2.jsonl` 6fb46123fb47a077, `exp3-luna-r3.jsonl`
 56fcf98342c585e0, `exp3-smoke.jsonl` 2e69f8f9299985cd. The train / held-out
 split is `livesqlbench/exp3-split.json`. See FINDINGS.md, *Completing the
 knowledge: predictions (13)-(15)*, and `analysis/lsb_corrected.py`.
+
+## Procedural-load ratings (`143e009`) -- kept private, identified here
+
+Two blind raters per task, 703 tasks (401 DABStep, 302 LiveSQLBench
+primary), ten batches each. The LiveSQLBench side lists the KB entries the
+private mapping assigns, so the packets, the key and the ratings stay in
+`~/data/dce-held-results/procedural-load/`. sha256 (first 16 hex) of the
+ratings, each role's ten batches concatenated in order: `rater-r1-c*.jsonl`
+b8cf40deb2b16001, `rater-r2-c*.jsonl` fe17649d857f4938. The inputs are
+identified in `143e009`. See FINDINGS.md, *Is the gain where the knowledge
+carries procedure?*, and `analysis/procedural_load.py`.

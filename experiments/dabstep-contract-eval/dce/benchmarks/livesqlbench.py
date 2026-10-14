@@ -64,6 +64,11 @@ EXTRA_CONTRACTS: dict[str, Path] = {
 #: digest.
 CORRECTED_ARMS: tuple[str, ...] = ("manual_corrected", "contract_corrected")
 
+#: Experiment 4's writing factor: `manual_prompt` reading a KB whose new
+#: entries carry the same knowledge written as a business manual writes it
+#: (`LSB_DATA/styled/kb/<db>_kb.jsonl`; prep/procedures/DESIGN.md).
+STYLED_ARMS: tuple[str, ...] = ("manual_styled",)
+
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
 SCORER = "lsb-soft-ex-duckdb/3"
@@ -193,7 +198,7 @@ class LiveSQLBench:
         "manual_compiled",
         "contract",
     )
-    extra_arms: tuple[str, ...] = (*EXTRA_CONTRACTS, *CORRECTED_ARMS)
+    extra_arms: tuple[str, ...] = (*EXTRA_CONTRACTS, *CORRECTED_ARMS, *STYLED_ARMS)
     governed_arms: frozenset[str] = frozenset(
         {"contract", *EXTRA_CONTRACTS, "contract_corrected"}
     )
@@ -373,7 +378,12 @@ class LiveSQLBench:
             return governed_arm(
                 prompt, db, self._contract(name, arm), init_sql=AGENT_INIT_SQL
             )
-        if arm in ("manual_prompt", "manual_compiled", "manual_corrected"):
+        if arm in (
+            "manual_prompt",
+            "manual_compiled",
+            "manual_corrected",
+            *STYLED_ARMS,
+        ):
             entries = _read_jsonl(self._kb_path(name, arm))
             prompt += "\n\n## Knowledge base\n\n" + render_manual(entries)
             if arm == "manual_compiled":
@@ -387,6 +397,8 @@ class LiveSQLBench:
     def _kb_path(self, db: str, arm: str) -> Path:
         if arm == "manual_corrected":
             return self._data / "corrected" / "kb" / f"{db}_kb.jsonl"
+        if arm in STYLED_ARMS:
+            return self._data / "styled" / "kb" / f"{db}_kb.jsonl"
         return self._db_dir(db) / f"{db}_kb.jsonl"
 
     def arm_digest(self, arm: str, task: Task) -> str:
@@ -400,6 +412,8 @@ class LiveSQLBench:
         joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
         if arm == "manual_corrected":
             joined += f"\ncorrected kb {_sha256(self._kb_path(name, arm))}"
+        if arm in STYLED_ARMS:
+            joined += f"\nstyled kb {_sha256(self._kb_path(name, arm))}"
         if arm == "manual_compiled":
             joined += f"\ncontract {contract_digest(self._contract(name))}"
         elif arm in self.governed_arms:
@@ -438,8 +452,15 @@ class LiveSQLBench:
                     f"manual_corrected: no corrected KB for {missing} under "
                     f"{self._data / 'corrected' / 'kb'}"
                 )
+        for arm in STYLED_ARMS:
+            missing = [db for db in dbs if not self._kb_path(db, arm).is_file()]
+            if arm in arms and missing:
+                raise SystemExit(
+                    f"{arm}: no styled KB for {missing} under "
+                    f"{self._data / 'styled' / 'kb'}"
+                )
         for arm in ("contract", *self.extra_arms):
-            if arm == "manual_corrected":
+            if arm == "manual_corrected" or arm in STYLED_ARMS:
                 continue
             if arm == "contract":
                 if not {"manual_compiled", "contract"} & set(arms):

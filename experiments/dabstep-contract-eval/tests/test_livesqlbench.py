@@ -74,6 +74,7 @@ def test_class_attributes(bench):
         "contract_authored",
         "manual_corrected",
         "contract_corrected",
+        "manual_styled",
     )
     assert LiveSQLBench.governed_arms == frozenset(
         {"contract", "contract_opus", "contract_authored", "contract_corrected"}

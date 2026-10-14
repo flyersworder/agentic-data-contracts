@@ -71,3 +71,25 @@ must know the same things.
 contract's definitions), `contract`, on `gpt-6-luna` and `gpt-6-sol`, k=3,
 run together in each repeat. Graded as LiveSQLBench is (result sets, Soft-EX
 tolerance). Predictions are fixed in the run commit.
+
+## The writing factor (added after the smoke, before the run commit)
+
+The smoke (12 R questions, shapes 1-4, gpt-6-luna) put every knowledge arm
+at 12 of 12: R and C are written as concise, explicit KB entries, and a
+procedure written that way gets through prose. Condition 2 is about
+knowledge that is easy to get wrong *from prose*, which depends on how the
+prose is written as much as on what it says. DABStep's manual states its
+procedure the way manuals do. So the prose arm gets a second version.
+
+- **`manual_styled`**: `manual_prompt` with R's and C's entries replaced by
+  the same knowledge written as a business manual writes it -- an overview
+  addressed to the reader, the rule table's fields described one by one,
+  the matching rule where the narrative reaches it, precedence, defaults and
+  edge cases in later notes, bands and formulas in words with a worked
+  example -- modelled on DABStep's manual. Every fact of the clean version
+  is present, nothing contradicts it, nothing is left open: a checker
+  confirms the facts one by one, and a blind solver with the styled KB
+  must still answer all 60 questions. Read from `LSB_DATA/styled/kb/`.
+- The contract is unchanged (it is the verified definition, whichever
+  prose sits beside it), as is `manual_compiled` (clean KB plus the
+  contract's SQL).

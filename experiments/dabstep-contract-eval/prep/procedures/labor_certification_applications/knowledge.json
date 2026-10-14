@@ -1,0 +1,110 @@
+[
+  {
+    "id": 61,
+    "knowledge": "Case Review Effort Schedule",
+    "description": "Illustrates the rules table that budgets analyst review hours for each labor condition application.",
+    "definition": "The Case Review Effort Schedule is the review_schedule table. Each row is one rule, identified by rule_id, with six matching criteria (visa_class, wage_level, h1b_dependent, soc_major_group, worksite_state, monthly_volume_band) and two amounts: base_hours, reviewer-hours charged once per case, and position_hours, reviewer-hours charged per worker position requested. A NULL criterion is a wildcard: it places no restriction on that attribute.",
+    "type": "value_illustration",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 62,
+    "knowledge": "Employer Monthly Case Volume (EMCV)",
+    "description": "Counts an employer's cases whose employment starts in a given calendar month.",
+    "definition": "EMCV = number of cases of an employer whose Start Month is the given calendar month. Every row of cases counts once, whatever its status or headCt. The employer is the exact text of cases.homeFirm, with no case folding or trimming ('Amazon.com Services LLC' and 'AMAZON.COM SERVICES LLC' are different employers). The Start Month of a case is the calendar year and month of cases.beginDay, the employment begin date, stored as text in DD/MM/YYYY format ('01/04/2024' is 1 April 2024, Start Month April 2024).",
+    "type": "calculation_knowledge",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 63,
+    "knowledge": "Monthly Volume Band",
+    "description": "Bands an employer's monthly case volume for matching against the review schedule.",
+    "definition": "A case's Monthly Volume Band is set by the EMCV of its employer in its Start Month, and is written as in review_schedule.monthly_volume_band: '1' when EMCV = 1; '2-4' when 2 ≤ EMCV ≤ 4; '5-14' when 5 ≤ EMCV ≤ 14; '15+' when EMCV ≥ 15. Both ends of each range are inclusive.",
+    "type": "domain_knowledge",
+    "children_knowledge": [62],
+    "piece": "R"
+  },
+  {
+    "id": 64,
+    "knowledge": "Review Rule Matching",
+    "description": "Defines when a case matches a rule of the Case Review Effort Schedule.",
+    "definition": "A case matches a rule when every non-NULL criterion of the rule equals the case's value, compared as exact text: visa_class against cases.visaCls; wage_level against the 'level' field of the 'prevailing_wage' object in prevailing_wage.wage_details ('I' to 'IV'), reached through the case's single case_worksite row (case_worksite.dockKey = cases.fileKey) and case_worksite.wageTrack = prevailing_wage.trackNo; h1b_dependent against cases.h1bDep; soc_major_group against the first two characters of cases.SocCd ('15' for '15-1253.00'); worksite_state against case_worksite.wsState; monthly_volume_band against the case's Monthly Volume Band. A NULL criterion matches any case value. When the case's own value is NULL (wage level or h1bDep), only a rule whose criterion for that attribute is NULL can match.",
+    "type": "domain_knowledge",
+    "children_knowledge": [61, 63],
+    "piece": "R"
+  },
+  {
+    "id": 65,
+    "knowledge": "Governing Review Rule",
+    "description": "Selects the single rule that charges a case when several rules match, and the default when none does.",
+    "definition": "Among the rules a case matches, the governing rule is the most specific one: the rule with the most non-NULL criteria among its six. If several matching rules tie on that count, the one with the lowest rule_id governs. Only the governing rule's amounts are used; other matching rules are ignored, never added or averaged. A case that matches no rule is charged by the Default Review Schedule, base_hours 3.50 and position_hours 0.50, and has no governing rule_id (NULL).",
+    "type": "domain_knowledge",
+    "children_knowledge": [64],
+    "piece": "R"
+  },
+  {
+    "id": 66,
+    "knowledge": "Case Review Hours (CRH)",
+    "description": "Calculates the reviewer-hours budgeted for one case.",
+    "definition": "CRH = base_hours + position_hours × headCt, where base_hours and position_hours come from the case's Governing Review Rule (or the Default Review Schedule) and headCt is cases.headCt, the worker positions requested. CRH is in reviewer-hours, exact to two decimal places, and is not rounded before it is aggregated.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [65],
+    "piece": "R"
+  },
+  {
+    "id": 67,
+    "knowledge": "Employer Review Load (ERL)",
+    "description": "Aggregates case review hours per employer over a period.",
+    "definition": "ERL = sum of CRH over an employer's cases whose Start Month lies in the period: a calendar month, or a calendar year meaning all twelve Start Months of that year. An average CRH is the sum of CRH divided by the number of cases. Totals and averages are rounded only when reported.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [62, 66],
+    "piece": "R"
+  },
+  {
+    "id": 68,
+    "knowledge": "Annualized Offered and Prevailing Wage (AOW, APW)",
+    "description": "Converts a case's offered and prevailing wages to yearly amounts.",
+    "definition": "Each case reaches its wage record through its single case_worksite row (case_worksite.dockKey = cases.fileKey) and case_worksite.wageTrack = prevailing_wage.trackNo. The offered amount is the 'from' field of the 'offered_wage' object in prevailing_wage.wage_details, text such as '$130000.00': remove '$' and any commas and read the rest as a number ('to' is ignored). The prevailing amount is the 'value' field of the 'prevailing_wage' object, text such as 'USD 116,979.00': remove 'USD ' and any commas. AOW and APW multiply each amount by the factor for the 'unit' field of its own object: Hour 2080, Week 52, Month 12, Year 1. AOW and APW are in US dollars per year; for example, an hourly offer of '$41.00' gives AOW = 41.00 × 2080 = 85,280.",
+    "type": "calculation_knowledge",
+    "children_knowledge": -1,
+    "piece": "C"
+  },
+  {
+    "id": 69,
+    "knowledge": "Wage Headroom Ratio (WHR)",
+    "description": "Measures how far a case's annualized offered wage sits above its annualized prevailing wage, and scores it.",
+    "definition": "WHR = (AOW - APW) / APW, a fraction (0.15 means 15% above the prevailing wage), computed per case without rounding. Headroom Points = 100 × min(max(WHR, 0), 0.40) / 0.40: a WHR at or below 0 earns 0 points, a WHR of 0.40 or more earns 100, and values between scale linearly; for example, a WHR of 0.10 earns 25 points.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [68],
+    "piece": "C"
+  },
+  {
+    "id": 70,
+    "knowledge": "Case Wage Assurance Score (CWAS)",
+    "description": "Scores one case's wage assurance on a 0-100 scale.",
+    "definition": "CWAS = 0.7 × Headroom Points + 0.3 × Level Points. Level Points come from the 'level' field of the 'prevailing_wage' object in prevailing_wage.wage_details: 'I' = 25, 'II' = 50, 'III' = 75, 'IV' = 100, and 50 when the level is NULL. The headroom weight 0.7 and level weight 0.3 sum to 1. CWAS is not rounded. For example, a level 'II' case with a WHR of 0.10 scores 0.7 × 25 + 0.3 × 50 = 32.5.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [69],
+    "piece": "C"
+  },
+  {
+    "id": 71,
+    "knowledge": "Employer Wage Assurance Score (EWAS)",
+    "description": "Aggregates case wage assurance scores to the employer over a period.",
+    "definition": "EWAS = sum(CWAS × headCt) / sum(headCt) over an employer's cases whose Start Month lies in the period, with headCt from cases.headCt (a headcount-weighted average: a case with headCt 3 counts three times as much as a case with headCt 1). The employer is the exact text of cases.homeFirm, with no case folding or trimming. A case's Start Month is the calendar year and month of cases.beginDay, text in DD/MM/YYYY format ('01/04/2024' is April 2024). A period is a calendar month, or a calendar year meaning all twelve Start Months of that year; with no period stated, it is all of the employer's cases. EWAS uses unrounded CWAS values.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [70],
+    "piece": "C"
+  },
+  {
+    "id": 72,
+    "knowledge": "Wage Assurance Tier",
+    "description": "Classifies employers by their Employer Wage Assurance Score.",
+    "definition": "An employer's Wage Assurance Tier for a period follows its unrounded EWAS: 'Thin' when EWAS < 30; 'Adequate' when 30 ≤ EWAS < 45; 'Strong' when 45 ≤ EWAS < 60; 'Exemplary' when EWAS ≥ 60. Lower bounds are inclusive and upper bounds exclusive. A tier exists only for an employer with at least one case in the period. Scores and averages are rounded only when reported.",
+    "type": "domain_knowledge",
+    "children_knowledge": [71],
+    "piece": "C"
+  }
+]

@@ -105,3 +105,25 @@ The same four arms and 375 tasks on `qwen3.8-27b`, at the same run commit
 retried; the loaders keep the last row per pair). Repeat 2 was resumed once
 after the job's volume filled while archiving traces; no row was rerun. See
 FINDINGS.md, *Qwen 3.8: the tie replicates, the two effects do not*.
+
+## `dabstep-opus-luna-r{1,2,3}.jsonl` -- experiment 1, a stronger compiler on DABStep
+
+`contract_compiled`, `contract_compiled_opus`, `contract_compiled_opus_joins`
+and `contract` on `gpt-6-luna`, 401 golded tasks, at the run commit
+`3f60a9c`, k=3, `--retry-pass` on every repeat. Repeats 1 and 2 have one row
+per (task, arm); repeat 3 holds 41 gateway authentication failures (HTTP
+401, $0) followed by their retried rows, and the loaders keep the last. The
+job's volume filled while archiving repeat 3's traces, after its sweep had
+finished; no row was lost or rerun. `dabstep-opus-smoke.jsonl` is the
+12-task smoke run before it. See FINDINGS.md, *A stronger compiler on
+DABStep: predictions (7)-(9)*, and `analysis/stronger_author.py`.
+
+## `livesqlbench/lsb-exp2-luna-r{1,2,3}.jsonl` -- experiment 2, a better-made contract on LiveSQLBench
+
+`manual_prompt`, `contract`, `contract_opus` and `contract_authored` on
+`gpt-6-luna`, the tasks of insider_trading, museum_artifact and cross_border
+(55 `primary`, 5 `order_only`), at the run commit `3e0915a`, k=3,
+`--retry-pass`; one row per (task, arm), no errors. A row carries `gold`, the
+sha256 of the gold result, never the gold itself. `livesqlbench/exp2-smoke.jsonl`
+is the 12-task smoke run before it. See FINDINGS.md, *A better-made contract
+on LiveSQLBench: predictions (10)-(12)*.

@@ -828,6 +828,102 @@ hypothesis 1 over the other two: what a definition is worth depends on whether
 someone got it right, with the data open, and wrote down the procedure the
 tasks turn on.
 
+### A stronger compiler on DABStep: predictions (7)-(9)
+
+Prediction (5) left a question: is the compiled contract's 35-point loss the
+compiler's limit, or the method's? The Sonnet 5 compiler refused the fee
+formula, the procedure the rule-set and total-fee families turn on, and
+allowing declared joins did not change that under Sonnet. With
+`claudeopus5.5` as the compiler model the formula compiles as a declared
+join (`from_sql`, library 0.62). Four arms ran together on `gpt-6-luna`,
+k=3, at the run commit `3f60a9c`: the Sonnet compile and the hand-authored
+contract as controls, and two Opus compiles of the same manual, one with
+one-table metrics only and one with declared joins. 4,853 rows, $14.77.
+Repeat 3 holds 41 gateway authentication failures (HTTP 401, zero turns,
+$0); the retry pass reran every one, and each task ends with a real verdict.
+A local start of repeat 1 that a network drop stopped (239 rows, $0.75) was
+discarded before the cluster run; it is not in these files.
+
+| arm | r1 | r2 | r3 | k=3 | rule-set (60) | total-fee (45) | rest (296) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| contract_compiled (Sonnet 5) | 183 | 194 | 192 | 47.3% | 23.9% | 7.4% | 58.1% |
+| contract_compiled_opus | 190 | 186 | 194 | 47.4% | 26.1% | 0.0% | 58.9% |
+| contract_compiled_opus_joins | 304 | 308 | 309 | 76.6% | 90.0% | 96.3% | 70.8% |
+| contract (hand-authored) | 324 | 319 | 319 | 80.0% | 98.3% | 100.0% | 73.2% |
+
+- **(7) holds.** The Opus compile with declared joins beats the Sonnet
+  compile on 172 tasks and loses on 15 (one-sided p = 3e-35). On the two fee
+  families together it is 76 points above it (92.7% against 16.8%), against
+  the 30 predicted.
+- **(8) holds in part.** Joins beat the one-table Opus compile 168 tasks to
+  18 (p = 5e-32), and the one-table Opus compile is level with Sonnet's
+  (47.4% against 47.3%; 54 tasks to 58). But the difference is not confined
+  to the fee families: on the rest the joins add 12 points (67 tasks to 18,
+  p = 4e-8). About 70% of the difference, in task-runs, is in the two
+  families.
+- **(9) holds.** The hand-authored contract still beats the best compile, 58
+  tasks to 22 (p = 4e-5). The 3.4-point gap splits about evenly: 51% of it
+  on the rest, 49% on the fee families, so "most of it on the rest" holds
+  only just.
+
+The agent uses what it is given: it looks a metric up in 57% of Sonnet-compile
+runs, 64% of one-table Opus runs, 87% with joins and 89% with the hand-written
+contract. A stronger model, writing the same KB entry by entry, closes about
+nine tenths of the gap the Sonnet compile left (29.3 of 32.7 points:
+47.3% to 76.6%, against 80.0%). The step that matters is not the
+stronger model as such -- without joins it gains nothing -- but the stronger
+model together with a contract format that can hold a multi-table procedure.
+
+### A better-made contract on LiveSQLBench: predictions (10)-(12)
+
+LiveSQLBench had no positive control: every contract run there used the
+Sonnet 5 compile, so "contracts do not help here" and "these contracts do not
+help" could not be told apart. Experiment 2 (run commit `3e0915a`) adds two
+contracts made by `claudeopus5.5` for the three databases with the most
+primary tasks (insider_trading, museum_artifact, cross_border; 55 primary
+and 5 order-only tasks): `contract_opus`, the compiler with declared joins,
+and `contract_authored`, one author session per database that read the whole
+KB, explored the data read-only and wrote the whole contract, mapping every
+KB entry to where it is held (`dce.author`; no task, question, gold or result
+was shown). Four arms on `gpt-6-luna`, k=3, paired within each repeat: 720
+rows, $2.44, no errors.
+
+| arm | r1 | r2 | r3 | k=3 (primary) | order-only |
+|---|---:|---:|---:|---:|---:|
+| manual_prompt | 14 | 15 | 11 | 24.2% | 6 / 15 |
+| contract (Sonnet compile) | 15 | 17 | 17 | 29.7% | 0 / 15 |
+| contract_opus | 19 | 18 | 15 | 31.5% | 0 / 15 |
+| contract_authored | 16 | 15 | 15 | 27.9% | 1 / 15 |
+
+- **(10) fails, narrowly.** The sign test is a tie (`contract` vs
+  `manual_prompt` 6 tasks to 2, p = 0.29), but the gap is 5.5 points against
+  the 5 allowed. On these databases the compiled contract does a little
+  better than on all 302 tasks (+0.4 points there).
+- **(11) fails.** `contract_authored` against `contract`: 3 tasks to 4,
+  one-sided p = 0.77.
+- **(12) fails.** `contract_opus` is the highest arm, not between the two;
+  5 tasks to 3 against `contract` (p = 0.73), 5 to 2 against
+  `contract_authored` (p = 0.45).
+
+| database | tasks | manual_prompt | contract | contract_opus | contract_authored |
+|---|---:|---:|---:|---:|---:|
+| cross_border | 17 | 9.8% | 15.7% | 19.6% | 19.6% |
+| insider_trading | 20 | 40.0% | 40.0% | 40.0% | 38.3% |
+| museum_artifact | 18 | 20.4% | 31.5% | 33.3% | 24.1% |
+
+The arms barely disagree: between any two contract arms only 7 or 8 of the
+55 tasks score differently over the three repeats. The agent consults all
+three contracts alike (a metric lookup in 92-93% of runs, 2.0-2.1 a run), so
+the null is not a contract left unread. Within the reach of this test, which
+is small, how the LiveSQLBench contract was made does not matter: entry by
+entry or whole, Sonnet or Opus, it is worth about what the Sonnet compile is.
+On DABStep the same change of author was worth 29 points. The difference is
+in the benchmarks: DABStep's tasks turn on one procedure (the fee formula)
+that the manual states badly and a contract can hold exactly, and nothing
+in these three LiveSQLBench KBs plays that role. The order-only tasks, where
+`manual_prompt` solves 2 of 5 every repeat and the contract arms almost
+none, are too few to read.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by
@@ -2694,6 +2790,7 @@ uv run python analysis/gold_disagreement.py                # the 19, and why
 uv run python analysis/leniency.py                        # exposure + transfer
 uv run python analysis/group_consistency.py               # the gold-free check
 uv run python analysis/replay.py                          # answer vs its own query
+uv run python analysis/stronger_author.py                 # predictions (7)-(12)
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

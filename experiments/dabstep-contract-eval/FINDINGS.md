@@ -1109,6 +1109,60 @@ Soft-EX rules, which the grader reproduces exactly:
 - **Gold on mock rows.** One gold runs on hard-coded inline rows, not the
   database, with a threshold that contradicts its question.
 
+### Completing the knowledge: predictions (13)-(15)
+
+If agents fail where the KB does not settle the gold, supplying what it
+leaves open should help. Experiment 3 (run commit `482da68`) does that, as
+a positive control with oracle knowledge, on experiment 2's three
+databases. Before any correction was written, each database's primary tasks
+were split in half (`results/livesqlbench/exp3-split.json`, `5b6acdc`).
+From the gold of the 27 training tasks only, 35 corrections were written:
+general facts about KB entries -- a scale, a weight, a threshold, how a
+missing value counts, which column holds a quantity, the grain, a join
+path -- never output form or one question's filter (25 clarify an entry, 4
+contradict it, 6 add one; two borderline ones are named in the run
+commit). Each was applied twice with the same content: appended to the
+entries' text (`manual_corrected`) and implemented in the Opus-compiled
+contract (`contract_corrected`). Corrections and results are derived from
+the gold and stay private; `analysis/lsb_corrected.py` prints the
+aggregates. Four arms on `gpt-6-luna`, k=3, paired within each repeat: 720
+rows, $2.38, no errors.
+
+| tasks | n | manual_prompt | manual_corrected | contract_opus | contract_corrected |
+|---|---:|---:|---:|---:|---:|
+| held out (the test) | 28 | 21.4% | 25.0% | 32.1% | 28.6% |
+| training (upper bound) | 27 | 25.9% | 46.9% | 28.4% | 50.6% |
+| held out, meets a corrected entry | 14 | 23.8% | 28.6% | 42.9% | 42.9% |
+| held out, does not | 14 | 19.0% | 21.4% | 21.4% | 14.3% |
+
+- **(13) fails.** On the held-out tasks the corrected KB lifts the manual
+  by 2 tasks to 0 (one-sided p = 0.25).
+- **(14) fails.** The corrected contract does not beat the Opus contract it
+  was made from: 0 tasks to 2.
+- **(15) holds.** The two corrected arms tie on the held-out tasks: 3 tasks
+  to 3, 3.6 points apart.
+
+On the training tasks the same corrections lift both arms by about 21
+points, 7 tasks to 0 each (p = 0.008), and the two deliveries tie there too
+(3 to 2). The corrections are therefore right and usable where they came
+from, and the held-out null is not for want of reach: half the held-out
+tasks (14) use an entry a correction names, and on those the corrections
+change one task. A choice learned from one task's gold does not carry to
+another task's gold through the same entry -- as the training golds already
+showed where two of them used one entry differently (a 0.1 or a 1.0
+threshold; three, five or ten fields in one formula). What LiveSQLBench
+leaves undetermined is, for the most part, not a hidden but consistent body
+of knowledge a better documentation could hold; it is settled task by task
+in the gold. A contract, which can only hold knowledge that holds across
+questions, has nothing to hold there. On DABStep the fee procedure is one
+procedure for every question that needs it, which is why writing it down
+once pays.
+
+Two cautions. The corrections were written by model reviewers from 27
+tasks, and a held-out task meets them only through the benchmark's
+task-to-KB mapping, which the blind raters found off on about one task in
+seven. And 28 held-out tasks make every test here weak.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by
@@ -2979,6 +3033,7 @@ uv run python analysis/stronger_author.py                 # predictions (7)-(12)
 uv run python analysis/knowledge_reuse.py                 # reuse; needs the private LSB mapping
 uv run python analysis/lsb_distinct_regrade.py            # DISTINCT stripping; needs the private golds
 uv run python analysis/lsb_kb_clarity.py [--all]          # blind test (55, or all 302); needs the private audit files
+uv run python analysis/lsb_corrected.py                   # experiment 3; needs the private results and corrections
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

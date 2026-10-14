@@ -127,3 +127,16 @@ DABStep: predictions (7)-(9)*, and `analysis/stronger_author.py`.
 sha256 of the gold result, never the gold itself. `livesqlbench/exp2-smoke.jsonl`
 is the 12-task smoke run before it. See FINDINGS.md, *A better-made contract
 on LiveSQLBench: predictions (10)-(12)*.
+
+## Experiment 3 (`482da68`) -- kept private, identified here
+
+`manual_prompt`, `manual_corrected`, `contract_opus` and `contract_corrected`
+on `gpt-6-luna`, experiment 2's databases, k=3, `--retry-pass`; one row per
+(task, arm), no errors. The corrected arms read knowledge derived from the
+gold and their answers can restate it, so the files stay with the private
+data (`~/data/dce-held-results/exp3/`), as do the corrections
+(`LSB_DATA/corrected/`). sha256 (first 16 hex): `exp3-luna-r1.jsonl`
+f0557d7a467241eb, `exp3-luna-r2.jsonl` 6fb46123fb47a077, `exp3-luna-r3.jsonl`
+56fcf98342c585e0, `exp3-smoke.jsonl` 2e69f8f9299985cd. The train / held-out
+split is `livesqlbench/exp3-split.json`. See FINDINGS.md, *Completing the
+knowledge: predictions (13)-(15)*, and `analysis/lsb_corrected.py`.

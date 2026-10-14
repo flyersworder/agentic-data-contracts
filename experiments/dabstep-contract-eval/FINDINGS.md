@@ -979,9 +979,78 @@ manual on them (6.3% against 7.9%): the manual's text adds nothing on these
 tasks either. Either the Opus definitions of this knowledge are wrong as
 well (they have not been reviewed), or what fails on these tasks is not the
 knowledge. Reuse, then, is not what separates the benchmarks, and "hard
-knowledge the contract holds correctly" is so far shown only on DABStep. Which
-of the two it is on LiveSQLBench is the question a failure audit of these
-tasks would settle.
+knowledge the contract holds correctly" is so far shown only on DABStep. The
+failure audit below settles which of the two it is on LiveSQLBench.
+
+### A failure audit of the hard tasks: the KB does not determine the gold
+
+The previous section left two explanations for the 29 hard tasks in
+experiment 2's databases (reused knowledge the manual fails on): the Opus
+definitions are wrong too, or what fails is not the knowledge. Each task was
+audited from a private dossier holding the question, the gold SQL and result,
+the KB entries the gold uses, each contract's definition of them, and all
+twelve experiment 2 runs with the SQL the grader scored and its result. Five
+model reviewers, one pass each, applied a fixed rubric; two of their
+gold-versus-KB verdicts were checked by hand and held. The dossiers and
+verdicts hold gold and stay out of the repository; only these counts leave
+them. Two tasks had no failures in experiment 2 (they were selected on the
+earlier runs).
+
+| | count |
+|---|---:|
+| KB states what the gold does | 4 of 29 |
+| KB ambiguous on it | 14 |
+| KB contradicts the gold | 7 |
+| gold uses something the KB never states | 4 |
+
+Main cause of the contract arms' failures, by task: the gold departs from the
+KB or the question, 11; a contract settled an ambiguous entry differently
+from the gold, 9; values right but the result's shape differs (extra rows
+the gold filters out, an extra id column), 5; interpretation, knowledge not
+applied, 1 each; no failures, 2. Over the 223 failed contract-arm runs:
+contract definition differs from the gold 80, gold departs from the KB 75,
+shape 45, interpretation 14, SQL error 7, definition not applied 2. Seven
+tasks are near misses a careful reader would call right.
+
+How each contract holds the knowledge these tasks need, judged against the
+gold: faithful in 11 (Sonnet compile), 16 (Opus compile) and 13 (Opus
+author) of 29; the rest partial, wrong or missing. Where a definition
+"differs from the gold", the KB was nearly always ambiguous: which ratings an
+average covers, whether a missing value counts as zero, whether a score is
+rescaled, which laws a compliance gap includes. The authors chose one
+reading; the gold chose another, with nothing in the KB to tell them apart.
+
+That is the answer to the previous section. The hard LiveSQLBench knowledge
+is not hard because it is difficult to write down; it is hard because the
+documentation does not settle it, and in a quarter of these tasks the gold
+contradicts the documentation. A stronger author, with the data open, cannot
+recover a choice the KB never makes. DABStep's fee procedure is the
+opposite case: determined by the manual and the data, so the Opus compiler,
+reading the manual alone, recovered it. The third condition is therefore
+sharper than "can be held exactly": the knowledge must be determinable from
+what the author can see. The audit is a single pass by model reviewers who
+saw the gold, so its labels are judgements; "the gold departs from the KB"
+is the most generous of them, and is flagged on 25 of the 29 tasks in some
+form.
+
+Two grading defects came out of the audit, both inherited from the official
+Soft-EX rules, and both arm-neutral in intent:
+
+- **DISTINCT stripping.** The official regex removes every DISTINCT from the
+  candidate query, so `a IS DISTINCT FROM b` becomes a parse error and
+  `COUNT(DISTINCT x)` a different count. The compiled contracts use both
+  constructs, so the defect leans against the contract arms.
+  `analysis/lsb_distinct_regrade.py` re-grades every affected answer: with
+  `IS [NOT] DISTINCT FROM` protected, luna's `contract` goes from 35.9% to
+  36.3% (`manual_prompt` 35.5% to 35.7%), Qwen's from 37.7% to 38.2% (37.3%
+  unchanged), experiment 2's Sonnet `contract` from 29.7% to 31.5%; also
+  protecting aggregate DISTINCT moves every arm back down by about the same.
+  No prediction's outcome changes. Every prediction stays scored with the
+  official rules.
+- **Order on an unordered gold.** A task's order flag comes from the
+  benchmark's conditions, and at least one primary task is graded in order
+  although its gold SQL has no ORDER BY; one run returned exactly the gold's
+  rows and failed on their incidental order.
 
 ## The contract compiles, so the residual gap is derivation, not information
 
@@ -2851,6 +2920,7 @@ uv run python analysis/group_consistency.py               # the gold-free check
 uv run python analysis/replay.py                          # answer vs its own query
 uv run python analysis/stronger_author.py                 # predictions (7)-(12)
 uv run python analysis/knowledge_reuse.py                 # reuse; needs the private LSB mapping
+uv run python analysis/lsb_distinct_regrade.py            # DISTINCT stripping; needs the private golds
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

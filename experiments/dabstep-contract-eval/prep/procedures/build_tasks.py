@@ -11,6 +11,8 @@ Run after every database's build.py. Writes to PROC_DATA (default
                                       high_level (false), conditions
   tasks_frozen_full_v1.json           {id: {db, order, set: "primary"}}
   gold_results_full_v1.json           {id: {db, order, rows}}
+  styled/kb/<db>_kb.jsonl             the database's original KB plus
+                                      knowledge_styled.json (manual_styled)
 
 Each gold is its gold_sql run the way the grader runs an answer (`clean`,
 then `run_sql`), and is refused unless it is non-empty, has no NULL, and
@@ -38,6 +40,24 @@ from dce.benchmarks.lsb_grade import (  # noqa: E402
 
 DBS = ("reverse_logistics", "labor_certification_applications", "solar_panel")
 OUT = Path(os.environ.get("PROC_DATA", Path.home() / "data" / "procedures"))
+LSB = Path(os.environ.get("LSB_DATA", Path.home() / "data" / "livesqlbench"))
+
+
+def styled_kb(db: str) -> str:
+    """The pristine KB with the styled R and C entries appended, as the
+    clean KB has the clean ones (`piece` stripped)."""
+    original = (LSB / "hf-full-v1" / db / (db + "_kb.jsonl")).read_text(
+        encoding="utf-8"
+    )
+    rows = [json.loads(x) for x in original.splitlines() if x.strip()]
+    styled = json.loads(
+        (HERE / db / "knowledge_styled.json").read_text(encoding="utf-8")
+    )
+    rows += [{k: v for k, v in e.items() if k != "piece"} for e in styled]
+    ids = [r["id"] for r in rows]
+    if len(ids) != len(set(ids)):
+        raise SystemExit(db + ": the styled KB repeats an entry id")
+    return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
 
 
 def _plain(value):
@@ -86,6 +106,11 @@ def main() -> None:
             gold[iid] = {"db": db, "order": order, "rows": rows}
     if problems:
         raise SystemExit("\n".join(problems))
+    (OUT / "styled" / "kb").mkdir(parents=True, exist_ok=True)
+    for db in DBS:
+        (OUT / "styled" / "kb" / (db + "_kb.jsonl")).write_text(
+            styled_kb(db), encoding="utf-8"
+        )
     (OUT / "hf-full-v1" / "livesqlbench_data.jsonl").write_text(
         "".join(json.dumps(p, ensure_ascii=False) + "\n" for p in public),
         encoding="utf-8",

@@ -151,3 +151,28 @@ ratings, each role's ten batches concatenated in order: `rater-r1-c*.jsonl`
 b8cf40deb2b16001, `rater-r2-c*.jsonl` fe17649d857f4938. The inputs are
 identified in `143e009`. See FINDINGS.md, *Is the gain where the knowledge
 carries procedure?*, and `analysis/procedural_load.py`.
+
+## `exp5-luna-r{1,2,3}.jsonl` -- experiment 5, the contract as text or behind its tools
+
+`manual_resolved`, `contract_text` and `contract` on `gpt-6-luna`, the 401
+golded DABStep tasks, at the run commit `f499053`, k=3, `--retry-pass`, run
+together in each repeat; 1,203 rows each, no errors, about $2.90 a repeat.
+`exp5-smoke.jsonl` is the 12-task smoke before it; a local partial first
+repeat (269 rows, $0.69) was aborted and is not used. `exp5b-smoke.jsonl` is
+the 12-task smoke of `manual_summed` (`14d627d`), the arm experiment 5b adds.
+See FINDINGS.md, *Text or tools: predictions (20)-(21)*, and
+`analysis/contract_text.py`.
+
+## `procedures/exp4-{luna,sol}-r{1,2,3}.jsonl` -- experiment 4, knowledge type and writing style, controlled
+
+`schema_only`, `manual_prompt`, `manual_styled`, `manual_compiled` and
+`contract` on `gpt-6-luna` and `gpt-6-sol`, the 60 questions of
+`prep/procedures/` on three LiveSQLBench databases (our own pieces of
+knowledge and questions; the databases themselves are not committed), at the
+run commit `05015db`, k=3, `--retry-pass`; 300 rows each, no errors. About
+$0.70 a luna repeat and $12.40 a sol repeat. `procedures/exp4-smoke.jsonl`
+and `exp4-smoke2.jsonl` are the two smokes before the run commit. The traces
+of the first 116 runs of `exp4-sol-r3` were lost when the job was suspended
+after the shared volume filled; their rows are intact and the repeat resumed
+from row 117. See FINDINGS.md, *Knowledge type, controlled: predictions
+(22)-(25)*, and `analysis/procedures.py`.

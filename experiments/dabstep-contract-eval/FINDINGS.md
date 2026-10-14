@@ -369,6 +369,16 @@ clauses cannot change an answer: four apply definitions the manual gives, and
 the two band tie-breaks decide boundaries that none of the 60 merchant-months
 in the data sits on.
 
+> **Correction (2026-10-14).** The contract carries a second fact the manual
+> lacks, found by experiment 5's transcripts: the manual never says what
+> happens when several fee rules match one transaction, and the contract's
+> `total_transaction_fees` sums over every matched (transaction, rule) pair,
+> the gold convention, without marking it as an `INTERPRETATION`. So
+> `manual_resolved` does not hold the contract's knowledge on the total-fee
+> families, and the "delivery" share below, and its "right time" reading,
+> are at least in large part that fact. See *The prose lacked a second
+> fact* and experiment 5b (`c39026f`).
+
 `manual_resolved` is `manual_prompt` plus `DATA_NOTE` (`dce/arms.py`): that
 fact, once, in words, no SQL. Both arms then know the same things. The plan --
 arm text, k=3, endpoints, how each outcome reads, and that the note is never
@@ -1241,6 +1251,196 @@ procedure" and "this procedure" cannot be told apart here, and telling them
 apart needs a second, independent procedure -- another benchmark, or one
 built for the purpose. The ratings, the key and the packets stay private
 (they encode the task-to-KB mapping); see `results/README.md`.
+
+### Knowledge type, controlled: predictions (22)-(25)
+
+The procedural-load test left "a rule-matching procedure" and "DABStep's
+fee procedure" confounded. Experiment 4 builds the procedure itself. On
+three LiveSQLBench databases from three domains (reverse_logistics,
+labor_certification_applications, solar_panel) each gets two new pieces of
+knowledge written as KB entries (`prep/procedures/DESIGN.md`): **R**, a
+rule-matching procedure -- a seeded table of 400-520 rules matched on
+several fields at once, NULL criteria as wildcards, a band on the entity's
+monthly count, precedence by specificity, a default when nothing matches,
+and a per-record amount aggregated -- and **C**, a composite over existing
+columns (dependent formulas, a banded class, a change of grain). Every
+choice is stated, so both are determined. An independent reviewer
+reimplemented every piece from its text and matched the reference on every
+record; a blind solver given only the KB answered all 60 questions (ten per
+piece per database, in matched shapes). The contracts were written by
+`dce.author` from the extended KB without any question, and a checker found
+every R and C definition equal to the reference on every record, no edit
+needed (`contracts-procedures/`).
+
+The first smoke (12 R questions, gpt-6-luna) put every knowledge arm at 12
+of 12, so a **writing factor** was added before the run commit:
+`manual_styled` is `manual_prompt` with R and C rewritten the way a business
+manual writes them, modelled on DABStep's -- an overview addressed to the
+reader, the rule table's fields described one by one, precedence, defaults
+and edge cases in later notes, bands and formulas in words with a worked
+example -- about twice the length. `styled_facts.md` maps every fact of the
+clean version to its styled sentence, and a blind solver given the styled
+KB also answered 60 of 60. The second smoke (both models, five arms) was at
+the ceiling too. The run commit `05015db` recorded both smokes and fixed
+how each outcome reads.
+
+Five arms on gpt-6-luna and gpt-6-sol, k=3, run together in each repeat; a
+task scores 0-6 (`analysis/procedures.py`):
+
+| piece | schema_only | manual_prompt | manual_styled | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| R (30 tasks) | 12.2% | 98.3% | 100.0% | 98.3% | 99.4% |
+| C (30 tasks) | 0.6% | 98.9% | 99.4% | 97.8% | 100.0% |
+
+- **The manipulation check holds.** The questions need the knowledge:
+  `manual_prompt` beats `schema_only` on R (29 tasks to 0) and on C (30 to 0).
+- **(22) fails.** On R with styled prose, the contract beats `manual_styled`
+  on no task and loses on one.
+- **(23) and (24) fail.** Styled prose costs nothing on either piece, so
+  there is no difference between R and C to find (permutation p = 0.95 and
+  1).
+- **(25) holds.** With clean prose the contract and the prose tie on R
+  (+1.1 points, 2 tasks to 0).
+
+Each model alone, and each database, says the same: gpt-6-sol scores 100%
+on R in every knowledge arm, gpt-6-luna 96.7-100%.
+
+As fixed in advance, (22) failing means **even a manual-style rule-matching
+procedure gets through prose when the prose is complete; DABStep's gain is
+specific to its procedure or its manual**. So the type of knowledge is not
+the condition, and neither is the style of the prose. The next two sections
+find what DABStep's procedure has that these do not: a fact the manual
+leaves out.
+
+Qwen 3.8, a weaker model, runs the same materials at `c39026f`, with the
+same four tests labelled (22Q)-(25Q). It was added after the ceiling was
+seen and is reported apart.
+
+### Text or tools: predictions (20)-(21)
+
+The contract differs from the prose arm in two ways at once: it states the
+procedure as definitions with SQL, and the agent reaches them through the
+governed tools. `contract_text` (`cb54e65`) separates the two: the
+contract's two files, verbatim, in the prompt, over the plain tools
+`manual_resolved` has. Run commit `f499053`: gpt-6-luna, k=3, the three arms
+together in each repeat, `--retry-pass`, no errors. Primary subset: the 199
+rule-matching tasks of the procedural-load test.
+
+| tasks | n | manual_resolved | contract_text | contract |
+|---|---:|---:|---:|---:|
+| rule-matching | 199 | 53.9% | 83.2% | 82.6% |
+| rest | 202 | 65.0% | 73.3% | 78.4% |
+| all | 401 | 59.5% | 78.2% | 80.5% |
+
+- **(20) holds.** On the rule-matching tasks `contract_text` beats
+  `manual_resolved`, 100 tasks to 7 (one-sided p = 2e-22).
+- **(21) holds.** There `contract` and `contract_text` tie: -0.7 points, 15
+  tasks to 18 (p = 0.73).
+- **Not predicted.** On the other 202 tasks the governed tools do add to the
+  text: `contract` beats `contract_text` by 5 points, 38 tasks to 15
+  (p = 0.002). The last section below finds where and why.
+
+Cost per repeat: `contract_text` $0.69, `manual_resolved` $1.02, `contract`
+$1.20. The text arm is the cheapest: the contract sits in the cached prompt
+prefix, and it takes 5.6 turns and 6 tool calls a run against the governed
+arm's 7.3 and 13.9. The governed arm runs the fewest queries (1.5 a run,
+against 2.7 and 7.8); its look-ups return new, uncached tokens.
+
+The reading fixed for (20) and (21) holding was "the gain is the executable
+statement of the procedure, wherever it sits". The next section shows that
+reading is premature: the text arm also knows something the prose arm does
+not.
+
+### The prose lacked a second fact: how overlapping rules combine
+
+Run 1's transcripts were compared on the 34 rule-matching tasks that
+`contract_text` solved and `manual_resolved` missed in both of the first two
+repeats (none went the other way). All 34 compute fees per transaction and
+add them up: a merchant's total fees for a day, month or year, and what-if
+changes (moving a merchant to another MCC, steering traffic to another ACI
+or card scheme). None is a "which rules apply" question.
+
+About 30 of the 34 turn on one point. The manual defines the fee of a
+transaction under one rule (`fee = fixed_amount + rate * transaction_value
+/ 10000`) and the null wildcard, and never says what happens when several
+rules match the same transaction. The contract's `total_transaction_fees`
+sums over every matched (transaction, rule) pair -- the gold convention --
+and does not mark that as an `INTERPRETATION`. The prose arm saw the overlap
+(nearly every one of these transcripts discusses specificity or double
+counting) and invented a one-rule-per-transaction policy; in two tasks it
+computed the gold number and then rejected it as double counting. Of the
+rest, two missed the empty-list check on one of the three list fields
+although the note states it, one did both, and one turns on what-if
+mechanics neither document states.
+
+**So "Knowledge or delivery?" held knowledge equal on one fact and not on
+this one.** The section's "delivery" share on gpt-6-sol -- the remaining gap
+in the total-fee families -- and the "right time" reading given there are,
+at least in large part, this second fact. Experiment 5b tests that:
+`manual_summed` (`14d627d`) is `manual_resolved` plus `SUM_NOTE`, the
+convention in words and without SQL. Run commit `c39026f` predicts that it
+beats `manual_resolved` on the rule-matching tasks (28) and ties
+`contract_text` there (29), on gpt-6-luna and on Qwen 3.8, where the four
+arms run together. Its 12-task smoke: `manual_resolved` 8, `manual_summed`
+11, `contract_text` 12.
+
+### Where the tools help: retrieval at the point of use, not validation
+
+The governed tools' 5-point lead on the non-rule-matching tasks sits in
+three families that average fees over the rule table (correct task-runs of
+three per task):
+
+| family | tasks | contract | contract_text | manual_resolved | tasks up / down |
+|---|---:|---:|---:|---:|---|
+| avg_fee_account_mcc | 20 | 59 | 43 | 29 | 14 / 1 |
+| avg_fee_credit | 19 | 39 | 25 | 4 | 12 / 3 |
+| avg_fee_account | 20 | 60 | 52 | 45 | 7 / 0 |
+| fee_ids_by_at_aci | 20 | 60 | 60 | 60 | 0 / 0 |
+| the other 123 | 123 | 257 | 264 | 256 | 5 / 11 |
+
+Every one of the 50 runs where `contract` was right and `contract_text`
+wrong (all three repeats) fails the same way: its answer equals, to six
+decimals, the result of dropping the wildcard rules -- a strict
+`list_contains(account_type, ...)` that drops the 720 rules with an empty
+list, or `is_credit = TRUE`, which drops the 100 with a null. Never the fee
+formula, the averaging, the units or the rounding.
+
+The text arm had the rule. It is stated three times in its 60,000-character
+prompt: the top-level MATCHING RULE in `contract.yml` (which mentions null
+only), the `INTERPRETATION` and SQL of `fee_rule_matches_transaction` about
+30,000 characters later, and the fee column descriptions. When its
+reasoning mentioned "empty" before its first fee query, it was right in 36
+of 38 runs, against 59 of 82 when it did not.
+
+The governed arm got there because the tools put the rule in front of the
+agent just before it wrote the query. In 34 of the 50 winning runs it
+looked up `fee_rule_matches_transaction` and copied its three-part clause
+(`IS NULL OR len(...) = 0 OR list_contains(...)`); in the other 16,
+`lookup_domain(fees)` or the governed `describe_table(fees)` (which carries
+the column descriptions; the plain one returns types) said that empty or
+null means all. Every governed run in these three families made both calls
+before its first fee query, as its instruction says. The first fee query carried the wildcard in
+35 of 57 credit-family runs against 6 for the text arm, 59 of 60 against 41
+for account, 54 of 60 against 44 for account and MCC. The text arm wins 12
+runs in this group, 11 of them in the credit family, where the governed arm
+read "for credit transactions" strictly.
+
+**`inspect_query` played no part: none of the 50 runs had a rejection.**
+That says nothing about validation in general. The contract declares one
+blocking rule (`no_select_star`) and one warn-only rule with no check, and
+the library's query checks (a required filter, required filter values, no
+`SELECT *`, blocked columns, a required `LIMIT`, a join cap) cannot express
+"a filter on this list column must accept the empty-list wildcard". A test
+of validation would need a check that can -- for example, one that blocks a
+fee query not built on the declared matching predicate -- and an arm that
+has it. On luna the tools help by retrieval at the point of use: the right
+clause, in focus, when the query is written. A contract that stated its key
+rule in full at the top might close part of this gap without tools; that is
+untested.
+
+The transcript analyses in this section and the one before are
+exploratory, chosen after the registered results were seen. The traces
+are kept off the repository for size (`~/data/dce-held-results/exp5/`).
 
 ## The contract compiles, so the residual gap is derivation, not information
 

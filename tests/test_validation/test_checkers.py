@@ -25,10 +25,10 @@ from agentic_data_contracts.validation.checkers import (
 from agentic_data_contracts.validation.validator import Validator
 
 
-def _parse(sql: str) -> sqlglot.exp.Expression:
+def _parse(sql: str, dialect: str | None = None) -> sqlglot.exp.Expression:
     from typing import cast
 
-    return cast(sqlglot.exp.Expression, sqlglot.parse_one(sql))
+    return cast(sqlglot.exp.Expression, sqlglot.parse_one(sql, read=dialect))
 
 
 @pytest.fixture
@@ -495,6 +495,66 @@ class TestBlockedColumnsChecker:
         result = BlockedColumnsChecker(["ssn"]).check_ast(ast)
         assert not result.passed
         assert "SELECT *" in result.message
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT COUNT(*) FROM analytics.customers",
+            "SELECT segment, COUNT(*) FROM analytics.customers GROUP BY segment",
+            "SELECT COUNT(*) OVER () FROM analytics.customers",
+            "SELECT COUNT(c.*) FROM analytics.customers c",
+        ],
+    )
+    def test_count_star_passes(self, sql: str) -> None:
+        """`COUNT(*)` returns one number and no column values (#148)."""
+        result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql))
+        assert result.passed, result.message
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT o.* FROM analytics.customers o",
+            "SELECT id FROM (SELECT * FROM analytics.customers) t",
+            "SELECT COUNT(*) FROM (SELECT * FROM analytics.customers) t",
+        ],
+    )
+    def test_star_projections_still_caught(self, sql: str) -> None:
+        result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql))
+        assert not result.passed
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "construct"),
+        [
+            (
+                "SELECT row_to_json(c.*) FROM analytics.customers c",
+                "postgres",
+                "ROW_TO_JSON(c.*)",
+            ),
+            (
+                "SELECT ARRAY_AGG(c.*) FROM analytics.customers c",
+                "postgres",
+                "ARRAY_AGG(c.*)",
+            ),
+            (
+                "SELECT TO_JSON_STRING(STRUCT(*)) FROM analytics.customers",
+                "bigquery",
+                "STRUCT(*)",
+            ),
+        ],
+    )
+    def test_star_inside_other_functions_still_caught(
+        self, sql: str, dialect: str, construct: str
+    ) -> None:
+        """Unlike NoSelectStarChecker, this checker cannot allow every star that
+        is not itself a projection: these functions return every column's
+        value, blocked ones included. Only COUNT is known to return none.
+
+        The message names the construct the query contains, not `SELECT *`.
+        """
+        result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql, dialect))
+        assert not result.passed
+        assert construct in result.message
+        assert "SELECT *" not in result.message
 
 
 class TestRequireLimitChecker:

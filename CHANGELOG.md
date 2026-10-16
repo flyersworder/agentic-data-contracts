@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.62.1] - 2026-10-16
+
+### Fixed
+
+- **`blocked_columns` no longer rejects `COUNT(*)` as `SELECT *`** (#148). On any table with `blocked_columns`, a plain row count failed with "SELECT * may expose blocked columns", because the checker matched a star anywhere in the query and `COUNT(*)` contains one. The same false positive was fixed in `no_select_star` earlier, but that fix did not reach `blocked_columns`. A star as the argument of `COUNT` (`COUNT(*)`, `COUNT(t.*)`) now passes. Every other star is still rejected: `SELECT *`, `SELECT t.*`, a starred subquery, and a star inside any other function. That last case is why `no_select_star`'s rule was not reused: it allows any star that is not itself a projection, but `row_to_json(t.*)`, `ARRAY_AGG(t.*)` and `STRUCT(*)` return every column's value, blocked ones included.
+- **The `blocked_columns` message names the star the query contains** (for example `ROW_TO_JSON(c.*)`) instead of always saying `SELECT *`, and says that `COUNT(*)` is allowed.
+
 ## [0.62.0] - 2026-10-12
 
 ### Added

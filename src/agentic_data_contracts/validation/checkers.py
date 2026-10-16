@@ -741,18 +741,40 @@ class BlockedColumnsChecker:
     Only checks SELECT expressions — references in WHERE/ORDER BY/GROUP BY are
     not blocked. The intent is to prevent data exposure in results, not to prevent
     all SQL references to sensitive columns.
+
+    A star is rejected wherever it appears, except as the argument of COUNT.
+    This is deliberately stricter than NoSelectStarChecker, which allows any
+    star that is not itself a projection: that checker asks how many columns
+    come back, this one asks whose values do, and `row_to_json(t.*)`,
+    `ARRAY_AGG(t.*)` or `STRUCT(*)` return every column's value inside one
+    projection. COUNT is the one function known to read none, so it is the
+    one exemption; an unfamiliar function wrapping a star stays rejected.
+    Do not merge the two checkers' star rules.
     """
 
     def __init__(self, blocked: list[str]) -> None:
         self.blocked = {c.lower() for c in blocked}
 
     def check_ast(self, ast: exp.Expression, **_: object) -> CheckResult:
-        if any(ast.find_all(exp.Star)):
+        for star in ast.find_all(exp.Star):
+            # `t.*` is Column(this=Star); judge it by what wraps the Column.
+            node: exp.Expression = star
+            if isinstance(star.parent, exp.Column):
+                node = star.parent
+            if isinstance(node.parent, exp.Count):
+                continue
+            # Name the construct the query contains, not a `SELECT *` it may
+            # not — an agent can only act on a message true of its query.
+            if isinstance(node.parent, exp.Select):
+                construct = f"SELECT {node.sql()}"
+            else:
+                construct = node.parent.sql() if node.parent else node.sql()
             return CheckResult(
                 passed=False,
                 message=(
-                    "SELECT * may expose blocked columns: "
-                    f"{', '.join(sorted(self.blocked))}"
+                    f"{construct} may expose blocked columns: "
+                    f"{', '.join(sorted(self.blocked))} — list the columns "
+                    "explicitly (COUNT(*) is allowed)"
                 ),
             )
 

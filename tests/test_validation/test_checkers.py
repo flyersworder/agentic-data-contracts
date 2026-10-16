@@ -542,6 +542,73 @@ class TestBlockedColumnsChecker:
         result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql, dialect))
         assert not result.passed
 
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("SELECT row_to_json(c) FROM analytics.customers c", "postgres"),
+            ("SELECT TO_JSON_STRING(c) FROM analytics.customers c", "bigquery"),
+            ("SELECT c FROM analytics.customers c", "postgres"),
+            ("SELECT customers FROM analytics.customers", "postgres"),
+            ("SELECT id, ARRAY_AGG(o) FROM analytics.orders o GROUP BY id", "duckdb"),
+            # Correlated: the alias comes from the outer query.
+            ("SELECT (SELECT row_to_json(c)) FROM analytics.customers c", "postgres"),
+            # A CTE named `c` does not hide the base table aliased `c`.
+            (
+                "WITH c AS (SELECT id FROM analytics.orders)"
+                " SELECT row_to_json(c) FROM analytics.customers c",
+                "postgres",
+            ),
+        ],
+    )
+    def test_whole_row_reference_caught(self, sql: str, dialect: str) -> None:
+        """A table alias used as a value returns the whole row, the same
+        values as `t.*` without the star. sqlglot parses it as a plain Column
+        named after the alias, so the column-name scan never saw it."""
+        result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql, dialect))
+        assert not result.passed
+        assert "email" in result.message
+
+    def test_whole_row_of_a_subquery_with_a_blocked_column_caught(self) -> None:
+        """Not by the whole-row rule: the subquery's own projection is checked."""
+        ast = _parse(
+            "SELECT row_to_json(t) FROM (SELECT email FROM analytics.customers) t",
+            "postgres",
+        )
+        result = BlockedColumnsChecker(["email"]).check_ast(ast)
+        assert not result.passed
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("SELECT c.id, name FROM analytics.customers c", None),
+            # A subquery or CTE projects only what its own SELECT lists, and
+            # that SELECT is checked; its whole row exposes nothing more.
+            (
+                "SELECT row_to_json(t) FROM (SELECT id FROM analytics.customers) t",
+                "postgres",
+            ),
+            (
+                "WITH t AS (SELECT id FROM analytics.customers) SELECT t FROM t",
+                "postgres",
+            ),
+            # A table function's row is its output, not a table's.
+            ("SELECT g FROM generate_series(1, 3) g", "postgres"),
+            # A column named like its table, qualified as the message advises.
+            ("SELECT status.status FROM analytics.status", None),
+            # Only SELECT expressions are checked, as for named columns.
+            (
+                "SELECT id FROM analytics.customers c"
+                " WHERE row_to_json(c)::text LIKE '%a%'",
+                "postgres",
+            ),
+        ],
+    )
+    def test_not_a_whole_row_of_a_table_passes(
+        self, sql: str, dialect: str | None
+    ) -> None:
+        result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql, dialect))
+        assert result.passed, result.message
+
     def test_message_does_not_render_the_query(self) -> None:
         """The checker has no dialect, so SQL it renders is in sqlglot's default
         one: Snowflake's `OBJECT_CONSTRUCT(*)` came back as `STAR_MAP(*)`, a

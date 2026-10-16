@@ -750,6 +750,10 @@ class BlockedColumnsChecker:
     projection. COUNT is the one function known to read none, so it is the
     one exemption; an unfamiliar function wrapping a star stays rejected.
     Do not merge the two checkers' star rules.
+
+    The same values come back with no star at all when a table alias is used
+    as a value (`row_to_json(t)`, `SELECT t`), so that is rejected too; see
+    `_base_table_row_names`.
     """
 
     def __init__(self, blocked: list[str]) -> None:
@@ -779,10 +783,13 @@ class BlockedColumnsChecker:
             )
 
         selected: set[str] = set()
+        unqualified: set[str] = set()
         for select in ast.find_all(exp.Select):
             for expr in select.expressions:
                 for col in expr.find_all(exp.Column):
                     selected.add(col.name.lower())
+                    if not col.table:
+                        unqualified.add(col.name.lower())
 
         found = selected & self.blocked
         if found:
@@ -790,7 +797,42 @@ class BlockedColumnsChecker:
                 passed=False,
                 message=f"Blocked columns in SELECT: {', '.join(sorted(found))}",
             )
+
+        whole_rows = unqualified & _base_table_row_names(ast)
+        if whole_rows:
+            return CheckResult(
+                passed=False,
+                message=(
+                    f"{', '.join(f'`{n}`' for n in sorted(whole_rows))} returns "
+                    "whole table rows, which may expose blocked columns: "
+                    f"{', '.join(sorted(self.blocked))} — list the columns "
+                    "explicitly, and qualify a column named like its table "
+                    "(`t.col`)"
+                ),
+            )
         return CheckResult(passed=True, message="")
+
+
+def _base_table_row_names(ast: exp.Expression) -> set[str]:
+    """Names under which a query can refer to a base table's whole row.
+
+    `row_to_json(c)`, `TO_JSON_STRING(c)` or a bare `SELECT c` return every
+    column of the table aliased `c`, the same values as `c.*` without the
+    star, yet sqlglot parses `c` as an ordinary Column. These are the names
+    that make such a Column a row: each base table's alias, or its name when
+    unaliased. A CTE or subquery is left out, because its row holds only what
+    its own SELECT lists and that SELECT is checked. So is a table function
+    (`generate_series(1, 3) g`), whose row is its output, not a table's.
+    """
+    ctes = {cte.alias_or_name.lower() for cte in ast.find_all(exp.CTE)}
+    names: set[str] = set()
+    for table in ast.find_all(exp.Table):
+        if not isinstance(table.this, exp.Identifier):
+            continue
+        if not table.db and table.name.lower() in ctes:
+            continue
+        names.add(table.alias_or_name.lower())
+    return names
 
 
 class RequireLimitChecker:

@@ -757,24 +757,24 @@ class BlockedColumnsChecker:
 
     def check_ast(self, ast: exp.Expression, **_: object) -> CheckResult:
         for star in ast.find_all(exp.Star):
-            # `t.*` is Column(this=Star); judge it by what wraps the Column.
+            # `t.*` is Column(this=Star) and `DISTINCT *` is Distinct(Star);
+            # judge the star by what wraps those.
             node: exp.Expression = star
-            if isinstance(star.parent, exp.Column):
-                node = star.parent
+            if isinstance(node.parent, exp.Column):
+                node = node.parent
+            if isinstance(node.parent, exp.Distinct):
+                node = node.parent
             if isinstance(node.parent, exp.Count):
                 continue
-            # Name the construct the query contains, not a `SELECT *` it may
-            # not — an agent can only act on a message true of its query.
-            if isinstance(node.parent, exp.Select):
-                construct = f"SELECT {node.sql()}"
-            else:
-                construct = node.parent.sql() if node.parent else node.sql()
+            # One message for every rejected star, rendering none of the query:
+            # the checker has no dialect, and SQL rendered in sqlglot's default
+            # one can name a construct the query does not contain.
             return CheckResult(
                 passed=False,
                 message=(
-                    f"{construct} may expose blocked columns: "
+                    "A `*` outside COUNT(*) may expose blocked columns: "
                     f"{', '.join(sorted(self.blocked))} — list the columns "
-                    "explicitly (COUNT(*) is allowed)"
+                    "explicitly"
                 ),
             )
 

@@ -494,7 +494,7 @@ class TestBlockedColumnsChecker:
         ast = _parse("SELECT * FROM analytics.customers")
         result = BlockedColumnsChecker(["ssn"]).check_ast(ast)
         assert not result.passed
-        assert "SELECT *" in result.message
+        assert "ssn" in result.message
 
     @pytest.mark.parametrize(
         "sql",
@@ -503,6 +503,8 @@ class TestBlockedColumnsChecker:
             "SELECT segment, COUNT(*) FROM analytics.customers GROUP BY segment",
             "SELECT COUNT(*) OVER () FROM analytics.customers",
             "SELECT COUNT(c.*) FROM analytics.customers c",
+            "SELECT COUNT(DISTINCT *) FROM analytics.customers",
+            "SELECT COUNT(DISTINCT c.*) FROM analytics.customers c",
         ],
     )
     def test_count_star_passes(self, sql: str) -> None:
@@ -523,38 +525,40 @@ class TestBlockedColumnsChecker:
         assert not result.passed
 
     @pytest.mark.parametrize(
-        ("sql", "dialect", "construct"),
+        ("sql", "dialect"),
         [
-            (
-                "SELECT row_to_json(c.*) FROM analytics.customers c",
-                "postgres",
-                "ROW_TO_JSON(c.*)",
-            ),
-            (
-                "SELECT ARRAY_AGG(c.*) FROM analytics.customers c",
-                "postgres",
-                "ARRAY_AGG(c.*)",
-            ),
-            (
-                "SELECT TO_JSON_STRING(STRUCT(*)) FROM analytics.customers",
-                "bigquery",
-                "STRUCT(*)",
-            ),
+            ("SELECT row_to_json(c.*) FROM analytics.customers c", "postgres"),
+            ("SELECT ARRAY_AGG(c.*) FROM analytics.customers c", "postgres"),
+            ("SELECT TO_JSON_STRING(STRUCT(*)) FROM analytics.customers", "bigquery"),
+            ("SELECT OBJECT_CONSTRUCT(*) FROM analytics.customers", "snowflake"),
         ],
     )
     def test_star_inside_other_functions_still_caught(
-        self, sql: str, dialect: str, construct: str
+        self, sql: str, dialect: str
     ) -> None:
         """Unlike NoSelectStarChecker, this checker cannot allow every star that
         is not itself a projection: these functions return every column's
-        value, blocked ones included. Only COUNT is known to return none.
-
-        The message names the construct the query contains, not `SELECT *`.
-        """
+        value, blocked ones included. Only COUNT is known to return none."""
         result = BlockedColumnsChecker(["email"]).check_ast(_parse(sql, dialect))
         assert not result.passed
-        assert construct in result.message
-        assert "SELECT *" not in result.message
+
+    def test_message_does_not_render_the_query(self) -> None:
+        """The checker has no dialect, so SQL it renders is in sqlglot's default
+        one: Snowflake's `OBJECT_CONSTRUCT(*)` came back as `STAR_MAP(*)`, a
+        construct the agent's query does not contain. One message, true of
+        every rejected star, names nothing the agent has to search for."""
+        rejected = [
+            _parse("SELECT * FROM analytics.customers"),
+            _parse("SELECT o.* FROM analytics.customers o"),
+            _parse("SELECT OBJECT_CONSTRUCT(*) FROM analytics.customers", "snowflake"),
+            _parse("SELECT row_to_json(c.*) FROM analytics.customers c", "postgres"),
+        ]
+        checker = BlockedColumnsChecker(["email", "ssn"])
+        messages = {checker.check_ast(ast).message for ast in rejected}
+        assert len(messages) == 1, messages
+        (message,) = messages
+        assert "email, ssn" in message
+        assert "COUNT(*)" in message
 
 
 class TestRequireLimitChecker:

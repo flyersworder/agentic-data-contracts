@@ -73,6 +73,14 @@ ARMS: tuple[str, ...] = (
 #: 5): the contract's knowledge delivered as a document rather than behind
 #: the governed tools, so it separates what the contract says from how the
 #: agent reaches it.
+#:
+#: `contract_text_noted` is `contract_text` plus `DATA_NOTE` and `SUM_NOTE`,
+#: under the headings and in the order `manual_summed` has them. The contract
+#: carries both facts, but less plainly than the notes: the empty-list
+#: wildcard sits in `semantic.yml`, far from the matching rule, and
+#: `total_transaction_fees` speaks of "the fee rule that matches" a
+#: transaction. With the notes in both, the two arms state the facts alike and
+#: differ only in the form of the rest.
 COMPILED_ARMS: tuple[str, ...] = (
     "contract_compiled",
     "contract_compiled_opus",
@@ -84,6 +92,7 @@ EXTRA_ARMS: tuple[str, ...] = (
     *COMPILED_ARMS,
     "contract_text",
     "manual_summed",
+    "contract_text_noted",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -155,13 +164,15 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
             prompt += f"\n\n## Fee note\n\n{SUM_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
-    if arm == "contract_text":
+    if arm in ("contract_text", "contract_text_noted"):
         files = "\n\n".join(
             f"### {path.name}\n\n```yaml\n"
             f"{path.read_text(encoding='utf-8').strip()}\n```"
             for path in (CONTRACT_PATH, CONTRACT_PATH.parent / "semantic.yml")
         )
         prompt = f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
+        if arm == "contract_text_noted":
+            prompt += f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
     if arm in GOVERNED_ARMS:

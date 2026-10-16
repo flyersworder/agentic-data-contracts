@@ -64,6 +64,7 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_compiled_opus_joins",
         "contract_text",
         "manual_summed",
+        "contract_text_noted",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -118,11 +119,34 @@ def test_contract_text_is_the_whole_contract_in_the_prompt_over_plain_tools(db):
     assert DOCS["manual"] not in text.system_prompt
 
 
+def test_contract_text_noted_is_contract_text_plus_both_notes(db):
+    """The two facts manual_summed states as notes, in the same words, under
+    the same headings, in the same order: the facts are then as plain in the
+    contract's text as in the prose, and only the form differs."""
+    text = build_arm("contract_text", db, DOCS)
+    noted = build_arm("contract_text_noted", db, DOCS)
+    assert noted.system_prompt == (
+        f"{text.system_prompt}\n\n## Data note\n\n{DATA_NOTE}"
+        f"\n\n## Fee note\n\n{SUM_NOTE}"
+    )
+    assert [t.name for t in noted.tools] == [t.name for t in text.tools]
+    assert noted.session is None
+
+
+def test_contract_text_noted_and_manual_summed_end_alike(db):
+    summed = build_arm("manual_summed", db, DOCS).system_prompt
+    noted = build_arm("contract_text_noted", db, DOCS).system_prompt
+    tail = f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
+    assert summed.endswith(tail)
+    assert noted.endswith(tail)
+
+
 def test_contract_text_carries_the_contract_digest():
     from dce.benchmarks.dabstep import arm_digest
     from dce.frozen import digest
 
     assert arm_digest("contract_text") == digest()
+    assert arm_digest("contract_text_noted") == digest()
 
 
 def test_the_data_note_states_the_fact_and_no_sql():

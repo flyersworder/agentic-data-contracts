@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.62.1] - 2026-10-16
+
+### Fixed
+
+- **`blocked_columns` no longer rejects `COUNT(*)` as `SELECT *`** (#148). On any table with `blocked_columns`, a plain row count failed with "SELECT * may expose blocked columns", because the checker matched a star anywhere in the query and `COUNT(*)` contains one. The same false positive was fixed in `no_select_star` earlier, but that fix did not reach `blocked_columns`. A star as the argument of `COUNT` (`COUNT(*)`, `COUNT(t.*)`, `COUNT(DISTINCT *)`) now passes. Every other star is still rejected: `SELECT *`, `SELECT t.*`, a starred subquery, and a star inside any other function. That last case is why `no_select_star`'s rule was not reused: it allows any star that is not itself a projection, but `row_to_json(t.*)`, `ARRAY_AGG(t.*)` and `STRUCT(*)` return every column's value, blocked ones included.
+- **The `blocked_columns` message no longer says `SELECT *` about a query without one.** It now reads "A `*` outside COUNT(*) may expose blocked columns: …" for every rejected star. It does not quote the query back: the checker has no dialect, and SQL rendered in sqlglot's default one can name a function the query does not contain (Snowflake's `OBJECT_CONSTRUCT(*)` renders as `STAR_MAP(*)`).
+
+### Documentation
+
+- **The README says what query checks do not protect against.** They stop a cooperating agent from breaking a rule by mistake. They are not an access-control boundary: a query written to evade `blocked_columns` can still return a blocked column's values. A column that must never reach a caller needs database column privileges or a view as well.
+
 ## [0.62.0] - 2026-10-12
 
 ### Added

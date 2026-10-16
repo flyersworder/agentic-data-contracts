@@ -741,18 +741,45 @@ class BlockedColumnsChecker:
     Only checks SELECT expressions — references in WHERE/ORDER BY/GROUP BY are
     not blocked. The intent is to prevent data exposure in results, not to prevent
     all SQL references to sensitive columns.
+
+    A star is rejected wherever it appears, except as the argument of COUNT.
+    This is deliberately stricter than NoSelectStarChecker, which allows any
+    star that is not itself a projection: that checker asks how many columns
+    come back, this one asks whose values do, and `row_to_json(t.*)`,
+    `ARRAY_AGG(t.*)` or `STRUCT(*)` return every column's value inside one
+    projection. COUNT is the one function known to read none, so it is the
+    one exemption; an unfamiliar function wrapping a star stays rejected.
+    Do not merge the two checkers' star rules.
+
+    This is a guardrail against a cooperating agent exposing a column by
+    mistake, not an access-control boundary: SQL has more ways to route a
+    value into a result than a syntax check recognises. A column that must
+    never reach a caller needs database privileges as well (see README).
     """
 
     def __init__(self, blocked: list[str]) -> None:
         self.blocked = {c.lower() for c in blocked}
 
     def check_ast(self, ast: exp.Expression, **_: object) -> CheckResult:
-        if any(ast.find_all(exp.Star)):
+        for star in ast.find_all(exp.Star):
+            # `t.*` is Column(this=Star) and `DISTINCT *` is Distinct(Star);
+            # judge the star by what wraps those.
+            node: exp.Expression = star
+            if isinstance(node.parent, exp.Column):
+                node = node.parent
+            if isinstance(node.parent, exp.Distinct):
+                node = node.parent
+            if isinstance(node.parent, exp.Count):
+                continue
+            # One message for every rejected star, rendering none of the query:
+            # the checker has no dialect, and SQL rendered in sqlglot's default
+            # one can name a construct the query does not contain.
             return CheckResult(
                 passed=False,
                 message=(
-                    "SELECT * may expose blocked columns: "
-                    f"{', '.join(sorted(self.blocked))}"
+                    "A `*` outside COUNT(*) may expose blocked columns: "
+                    f"{', '.join(sorted(self.blocked))} — list the columns "
+                    "explicitly"
                 ),
             )
 

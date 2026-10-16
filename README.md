@@ -651,6 +651,8 @@ Each rule carries a `query_check` (pre-execution) or `result_check` (post-execut
 | `require_limit` | Require a LIMIT clause |
 | `max_joins` | Cap the number of JOINs |
 
+Query checks read the SQL text before it runs. They keep a cooperating agent from doing by mistake what a rule forbids, and tell it why, so it can correct the query. They are not an access-control boundary: SQL has more ways to route a value into a result than a static check can recognise, so a query written to evade `blocked_columns` can still return a blocked column's values. If a column must never reach a given caller, enforce that in the database as well, with column privileges or a view that leaves it out, and connect the agent with credentials that have only that access.
+
 **Built-in result checks** (post-execution, validated against query output):
 
 | Check | Description |

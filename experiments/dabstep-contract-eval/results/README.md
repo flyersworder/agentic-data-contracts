@@ -163,6 +163,23 @@ the 12-task smoke of `manual_summed` (`14d627d`), the arm experiment 5b adds.
 See FINDINGS.md, *Text or tools: predictions (20)-(21)*, and
 `analysis/contract_text.py`.
 
+## `exp5b-luna-r{1,2,3}.jsonl`, `exp5-qwen-r{1,2,3}.jsonl` -- experiment 5b, the manual with both facts
+
+`exp5b-luna-r{i}` is `manual_summed` alone on `gpt-6-luna`, the 401 golded
+DABStep tasks, at the run commit `c39026f`, k=3, `--retry-pass`; 401 rows
+each, no errors, about $0.66 a repeat. Each pairs by task with
+`exp5-luna-r{i}` (run at `f499053` a day or so earlier; the harness differs
+only by the new arm). `exp5-qwen-r{i}` is `manual_resolved`, `manual_summed`,
+`contract_text` and `contract` on `qwen3.8-27b`, run together in each repeat
+at `c39026f`, k=3, `--retry-pass`; 1,604 graded rows each plus the retried
+ones, about $1.90 a repeat. Five `manual_resolved` runs of 1,203 ended at an
+error or the turn limit and count as wrong (three in r1, two in r2); one
+`contract_text` run in r1 overran the 262k context and was retried. sha256
+(first 16 hex): exp5b-luna r1 0cfbd2470ba1e597, r2 8fdd7a14d381f023, r3
+ab30c53a3357acf9; exp5-qwen r1 6cedf0bc458a7b35, r2 11a5700de94d8e00, r3
+1959d476b559e0c0. See FINDINGS.md, *The prose lacked a second fact*, and
+`analysis/contract_text.py --model luna|qwen`.
+
 ## `procedures/exp4-{luna,sol}-r{1,2,3}.jsonl` -- experiment 4, knowledge type and writing style, controlled
 
 `schema_only`, `manual_prompt`, `manual_styled`, `manual_compiled` and
@@ -176,3 +193,9 @@ of the first 116 runs of `exp4-sol-r3` were lost when the job was suspended
 after the shared volume filled; their rows are intact and the repeat resumed
 from row 117. See FINDINGS.md, *Knowledge type, controlled: predictions
 (22)-(25)*, and `analysis/procedures.py`.
+
+`procedures/exp4-qwen-r{1,2,3}.jsonl` are the same five arms on
+`qwen3.8-27b` at `c39026f`, k=3, `--retry-pass`; 300 graded rows each (two
+errors in r1 and one in r3 were retried), about $0.32 a repeat. sha256 (first
+16 hex): r1 23e26129b6d735f3, r2 b41d43ffda57e99e, r3 8fa17263640dad81. See
+`analysis/procedures.py --set qwen`.

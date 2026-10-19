@@ -1,0 +1,70 @@
+{
+  "g1": [
+    {
+      "sentinel": "*",
+      "why": "Conventional wildcard token; cannot equal any of the six case-side values (enumerated visa classes, Roman-numeral levels, Yes/No, two-digit SOC groups, state abbreviations or the four volume bands)."
+    },
+    {
+      "sentinel": "ANY",
+      "why": "A common rule-engine any-value marker, distinct from every case-side value and volume band."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "An ordinary configuration marker meaning all categories; no case-side criterion has this literal value."
+    },
+    {
+      "sentinel": "<ANY>",
+      "why": "A plausible explicit configuration wildcard token; angle brackets cannot occur in any of these case-side domains."
+    },
+    {
+      "sentinel": "__ANY__",
+      "why": "A conventional reserved configuration token, not a visa, wage level, dependency status, two-digit SOC group, state abbreviation or volume band."
+    }
+  ],
+  "g2": [
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v*2",
+      "recover": "v/2",
+      "kind": "reversed relationship to the recorded maximum / doubled numeric scale",
+      "named_by_author_prompt": false,
+      "silent_because": "Retain the documented $ string format, but double its parsed numeric component: $41.00 becomes $82.00 and $90000.00 becomes $180000.00. Both remain believable wages and C[68] still parses them, silently overstating AOW and downstream scores.",
+      "data_shows": "Column meanings identify offered_wage.from as 'Minimum wage rate of pay from' and offered_wage.to as 'Maximum wage rate of pay to'; C[68] specifies that 'from' is the numeric dollar amount and ignores 'to'. There are 290 positive maximums, all originally at least the minimum; trackno 470 has to 90000.01 and from $90000.00, trackno 780 has to 62500.01 and from $62500.00. Following the change these become $180000.00 against 90000.01 and $125000.00 against 62500.01: minimum exceeds maximum. The multiplier 2 is independently exposed by unchanged prevailing_wage.value: 279 same-unit records have exactly identical numerical from/value now; e.g. trackno 27 has from $77022.00, prevailing USD 77,022.00 and to 77023, and after encoding from $154044.00, precisely twice unchanged USD 77,022.00, while exceeding to. The same exact doubling across many independent same-unit wage pairs identifies division by 2 as the recovery."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "additive offset that reverses near-equal wage-range bounds",
+      "named_by_author_prompt": false,
+      "silent_because": "Keep the $ currency wrapper and add one dollar to the numeric rate. AOW still parses and stays within plausible salary and hourly ranges, but changes WHR, CWAS and EWAS.",
+      "data_shows": "The column meanings say offered_wage.from is the minimum and offered_wage.to is the maximum; C[68] reads the from amount and ignores to. Trackno 470 has from $90000.00 and to 90000.01; trackno 780 has $62500.00 and 62500.01; trackno 916 has $115000.00 and 115000.01. After the offset each minimum would exceed its recorded maximum by exactly 0.99, revealing the +1 offset. As an independent exact anchor, 279 wage records have equal original from and prevailing.value with identical units: trackno 27 has $77022.00, USD 77,022.00 and maximum 77023. After change $77023.00 is one dollar above the unchanged prevailing value and equals the maximum. The constant one-dollar discrepancy across those 279 records and the observed 0.99 range reversals identifies subtracting 1."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.prevailing_wage.value",
+      "stored": "v*2",
+      "recover": "v/2",
+      "kind": "doubled numeric scale, breaking corroboration by wage-range endpoints",
+      "named_by_author_prompt": false,
+      "silent_because": "Retain the 'USD ' prefix and commas, e.g. USD 77,022.00 to USD 154,044.00; C[68] parses it as dollars, returning plausible but wrong APW and wage-headroom scores.",
+      "data_shows": "C[68] specifies 'value' text such as 'USD 116,979.00' is a wage in dollars in its stated unit; the wage JSON also has independently unchanged offered_wage.from and to. Currently 279 same-unit records have identical numeric from and prevailing.value (trackno 27: from $77022.00, to 77023, prevailing USD 77,022.00; trackno 90: from $93.00, to 103.5, prevailing USD 93.00). After encoding these unchanged offered minima correspond exactly to one half of the prevailing wage, e.g. USD 154,044.00 against $77022.00 and USD 186.00 against $93.00, recurring over 279 records with radically different scales. This exact twofold ratio with the unchanged offered wages establishes division by 2 to recover original values; parsing as documented yields a wrong but numerical APW."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.prevailing_wage.value",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "additive offset relative to independently recorded wage-range minimum",
+      "named_by_author_prompt": false,
+      "silent_because": "Preserve the USD currency string and add a dollar to the amount; for instance USD 77,022.00 becomes USD 77,023.00. C[68-71] still calculates plausible numeric APW, WHR and EWAS but they are wrong.",
+      "data_shows": "C[68] says prevailing.value is a dollar amount in the wage unit; offered_wage.from is independently specified as the minimum offered wage. In 279 same-unit wage records their amounts exactly coincide; e.g. trackno 27 is from $77022.00, to 77023, prevailing USD 77,022.00; trackno 90 is from $93.00, to 103.5, prevailing USD 93.00. Following the change, these become prevailing USD 77,023.00 and USD 94.00 respectively, each exactly one dollar above its unchanged offered minimum; in trackno 27 the altered prevailing amount also exactly coincides with offered maximum. The ubiquitous precise +1 gap across these independent wage fields identifies the additive shift and subtracting 1 recovers the originals."
+    }
+  ]
+}

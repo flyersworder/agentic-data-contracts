@@ -1,0 +1,187 @@
+{
+ "labels": {
+  "settled": [
+   "solar_panel:g1",
+   "solar_panel:g2"
+  ],
+  "split": [
+   "labor_certification_applications:g1",
+   "reverse_logistics:g1",
+   "reverse_logistics:g2"
+  ],
+  "convention-only": [
+   "reverse_logistics:g3"
+  ]
+ },
+ "questions": {
+  "labor_certification_applications_R01": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C01": [],
+  "solar_panel_R01": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C01": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C01": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R01": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R02": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C02": [],
+  "solar_panel_R02": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C02": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C02": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R02": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R03": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C03": [],
+  "solar_panel_R03": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C03": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C03": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R03": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R04": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C04": [],
+  "solar_panel_R04": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C04": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C04": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R04": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R05": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C05": [],
+  "solar_panel_R05": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C05": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C05": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R05": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R06": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C06": [],
+  "solar_panel_R06": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C06": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C06": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R06": [
+   "reverse_logistics:g1"
+  ],
+  "labor_certification_applications_R07": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C07": [],
+  "solar_panel_R07": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C07": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C07": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R07": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R08": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C08": [],
+  "solar_panel_R08": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C08": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C08": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R08": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R09": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C09": [],
+  "solar_panel_R09": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C09": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C09": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R09": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ],
+  "labor_certification_applications_R10": [
+   "labor_certification_applications:g1"
+  ],
+  "labor_certification_applications_C10": [],
+  "solar_panel_R10": [
+   "solar_panel:g1"
+  ],
+  "solar_panel_C10": [
+   "solar_panel:g2"
+  ],
+  "reverse_logistics_C10": [
+   "reverse_logistics:g2"
+  ],
+  "reverse_logistics_R10": [
+   "reverse_logistics:g1",
+   "reverse_logistics:g3"
+  ]
+ }
+}

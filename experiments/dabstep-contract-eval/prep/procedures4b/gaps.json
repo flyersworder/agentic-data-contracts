@@ -1,0 +1,101 @@
+{
+  "labor_certification_applications": {
+    "g1": {
+      "sentinel": "*",
+      "entry_id": 64,
+      "menu_rank": 0,
+      "full_note": "In review_schedule, a criterion that matches any value is stored as the text '*', not as NULL: treat '*' exactly as the NULL criterion this documentation describes, so it matches every value, a missing one included, and is not counted as a specified criterion."
+    },
+    "g2": null,
+    "doc_edits": [
+      {
+        "entry_id": 64,
+        "old": "only a rule whose criterion for that attribute is NULL can match.",
+        "new": "only a rule whose criterion for that attribute places no restriction can match."
+      },
+      {
+        "entry_id": 65,
+        "old": "the rule with the most non-NULL criteria among its six.",
+        "new": "the rule with the most criteria that place a restriction, among its six."
+      }
+    ]
+  },
+  "reverse_logistics": {
+    "g1": {
+      "sentinel": "ANY",
+      "entry_id": 32,
+      "menu_rank": 0,
+      "full_note": "In return_charge_rules, a criterion that matches any value is stored as the text 'ANY', not as NULL: treat 'ANY' exactly as the NULL criterion this documentation describes, so it matches every value, a missing one included, and is not counted as a specified criterion."
+    },
+    "g2": {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "one-step positive ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "IRV still obtains a finite number, but rises by V*K/10, and RVL and CLR are consequently understated.",
+      "data_shows": "[36] explicitly defines aesthetic A as 'a number from 1 to 10 read as a decimal'. The existing observed endpoints are 1 (17 rows) and 10 (7 rows); changed data would span 2–11 with seven scores of 11, breaching the documented maximum by exactly one; the ten-unit-wide observed scale is displaced one step above the documented 1–10 interval, yielding original A=stored-1.",
+      "menu_rank": 2,
+      "entry_id": 36,
+      "full_note": "In quality_assessment.assessment_summary the aesthetic score at results.aesthetic_score is stored one point higher, from 2 to 11: A is the stored value minus 1."
+    },
+    "g3_entries": {
+      "33": {
+        "knowledge": "Standard Handling Charge",
+        "description": "Charge terms for a return that no rule of the schedule matches.",
+        "definition": "A return that matches no rule of the Return Handling Charge Schedule takes the Standard Handling Charge: flat_charge 15.00 and charge_pct 5.0."
+      },
+      "34": {
+        "definition": "$$RHC = F + \\frac{P}{100} \\times V$$ where F is flat_charge and P is charge_pct of a rule of the schedule that matches the return (or of the Standard Handling Charge), and V is products.unit_value of the returned item, in the currency units of unit_value. Every row of returns has an RHC. A customer's or group's RHC over a period is the sum over its returns whose revdate falls in the period; its average is that sum divided by the number of those returns. No intermediate rounding; round only the reported result, to 2 decimals."
+      }
+    },
+    "doc_edits": [
+      {
+        "entry_id": 32,
+        "old": "a non-NULL criterion never matches a return whose value is NULL (for example a customer whose seg_category is NULL).",
+        "new": "a criterion that places no restriction matches every return, one whose value is missing included, and any other criterion never matches a return whose value is NULL (for example a customer whose seg_category is NULL)."
+      },
+      {
+        "entry_id": 33,
+        "old": "Specificity counts each non-NULL text criterion as 1,",
+        "new": "Specificity counts each text criterion that places a restriction as 1,"
+      }
+    ]
+  },
+  "solar_panel": {
+    "g1": {
+      "sentinel": "ALL",
+      "entry_id": 53,
+      "menu_rank": 2,
+      "full_note": "In warranty_settle_rules, a criterion that matches any value is stored as the text 'ALL', not as NULL: treat 'ALL' exactly as the NULL criterion this documentation describes, so it matches every value, a missing one included, and is not counted as a specified criterion."
+    },
+    "g2": {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "v / 100",
+      "recover": "v * 100",
+      "kind": "percentage-to-fraction scale",
+      "named_by_author_prompt": true,
+      "silent_because": "Values 0.95–0.9999 still parse as numbers and yield finite, plausible potential-yield and loss ratios, but greatly inflate calculated losses.",
+      "data_shows": "[56] explicitly says availability_pct is a percentage on a 0-to-100 scale; [8] says 99% is typical availability. Existing values span 95.00–99.99, hence changed values span 0.9500–0.9999, including PV937101: 97.73 -> 0.9773; PV945724: 96.91 -> 0.9691. These values are fractional availability, so multiply by exactly 100 to obtain the documented percent.",
+      "menu_rank": 0,
+      "entry_id": 56,
+      "full_note": "In electrical_performance.elec_perf_snapshot, energy_yield.availability_pct is stored as a fraction from 0 to 1, not as a percentage: A is the stored value times 100."
+    },
+    "doc_edits": [
+      {
+        "entry_id": 53,
+        "old": "A non-NULL criterion is never satisfied by a NULL snapshot value, so an 'Unlisted' snapshot, or one with no alert or warranty state, satisfies only a NULL criterion there.",
+        "new": "A criterion that places a restriction is never satisfied by a NULL snapshot value, so an 'Unlisted' snapshot, or one with no alert or warranty state, satisfies only a criterion that places no restriction there."
+      },
+      {
+        "entry_id": 53,
+        "old": "A rule's specificity is its number of non-NULL criteria (0 to 6).",
+        "new": "A rule's specificity is its number of criteria that place a restriction (0 to 6)."
+      }
+    ]
+  }
+}

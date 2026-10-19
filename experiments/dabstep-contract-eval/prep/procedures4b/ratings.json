@@ -1,0 +1,82 @@
+{
+  "labor_certification_applications|gpt-6-sol": {
+    "g1": {
+      "sentinel": "*",
+      "matches_missing": null,
+      "settled": false,
+      "evidence": "Across all 496 review_schedule rules, SQL NULL occurs in none of the six criteria; '*' occurs in each criterion (466 rules contain at least one). This strongly indicates '*' is the stored no-restriction marker, contrary to documentation [61,64], which explicitly assigns wildcard and NULL-case matching semantics to SQL NULL. No rule-match results or explicit '*' matching specification establish whether a stored '*' criterion matches a case value that is NULL."
+    }
+  },
+  "labor_certification_applications|claudeopus5.5": {
+    "g1": {
+      "sentinel": "*",
+      "matches_missing": true,
+      "settled": true,
+      "evidence": "Docs [61]/[64] and column meanings say a NULL criterion is the wildcard, but review_schedule contains no NULLs in any criterion column (all 496 rows non-null); instead '*' appears throughout (visa_class 222, wage_level 173, h1b_dependent 162, monthly_volume_band 130, soc_major_group 151), alongside only the documented real values. So '*' is the stored 'no restriction' marker playing the role docs assign to NULL. Doc [64]: when the case's own value is NULL (wage level or h1bDep), only a rule whose criterion places no restriction can match — so a '*' criterion matches a missing value."
+    }
+  },
+  "reverse_logistics|gpt-6-sol": {
+    "g1": {
+      "sentinel": "ANY",
+      "matches_missing": null,
+      "settled": false,
+      "evidence": "[32] says SQL NULL is unrestricted and matches missing return values, but all 400 stored rules use no SQL NULL in any of the five criteria; 388 contain the out-of-domain literal 'ANY'. This strongly suggests ANY is the stored wildcard, but the documentation does not define its matching behavior against missing record values (93 customers have NULL seg_category)."
+    },
+    "g2": {
+      "recover": null,
+      "settled": false,
+      "evidence": "[36] specifies A as the stored aesthetic score, a decimal from 1 to 10. Across 1,500 assessments the stored scores span 2.0 to 11.0, including 147 above 10. Subtracting 1 would bring the observed range into 1–10, but neither a mapping nor a reason for the discrepancy is specified, so the correct recovery cannot be established."
+    },
+    "g3": {
+      "convention": "other",
+      "detail": "No tie-break or aggregation rule is specified; cannot determine which matching rule(s) set the charge when several match.",
+      "settled": false,
+      "evidence": "[30]–[34] describe rule matching and charge from a matching rule, but do not specify precedence or aggregation. Actual returns match several distinct charges: RL110727 matches rule IDs 80, 95, 177, 260, 263, 268, 300, 351 and 359, with eight different charge-term pairs. No resulting charge is stored to disambiguate."
+    }
+  },
+  "reverse_logistics|claudeopus5.5": {
+    "g1": {
+      "sentinel": "ANY",
+      "matches_missing": true,
+      "settled": true,
+      "evidence": "Doc [32] says a no-restriction criterion is NULL and matches every return, including ones whose value is missing. In the data none of the five criteria columns has a NULL; each one uses the literal 'ANY' instead (seg 170, channel 127, category 141, reason 145, condition 129 rows). So 'ANY' is the stored no-restriction value, and the doc's explicit rule covers missing values."
+    },
+    "g2": {
+      "recover": "v - 1",
+      "settled": true,
+      "evidence": "Doc [36] says A is a number from 1 to 10. The stored aesthetic_score values run evenly in 0.1 steps from 2.0 to 11.0 across all 1500 rows: 147 are above 10 and none are below 2. That is the documented 1-10 scale shifted up by 1, so A = v - 1."
+    },
+    "g3": {
+      "convention": "other",
+      "detail": "Not documented. Docs [30]-[34] only say F and P come from 'a rule ... that matches'. None of them says how to choose between several matching rules, and rule order or specificity is never mentioned.",
+      "settled": false,
+      "evidence": "Using the 'ANY' wildcard and inclusive bands, 1409 of 1500 returns match 2 or more rules (up to 9); 91 match none. Even ranking by number of non-ANY criteria leaves ties for 515 multi-match returns. The data does not reveal a rule for choosing between them."
+    }
+  },
+  "solar_panel|gpt-6-sol": {
+    "g1": {
+      "sentinel": "ALL",
+      "matches_missing": true,
+      "settled": true,
+      "evidence": "[53] defines unrestricted criteria as matching any value, including missing snapshot values; the column meanings call that sentinel NULL. Actual rule data instead has zero SQL NULL criteria across 520 rules and uses 'ALL' in every criterion column (102–183 times each), outside the listed domain values. Thus the stored unrestricted marker is 'ALL', carrying the documented unrestricted semantics, including matching a missing record value."
+    },
+    "g2": {
+      "recover": "v * 100",
+      "settled": true,
+      "evidence": "[56] defines A as a percentage on the 0–100 scale, dividing by A/100, and the column meaning gives availability_pct example 97.73. The corresponding first-row stored value is 0.9773; across 998 rows values range from 0.95 to 0.9999, with none above 1. Values are stored as fractions, so multiply by 100 to recover the documented percent."
+    }
+  },
+  "solar_panel|claudeopus5.5": {
+    "g1": {
+      "sentinel": "ALL",
+      "matches_missing": true,
+      "settled": true,
+      "evidence": "None of the six criteria columns contains a NULL. Each has the value 'ALL' (maker 160, kind 183, alrt 154, warr 141, cap 181, vol 102 rows) next to the documented restricting values. So the stored 'ALL' plays the role that the docs and column notes give to NULL ('not restricted'). Doc [53] says a criterion with no restriction matches any value, including a missing one, so an 'ALL' criterion matches a NULL snapshot value."
+    },
+    "g2": {
+      "recover": "v * 100",
+      "settled": true,
+      "evidence": "Doc [56] treats A as a percentage on a 0-100 scale, and the column note gives the example 97.73. The stored values run from 0.95 to 0.9999 (mean 0.975, none above 1, all 998 rows present), and the first row stores 0.9773 where the note shows 97.73. So the values are stored as fractions, and v*100 gives the documented percentage."
+    }
+  }
+}

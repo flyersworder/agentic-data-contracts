@@ -1,0 +1,70 @@
+{
+  "g1": [
+    {
+      "sentinel": "ANY",
+      "why": "Conventional all-values rule marker; absent from all five corresponding record fields (checked by SQL)."
+    },
+    {
+      "sentinel": "*",
+      "why": "Common glob-style wildcard in rules engines; absent from all five corresponding record fields (checked by SQL)."
+    },
+    {
+      "sentinel": "All",
+      "why": "Human-readable unrestricted selection in business configuration; absent from all five corresponding record fields (checked by SQL)."
+    },
+    {
+      "sentinel": "(any)",
+      "why": "Common UI/export label for an unconstrained criterion; absent from all five corresponding record fields (checked by SQL)."
+    },
+    {
+      "sentinel": "No restriction",
+      "why": "Natural rule-editor label for a filter that is not applied; absent from all five corresponding record fields (checked by SQL)."
+    }
+  ],
+  "g2": [
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v-1",
+      "recover": "v+1",
+      "kind": "offset (zero-based scoring)",
+      "named_by_author_prompt": false,
+      "silent_because": "The numeric JSON score remains numeric, and IRV and downstream leakage formulas produce believable amounts, but interpret the aesthetic score one point too low.",
+      "data_shows": "[36] says aesthetic score A is 'a number from 1 to 10'; the data currently include score 1 (inspectref RL473168; 17 scores of 1), which becomes 0, violating the documented lower bound."
+    },
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "offset (one-point upward shift)",
+      "named_by_author_prompt": false,
+      "silent_because": "A remains an ordinary numeric score and gives a realistic-looking IRV/RVL, with IRV overestimated by V*K/10.",
+      "data_shows": "[36] specifies 'a number from 1 to 10'; seven current scores equal 10 (e.g. RL139789), becoming 11, above the documented upper bound."
+    },
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "10-v",
+      "recover": "10-v",
+      "kind": "reversed and zero-based ordinal scale",
+      "named_by_author_prompt": false,
+      "silent_because": "Scores still appear as normal-sized numeric ratings (0 through 9); the formulas run and return believable but incorrect inspected resale values and leakage.",
+      "data_shows": "[36] specifies A 'a number from 1 to 10'; seven current score-10 assessments (e.g. RL139789) become 0, outside the stated scale."
+    },
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v/2",
+      "recover": "v*2",
+      "kind": "half-scale numeric representation",
+      "named_by_author_prompt": true,
+      "silent_because": "A stays numeric and scores from 0.5 to 5 can be read as credible ratings, producing plausible but understated resale values and overstated leakage.",
+      "data_shows": "[36] says A is 'a number from 1 to 10'; 17 assessments currently have score 1 (e.g. RL473168), becoming 0.5, contrary to the documented lower bound."
+    }
+  ]
+}

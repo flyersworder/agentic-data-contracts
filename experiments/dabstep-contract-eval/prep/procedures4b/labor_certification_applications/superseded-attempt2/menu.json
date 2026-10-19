@@ -1,0 +1,70 @@
+{
+  "g1": [
+    {
+      "sentinel": "*",
+      "why": "A conventional wildcard token in rule engines; absent from all six corresponding case-derived criterion domains."
+    },
+    {
+      "sentinel": "ANY",
+      "why": "Common literal for an unrestricted matching criterion; absent from all six case-derived criterion domains."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "A conventional all-values selection; absent from all six case-derived criterion domains."
+    },
+    {
+      "sentinel": "ANY_VALUE",
+      "why": "A recognizable database-rule wildcard literal, absent from every corresponding case-derived domain."
+    },
+    {
+      "sentinel": "NO_RESTRICTION",
+      "why": "A realistic rule-configuration token denoting unrestricted matching; absent from every corresponding case-derived domain."
+    }
+  ],
+  "g2": [
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "Keep the dollar sign and numeric text formatting, adding $1 to each wage figure. The annualization calculation parses the result and returns plausible but wrong AOW, WHR, CWAS and EWAS.",
+      "data_shows": "Column meanings: offered_wage.from is the 'Minimum wage rate of pay from', and offered_wage.to the 'Maximum wage rate of pay to'. Data: trackno 27 has from $77022.00 and to 77023.00; after offset +1 its from is $77023.00, so use trackno 441, whose from $145000.00 and to 145000.02: after +1 the minimum $145001.00 exceeds the unchanged maximum $145000.02. Also trackno 297 has Hour from $53.06, to $53.16; after +1 its minimum $54.06 exceeds maximum $53.16."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v+5",
+      "recover": "v-5",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "Dollar-formatted numbers remain parseable; +$5 produces plausible annual and hourly offered rates, while AOW and downstream scores silently change.",
+      "data_shows": "Column meanings describe offered_wage.from as 'Minimum wage rate of pay from' and offered_wage.to as 'Maximum wage rate of pay to'. Data: trackno 27 from $77022.00, to 77023.00 (Year); after +5 from $77027.00 exceeds the unchanged maximum 77023.00. Trackno 297 Hour from $53.06 and to $53.16 likewise becomes $58.06 > $53.16."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v*1.1",
+      "recover": "v/1.1",
+      "kind": "multiplicative scale",
+      "named_by_author_prompt": true,
+      "silent_because": "Dollar-formatted numerical wage remains valid and generally plausible after a 10% uplift; the unchanged formula silently annualizes the wrong wage, changing wage headroom and assurance scores.",
+      "data_shows": "Column meanings call offered_wage.from 'Minimum wage rate of pay from' and offered_wage.to 'Maximum wage rate of pay to'. Data: trackno 30 has from $154482.00 and to 169500.00 (Year). Changed minimum 154482*1.1 = $169930.20 exceeds unchanged maximum $169500.00. Trackno 297 hourly 53.06*1.1 = $58.366 exceeds to $53.16."
+    },
+    {
+      "table": "prevailing_wage",
+      "column": "wage_details",
+      "json_path": "$.offered_wage.from",
+      "stored": "v*1.2",
+      "recover": "v/1.2",
+      "kind": "multiplicative scale",
+      "named_by_author_prompt": true,
+      "silent_because": "Dollar-formatted amounts remain numeric and realistic for offered salaries and hourly rates; applying C's unchanged annualization yields plausible wrong wage and score calculations.",
+      "data_shows": "Column meanings define offered_wage.from as the 'Minimum wage rate of pay from' and offered_wage.to as the 'Maximum wage rate of pay to'. Data: trackno 30 from $154482.00 and to 169500.00 (Year) changes to $185378.40, above the unchanged maximum $169500.00; trackno 297 from $53.06 and to $53.16 (Hour) changes to $63.672, again above its maximum."
+    }
+  ]
+}

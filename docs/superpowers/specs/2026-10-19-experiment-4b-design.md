@@ -351,3 +351,49 @@ On the G3 subset, descriptive: `contract_gap` against `manual_gap` and
 - The proposer's and raters' prompts, within the visibility rules above.
 - The note heading and extraction, within the rule that notes carry the
   author's resolutions and nothing else.
+
+## Amendments while building the materials (2026-10-19, before any authoring)
+
+Recorded as they happened; nothing below was decided after seeing an author
+draw or an agent run.
+
+1. **Proposer prompt, three rounds.** Round 1 (reverse_logistics only)
+   judged "the data reveals it" against the data before the change and
+   proposed G2s on `unit_value`, which R also reads. Round 2 (all three)
+   proposed G2s whose evidence shows only that something is off. The prompt
+   was sharpened twice, generically: the evidence must be visible in the
+   changed data alone and must pin down the exact transformation; nothing R
+   reads may change; candidates on at least two quantities. Rounds 1 and 2
+   are kept under `prep/procedures4b/<db>/superseded-attempt{1,2}/`.
+2. **Sentinels** are taken in menu order per database, alphabetically by
+   database, skipping one already used: labor `*`, reverse_logistics `ANY`,
+   solar `ALL`.
+3. **No G2 for labor.** Its menu (wage amounts) has no bound the
+   documentation states, and the wage fields are text; the menu is
+   exhausted and labor's C questions become a no-gap control.
+4. **Missing-value and specificity wording.** Round 1 of the ratings showed
+   that the gapped KB's sentence "a non-NULL criterion never matches a NULL
+   record value" made G1 partly a convention (does the sentinel match a
+   missing value?). In both documentations the missing-value and
+   specificity sentences now speak of a criterion that "places no
+   restriction" (`gaps.json`, `doc_edits`); the sentences that say the
+   wildcard is NULL are G1 and stay.
+5. **reverse_logistics' G2** moved from menu rank 0 (scores stored 0-9) to
+   rank 2 (stored 2-11) after round 1 of the ratings split on rank 0; rank
+   1 is not read by C.
+6. **Rater labels replace the pass/fail gate** (decided 2026-10-19). Round
+   2 of the ratings: both raters settle solar's G1 and G2; they split on
+   labor G1, reverse_logistics G1 and G2 (gpt-6-sol identifies every
+   sentinel but will not extend it to missing values, nor infer the exact
+   shift from 2-11 against a documented 1-10; claudeopus5.5 does both); G3
+   is convention-only. Every gap is kept and labelled: **settled** (solar
+   G1, G2; 20 questions), **split** (labor G1, reverse_logistics G1 via R06,
+   reverse_logistics G2; 21), **convention-only** (reverse_logistics G3; 9),
+   **no gap** (labor C; 10). The data-informed subset is settled + split
+   (41 questions, five clusters).
+7. **Predictions, re-specified before authoring.** (32) is over the five
+   data-informed gaps (15 gap-draws). Added **(32g)**: recovery is highest
+   on settled gaps, then split, then convention-only (no draw choosing
+   "most specific wins"). (32c) becomes at most one of five. (34)-(36) are
+   on the data-informed subset, reported per label; the no-gap control is
+   reported beside them (all knowledge arms should tie there).

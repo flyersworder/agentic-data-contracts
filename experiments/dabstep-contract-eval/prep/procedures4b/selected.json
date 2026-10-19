@@ -1,0 +1,88 @@
+{
+  "labor_certification_applications": {
+    "g1": {
+      "sentinel": "*",
+      "menu_rank": 0,
+      "bite": 1.0,
+      "loud": 0
+    }
+  },
+  "reverse_logistics": {
+    "g1": {
+      "sentinel": "ANY",
+      "menu_rank": 0,
+      "bite": 1.0,
+      "loud": 1
+    },
+    "g2": {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "one-step positive ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "IRV still obtains a finite number, but rises by V*K/10, and RVL and CLR are consequently understated.",
+      "data_shows": "[36] explicitly defines aesthetic A as 'a number from 1 to 10 read as a decimal'. The existing observed endpoints are 1 (17 rows) and 10 (7 rows); changed data would span 2–11 with seven scores of 11, breaching the documented maximum by exactly one; the ten-unit-wide observed scale is displaced one step above the documented 1–10 interval, yielding original A=stored-1.",
+      "menu_rank": 2,
+      "reads": [
+        "reverse_logistics_C01",
+        "reverse_logistics_C02",
+        "reverse_logistics_C03",
+        "reverse_logistics_C04",
+        "reverse_logistics_C05",
+        "reverse_logistics_C06",
+        "reverse_logistics_C07",
+        "reverse_logistics_C08",
+        "reverse_logistics_C09",
+        "reverse_logistics_C10"
+      ],
+      "bite": 1.0,
+      "loud": 0
+    },
+    "g3": {
+      "sum": {
+        "bite": 1.0,
+        "degenerate": 0
+      },
+      "lowest_id": {
+        "bite": 1.0,
+        "degenerate": 0
+      }
+    }
+  },
+  "solar_panel": {
+    "g1": {
+      "sentinel": "ALL",
+      "menu_rank": 2,
+      "bite": 1.0,
+      "loud": 0
+    },
+    "g2": {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "v / 100",
+      "recover": "v * 100",
+      "kind": "percentage-to-fraction scale",
+      "named_by_author_prompt": true,
+      "silent_because": "Values 0.95–0.9999 still parse as numbers and yield finite, plausible potential-yield and loss ratios, but greatly inflate calculated losses.",
+      "data_shows": "[56] explicitly says availability_pct is a percentage on a 0-to-100 scale; [8] says 99% is typical availability. Existing values span 95.00–99.99, hence changed values span 0.9500–0.9999, including PV937101: 97.73 -> 0.9773; PV945724: 96.91 -> 0.9691. These values are fractional availability, so multiply by exactly 100 to obtain the documented percent.",
+      "menu_rank": 0,
+      "reads": [
+        "solar_panel_C01",
+        "solar_panel_C02",
+        "solar_panel_C03",
+        "solar_panel_C04",
+        "solar_panel_C05",
+        "solar_panel_C06",
+        "solar_panel_C07",
+        "solar_panel_C08",
+        "solar_panel_C09",
+        "solar_panel_C10"
+      ],
+      "bite": 1.0,
+      "loud": 0
+    }
+  }
+}

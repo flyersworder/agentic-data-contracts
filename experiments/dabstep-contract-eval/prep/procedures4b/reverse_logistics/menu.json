@@ -1,0 +1,66 @@
+{
+  "g1": [
+    {
+      "sentinel": "ANY",
+      "why": "Conventional all-values rule marker; none of the five corresponding record fields contains ANY (their observed values are the documented enumerations)."
+    },
+    {
+      "sentinel": "*",
+      "why": "Common wildcard token in rule/configuration tables; absent from all five record-field value sets."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "A plausible all-categories selection in a policy table; not a value of any of the five matched record fields."
+    },
+    {
+      "sentinel": "No restriction",
+      "why": "Human-readable unrestricted-criterion marker in a rule table; absent from all five matched fields."
+    }
+  ],
+  "g2": [
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v-1",
+      "recover": "v+1",
+      "kind": "zero-based ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "A numeric score remains numeric: IRV and RVL calculate normally but IRV is reduced by V*K/10 and leakage rises.",
+      "data_shows": "[36] says A is 'a number from 1 to 10 read as a decimal' and IRV=V*A/10*K. The existing data span 1 to 10 (17 entries at 1, 7 at 10); after this change the data alone span 0 to 9, with those endpoint frequencies at 0 and 9. The exact one-step zero-based offset of the documented ten-point scale gives original A=stored+1 for each row."
+    },
+    {
+      "table": "case_management",
+      "column": "satisfscore",
+      "json_path": null,
+      "stored": "v-1",
+      "recover": "v+1",
+      "kind": "zero-based ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "It remains an integer satisfaction score, and numerical aggregation still works but shifts every non-null value by one.",
+      "data_shows": "[26] specifies a five-point 1–5 ordinal scale with larger values meaning greater satisfaction; the column meanings list precisely 1,2,3,4,5. The existing data span 1–5 (271 at 1, 321 at 5); changed data would span 0–4, with 271 zeros and 321 fours. This is the entire five-point ordinal scale displaced down one, pinning down recovery as stored+1."
+    },
+    {
+      "table": "quality_assessment",
+      "column": "assessment_summary",
+      "json_path": "$.results.aesthetic_score",
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "one-step positive ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "IRV still obtains a finite number, but rises by V*K/10, and RVL and CLR are consequently understated.",
+      "data_shows": "[36] explicitly defines aesthetic A as 'a number from 1 to 10 read as a decimal'. The existing observed endpoints are 1 (17 rows) and 10 (7 rows); changed data would span 2–11 with seven scores of 11, breaching the documented maximum by exactly one; the ten-unit-wide observed scale is displaced one step above the documented 1–10 interval, yielding original A=stored-1."
+    },
+    {
+      "table": "case_management",
+      "column": "satisfscore",
+      "json_path": null,
+      "stored": "v+1",
+      "recover": "v-1",
+      "kind": "one-step positive ordinal offset",
+      "named_by_author_prompt": false,
+      "silent_because": "All numeric reads and averages remain operational and seem numerically reasonable, but each satisfaction score is one too high.",
+      "data_shows": "[26] states 'Use 1-5' on a five-point ordinal scale, and the column meanings list 1,2,3,4,5. Existing minimum and maximum are 1 and 5, including 271 ones and 321 fives; changed data would instead span 2–6, with 321 sixes. The whole five-value scale is displaced one step above the documented endpoints, giving original score=stored-1."
+    }
+  ]
+}

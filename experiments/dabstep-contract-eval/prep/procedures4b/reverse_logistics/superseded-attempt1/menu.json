@@ -1,0 +1,70 @@
+{
+  "g1": [
+    {
+      "sentinel": "*",
+      "why": "Conventional wildcard token in rule configuration; absent from all five corresponding record fields."
+    },
+    {
+      "sentinel": "ANY",
+      "why": "Common human-readable rule-engine wildcard; absent from all five corresponding record fields."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "Common configuration term meaning all eligible values; absent from all five corresponding record fields."
+    },
+    {
+      "sentinel": "<ANY>",
+      "why": "Explicit placeholder used in policy or matching configurations; absent from all five corresponding record fields."
+    },
+    {
+      "sentinel": "__ANY__",
+      "why": "Reserved-looking wildcard marker suitable for an internal rules table; absent from all five corresponding record fields."
+    }
+  ],
+  "g2": [
+    {
+      "table": "returns",
+      "column": "return_details",
+      "json_path": "shipping.fee",
+      "stored": "v + 100",
+      "recover": "v - 100",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "All fees become 105.11–199.98: positive, credible shipping charges; RVL and CLR still compute numeric results, but are overstated.",
+      "data_shows": "Every shipping fee would exceed 100, whereas current fees span 5.11–99.98; an exact 100-unit shift is suggested by the new, sharply displaced interval."
+    },
+    {
+      "table": "products",
+      "column": "unit_value",
+      "json_path": null,
+      "stored": "v + 2000",
+      "recover": "v - 2000",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "All prices become 2019.09–3997.73, plausible prices for individual products; IRV, RVL and CLR remain computable but wrong.",
+      "data_shows": "Every product price would exceed 2000, unlike documented example prices and the present 19.09–1997.73 range; the whole distribution is displaced by 2000."
+    },
+    {
+      "table": "returns",
+      "column": "return_details",
+      "json_path": "shipping.fee",
+      "stored": "200 - v",
+      "recover": "200 - v",
+      "kind": "reversed scale around a fixed anchor",
+      "named_by_author_prompt": false,
+      "silent_because": "Fees become 100.02–194.89, still credible positive shipping charges; leakage calculations produce believable but incorrect numbers.",
+      "data_shows": "All 1500 fees now lie above 100, despite presently all lying below 100; the reflected interval exposes the reversed encoding."
+    },
+    {
+      "table": "products",
+      "column": "unit_value",
+      "json_path": null,
+      "stored": "3000 - v",
+      "recover": "3000 - v",
+      "kind": "reversed scale around a fixed anchor",
+      "named_by_author_prompt": false,
+      "silent_because": "Prices become 1002.27–2980.91: positive, credible product prices, giving numeric but incorrect leakage results.",
+      "data_shows": "The smallest product price now exceeds 1000 although current prices extend down to 19.09; the value distribution is reflected around 1500."
+    }
+  ]
+}

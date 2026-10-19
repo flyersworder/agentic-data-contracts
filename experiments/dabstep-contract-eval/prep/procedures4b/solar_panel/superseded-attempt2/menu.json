@@ -1,0 +1,70 @@
+{
+  "g1": [
+    {
+      "sentinel": "*",
+      "why": "Conventional wildcard token used in rule/configuration tables; absent from all six matched record-value domains (including Small/Mid/Large and Single/Moderate/Bulk)."
+    },
+    {
+      "sentinel": "ANY",
+      "why": "Common literal for an unrestricted criterion; none of the matched record fields has this value."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "Common rule-scope token meaning every value; not a manufacturer, technology, alert, warranty state, capacity band or volume tier."
+    },
+    {
+      "sentinel": "UNRESTRICTED",
+      "why": "Plausible explicit configuration label for a criterion without restrictions; absent from all six matched record-value domains."
+    },
+    {
+      "sentinel": "NO_RESTRICTION",
+      "why": "Plausible configuration/ETL wildcard marker; absent from all matched record-value domains."
+    }
+  ],
+  "g2": [
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "v + 1",
+      "recover": "v - 1",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "The formula divides by a percentage that is only one point too high; computed potential yield and recoverable loss remain numerically credible and nonempty.",
+      "data_shows": "[56] says availability_pct is a percentage on a 0 to 100 scale. Data have availability_pct as high as 99.99; after this change they reach about 100.99 (196 records exceed 100), visibly contradicting that scale."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "200 - v",
+      "recover": "200 - v",
+      "kind": "reversed scale centered on 100",
+      "named_by_author_prompt": false,
+      "silent_because": "New availability percentages run just above 100 (about 100.01 to 105), so using them unchanged in [56] still returns finite, plausible energy yields, though incorrect.",
+      "data_shows": "[56] explicitly says A (availability_pct) is a percentage on a 0 to 100 scale. Original data range from 95 to 99.99, so changed values range about 100.01 to 105; all 998 exceed the documented upper bound."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.efficiency.soil_loss_pct",
+      "stored": "v - 1",
+      "recover": "v + 1",
+      "kind": "additive offset",
+      "named_by_author_prompt": false,
+      "silent_because": "Subtracting one percentage point only modestly changes the denominator in [56]; potential yield and recoverable loss are finite and similar in magnitude to correct results.",
+      "data_shows": "[56] explicitly says L_soil (soil_loss_pct) is a percentage on a 0 to 100 scale, and [2] describes it as a percentage reduction. Original stored values reach 0.02, so transformed values reach -0.98; 61 rows become negative, contradicting the documented scale."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.efficiency.soil_loss_pct",
+      "stored": "14 - v",
+      "recover": "14 - v",
+      "kind": "reversed scale centered on seven percentage points",
+      "named_by_author_prompt": false,
+      "silent_because": "Changed losses are around -0.99 to 13.98 percentage points, so [56]'s denominator remains positive and yields numerically ordinary but wrong energy figures.",
+      "data_shows": "[56] calls L_soil a percentage on a 0 to 100 scale; [2] describes a nonnegative power reduction. Original soil_loss_pct reaches 14.99, making changed values as low as -0.99; 60 records have negative loss in contradiction to that scale."
+    }
+  ]
+}

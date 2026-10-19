@@ -378,6 +378,14 @@ in the data sits on.
 > families, and the "delivery" share below, and its "right time" reading,
 > are at least in large part that fact. See *The prose lacked a second
 > fact* and experiment 5b (`c39026f`).
+>
+> **Update (2026-10-19).** Measured since: the summing note lifts the prose
+> by 28.5 points on gpt-6-luna and 42.7 on Qwen 3.8 on the rule-matching
+> tasks, so most of DABStep's knowledge gain is the two facts the manual
+> leaves out. With both stated alike in prose and in the contract's text,
+> the contract's text is ahead by 3.7 points on gpt-6-luna and 5.5 on Qwen.
+> Form adds a modest gain beyond the facts. See *The second fact,
+> measured* and *The facts stated alike*.
 
 `manual_resolved` is `manual_prompt` plus `DATA_NOTE` (`dce/arms.py`): that
 fact, once, in words, no SQL. Both arms then know the same things. The plan --
@@ -1314,7 +1322,18 @@ leaves out.
 
 Qwen 3.8, a weaker model, runs the same materials at `c39026f`, with the
 same four tests labelled (22Q)-(25Q). It was added after the ceiling was
-seen and is reported apart.
+seen and is reported apart (`analysis/procedures.py --set qwen`; a task
+scores 0-3):
+
+| piece | schema_only | manual_prompt | manual_styled | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| R (30 tasks) | 11.1% | 98.9% | 96.7% | 96.7% | 100.0% |
+| C (30 tasks) | 0.0% | 97.8% | 96.7% | 100.0% | 100.0% |
+
+The manipulation check holds (28 tasks to 0 on R, 30 to 0 on C); (22Q),
+(23Q) and (24Q) fail (2 tasks to 0, p = 0.25; permutation p = 0.5 and
+0.63); (25Q) holds (+1.1 points, 1 task to 0). **The weaker model is at the
+ceiling too**: complete prose carries both pieces, in either style.
 
 ### Text or tools: predictions (20)-(21)
 
@@ -1435,12 +1454,129 @@ of validation would need a check that can -- for example, one that blocks a
 fee query not built on the declared matching predicate -- and an arm that
 has it. On luna the tools help by retrieval at the point of use: the right
 clause, in focus, when the query is written. A contract that stated its key
-rule in full at the top might close part of this gap without tools; that is
-untested.
+rule in full at the top might close part of this gap without tools;
+experiment 5c below comes close to testing it.
 
 The transcript analyses in this section and the one before are
 exploratory, chosen after the registered results were seen. The traces
 are kept off the repository for size (`~/data/dce-held-results/exp5/`).
+
+### The second fact, measured: predictions (26)-(29Q)
+
+Experiment 5b (run commit `c39026f`) adds `manual_summed`: `manual_resolved`
+plus `SUM_NOTE` ("Several fee rules can match the same transaction; when
+they do, each of them applies. ..."), the convention in words. On
+gpt-6-luna it ran alone and pairs by task and repeat with experiment 5's
+files; on Qwen 3.8 the four arms ran together, with Qwen's experiment 5
+predictions (26)-(27), fixed earlier in `7ffc11a`. k=3, `--retry-pass`,
+end-to-end strict on the 199 rule-matching tasks (`analysis/contract_text.py
+--model luna|qwen`).
+
+| model | tasks | manual_resolved | manual_summed | contract_text | contract |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | rule-matching | 53.9% | 82.4% | 83.2% | 82.6% |
+| | rest | 65.0% | 67.3% | 73.3% | 78.4% |
+| Qwen 3.8 | rule-matching | 43.4% | **86.1%** | 69.5% | 79.6% |
+| | rest | 69.8% | **74.1%** | 62.9% | 55.9% |
+| | rule-matching, official | 24.6% | 45.6% | 41.5% | 51.6% |
+
+- **(28) and (28Q) hold.** The note lifts the prose by 28.5 points on luna
+  (95 tasks to 4, p = 6e-24) and 42.7 on Qwen (112 to 4, p = 9e-29). The
+  convention is knowledge the manual lacked, on both models.
+- **(29) holds on luna**: `contract_text` and `manual_summed` tie (+0.8
+  points, 26 tasks to 19, p = 0.37).
+- **(29Q) fails on Qwen, with the prose ahead**: `manual_summed` beats
+  `contract_text` by 16.6 points, 69 tasks to 14 (p = 7e-10). The run
+  commit's readings did not foresee this direction.
+- **(26) holds** (`contract_text` beats `manual_resolved`, 88 tasks to 13)
+  **and (27) holds** (the governed tools add to the text on Qwen, +10.1
+  points, 64 tasks to 16, p = 3e-8).
+- **Not predicted.** On the other 202 tasks luna's `contract_text` beats
+  `manual_summed` (41 tasks to 21, p = 0.015), in the three average-fee
+  families of the section above; on Qwen the governed `contract` trails
+  `contract_text` there (30 tasks to 49, p = 0.04).
+
+Qwen states its working and then the answer as its last paragraph, and the
+official scorer marks that wrong; the end-to-end view credits it. The
+upgrade is not even across arms (+40.5 points for `manual_summed` on the
+rule-matching tasks, +28 for each contract arm), so under official verdicts
+the order changes: `contract` leads, and `manual_summed` and `contract_text`
+are close. Sampled upgraded answers were right in every arm, and answers
+holding the gold anywhere but the last paragraph are rare (0-15 per arm and
+subset) and were wrong when read. On luna the two views agree exactly.
+Run health: Qwen's three repeats cost about $1.90 each; five
+`manual_resolved` runs of 1,203 ended at an error or the turn limit and
+count as wrong; gpt-6-luna's `manual_summed` cost $0.66 a repeat, no errors.
+
+### The notes were plainer than the contract
+
+The design was checked after (29Q) failed. The prompts were as built (one
+system prompt per arm over all 401 traces; `manual_summed` is
+`manual_resolved` plus the note and nothing else; both contract files
+verbatim in `contract_text`), the configuration matched across arms, and the
+harness between the two run commits differs only by the new arm. One thing
+was not equal. The prose arm states both deciding facts as notes of their
+own. The contract states them less plainly: its MATCHING RULE mentions null
+only, with the empty-list clause about 28,000 characters later, and
+`total_transaction_fees` speaks of each transaction "joined to **the fee
+rule** that matches it" before saying to sum over matched pairs.
+
+The traces fit that reading. A keyword count over repeat 1 (single-rule
+policies: "most specific", "cheapest", "minimum fee per transaction" and
+the like; approximate, so a direction rather than a measurement) finds
+single-rule reasoning in 103 of Qwen's 199 `contract_text` runs on the
+rule-matching tasks, against 37 of 199 on luna; in 49 of Qwen's 61 failed
+`contract_text` runs, against 8 of 30 failed `manual_summed` runs. Luna
+reads the contract as summing; Qwen often takes "the fee rule" at its word.
+So (29Q) compared a note against a sentence that half-contradicts it, not
+prose against the contract's form.
+
+### The facts stated alike: predictions (30)-(31Q)
+
+Experiment 5c tests that. `contract_text_noted` (`581feb1`) is
+`contract_text` plus `DATA_NOTE` and `SUM_NOTE`, word for word, under the
+headings and in the order `manual_summed` has them. Run commit `a960495`:
+`manual_summed`, `contract_text` and `contract_text_noted` together in each
+repeat, gpt-6-luna then Qwen 3.8, k=3, `--retry-pass`; the two older arms are
+rerun so every test pairs within a run, and their earlier files serve as a
+drift check (`analysis/contract_noted.py --model luna|qwen`).
+
+| model | tasks | manual_summed | contract_text | contract_text_noted |
+|---|---|---:|---:|---:|
+| gpt-6-luna | rule-matching | 84.1% | 80.4% | **87.8%** |
+| | rest | 68.2% | 73.8% | **77.7%** |
+| Qwen 3.8 | rule-matching | 84.1% | 70.7% | **89.6%** |
+| | rest | **75.4%** | 60.6% | 70.1% |
+| | rule-matching, official | 45.7% | 38.9% | **54.6%** |
+
+- **(30) and (30Q) fail, with the contract's text ahead.** Stated alike,
+  the facts do better in the contract than in the prose on the
+  rule-matching tasks: +3.7 points on luna (32 tasks to 13, p = 0.007) and
+  +5.5 on Qwen (35 to 10, p = 3e-4; official 74 to 45, p = 0.01).
+- **(31Q) holds**: the two notes lift Qwen's `contract_text` by 18.9 points
+  (70 tasks to 8, p = 9e-14). On luna, where none was registered, they add
+  7.4 (31 to 8).
+- **No drift.** Each rerun arm is within 3 points of its earlier run on
+  every subset (largest: luna's `contract_text` on the rule-matching tasks,
+  -2.8 points, 8 tasks to 22), so experiments 5 and 5b stand.
+- **On the other 202 tasks the models part.** Luna's noted text leads the
+  prose by 9.5 points (51 tasks to 14), most of it in the average-fee
+  families. Qwen's is behind by 5.3 points, not significantly (37 to 47,
+  p = 0.33): it wins the credit family (35 of 57 task-runs against 3) and
+  loses `fee_ids_by_at_aci` (17 of 60 against 60). There Qwen, reading the
+  contract, matches `account_type` and `aci` strictly and lists too few
+  rules, although the data note sits in the same prompt; read with the
+  prose, it never does.
+
+As fixed in the run commit, the contract's text ahead means **with the
+facts alike, the contract's form adds to them** on the tasks the procedure
+governs, on both models. One caveat: the noted arm states each fact twice
+(in the contract and in the note), the prose once, so part of the lead may
+be repetition rather than form. Run health: luna $1.97 and Qwen about $1.00
+a repeat, no errors; one `manual_summed` run per Qwen repeat ended at the
+turn limit. The family counts and the `fee_ids_by_at_aci` reading are
+exploratory. Traces: `~/data/dce-held-results/exp5b/`, `exp5-qwen/`,
+`exp5c/`.
 
 ## The contract compiles, so the residual gap is derivation, not information
 

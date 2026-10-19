@@ -180,6 +180,19 @@ ab30c53a3357acf9; exp5-qwen r1 6cedf0bc458a7b35, r2 11a5700de94d8e00, r3
 1959d476b559e0c0. See FINDINGS.md, *The prose lacked a second fact*, and
 `analysis/contract_text.py --model luna|qwen`.
 
+## `exp5c-{luna,qwen}-r{1,2,3}.jsonl` -- experiment 5c, the facts stated alike
+
+`manual_summed`, `contract_text` and `contract_text_noted` (`581feb1`), run
+together in each repeat, the 401 golded DABStep tasks, at the run commit
+`a960495`, k=3, `--retry-pass`, gpt-6-luna then qwen3.8-27b. 1,203 graded
+rows each; no errors; one Qwen `manual_summed` run per repeat ended at the
+turn limit and counts as wrong. About $1.97 a luna repeat and $1.00 a Qwen
+repeat. `exp5c-smoke.jsonl` is the 12-task gpt-6-luna smoke at `581feb1`.
+sha256 (first 16 hex): luna r1 e4c8a1dda10c6011, r2 06222a502419ee0a, r3
+ac34377b6afca4ba; qwen r1 3fcf2ba6841949c7, r2 d36e65d2a938f1f0, r3
+7dc349d74eafc9f1. See FINDINGS.md, *The facts stated alike: predictions
+(30)-(31Q)*, and `analysis/contract_noted.py --model luna|qwen`.
+
 ## `procedures/exp4-{luna,sol}-r{1,2,3}.jsonl` -- experiment 4, knowledge type and writing style, controlled
 
 `schema_only`, `manual_prompt`, `manual_styled`, `manual_compiled` and

@@ -72,12 +72,23 @@ def test_class_attributes(bench):
     assert LiveSQLBench.extra_arms == (
         "contract_opus",
         "contract_authored",
+        "contract_gap",
         "manual_corrected",
         "contract_corrected",
         "manual_styled",
+        "manual_gap",
+        "manual_full",
+        "manual_noted",
+        "contract_text",
     )
     assert LiveSQLBench.governed_arms == frozenset(
-        {"contract", "contract_opus", "contract_authored", "contract_corrected"}
+        {
+            "contract",
+            "contract_opus",
+            "contract_authored",
+            "contract_gap",
+            "contract_corrected",
+        }
     )
     assert LiveSQLBench.roles == {
         "baseline": "schema_only",

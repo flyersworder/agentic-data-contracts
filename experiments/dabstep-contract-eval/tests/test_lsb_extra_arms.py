@@ -57,6 +57,7 @@ def test_the_default_directories():
     assert livesqlbench_module.EXTRA_CONTRACTS == {
         "contract_opus": root / "contracts-opus-joins" / "livesqlbench",
         "contract_authored": root / "contracts-authored" / "livesqlbench",
+        "contract_gap": root / "contracts-procedures4b" / "draw-1" / "livesqlbench",
     }
 
 

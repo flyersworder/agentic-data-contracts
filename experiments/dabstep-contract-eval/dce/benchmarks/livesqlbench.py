@@ -55,6 +55,12 @@ EXTRA_CONTRACTS: dict[str, Path] = {
     "contract_authored": DEFAULT_CONTRACTS.parent.parent
     / "contracts-authored"
     / "livesqlbench",
+    # Experiment 4b: the contract `dce.author` wrote from the gapped KB and the
+    # data, draw 1 (prep/procedures4b/RUBRIC.md).
+    "contract_gap": DEFAULT_CONTRACTS.parent.parent
+    / "contracts-procedures4b"
+    / "draw-1"
+    / "livesqlbench",
 }
 
 #: The corrected arms: `manual_prompt` reading a corrected KB, and a governed
@@ -68,6 +74,26 @@ CORRECTED_ARMS: tuple[str, ...] = ("manual_corrected", "contract_corrected")
 #: entries carry the same knowledge written as a business manual writes it
 #: (`LSB_DATA/styled/kb/<db>_kb.jsonl`; prep/procedures/DESIGN.md).
 STYLED_ARMS: tuple[str, ...] = ("manual_styled",)
+
+#: Experiment 4b's ungoverned arms (docs/superpowers/specs/
+#: 2026-10-19-experiment-4b-design.md), run with `--lsb-data` at the 4b data:
+#: `manual_gap` the manual over the gapped KB (`manual_prompt`'s prompt, named
+#: for the analysis); `manual_full` the KB with each gap's correction
+#: (`LSB_DATA/full/kb/`); `manual_noted` the gapped KB plus the author's
+#: resolutions in words (`notes.md` beside `contract_gap`'s contract); and
+#: `contract_text` that contract's two files in the prompt over plain tools.
+GAP_ARMS: tuple[str, ...] = (
+    "manual_gap",
+    "manual_full",
+    "manual_noted",
+    "contract_text",
+)
+#: Introduces the contract files in `contract_text`, as on DABStep.
+CONTRACT_TEXT_NOTE = (
+    "The data contract for this database follows: its two files, verbatim. "
+    "They define the tables, the metrics as SQL, and how the domain's rules "
+    "are to be read."
+)
 
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
@@ -198,7 +224,12 @@ class LiveSQLBench:
         "manual_compiled",
         "contract",
     )
-    extra_arms: tuple[str, ...] = (*EXTRA_CONTRACTS, *CORRECTED_ARMS, *STYLED_ARMS)
+    extra_arms: tuple[str, ...] = (
+        *EXTRA_CONTRACTS,
+        *CORRECTED_ARMS,
+        *STYLED_ARMS,
+        *GAP_ARMS,
+    )
     governed_arms: frozenset[str] = frozenset(
         {"contract", *EXTRA_CONTRACTS, "contract_corrected"}
     )
@@ -378,14 +409,28 @@ class LiveSQLBench:
             return governed_arm(
                 prompt, db, self._contract(name, arm), init_sql=AGENT_INIT_SQL
             )
-        if arm in (
+        if arm == "contract_text":
+            folder = self._contract_dir(name, "contract_gap")
+            files = "\n\n".join(
+                f"### {f}\n\n```yaml\n"
+                f"{(folder / f).read_text(encoding='utf-8').strip()}\n```"
+                for f in ("contract.yml", "semantic.yml")
+            )
+            prompt += f"\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
+        elif arm in (
             "manual_prompt",
             "manual_compiled",
             "manual_corrected",
             *STYLED_ARMS,
+            "manual_gap",
+            "manual_full",
+            "manual_noted",
         ):
             entries = _read_jsonl(self._kb_path(name, arm))
             prompt += "\n\n## Knowledge base\n\n" + render_manual(entries)
+            if arm == "manual_noted":
+                notes = self._notes_path(name).read_text(encoding="utf-8").strip()
+                prompt += "\n\n## Data notes\n\n" + notes
             if arm == "manual_compiled":
                 prompt += "\n\n## Compiled definitions\n\n" + render_compiled(
                     self._contract_dir(name)
@@ -399,14 +444,19 @@ class LiveSQLBench:
             return self._data / "corrected" / "kb" / f"{db}_kb.jsonl"
         if arm in STYLED_ARMS:
             return self._data / "styled" / "kb" / f"{db}_kb.jsonl"
+        if arm == "manual_full":
+            return self._data / "full" / "kb" / f"{db}_kb.jsonl"
         return self._db_dir(db) / f"{db}_kb.jsonl"
+
+    def _notes_path(self, db: str) -> Path:
+        return self._contract_dir(db, "contract_gap") / "notes.md"
 
     def arm_digest(self, arm: str, task: Task) -> str:
         # Every file the arm's prompt is built from, for the task's database,
         # so a re-downloaded schema or KB cannot change an arm unrecorded.
         name = task.meta["db"]
         files = [f"{name}_schema.txt", f"{name}_column_meaning_base.json"]
-        if arm in ("manual_prompt", "manual_compiled"):
+        if arm in ("manual_prompt", "manual_compiled", "manual_gap", "manual_noted"):
             files.append(f"{name}_kb.jsonl")
         folder = self._db_dir(name)
         joined = "\n".join(f"{f} {_sha256(folder / f)}" for f in files)
@@ -414,6 +464,16 @@ class LiveSQLBench:
             joined += f"\ncorrected kb {_sha256(self._kb_path(name, arm))}"
         if arm in STYLED_ARMS:
             joined += f"\nstyled kb {_sha256(self._kb_path(name, arm))}"
+        if arm in GAP_ARMS:
+            joined += f"\narm {arm}"
+        if arm == "manual_full":
+            joined += f"\nfull kb {_sha256(self._kb_path(name, arm))}"
+        if arm == "manual_noted":
+            joined += f"\nnotes {_sha256(self._notes_path(name))}"
+        if arm == "contract_text":
+            joined += (
+                f"\ncontract {contract_digest(self._contract(name, 'contract_gap'))}"
+            )
         if arm == "manual_compiled":
             joined += f"\ncontract {contract_digest(self._contract(name))}"
         elif arm in self.governed_arms:
@@ -459,8 +519,26 @@ class LiveSQLBench:
                     f"{arm}: no styled KB for {missing} under "
                     f"{self._data / 'styled' / 'kb'}"
                 )
+        if "manual_full" in arms:
+            missing = [
+                db for db in dbs if not self._kb_path(db, "manual_full").is_file()
+            ]
+            if missing:
+                raise SystemExit(
+                    f"manual_full: no full KB for {missing} under "
+                    f"{self._data / 'full' / 'kb'}"
+                )
+        if "manual_noted" in arms:
+            missing = [db for db in dbs if not self._notes_path(db).is_file()]
+            if missing:
+                raise SystemExit(
+                    f"manual_noted: no notes.md for {missing} under "
+                    f"{self._roots['contract_gap']}"
+                )
+        if {"contract_text", "manual_noted"} & set(arms) and "contract_gap" not in arms:
+            self._check_contracts("contract_gap", dbs, appendix=False)
         for arm in ("contract", *self.extra_arms):
-            if arm == "manual_corrected" or arm in STYLED_ARMS:
+            if arm == "manual_corrected" or arm in STYLED_ARMS or arm in GAP_ARMS:
                 continue
             if arm == "contract":
                 if not {"manual_compiled", "contract"} & set(arms):

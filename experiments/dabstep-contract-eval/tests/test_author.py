@@ -253,3 +253,47 @@ def test_the_cli_gives_the_author_a_long_request_timeout(
     assert seen["timeout"] == author.AUTHOR_TIMEOUT_S > 300
     assert seen["request_limit"] == author.AUTHOR_REQUEST_LIMIT
     assert run_module.claude_driver.__kwdefaults__["timeout"] == 300
+
+
+def test_strip_sample_rows_keeps_the_ddl_and_drops_every_sample():
+    ddl = (
+        'CREATE TABLE "a" (\nx bigint NULL\n);\n\nFirst 3 rows:\nx\n-\n1\n2\n...\n\n'
+        'CREATE TABLE "b" (\ny text NULL\n);\n\nFirst 3 rows:\ny\n-\nANY\n...\n'
+    )
+    out = author.strip_sample_rows(ddl)
+    assert 'CREATE TABLE "a"' in out and 'CREATE TABLE "b"' in out
+    assert "First 3 rows" not in out and "ANY" not in out and "\n1\n" not in out
+
+
+def test_the_no_data_author_has_no_query_tool_and_no_sample_rows(inputs, tmp_path):
+    # Experiment 4b's control: the same author and documentation, without
+    # the data, so recovery that needs the data cannot happen here.
+    seen = {}
+
+    def driver(*, system_prompt, user_prompt, tools, **_):
+        seen.update(
+            tools={t.__name__ for t in tools}, system=system_prompt, user=user_prompt
+        )
+        by_name = {t.__name__: t for t in tools}
+        by_name["submit_contract"](
+            contract_yml=CONTRACT, semantic_yml=SEMANTIC, kb_coverage=COVERAGE
+        )
+        return DriverResult(messages=[], usage=dict(USAGE))
+
+    out = tmp_path / "shop"
+    status, _ = author.author_database(inputs, out, driver, spend_cap=1.0, no_data=True)
+    assert status == "done"
+    assert seen["tools"] == {"submit_contract"}
+    assert "run_sql" not in seen["system"]
+    assert "First 3 rows" not in seen["user"]
+    header = json.loads(
+        gzip.decompress((out / author.LOG).read_bytes()).splitlines()[0]
+    )
+    assert header["no_data"] is True
+
+
+def test_the_author_with_data_is_unchanged(inputs, tmp_path):
+    driver = scripted(_submit())
+    author.author_database(inputs, tmp_path / "shop", driver, spend_cap=1.0)
+    assert "run_sql" in driver.system_prompt
+    assert driver.system_prompt == author.system_prompt(inputs)

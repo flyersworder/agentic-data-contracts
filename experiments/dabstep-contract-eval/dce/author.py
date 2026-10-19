@@ -24,6 +24,7 @@ import argparse
 import gzip
 import json
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Callable
@@ -123,8 +124,27 @@ Write the contract for the database `{db}`.
 """
 
 
-def system_prompt(inputs: CompileInputs) -> str:
-    return SYSTEM_PROMPT.format(
+#: The bullet that sends the author to the data. The no-data control
+#: (experiment 4b) has no run_sql, so its prompt drops this bullet only.
+DATA_BULLET = """\
+- Check the data with run_sql where it decides how a definition must be \
+written (how values are stored, units, NULLs, JSON paths, formats) and say \
+what you found in the description.
+"""
+_SAMPLE_ROWS = re.compile(r"\n*First 3 rows:\n.*?\n\.\.\.\n?", flags=re.DOTALL)
+
+
+def strip_sample_rows(ddl: str) -> str:
+    """The schema text without its "First 3 rows" samples."""
+    return _SAMPLE_ROWS.sub("\n", ddl)
+
+
+def system_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
+    template = SYSTEM_PROMPT
+    if no_data:
+        assert DATA_BULLET in template
+        template = template.replace(DATA_BULLET, "")
+    return template.format(
         dialect_note=inputs.dialect_note,
         forbidden=", ".join(FORBIDDEN_OPERATIONS),
         submissions=MAX_SUBMISSIONS,
@@ -133,10 +153,10 @@ def system_prompt(inputs: CompileInputs) -> str:
     )
 
 
-def user_prompt(inputs: CompileInputs) -> str:
+def user_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
     return USER_PROMPT.format(
         db=inputs.db_name,
-        ddl=inputs.ddl,
+        ddl=strip_sample_rows(inputs.ddl) if no_data else inputs.ddl,
         meanings=inputs.column_meanings or "(none)",
         n=len(inputs.entries),
         kb="\n".join(
@@ -244,8 +264,11 @@ def check_submission(
 
 
 class _Session:
-    def __init__(self, inputs: CompileInputs, db: CompileDB, tables) -> None:
+    def __init__(
+        self, inputs: CompileInputs, db: CompileDB, tables, *, no_data: bool = False
+    ) -> None:
         self.inputs, self.db, self.tables = inputs, db, tables
+        self.no_data = no_data
         self.submissions = 0
         self.accepted: tuple[str, str] | None = None
         self.errors: list[str] = []
@@ -288,10 +311,10 @@ class _Session:
                 left = MAX_SUBMISSIONS - self.submissions
                 return f"ERROR:\n{text}\nFix these and submit again ({left} left)."
 
-        return [run_sql, submit_contract]
+        return [submit_contract] if self.no_data else [run_sql, submit_contract]
 
 
-def _header(inputs: CompileInputs, model: str) -> dict:
+def _header(inputs: CompileInputs, model: str, *, no_data: bool = False) -> dict:
     from dce.agent import _commit_sha
 
     return {
@@ -299,6 +322,7 @@ def _header(inputs: CompileInputs, model: str) -> dict:
         "benchmark": inputs.benchmark,
         "db": inputs.db_name,
         "model": model,
+        "no_data": no_data,
         "commit_sha": _commit_sha(),
         "inputs": {p.name: _sha256(p) for p in inputs.sources},
     }
@@ -323,6 +347,7 @@ def author_database(
     spend_cap: float,
     spent: float = 0.0,
     model: str = AUTHOR_MODEL,
+    no_data: bool = False,
 ) -> tuple[str, float]:
     """("done" | "failed" | "error" | "skipped" | "capped", spent). A
     database with a log is finished, accepted or not, and is skipped:
@@ -336,10 +361,10 @@ def author_database(
     db = CompileDB(inputs.db_path, init_sql=inputs.init_sql)
     try:
         tables = db.tables()
-        session = _Session(inputs, db, tables)
+        session = _Session(inputs, db, tables, no_data=no_data)
         result: DriverResult = driver(
-            system_prompt=system_prompt(inputs),
-            user_prompt=user_prompt(inputs),
+            system_prompt=system_prompt(inputs, no_data=no_data),
+            user_prompt=user_prompt(inputs, no_data=no_data),
             tools=session.tools(),
         )
     finally:
@@ -373,7 +398,7 @@ def author_database(
         "usage": result.usage,
         "messages": result.messages,
     }
-    lines = [_header(inputs, model), record]
+    lines = [_header(inputs, model, no_data=no_data), record]
     (out_dir / LOG).write_bytes(
         gzip.compress(
             "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines).encode(
@@ -401,6 +426,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--out", type=Path, default=Path("contracts-authored"))
     parser.add_argument("--model", default=AUTHOR_MODEL)
     parser.add_argument("--max-spend", type=float, required=True)
+    parser.add_argument(
+        "--no-data",
+        action="store_true",
+        help="no run_sql and no sample rows (experiment 4b's control)",
+    )
     args = parser.parse_args(argv)
 
     root = args.out / "livesqlbench"
@@ -419,6 +449,7 @@ def main(argv: list[str] | None = None) -> None:
             spend_cap=args.max_spend,
             spent=spent,
             model=args.model,
+            no_data=args.no_data,
         )
         print(f"{name}: {status} (spent ${spent:.2f} of ${args.max_spend:.2f})")
         if status == "capped":

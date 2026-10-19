@@ -1,0 +1,434 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: reverse_logistics, author: claudeopus5.5
+metrics:
+- name: total_return_cost
+  description: 'TRC: aggregated monetary outlay incurred to handle a single return from transport to final
+    disposition. TRC = Shipping Fee + Restocking Fee + Relabeling Cost + Disposal Cost + Repair Estimate.
+    Shipping fee from returns.return_details shipping.fee; the rest from financial_management.cost_breakdown
+    (fees.restocking_fee, fees.relabeling_cost, disposal.disposal_cost, repair_costs.repair_estimate).
+    Per-return value (wrap in SUM/AVG to aggregate). Only the 995 returns with a financial record have
+    a TRC. dispcost column is all 0 - not used.
+
+    '
+  sql_expression: 'CAST(r.return_details->>''$.shipping.fee'' AS DOUBLE) + CAST(f.cost_breakdown->>''$.fees.restocking_fee''
+    AS DOUBLE) + CAST(f.cost_breakdown->>''$.fees.relabeling_cost'' AS DOUBLE) + CAST(f.cost_breakdown->>''$.disposal.disposal_cost''
+    AS DOUBLE) + CAST(f.cost_breakdown->>''$.repair_costs.repair_estimate'' AS DOUBLE)
+
+    '
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.financial_management f ON f.casetag = r.casenum
+  grain: one return case that has a financial_management record
+  domains:
+  - return_costs
+- name: return_profit_impact
+  description: 'RPI: net financial impact of a return after cost and recovery value. RPI = Recovery Value
+    (cost_breakdown valuation.recovery_value) - TRC.
+
+    '
+  sql_expression: "CAST(f.cost_breakdown->>'$.valuation.recovery_value' AS DOUBLE) - (CAST(r.return_details->>'$.shipping.fee'\
+    \ AS DOUBLE)\n   + CAST(f.cost_breakdown->>'$.fees.restocking_fee' AS DOUBLE)\n   + CAST(f.cost_breakdown->>'$.fees.relabeling_cost'\
+    \ AS DOUBLE)\n   + CAST(f.cost_breakdown->>'$.disposal.disposal_cost' AS DOUBLE)\n   + CAST(f.cost_breakdown->>'$.repair_costs.repair_estimate'\
+    \ AS DOUBLE))\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.financial_management f ON f.casetag = r.casenum
+  grain: one return case that has a financial_management record
+  domains:
+  - return_costs
+- name: recovery_rate_per_day
+  description: 'RRD: value recovered per day elapsed since sale. RRD = Recovery Value / Days Lapsed (returns.dayslapsed,
+    always > 0; cast to DOUBLE to avoid integer division).
+
+    '
+  sql_expression: 'CAST(f.cost_breakdown->>''$.valuation.recovery_value'' AS DOUBLE) / NULLIF(CAST(r.dayslapsed
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.financial_management f ON f.casetag = r.casenum
+  grain: one return case that has a financial_management record
+  domains:
+  - return_costs
+- name: sustainability_adjusted_loss
+  description: 'SAL: cost of a return adjusted for environmental impact. SAL = TRC + 0.5 x Carbon Footprint
+    (sustainability.carbon_footprint, kg CO2e) - Recovery Value.
+
+    '
+  sql_expression: "(CAST(r.return_details->>'$.shipping.fee' AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.fees.restocking_fee'\
+    \ AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.fees.relabeling_cost' AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.disposal.disposal_cost'\
+    \ AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.repair_costs.repair_estimate' AS DOUBLE))\n+ 0.5 * CAST(f.cost_breakdown->>'$.sustainability.carbon_footprint'\
+    \ AS DOUBLE) - CAST(f.cost_breakdown->>'$.valuation.recovery_value' AS DOUBLE)\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.financial_management f ON f.casetag = r.casenum
+  grain: one return case that has a financial_management record
+  domains:
+  - return_costs
+- name: regulatory_compliance_penalty
+  description: 'RCP: additional proportional cost when the returned product is non-compliant. RCP = 0.2
+    x TRC if products.product_traceability compliance.regulatory_compliance = ''Non-compliant'', else
+    0 (including NULL status).
+
+    '
+  sql_expression: "CASE WHEN (p.product_traceability->>'$.compliance.regulatory_compliance') = 'Non-compliant'\
+    \ THEN 0.2 * (CAST(r.return_details->>'$.shipping.fee' AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.fees.restocking_fee'\
+    \ AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.fees.relabeling_cost' AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.disposal.disposal_cost'\
+    \ AS DOUBLE)\n + CAST(f.cost_breakdown->>'$.repair_costs.repair_estimate' AS DOUBLE))\nELSE 0 END\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.financial_management f ON f.casetag = r.casenum JOIN main.products
+    p ON p.itemcode = r.itemlink
+  grain: one return case that has a financial_management record
+  domains:
+  - return_costs
+  - operations
+- name: return_channel_cost_index
+  description: 'RCCI: relative shipping expense of a return compared with the average shipping fee of
+    its return channel. RCCI = S_f / avg S_f over all returns with the same returns.return_channel (window
+    over the whole returns table; apply filters outside if the average must stay historical).
+
+    '
+  sql_expression: 'CAST(r.return_details->>''$.shipping.fee'' AS DOUBLE) / AVG(CAST(r.return_details->>''$.shipping.fee''
+    AS DOUBLE)) OVER (PARTITION BY r.return_channel)
+
+    '
+  source_model: main.returns
+  from_sql: main.returns r
+  grain: one return case
+  domains:
+  - return_costs
+- name: warranty_claim_ratio
+  description: 'WCR = N_claims / T_r: proportion of returns that include a valid warranty claim; N_claims
+    = number of authorised warranty claims, T_r = returns in scope. INTERPRETATION: an authorised warranty
+    claim is a return with a non-NULL authorization.warranty_claim (799 of 1500) whose authorization.auth_status
+    = ''Approved''.
+
+    '
+  sql_expression: "CAST(COUNT(*) FILTER (WHERE (r.return_details->>'$.authorization.warranty_claim') IS\
+    \ NOT NULL\n  AND (r.return_details->>'$.authorization.auth_status') = 'Approved') AS DOUBLE)\n/ NULLIF(COUNT(*),\
+    \ 0)\n"
+  source_model: main.returns
+  from_sql: main.returns r
+  grain: one return case
+  domains:
+  - fraud_and_warranty
+- name: average_processing_time
+  description: 'APT = sum of processing times / n: mean calendar time spent processing returns at a facility,
+    from return_processing.proctime (one row per loccode; group by loccode or another attribute as asked).
+
+    '
+  sql_expression: AVG(rp.proctime)
+  source_model: main.return_processing
+  from_sql: main.return_processing rp
+  grain: one return_processing row (location code)
+  domains:
+  - operations
+- name: customer_monthly_return_count
+  description: 'CMRC of a return: number of returns rows with the same customer (orders.buyerlink via
+    returns.srctxn = orders.txnnum) and same calendar month (substr(revdate,1,7)), the return itself included;
+    >= 1.
+
+    '
+  sql_expression: COUNT(*) OVER (PARTITION BY o.buyerlink, substr(r.revdate, 1, 7))
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.orders o ON o.txnnum = r.srctxn
+  grain: one return case
+  domains:
+  - handling_charges
+- name: return_handling_charge
+  description: 'RHC summed over the returns in scope: per return RHC = F + P/100 x V, F/P = flat_charge/charge_pct
+    of the matching rule of return_charge_rules, or the Standard Handling Charge (15.00 / 5.0) when none
+    matches; V = products.unit_value. Matching per the handling_charges domain: ''ANY'' or NULL text criterion
+    = no restriction; otherwise exact equality (NULL return value never matches a specific criterion);
+    CMRC band inclusive, NULL bound open. INTERPRETATION: when several rules match (common), the lowest
+    rule_id is applied (the documentation gives no precedence). Group by o.buyerlink and/or substr(r.revdate,1,7),
+    filter on r.revdate for a period; average = AVG(same per-return expression). Round only the final
+    result to 2 decimals. Checked: 1500 returns, 1409 matched a rule, 91 take the standard charge; total
+    over all returns 109208.30.
+
+    '
+  sql_expression: "SUM(CASE WHEN k.rule_id IS NULL THEN 15.00 ELSE k.flat_charge END\n    + CASE WHEN\
+    \ k.rule_id IS NULL THEN 5.0 ELSE k.charge_pct END / 100.0 * p.unit_value)\n"
+  source_model: main.returns
+  from_sql: "main.returns r JOIN main.orders o ON o.txnnum = r.srctxn LEFT JOIN main.customers c ON c.profilenum\
+    \ = o.buyerlink JOIN main.products p ON p.itemcode = r.itemlink LEFT JOIN main.quality_assessment\
+    \ q ON q.inspectref = r.casenum JOIN (SELECT r2.casenum, COUNT(*) OVER (PARTITION BY o2.buyerlink,\
+    \ substr(r2.revdate, 1, 7)) AS cmrc\n      FROM main.returns r2 JOIN main.orders o2 ON o2.txnnum =\
+    \ r2.srctxn) m ON m.casenum = r.casenum\nLEFT JOIN LATERAL (\n  SELECT k0.rule_id, k0.flat_charge,\
+    \ k0.charge_pct FROM main.return_charge_rules k0\n  WHERE (k0.customer_segment IS NULL OR k0.customer_segment\
+    \ = 'ANY' OR k0.customer_segment = c.seg_category)\n    AND (k0.return_channel IS NULL OR k0.return_channel\
+    \ = 'ANY' OR k0.return_channel = r.return_channel)\n    AND (k0.item_category IS NULL OR k0.item_category\
+    \ = 'ANY' OR k0.item_category = p.itemcategory)\n    AND (k0.primary_reason IS NULL OR k0.primary_reason\
+    \ = 'ANY' OR k0.primary_reason = (r.return_details->>'$.reasoning.primary_reason'))\n    AND (k0.item_condition\
+    \ IS NULL OR k0.item_condition = 'ANY' OR k0.item_condition = (q.assessment_summary->>'$.condition.item_condition'))\n\
+    \    AND (k0.min_monthly_returns IS NULL OR m.cmrc >= k0.min_monthly_returns)\n    AND (k0.max_monthly_returns\
+    \ IS NULL OR m.cmrc <= k0.max_monthly_returns)\n  ORDER BY k0.rule_id LIMIT 1) k ON TRUE\n"
+  grain: one return case with its applied charge rule (k NULL = Standard Handling Charge)
+  domains:
+  - handling_charges
+- name: inspected_resale_value
+  description: 'IRV of a return = V x A/10 x K: V = products.unit_value, A = results.aesthetic_score (decimal;
+    observed 2-11), K = 1.00 Complete, 0.85 Accessories Missing, 0.60 Missing Parts (condition.completeness).
+    Per return, in unit_value currency units.
+
+    '
+  sql_expression: "p.unit_value * CAST(q.assessment_summary->>'$.results.aesthetic_score' AS DOUBLE) /\
+    \ 10.0 * CASE (q.assessment_summary->>'$.condition.completeness')\n    WHEN 'Complete' THEN 1.00 WHEN\
+    \ 'Accessories Missing' THEN 0.85 WHEN 'Missing Parts' THEN 0.60 END\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.products p ON p.itemcode = r.itemlink JOIN main.quality_assessment
+    q ON q.inspectref = r.casenum
+  grain: one return case
+  domains:
+  - value_leakage
+- name: return_value_leakage
+  description: 'RVL of a return = V - IRV + S_f (shipping.fee read as decimal); every returns row has
+    one. Sum over a customer/group/period with SUM(...), average with AVG(...). No intermediate rounding.
+
+    '
+  sql_expression: "p.unit_value - p.unit_value * CAST(q.assessment_summary->>'$.results.aesthetic_score'\
+    \ AS DOUBLE) / 10.0\n  * CASE (q.assessment_summary->>'$.condition.completeness')\n      WHEN 'Complete'\
+    \ THEN 1.00 WHEN 'Accessories Missing' THEN 0.85 WHEN 'Missing Parts' THEN 0.60 END\n+ CAST(r.return_details->>'$.shipping.fee'\
+    \ AS DOUBLE)\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.orders o ON o.txnnum = r.srctxn JOIN main.products p ON p.itemcode
+    = r.itemlink JOIN main.quality_assessment q ON q.inspectref = r.casenum
+  grain: one return case
+  domains:
+  - value_leakage
+- name: customer_leakage_ratio
+  description: 'CLR = SUM(RVL) / SUM(V) over the same returns (ratio of sums). Per Customer Return Month:
+    GROUP BY o.buyerlink, substr(r.revdate, 1, 7); for another period filter r.revdate and group by customer/group.
+    Round only the final result to 2 decimals.
+
+    '
+  sql_expression: "SUM(p.unit_value\n    - p.unit_value * CAST(q.assessment_summary->>'$.results.aesthetic_score'\
+    \ AS DOUBLE) / 10.0\n      * CASE (q.assessment_summary->>'$.condition.completeness')\n          WHEN\
+    \ 'Complete' THEN 1.00 WHEN 'Accessories Missing' THEN 0.85 WHEN 'Missing Parts' THEN 0.60 END\n \
+    \   + CAST(r.return_details->>'$.shipping.fee' AS DOUBLE))\n/ NULLIF(SUM(p.unit_value), 0)\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.orders o ON o.txnnum = r.srctxn JOIN main.products p ON p.itemcode
+    = r.itemlink JOIN main.quality_assessment q ON q.inspectref = r.casenum
+  grain: one Customer Return Month (o.buyerlink, substr(r.revdate,1,7)) after GROUP BY
+  domains:
+  - value_leakage
+- name: leakage_class
+  description: 'Leakage Class of a Customer Return Month from its unrounded CLR: ''Contained'' CLR < 0.55;
+    ''Elevated'' 0.55 <= CLR < 0.70; ''Severe'' CLR >= 0.70. Must be used with GROUP BY o.buyerlink, substr(r.revdate,
+    1, 7). Checked: 397 customer-months -> 195 Contained, 123 Elevated, 79 Severe.
+
+    '
+  sql_expression: "CASE WHEN SUM(p.unit_value\n      - p.unit_value * CAST(q.assessment_summary->>'$.results.aesthetic_score'\
+    \ AS DOUBLE) / 10.0\n        * CASE (q.assessment_summary->>'$.condition.completeness')\n        \
+    \    WHEN 'Complete' THEN 1.00 WHEN 'Accessories Missing' THEN 0.85 WHEN 'Missing Parts' THEN 0.60\
+    \ END\n      + CAST(r.return_details->>'$.shipping.fee' AS DOUBLE)) / NULLIF(SUM(p.unit_value), 0)\
+    \ < 0.55 THEN 'Contained'\n     WHEN SUM(p.unit_value\n      - p.unit_value * CAST(q.assessment_summary->>'$.results.aesthetic_score'\
+    \ AS DOUBLE) / 10.0\n        * CASE (q.assessment_summary->>'$.condition.completeness')\n        \
+    \    WHEN 'Complete' THEN 1.00 WHEN 'Accessories Missing' THEN 0.85 WHEN 'Missing Parts' THEN 0.60\
+    \ END\n      + CAST(r.return_details->>'$.shipping.fee' AS DOUBLE)) / NULLIF(SUM(p.unit_value), 0)\
+    \ < 0.70 THEN 'Elevated'\n     ELSE 'Severe' END\n"
+  source_model: main.returns
+  from_sql: main.returns r JOIN main.orders o ON o.txnnum = r.srctxn JOIN main.products p ON p.itemcode
+    = r.itemlink JOIN main.quality_assessment q ON q.inspectref = r.casenum
+  grain: one Customer Return Month (o.buyerlink, substr(r.revdate,1,7)) after GROUP BY
+  domains:
+  - value_leakage
+tables:
+- schema: main
+  table: customers
+  columns:
+  - name: profilenum
+    description: Unique customer profile id (PK); orders.buyerlink points here.
+  - name: seg_category
+    description: 'Customer segment: Wholesale, Retail, Individual. NULL (93 rows) = segment not assigned;
+      such customers never match a charge rule with a specific segment.'
+  - name: geographyzone
+    description: Geographic location zone (country name), e.g. Cambodia.
+  - name: return_behavior_profile
+    description: 'JSON: total_returns (Total Returns T_r, lifetime count of returns), return_frequency_score,
+      similar_previous_returns (NULL = no previous simulated returns data).'
+- schema: main
+  table: products
+  columns:
+  - name: itemcode
+    description: Unique product id (PK); returns.itemlink points here.
+  - name: itemcategory
+    description: 'Product category: Apparel, Electronics, Home Goods, Accessories. Compared with return_charge_rules.item_category.'
+  - name: subcat
+    description: 'Subcategory: Laptops, Shirts, Shoes, Smartphones.'
+  - name: unit_value
+    description: Unit value/price (V in RHC, IRV, RVL, CLR). REAL.
+  - name: product_traceability
+    description: 'JSON: trace.{batch_reference, lot_reference, serial_number, manufacture_date}; compliance.{regulatory_compliance
+      (''Compliant''/''Non-compliant'', NULL = no status; drives RCP), hazardous_material, recall_flag
+      Yes/No}.'
+- schema: main
+  table: orders
+  columns:
+  - name: txnnum
+    description: Order transaction id (PK); returns.srctxn points here.
+  - name: buyerlink
+    description: Customer of the order (customers.profilenum). Defines the customer of a return.
+  - name: transaction_value
+    description: Total order value. 0 on every row in this data.
+  - name: txndate
+    description: Transaction date. Empty string on every row, so customer tenure / CRFI cannot be computed.
+- schema: main
+  table: returns
+  columns:
+  - name: casenum
+    description: Return case id (PK), e.g. RL924605.
+  - name: logtime
+    description: When the return was logged; mixed text formats (e.g. 'Jun 15, 2024', 'February 18th,
+      2025', '2024-08-13').
+  - name: srctxn
+    description: FK to orders.txnnum.
+  - name: itemlink
+    description: FK to products.itemcode.
+  - name: revdate
+    description: Date the return was processed, always 'YYYY-MM-DD' text (2025-01-20..2025-02-19); substr(revdate,1,7)
+      gives the month used by CMRC, RHC periods and Customer Return Month.
+  - name: dayslapsed
+    description: 'Days Lapsed D_l: calendar days between original transaction and completion of return
+      processing / refund issue. Always > 0.'
+  - name: return_channel
+    description: 'Return channel: Store, Courier, Mail, Collection Point (Locker/Pickup documented but
+      absent).'
+  - name: return_details
+    description: 'JSON: reasoning.{primary_reason (Changed Mind, Quality Issue, Size/Fit, Wrong Item),
+      secondary_reason, reason_notes, client_notes}; authorization.{auth_status Approved/Pending/Rejected,
+      warranty_status Valid/Expired/Not Applicable, warranty_claim (NULL = none)}; shipping.{carrier,
+      fee (Shipping Fee S_f, numeric), insurance_amount, estimated_arrival, tracking_reference}; fraud.{risk_level
+      Low/Medium/High or null = not assessed, fraud_flags 0-5}. Extract with ->> and parenthesise before
+      comparing.'
+- schema: main
+  table: quality_assessment
+  columns:
+  - name: inspectref
+    description: PK and FK to returns.casenum; every return has exactly one inspection.
+  - name: assessment_summary
+    description: 'JSON: condition.{item_condition New/Like New/Used/Damaged, package_condition, completeness
+      Complete/Accessories Missing/Missing Parts, usage_signs (NULL = none)}; defects.{defect_type, defect_severity};
+      results.{qa_result Pass/Fail/Conditional, functional_test_result, aesthetic_score (numeric, observed
+      2-11), tech_review_status}; documentation.{documentation_status, has_photos (mixed yes/no codes),
+      qa_alert, needs_investigation}.'
+- schema: main
+  table: return_processing
+  columns:
+  - name: loccode
+    description: Location code (PK); 26 rows, not linked to returns.
+  - name: procprio
+    description: 'Processing priority: Bulk (palletised/batch, low-demand periods), Standard (default
+      SLA e.g. 3-5 days), Express (VIP, high resale value, or paid premium).'
+  - name: procstate
+    description: 'Processing state: Received, Inspecting, Processing, Completed.'
+  - name: proctime
+    description: Processing time PT_i; APT = AVG(proctime).
+  - name: handreq
+    description: 'Handling requirement: Standard, Fragile, Hazardous, Special.'
+  - name: needsquar
+    description: 'Quarantine needed: Yes/No.'
+  - name: quardays
+    description: Quarantine days.
+  - name: handling_notes
+    description: Handling notes.
+  - name: dispaction
+    description: 'Disposition action: Refurbish, Repair, Resell, Scrap.'
+  - name: dispreason
+    description: 'Disposition reason: Good Condition, Repairable, Too Costly, Unsalvageable; NULL = none
+      provided.'
+  - name: needsrelabel
+    description: 'Relabel needed, mixed codes: 1/True/Y/YES yes; 0/False/F/N/NO no; P undocumented.'
+  - name: repairfeas
+    description: 'Repair feasibility: High, Medium, Low, Not Feasible.'
+  - name: estrepairhrs
+    description: Estimated repair hours.
+  - name: partsavail
+    description: 'Parts availability: Available, Partial, Unavailable.'
+  - name: policycomp
+    description: 'Policy compliance: Compliant / Non-compliant.'
+  - name: exceptmade
+    description: 'Exception made: Yes/No.'
+  - name: excepttype
+    description: 'Exception type: Customer Value, Error, Goodwill; NULL = none provided.'
+  - name: apprlevel
+    description: 'Approval level for exceptional processing: Automatic, Manager, Supervisor.'
+- schema: main
+  table: financial_management
+  columns:
+  - name: creditref
+    description: Financial record id (PK).
+  - name: casetag
+    description: FK to returns.casenum; unique; 995 of 1500 returns have a record.
+  - name: dispcost
+    description: Documented as disposal cost but 0 on every row; use cost_breakdown disposal.disposal_cost
+      instead.
+  - name: cost_breakdown
+    description: 'JSON: refund.{refund_amount, method Original Payment/Bank Transfer/Store Credit, status,
+      processing_days}; fees.{restocking_fee R_f, repackaging_cost, relabeling_cost L_c, qa_fee}; repair_costs.{repair_estimate
+      R_e, parts_fee, labor_fee}; disposal.{disposal_cost D_c, disposal_method Recycle/Hazardous Waste/Landfill/Return
+      to Vendor, environmental_impact, recycling_category}; valuation.{recovery_value R_v, value_loss_pct};
+      sustainability.{sustainability_score, carbon_footprint C_f (kg CO2e), efficiency_score, cost_efficiency}.
+      Numbers mix int/decimal: CAST(... AS DOUBLE).'
+- schema: main
+  table: case_management
+  columns:
+  - name: casetie
+    description: PK and FK to returns.casenum.
+  - name: satisfscore
+    description: 'Satisfaction 1-5: 1 Very Dissatisfied, 2 Dissatisfied, 3 Neutral, 4 Satisfied, 5 Very
+      Satisfied.'
+  - name: resptime
+    description: Response time for handling the case.
+  - name: trainident
+    description: 'Training required, mixed codes: 1/True/Y/YES yes; 0/False/F/N/NO no; P undocumented.'
+  - name: feedbacktype
+    description: Process/Product/Service; NULL = no feedback type.
+  - name: vendoraction
+    description: Initiated/Completed; NULL = no vendor action reported.
+  - name: recstate
+    description: Approved/Draft; NULL = no recommendation state.
+  - name: closedate
+    description: Case close date 'YYYY-MM-DD' text.
+  - name: nextreview
+    description: Next review date 'YYYY-MM-DD' text.
+- schema: main
+  table: return_charge_rules
+  columns:
+  - name: rule_id
+    description: Rule id (PK). Lowest rule_id wins when several rules match (contract interpretation).
+  - name: customer_segment
+    description: Segment criterion vs customers.seg_category. 'ANY' (stored wildcard) or NULL = no restriction.
+  - name: return_channel
+    description: Channel criterion vs returns.return_channel. 'ANY' or NULL = no restriction.
+  - name: item_category
+    description: Category criterion vs products.itemcategory. 'ANY' or NULL = no restriction.
+  - name: primary_reason
+    description: Reason criterion vs return_details reasoning.primary_reason. 'ANY' or NULL = no restriction.
+  - name: item_condition
+    description: Condition criterion vs assessment_summary condition.item_condition. 'ANY' or NULL = no
+      restriction.
+  - name: min_monthly_returns
+    description: Inclusive lower bound on CMRC; NULL = no lower bound.
+  - name: max_monthly_returns
+    description: Inclusive upper bound on CMRC; NULL = no upper bound.
+  - name: flat_charge
+    description: Fixed handling charge F, in unit_value currency units. Standard (no match) = 15.00.
+  - name: charge_pct
+    description: Charge P as percentage of products.unit_value. Standard (no match) = 5.0.
+relationships:
+- from: main.returns.srctxn
+  to: main.orders.txnnum
+  type: many_to_one
+- from: main.returns.itemlink
+  to: main.products.itemcode
+  type: many_to_one
+- from: main.orders.buyerlink
+  to: main.customers.profilenum
+  type: many_to_one
+- from: main.quality_assessment.inspectref
+  to: main.returns.casenum
+  type: one_to_one
+- from: main.financial_management.casetag
+  to: main.returns.casenum
+  type: one_to_one
+- from: main.case_management.casetie
+  to: main.returns.casenum
+  type: one_to_one

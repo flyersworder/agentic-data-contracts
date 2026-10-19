@@ -1,0 +1,208 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: reverse_logistics, author: claudeopus5.5
+version: '1.0'
+name: reverse_logistics
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Reverse-logistics (product returns) database: customers, products, orders, return cases
+      and their quality assessment, financial breakdown, case management, processing locations, and the
+      return handling charge schedule.'
+    preferred: true
+    tables:
+    - customers
+    - products
+    - orders
+    - returns
+    - quality_assessment
+    - return_processing
+    - financial_management
+    - case_management
+    - return_charge_rules
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: return_costs
+    summary: Cost components of a return and the cost KPIs built on them
+    description: 'COST COMPONENTS (definitions). Shipping Fee (S_f): cost charged by the logistics provider
+      for transporting a returned item; a monetary amount reflecting transportation cost incurred for
+      a single return shipment. Stored at JSON path shipping.fee in returns.return_details. Restocking
+      Fee (R_f): service charge for reintegrating a returned item into inventory; fee imposed to cover
+      administrative and handling work required to make the item sellable again. JSON path fees.restocking_fee
+      in financial_management.cost_breakdown. Relabeling Cost (L_c): expense of printing and applying
+      new labels or packaging identifiers to a returned item; direct cost of material and labor associated
+      with correcting item labeling deficiencies. JSON path fees.relabeling_cost in cost_breakdown. Disposal
+      Cost (D_c): fee incurred when discarding a returned item that cannot be resold or refurbished; monetary
+      cost of disposing the item through methods such as recycling, landfill, or hazardous-waste processing.
+      JSON path disposal.disposal_cost in cost_breakdown (the flat column financial_management.dispcost
+      is also a disposal cost; the metrics use the JSON path). Repair Estimate (R_e): projected expense
+      required to bring a defective return back to sellable condition; estimated sum of parts, labor and
+      overhead needed for repair work, agreed before work commences. JSON path repair_costs.repair_estimate
+      in cost_breakdown. Recovery Value (R_v): amount of monetary value recaptured from a return via resale,
+      refurbish, or parts harvesting; net revenue expected after processing the return, excluding initial
+      cost. JSON path valuation.recovery_value in cost_breakdown. Carbon Footprint (C_f): estimated kilograms
+      of CO2-equivalent generated through return processing activities; quantifies greenhouse-gas emissions
+      attributable to transportation, handling, and disposal of a single return. JSON path sustainability.carbon_footprint
+      in cost_breakdown. Days Lapsed (D_l): number of calendar days between original transaction and completion
+      of return processing; difference in days between transaction date and point at which funds/refund
+      are issued (returns.dayslapsed). Monetary JSON values may be written with ''$'' and thousands commas
+      (e.g. ''$1,337.51''); strip them before casting to a number, as the metrics do.
+
+      KPIs: TRC = S_f + R_f + L_c + D_c + R_e (total_return_cost); RPI = R_v - TRC (return_profit_impact);
+      RRD = R_v / D_l (recovery_rate_per_day); SAL = TRC + 0.5 * C_f - R_v (sustainability_adjusted_loss);
+      RCP = 0.2 * TRC if the product''s regulatory compliance status is ''Non-compliant'', else 0 (regulatory_compliance_penalty);
+      RCCI = S_f / average S_f of the same return channel (return_channel_cost_index).
+
+      '
+    tables:
+    - main.returns
+    - main.financial_management
+    - main.products
+  - name: return_vocabulary
+    summary: Value meanings for return channels, fraud, warranty, refunds, disposal and processing
+    description: 'RETURN CHANNELS: ''Store'' when customer returns item in person at a retail outlet;
+      ''Courier'' when customer arranges a courier service for doorstep pickup; ''Mail'' when item is
+      posted through the national mail system; ''Locker'' when customer deposits parcel in an automated
+      locker or drop-box; ''Pickup'' when retailer schedules a home or office collection for oversized
+      or fragile goods. (The charge schedule also uses ''Collection Point''.) FRAUD RISK LEVELS: qualitative
+      grading of suspected fraud severity in a return; 3 levels ''Low'', ''Medium'', ''High'' (JSON fraud.risk_level
+      in returns.return_details; NULL = not assessed). ITEM CONDITION STATES: 4 states ''New'', ''Like
+      New'', ''Used'', ''Damaged''. DISPOSAL METHODS: ''Recycle'' materials separated for recycling streams;
+      ''Hazardous Waste'' components containing batteries, chemicals, or e-waste; ''Landfill'' non-recyclable
+      residuals; ''Return to Vendor'' supplier agrees to take back for specialised processing. REFUND
+      METHODS: ''Original Payment'' credit card/PayPal reversal within payment gateway; ''Bank Transfer''
+      direct ACH/SEPA transfer when gateway refund blocked; ''Store Credit'' applied to customer account
+      as gift card or voucher on customer request or policy. APPROVAL LEVELS: hierarchy of sign-off required
+      for exceptional processing steps; 3 levels ''Automatic'', ''Manager'', ''Supervisor''. SATISFACTION
+      SCORES: 5-point ordinal scale, larger = more satisfied: 1 Very Dissatisfied, 2 Dissatisfied, 3 Neutral,
+      4 Satisfied, 5 Very Satisfied. WARRANTY STATUSES: ''Valid'' within manufacturer or retailer warranty
+      period; ''Expired'' warranty term has lapsed; ''Not Applicable'' no warranty offered or proof unavailable.
+      PROCESSING PRIORITIES: ''Bulk'' palletised or batch returns processed during low-demand periods;
+      ''Standard'' default SLA (e.g. 3-5 days); ''Express'' expedited for VIP customers, high resale value,
+      or paid premium. REGULATORY COMPLIANCE STATUSES: ''Compliant'' meets all relevant safety/environmental
+      standards; ''Non-compliant'' fails certification, recall notice, or missing documentation, triggering
+      quarantine or disposal penalty (see regulatory_compliance_penalty).
+
+      '
+    tables:
+    - main.returns
+    - main.financial_management
+    - main.return_processing
+    - main.case_management
+    - main.products
+    - main.quality_assessment
+  - name: customers
+    summary: Customer return behaviour, tenure and return frequency
+    description: 'Total Returns (T_r): lifetime count of items a customer has returned; cumulative tally
+      of processed return cases of one customer account (return_behavior_profile.total_returns). Customer
+      Tenure (years): length of time a customer has maintained an active account before the current date
+      = (current date - customer''s first recorded transaction date) / 365 (customer_tenure_years). CRFI
+      = T_r / T_y (customer_return_frequency_index). Customers link to orders by orders.buyerlink = customers.profilenum;
+      orders.txndate is text like ''Feb 16, 2025''.
+
+      '
+    tables:
+    - main.customers
+    - main.orders
+  - name: operations
+    summary: Processing time, warranty claims and fraud scoring
+    description: 'APT = sum of processing times / n, the mean calendar time spent processing a batch of
+      returns at a given facility (average_processing_time, over return_processing.proctime; group by
+      loccode for a facility). WCR = N_claims / T_r, the proportion of returns that include a valid (authorised)
+      warranty claim (warranty_claim_ratio). FFS = F_f x w_risk, fraud flags weighted by fraud risk level
+      (fraud_flag_severity_score).
+
+      '
+    tables:
+    - main.return_processing
+    - main.returns
+  - name: return_charges
+    summary: Return Handling Charge Schedule, rule matching, CMRC and RHC
+    description: 'RETURN HANDLING CHARGE SCHEDULE: rule table that sets the charge a customer pays for
+      having a return handled. Each row of return_charge_rules is one rule (rule_id). Criteria are compared
+      with a return: customer_segment with customers.seg_category of the return''s customer; return_channel
+      with returns.return_channel; item_category with products.itemcategory of the returned item (returns.itemlink
+      = products.itemcode); primary_reason with JSON reasoning.primary_reason in returns.return_details;
+      item_condition with JSON condition.item_condition in quality_assessment.assessment_summary (quality_assessment.inspectref
+      = returns.casenum); and the band min_monthly_returns..max_monthly_returns with the return''s Customer
+      Monthly Return Count. Charge terms are flat_charge and charge_pct.
+
+      CUSTOMER MONTHLY RETURN COUNT (CMRC): the customer of a return is orders.buyerlink of its order
+      (returns.srctxn = orders.txnnum); the month is the first seven characters (''YYYY-MM'') of returns.revdate
+      (''YYYY-MM-DD''). CMRC of a return = number of returns rows with the same customer and month, the
+      return itself included, so it is >= 1 and the same for every return of that customer in that month.
+
+      MATCHING: a rule matches when ALL criteria match. A text criterion matches when it is NULL or equals
+      the return''s value exactly; a NULL criterion matches every return, including one whose value is
+      missing; a non-NULL criterion never matches a return whose value is NULL (e.g. a customer with NULL
+      seg_category). Band: min_monthly_returns <= CMRC <= max_monthly_returns, both inclusive; a NULL
+      bound sets no limit on its side.
+
+      STANDARD HANDLING CHARGE: a return matching no rule takes flat_charge 15.00 and charge_pct 5.0.
+
+      RHC = F + P/100 x V, F = flat_charge, P = charge_pct of the matching rule (or the Standard Handling
+      Charge), V = products.unit_value of the returned item. Every returns row has an RHC. A customer''s
+      or group''s RHC over a period is the sum over its returns whose revdate falls in the period; its
+      average is that sum / number of those returns. No intermediate rounding; round only the reported
+      result to 2 decimals.
+
+      '
+    tables:
+    - main.return_charge_rules
+    - main.returns
+    - main.orders
+    - main.customers
+    - main.products
+    - main.quality_assessment
+  - name: value_leakage
+    summary: Inspected resale value, return value leakage, CLR and Leakage Class per Customer Return Month
+    description: 'CUSTOMER RETURN MONTH: the customer-and-month grain at which return value leakage is
+      reviewed. Customer = orders.buyerlink of the return''s order (returns.srctxn = orders.txnnum); month
+      = first seven characters ''YYYY-MM'' of returns.revdate. A customer return month is the set of returns
+      rows with one customer and one month; a customer has one only for months with at least one return.
+
+      IRV = V x A/10 x K: V = products.unit_value; A = JSON results.aesthetic_score (1-10, read as decimal)
+      in quality_assessment.assessment_summary; K = completeness factor from JSON condition.completeness:
+      1.00 ''Complete'', 0.85 ''Accessories Missing'', 0.60 ''Missing Parts''. RVL = V - IRV + S_f, S_f
+      = JSON shipping.fee in returns.return_details read as a decimal; computed for every returns row.
+      CLR = sum(RVL) / sum(V) over the same returns -- a ratio of sums, NOT an average of per-return ratios.
+      Computed per Customer Return Month; a customer''s or group''s CLR over another period takes both
+      sums over its returns whose revdate falls in that period. RVL over a period is the sum over those
+      returns; its average is that sum / their number. No intermediate rounding; round only the reported
+      result to 2 decimals. LEAKAGE CLASS (on unrounded CLR of a Customer Return Month): ''Contained''
+      CLR < 0.55; ''Elevated'' 0.55 <= CLR < 0.70; ''Severe'' CLR >= 0.70. Lower bounds inclusive, upper
+      bounds exclusive. The class belongs to the customer-month; a customer can hold different classes
+      in different months.
+
+      '
+    tables:
+    - main.returns
+    - main.products
+    - main.quality_assessment
+    - main.orders
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Cost, charge and leakage computations must follow the metric definitions in semantic.yml
+      (formulas, matching rules, thresholds, Standard Handling Charge 15.00 / 5.0, ratio-of-sums CLR,
+      rounding only the final result to 2 decimals).
+
+      '
+    enforcement: warn

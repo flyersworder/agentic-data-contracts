@@ -1,0 +1,294 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: labor_certification_applications, author: claudeopus5.5
+version: '1.0'
+name: labor-certification-applications
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Labor Condition Application (LCA) data: cases (one row per application), their employer,
+      employer point of contact, preparer, attorneys, worksite and prevailing-wage record, plus the review_schedule
+      rules table (Case Review Effort Schedule) that budgets analyst review hours.'
+    preferred: true
+    tables:
+    - employer
+    - employer_poc
+    - cases
+    - preparer
+    - case_attorney
+    - attorney
+    - case_worksite
+    - worksite
+    - prevailing_wage
+    - review_schedule
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: applications
+    summary: Visa classes, statuses, attestation flags, dates and application-level KPIs
+    description: 'VISA CLASSES (cases.visaCls, enum): H-1B (specialty occupations requiring theoretical
+      and practical application of specialized knowledge), H-1B1 Singapore (Singapore nationals in specialty
+      occupations), H-1B1 Chile (Chilean nationals in specialty occupations), E-3 Australian (Australian
+      nationals in specialty occupations). Data: H-1B 955, E-3 Australian 19, H-1B1 Singapore 5, H-1B1
+      Chile 2 of 981 cases.
+
+      STATUS (cases.statusTag). Possible outcomes for a visa application: Certified (approved), Denied
+      (rejected), Withdrawn (voluntarily withdrawn by applicant), Certified-Withdrawn (approved but later
+      withdrawn). The data stores only ''CERTIFIED'', ''Certified'' and ''certified'' (case varies), so
+      always compare upper(trim(statustag)) = ''CERTIFIED''; on this data every case is certified, so
+      approval/success rates are 100%.
+
+      H-1B DEPENDENT (cases.h1bDep): an employer is H-1B dependent when the proportion of H-1B workers
+      relative to total workforce exceeds specific thresholds: 15% for employers with more than 50 employees,
+      8 workers for employers with 26-50 employees, or 4 workers for employers with 25 or fewer employees.
+      H-1B dependent employers face additional attestation requirements. Stored as the recorded flag (Yes/No/NULL);
+      workforce size is not in the data, so use the flag, never recompute it.
+
+      WILLFUL VIOLATOR (cases.willfulV): an employer found by the Department of Labor to have committed
+      a willful failure to meet LCA conditions or made a misrepresentation of material fact on an LCA
+      within the past 5 years; such employers face additional attestation requirements similar to H-1B
+      dependent employers. Data holds only ''No'' or NULL.
+
+      FULL-TIME (cases.FullTimeInd): full-time typically means at least 35 hours per week (definitions
+      may vary by employer); non-full-time may include part-time roles that require fewer hours. Data
+      holds ''Y'', ''N'' or NULL.
+
+      PUBLIC DISCLOSURE (cases.pubDisc): ''Disclose Business'' means the employer consents to having its
+      information publicly available; other options (''Disclose Employment'', ''Disclose Business and
+      Employment'') may restrict disclosure to protect confidential business information.
+
+      DATES are text in three formats: recvDay ''YYYY/MM/DD'' (all cases 2023/12/21), decisionDay ''YYYY-MM-DD''
+      (NULL for 216 cases), beginDay ''DD/MM/YYYY'' (always present, Dec 2023 - Dec 2024). endDay is free
+      text like ''2026 20th Dec.'' and is not parsed by any metric. Parse with strptime(c.recvday,''%Y/%m/%d''),
+      strptime(c.decisionday,''%Y-%m-%d''), strptime(c.beginday,''%d/%m/%Y'').
+
+      KPIs: application_processing_time_days (APT), processing_efficiency_ratio (PER, >1 = faster than
+      average), approval_rate (AR), visa_class_distribution (VCD), seasonal_application_index (SAI), occupational_demand_index
+      (ODI), visa_filing_window, application_complexity_tier, complexity_factor_count (ACS) and application_delay_risk_profile.
+
+      SOC codes (cases.SocCd) are standardized occupation codes, e.g. 15-1253.00 ''Software Quality Assurance
+      Analysts and Testers'', 29-1141.00 ''Registered Nurses''; they help ensure foreign workers are properly
+      classified and paid according to their occupational category.
+
+      '
+    tables:
+    - main.cases
+  - name: wages
+    summary: Offered/prevailing wages, annualization, wage levels and wage KPIs
+    description: 'Each case reaches its wage record through its single case_worksite row (case_worksite.dockKey
+      = cases.fileKey; verified: every case has exactly one) and case_worksite.wageTrack = prevailing_wage.trackNo
+      (no orphans). JSON paths (DuckDB JSON): wage_details->>''$.offered_wage.from'' (text like ''$130000.00''),
+      ''$.offered_wage.unit'' (Hour/Week/Year), ''$.offered_wage.to'' (ignored), ''$.prevailing_wage.value''
+      (text like ''USD 116,979.00''), ''$.prevailing_wage.unit'' (Hour/Week/Month/Year), ''$.prevailing_wage.level''
+      (I-IV or JSON null), ''$.prevailing_wage.oes_year'', ''$.alternate_source.{source_type,source_year,publisher,survey_title}''.
+
+      WAGE LEVELS: I to IV, increasingly higher wages based on skill, experience, education and responsibility:
+      Level I entry-level, II qualified, III experienced, IV fully competent, determined by the position''s
+      requirements compared to the occupational standard.
+
+      PAYMENT UNITS: Hour (per working hour), Week (weekly salary), Month (monthly salary), Year (annual
+      salary); different units may be used depending on industry norms and position types. Annualization
+      factors (AOW/APW): Hour 2080, Week 52, Month 12, Year 1. All wage comparisons (WDR, WPR) are made
+      on annualized amounts.
+
+      ALTERNATIVE PREVAILING WAGE SOURCES: acceptable sources are Occupational Employment Statistics (OES),
+      Collective Bargaining Agreements (CBA), and independent published wage surveys meeting Department
+      of Labor requirements (alternate_source.source_type CBA/Survey; oes_year for OES).
+
+      Metrics: annualized_offered_wage (AOW), annualized_prevailing_wage (APW), wage_differential_rate
+      (WDR, percent), wage_premium_rate (WPR), premium_wage_position (WDR > 20%), wage_competitiveness_tier
+      (Below-Market WDR < 0%, Market-Competitive 0% <= WDR <= 10%, Premium WDR > 10%), premium_wage_employer
+      (average WDR across all applications > 15%), industry_wage_differential (IWD), wage_competitiveness_index
+      (WCI), wage_growth_rate (WGR), skill_shortage_occupation_wdr.
+
+      '
+    tables:
+    - main.prevailing_wage
+    - main.case_worksite
+    - main.cases
+  - name: employers
+    summary: Employer identity, NAICS industry, employer KPIs and classifications
+    description: 'Employer key is (corphandle, zipref); cases join with cases.homefirm = employer.corphandle
+      AND cases.homezip = employer.zipref (all 981 cases join). For employer-level metrics the employer
+      is the exact text of cases.homeFirm (546 distinct; 540 if case-folded - do NOT fold or trim: ''Amazon.com
+      Services LLC'' and ''AMAZON.COM SERVICES LLC'' are different employers).
+
+      NAICS: the North American Industry Classification System code is a 6-digit code identifying the
+      employer''s primary industry sector, e.g. 541511 ''Custom Computer Programming Services'', 561320
+      ''Temporary Help Services''; used to categorize employers by industry for statistical and regulatory
+      purposes. Stored at employer_contact_info->>''$.naics_code'' (some values have fewer than 6 digits,
+      e.g. 54151; use as stored). Industry = the employer''s NAICS code.
+
+      Metrics: employer_h1b_concentration (EHC), application_success_rate_employer (ASR), employer_retention_rate
+      (ERR), employer_scale_indicator (ESI), industry_application_distribution (IAD), industry_concentration_ratio
+      (ICR), employer_size_classification (Small-scale < 5 applications annually, Medium-scale 5-25, Large-scale
+      > 25), continuous_filing_employer (applications in at least 9 months of the year).
+
+      '
+    tables:
+    - main.employer
+    - main.employer_poc
+    - main.cases
+    - main.preparer
+  - name: attorneys
+    summary: Attorney representation, case load, success and specialization
+    description: 'Attorney representation status indicates whether an employer has legal counsel for the
+      application: when present the employer has retained qualified legal assistance for navigating immigration
+      regulations; when absent the employer is self-represented, handling the process internally without
+      specialized legal counsel. A case is represented when it has a row in case_attorney (727 of 981
+      cases; each has exactly one attorney row; counselFor is always ''Yes''). Attorney identity is case_attorney.counselMail
+      = attorney.lawMail.
+
+      Metrics: attorney_case_load (ACL), attorney_success_rate (ASR_Attorney), attorney_performance_rating
+      (High Performers > 95% approval rate, Standard Performers 85-95%, Underperformers < 85%), external_counsel_rate
+      (ECR), attorney_specialization_index (ASI, closer to 1 = more specialized), attorney_top_visa_class_share
+      (Specialist = over 80% of cases in one visa type), legal_representation_efficacy (High Impact >
+      10 points higher approval rate with attorney, Moderate Impact 5-10, Minimal Impact < 5 difference).
+
+      ATTORNEY SPECIALIZATION CATEGORY: Specialists (over 80% of cases in one visa type), Generalists
+      (even distribution across visa types), Hybrid Practitioners (significant experience in 2-3 visa
+      categories). Only the Specialist threshold is quantified; ''even distribution'' and ''significant
+      experience'' have no stated threshold.
+
+      '
+    tables:
+    - main.case_attorney
+    - main.attorney
+    - main.cases
+  - name: geography
+    summary: Worksites, state distribution and geographic concentration
+    description: 'State of an application = case_worksite.wsState of its single worksite row. Metrics:
+      state_application_distribution (SAD), geographic_concentration_index (GCI), worksite_density (WD),
+      worksite_diversity_index (WDI, per employer, from wsHeads). worksite.SecEnt flags a secondary entity
+      (Yes/No, NULL = none specified).
+
+      '
+    tables:
+    - main.case_worksite
+    - main.worksite
+    - main.cases
+  - name: review_effort
+    summary: 'Case Review Effort Schedule: matching, governing rule, CRH, ERL'
+    description: 'The Case Review Effort Schedule is the review_schedule table. Each row is one rule (rule_id)
+      with six matching criteria (visa_class, wage_level, h1b_dependent, soc_major_group, worksite_state,
+      monthly_volume_band) and two amounts: base_hours (reviewer-hours charged once per case) and position_hours
+      (reviewer-hours charged per worker position requested). A NULL criterion is a wildcard. DATA FINDING:
+      no criterion is stored as SQL NULL; the wildcard is stored as the text ''*'' (e.g. 222 of 496 rules
+      have visa_class ''*''). Treat NULL or ''*'' as "no restriction".
+
+      EMCV (Employer Monthly Case Volume) = number of cases of an employer whose Start Month is the given
+      calendar month; every cases row counts once whatever its status or headCt; employer = exact text
+      of cases.homeFirm (no case folding or trimming). Start Month = calendar year and month of cases.beginDay,
+      text ''DD/MM/YYYY'' (''01/04/2024'' is 1 April 2024 -> April 2024).
+
+      MONTHLY VOLUME BAND of a case = band of its employer''s EMCV in its Start Month: ''1'' when EMCV
+      = 1; ''2-4'' when 2 <= EMCV <= 4; ''5-14'' when 5 <= EMCV <= 14; ''15+'' when EMCV >= 15 (both ends
+      inclusive).
+
+      MATCHING: a case matches a rule when every restricting criterion equals the case''s value as exact
+      text: visa_class vs cases.visaCls; wage_level vs wage_details ''prevailing_wage''.''level'' via
+      the case''s single case_worksite row and wageTrack; h1b_dependent vs cases.h1bDep; soc_major_group
+      vs first two characters of cases.SocCd (''15'' for ''15-1253.00''); worksite_state vs case_worksite.wsState;
+      monthly_volume_band vs the case''s Monthly Volume Band. When the case''s own value is NULL (wage
+      level or h1bDep), only a rule with no restriction on that attribute can match.
+
+      GOVERNING RULE: among matching rules, the most specific (most restricting criteria of the six) governs;
+      ties -> lowest rule_id. Only the governing rule''s amounts are used, never added or averaged. A
+      case matching no rule is charged by the Default Review Schedule, base_hours 3.50 and position_hours
+      0.50, with governing rule_id NULL (69 of 981 cases on this data).
+
+      CRH = base_hours + position_hours x headCt (reviewer-hours, exact to two decimals, not rounded before
+      aggregation). ERL = sum of CRH over an employer''s cases whose Start Month lies in the period (a
+      calendar month, or a calendar year = all twelve Start Months of that year). Average CRH = sum of
+      CRH / number of cases. Round only when reporting.
+
+      '
+    tables:
+    - main.review_schedule
+    - main.cases
+    - main.case_worksite
+    - main.prevailing_wage
+  - name: wage_assurance
+    summary: WHR, Headroom Points, CWAS, EWAS and Wage Assurance Tier
+    description: 'AOW/APW: offered amount = ''offered_wage''.''from'' with ''$'' and commas removed (''to''
+      ignored); prevailing amount = ''prevailing_wage''.''value'' with ''USD '' and commas removed; each
+      multiplied by its own object''s unit factor (Hour 2080, Week 52, Month 12, Year 1); US dollars per
+      year (hourly ''$41.00'' -> 85,280). WHR = (AOW - APW) / APW, a fraction, per case, unrounded. Headroom
+      Points = 100 x min(max(WHR, 0), 0.40) / 0.40 (WHR <= 0 -> 0, >= 0.40 -> 100, linear between; WHR
+      0.10 -> 25). Level Points: ''I'' 25, ''II'' 50, ''III'' 75, ''IV'' 100, NULL level 50. CWAS = 0.7
+      x Headroom Points + 0.3 x Level Points (weights sum to 1; 0-100, unrounded; level II with WHR 0.10
+      -> 32.5). EWAS = sum(CWAS x headCt) / sum(headCt) over an employer''s cases whose Start Month lies
+      in the period (headcount-weighted: headCt 3 counts three times headCt 1); employer = exact cases.homeFirm
+      text; period = calendar month or calendar year (all twelve Start Months); with no period stated,
+      all of the employer''s cases. Wage Assurance Tier from unrounded EWAS: ''Thin'' < 30; ''Adequate''
+      30 <= EWAS < 45; ''Strong'' 45 <= EWAS < 60; ''Exemplary'' >= 60 (lower bounds inclusive, upper
+      exclusive). A tier exists only for an employer with at least one case in the period. Round scores
+      only when reported.
+
+      '
+    tables:
+    - main.cases
+    - main.case_worksite
+    - main.prevailing_wage
+  - name: not_computable
+    summary: Documented concepts with no data or no stated formula
+    description: 'These definitions are carried for completeness; the data cannot compute them, so answer
+      qualitatively or say the data lacks the input. Cost of Living Adjusted Wage (CLAW) = (Offered Wage
+      / Cost of Living Index) x 100, the index having 100 as national average - no cost of living data.
+      Worksite Cost Index (WkCI) = (Worksite Cost of Living / National Average Cost of Living) x 100 -
+      no cost data. Premium Processing Rate (PPR) = premium processing applications / total x 100% - no
+      premium processing column. Visa-Dependent Industry: an industry whose visa applications relative
+      to total workforce exceed 15% (significant reliance on foreign talent) - no workforce data. Geographic
+      Application Hotspot: an area (state, metro area, city) whose application volume is at least 50%
+      higher than the national average when adjusted for population - no population data. Employer Dependency
+      Level: Low (< 5% of workforce), Moderate (5-15%), High (> 15%); H-1B dependent status typically
+      applies to High - no workforce data (cases.h1bDep is the recorded flag). Occupational Specialization
+      Levels: General (broad knowledge), Specialized (focused expertise in one area), Highly Specialized
+      (deep expertise in niche areas), typically correlated with wage level and experience - no rule.
+      Position Scarcity Index: Abundant (many qualified candidates), Moderate Scarcity (limited), High
+      Scarcity (very few), often correlated with wage premiums and processing priorities - no rule. Seasonal
+      Application Pattern: Peak Season (higher submission rates), Off-Peak Season (lower), Transition
+      Periods (moderate activity between peaks) - no thresholds; use seasonal_application_index as evidence
+      (all receipt dates are 2023/12/21). Worksite Geographic Diversity: Single-Location (all applications
+      for one location), Regional (multiple locations in one region), National (multiple regions) - regions
+      are not defined; only Single-Location (one distinct worksite) is determinable. Skill Shortage Occupation:
+      WDR > 10% and a statistically significant number of applications (may receive prioritized processing
+      or cap exemptions) - the significance test is not stated; only the WDR part is computed (skill_shortage_occupation_wdr).
+      Application Complexity Score (ACS): a weighted sum of binary factors (H-1B dependency, willful violator,
+      new employment, amendment) - weights are not stated; complexity_factor_count is the unweighted count.
+
+      '
+    tables: []
+  rules:
+  - name: status_case_insensitive
+    description: Certified status is tested as upper(trim(cases.statustag)) = 'CERTIFIED'; the column
+      mixes CERTIFIED/Certified/certified.
+    enforcement: warn
+  - name: review_wildcard_star
+    description: In review_schedule a criterion of NULL or '*' is a wildcard; restricting criteria are
+      compared as exact text. Use the governing_review_rule_id / case_review_hours metrics' FROM clause.
+    enforcement: warn
+  - name: employer_exact_text
+    description: Employer-level EMCV, ERL, EWAS and tiers group by the exact text of cases.homefirm, without
+      case folding or trimming.
+    enforcement: warn
+  - name: round_only_when_reported
+    description: CRH, CWAS, WHR, EWAS, ERL and averages are never rounded before aggregation or tiering;
+      round only the final reported figure.
+    enforcement: warn
+  - name: text_dates_parse
+    description: Parse beginday as '%d/%m/%Y', recvday as '%Y/%m/%d', decisionday as '%Y-%m-%d'; never
+      compare these text columns lexically.
+    enforcement: warn

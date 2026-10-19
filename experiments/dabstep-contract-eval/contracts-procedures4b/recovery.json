@@ -1,0 +1,1024 @@
+{
+ "labor_certification_applications": {
+  "draw-1": {
+   "g1": {
+    "category": "recovered",
+    "right_part": null,
+    "text": {
+     "reading": "'*' is stated to be the stored wildcard, read as no restriction; a NULL case value matches only a wildcard criterion, so it matches '*'.",
+     "quote": "DATA FINDING: no criterion is stored as SQL NULL; the wildcard is stored as the text '*' (e.g. 222 of 496 rules have visa_class '*'). Treat NULL or '*' as \"no restriction\". | A NULL case value only matches a wildcard criterion (equality with NULL is not true).",
+     "where": "contract.yml domain review_effort (first quote; also rule review_wildcard_star); semantic.yml metric review_rule_matches_case (second quote); review_rule_specificity: \"(not NULL and not the wildcard '*')\""
+    },
+    "sql": {
+     "reading": "Matches with (r.x IS NULL OR r.x = '*' OR r.x = case.x), so '*' matches every case value, NULL included; specificity counts a criterion only when it is NOT NULL AND <> '*'.",
+     "where": "review_rule_matches_case, review_rule_specificity, and the shared rv from_sql of governing_review_rule_id / case_review_hours / employer_review_load"
+    },
+    "comparisons": [
+     {
+      "name": "matching pairs",
+      "contract": "review_rule_matches_case (predicate over cases x rules)",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "case agrees when its set of matching rules is identical (2788 pairs both sides); agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "specificity",
+      "contract": "review_rule_specificity",
+      "agree": 496,
+      "total": 496,
+      "agree_after_correction": null,
+      "note": "per rule, all 496 rules"
+     },
+     {
+      "name": "governing rule",
+      "contract": "governing_review_rule_id",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "CRH per record",
+      "contract": "case_review_hours",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "draw-2": {
+   "g1": {
+    "category": "recovered",
+    "right_part": null,
+    "text": {
+     "reading": "'*' is stated to be the stored wildcard, placing no restriction for matching and for specificity; a NULL case value matches only a wildcard criterion.",
+     "quote": "DATA CHECK: the stored table has NO NULL criteria; the wildcard is written as the literal '*'. Treat both NULL and '*' as \"places no restriction\" (matching and specificity). | When the case's value is NULL (wage level or h1bDep) only a wildcard criterion can match.",
+     "where": "contract.yml domain review_effort (also rule review_wildcard_star); semantic.yml review_rule_match and governing_review_rule_id descriptions say the same"
+    },
+    "sql": {
+     "reading": "Matches with (r.x IS NULL OR r.x = '*' OR r.x = m.x), so '*' matches every case value, NULL included; specificity adds 0 when r.x IS NULL OR r.x = '*'.",
+     "where": "review_rule_match, and the g subquery of governing_review_rule_id / case_review_hours / employer_review_load"
+    },
+    "comparisons": [
+     {
+      "name": "matching pairs",
+      "contract": "review_rule_match (predicate over cases x rules)",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "case agrees when its set of matching rules is identical (2788 pairs both sides); agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "specificity",
+      "contract": "not a metric of its own: the ORDER BY of governing_review_rule_id's from_sql",
+      "agree": 496,
+      "total": 496,
+      "agree_after_correction": null,
+      "note": "per rule, all 496 rules"
+     },
+     {
+      "name": "governing rule",
+      "contract": "governing_review_rule_id",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "CRH per record",
+      "contract": "case_review_hours",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "draw-3": {
+   "g1": {
+    "category": "recovered",
+    "right_part": null,
+    "text": {
+     "reading": "'*' is stated to be the stored wildcard, read exactly as NULL: no restriction and not counted toward specificity; a NULL case value matches only a wildcard criterion.",
+     "quote": "DATA FINDING: the table stores wildcards as the literal '*' (no criterion is actually NULL); treat '*' exactly like NULL — a wildcard placing no restriction and not counting toward specificity. | When the case's value is NULL (wage level or h1bDep) only a wildcard criterion matches.",
+     "where": "contract.yml domain review_effort (also rule review_schedule_star_is_wildcard); semantic.yml review_rule_matches description"
+    },
+    "sql": {
+     "reading": "Matches with (r.x IS NULL OR r.x = '*' OR r.x = cb.x), so '*' matches every case value, NULL included; specificity counts a criterion only when it is NOT NULL AND <> '*'.",
+     "where": "review_rule_matches, and the cr from_sql of governing_review_rule_id / case_review_hours / employer_review_load"
+    },
+    "comparisons": [
+     {
+      "name": "matching pairs",
+      "contract": "review_rule_matches (predicate over cases x rules)",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "case agrees when its set of matching rules is identical (2788 pairs both sides); agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "specificity",
+      "contract": "not a metric of its own: the ORDER BY of governing_review_rule_id's from_sql",
+      "agree": 496,
+      "total": 496,
+      "agree_after_correction": null,
+      "note": "per rule, all 496 rules"
+     },
+     {
+      "name": "governing rule",
+      "contract": "governing_review_rule_id",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     },
+     {
+      "name": "CRH per record",
+      "contract": "case_review_hours",
+      "agree": 981,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "agrees on all 286 cases with a NULL wage level or h1bDep and all 695 others"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "no-data": {
+   "g1": {
+    "category": "missed",
+    "right_part": null,
+    "text": {
+     "reading": "Only NULL is named as the wildcard; '*' is never mentioned, so a criterion of '*' is by implication a literal value that restricts, and a NULL case value matches only a NULL criterion.",
+     "quote": "A NULL criterion is a wildcard. | If the case value is NULL, only a rule with a NULL criterion for that attribute matches. | GOVERNING RULE: the matching rule with the most non-NULL criteria",
+     "where": "contract.yml domain review_effort; semantic.yml governing_review_rule and table review_schedule (\"NULL = any\")"
+    },
+    "sql": {
+     "reading": "Matches with (r.x IS NULL OR r.x = k.x): '*' is compared as a literal value, so it matches no case with a value and no case with a NULL; specificity counts '*' as a restriction (IS NOT NULL). Only the 30 rules with no '*' can match, and every case with a NULL wage level or h1bDep matches nothing.",
+     "where": "governing_review_rule, case_review_hours, employer_review_load (shared crh from_sql)"
+    },
+    "comparisons": [
+     {
+      "name": "matching pairs",
+      "contract": "not a metric of its own: the LEFT JOIN condition in governing_review_rule's from_sql (kb_coverage maps 64 and 65 to governing_review_rule)",
+      "agree": 69,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "case agrees when its set of matching rules is identical. Contract finds 13 (case, rule) pairs, reference 2788; the 69 agreeing cases are exactly the cases that match no rule in the reference (53 with a NULL wage level or h1bDep, 16 others). Only the 30 rules with no '*' criterion can match."
+     },
+     {
+      "name": "specificity",
+      "contract": "not a metric of its own: the ORDER BY of governing_review_rule's from_sql",
+      "agree": 30,
+      "total": 496,
+      "agree_after_correction": null,
+      "note": "the 30 agreeing rules are those with no '*' criterion; every other rule counts '*' as a restriction and gets 6."
+     },
+     {
+      "name": "governing rule",
+      "contract": "governing_review_rule",
+      "agree": 82,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "82 = the 69 no-match cases (NULL both sides) plus 13 cases whose governing rule is one of the 30 '*'-free rules. Of the 286 cases with a NULL wage level or h1bDep, 233 match a rule in the reference and none does here."
+     },
+     {
+      "name": "CRH per record",
+      "contract": "case_review_hours",
+      "agree": 92,
+      "total": 981,
+      "agree_after_correction": null,
+      "note": "92 = the 82 with the same governing rule plus 10 where the Default Review Schedule (3.50 + 0.50 x headCt) happens to equal the reference's governing rule amount."
+     }
+    ],
+    "correctable": []
+   }
+  }
+ },
+ "reverse_logistics": {
+  "draw-1": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "All of it that the contract builds: 'ANY' read as no restriction on all five text criteria, a NULL record value (655 returns, NULL seg_category) matching an 'ANY' criterion; matched pairs agree 4493/4493 including the 1349 pairs on those returns. Specificity (whether 'ANY' counts) is not built because precedence is lowest rule_id.",
+    "text": {
+     "reading": "ANY is the wildcard, same as NULL; it matches every return, a missing value included (NULL seg_category matches segment-ANY rules). Specificity is never mentioned.",
+     "quote": "\"the documentation says \"no restriction\" is NULL, but in this data no text criterion is NULL; the literal 'ANY' is used instead on all five text columns. Treat both NULL and 'ANY' as the wildcard.\" ... \"A criterion that places no restriction matches every return, including one whose value is missing\"",
+     "where": "contract.yml domain return_charges (MATCHING, DATA FINDING); semantic.yml metric return_charge_rule_matches description; table return_charge_rules and its column descriptions"
+    },
+    "sql": {
+     "reading": "(x.col IS NULL OR x.col = 'ANY' OR x.col = b.value) for all five text criteria; a NULL record value matches an 'ANY' rule because the 'ANY' test does not read the record value.",
+     "where": "semantic.yml return_charge_rule_matches; ON clause of return_handling_charge (and total_/average_ copies)"
+    },
+    "comparisons": [
+     {
+      "name": "matching (return, rule) pairs",
+      "contract": "metric return_charge_rule_matches (sql_expression over its from_sql b CROSS JOIN x)",
+      "agree": 4493,
+      "total": 4493,
+      "agree_after_correction": null,
+      "note": "Exact; includes the 1349 reference pairs on returns whose seg_category is NULL."
+     },
+     {
+      "name": "rule specificity",
+      "contract": "not defined",
+      "agree": null,
+      "total": null,
+      "agree_after_correction": null,
+      "note": "Not defined: the contract never computes a specificity; it resolves several matches by lowest rule_id, so how 'ANY' would count toward specificity is never stated or built."
+     },
+     {
+      "name": "applying rule per return (r_record_amounts.applying_rule_id)",
+      "contract": "metric return_handling_charge, derived table rh.rule_id (MIN(x.rule_id))",
+      "agree": 911,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     },
+     {
+      "name": "RHC per return (r_record_amounts.rhc)",
+      "contract": "metric return_handling_charge",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "missed",
+    "right_part": "None for the score: every metric that reads it (inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class) uses the stored value. Everything else in IRV and RVL is right: with the score decoded as stored - 1 (diagnostic only) IRV and RVL agree 1500/1500.",
+    "text": {
+     "reading": "The score is read as stored, as a decimal; the author saw the 2-11 range breach the documented 1-10 and kept the stored value; no decoding.",
+     "quote": "\"A = assessment_summary $.results.aesthetic_score read as a decimal (documented as 1-10; observed range 2 to 11 - use as stored, do not clip)\"",
+     "where": "contract.yml domain value_leakage; semantic.yml inspected_resale_value description"
+    },
+    "sql": {
+     "reading": "CAST(score AS DOUBLE) / 10 with no offset in IRV, RVL, CLR and Leakage Class; IRV overstated by V x K / 10 on every return, RVL understated by the same.",
+     "where": "semantic.yml inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class"
+    },
+    "comparisons": [
+     {
+      "name": "IRV per return (c_record_values.irv)",
+      "contract": "metric inspected_resale_value",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     },
+     {
+      "name": "RVL per return (c_record_values.rvl)",
+      "contract": "metric return_value_leakage",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     }
+    ],
+    "correctable": []
+   },
+   "g3": {
+    "convention": "lowest_id",
+    "detail": "Of several matching rules, the one with the lowest rule_id applies; no match takes the Standard Handling Charge 15.00 / 5.0. RHC agrees with the lowest-id variant on 1500/1500 returns.",
+    "text": {
+     "reading": "Lowest rule_id applies; stated as the author's own interpretation since the documentation names none.",
+     "quote": "\"The documentation does not state which one applies; the contract uses the matching rule with the LOWEST rule_id (first rule in the schedule). This tie-break is the contract's, not the documentation's.\"",
+     "where": "contract.yml domain return_charges (DATA FINDING / INTERPRETATION); semantic.yml return_handling_charge description"
+    },
+    "sql": {
+     "reading": "MIN(x.rule_id) and arg_min(flat_charge/charge_pct, rule_id) over all matching rules; COALESCE to 15.00 / 5.0",
+     "where": "semantic.yml return_handling_charge (and total_/average_ copies where present)"
+    },
+    "comparisons": [
+     {
+      "name": "RHC vs most_specific",
+      "contract": "metric return_handling_charge",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs sum",
+      "contract": "metric return_handling_charge",
+      "agree": 352,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs lowest_id",
+      "contract": "metric return_handling_charge",
+      "agree": 1500,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     }
+    ],
+    "read_from": "records"
+   }
+  },
+  "draw-2": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "All of it that the contract builds: 'ANY' read as no restriction on all five text criteria, a NULL record value (655 returns, NULL seg_category) matching an 'ANY' criterion; matched pairs agree 4493/4493 including the 1349 pairs on those returns. Specificity (whether 'ANY' counts) is not built because precedence is lowest rule_id.",
+    "text": {
+     "reading": "ANY means no restriction, exactly like NULL; a no-restriction criterion matches a missing value (NULL seg_category customers match only segment-ANY rules). Specificity is never mentioned.",
+     "quote": "\"'no restriction' is stored as the literal 'ANY' (e.g. 170 of 400 customer_segment values), so 'ANY' must be treated exactly like NULL.\" ... \"a criterion placing no restriction matches every return, including one whose value is missing\"",
+     "where": "contract.yml domain handling_charges (MATCHING, DATA FINDING) and rule any_is_wildcard; semantic.yml return_charge_rules column descriptions"
+    },
+    "sql": {
+     "reading": "(k0.col IS NULL OR k0.col = 'ANY' OR k0.col = value) for all five text criteria; a NULL record value matches an 'ANY' rule.",
+     "where": "semantic.yml return_handling_charge, LATERAL subquery"
+    },
+    "comparisons": [
+     {
+      "name": "matching (return, rule) pairs",
+      "contract": "not its own metric; taken from the LEFT JOIN LATERAL subquery of return_handling_charge with ORDER BY k0.rule_id LIMIT 1 removed",
+      "agree": 4493,
+      "total": 4493,
+      "agree_after_correction": null,
+      "note": "Exact; includes the 1349 reference pairs on returns whose seg_category is NULL."
+     },
+     {
+      "name": "rule specificity",
+      "contract": "not defined",
+      "agree": null,
+      "total": null,
+      "agree_after_correction": null,
+      "note": "Not defined: the contract never computes a specificity; it resolves several matches by lowest rule_id, so how 'ANY' would count toward specificity is never stated or built."
+     },
+     {
+      "name": "applying rule per return (r_record_amounts.applying_rule_id)",
+      "contract": "metric return_handling_charge, lateral k.rule_id (ORDER BY k0.rule_id LIMIT 1)",
+      "agree": 911,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     },
+     {
+      "name": "RHC per return (r_record_amounts.rhc)",
+      "contract": "metric return_handling_charge (SUM over one return per group, grouped by r.casenum)",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "missed",
+    "right_part": "None for the score: every metric that reads it (inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class) uses the stored value. Everything else in IRV and RVL is right: with the score decoded as stored - 1 (diagnostic only) IRV and RVL agree 1500/1500.",
+    "text": {
+     "reading": "The score is read as stored, as a decimal; the author saw the 2-11 range breach the documented 1-10 and kept the stored value; no decoding.",
+     "quote": "\"A = aesthetic score at assessment_summary results.aesthetic_score, read as a decimal (documented 1 to 10; observed 2.0 to 11.0, used as stored, not clipped)\"",
+     "where": "contract.yml domain value_leakage; semantic.yml inspected_resale_value description"
+    },
+    "sql": {
+     "reading": "CAST(score AS DOUBLE) / 10 with no offset in IRV, RVL, CLR and Leakage Class; IRV overstated by V x K / 10 on every return, RVL understated by the same.",
+     "where": "semantic.yml inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class"
+    },
+    "comparisons": [
+     {
+      "name": "IRV per return (c_record_values.irv)",
+      "contract": "metric inspected_resale_value",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     },
+     {
+      "name": "RVL per return (c_record_values.rvl)",
+      "contract": "metric return_value_leakage",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     }
+    ],
+    "correctable": []
+   },
+   "g3": {
+    "convention": "lowest_id",
+    "detail": "Of several matching rules, the one with the lowest rule_id applies; no match takes the Standard Handling Charge 15.00 / 5.0. RHC agrees with the lowest-id variant on 1500/1500 returns.",
+    "text": {
+     "reading": "Lowest rule_id applies; stated as the author's own interpretation since the documentation names none.",
+     "quote": "\"INTERPRETATION (tie-break): the documentation says \"a rule that matches\" but gives no precedence ... The metric applies the matching rule with the LOWEST rule_id (first rule in the schedule).\"",
+     "where": "contract.yml domain handling_charges and rule any_is_wildcard; semantic.yml return_handling_charge description"
+    },
+    "sql": {
+     "reading": "LEFT JOIN LATERAL (... ORDER BY k0.rule_id LIMIT 1); NULL rule_id takes 15.00 / 5.0",
+     "where": "semantic.yml return_handling_charge (and total_/average_ copies where present)"
+    },
+    "comparisons": [
+     {
+      "name": "RHC vs most_specific",
+      "contract": "metric return_handling_charge (SUM over one return per group, grouped by r.casenum)",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs sum",
+      "contract": "metric return_handling_charge (SUM over one return per group, grouped by r.casenum)",
+      "agree": 352,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs lowest_id",
+      "contract": "metric return_handling_charge (SUM over one return per group, grouped by r.casenum)",
+      "agree": 1500,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     }
+    ],
+    "read_from": "records"
+   }
+  },
+  "draw-3": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "All of it that the contract builds: 'ANY' read as no restriction on all five text criteria, a NULL record value (655 returns, NULL seg_category) matching an 'ANY' criterion; matched pairs agree 4493/4493 including the 1349 pairs on those returns. Specificity (whether 'ANY' counts) is not built because precedence is lowest rule_id.",
+    "text": {
+     "reading": "NULL and ANY alike are the wildcard; a NULL record value matches only wildcard criteria (NULL seg_category customers match only segment-ANY rules). Specificity is never mentioned.",
+     "quote": "\"IN THE DATA no rule criterion is NULL - the wildcard is stored as the literal text 'ANY', so treat NULL and 'ANY' alike\" ... \"the 93 customers with NULL seg_category match only segment-'ANY' rules\"",
+     "where": "contract.yml domain return_charges (MATCHING) and the final rule; semantic.yml return_handling_charge description, customers.seg_category and return_charge_rules column descriptions"
+    },
+    "sql": {
+     "reading": "(k.col IS NULL OR k.col = 'ANY' OR k.col = value) for all five text criteria; a NULL record value matches an 'ANY' rule.",
+     "where": "semantic.yml return_handling_charge, LATERAL subquery"
+    },
+    "comparisons": [
+     {
+      "name": "matching (return, rule) pairs",
+      "contract": "not its own metric; taken from the LEFT JOIN LATERAL subquery of return_handling_charge with ORDER BY k.rule_id LIMIT 1 removed",
+      "agree": 4493,
+      "total": 4493,
+      "agree_after_correction": null,
+      "note": "Exact; includes the 1349 reference pairs on returns whose seg_category is NULL."
+     },
+     {
+      "name": "rule specificity",
+      "contract": "not defined",
+      "agree": null,
+      "total": null,
+      "agree_after_correction": null,
+      "note": "Not defined: the contract never computes a specificity; it resolves several matches by lowest rule_id, so how 'ANY' would count toward specificity is never stated or built."
+     },
+     {
+      "name": "applying rule per return (r_record_amounts.applying_rule_id)",
+      "contract": "metric return_handling_charge, lateral rule.rule_id (ORDER BY k.rule_id LIMIT 1)",
+      "agree": 911,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     },
+     {
+      "name": "RHC per return (r_record_amounts.rhc)",
+      "contract": "metric return_handling_charge",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Disagreements are all returns where the lowest matching rule_id is not the most specific rule (G3 convention), not G1: RHC agrees 1500/1500 with the lowest-id variant built from the reference's own matches."
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "missed",
+    "right_part": "None for the score: every metric that reads it (inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class) uses the stored value. Everything else in IRV and RVL is right: with the score decoded as stored - 1 (diagnostic only) IRV and RVL agree 1500/1500.",
+    "text": {
+     "reading": "The score is read as stored, as a decimal; the author saw the 2-11 range breach the documented 1-10 and kept the stored value; no decoding.",
+     "quote": "\"A = results.aesthetic_score in quality_assessment.assessment_summary read as a decimal (documented 1-10; the data holds 2 to 11, 147 rows above 10 - use as stored, no clamping)\"",
+     "where": "contract.yml domain value_leakage; semantic.yml inspected_resale_value description"
+    },
+    "sql": {
+     "reading": "CAST(score AS DOUBLE) / 10 with no offset in IRV, RVL, CLR and Leakage Class; IRV overstated by V x K / 10 on every return, RVL understated by the same.",
+     "where": "semantic.yml inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class"
+    },
+    "comparisons": [
+     {
+      "name": "IRV per return (c_record_values.irv)",
+      "contract": "metric inspected_resale_value",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     },
+     {
+      "name": "RVL per return (c_record_values.rvl)",
+      "contract": "metric return_value_leakage",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     }
+    ],
+    "correctable": []
+   },
+   "g3": {
+    "convention": "lowest_id",
+    "detail": "Of several matching rules, the one with the lowest rule_id applies; no match takes the Standard Handling Charge 15.00 / 5.0. RHC agrees with the lowest-id variant on 1500/1500 returns.",
+    "text": {
+     "reading": "Lowest rule_id applies; stated as the author's own interpretation since the documentation names none.",
+     "quote": "\"INTERPRETATION (precedence): the documentation does not say which rule applies when several match, and most returns match 2-9 rules with different terms. The metric return_handling_charge applies the matching rule with the LOWEST rule_id.\"",
+     "where": "contract.yml domain return_charges; semantic.yml return_handling_charge description"
+    },
+    "sql": {
+     "reading": "LEFT JOIN LATERAL (... ORDER BY k.rule_id LIMIT 1); NULL rule_id takes 15.00 + 5.0/100 x V",
+     "where": "semantic.yml return_handling_charge (and total_/average_ copies where present)"
+    },
+    "comparisons": [
+     {
+      "name": "RHC vs most_specific",
+      "contract": "metric return_handling_charge",
+      "agree": 955,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs sum",
+      "contract": "metric return_handling_charge",
+      "agree": 352,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs lowest_id",
+      "contract": "metric return_handling_charge",
+      "agree": 1500,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     }
+    ],
+    "read_from": "records"
+   }
+  },
+  "no-data": {
+   "g1": {
+    "category": "missed",
+    "right_part": "Only the parts outside the sentinel: the 12 rules with no 'ANY' criterion match exactly as the reference (12/12 of their pairs).",
+    "text": {
+     "reading": "Only NULL is a wildcard; 'ANY' is never mentioned, so it is an ordinary value compared by equality. A NULL criterion matches a missing record value; a non-NULL one (including 'ANY') never does.",
+     "quote": "\"A text criterion matches when it is NULL or equals the return's value exactly; a NULL criterion matches every return, including one whose value is missing; a non-NULL criterion never matches a return whose value is NULL\"",
+     "where": "contract.yml domain return_charges (MATCHING); semantic.yml return_charge_rule_matches description and return_charge_rules column descriptions"
+    },
+    "sql": {
+     "reading": "(rr.col IS NULL OR rr.col = k.value): 'ANY' is compared as a literal value, so it matches no return (no record holds 'ANY') and no NULL record value.",
+     "where": "semantic.yml return_charge_rule_matches; matches subquery of return_handling_charge (and total_/average_ copies)"
+    },
+    "comparisons": [
+     {
+      "name": "matching (return, rule) pairs",
+      "contract": "metric return_charge_rule_matches (sql_expression over its from_sql k CROSS JOIN rr)",
+      "agree": 12,
+      "total": 4493,
+      "agree_after_correction": null,
+      "note": "Contract finds only the 12 pairs of the 12 rules with no 'ANY' criterion; it adds no false pairs."
+     },
+     {
+      "name": "rule specificity",
+      "contract": "not defined",
+      "agree": null,
+      "total": null,
+      "agree_after_correction": null,
+      "note": "Not defined: the contract never computes a specificity; it resolves several matches by lowest rule_id, so how 'ANY' would count toward specificity is never stated or built."
+     },
+     {
+      "name": "applying rule per return (r_record_amounts.applying_rule_id)",
+      "contract": "metric return_handling_charge, mr.rule_id (MIN(rr.rule_id) over matches)",
+      "agree": 102,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "G1: 'ANY' compared as a value leaves 4481 of 4493 reference pairs unmatched, so 1488 returns fall to the Standard Handling Charge. Agreement is the 91 truly unmatched returns plus 11 of the 12 returns the contract does match (to a rule with no 'ANY' criterion). No cause outside G1/G3: with 'ANY' read as a wildcard (diagnostic only, not a correction) the pairs agree 4493/4493 and RHC matches the lowest-id variant 1500/1500."
+     },
+     {
+      "name": "RHC per return (r_record_amounts.rhc)",
+      "contract": "metric return_handling_charge",
+      "agree": 103,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "G1: 'ANY' compared as a value leaves 4481 of 4493 reference pairs unmatched, so 1488 returns fall to the Standard Handling Charge. Agreement is the 91 truly unmatched returns plus 11 of the 12 returns the contract does match (to a rule with no 'ANY' criterion). No cause outside G1/G3: with 'ANY' read as a wildcard (diagnostic only, not a correction) the pairs agree 4493/4493 and RHC matches the lowest-id variant 1500/1500."
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "missed",
+    "right_part": "None for the score: every metric that reads it (inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class) uses the stored value. Everything else in IRV and RVL is right: with the score decoded as stored - 1 (diagnostic only) IRV and RVL agree 1500/1500.",
+    "text": {
+     "reading": "The score is read as stored, as a decimal; no decoding.",
+     "quote": "\"A = JSON results.aesthetic_score (1-10, read as decimal)\"",
+     "where": "contract.yml domain value_leakage; semantic.yml inspected_resale_value description"
+    },
+    "sql": {
+     "reading": "CAST(score AS DOUBLE) / 10 with no offset in IRV, RVL, CLR and Leakage Class; IRV overstated by V x K / 10 on every return, RVL understated by the same.",
+     "where": "semantic.yml inspected_resale_value, return_value_leakage, customer_leakage_ratio, leakage_class"
+    },
+    "comparisons": [
+     {
+      "name": "IRV per return (c_record_values.irv)",
+      "contract": "metric inspected_resale_value",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     },
+     {
+      "name": "RVL per return (c_record_values.rvl)",
+      "contract": "metric return_value_leakage",
+      "agree": 0,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": "Every return differs by V x K / 10; with stored - 1 substituted (diagnostic) 1500/1500."
+     }
+    ],
+    "correctable": []
+   },
+   "g3": {
+    "convention": "lowest_id",
+    "detail": "Of several matching rules, the one with the lowest rule_id applies; no match takes the Standard Handling Charge 15.00 / 5.0. Read from SQL and text: the per-return comparison is unreadable because 'ANY' never matches. A diagnostic with 'ANY' read as a wildcard reproduces the lowest-id variant on 1500/1500 returns.",
+    "text": {
+     "reading": "Lowest rule_id applies; stated as the author's own interpretation since the documentation names none.",
+     "quote": "\"INTERPRETATION: if several rules match, the lowest rule_id is used.\"",
+     "where": "semantic.yml return_handling_charge description (the contract.yml domain text names no precedence)"
+    },
+    "sql": {
+     "reading": "MIN(rr.rule_id) over matching rules, joined back to return_charge_rules; NULL rule_id takes 15.00 + 5.0/100 x V",
+     "where": "semantic.yml return_handling_charge (and total_/average_ copies where present)"
+    },
+    "comparisons": [
+     {
+      "name": "RHC vs most_specific",
+      "contract": "metric return_handling_charge",
+      "agree": 103,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs sum",
+      "contract": "metric return_handling_charge",
+      "agree": 91,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     },
+     {
+      "name": "RHC vs lowest_id",
+      "contract": "metric return_handling_charge",
+      "agree": 95,
+      "total": 1500,
+      "agree_after_correction": null,
+      "note": ""
+     }
+    ],
+    "read_from": "sql_and_text"
+   }
+  }
+ },
+ "solar_panel": {
+  "draw-1": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "all: 'ALL' read as no restriction, matching a NULL record value, and not counted in specificity",
+    "text": {
+     "reading": "States the reference reading: 'ALL' is the stored form of 'no restriction', a wildcard like NULL, excluded from specificity; only a restricting criterion fails on a NULL snapshot value, so 'ALL' matches a NULL record value (said by implication, not in so many words).",
+     "quote": "DATA FINDING: in warranty_settle_rules no criterion is NULL; \"no restriction\" is stored as the literal 'ALL' (all 6 columns), so 'ALL' and NULL are both wildcards. A restricting criterion never matches a NULL snapshot value ('Unlisted', no alert state, no warranty state). Specificity = number of restricting criteria (0-6)",
+     "where": "contract.yml domain warranty_settlement; also rule settlement_wildcard_all, semantic.yml governing_settlement_rule_id description and the warranty_settle_rules column descriptions"
+    },
+    "sql": {
+     "reading": "Match: (w.c IS NULL OR w.c = 'ALL' OR w.c = s.value) for all six criteria, so 'ALL' matches a NULL value; specificity counts a criterion only when it is neither NULL nor 'ALL'; ROW_NUMBER by spec DESC, rule_id ASC; COALESCE to 300.00 / 5.00.",
+     "where": "semantic.yml from_sql subquery st, shared by manufacturer_monthly_claim_volume, claim_volume_tier, governing_settlement_rule_id, warranty_settlement_amount, warranty_settlement_total"
+    },
+    "comparisons": [
+     {
+      "name": "matching (snapshot, rule) pairs",
+      "contract": "governing_settlement_rule_id: its subquery st (from_sql shared by the settlement metrics) with the top-1 filter removed",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "pairs: contract 3750, reference 3750, common 3750; same SQL on experiment 4's database: 998/998; agree = snapshots whose set of matched rule_ids equals the reference's (r_record_matches)"
+     },
+     {
+      "name": "rule specificity",
+      "contract": "governing_settlement_rule_id: its specificity expression, applied to every rule",
+      "agree": 520,
+      "total": 520,
+      "agree_after_correction": 520,
+      "note": "same SQL on experiment 4's database: 520/520; per rule_id, total = all 520 rules; reference = reference.sql's specificity expression (checked equal to r_record_matches.specificity)"
+     },
+     {
+      "name": "governing rule per snapshot",
+      "contract": "governing_settlement_rule_id",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.rule_id; NULL = Standard Settlement Terms"
+     },
+     {
+      "name": "settlement amount S per snapshot",
+      "contract": "warranty_settlement_amount",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.settlement_usd"
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "recovered",
+    "right_part": "all: every metric that reads availability_pct uses the stored fraction as A/100 (A = stored x 100)",
+    "text": {
+     "reading": "States that availability_pct is a fraction and that A/100 is the stored value itself, i.e. A = stored x 100.",
+     "quote": "DATA FINDING: the documentation says A is on a 0-100 scale, but availability_pct is stored as a FRACTION (0.95-0.9999 in all 998 rows), so A/100 is the stored value itself",
+     "where": "contract.yml domain energy_loss; also rule availability_is_fraction, semantic.yml potential_snapshot_yield description and the elec_perf_snapshot column description"
+    },
+    "sql": {
+     "reading": "E_pot = E / NULLIF(avail * (1 - soil/100), 0): the stored fraction is used directly as A/100. All five metrics that read availability_pct (potential_snapshot_yield, recoverable_energy_loss, technology_monthly_energy_loss_ratio, energy_loss_band, technology_recoverable_energy) share this ep subquery.",
+     "where": "semantic.yml from_sql subquery ep of the five energy_loss metrics"
+    },
+    "comparisons": [
+     {
+      "name": "potential snapshot yield",
+      "contract": "potential_snapshot_yield (subquery ep)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 0/998; against c_record_values.potential_kwh; 0/998 on experiment 4's database is expected: there availability is stored as a percentage and draw-1 reads it unconditionally as a fraction"
+     },
+     {
+      "name": "recoverable energy loss",
+      "contract": "recoverable_energy_loss (subquery ep)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 0/998; against c_record_values.loss_kwh; 0/998 on experiment 4's database is expected: there availability is stored as a percentage and draw-1 reads it unconditionally as a fraction"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "draw-2": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "all: 'ALL' read as no restriction, matching a NULL record value, and not counted in specificity",
+    "text": {
+     "reading": "States the reference reading explicitly, including that an unrestricted criterion matches a missing value.",
+     "quote": "a criterion with no restriction matches anything including a missing value; a restricted criterion must equal the snapshot value exactly and never matches a NULL snapshot value [...] DATA: the rules table stores \"no restriction\" as the literal 'ALL' (it contains no NULLs); treat NULL and 'ALL' alike as unrestricted. [...] Specificity = number of restricted criteria (0-6)",
+     "where": "contract.yml domain warranty_settlement; also rule use_declared_definitions and semantic.yml governing_settlement_rule description"
+    },
+    "sql": {
+     "reading": "Match: (COALESCE(w.c,'ALL') = 'ALL' OR w.c = s.value), so 'ALL' matches a NULL value; specificity sums (COALESCE(w.c,'ALL') <> 'ALL')::INT; ROW_NUMBER by spec DESC, rule_id ASC; COALESCE to 300.00 / 5.00.",
+     "where": "semantic.yml x-froms subquery ws (inner g), used by governing_settlement_rule, warranty_settlement_amount, total_warranty_settlement and the volume metrics"
+    },
+    "comparisons": [
+     {
+      "name": "matching (snapshot, rule) pairs",
+      "contract": "governing_settlement_rule: its x-froms subquery ws (inner g) with the top-1 filter removed",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "pairs: contract 3750, reference 3750, common 3750; same SQL on experiment 4's database: 998/998; agree = snapshots whose set of matched rule_ids equals the reference's (r_record_matches)"
+     },
+     {
+      "name": "rule specificity",
+      "contract": "governing_settlement_rule: its specificity expression, applied to every rule",
+      "agree": 520,
+      "total": 520,
+      "agree_after_correction": 520,
+      "note": "same SQL on experiment 4's database: 520/520; per rule_id, total = all 520 rules; reference = reference.sql's specificity expression (checked equal to r_record_matches.specificity)"
+     },
+     {
+      "name": "governing rule per snapshot",
+      "contract": "governing_settlement_rule",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.rule_id; NULL = Standard Settlement Terms"
+     },
+     {
+      "name": "settlement amount S per snapshot",
+      "contract": "warranty_settlement_amount",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.settlement_usd"
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "recovered",
+    "right_part": "all: every metric that reads availability_pct multiplies a stored value <= 1 by 100 before A/100",
+    "text": {
+     "reading": "States that availability_pct is a fraction and is scaled x100 to the documented 0-100 A.",
+     "quote": "A must be on a 0-100 scale: the stored availability_pct is a fraction (0.95-0.9999), so it is scaled x100 first (values <= 1 multiplied by 100)",
+     "where": "contract.yml domain energy_loss; also the STORED FORMATS paragraph, rule use_declared_definitions and semantic.yml potential_snapshot_yield description"
+    },
+    "sql": {
+     "reading": "A = CASE WHEN avail <= 1 THEN 100 * avail ELSE avail END, then A/100. A conditional rescale: it equals the reference on every stored value here (all 0.95-0.9999). All five metrics that read availability_pct share the el subquery.",
+     "where": "semantic.yml x-froms subquery el, used by the five energy_loss metrics"
+    },
+    "comparisons": [
+     {
+      "name": "potential snapshot yield",
+      "contract": "potential_snapshot_yield (x-froms subquery el)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.potential_kwh"
+     },
+     {
+      "name": "recoverable energy loss",
+      "contract": "recoverable_energy_loss (x-froms subquery el)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.loss_kwh"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "draw-3": {
+   "g1": {
+    "category": "recovered",
+    "right_part": "all: 'ALL' read as no restriction, matching a NULL record value, and not counted in specificity",
+    "text": {
+     "reading": "States the reference reading; that 'ALL' matches a NULL record value follows from 'Unlisted or no alert/warranty state only satisfies unrestricted criteria' together with 'treat NULL and ALL as unrestricted'.",
+     "quote": "a restricting criterion never matches a NULL snapshot value (so 'Unlisted' or no alert/warranty state only satisfies unrestricted criteria). Specificity = number of restricting criteria (0-6) [...] DATA FINDING: in warranty_settle_rules no criterion is SQL NULL; \"no restriction\" is stored as the literal string 'ALL' [...] Treat both NULL and 'ALL' as unrestricted.",
+     "where": "contract.yml domain warranty_settlement; also semantic.yml governing_settlement_rule description and the warranty_settle_rules column descriptions"
+    },
+    "sql": {
+     "reading": "Match: (COALESCE(w.c, 'ALL') = 'ALL' OR w.c = s.value), so 'ALL' matches a NULL value; specificity sums CASE WHEN COALESCE(w.c, 'ALL') <> 'ALL' THEN 1; ROW_NUMBER by spec DESC, rule_id; COALESCE to 300.00 / 5.00.",
+     "where": "semantic.yml subquery g (inner z) of governing_settlement_rule, warranty_settlement_amount, manufacturer_monthly_settlement and the volume metrics"
+    },
+    "comparisons": [
+     {
+      "name": "matching (snapshot, rule) pairs",
+      "contract": "governing_settlement_rule: its subquery g (inner z) with the top-1 filter removed",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "pairs: contract 3750, reference 3750, common 3750; same SQL on experiment 4's database: 998/998; agree = snapshots whose set of matched rule_ids equals the reference's (r_record_matches)"
+     },
+     {
+      "name": "rule specificity",
+      "contract": "governing_settlement_rule: its specificity expression, applied to every rule",
+      "agree": 520,
+      "total": 520,
+      "agree_after_correction": 520,
+      "note": "same SQL on experiment 4's database: 520/520; per rule_id, total = all 520 rules; reference = reference.sql's specificity expression (checked equal to r_record_matches.specificity)"
+     },
+     {
+      "name": "governing rule per snapshot",
+      "contract": "governing_settlement_rule",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.rule_id; NULL = Standard Settlement Terms"
+     },
+     {
+      "name": "settlement amount S per snapshot",
+      "contract": "warranty_settlement_amount",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.settlement_usd"
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "recovered",
+    "right_part": "all: every metric that reads availability_pct multiplies a stored value <= 1 by 100 before A/100",
+    "text": {
+     "reading": "States that availability_pct is a fraction and that the metric rescales it x100.",
+     "quote": "DATA FINDING: the documentation says A is on a 0-100 scale but every stored availability_pct is a fraction (0.95-0.9999); the metric rescales values <= 1 by x100 before applying A/100",
+     "where": "contract.yml domain energy_loss; also semantic.yml potential_snapshot_yield description and the elec_perf_snapshot column description"
+    },
+    "sql": {
+     "reading": "A = CASE WHEN avail <= 1 THEN 100 * avail ELSE avail END, then A/100; conditional, equal to the reference on every stored value here. All five metrics that read availability_pct share the y subquery.",
+     "where": "semantic.yml subquery y of the five energy_loss metrics"
+    },
+    "comparisons": [
+     {
+      "name": "potential snapshot yield",
+      "contract": "potential_snapshot_yield (subquery y)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.potential_kwh"
+     },
+     {
+      "name": "recoverable energy loss",
+      "contract": "recoverable_energy_loss (subquery y)",
+      "agree": 998,
+      "total": 998,
+      "agree_after_correction": 998,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.loss_kwh"
+     }
+    ],
+    "correctable": []
+   }
+  },
+  "no-data": {
+   "g1": {
+    "category": "missed",
+    "right_part": null,
+    "text": {
+     "reading": "The documented reading only: NULL is the wildcard and specificity counts non-NULL criteria. 'ALL' is never mentioned, so it is a value to compare; it does not match a NULL record value (or any record value).",
+     "quote": "a snapshot satisfies a criterion of warranty_settle_rules when the criterion is NULL (matches anything, including missing) or equals the snapshot value exactly [...] Specificity = number of restricting (non-NULL) criteria 0-6",
+     "where": "contract.yml domain warranty_settlement; semantic.yml warranty_settle_rules columns ('NULL = unrestricted')"
+    },
+    "sql": {
+     "reading": "Match: (r.c IS NULL OR r.c = s.value); 'ALL' is compared as a literal value, so a rule with any 'ALL' never matches. Specificity counts IS NOT NULL, so 'ALL' counts as specified. Only the 7 pairs on the 72 rules without 'ALL' match.",
+     "where": "semantic.yml warranty_governing_rule / warranty_settlement_amount (CROSS JOIN LATERAL with arg_min)"
+    },
+    "comparisons": [
+     {
+      "name": "matching (snapshot, rule) pairs",
+      "contract": "warranty_governing_rule: its subquery s with CROSS JOIN LATERAL g with the top-1 filter removed",
+      "agree": 72,
+      "total": 998,
+      "agree_after_correction": 72,
+      "note": "pairs: contract 7, reference 3750, common 7; same SQL on experiment 4's database: 998/998; agree = snapshots whose set of matched rule_ids equals the reference's (r_record_matches); the 72 agreeing snapshots are those that match no rule under either reading"
+     },
+     {
+      "name": "rule specificity",
+      "contract": "warranty_governing_rule: its specificity expression, applied to every rule",
+      "agree": 72,
+      "total": 520,
+      "agree_after_correction": 72,
+      "note": "same SQL on experiment 4's database: 520/520; per rule_id, total = all 520 rules; reference = reference.sql's specificity expression (checked equal to r_record_matches.specificity); the 72 agreeing rules are those with no 'ALL' (specificity 6)"
+     },
+     {
+      "name": "governing rule per snapshot",
+      "contract": "warranty_governing_rule",
+      "agree": 79,
+      "total": 998,
+      "agree_after_correction": 79,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.rule_id; NULL = Standard Settlement Terms; agree = the 72 unmatched snapshots plus 7 governed by a specificity-6 rule"
+     },
+     {
+      "name": "settlement amount S per snapshot",
+      "contract": "warranty_settlement_amount",
+      "agree": 79,
+      "total": 998,
+      "agree_after_correction": 79,
+      "note": "same SQL on experiment 4's database: 998/998; against r_record_amounts.settlement_usd; same 79 snapshots as the governing rule"
+     }
+    ],
+    "correctable": []
+   },
+   "g2": {
+    "category": "missed",
+    "right_part": null,
+    "text": {
+     "reading": "The field read as documented: A = availability_pct on a 0-100 scale, divided by 100. No rescaling.",
+     "quote": "Potential Snapshot Yield E_pot = E / ((A/100) x (1 - L_soil/100)), E = energy_yield.energy_yield_kwh, A = energy_yield.availability_pct",
+     "where": "contract.yml domain energy_loss; semantic.yml potential_snapshot_yield description"
+    },
+    "sql": {
+     "reading": "E_pot = E / ((avail / 100.0) * (1 - soil/100.0)) on the stored fraction, so E_pot is about 100x too large. All five metrics that read availability_pct use the same unscaled /100.0.",
+     "where": "semantic.yml sql_expression of potential_snapshot_yield, recoverable_energy_loss, technology_monthly_energy_loss_ratio, energy_loss_band, technology_recoverable_energy"
+    },
+    "comparisons": [
+     {
+      "name": "potential snapshot yield",
+      "contract": "potential_snapshot_yield (inline expression)",
+      "agree": 0,
+      "total": 998,
+      "agree_after_correction": 0,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.potential_kwh"
+     },
+     {
+      "name": "recoverable energy loss",
+      "contract": "recoverable_energy_loss (inline expression)",
+      "agree": 0,
+      "total": 998,
+      "agree_after_correction": 0,
+      "note": "same SQL on experiment 4's database: 998/998; against c_record_values.loss_kwh"
+     }
+    ],
+    "correctable": []
+   }
+  }
+ }
+}

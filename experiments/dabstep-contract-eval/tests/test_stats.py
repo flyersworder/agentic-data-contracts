@@ -224,11 +224,12 @@ def test_report_covers_every_verdict_without_crashing_or_miscounting(tmp_path):
 
     text = report(path)
 
-    # One correct and one incorrect out of the seven verdicts: SCORED is
-    # 1/2, STRICT is 1/7, for each arm. (Each arm's summary is printed
-    # once in the PRIMARY section and again in its SECONDARY breakdown.)
+    # One correct and one incorrect out of every verdict: SCORED is 1/2,
+    # STRICT is 1 over the number of verdicts, for each arm. (Each arm's
+    # summary is printed once in the PRIMARY section and again in its
+    # SECONDARY breakdown.)
     assert "scored    1/2" in text
-    assert "strict    1/7" in text
+    assert f"strict    1/{len(all_verdicts)}" in text
     # Every harness verdict is broken out by name somewhere in the report.
     for verdict in HARNESS_VERDICTS:
         assert verdict in text

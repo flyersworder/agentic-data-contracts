@@ -1417,6 +1417,20 @@ def _litellm_responses_agent(
     )
 
 
+#: How a route says the context window cannot hold a request: LiteLLM's
+#: `ContextWindowExceededError`, vLLM's and OpenAI's wording.
+_CONTEXT_OVERFLOW = (
+    "contextwindowexceeded",
+    "maximum context length",
+    "context_length_exceeded",
+)
+
+
+def _is_context_overflow(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in _CONTEXT_OVERFLOW)
+
+
 def _default_agent_factory(
     *,
     model: str,
@@ -1612,6 +1626,11 @@ def run_task(
             raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
 
         prompt = task.prompt
+        # Experiment 6's arms carry a larger guard so it never binds before
+        # `REQUEST_LIMIT` at their prompt sizes; every other arm keeps the
+        # shared one.
+        token_budget = getattr(setup, "token_budget", None)
+        token_cap = token_budget or TOKEN_BUDGET
         limits = UsageLimits(
             # THE uniform iteration control across arms — see `dce/tools.py`'s
             # module docstring. `total_tokens_limit`/`cost_limit` below are
@@ -1632,7 +1651,7 @@ def run_task(
             # `per_task_usd` was tried and reverted (it reintroduced a
             # non-uniform iteration budget across arms). Fixed and uniform
             # across every arm and model.
-            total_tokens_limit=TOKEN_BUDGET,
+            total_tokens_limit=token_cap,
             # N2: bounds one single request's input — closes the gap this
             # limit alone leaves open (checked only BETWEEN requests). See
             # `PER_REQUEST_INPUT_TOKEN_CAP`'s module-level comment. Not
@@ -1645,9 +1664,10 @@ def run_task(
             # first one's cost. Real protection against the first oversized
             # request is `dce/tools.py`'s `MAX_ROWS` (cut from 10,000 to
             # 1,000 for exactly this reason).
-            per_request_input_tokens_limit=PER_REQUEST_INPUT_TOKEN_CAP,
+            per_request_input_tokens_limit=(
+                token_cap // 4 if token_budget else PER_REQUEST_INPUT_TOKEN_CAP
+            ),
         )
-        token_cap = TOKEN_BUDGET
 
         answer, verdict = "", "unset"
         forced_answer = False
@@ -1741,8 +1761,22 @@ def run_task(
                     else:
                         answer = f"{type(exc).__name__}: {exc}"
             except Exception as exc:
-                verdict = "error"
+                # A prompt or tool result the route's context window cannot
+                # hold is deterministic: its own verdict, which `--retry-pass`
+                # (it retries `error` rows) never pays for twice.
+                verdict = "overflow" if _is_context_overflow(exc) else "error"
                 answer = f"{type(exc).__name__}: {exc}"
+        # A request reporting fewer input tokens than its prompt holds was
+        # truncated by the route: fail the run rather than grade an answer
+        # to a prompt the model never saw (experiment 6's anti-goal).
+        min_input = getattr(setup, "min_input_tokens", None)
+        if (
+            verdict == "unset"
+            and min_input
+            and usage.requests
+            and usage.input_tokens < usage.requests * min_input
+        ):
+            verdict = "truncated"
 
         # The full transcript, written before the bookkeeping below can
         # raise. `write_trace` swallows its own failures and returns None, so

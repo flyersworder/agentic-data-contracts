@@ -205,6 +205,11 @@ class ArmSetup:
     tools: list[Tool]
     session: object | None
     adapter: DuckDBAdapter | None = None  # arm `contract`'s adapter, else None
+    # Experiment 6: an arm whose prompt is many times the usual size carries
+    # its own runaway guard (else `dce.agent.TOKEN_BUDGET`), and the fewest
+    # input tokens a request must report, below which the route truncated it.
+    token_budget: int | None = None
+    min_input_tokens: int | None = None
 
     def close(self) -> None:
         """Release the persistent database connection this arm holds, if any.

@@ -1,0 +1,917 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: disaster_relief, author: claudeopus5.5
+metrics:
+- name: disaster_mortality_rate
+  description: 'DMR: percentage of a disaster''s total affected population that resulted in a confirmed
+    death = casualties / affected * 100. Per disasterevents row.
+
+    '
+  sql_expression: 100.0 * CAST(impact_summary->'population_impact'->>'casualties' AS DOUBLE) / NULLIF(CAST(impact_summary->'population_impact'->>'affected'
+    AS DOUBLE), 0)
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: population_displacement_rate
+  description: 'PDR: percentage of a disaster''s total affected population forced to leave their homes
+    = displaced / affected * 100. NULL when displaced is NULL (displacement data not available, 400 of
+    1000 rows).
+
+    '
+  sql_expression: 100.0 * CAST(impact_summary->'population_impact'->>'displaced' AS DOUBLE) / NULLIF(CAST(impact_summary->'population_impact'->>'affected'
+    AS DOUBLE), 0)
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: infrastructure_damage_index
+  description: 'IDI, 0-100: average of infrastructure, power and water damage percentages, NULLs as 0:
+    (COALESCE(infra_damage_pct,0)+COALESCE(power_outage_pct,0)+COALESCE(water_damage_pct,0))/3.
+
+    '
+  sql_expression: "(COALESCE(CAST(impact_summary->'infrastructure_damage'->>'infra_damage_pct' AS DOUBLE),\
+    \ 0)\n + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'power_outage_pct' AS DOUBLE), 0)\n\
+    \ + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'water_damage_pct' AS DOUBLE), 0)) / 3.0"
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: population_impact_score
+  description: 'PIS: weighted human-suffering score = 10*COALESCE(casualties,0) + 3*COALESCE(injured,0)
+    + 2*COALESCE(missing,0) + 1*COALESCE(displaced,0).
+
+    '
+  sql_expression: 10 * COALESCE(CAST(impact_summary->'population_impact'->>'casualties' AS BIGINT), 0)
+    + 3 * COALESCE(CAST(impact_summary->'population_impact'->>'injured' AS BIGINT), 0) + 2 * COALESCE(CAST(impact_summary->'population_impact'->>'missing'
+    AS BIGINT), 0) + 1 * COALESCE(CAST(impact_summary->'population_impact'->>'displaced' AS BIGINT), 0)
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: disaster_severity_index
+  description: 'Overall Disaster Severity Index (DSI) = 0.6 * Population Impact Score + 0.4 * Infrastructure
+    Damage Index. Current range up to ~71,364.
+
+    '
+  sql_expression: "0.6 * (10 * COALESCE(CAST(impact_summary->'population_impact'->>'casualties' AS BIGINT),\
+    \ 0)\n     + 3 * COALESCE(CAST(impact_summary->'population_impact'->>'injured' AS BIGINT), 0)\n  \
+    \   + 2 * COALESCE(CAST(impact_summary->'population_impact'->>'missing' AS BIGINT), 0)\n     + COALESCE(CAST(impact_summary->'population_impact'->>'displaced'\
+    \ AS BIGINT), 0))\n+ 0.4 * ((COALESCE(CAST(impact_summary->'infrastructure_damage'->>'infra_damage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'power_outage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'water_damage_pct'\
+    \ AS DOUBLE), 0)) / 3.0)"
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: is_major_disaster
+  description: 'Major Disaster (national-level response): DSI between 500,000 and 2,000,000 inclusive.
+    No current disaster qualifies (max DSI ~71,364) - an empty result is correct.
+
+    '
+  sql_expression: "(0.6 * (10 * COALESCE(CAST(impact_summary->'population_impact'->>'casualties' AS BIGINT),\
+    \ 0)\n     + 3 * COALESCE(CAST(impact_summary->'population_impact'->>'injured' AS BIGINT), 0)\n  \
+    \   + 2 * COALESCE(CAST(impact_summary->'population_impact'->>'missing' AS BIGINT), 0)\n     + COALESCE(CAST(impact_summary->'population_impact'->>'displaced'\
+    \ AS BIGINT), 0))\n+ 0.4 * ((COALESCE(CAST(impact_summary->'infrastructure_damage'->>'infra_damage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'power_outage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'water_damage_pct'\
+    \ AS DOUBLE), 0)) / 3.0))\nBETWEEN 500000 AND 2000000"
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: is_catastrophic_disaster
+  description: 'Catastrophic Disaster (maximum-level international response): DSI > 15,000 (505 of 1000
+    disasters currently).
+
+    '
+  sql_expression: "(0.6 * (10 * COALESCE(CAST(impact_summary->'population_impact'->>'casualties' AS BIGINT),\
+    \ 0)\n     + 3 * COALESCE(CAST(impact_summary->'population_impact'->>'injured' AS BIGINT), 0)\n  \
+    \   + 2 * COALESCE(CAST(impact_summary->'population_impact'->>'missing' AS BIGINT), 0)\n     + COALESCE(CAST(impact_summary->'population_impact'->>'displaced'\
+    \ AS BIGINT), 0))\n+ 0.4 * ((COALESCE(CAST(impact_summary->'infrastructure_damage'->>'infra_damage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'power_outage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(impact_summary->'infrastructure_damage'->>'water_damage_pct'\
+    \ AS DOUBLE), 0)) / 3.0))\n> 15000"
+  source_model: main.disasterevents
+  domains:
+  - disaster_impact
+- name: medical_support_ratio
+  description: 'MSR: medical personnel (humanresources.staffing_details.staff_counts.medical) / (casualties
+    + injured) of the same disaster. INTERPRETATION: NULL injured (injury data not available) counts as
+    0 in the denominator; denominator 0 -> NULL. Medical count cast to DOUBLE to avoid integer division.
+
+    '
+  sql_expression: "CAST(h.staffing_details->'staff_counts'->>'medical' AS DOUBLE) / NULLIF(COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties'\
+    \ AS BIGINT), 0)\n       + COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT),\
+    \ 0), 0)"
+  source_model: main.humanresources
+  from_sql: main.humanresources h JOIN main.disasterevents d ON d.distregistry = h.hrdistref
+  grain: one humanresources record (one per disaster; 57 rows)
+  domains:
+  - operations
+  - disaster_impact
+- name: is_mass_casualty_incident
+  description: 'MCI: total fatalities and injuries (casualties + COALESCE(injured,0)) > 100 OR Medical
+    Support Ratio < 0.01. LEFT JOIN so disasters without a staffing record are still tested on the first
+    condition.
+
+    '
+  sql_expression: "(COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties' AS BIGINT), 0)\n\
+    \ + COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT), 0)) > 100\nOR COALESCE(CAST(h.staffing_details->'staff_counts'->>'medical'\
+    \ AS DOUBLE)\n   / NULLIF(COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties' AS BIGINT),\
+    \ 0)\n          + COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT), 0),\
+    \ 0) < 0.01, FALSE)"
+  source_model: main.disasterevents
+  from_sql: main.disasterevents d LEFT JOIN main.humanresources h ON h.hrdistref = d.distregistry
+  grain: one disaster event
+  domains:
+  - disaster_impact
+- name: medical_staff_ratio
+  description: 'Medical staff available per 1000 affected people = (medical_staff_count / affected_population)
+    * 1000.
+
+    '
+  sql_expression: CAST(h.staffing_details->'staff_counts'->>'medical' AS DOUBLE) / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'
+    AS DOUBLE), 0) * 1000
+  source_model: main.humanresources
+  from_sql: main.humanresources h JOIN main.disasterevents d ON d.distregistry = h.hrdistref
+  grain: one humanresources record
+  domains:
+  - operations
+- name: total_humanitarian_footprint
+  description: 'THF: total personnel dedicated to a response, paid staff plus volunteers = staff_counts.total
+    + staff_counts.volunteers. INTERPRETATION: NULL (not recorded) counts as 0 for each part (total NULL
+    in 24 rows, volunteers NULL in 22). staff_counts.total is its own field and does not equal medical+logistics+security.
+
+    '
+  sql_expression: COALESCE(CAST(staffing_details->'staff_counts'->>'total' AS BIGINT), 0) + COALESCE(CAST(staffing_details->'staff_counts'->>'volunteers'
+    AS BIGINT), 0)
+  source_model: main.humanresources
+  domains:
+  - operations
+- name: supply_sufficiency_days
+  description: 'Supply Sufficiency (Days): days current supplies last, limited by food or water, at 2
+    kg food and 3 L water per person per day: LEAST(foodtons*1000/(affected*2), water_liters/(affected*3)).
+    Supplies joined to the disaster on supply_dist_ref.
+
+    '
+  sql_expression: "LEAST((s.foodtons * 1000.0) / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'\
+    \ AS DOUBLE) * 2, 0),\n      s.water_liters / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'\
+    \ AS DOUBLE) * 3, 0))"
+  source_model: main.supplies
+  from_sql: main.supplies s JOIN main.disasterevents d ON d.distregistry = s.supply_dist_ref
+  grain: one supplies record (one per disaster)
+  domains:
+  - logistics
+- name: is_imminent_supply_depletion
+  description: 'Imminent Supply Depletion Alert: essential supplies run out within 48 hours, i.e. Supply
+    Sufficiency (Days) < 2.
+
+    '
+  sql_expression: "LEAST((s.foodtons * 1000.0) / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'\
+    \ AS DOUBLE) * 2, 0),\n      s.water_liters / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'\
+    \ AS DOUBLE) * 3, 0)) < 2"
+  source_model: main.supplies
+  from_sql: main.supplies s JOIN main.disasterevents d ON d.distregistry = s.supply_dist_ref
+  grain: one supplies record
+  domains:
+  - logistics
+- name: shelter_gap
+  description: 'Shortfall of shelter units vs displaced population = GREATEST(0, displaced - shelter_units).
+    NULL where displaced is not available.
+
+    '
+  sql_expression: GREATEST(0, CAST(d.impact_summary->'population_impact'->>'displaced' AS BIGINT) - s.shelter_units)
+  source_model: main.supplies
+  from_sql: main.supplies s JOIN main.disasterevents d ON d.distregistry = s.supply_dist_ref
+  grain: one supplies record
+  domains:
+  - logistics
+- name: is_severe_shelter_crisis
+  description: 'Severe Shelter Crisis: Shelter Gap > 1,000 units.'
+  sql_expression: GREATEST(0, CAST(d.impact_summary->'population_impact'->>'displaced' AS BIGINT) - s.shelter_units)
+    > 1000
+  source_model: main.supplies
+  from_sql: main.supplies s JOIN main.disasterevents d ON d.distregistry = s.supply_dist_ref
+  grain: one supplies record
+  domains:
+  - logistics
+- name: logistical_throughput_per_vehicle
+  description: 'LTV: average daily tonnage delivered per vehicle = delivery_capacity.daily_tons / vehiclecount.
+    vehiclecount NULL (not recorded, 392 rows) -> NULL.
+
+    '
+  sql_expression: CAST(delivery_metrics->'delivery_capacity'->>'daily_tons' AS DOUBLE) / NULLIF(vehiclecount,
+    0)
+  source_model: main.transportation
+  domains:
+  - logistics
+- name: average_vehicle_breakdown_rate
+  description: 'Mean vehicle breakdown rate over a chosen cohort of transportation rows; break_rate (delivery_metrics.vehicle_metrics.break_rate)
+    is stored as a percentage (0-9.99).
+
+    '
+  sql_expression: AVG(CAST(delivery_metrics->'vehicle_metrics'->>'break_rate' AS DOUBLE))
+  source_model: main.transportation
+  domains:
+  - logistics
+- name: aid_delivery_cost_per_ton
+  description: 'ADC: transport costs (financials.transportcostsusd) divided by total tons delivered (transportation.delivery_metrics.delivery_capacity.total_tons)
+    for the same transport, matched through the shared disaster reference (one of each per disaster).
+
+    '
+  sql_expression: CAST(f.transportcostsusd AS DOUBLE) / NULLIF(CAST(t.delivery_metrics->'delivery_capacity'->>'total_tons'
+    AS DOUBLE), 0)
+  source_model: main.transportation
+  from_sql: main.transportation t JOIN main.financials f ON f.findistref = t.transportdistref
+  grain: one transportation record
+  domains:
+  - logistics
+  - finance
+- name: hub_utilization_turnover_score
+  description: Combined hub utilization and turnover score = (hubutilpct/100) + (stockturnrate/10).
+  sql_expression: (hubutilpct / 100.0) + (stockturnrate / 10.0)
+  source_model: main.distributionhubs
+  domains:
+  - logistics
+- name: is_hub_overloaded
+  description: 'Hub Overload: (hubutilpct/100) + (stockturnrate/10) > 1.5.'
+  sql_expression: (hubutilpct / 100.0) + (stockturnrate / 10.0) > 1.5
+  source_model: main.distributionhubs
+  domains:
+  - logistics
+- name: hub_strain_index
+  description: 'HSI = 0.5*((hubutilpct/100)+(stockturnrate/10)) + 0.5*avg_dsi_served, where avg_dsi_served
+    is the average DSI of disasters the hub serves via transportation (transport_hub_ref). Aggregate:
+    GROUP BY hb.hubregistry. Max currently ~34,000.
+
+    '
+  sql_expression: "0.5 * ((MAX(hb.hubutilpct) / 100.0) + (MAX(hb.stockturnrate) / 10.0)) + 0.5 * AVG(0.6\
+    \ * (10 * COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties' AS BIGINT), 0)\n    \
+    \ + 3 * COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT), 0)\n     + 2 *\
+    \ COALESCE(CAST(d.impact_summary->'population_impact'->>'missing' AS BIGINT), 0)\n     + COALESCE(CAST(d.impact_summary->'population_impact'->>'displaced'\
+    \ AS BIGINT), 0))\n  + 0.4 * ((COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'infra_damage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'power_outage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'water_damage_pct'\
+    \ AS DOUBLE), 0)) / 3.0))"
+  source_model: main.distributionhubs
+  from_sql: main.distributionhubs hb JOIN main.transportation t ON t.transport_hub_ref = hb.hubregistry
+    JOIN main.disasterevents d ON d.distregistry = t.transportdistref
+  grain: one distribution hub after GROUP BY hb.hubregistry
+  domains:
+  - logistics
+- name: is_overwhelmed_hub
+  description: 'Overwhelmed Logistical Hub: HSI > 1,000,000 (use as HAVING with GROUP BY hb.hubregistry).
+    No hub currently qualifies; an empty result is correct.
+
+    '
+  sql_expression: "0.5 * ((MAX(hb.hubutilpct) / 100.0) + (MAX(hb.stockturnrate) / 10.0)) + 0.5 * AVG(0.6\
+    \ * (10 * COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties' AS BIGINT), 0)\n    \
+    \ + 3 * COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT), 0)\n     + 2 *\
+    \ COALESCE(CAST(d.impact_summary->'population_impact'->>'missing' AS BIGINT), 0)\n     + COALESCE(CAST(d.impact_summary->'population_impact'->>'displaced'\
+    \ AS BIGINT), 0))\n  + 0.4 * ((COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'infra_damage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'power_outage_pct'\
+    \ AS DOUBLE), 0)\n     + COALESCE(CAST(d.impact_summary->'infrastructure_damage'->>'water_damage_pct'\
+    \ AS DOUBLE), 0)) / 3.0)) > 1000000"
+  source_model: main.distributionhubs
+  from_sql: main.distributionhubs hb JOIN main.transportation t ON t.transport_hub_ref = hb.hubregistry
+    JOIN main.disasterevents d ON d.distregistry = t.transportdistref
+  grain: one distribution hub after GROUP BY hb.hubregistry
+  domains:
+  - logistics
+- name: supply_chain_fragility_index
+  description: 'SCFI = 0.5*((hubutilpct/100)+(stockturnrate/10)) + 0.5*break_rate, break_rate as stored
+    (percentage). Transport row joined to its hub; relate to an operation through the shared disaster
+    reference (e.g. financials.findistref = t.transportdistref).
+
+    '
+  sql_expression: 0.5 * ((hb.hubutilpct / 100.0) + (hb.stockturnrate / 10.0)) + 0.5 * CAST(t.delivery_metrics->'vehicle_metrics'->>'break_rate'
+    AS DOUBLE)
+  source_model: main.transportation
+  from_sql: main.transportation t JOIN main.distributionhubs hb ON hb.hubregistry = t.transport_hub_ref
+  grain: one transportation record
+  domains:
+  - logistics
+- name: is_fragile_supply_chain
+  description: 'Fragile Supply Chain / Operation with Fragile Supply Chain: SCFI > 5.0.'
+  sql_expression: 0.5 * ((hb.hubutilpct / 100.0) + (hb.stockturnrate / 10.0)) + 0.5 * CAST(t.delivery_metrics->'vehicle_metrics'->>'break_rate'
+    AS DOUBLE) > 5.0
+  source_model: main.transportation
+  from_sql: main.transportation t JOIN main.distributionhubs hb ON hb.hubregistry = t.transport_hub_ref
+  grain: one transportation record
+  domains:
+  - logistics
+- name: is_logistical_gridlock
+  description: 'Logistical Gridlock: operations.supply_flow_state = ''Disrupted'' AND the disaster''s
+    transport_access = ''Minimal''. Operation paired with disaster via humanresources (the same pairing
+    GSI uses); the same predicate applies over any other op-disaster link table. The JSON extraction is
+    parenthesised because of operator precedence.
+
+    '
+  sql_expression: (o.supply_flow_state = 'Disrupted') AND ((d.impact_summary->'communication_and_transport'->>'transport_access')
+    = 'Minimal')
+  source_model: main.operations
+  from_sql: main.operations o JOIN main.humanresources h ON h.hr_ops_ref = o.opsregistry JOIN main.disasterevents
+    d ON d.distregistry = h.hrdistref
+  grain: one operation-disaster pair (humanresources record)
+  domains:
+  - logistics
+  - operations
+- name: gridlock_severity_index
+  description: 'GSI = ((10 - priority_score)*0.5) + (total_personnel*0.2) + (transport_restriction_score*30);
+    priority_score Critical=1, High=2, Medium=3, Low=4 (stored title-case); transport restriction Minimal=1.0,
+    Limited=0.5, else 0; total_personnel = THF (total + volunteers, NULL as 0). Used to prioritise operations
+    in logistical gridlock.
+
+    '
+  sql_expression: "((10 - CASE CAST(o.priority_rank AS VARCHAR) WHEN 'Critical' THEN 1 WHEN 'High' THEN\
+    \ 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 END) * 0.5) + ((COALESCE(CAST(h.staffing_details->'staff_counts'->>'total'\
+    \ AS BIGINT), 0)\n    + COALESCE(CAST(h.staffing_details->'staff_counts'->>'volunteers' AS BIGINT),\
+    \ 0)) * 0.2)\n+ (CASE (d.impact_summary->'communication_and_transport'->>'transport_access') WHEN\
+    \ 'Minimal' THEN 1.0 WHEN 'Limited' THEN 0.5 ELSE 0 END * 30)"
+  source_model: main.operations
+  from_sql: main.operations o JOIN main.humanresources h ON h.hr_ops_ref = o.opsregistry JOIN main.disasterevents
+    d ON d.distregistry = h.hrdistref
+  grain: one operation-disaster pair (humanresources record)
+  domains:
+  - logistics
+  - operations
+- name: total_operation_cost
+  description: 'Total cost of an operation = ops_costs_usd + transportcostsusd + storage_costs_usd + personnelcostsusd
+    (none NULL). Used as total operational costs in FBR, runway and burn alert.
+
+    '
+  sql_expression: ops_costs_usd + transportcostsusd + storage_costs_usd + personnelcostsusd
+  source_model: main.financials
+  domains:
+  - finance
+- name: allocated_budget_usd
+  description: budgetallotusd parsed from text like '$4,227,090.00' to a number.
+  sql_expression: CAST(replace(replace(budgetallotusd, '$', ''), ',', '') AS DOUBLE)
+  source_model: main.financials
+  domains:
+  - finance
+- name: cost_per_person_affected
+  description: 'CPPA: total operation cost (four cost columns) / affected population of the disaster.
+
+    '
+  sql_expression: (f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)
+    / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected' AS DOUBLE), 0)
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.disasterevents d ON d.distregistry = f.findistref
+  grain: one financials record (one operation, one disaster)
+  domains:
+  - finance
+- name: cost_per_beneficiary
+  description: 'CPB: total costs (four cost columns) of completed operations (opsstatus = ''Completed'')
+    divided by their total affected population - a ratio of sums over the whole set.
+
+    '
+  sql_expression: SUM(f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)
+    FILTER (WHERE o.opsstatus = 'Completed') / NULLIF(SUM(CAST(d.impact_summary->'population_impact'->>'affected'
+    AS DOUBLE)) FILTER (WHERE o.opsstatus = 'Completed'), 0)
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.operations o ON o.opsregistry = f.fin_ops_ref JOIN main.disasterevents
+    d ON d.distregistry = f.findistref
+  grain: one financials record; the metric aggregates over all of them
+  domains:
+  - finance
+- name: financial_burn_rate
+  description: 'FBR: average daily expenditure = total operational costs (four-column total) / (current_date
+    - ops_start_date) in days (date minus date yields integer days).
+
+    '
+  sql_expression: (f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)
+    / NULLIF(current_date - o.ops_start_date, 0)
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.operations o ON o.opsregistry = f.fin_ops_ref
+  grain: one financials record (one operation)
+  domains:
+  - finance
+- name: budget_runway_days
+  description: 'Budget Runway (Days) = (allocated budget - total operational costs) / Financial Burn Rate.
+
+    '
+  sql_expression: "(CAST(replace(replace(f.budgetallotusd, '$', ''), ',', '') AS DOUBLE)\n - (f.ops_costs_usd\
+    \ + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd))\n/ NULLIF((f.ops_costs_usd +\
+    \ f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)\n         / NULLIF(current_date\
+    \ - o.ops_start_date, 0), 0)"
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.operations o ON o.opsregistry = f.fin_ops_ref
+  grain: one financials record
+  domains:
+  - finance
+- name: is_funding_crisis
+  description: 'Funding Crisis: funding_state = ''Critical'' AND Budget Runway < 7 days.'
+  sql_expression: "(f.funding_state = 'Critical') AND ((CAST(replace(replace(f.budgetallotusd, '$', ''),\
+    \ ',', '') AS DOUBLE)\n - (f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd))\n\
+    / NULLIF((f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)\n   \
+    \      / NULLIF(current_date - o.ops_start_date, 0), 0) < 7)"
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.operations o ON o.opsregistry = f.fin_ops_ref
+  grain: one financials record
+  domains:
+  - finance
+- name: financial_health_score
+  description: 'FHS = 0.5*(100 - funds_util_pct) + 0.5*((budget - COALESCE(resource_gaps_usd,0)) / NULLIF(budget,0))*100;
+    funds_util_pct parsed from ''9.8%'', budget from ''$4,227,090.00''.
+
+    '
+  sql_expression: "0.5 * (100 - CAST(replace(funds_util_pct, '%', '') AS DOUBLE)) + 0.5 * ((CAST(replace(replace(budgetallotusd,\
+    \ '$', ''), ',', '') AS DOUBLE) - COALESCE(resource_gaps_usd, 0))\n         / NULLIF(CAST(replace(replace(budgetallotusd,\
+    \ '$', ''), ',', '') AS DOUBLE), 0)) * 100"
+  source_model: main.financials
+  domains:
+  - finance
+- name: is_financially_unstable_operation
+  description: 'Financially Unstable Operation: Financial Health Score < 50.'
+  sql_expression: "0.5 * (100 - CAST(replace(funds_util_pct, '%', '') AS DOUBLE)) + 0.5 * ((CAST(replace(replace(budgetallotusd,\
+    \ '$', ''), ',', '') AS DOUBLE) - COALESCE(resource_gaps_usd, 0))\n         / NULLIF(CAST(replace(replace(budgetallotusd,\
+    \ '$', ''), ',', '') AS DOUBLE), 0)) * 100 < 50"
+  source_model: main.financials
+  domains:
+  - finance
+- name: is_high_burn_rate_alert
+  description: 'High Burn Rate Alert: total costs (four columns) > 20% of the allocated budget.'
+  sql_expression: (ops_costs_usd + transportcostsusd + storage_costs_usd + personnelcostsusd) > 0.2 *
+    CAST(replace(replace(budgetallotusd, '$', ''), ',', '') AS DOUBLE)
+  source_model: main.financials
+  domains:
+  - finance
+- name: response_effectiveness_score
+  description: 'RES = 0.4*success_rate + 0.3*bene_feedbackscore*10 + 0.3*distequityidx*100; success_rate
+    from transportation.delivery_metrics.delivery_performance (same disaster). NULL when feedback is not
+    recorded.
+
+    '
+  sql_expression: 0.4 * CAST(t.delivery_metrics->'delivery_performance'->>'success_rate' AS DOUBLE) +
+    0.3 * b.bene_feedbackscore * 10 + 0.3 * b.distequityidx * 100
+  source_model: main.beneficiariesandassessments
+  from_sql: main.beneficiariesandassessments b JOIN main.transportation t ON t.transportdistref = b.bene_dist_ref
+  grain: one beneficiaries record (one operation-disaster pair)
+  domains:
+  - operations
+- name: coordination_quality_index
+  description: 'CQI = (report_compliance + stakeholder_satisf*20 + dataqualityvalue*20) / 3.0.
+
+    '
+  sql_expression: (report_compliance + (stakeholder_satisf * 20) + (dataqualityvalue * 20)) / 3.0
+  source_model: main.coordinationandevaluation
+  domains:
+  - coordination
+- name: is_highly_effective_operation
+  description: 'Highly Effective Operation: RES > 75 AND CQI > 75; coordination row matched on the same
+    operation and disaster.
+
+    '
+  sql_expression: "((0.4 * CAST(t.delivery_metrics->'delivery_performance'->>'success_rate' AS DOUBLE)\n\
+    \ + 0.3 * b.bene_feedbackscore * 10 + 0.3 * b.distequityidx * 100) > 75)\nAND (((c.report_compliance\
+    \ + c.stakeholder_satisf * 20 + c.dataqualityvalue * 20) / 3.0) > 75)"
+  source_model: main.beneficiariesandassessments
+  from_sql: main.beneficiariesandassessments b JOIN main.transportation t ON t.transportdistref = b.bene_dist_ref
+    JOIN main.coordinationandevaluation c ON c.coordopsref = b.beneopsref AND c.coord_dist_ref = b.bene_dist_ref
+  grain: one operation-disaster pair
+  domains:
+  - operations
+  - coordination
+- name: is_failing_operation
+  description: 'Failing Operation: LTV < 1.0 OR RES < 40.'
+  sql_expression: "(CAST(t.delivery_metrics->'delivery_capacity'->>'daily_tons' AS DOUBLE) / NULLIF(t.vehiclecount,\
+    \ 0) < 1.0) OR ((0.4 * CAST(t.delivery_metrics->'delivery_performance'->>'success_rate' AS DOUBLE)\n\
+    \    + 0.3 * b.bene_feedbackscore * 10 + 0.3 * b.distequityidx * 100) < 40)"
+  source_model: main.beneficiariesandassessments
+  from_sql: main.beneficiariesandassessments b JOIN main.transportation t ON t.transportdistref = b.bene_dist_ref
+  grain: one operation-disaster pair
+  domains:
+  - operations
+- name: is_high_cost_low_impact_operation
+  description: 'High Cost, Low Impact Operation: CPPA above the average CPPA AND RES below the average
+    RES, averages over all rows of this join (window AVG OVER ()); use in a subquery then filter.
+
+    '
+  sql_expression: "(((f.ops_costs_usd + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)\n\
+    \  / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected' AS DOUBLE), 0))\n> AVG((f.ops_costs_usd\
+    \ + f.transportcostsusd + f.storage_costs_usd + f.personnelcostsusd)\n  / NULLIF(CAST(d.impact_summary->'population_impact'->>'affected'\
+    \ AS DOUBLE), 0)) OVER ())\nAND ((0.4 * CAST(t.delivery_metrics->'delivery_performance'->>'success_rate'\
+    \ AS DOUBLE)\n  + 0.3 * b.bene_feedbackscore * 10 + 0.3 * b.distequityidx * 100)\n< AVG(0.4 * CAST(t.delivery_metrics->'delivery_performance'->>'success_rate'\
+    \ AS DOUBLE)\n  + 0.3 * b.bene_feedbackscore * 10 + 0.3 * b.distequityidx * 100) OVER ())"
+  source_model: main.financials
+  from_sql: main.financials f JOIN main.disasterevents d ON d.distregistry = f.findistref JOIN main.beneficiariesandassessments
+    b ON b.beneopsref = f.fin_ops_ref AND b.bene_dist_ref = f.findistref JOIN main.transportation t ON
+    t.transportdistref = f.findistref
+  grain: one financials record (operation)
+  domains:
+  - operations
+  - finance
+- name: is_high_risk_operation
+  description: 'High-Risk Operation: safety_ranking = ''High Risk'' OR security incidents exceed 5 per
+    week. INTERPRETATION: no time window exists, so secincidentcount is taken as the weekly figure (secincidentcount
+    > 5).
+
+    '
+  sql_expression: (safety_ranking = 'High Risk') OR (secincidentcount > 5)
+  source_model: main.coordinationandevaluation
+  domains:
+  - operations
+  - coordination
+- name: is_high_risk_active_operation
+  description: 'High Risk Operation (active variant): opsstatus = ''Active'' AND (safety_ranking = ''High
+    Risk'' OR more than 5 security incidents); the Active condition applies to both branches.
+
+    '
+  sql_expression: (o.opsstatus = 'Active') AND (c.safety_ranking = 'High Risk' OR c.secincidentcount >
+    5)
+  source_model: main.operations
+  from_sql: main.operations o JOIN main.coordinationandevaluation c ON c.coordopsref = o.opsregistry
+  grain: one coordination record of an operation
+  domains:
+  - operations
+- name: is_full_scale_emergency
+  description: 'Full-Scale Emergency: emerglevel ''Red'' or ''Black''.'
+  sql_expression: emerglevel IN ('Red', 'Black')
+  source_model: main.operations
+  domains:
+  - operations
+- name: is_successful_community_partnership
+  description: 'Successful Community Partnership: commengagelvl = ''High'' AND distequityidx > 0.9.'
+  sql_expression: (commengagelvl = 'High') AND (distequityidx > 0.9)
+  source_model: main.beneficiariesandassessments
+  domains:
+  - beneficiaries
+- name: distribution_equity_band
+  description: 'Distribution Equity Index meaning: 1.0 perfect equity; below 0.5 severe inequity; below
+    0.7 may indicate significant disparities; otherwise acceptable.
+
+    '
+  sql_expression: "CASE WHEN distequityidx = 1.0 THEN 'Perfect equity'\n     WHEN distequityidx < 0.5\
+    \ THEN 'Severe inequity'\n     WHEN distequityidx < 0.7 THEN 'Significant disparities'\n     WHEN\
+    \ distequityidx IS NOT NULL THEN 'Acceptable' END"
+  source_model: main.beneficiariesandassessments
+  domains:
+  - beneficiaries
+- name: public_health_risk_score
+  description: 'PHRS = ((1 - MSR)*40) + (disease_risk_score*10) + ((100 - sanitation_coverage)*0.15) +
+    ((100 - water_quality_index)*0.15); disease_risk_score High=3, Medium=2, else 1; water_quality_index
+    parsed from text like ''85.6 WQI''; MSR from the disaster''s humanresources record (casualties + COALESCE(injured,0)).
+
+    '
+  sql_expression: "((1 - CAST(h.staffing_details->'staff_counts'->>'medical' AS DOUBLE)\n   / NULLIF(COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties'\
+    \ AS BIGINT), 0)\n          + COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT),\
+    \ 0), 0)) * 40)\n+ (CASE (e.health_environment_profile->'health'->>'disease_risk') WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END * 10) + ((100 - CAST(e.health_environment_profile->'environment'->>'sanitation_coverage'\
+    \ AS DOUBLE)) * 0.15) + ((100 - CAST(trim(replace(e.health_environment_profile->'environment'->>'water_quality_index',\
+    \ 'WQI', '')) AS DOUBLE)) * 0.15)"
+  source_model: main.environmentandhealth
+  from_sql: main.environmentandhealth e JOIN main.disasterevents d ON d.distregistry = e.env_dist_ref
+    JOIN main.humanresources h ON h.hrdistref = d.distregistry
+  grain: one environmentandhealth record (20 rows)
+  domains:
+  - health_environment
+- name: is_public_health_emergency
+  description: 'Public Health Emergency: PHRS > 70.'
+  sql_expression: "(((1 - CAST(h.staffing_details->'staff_counts'->>'medical' AS DOUBLE)\n   / NULLIF(COALESCE(CAST(d.impact_summary->'population_impact'->>'casualties'\
+    \ AS BIGINT), 0)\n          + COALESCE(CAST(d.impact_summary->'population_impact'->>'injured' AS BIGINT),\
+    \ 0), 0)) * 40)\n+ (CASE (e.health_environment_profile->'health'->>'disease_risk') WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END * 10) + ((100 - CAST(e.health_environment_profile->'environment'->>'sanitation_coverage'\
+    \ AS DOUBLE)) * 0.15) + ((100 - CAST(trim(replace(e.health_environment_profile->'environment'->>'water_quality_index',\
+    \ 'WQI', '')) AS DOUBLE)) * 0.15)) > 70"
+  source_model: main.environmentandhealth
+  from_sql: main.environmentandhealth e JOIN main.disasterevents d ON d.distregistry = e.env_dist_ref
+    JOIN main.humanresources h ON h.hrdistref = d.distregistry
+  grain: one environmentandhealth record
+  domains:
+  - health_environment
+- name: is_high_accountability_response
+  description: 'High-Accountability Response: compliancestate ''Compliant'' AND audit_state ''Completed''
+    AND qualitycontrolsteps ''Strong''.
+
+    '
+  sql_expression: (compliancestate = 'Compliant') AND (audit_state = 'Completed') AND (qualitycontrolsteps
+    = 'Strong')
+  source_model: main.coordinationandevaluation
+  domains:
+  - coordination
+- name: is_negative_media_narrative
+  description: 'Negative Media Narrative: mediacoversentiment ''Negative'' AND public perception score
+    below 60. public_perception is text like ''3.5★'' (1-5 stars); parsed numerically and compared to
+    60 as documented, so all Negative rows qualify.
+
+    '
+  sql_expression: (mediacoversentiment = 'Negative') AND (CAST(trim(replace(public_perception, '★', ''))
+    AS DOUBLE) < 60)
+  source_model: main.coordinationandevaluation
+  domains:
+  - coordination
+- name: data_quality_band
+  description: 'Data Quality Value bands: > 90 Excellent; 70-89 Good; 50-69 Fair; below 50 Poor (decisions
+    based on unreliable information). Stored dataqualityvalue is 1-5, so all rows band as Poor on raw
+    values.
+
+    '
+  sql_expression: "CASE WHEN dataqualityvalue > 90 THEN 'Excellent'\n     WHEN dataqualityvalue >= 70\
+    \ THEN 'Good'\n     WHEN dataqualityvalue >= 50 THEN 'Fair'\n     WHEN dataqualityvalue IS NOT NULL\
+    \ THEN 'Poor' END"
+  source_model: main.coordinationandevaluation
+  domains:
+  - coordination
+tables:
+- schema: main
+  table: disasterevents
+  description: One row per disaster event (1000). impact_summary is JSON; see domain disaster_impact.
+  columns:
+  - name: distregistry
+    description: Unique disaster event identifier (PK).
+  - name: timemark
+    description: Timestamp when the disaster event was recorded.
+  - name: haztype
+    description: 'Disaster type: Earthquake, Flood, Hurricane, Tsunami, Wildfire.'
+  - name: haz_level
+    description: 'Hazard Severity Level ''Severity-1''..''Severity-5'' (= Level 1..5). Level 1: minor,
+      localized event. Level 3: moderate event with regional impact. Level 5: catastrophic event with
+      widespread, severe impact requiring international assistance.'
+  - name: affectedarea
+    description: Geographic area impacted.
+  - name: region_tag
+    description: Regional tag, e.g. RC7250.
+  - name: latcoord
+    description: Latitude of disaster center.
+  - name: lon_coord
+    description: Longitude of disaster center.
+  - name: damagereport
+    description: 'Damage Report Category. Minor: limited damage. Moderate: visible damage to some structures.
+      Severe: widespread destruction. Catastrophic: near-total destruction of the built environment in
+      the affected area.'
+  - name: impact_summary
+    description: 'JSON: population_impact {affected, displaced (NULL = not available), casualties, injured
+      (NULL = not available), missing (NULL = not recorded)}; infrastructure_damage {infra_damage_pct,
+      power_outage_pct (NULL = not recorded), water_damage_pct (NULL = not available)}; communication_and_transport
+      {communication_state Down/Limited/OP, transport_access Full/Limited/Minimal}. Use ->/->> and CAST;
+      parenthesise ->> before comparing.'
+- schema: main
+  table: humanresources
+  description: Staffing per operation-disaster pair (57 rows, one per disaster).
+  columns:
+  - name: hrregistry
+    description: PK.
+  - name: hrdistref
+    description: FK to disasterevents.
+  - name: hr_ops_ref
+    description: FK to operations.
+  - name: staffing_details
+    description: 'JSON: staff_counts {total (NULL = not recorded), medical, logistics, security (NULL
+      = not recorded), volunteers}; availability_and_equipment {availability_pct, training_state Complete/In
+      Progress/Required (NULL = not recorded), ppe_status Critical/LTD/✓, comm_equipment Insufficient/Limited/Sufficient}.'
+- schema: main
+  table: transportation
+  description: Transport per disaster (987 rows, one per disaster).
+  columns:
+  - name: transportregistry
+    description: PK (transport ID).
+  - name: transportdistref
+    description: FK to disasterevents.
+  - name: transport_hub_ref
+    description: FK to distributionhubs; the hub serving this disaster.
+  - name: transportsupref
+    description: FK to supplies.
+  - name: vehiclecount
+    description: Number of vehicles available. NULL means vehicle count not recorded (392 rows).
+  - name: trucks_available
+    description: Available trucks.
+  - name: helosavailable
+    description: Available helicopters.
+  - name: boatsavailable
+    description: Available boats.
+  - name: lastmilestatus
+    description: 'Last-mile delivery status (local hub to final distribution points). On Track: proceeding
+      as planned. Delayed: facing obstacles, behind schedule. Suspended: halted due to safety, access
+      or other critical issues.'
+  - name: distribution_points
+    description: Number of distribution points.
+  - name: deliverystatus
+    description: Overall delivery status.
+  - name: delivery_metrics
+    description: 'JSON: delivery_capacity {total_tons, daily_tons}; delivery_performance {avg_hours (NULL
+      = not recorded), success_rate (percent), route_optimization_status}; vehicle_metrics {fuel_efficiency_lpk,
+      maintenance_state Due/Overdue/Up to Date, break_rate (percentage, 0-9.99)}.'
+- schema: main
+  table: supplies
+  description: Supplies per disaster (312 rows).
+  columns:
+  - name: supplyregistry
+    description: PK.
+  - name: supply_dist_ref
+    description: FK to disasterevents.
+  - name: supplyhubref
+    description: FK to distributionhubs.
+  - name: foodtons
+    description: Food in tons.
+  - name: water_liters
+    description: Water in liters.
+  - name: medunits
+    description: Medical units.
+  - name: shelter_units
+    description: Shelter units (used in Shelter Gap).
+  - name: blanketunits
+    description: Blankets.
+  - name: hygiene_units
+    description: Hygiene units.
+  - name: powergenunits
+    description: Power generators.
+  - name: fuel_reserve_liters
+    description: Fuel reserves in liters.
+- schema: main
+  table: distributionhubs
+  description: Distribution hubs (405).
+  columns:
+  - name: hubregistry
+    description: PK.
+  - name: hub_cap_tons
+    description: Capacity in tons.
+  - name: hubutilpct
+    description: Utilization percent (0-100).
+  - name: store_cap_m3
+    description: Storage capacity m3.
+  - name: storeavailm3
+    description: Available storage m3.
+  - name: coldstorecapm3
+    description: Cold storage capacity m3.
+  - name: cold_store_temp_c
+    description: Cold storage temperature C; NULL means not recorded.
+  - name: warehouse_state
+    description: Excellent, Fair, Good, Poor.
+  - name: invaccpct
+    description: Inventory acceptance percent.
+  - name: stockturnrate
+    description: Stock turnover rate.
+- schema: main
+  table: operations
+  description: Relief operations (231). No disaster column; link via financials, humanresources, beneficiariesandassessments
+    or coordinationandevaluation.
+  columns:
+  - name: opsregistry
+    description: PK.
+  - name: emerglevel
+    description: 'Emergency Alert Level. Yellow: monitoring required. Orange: active response, regional
+      command. Red: full-scale emergency, national command. Black: catastrophic event, international-level
+      coordination.'
+  - name: resp_phase
+    description: 'Response Phase. Initial: first 24-72 hours, life-saving focus. Emergency: active large-scale
+      relief. Recovery: transition to restoring services. Reconstruction: long-term rebuilding of infrastructure
+      and society.'
+  - name: opsstatus
+    description: Active, Completed, Planning, Scaling Down.
+  - name: coordcenter
+    description: Coordination center.
+  - name: ops_start_date
+    description: Operation start date (2025-01-20..2025-02-19).
+  - name: estdurationdays
+    description: Estimated duration in days.
+  - name: priority_rank
+    description: Critical, High, Medium, Low (GSI score 1..4).
+  - name: resourceallocstate
+    description: Critical, Limited, Sufficient.
+  - name: supply_flow_state
+    description: 'Supply Flow State. Stable: goods moving predictably and efficiently. Strained: functioning
+      but experiencing delays or difficulties. Disrupted: supply chain broken, goods not reaching destinations.'
+- schema: main
+  table: financials
+  description: Finances per operation (201 rows, one per operation and per disaster).
+  columns:
+  - name: financeregistry
+    description: PK.
+  - name: findistref
+    description: FK to disasterevents.
+  - name: fin_ops_ref
+    description: FK to operations.
+  - name: budgetallotusd
+    description: Allotted budget, text like '$4,227,090.00'; strip '$' and ',' then cast.
+  - name: funds_util_pct
+    description: Funds utilized percent, text like '9.8%'; strip '%' then cast.
+  - name: costbeneusd
+    description: Cost-benefit ratio USD, text like '$844.12'.
+  - name: ops_costs_usd
+    description: Operational costs USD.
+  - name: transportcostsusd
+    description: Transportation costs USD.
+  - name: storage_costs_usd
+    description: Storage costs USD.
+  - name: personnelcostsusd
+    description: Personnel costs USD.
+  - name: funding_state
+    description: 'Funding State. Adequate: sufficient funds available. Limited: funding available but
+      does not cover all needs, requiring prioritization. Critical: a severe funding gap threatens essential
+      activities.'
+  - name: donor_commitments_usd
+    description: Donor commitments USD; NULL means no donor commitments.
+  - name: resource_gaps_usd
+    description: Resource gaps USD.
+- schema: main
+  table: beneficiariesandassessments
+  description: Beneficiary/assessment record per operation-disaster pair (800).
+  columns:
+  - name: beneregistry
+    description: PK.
+  - name: bene_dist_ref
+    description: FK to disasterevents.
+  - name: beneopsref
+    description: FK to operations.
+  - name: beneregister
+    description: Complete, Partial, Pending; NULL means registration not completed.
+  - name: vulnerability_review
+    description: Complete, In Progress, Pending.
+  - name: needs_assess_status
+    description: Due, Overdue, Updated.
+  - name: distequityidx
+    description: 'Distribution Equity Index 0-1: 1.0 perfect equity; below 0.7 may indicate significant
+      disparities; below 0.5 severe inequity.'
+  - name: bene_feedbackscore
+    description: Beneficiary feedback score (1-5); NULL means feedback not recorded.
+  - name: commengagelvl
+    description: 'Community engagement: High, Low, Medium.'
+  - name: local_capacity_growth
+    description: Active, Limited; NULL means no growth recorded.
+- schema: main
+  table: environmentandhealth
+  description: Environment/health profile per disaster (20 rows).
+  columns:
+  - name: envhealthregistry
+    description: PK.
+  - name: env_dist_ref
+    description: FK to disasterevents.
+  - name: health_environment_profile
+    description: 'JSON: environment {impact_rate, waste_management, recycling_pct, carbon_tons (NULL =
+      not recorded), renewable_energy_pct, water_quality_index text like ''85.6 WQI'', sanitation_coverage};
+      health {disease_risk High/Medium/Low, medical_capacity Adequate/Critical/Limited, vaccination_coverage
+      (NULL = not recorded), mental_health_aid Available/Limited}.'
+- schema: main
+  table: coordinationandevaluation
+  description: Coordination/evaluation per operation-disaster pair (967).
+  columns:
+  - name: coordevalregistry
+    description: PK.
+  - name: coord_dist_ref
+    description: FK to disasterevents.
+  - name: coordopsref
+    description: FK to operations.
+  - name: secincidentcount
+    description: Security incident count (0-100).
+  - name: safety_ranking
+    description: High Risk, Moderate, Safe; NULL means not assessed.
+  - name: accesslimitation
+    description: Partial, Severe; NULL means no access limitations.
+  - name: coord_effect_lvl
+    description: 'Coordination Effectiveness Level. Low: poor communication, duplicated efforts. Medium:
+      functional coordination with some gaps. High: seamless, efficient, collaborative partnership among
+      all stakeholders.'
+  - name: partnerorgs
+    description: Partner organizations (text number).
+  - name: infosharingstate
+    description: Effective, Limited, Poor.
+  - name: report_compliance
+    description: Report compliance percent (70-99.9).
+  - name: dataqualityvalue
+    description: Data quality score. Documented 0-100 (>90 Excellent, 70-89 Good, 50-69 Fair, <50 Poor)
+      but stored as integer 1-5.
+  - name: monitoring_freq
+    description: Daily, Monthly, Weekly.
+  - name: evaluationstage
+    description: Current, Due, Overdue; NULL means not set.
+  - name: lessons_learned_stage
+    description: Documented, In Progress, Pending.
+  - name: contingencyplanstage
+    description: Due, Overdue, Updated.
+  - name: risk_mitigation_steps
+    description: Adequate, Insufficient, Partial.
+  - name: insurance_scope
+    description: Full, Partial.
+  - name: compliancestate
+    description: Compliant, Non-Compliant, Partial.
+  - name: audit_state
+    description: Completed, Due, Overdue.
+  - name: qualitycontrolsteps
+    description: Moderate, Strong, Weak.
+  - name: stakeholder_satisf
+    description: Stakeholder satisfaction score (1-5).
+  - name: mediacoversentiment
+    description: Negative, Neutral, Positive.
+  - name: public_perception
+    description: Public perception, text like '3.5★' (1-5 stars); strip '★' to get the number.
+  - name: documentation_state
+    description: Complete, Incomplete, Partial.
+  - name: lessonsrecorded
+    description: Lessons recorded (text number).
+  - name: bestpracticeslisted
+    description: Best practices listed (text number).
+  - name: improvement_recs
+    description: Improvement recommendations (text number).
+  - name: next_review_date
+    description: Next scheduled review date.
+  - name: notes
+    description: Notes; NULL means no notes recorded.
+- schema: main
+  table: operation_hub_map
+  description: Operation-to-hub assignments (800).
+  columns:
+  - name: opsregistry
+    description: FK to operations (PK part).
+  - name: hubregistry
+    description: FK to distributionhubs (PK part).
+  - name: hub_role
+    description: Hub role. Stored values are 'main', 'backup', 'overflow' (documented as Primary Hub,
+      Backup Hub, Forward Depot).
+  - name: allocated_cap_tons
+    description: Allocated capacity in tons.

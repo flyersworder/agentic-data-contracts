@@ -1,0 +1,258 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: mental_health, author: claudeopus5.5
+version: '1.0'
+name: mental-health
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Mental health assessment database: facilities, clinicians, patients, assessments (basics,
+      symptoms & risk, social & diagnosis), encounters, treatments and treatment outcomes.'
+    preferred: true
+    tables:
+    - facilities
+    - clinicians
+    - patients
+    - assessmentbasics
+    - assessmentsymptomsandrisk
+    - assessmentsocialanddiagnosis
+    - encounters
+    - treatmentbasics
+    - treatmentoutcomes
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_model
+    summary: How the tables join, and what 'facility', 'patient' and 'latest' mean in SQL
+    description: 'JOIN PATHS (verified on the data). An assessment (assessmentbasics.ab_key) has optional
+      1:1 extensions assessmentsymptomsandrisk.asr_key and assessmentsocialanddiagnosis.asd_key (same
+      key value). Assessments reach a facility only through encounters: encounters.ab_ref = ab_key and
+      encounters.fac_id = facilities.fac_key (fac_id always matches a facility, though it is not a declared
+      FK). Treatments: treatmentbasics.enc_ref = encounters.enc_key; outcomes: treatmentoutcomes.tx_ref
+      = treatmentbasics.tx_key (one outcome per treatment). "At a facility" / "for a given facility" therefore
+      always means: via encounters.fac_id. Only 351 encounters exist (342 distinct assessments, 273 facilities,
+      335 patients); of 523 symptom assessments only 224 encounter rows link, of 652 social/diagnosis
+      assessments 266, so facility metrics cover only encounter-linked records and facilities without
+      such records get NULL. The patient of an encounter is encounters.pat_ref; the patient of an assessment
+      is assessmentbasics.pat_owner_ref; the two disagree on 20 encounter rows. Patient-level metrics
+      that go through encounters use e.pat_ref; metrics on assessmentbasics use pat_owner_ref. Patient
+      "assigned to a clinician" = patients.clin_lead_ref; a clinician''s facility = clinicians.fac_connect
+      (differs from encounters.fac_id on 119 rows). LATEST / MOST RECENT. Assessments carry no date. "Latest
+      assessment" is defined as the patient''s assessment whose linked encounter has the greatest time_mark,
+      NULLS LAST, ties broken by ab_key DESC; "latest encounter" is max time_mark, ties by enc_key DESC.
+      Caution: every encounters.time_mark in the data is the same instant (2025-02-19 08:30:58.912609),
+      so in practice the tie-break decides. Most patients have one assessment (68 have several). SQL NOTE:
+      in DuckDB the JSON operator ->> binds more loosely than = / IN / AND; always parenthesize it, e.g.
+      (o.txprogmet->>''Tx_Adh'') = ''High''.
+
+      '
+    tables:
+    - main.encounters
+    - main.assessmentbasics
+    - main.assessmentsymptomsandrisk
+    - main.assessmentsocialanddiagnosis
+    - main.treatmentbasics
+    - main.treatmentoutcomes
+    - main.facilities
+    - main.patients
+    - main.clinicians
+  - name: value_scales
+    summary: Meaning of clinical scales and categorical levels, and their numeric scorings
+    description: 'PHQ-9 (depression): 0-27; 0-4 minimal, 5-9 mild, 10-14 moderate, 15-19 moderately severe,
+      20-27 severe (metric phq9_severity_band). GAD-7 (anxiety): 0-21; 0-4 minimal, 5-9 mild, 10-14 moderate,
+      15-21 severe (metric gad7_severity_band). Suicide risk level: Low to High. Low = minimal risk, Medium
+      = some concern, High = immediate concern and need for intervention. The data also contains ''Severe''
+      (126 rows) in suic_risk, which no definition counts as ''High''. Therapy engagement: Low = minimal
+      participation, Medium = regular participation, High = active engagement. Score 3/2/1 for High/Medium/Low
+      (th_eng also holds ''Non-compliant'', which has no score and is excluded). Community resources:
+      Limited = few resources, Adequate = sufficient, Comprehensive/Extensive = robust. Score 3 Comprehensive
+      or Extensive, 2 Adequate, 1 Limited (no ''Extensive'' value occurs in the data; NULL = unscored).
+      Functional impairment: Mild = minimal impact on daily life, Moderate = noticeable impact, Severe
+      = significant disruption. Score 3/2/1 for Severe/Moderate/Mild; func_imp is mixed case, compare
+      with lower(). Treatment adherence: Non-compliant = no adherence, Low = occasional, Medium = regular,
+      High/Compliant = consistent adherence. Crisis intervention count (treatmentbasics.crisis_int): 0
+      = no interventions; higher values (e.g. 3) = frequent interventions. Social support level: Weak
+      = minimal, Limited = some, Adequate = good, Strong = robust support. SSE scoring: Strong=3, Adequate=2,
+      Limited=1, Weak=0; relationship quality Good=3, Fair=2, Poor=1, Conflicted=0. DATA NOTE: funcassess->>''Soc_Sup''
+      actually holds Strong, Moderate, Limited or NULL (''Adequate'' and ''Weak'' never occur); ''Moderate''
+      and NULL are not in the documented scoring, so SSE is NULL for them as written. Missed appointment
+      count: 0 = perfect attendance; higher values (e.g. 5) = frequent absences. Therapeutic alliance
+      score: Strong=3, Moderate=2, Weak=1, Poor=0 (mixed case; compare with lower()). Functional improvement
+      score: Significant=3, Moderate=2, Minimal=1 (mixed case; lower()).
+
+      '
+    tables:
+    - main.assessmentsymptomsandrisk
+    - main.assessmentsocialanddiagnosis
+    - main.treatmentbasics
+    - main.treatmentoutcomes
+    - main.facilities
+    - main.encounters
+  - name: facility_metrics
+    summary: Facility-level KPIs (APSF ... FPQ) and facility classifications
+    description: 'All facility KPIs are computed per facility (one row per facilities.fac_key) from the
+      shared facility summary subquery `fs` used as from_sql by every facility metric. Base KPIs: APSF,
+      AGSF, TAR, SRP, TES, FRAI, PFIS, CIF, MAR, average SSE, average therapeutic alliance score, average
+      functional improvement score. Composites: SSI, EAS, FRPI, PSM, RDD, SESI, AER, EDI, CFRS, SSPI,
+      CIPI, FEI, TAES, RTI, CAR, CRAA, FPQ. Thresholds (strict as stated): High-Need Under-Resourced FRPI
+      > 4.5 AND FRAI < 1.5; Engaged but High-Impairment EAS > 2.0 AND PFIS > 2.0; Attrition Risk EAS <
+      1.5 AND MAR > 2.5; Well-Resourced High-Support FRAI >= 2.0 AND avg SSE >= 4.5; Treatment Inertia
+      TES > 2.2 AND TAR < 0.6; Strong Retention TAR > 0.75 AND MAR < 1.0; High Clinical Leverage EAS >
+      2.5 AND SSI > 15; Engagement-Outcome Disconnect TES > 2.0 AND RTI < 0.8; Systemically Stressed RDD
+      > 1.0 AND Attrition Risk. TAR is a fraction (0-1); SRP is a percentage (0-100). ENGAGEMENT DRIVER
+      ANALYSIS: to explain a group''s Engagement-Adherence Score, compute and present separately the average
+      Therapy Engagement Score and the Treatment Adherence Rate for the group (the two parts of EAS).
+
+      '
+    tables:
+    - main.facilities
+    - main.encounters
+    - main.assessmentsymptomsandrisk
+    - main.assessmentsocialanddiagnosis
+    - main.treatmentbasics
+    - main.treatmentoutcomes
+  - name: patient_classification
+    summary: Patient-level risk, recovery and adherence classifications
+    description: 'High-Risk Patient: suic_risk ''High'' OR PHQ-9 > 15 OR GAD-7 > 15. Treatment-Resistant:
+      outcome Tx_Resp ''Poor'' with Tx_Adh ''Medium'' or ''High''. Complex Care Needs: at a facility with
+      SRP > 20% AND PFIS > 2.5, and the patient''s sub_use is ''Opioids'' or ''Multiple''. Stable Recovery:
+      rec_status ''Stable'' AND Func_Impv ''Moderate'' or ''Significant''. Low Engagement Risk: TES <
+      1.5 AND current th_eng ''Low''. High Social Support: SSE >= 5. Frequent Crisis: at a facility whose
+      CIF > 2. Non-Compliant: outcome Tx_Adh AND medication med_adh both ''Non-compliant''. High Appointment
+      Adherence: at a facility whose MAR < 1. Strong Recovery Capital: SSE >= 5 AND func_imp ''Mild''.
+      Severe Comorbid Distress: PHQ-9 >= 15 AND GAD-7 >= 15 AND func_imp ''Severe''. High Crisis & Low
+      Support: total crisis interventions > 2 AND SSE < 3. High Severity High Risk: (PHQ-9 > 19 OR GAD-7
+      > 14) AND suic_risk ''High''. Fragile Stability: Stable Recovery AND (average missed appointments
+      > 2 OR SSE < 3). Resource-Intensive High-Risk Cohort: Complex Care Needs AND Frequent Crisis. Peer
+      Mentor Candidate: rec_status ''Stable'', dx_dur_m > 72, Res_Scr >= 8. Chronic High-Acuity Bipolar:
+      prim_dx ''Bipolar'', dx_dur_m >= 120, prev_hosp > 3. At-Risk Independent Living: living_arr ''Alone''
+      AND latest support utilization rate > 2.5.
+
+      '
+    tables:
+    - main.patients
+    - main.assessmentsymptomsandrisk
+    - main.assessmentsocialanddiagnosis
+    - main.treatmentbasics
+    - main.treatmentoutcomes
+    - main.encounters
+  - name: derived_rates
+    summary: Text-encoded per-patient rates on assessmentbasics and projections built on them
+    description: 'The 12 rate columns of assessmentbasics are TEXT "<number> <unit>", e.g. ''1.6 points/month'',
+      ''0.11976047904191617 QoL-points/$''. Every row in the data matches the pattern; take the numeric
+      value with CAST(split_part(col, '' '', 1) AS DOUBLE). Units: depr_improve_rate points/month (PHQ-9
+      reduction per month of therapy); therapy_exp_intensity hours/month; med_side_eff_density side-effects/med/month;
+      crisis_event_rate events/month; func_recovery_eff QoL-points/month; adherence_index adherence-score/appointment;
+      sympt_fluct_index fluctuation-points/assessment; hosp_risk_density risk-score/year; med_change_freq
+      changes/month; support_util_rate support-level/contact; treatment_cost_eff QoL-points/$; recovery_goal_vel
+      goals/month. Projections: Annual Treatment Benefit = depression improvement rate x 12; Annual Treatment
+      Burden = Annualized Side Effect Score = side effect density x number of medications x 12 (a standard
+      number of medications is assumed -- supply it); High Responder: Benefit >= 5 x Burden AND in therapy
+      >= 6 months; Projected Annual QoL Gain = cost-effectiveness x annual budget; High QoL Gain Candidate:
+      Projected Annual QoL Gain > 100; Insurance-adjusted budget: Private 6000, Medicare 3500, Medicaid
+      2500, otherwise 0; Break-Even Therapy Hours = ((QoL threshold / cost-effectiveness) / exchange rate)
+      / hourly rate; Annual Goal Achievement = goal velocity x 12; Annualized Hospitalization Risk = prev_hosp
+      / (dx_dur_m / 12); Intensive Care Coordination Flag: AHR > 1.5 AND monthly therapy hours < 8; Intensive
+      Therapy Standard Compliance: hours/month >= threshold; T-ROI = depression improvement rate / therapy
+      hours per month. PARAMETERS: metrics with question-supplied inputs (number of medications, budgets,
+      thresholds, rates, cohorts) carry an example literal marked "PARAMETER" in their description; replace
+      it with the value the question gives.
+
+      '
+    tables:
+    - main.assessmentbasics
+    - main.assessmentsocialanddiagnosis
+    - main.patients
+  - name: protocols
+    summary: Clinical procedures, reports and record updates (read-only here)
+    description: 'High-Risk Escalation Protocol: update a clinician''s care_coord to ''Intensive'' if
+      they are the lead (patients.clin_lead_ref) for a patient whose most recent assessment indicates
+      ''High'' suicide risk. Mandatory Case Review Protocol: flag a patient for case review if their latest
+      hosp_risk_density > 1.5. Therapeutic Goal Adjustment: an update to a patient''s metric that codifies
+      a new forward-looking clinical goal (in response to a significant life event) rather than correcting
+      an error or recording a new measurement. Vulnerable Patient Watchlist Generation: identify patients
+      meeting high-risk criteria (e.g. Patient with High Crisis & Low Support Profile), show contextual
+      actionable data (last hospitalization date, next appointment) and sort to prioritize intervention;
+      one variant creates a dedicated table and populates it. Stale Treatment Outcome Records: outcomes
+      whose linked encounter time_mark is older than an interval (e.g. 60 days). READ-ONLY: UPDATE/INSERT/CREATE
+      are forbidden in this contract, so these procedures are answered with SELECT queries that list the
+      rows that would be updated, flagged or inserted (metrics high_risk_escalation_candidates, mandatory_case_review_flag,
+      vulnerable_patient_watchlist). Never attempt the write.
+
+      '
+    tables:
+    - main.clinicians
+    - main.patients
+    - main.assessmentbasics
+    - main.encounters
+    - main.treatmentoutcomes
+  - name: data_quality
+    summary: Noisy casing, text dates and NULL conventions
+    description: 'Mixed-case noise: compare with lower() (or upper()) on facilities.legl_issue, patients.disab_stat,
+      cult_factor, stigma_imp, encounters.tx_barrier, assessmentsocialanddiagnosis.func_imp, and txprogmet
+      keys Symp_Imp, Func_Impv, Work_Stat_Chg, Ther_Alliance, Tx_Sat. Tx_Adh, Tx_Resp, th_eng, med_adh,
+      suic_risk, sub_use, rec_status, com_res are clean (exact case). Text dates: encounters.nx_appt_dt
+      is ''dd/mm/yyyy'' (strptime(x,''%d/%m/%Y'')); assessmentsocialanddiagnosis.last_hosp_dt is ''yyyy/mm/dd''
+      (strptime(x,''%Y/%m/%d'')); all values parse and none are NULL. JSON: read fields with ->> (text)
+      inside parentheses, e.g. (funcassess->>''Soc_Sup''), (txprogmet->>''Tx_Adh''), (sympscores->>''Mood_Scr'');
+      cast numeric fields. Missing categorical values are SQL NULL, not empty strings. encounters.assess_complete
+      is text holding a decimal fraction (e.g. ''0.852'').
+
+      '
+    tables:
+    - main.facilities
+    - main.patients
+    - main.encounters
+    - main.treatmentoutcomes
+    - main.assessmentsocialanddiagnosis
+  rules:
+  - name: read_only_protocols
+    description: 'Procedures phrased as updates or table creation (High-Risk Escalation, Mandatory Case
+      Review, Therapeutic Goal Adjustment, Watchlist table) must be answered with SELECT queries identifying
+      affected rows; never write.
+
+      '
+    enforcement: block
+  - name: facility_via_encounters
+    description: 'Attribute assessments, treatments and outcomes to a facility through encounters.fac_id,
+      and compute facility KPIs with the declared facility metrics (from_sql `fs`), not ad-hoc formulas.
+      Do not average missed appointments over a join with treatments (it duplicates rows).
+
+      '
+    enforcement: warn
+  - name: case_insensitive_noisy_values
+    description: 'Compare noisy categorical columns and JSON fields case-insensitively (lower()) as listed
+      in the data_quality domain.
+
+      '
+    enforcement: warn
+  - name: parse_text_rates
+    description: 'Numeric values of assessmentbasics rate columns are taken with CAST(split_part(col,
+      '' '', 1) AS DOUBLE); never compare the text directly.
+
+      '
+    enforcement: warn
+  - name: parenthesize_json_operator
+    description: 'Wrap every ->> JSON extraction in parentheses before comparing it; DuckDB otherwise
+      parses `x->>''k'' = ''v'' AND ...` wrongly.
+
+      '
+    enforcement: warn
+  - name: keep_stated_thresholds
+    description: 'Use thresholds exactly as documented, including strict vs inclusive comparisons (e.g.
+      ''over 15'' is > 15; ''15 or greater'' is >= 15).
+
+      '
+    enforcement: warn

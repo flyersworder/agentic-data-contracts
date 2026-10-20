@@ -1,0 +1,208 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: households, author: claudeopus5.5
+version: '1.0'
+name: households
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: Household survey data (Brazilian Federal District style regions such as Taguatinga, Guará).
+      One row of `households` per household; properties, amenities and transportation_assets are 1:1 with
+      households; infrastructure and service_types are shared configuration rows that properties / households
+      point at.
+    preferred: true
+    tables:
+    - locations
+    - amenities
+    - infrastructure
+    - service_types
+    - households
+    - properties
+    - transportation_assets
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_quality
+    summary: How categorical text is stored and must be normalised before comparing
+    description: 'CHECKED IN THE DATA: almost every categorical text value is stored with inconsistent
+      case, stray leading/trailing spaces, tabs and doubled spaces (e.g. cablestatus ''AVAILABLE '', ''AvAIlaBlE'',
+      ''NOT<tab>AVAILABLE''; Dwelling_Class ''BRICKWORK  HOUSE''). Always compare on the normalised form
+      lower(trim(regexp_replace(<value>, ''\s+'', '' '', ''g''))). Normalised distinct values found: infrastructure.wateraccess:
+      ''yes, available at least in one room'', ''yes, but only connected to a tap outside of the house
+      (in the property)''. infrastructure.roadsurface: ''asphalt, concrete'', ''gravel surface''. infrastructure.parkavail:
+      ''available'', ''not available''. amenities.cablestatus: avail, available, yes, y, have (available-like);
+      no, n, not avail, not available, unavailable, dont have (not available). service_types.domestichelp:
+      ''no domestic workers'', ''yes, occasional'', ''yes, regular'', ''yes, living-in''. service_types.socsupport:
+      ''yes'', ''no''. Tenure_Type: own, owned, rent, rented, living as a guest, guest, concession, in
+      concession, in process of owning, subsidized by work company, other type (never NULL in the data).
+      Income_Bracket: ''has no income'', ''r$ 440 or less'', ''more than r$ 440 and less than r$ 880'',
+      ..., ''more than r$ 26,400'' (Brazilian real ranges) and NULL for 110 households. Dwelling_Class:
+      brickwork house, brick house, apartment, apt, shack (with floor finish), shack with floor, shack
+      (no floor finish), unfinished brickwork, unfinished, other. Newest_Year: ''2010 to 2013'' style
+      plus variants ''2010-2013'', ''10-13'', ''2014+'', ''2014 or newer'', ''2014 and newer'', ''after
+      2014'', ''95-99'', and no-vehicle markers ''not applicable'', ''na'', ''n/a'', plus JSON NULL. JSON:
+      households.socioeconomic, properties.dwelling_specs and transportation_assets.vehicleinventory are
+      JSON; read fields with ->> (text) and cast numbers, e.g. (dwelling_specs->>''Room_Count'')::INT,
+      (socioeconomic->>''Expend_Coeff'')::DOUBLE, (vehicleinventory->''vehicle_counts''->>''Auto_Count'')::INT.
+      Field names are case-sensitive as written (Tenure_Type, Income_Bracket, Expend_Coeff, Dwelling_Class,
+      Bath_Count, Room_Count, Newest_Year, vehicle_counts.Auto_Count/Bike_Count/Motor_Count). Integer
+      division: residentcount and JSON counts are integers and the database divides integers like PostgreSQL
+      (truncating), so cast to DOUBLE before dividing. Three properties have Room_Count = 0; divide with
+      NULLIF(...,0). 8 households have NULL serviceplan (not enrolled / undetermined). 1581 households,
+      1577 properties (4 households have no property row).
+
+      '
+    tables:
+    - main.households
+    - main.properties
+    - main.infrastructure
+    - main.amenities
+    - main.service_types
+    - main.transportation_assets
+  - name: housing_scores
+    summary: Point scores for water, road, parking, dwelling type and the composite scores built on them
+    description: 'WATER ACCESS (doc): ''Yes'' (piped access) = 4 points; other statuses = 1. Both stored
+      values begin with ''Yes'' (indoor room and outside tap on the property), so both score 4 under the
+      documented rule. ROAD SURFACE: ''Asphalt'' and ''Concrete'' = 4 points; others (e.g. Gravel) = 1.
+      PARKING: ''Available'' = 4 points; ''not available'' = 1. DWELLING TYPE SCORE: ''Brickwork house''
+      = 4 and ''Condominium'' = 4 (entry 6; no condominium value exists in the data), ''Apartment'' =
+      3, all other types = 1. Entry 44 states the same ranking (Brickwork 4, Apartment 3, others 1) and
+      says the score feeds the Living Condition Score. ''brick house'' is treated as Brickwork house and
+      ''apt'' as Apartment (spelling variants). INFRASTRUCTURE QUALITY SCORE = average of the water, road
+      and parking scores. LIVING CONDITION SCORE = 50/50 weighted average of Dwelling Type score and Infrastructure
+      Quality Score. DWELLING CAPACITY = 2 * bedrooms (Room_Count) + bathrooms (Bath_Count). HOUSEHOLD
+      DENSITY = residents / bedrooms. BATHROOM RATIO = bathrooms / residents.
+
+      '
+    tables:
+    - main.infrastructure
+    - main.properties
+    - main.households
+  - name: socioeconomic
+    summary: Tenure, income bracket, expenditure ratio and socioeconomic index
+    description: 'TENURE: values per documentation are ''OWNED'', ''RENTED'', ''OCCUPIED''; ''OWNED''
+      is owner-occupied. Stored as own/owned (=OWNED), rent/rented (=RENTED) and other occupancy forms
+      (guest, concession, ...). NULL means unknown, transitional or disputed. INCOME CLASSIFICATION: documented
+      as ranging from ''Low Income'' to ''Very High Income''; NULL = undisclosed or irregular income.
+      The data however stores Brazilian real ranges (''more than R$ 1,760 and less than R$ 2,640'' ...),
+      not those labels; no row contains ''High Income'' or ''Very High Income''. Metric `income_bracket_rank`
+      gives an ordinal mapping (interpretation). EXPENDITURE RATIO = Expend_Coeff / numeric mapping of
+      income bracket. The documentation does not give the mapping; `expenditure_ratio` uses `income_bracket_rank`
+      and says so. SOCIOECONOMIC INDEX = weighted sum of income score, expenditure ratio and tenure score.
+      NOT FULLY SPECIFIED: the documentation states neither the weights nor the income/tenure scores,
+      so no metric is defined; if asked, state the weights and scores you assume. ECONOMICALLY STABLE
+      HOUSEHOLD: high Socioeconomic Index and low Expenditure Ratio (thresholds not stated).
+
+      '
+    tables:
+    - main.households
+  - name: mobility
+    summary: Vehicle counts, newest vehicle year range and mobility score
+    description: 'VEHICLE YEAR RANGE: text ranges like ''1995 to 1999'', ''2005 to 2009'', ''2010 to 2013'';
+      NULL = no vehicles or unknown age (''Not applicable'' also means no vehicle). Use metric `newest_vehicle_year_range`
+      for the canonical range. VEHICLE OWNERSHIP INDEX = Auto_Count + Bike_Count + Motor_Count. MOBILITY
+      SCORE = vehicle count * numeric mapping of newest vehicle year; the mapping is not given in the
+      documentation, so no metric is defined — state any mapping you assume. MOBILE HOUSEHOLD: high Vehicle
+      Ownership Index and a recent Vehicle Year Range (thresholds not stated). VEHICLE TYPE DISTRIBUTION
+      (doc): an array of counts representing vehicle types, NULL = unknown/unverified ownership. Not stored
+      as an array; the closest data is vehicleinventory->''vehicle_counts'' (object of three counts).
+
+      '
+    tables:
+    - main.transportation_assets
+  - name: services
+    summary: Domestic help, social support, cable TV
+    description: 'DOMESTIC HELP (doc): ''Full-time'' (daily), ''Part-time'' (periodic), ''Occasional''
+      (as-needed), ''None'' (no help), ''Live-in'' (resident worker); NULL = informal or undisclosed.
+      Stored values: ''No domestic workers'' (None), ''Yes, occasional'' (Occasional), ''Yes, regular'',
+      ''Yes, living-in'' (Live-in). SOCIAL SUPPORT / SOCIAL ASSISTANCE PARTICIPATION: binary ''Yes'' =
+      the household accepts social assistance, ''No'' = it does not; part of the service_types unique
+      constraint (domestichelp, socsupport). Reached through households.serviceplan -> service_types.serviceref.
+      SERVICE SUPPORT SCORE: weighted score combining domestic help availability and social assistance
+      status (Yes/No). Weights not stated, so no metric is defined. CABLE TV: values indicating availability
+      are ''avail'', ''available'' and ''yes'' (normalised). The data also contains ''y'' and ''have'',
+      which are not in the documented list; `has_cable_tv` follows the documented list.
+
+      '
+    tables:
+    - main.service_types
+    - main.amenities
+    - main.households
+  - name: household_classes
+    summary: Named household/dwelling definitions and their thresholds
+    description: 'AFFLUENT: Tenure_Type ''OWNED'' and Income_Bracket ''High Income'' or ''Very High Income''
+      (see socioeconomic: those labels do not occur in the data). URBAN HOUSEHOLD: ''Municipal Piped''
+      Water Access Type and high-quality Road Surface Quality. URBAN ZONE: a zone is urban if loczone
+      = 1 (no household has loczone 1 in the data). SUPPORTED: social support status ''Yes''. CROWDED:
+      Household Density greater than a threshold (threshold not stated). MODERN DWELLING: specific Dwelling
+      Type and active Cable TV Status (type not stated). WELL-EQUIPPED: high Infrastructure Quality Score
+      and high Service Support Score (thresholds not stated). COMFORTABLE LIVING: Living Condition Score
+      > 3 AND Bathroom Ratio > 0.5 (both strict). SELF-SUFFICIENT: limited Domestic Help Availability,
+      social support ''No'', and high Vehicle Ownership Index (thresholds not stated). COMPACT: specific
+      Dwelling Type and small resident count (not stated). HIGH-MOBILITY URBAN: specific Residential Zone
+      Type and Vehicle Type Distribution. STABLE INFRASTRUCTURE: specific Utility Access Level and Road
+      Surface Quality. ECONOMICALLY INDEPENDENT: high Income Classification and social support ''No''.
+      WELL-MAINTAINED DWELLING: Dwelling Condition Status Excellent or Good plus Cable TV Status. Where
+      a threshold is "not stated", say which one you use.
+
+      '
+    tables:
+    - main.households
+    - main.properties
+    - main.infrastructure
+    - main.service_types
+    - main.transportation_assets
+    - main.amenities
+  - name: unmodelled_concepts
+    summary: Documented categories with no column in this database
+    description: 'RESIDENTIAL ZONE TYPES: ''Urban'' (densely populated city areas), ''Suburban'' (residential
+      outskirts), ''Rural'' (sparsely populated countryside), ''Mixed'' (transitional areas); NULL = unclassified
+      or pending zoning. No column stores it (only the loczone = 1 urban rule). UTILITY ACCESS LEVEL:
+      ''Full'' (all utilities like water and cable available), ''Partial'' (some utilities), ''Basic''
+      (only essential utilities like water), ''None'' (no utility access); NULL = unassessed. No column
+      stores it. DWELLING CONDITION STATUS: ''Excellent'' (well-maintained), ''Good'' (minor repairs needed),
+      ''Fair'' (moderate repairs), ''Poor'' (significant repairs); NULL = unassessed. No column stores
+      it.
+
+      '
+    tables: []
+  - name: data_actions
+    summary: Documented write actions — not permitted through this contract
+    description: 'The documentation describes three actions. This contract is read-only: DELETE, INSERT
+      and UPDATE are forbidden, so these may be described or previewed with SELECT but never executed.
+      PURGE INCOMPLETE TRANSPORT DATA: remove transportation_assets records for any household whose income
+      classification (socioeconomic->>''Income_Bracket'') is NULL. Preview with metric `purge_incomplete_transport_candidate`.
+      REGISTER NEW HOUSEHOLD: insert a new households record with all required information (housenum,
+      residentcount, locregion, loczone are NOT NULL; serviceplan and socioeconomic optional). UPDATE
+      VEHICLE INVENTORY: modify a household''s vehicleinventory (newest vehicle year or vehicle counts),
+      typically after buying or selling a vehicle.
+
+      '
+    tables:
+    - main.transportation_assets
+    - main.households
+  rules:
+  - name: normalise_text_before_compare
+    description: Compare categorical text and JSON text fields on lower(trim(regexp_replace(x,'\s+','
+      ','g'))); raw values have mixed case and whitespace.
+    enforcement: warn
+  - name: use_declared_metrics
+    description: Scores, ratios and household classes must use the metric SQL in semantic.yml; cast to
+      DOUBLE before dividing integers.
+    enforcement: warn
+  - name: read_only
+    description: Purge / register / update actions are documented but must not be executed; only SELECT
+      is allowed.
+    enforcement: block

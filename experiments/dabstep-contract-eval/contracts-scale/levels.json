@@ -1,0 +1,132 @@
+{
+ "labor_certification_applications": {
+  "1x": [],
+  "2x": [
+   "reverse_logistics",
+   "solar_panel"
+  ],
+  "4x": [
+   "reverse_logistics",
+   "solar_panel",
+   "exchange_traded_funds",
+   "planets_data"
+  ],
+  "8x": [
+   "reverse_logistics",
+   "solar_panel",
+   "exchange_traded_funds",
+   "planets_data",
+   "hulushows",
+   "insider_trading",
+   "museum_artifact"
+  ],
+  "all": [
+   "reverse_logistics",
+   "solar_panel",
+   "exchange_traded_funds",
+   "planets_data",
+   "hulushows",
+   "insider_trading",
+   "museum_artifact",
+   "disaster_relief",
+   "organ_transplant",
+   "cold_chain_pharma_compliance",
+   "cross_border",
+   "crypto_exchange",
+   "mental_health",
+   "sports_events",
+   "cybermarket_pattern",
+   "virtual_idol",
+   "robot_fault_prediction",
+   "archeology_scan",
+   "households",
+   "fake_account",
+   "polar_equipment"
+  ]
+ },
+ "reverse_logistics": {
+  "1x": [],
+  "2x": [
+   "labor_certification_applications"
+  ],
+  "4x": [
+   "labor_certification_applications",
+   "solar_panel",
+   "households",
+   "crypto_exchange"
+  ],
+  "8x": [
+   "labor_certification_applications",
+   "solar_panel",
+   "households",
+   "crypto_exchange",
+   "cold_chain_pharma_compliance",
+   "mental_health"
+  ],
+  "all": [
+   "labor_certification_applications",
+   "solar_panel",
+   "households",
+   "crypto_exchange",
+   "cold_chain_pharma_compliance",
+   "mental_health",
+   "cybermarket_pattern",
+   "virtual_idol",
+   "sports_events",
+   "disaster_relief",
+   "polar_equipment",
+   "organ_transplant",
+   "hulushows",
+   "robot_fault_prediction",
+   "exchange_traded_funds",
+   "fake_account",
+   "planets_data",
+   "cross_border",
+   "archeology_scan",
+   "museum_artifact",
+   "insider_trading"
+  ]
+ },
+ "solar_panel": {
+  "1x": [],
+  "2x": [
+   "labor_certification_applications"
+  ],
+  "4x": [
+   "labor_certification_applications",
+   "reverse_logistics",
+   "hulushows"
+  ],
+  "8x": [
+   "labor_certification_applications",
+   "reverse_logistics",
+   "hulushows",
+   "cross_border",
+   "households",
+   "mental_health"
+  ],
+  "all": [
+   "labor_certification_applications",
+   "reverse_logistics",
+   "hulushows",
+   "cross_border",
+   "households",
+   "mental_health",
+   "organ_transplant",
+   "museum_artifact",
+   "fake_account",
+   "cold_chain_pharma_compliance",
+   "archeology_scan",
+   "polar_equipment",
+   "planets_data",
+   "disaster_relief",
+   "exchange_traded_funds",
+   "cybermarket_pattern",
+   "sports_events",
+   "robot_fault_prediction",
+   "crypto_exchange",
+   "insider_trading",
+   "virtual_idol"
+  ]
+ }
+}

@@ -1,0 +1,541 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: sports_events, author: claudeopus5.5
+metrics:
+- name: lap_time_seconds
+  description: 'Lap Time in Seconds: T_seconds = T_milliseconds / 1000, from lap_times.msec_val (never
+    NULL in the data). Uses 1000.0 to avoid integer division.'
+  sql_expression: lt.msec_val / 1000.0
+  source_model: main.lap_times
+  from_sql: main.lap_times lt
+  grain: one recorded lap of one driver in one race
+  domains:
+  - laps_and_pits
+- name: pit_stop_duration_seconds
+  description: 'Pit Stop Duration in Seconds: D_seconds = D_milliseconds / 1000, from pit_stops.ms_count.'
+  sql_expression: ps.ms_count / 1000.0
+  source_model: main.pit_stops
+  from_sql: main.pit_stops ps
+  grain: one pit stop
+  domains:
+  - laps_and_pits
+- name: efficient_pit_stop
+  description: 'Efficient Pit Stop: a pit stop where the total time the car is stationary is less than
+    2.5 seconds (strictly < 2500 ms), indicating outstanding pit-crew performance. The only duration recorded
+    is ms_count; checked: its minimum is 13,206 ms, so no stop in this data qualifies and the predicate
+    is always false.'
+  sql_expression: ps.ms_count < 2500
+  source_model: main.pit_stops
+  from_sql: main.pit_stops ps
+  grain: one pit stop
+  domains:
+  - laps_and_pits
+- name: driver_average_lap_time
+  description: 'Driver''s Average Lap Time in a race: sum of Lap Time in Seconds over the driver''s laps
+    / number of laps. GROUP BY lt.rc_index, lt.wheel_unit. lap_times is sampled (<= 3 laps per driver-race),
+    so this is over recorded laps only.'
+  sql_expression: AVG(lt.msec_val / 1000.0)
+  source_model: main.lap_times
+  from_sql: main.lap_times lt
+  grain: one driver in one race (GROUP BY lt.rc_index, lt.wheel_unit)
+  domains:
+  - laps_and_pits
+- name: lap_time_consistency
+  description: 'Lap Time Consistency: population standard deviation sqrt(sum((T_i - mean)^2)/n) of a driver''s
+    lap times in seconds within a race (STDDEV_POP, not STDDEV_SAMP). Equals 0 with a single lap. GROUP
+    BY lt.rc_index, lt.wheel_unit.'
+  sql_expression: STDDEV_POP(lt.msec_val / 1000.0)
+  source_model: main.lap_times
+  from_sql: main.lap_times lt
+  grain: one driver in one race (GROUP BY lt.rc_index, lt.wheel_unit)
+  domains:
+  - laps_and_pits
+- name: tyre_management_index
+  description: Tyre Management Index = 1 / (Lap Time Consistency * (1 + N_stops)), higher is better, where
+    N_stops is the driver's number of pit stops in that race (0 if none recorded). NULL when the consistency
+    is 0 (e.g. only one recorded lap) to avoid division by zero.
+  sql_expression: 1.0 / NULLIF(la.ltc * (1 + COALESCE(ps.n_stops, 0)), 0)
+  source_model: main.lap_times
+  from_sql: "(SELECT rc_index AS race_id, wheel_unit AS driver_id, STDDEV_POP(msec_val / 1000.0) AS ltc\n\
+    \ FROM main.lap_times GROUP BY rc_index, wheel_unit) la\nLEFT JOIN (SELECT matchidx, wunit, COUNT(*)\
+    \ AS n_stops FROM main.pit_stops GROUP BY matchidx, wunit) ps\n  ON ps.matchidx = la.race_id AND ps.wunit\
+    \ = la.driver_id"
+  grain: one driver in one race (la.race_id, la.driver_id)
+  domains:
+  - laps_and_pits
+- name: average_stops_per_car
+  description: Average Stops Per Car for a race = total number of pit stops / number of unique cars (drivers)
+    that made a pit stop. GROUP BY ps.matchidx.
+  sql_expression: COUNT(*) * 1.0 / COUNT(DISTINCT ps.wunit)
+  source_model: main.pit_stops
+  from_sql: main.pit_stops ps
+  grain: one race (GROUP BY ps.matchidx)
+  domains:
+  - laps_and_pits
+- name: pit_strategy_cluster
+  description: 'Pit Strategy Cluster of a race by Average Stops Per Car: ''Single-Stop Race'' (< 1.5),
+    ''Standard Two-Stop'' (1.5 up to < 2.5), ''High-Strategy Event'' (>= 2.5). Only races with pit stop
+    rows have a cluster.'
+  sql_expression: "CASE WHEN a.avg_stops < 1.5 THEN 'Single-Stop Race'\n     WHEN a.avg_stops < 2.5 THEN\
+    \ 'Standard Two-Stop'\n     ELSE 'High-Strategy Event' END"
+  source_model: main.pit_stops
+  from_sql: "(SELECT matchidx AS race_id, COUNT(*) * 1.0 / COUNT(DISTINCT wunit) AS avg_stops\n FROM main.pit_stops\
+    \ GROUP BY matchidx) a"
+  grain: one race (a.race_id)
+  domains:
+  - laps_and_pits
+- name: high_altitude_circuit
+  description: 'High-Altitude Circuit: elevation greater than 800 metres above sea level (strict >). Elevation
+    is JSON location_metadata.coordinates.elevation_m (number, mostly NULL = not recorded). Checked: only
+    Kyalami (1460) and Autodromo Hermanos Rodriguez (2227) qualify.'
+  sql_expression: TRY_CAST(c.location_metadata->'coordinates'->>'elevation_m' AS DOUBLE) > 800
+  source_model: main.circuits
+  from_sql: main.circuits c
+  grain: one circuit
+  domains:
+  - drivers_performance
+- name: high_altitude_performance_factor
+  description: High-Altitude Performance Factor = driver's average lap time (seconds) at High-Altitude
+    Circuits (elevation > 800 m) / driver's season average lap time (all recorded laps of that season,
+    pooled). GROUP BY lt.wheel_unit, r.yr; NULL when the driver has no high-altitude laps that season.
+  sql_expression: AVG(lt.msec_val / 1000.0) FILTER (WHERE TRY_CAST(c.location_metadata->'coordinates'->>'elevation_m'
+    AS DOUBLE) > 800) / NULLIF(AVG(lt.msec_val / 1000.0), 0)
+  source_model: main.lap_times
+  from_sql: main.lap_times lt JOIN main.races r ON r.rak_id = lt.rc_index JOIN main.circuits c ON c.cctkey
+    = r.trkbind
+  grain: one driver in one season (GROUP BY lt.wheel_unit, r.yr)
+  domains:
+  - drivers_performance
+  - laps_and_pits
+- name: driver_age
+  description: Driver Age = floor((current date - birth date) / 365.25), the CURRENT age (as of today).
+    birth_date is JSON text 'YYYY-MM-DD'; NULL (260 drivers) means unknown, so age is NULL.
+  sql_expression: floor((current_date - CAST(d.driver_identity->>'birth_date' AS DATE)) / 365.25)
+  source_model: main.drivers
+  from_sql: main.drivers d
+  grain: one driver
+  domains:
+  - drivers_performance
+- name: qualifying_best_time_seconds
+  description: 'A driver''s best (fastest) qualifying lap in seconds in one qualifying session: the minimum
+    of the parsed Q1, Q2, Q3 times. Times are text ''M:SS.mmm'' parsed as minutes*60 + seconds; LEAST
+    ignores NULL stages (NULL = no result in that stage). NULL if no stage time.'
+  sql_expression: "LEAST(TRY_CAST(split_part(q.q1_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q1_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q2_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q2_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q3_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q3_r,\
+    \ ':', 2) AS DOUBLE))"
+  source_model: main.qualifying
+  from_sql: main.qualifying q
+  grain: one driver in one race's qualifying
+  domains:
+  - qualifying_performance
+- name: pole_position
+  description: 'Pole Position: the driver who set the fastest lap time in the final stage (Q3) of qualifying,
+    i.e. the qualifying row with px_pos = 1 for the race.'
+  sql_expression: q.px_pos = 1
+  source_model: main.qualifying
+  from_sql: main.qualifying q
+  grain: one driver in one race's qualifying
+  domains:
+  - qualifying_performance
+- name: qualifying_time_deficit_to_pole
+  description: Qualifying Time Deficit to Pole = T_driver - T_pole, where T_driver is the driver's best
+    qualifying lap in seconds (best of Q1/Q2/Q3) and T_pole is the pole sitter's (px_pos = 1) best time
+    in the same race. Only races with a px_pos = 1 row (86 of 486) have values; 5 rows are slightly negative
+    because a driver's Q1/Q2 lap beat the pole sitter's best.
+  sql_expression: "LEAST(TRY_CAST(split_part(q.q1_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q1_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q2_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q2_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q3_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q3_r,\
+    \ ':', 2) AS DOUBLE))\n- pole.pole_time"
+  source_model: main.qualifying
+  from_sql: "main.qualifying q JOIN (\n  SELECT rbind,\n         LEAST(TRY_CAST(split_part(q1_r, ':',\
+    \ 1) AS INTEGER) * 60 + TRY_CAST(split_part(q1_r, ':', 2) AS DOUBLE),\n               TRY_CAST(split_part(q2_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q2_r, ':', 2) AS DOUBLE),\n               TRY_CAST(split_part(q3_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q3_r, ':', 2) AS DOUBLE)) AS pole_time\n  FROM main.qualifying\
+    \ WHERE px_pos = 1) pole ON pole.rbind = q.rbind"
+  grain: one driver in one race's qualifying (q.rbind, q.pilotrec)
+  domains:
+  - qualifying_performance
+- name: qualifying_specialist
+  description: 'Qualifying Specialist: a driver whose Qualifying Time Deficit to Pole is less than 0.2
+    seconds (strict <) in that qualifying session.'
+  sql_expression: "LEAST(TRY_CAST(split_part(q.q1_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q1_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q2_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q2_r,\
+    \ ':', 2) AS DOUBLE),\n      TRY_CAST(split_part(q.q3_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q3_r,\
+    \ ':', 2) AS DOUBLE))\n- pole.pole_time < 0.2"
+  source_model: main.qualifying
+  from_sql: "main.qualifying q JOIN (\n  SELECT rbind,\n         LEAST(TRY_CAST(split_part(q1_r, ':',\
+    \ 1) AS INTEGER) * 60 + TRY_CAST(split_part(q1_r, ':', 2) AS DOUBLE),\n               TRY_CAST(split_part(q2_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q2_r, ':', 2) AS DOUBLE),\n               TRY_CAST(split_part(q3_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q3_r, ':', 2) AS DOUBLE)) AS pole_time\n  FROM main.qualifying\
+    \ WHERE px_pos = 1) pole ON pole.rbind = q.rbind"
+  grain: one driver in one race's qualifying
+  domains:
+  - qualifying_performance
+- name: qualifying_performance_cluster
+  description: 'Qualifying Performance Cluster on a driver''s AVERAGE Qualifying Time Deficit to Pole
+    across their qualifying sessions: ''Pole Threat'' (< 0.15 s), ''Mid Gap'' (0.15 s to < 0.4 s), ''Backmarker''
+    (>= 0.4 s).'
+  sql_expression: "CASE WHEN dd.avg_deficit < 0.15 THEN 'Pole Threat'\n     WHEN dd.avg_deficit < 0.4\
+    \ THEN 'Mid Gap'\n     ELSE 'Backmarker' END"
+  source_model: main.qualifying
+  from_sql: "(SELECT q.pilotrec AS driver_id,\n        AVG(LEAST(TRY_CAST(split_part(q.q1_r, ':', 1) AS\
+    \ INTEGER) * 60 + TRY_CAST(split_part(q.q1_r, ':', 2) AS DOUBLE),\n                  TRY_CAST(split_part(q.q2_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q2_r, ':', 2) AS DOUBLE),\n                  TRY_CAST(split_part(q.q3_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q3_r, ':', 2) AS DOUBLE))\n            - pole.pole_time)\
+    \ AS avg_deficit\n FROM main.qualifying q JOIN (\n   SELECT rbind,\n          LEAST(TRY_CAST(split_part(q1_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q1_r, ':', 2) AS DOUBLE),\n                TRY_CAST(split_part(q2_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q2_r, ':', 2) AS DOUBLE),\n                TRY_CAST(split_part(q3_r,\
+    \ ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q3_r, ':', 2) AS DOUBLE)) AS pole_time\n   FROM main.qualifying\
+    \ WHERE px_pos = 1) pole ON pole.rbind = q.rbind\n GROUP BY q.pilotrec) dd"
+  grain: one driver (dd.driver_id)
+  domains:
+  - qualifying_performance
+- name: qualifying_to_race_pace_differential
+  description: Qualifying to Race Pace Differential QRD = Driver's Average Lap Time in the race (seconds)
+    - the driver's fastest qualifying lap (best of Q1/Q2/Q3, seconds) for the same race. Only driver-races
+    present in both lap_times and qualifying.
+  sql_expression: "la.avg_lap - LEAST(TRY_CAST(split_part(q.q1_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q1_r,\
+    \ ':', 2) AS DOUBLE),\n                   TRY_CAST(split_part(q.q2_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q2_r,\
+    \ ':', 2) AS DOUBLE),\n                   TRY_CAST(split_part(q.q3_r, ':', 1) AS INTEGER) * 60 + TRY_CAST(split_part(q.q3_r,\
+    \ ':', 2) AS DOUBLE))"
+  source_model: main.qualifying
+  from_sql: "main.qualifying q JOIN (SELECT rc_index, wheel_unit, AVG(msec_val / 1000.0) AS avg_lap\n\
+    \                        FROM main.lap_times GROUP BY rc_index, wheel_unit) la\n  ON la.rc_index =\
+    \ q.rbind AND la.wheel_unit = q.pilotrec"
+  grain: one driver in one race
+  domains:
+  - qualifying_performance
+  - laps_and_pits
+- name: pole_based_race_win_probability
+  description: 'Pole-Based Race Win Probability (assumption): 35% (0.35) if the driver started from Pole
+    Position (qualifying px_pos = 1), 5% (0.05) otherwise.'
+  sql_expression: CASE WHEN q.px_pos = 1 THEN 0.35 ELSE 0.05 END
+  source_model: main.qualifying
+  from_sql: main.qualifying q
+  grain: one driver in one race's qualifying
+  domains:
+  - qualifying_performance
+- name: pole_based_fastest_lap_probability
+  description: 'Pole-Based Fastest Lap Probability (assumption): 25% (0.25) if the driver started from
+    Pole Position (qualifying px_pos = 1), 8% (0.08) otherwise.'
+  sql_expression: CASE WHEN q.px_pos = 1 THEN 0.25 ELSE 0.08 END
+  source_model: main.qualifying
+  from_sql: main.qualifying q
+  grain: one driver in one race's qualifying
+  domains:
+  - qualifying_performance
+- name: sprint_winner
+  description: 'Sprint Winner: the driver classified in 1st place at the conclusion of a Sprint session,
+    i.e. sprint_performance final_position = 1 (final_position JSON null = did not finish/classify).'
+  sql_expression: CAST(s.sprint_performance->>'final_position' AS INTEGER) = 1
+  source_model: main.sprint_results
+  from_sql: main.sprint_results s
+  grain: one driver in one sprint
+  domains:
+  - race_results
+  - race_weekend
+- name: sprint_championship_points
+  description: 'Championship Points System (Sprint): top 8 finishers score 1st 8, 2nd 7, 3rd 6, 4th 5,
+    5th 4, 6th 3, 7th 2, 8th 1; others and non-classified 0. Computed from final_position. Note the stored
+    sprint_performance points agree except for 3 sprints (2021) that store 3-2-1.'
+  sql_expression: "CASE CAST(s.sprint_performance->>'final_position' AS INTEGER)\n  WHEN 1 THEN 8 WHEN\
+    \ 2 THEN 7 WHEN 3 THEN 6 WHEN 4 THEN 5\n  WHEN 5 THEN 4 WHEN 6 THEN 3 WHEN 7 THEN 2 WHEN 8 THEN 1\
+    \ ELSE 0 END"
+  source_model: main.sprint_results
+  from_sql: main.sprint_results s
+  grain: one driver in one sprint
+  domains:
+  - championship_points
+- name: sprint_performance_index
+  description: Sprint Performance Index SPI = (9 - P_sprint) + S_pts, P_sprint the sprint finishing position
+    and S_pts points per the Championship Points System (Sprint) (8..1 for positions 1..8). NULL when
+    the driver was not classified (final_position null). A winner scores 8 + 8 = 16.
+  sql_expression: "(9 - CAST(s.sprint_performance->>'final_position' AS INTEGER)) + CASE CAST(s.sprint_performance->>'final_position'\
+    \ AS INTEGER)\n    WHEN 1 THEN 8 WHEN 2 THEN 7 WHEN 3 THEN 6 WHEN 4 THEN 5\n    WHEN 5 THEN 4 WHEN\
+    \ 6 THEN 3 WHEN 7 THEN 2 WHEN 8 THEN 1 ELSE 0 END"
+  source_model: main.sprint_results
+  from_sql: main.sprint_results s
+  grain: one driver in one sprint
+  domains:
+  - championship_points
+- name: podium_finish
+  description: 'Podium Finish: a driver''s final rank is 1st, 2nd or 3rd. With no main-race result table,
+    the computable form is the championship standings rank after a race (driver_standings.px IN 1-3; px
+    NULL = rank not calculated, not a podium); for a season result use the season''s last race. For sprints
+    use CAST(sprint_performance->>''final_position'' AS INTEGER) <= 3.'
+  sql_expression: ds.px BETWEEN 1 AND 3
+  source_model: main.driver_standings
+  from_sql: main.driver_standings ds
+  grain: one driver's standings after one race
+  domains:
+  - race_results
+- name: veterans_podium
+  description: 'Veteran''s Podium: a driver with Driver Age (current age, floor(days/365.25)) of 35 years
+    or more (>= 35) achieves a Podium Finish (standings rank px 1-3, see podium_finish). Drivers with
+    NULL birth date are excluded.'
+  sql_expression: ds.px BETWEEN 1 AND 3 AND floor((current_date - CAST(d.driver_identity->>'birth_date'
+    AS DATE)) / 365.25) >= 35
+  source_model: main.driver_standings
+  from_sql: main.driver_standings ds JOIN main.drivers d ON d.drv_main = ds.drive_link
+  grain: one driver's standings after one race
+  domains:
+  - drivers_performance
+  - race_results
+- name: constructor_total_race_points
+  description: 'Constructor''s Total Race Points: the points a constructor scored in one race from all
+    its drivers who had a Points Finish — stored as constructor_results.scoreval (one row per constructor
+    per race, checked). GROUP BY cr.matchref, cr.unitnode. NULL scoreval = unclassified or missing.'
+  sql_expression: SUM(cr.scoreval)
+  source_model: main.constructor_results
+  from_sql: main.constructor_results cr
+  grain: one constructor in one race (GROUP BY cr.matchref, cr.unitnode)
+  domains:
+  - championship_points
+  - constructors_performance
+- name: constructor_reliability_rate
+  description: Constructor Reliability Rate = N_finishes / N_starts * 100. Each constructor_results row
+    is a start; a start is a finish when st_mark IS NULL (not specially marked; only one row is 'D').
+    GROUP BY cr.unitnode for career, or add r.yr (join main.races r ON r.rak_id = cr.matchref) for a season.
+    Compare only Constructors with Significant Participation (> 10 races).
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE cr.st_mark IS NULL) / COUNT(*)
+  source_model: main.constructor_results
+  from_sql: main.constructor_results cr JOIN main.races r ON r.rak_id = cr.matchref
+  grain: one constructor (GROUP BY cr.unitnode), optionally per season (r.yr)
+  domains:
+  - constructors_performance
+- name: constructor_significant_participation
+  description: 'Constructors with Significant Participation: started more than 10 races (COUNT DISTINCT
+    race > 10, strict), ensuring statistical validity for reliability rate calculations. GROUP BY cr.unitnode;
+    use in HAVING.'
+  sql_expression: COUNT(DISTINCT cr.matchref) > 10
+  source_model: main.constructor_results
+  from_sql: main.constructor_results cr
+  grain: one constructor (GROUP BY cr.unitnode)
+  domains:
+  - constructors_performance
+- name: constructor_season_total_points
+  description: 'Season Total Points of a constructor: sum of its Constructor''s Total Race Points (constructor_results.scoreval)
+    over the season''s races. GROUP BY r.yr, cr.unitnode.'
+  sql_expression: SUM(cr.scoreval)
+  source_model: main.constructor_results
+  from_sql: main.constructor_results cr JOIN main.races r ON r.rak_id = cr.matchref
+  grain: one constructor in one season (GROUP BY r.yr, cr.unitnode)
+  domains:
+  - constructors_performance
+  - championship_points
+- name: constructor_performance_score
+  description: Constructor's Performance Score CPS = Season Total Points * Constructor Reliability Rate
+    / 100, both computed over that season's constructor_results rows. GROUP BY r.yr, cr.unitnode.
+  sql_expression: SUM(cr.scoreval) * (100.0 * COUNT(*) FILTER (WHERE cr.st_mark IS NULL) / COUNT(*)) /
+    100
+  source_model: main.constructor_results
+  from_sql: main.constructor_results cr JOIN main.races r ON r.rak_id = cr.matchref
+  grain: one constructor in one season (GROUP BY r.yr, cr.unitnode)
+  domains:
+  - constructors_performance
+- name: reliable_and_performing_constructor
+  description: 'Reliable and Performing Constructor: season Constructor Reliability Rate above 95% (>
+    95) AND CPS in the top three of that season (RANK over all constructors of the season by CPS desc
+    <= 3; ties share a rank). Use as a filter: SELECT ... FROM <from_sql> WHERE <expression>.'
+  sql_expression: s.rel > 95 AND s.cps_rank <= 3
+  source_model: main.constructor_results
+  from_sql: "(SELECT yr, constructor_id, rel, cps, RANK() OVER (PARTITION BY yr ORDER BY cps DESC NULLS\
+    \ LAST) AS cps_rank\n FROM (SELECT r.yr, cr.unitnode AS constructor_id,\n              100.0 * COUNT(*)\
+    \ FILTER (WHERE cr.st_mark IS NULL) / COUNT(*) AS rel,\n              SUM(cr.scoreval) * (100.0 *\
+    \ COUNT(*) FILTER (WHERE cr.st_mark IS NULL) / COUNT(*)) / 100 AS cps\n       FROM main.constructor_results\
+    \ cr JOIN main.races r ON r.rak_id = cr.matchref\n       GROUP BY r.yr, cr.unitnode) t) s"
+  grain: one constructor in one season (s.yr, s.constructor_id)
+  domains:
+  - constructors_performance
+- name: driver_points_per_race
+  description: 'Driver''s Points Per Race PPR = P_total / R_completed: P_total is the driver''s cumulative
+    season points (driver_standings.acc_pt is cumulative, so MAX within the season = latest total; NULL
+    acc_pt ignored) and R_completed the number of races the driver participated in (distinct races with
+    a standings row that season). GROUP BY ds.drive_link, r.yr. Standings are sampled, so PPR reflects
+    recorded races only.'
+  sql_expression: MAX(ds.acc_pt) / NULLIF(COUNT(DISTINCT ds.rlink), 0)
+  source_model: main.driver_standings
+  from_sql: main.driver_standings ds JOIN main.races r ON r.rak_id = ds.rlink
+  grain: one driver in one season (GROUP BY ds.drive_link, r.yr)
+  domains:
+  - drivers_performance
+- name: driver_performance_value
+  description: Driver Performance Value DPV = Driver's Points Per Race / Driver Age (current age). NULL
+    when birth date or points unknown.
+  sql_expression: p.ppr / NULLIF(floor((current_date - CAST(d.driver_identity->>'birth_date' AS DATE))
+    / 365.25), 0)
+  source_model: main.driver_standings
+  from_sql: "(SELECT ds.drive_link AS driver_id, r.yr, MAX(ds.acc_pt) / NULLIF(COUNT(DISTINCT ds.rlink),\
+    \ 0) AS ppr\n FROM main.driver_standings ds JOIN main.races r ON r.rak_id = ds.rlink\n GROUP BY ds.drive_link,\
+    \ r.yr) p\nJOIN main.drivers d ON d.drv_main = p.driver_id"
+  grain: one driver in one season (p.driver_id, p.yr)
+  domains:
+  - drivers_performance
+tables:
+- schema: main
+  table: circuits
+  columns:
+  - name: cctkey
+    description: Circuit id (PK); races.trkbind references it.
+  - name: location_metadata
+    description: 'JSON: name, reference_code, location.city, location.country, coordinates.latitude/longitude/
+      elevation_m (numbers), external_link. Access e.g. location_metadata->>''name'', location_metadata->''location''->>''country''.
+      NULL city/latitude/longitude = not supplied or unknown in the source feed; NULL elevation_m = not
+      recorded (most circuits). High-Altitude Circuit = elevation_m > 800.'
+- schema: main
+  table: drivers
+  columns:
+  - name: drv_main
+    description: Driver id (PK).
+  - name: driver_identity
+    description: 'JSON: reference, racing_number (text like ''14.0''), code (3 letters), name.first_name,
+      name.surname, birth_date (''YYYY-MM-DD'' or null), nationality, info_link. NULL racing number or
+      code = not officially assigned or not present in the dataset. NULL birth_date (260 drivers) = unknown
+      age.'
+- schema: main
+  table: races
+  columns:
+  - name: rak_id
+    description: Race id (PK).
+  - name: yr
+    description: Season year.
+  - name: rnum
+    description: Round number within the season.
+  - name: trkbind
+    description: Circuit (circuits.cctkey).
+  - name: event_schedule
+    description: 'JSON: event_name, date_set (''YYYY/MM/DD'', 6 NULL), start_time (''HH:MM:SS''), details_url,
+      sessions.{fp1,fp2,fp3,qualifying,sprint}.{date,time}. A NULL session date/time means TBD, not applicable,
+      or not yet published. Non-null sessions.sprint.date marks a sprint weekend.'
+- schema: main
+  table: constructor_results
+  columns:
+  - name: cresref
+    description: Result id (PK); one row per constructor per race (a start).
+  - name: matchref
+    description: Race (races.rak_id).
+  - name: unitnode
+    description: Constructor (constructors.cstr_key).
+  - name: scoreval
+    description: Constructor's Total Race Points for that race. NULL = unclassified or missing.
+  - name: st_mark
+    description: 'Status mark: NULL = not specially marked = finished (reliability); ''D'' (one row) =
+      marked, not a finish.'
+- schema: main
+  table: constructors
+  columns:
+  - name: cstr_key
+    description: Constructor id (PK).
+  - name: refcod
+    description: Reference code, e.g. mclaren.
+  - name: namelabel
+    description: Team name; NULL = not resolved or released.
+  - name: naty
+    description: Nationality; NULL = team's country of origin not recorded in the dataset.
+  - name: linkpage
+    description: Reference URL; NULL = missing.
+- schema: main
+  table: constructor_standings
+  columns:
+  - name: cstnds
+    description: Standings row id (PK).
+  - name: rref
+    description: Race after which the standing applies.
+  - name: contunit
+    description: Constructor.
+  - name: scr_tot
+    description: Cumulative season points (do not sum across races).
+  - name: posno
+    description: Championship rank.
+  - name: poslab
+    description: Rank label text; 'E' appears 4 times (excluded/non-numeric).
+  - name: trophy_w
+    description: Cumulative season wins.
+- schema: main
+  table: driver_standings
+  columns:
+  - name: drv_stnd
+    description: Standings row id (PK).
+  - name: rlink
+    description: Race after which the standing applies.
+  - name: drive_link
+    description: Driver.
+  - name: acc_pt
+    description: Cumulative season points (600 NULL = no points or not updated); not race points.
+  - name: px
+    description: Championship rank after the race (NULL = not calculated); NOT the race finishing position.
+  - name: px_desc
+    description: Rank label text, stored inconsistently as '56' or '56.0'.
+  - name: topmark
+    description: Cumulative season wins; NULL = no wins or not entered.
+- schema: main
+  table: lap_times
+  columns:
+  - name: rc_index
+    description: Race.
+  - name: wheel_unit
+    description: Driver.
+  - name: lapval
+    description: 'Lap number. Sample: at most 3 laps per driver-race.'
+  - name: pp
+    description: Position on that lap.
+  - name: tmdesc
+    description: Lap time text 'M:SS.mmm'.
+  - name: msec_val
+    description: Lap time in ms (never NULL); seconds = msec_val / 1000.0.
+- schema: main
+  table: pit_stops
+  columns:
+  - name: matchidx
+    description: Race.
+  - name: wunit
+    description: Driver (car).
+  - name: pause_no
+    description: Stop number for the driver in the race (1-6).
+  - name: moment
+    description: Lap on which the stop occurred.
+  - name: attime
+    description: Time of day of the stop 'HH:MM:SS'.
+  - name: durtxt
+    description: Duration text in seconds, e.g. '22.936'.
+  - name: ms_count
+    description: Duration in ms (min 13,206; none < 2,500, so no Efficient Pit Stop exists).
+- schema: main
+  table: qualifying
+  columns:
+  - name: qualkey
+    description: Qualifying row id (PK).
+  - name: rbind
+    description: Race.
+  - name: pilotrec
+    description: Driver.
+  - name: corptag
+    description: Constructor.
+  - name: regno
+    description: Car number.
+  - name: px_pos
+    description: Qualifying position; 1 = Pole Position (present for only 86 of 486 races).
+  - name: q1_r
+    description: Q1 time text 'M:SS.mmm'; NULL = no Q1 result.
+  - name: q2_r
+    description: Q2 time text 'M:SS.mmm'; NULL = no Q2 result (eliminated or absent).
+  - name: q3_r
+    description: Q3 time text 'M:SS.mmm'; NULL = no Q3 result.
+- schema: main
+  table: sprint_results
+  columns:
+  - name: srescode
+    description: Sprint result id (PK).
+  - name: matchref
+    description: Race weekend (races.rak_id).
+  - name: unitdrive
+    description: Driver.
+  - name: makeref
+    description: Constructor.
+  - name: rno
+    description: Car number; NULL = not available.
+  - name: sprint_performance
+    description: 'JSON: grid, final_position (null = not classified, 15 rows), position_label, ranking_order,
+      points (stored; 2021 sprints used 3-2-1), laps_completed, timing.final_time, timing.duration_ms,
+      fastest_lap.lap_number, fastest_lap.lap_time, status_code (1 = finished in 340 rows). Extract with
+      CAST(sprint_performance->>''final_position'' AS INTEGER).'

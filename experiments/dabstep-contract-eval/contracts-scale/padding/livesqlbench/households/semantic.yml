@@ -1,0 +1,399 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: households, author: claudeopus5.5
+metrics:
+- name: water_access_score
+  description: 'Water Access score: ''Yes'' (piped access) = 4, other statuses = 1. Stored values are
+    ''Yes, available at least in one room'' and ''Yes, but only connected to a tap outside of the house
+    (in the property)'' with case / whitespace noise; both start with ''yes'' so both score 4.
+
+    '
+  sql_expression: 'CASE WHEN lower(trim(regexp_replace(i.wateraccess, ''\s+'', '' '', ''g''))) LIKE ''yes%''
+    THEN 4 ELSE 1 END
+
+    '
+  source_model: main.infrastructure
+  from_sql: main.infrastructure i
+  grain: one row per infrastructure configuration
+  domains:
+  - housing_scores
+- name: road_surface_score
+  description: 'Road Surface score: ''Asphalt'' or ''Concrete'' = 4, others (e.g. ''Gravel surface'')
+    = 1. Stored value ''Asphalt, concrete'' scores 4.'
+  sql_expression: 'CASE WHEN lower(i.roadsurface) LIKE ''%asphalt%'' OR lower(i.roadsurface) LIKE ''%concrete%''
+    THEN 4 ELSE 1 END
+
+    '
+  source_model: main.infrastructure
+  from_sql: main.infrastructure i
+  grain: one row per infrastructure configuration
+  domains:
+  - housing_scores
+- name: parking_score
+  description: 'Parking Availability score: ''Available'' = 4, ''not available'' = 1 (compared after normalising
+    case/whitespace).'
+  sql_expression: 'CASE WHEN lower(trim(regexp_replace(i.parkavail, ''\s+'', '' '', ''g''))) = ''available''
+    THEN 4 ELSE 1 END
+
+    '
+  source_model: main.infrastructure
+  from_sql: main.infrastructure i
+  grain: one row per infrastructure configuration
+  domains:
+  - housing_scores
+- name: infrastructure_quality_score
+  description: Average of the water access, road surface and parking scores (range 1-4).
+  sql_expression: "(CASE WHEN lower(trim(regexp_replace(i.wateraccess, '\\s+', ' ', 'g'))) LIKE 'yes%'\
+    \ THEN 4 ELSE 1 END\n + CASE WHEN lower(i.roadsurface) LIKE '%asphalt%' OR lower(i.roadsurface) LIKE\
+    \ '%concrete%' THEN 4 ELSE 1 END\n + CASE WHEN lower(trim(regexp_replace(i.parkavail, '\\s+', ' ',\
+    \ 'g'))) = 'available' THEN 4 ELSE 1 END) / 3.0\n"
+  source_model: main.infrastructure
+  from_sql: main.infrastructure i
+  grain: one row per infrastructure configuration
+  domains:
+  - housing_scores
+- name: dwelling_type_score
+  description: 'Dwelling Type score: ''Brickwork house'' = 4, ''Condominium'' = 4, ''Apartment'' = 3,
+    all other types = 1. Normalised; ''brick house'' counted as Brickwork house and ''apt'' as Apartment
+    (spelling variants found in the data). No condominium exists in the data, so this agrees with entry
+    44''s ranking.
+
+    '
+  sql_expression: "CASE WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class', '\\s+', '\
+    \ ', 'g'))) IN ('brickwork house', 'brick house', 'condominium') THEN 4\n     WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class',\
+    \ '\\s+', ' ', 'g'))) IN ('apartment', 'apt') THEN 3\n     ELSE 1 END\n"
+  source_model: main.properties
+  from_sql: main.properties p
+  grain: one row per property
+  domains:
+  - housing_scores
+- name: living_condition_score
+  description: 0.5 * Dwelling Type score + 0.5 * Infrastructure Quality Score, per property/household.
+  sql_expression: "0.5 * (CASE WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class', '\\\
+    s+', ' ', 'g'))) IN ('brickwork house', 'brick house', 'condominium') THEN 4\n            WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class',\
+    \ '\\s+', ' ', 'g'))) IN ('apartment', 'apt') THEN 3\n            ELSE 1 END)\n+ 0.5 * ((CASE WHEN\
+    \ lower(trim(regexp_replace(i.wateraccess, '\\s+', ' ', 'g'))) LIKE 'yes%' THEN 4 ELSE 1 END\n + CASE\
+    \ WHEN lower(i.roadsurface) LIKE '%asphalt%' OR lower(i.roadsurface) LIKE '%concrete%' THEN 4 ELSE\
+    \ 1 END\n + CASE WHEN lower(trim(regexp_replace(i.parkavail, '\\s+', ' ', 'g'))) = 'available' THEN\
+    \ 4 ELSE 1 END) / 3.0)\n"
+  source_model: main.properties
+  from_sql: main.properties p JOIN main.infrastructure i ON i.infraref = p.infralink
+  grain: one row per property (1:1 with a household via p.houselink)
+  domains:
+  - housing_scores
+- name: household_density
+  description: 'Residents per bedroom: residentcount / Room_Count, computed in DOUBLE; NULL when Room_Count
+    is 0 (3 properties) or missing.'
+  sql_expression: CAST(h.residentcount AS DOUBLE) / NULLIF((p.dwelling_specs->>'Room_Count')::INT, 0)
+  source_model: main.households
+  from_sql: main.households h JOIN main.properties p ON p.houselink = h.housenum
+  grain: one row per household with a property
+  domains:
+  - housing_scores
+- name: bathroom_ratio
+  description: 'Bathrooms per resident: Bath_Count / residentcount, in DOUBLE (residentcount is never
+    0).'
+  sql_expression: CAST((p.dwelling_specs->>'Bath_Count')::INT AS DOUBLE) / NULLIF(h.residentcount, 0)
+  source_model: main.households
+  from_sql: main.households h JOIN main.properties p ON p.houselink = h.housenum
+  grain: one row per household with a property
+  domains:
+  - housing_scores
+- name: dwelling_capacity
+  description: 2 * bedrooms (Room_Count) + bathrooms (Bath_Count).
+  sql_expression: 2 * (p.dwelling_specs->>'Room_Count')::INT + (p.dwelling_specs->>'Bath_Count')::INT
+  source_model: main.properties
+  from_sql: main.properties p
+  grain: one row per property
+  domains:
+  - housing_scores
+- name: comfortable_living_household
+  description: True when Living Condition Score > 3 AND Bathroom Ratio > 0.5 (both strict).
+  sql_expression: "(0.5 * (CASE WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class', '\\\
+    s+', ' ', 'g'))) IN ('brickwork house', 'brick house', 'condominium') THEN 4\n             WHEN lower(trim(regexp_replace(p.dwelling_specs->>'Dwelling_Class',\
+    \ '\\s+', ' ', 'g'))) IN ('apartment', 'apt') THEN 3\n             ELSE 1 END)\n + 0.5 * ((CASE WHEN\
+    \ lower(trim(regexp_replace(i.wateraccess, '\\s+', ' ', 'g'))) LIKE 'yes%' THEN 4 ELSE 1 END\n  +\
+    \ CASE WHEN lower(i.roadsurface) LIKE '%asphalt%' OR lower(i.roadsurface) LIKE '%concrete%' THEN 4\
+    \ ELSE 1 END\n  + CASE WHEN lower(trim(regexp_replace(i.parkavail, '\\s+', ' ', 'g'))) = 'available'\
+    \ THEN 4 ELSE 1 END) / 3.0)) > 3\nAND CAST((p.dwelling_specs->>'Bath_Count')::INT AS DOUBLE) / NULLIF(h.residentcount,\
+    \ 0) > 0.5\n"
+  source_model: main.households
+  from_sql: main.households h JOIN main.properties p ON p.houselink = h.housenum JOIN main.infrastructure
+    i ON i.infraref = p.infralink
+  grain: one row per household with a property
+  domains:
+  - household_classes
+  - housing_scores
+- name: vehicle_ownership_index
+  description: 'Total vehicles: Auto_Count + Bike_Count + Motor_Count from vehicleinventory->''vehicle_counts''
+    (all three are integers in every row checked).'
+  sql_expression: '(t.vehicleinventory->''vehicle_counts''->>''Auto_Count'')::INT + (t.vehicleinventory->''vehicle_counts''->>''Bike_Count'')::INT
+    + (t.vehicleinventory->''vehicle_counts''->>''Motor_Count'')::INT
+
+    '
+  source_model: main.transportation_assets
+  from_sql: main.transportation_assets t
+  grain: one row per household transport record
+  domains:
+  - mobility
+- name: newest_vehicle_year_range
+  description: 'Canonical Vehicle Year Range from Newest_Year. Variants unified (''2010-2013'',''10-13''
+    -> ''2010 to 2013''; ''2014+'',''2014 and newer'',''after 2014'' -> ''2014 or newer''; ''95-99'',''1995-1999''
+    -> ''1995 to 1999'', etc.). ''not applicable'',''na'',''n/a'' and JSON NULL -> NULL (no vehicle /
+    unknown).
+
+    '
+  sql_expression: "CASE lower(trim(regexp_replace(t.vehicleinventory->>'Newest_Year', '\\s+', ' ', 'g')))\n\
+    \  WHEN '1989 or older' THEN '1989 or older'\n  WHEN '1990 to 1994' THEN '1990 to 1994'\n  WHEN '1995\
+    \ to 1999' THEN '1995 to 1999' WHEN '1995-1999' THEN '1995 to 1999' WHEN '95-99' THEN '1995 to 1999'\n\
+    \  WHEN '2000 to 2004' THEN '2000 to 2004' WHEN '2000-2004' THEN '2000 to 2004' WHEN '00-04' THEN\
+    \ '2000 to 2004'\n  WHEN '2005 to 2009' THEN '2005 to 2009' WHEN '2005-2009' THEN '2005 to 2009' WHEN\
+    \ '05-09' THEN '2005 to 2009'\n  WHEN '2010 to 2013' THEN '2010 to 2013' WHEN '2010-2013' THEN '2010\
+    \ to 2013' WHEN '10-13' THEN '2010 to 2013'\n  WHEN '2014 or newer' THEN '2014 or newer' WHEN '2014\
+    \ and newer' THEN '2014 or newer'\n  WHEN '2014+' THEN '2014 or newer' WHEN 'after 2014' THEN '2014\
+    \ or newer'\n  ELSE NULL END\n"
+  source_model: main.transportation_assets
+  from_sql: main.transportation_assets t
+  grain: one row per household transport record
+  domains:
+  - mobility
+- name: tenure_type_normalized
+  description: 'Tenure_Type upper-cased with variants unified: own/owned -> ''OWNED'', rent/rented ->
+    ''RENTED''; other values upper-cased as stored.'
+  sql_expression: "CASE WHEN lower(trim(h.socioeconomic->>'Tenure_Type')) IN ('own', 'owned') THEN 'OWNED'\n\
+    \     WHEN lower(trim(h.socioeconomic->>'Tenure_Type')) IN ('rent', 'rented') THEN 'RENTED'\n    \
+    \ ELSE upper(trim(regexp_replace(h.socioeconomic->>'Tenure_Type', '\\s+', ' ', 'g'))) END\n"
+  source_model: main.households
+  from_sql: main.households h
+  grain: one row per household
+  domains:
+  - socioeconomic
+- name: income_bracket_rank
+  description: 'INTERPRETATION (the documentation gives no numeric mapping): ordinal rank of the stored
+    R$ brackets: ''has no income'' 0, ''R$ 440 or less'' 1, 440-880 2, 880-1,760 3, 1,760-2,640 4, 2,640-4,400
+    5, 4,400-8,800 6, 8,800-13,200 7, 13,200-17,600 8, 17,600-22,000 9, 22,000-26,400 10, ''more than
+    R$ 26,400'' 11; NULL bracket -> NULL.
+
+    '
+  sql_expression: "CASE lower(trim(regexp_replace(h.socioeconomic->>'Income_Bracket', '\\s+', ' ', 'g')))\n\
+    \  WHEN 'has no income' THEN 0\n  WHEN 'r$ 440 or less' THEN 1\n  WHEN 'more than r$ 440 and less\
+    \ than r$ 880' THEN 2\n  WHEN 'more than r$ 880 and less than r$ 1,760' THEN 3\n  WHEN 'more than\
+    \ r$ 1,760 and less than r$ 2,640' THEN 4\n  WHEN 'more than r$ 2,640 and less than r$ 4,400' THEN\
+    \ 5\n  WHEN 'more than r$ 4,400 and less than r$ 8,800' THEN 6\n  WHEN 'more than r$ 8,800 and less\
+    \ than r$ 13,200' THEN 7\n  WHEN 'more than r$ 13,200 and less than r$ 17,600' THEN 8\n  WHEN 'more\
+    \ than r$ 17,600 and less than r$ 22,000' THEN 9\n  WHEN 'more than r$ 22,000 and less than r$ 26,400'\
+    \ THEN 10\n  WHEN 'more than r$ 26,400' THEN 11\nEND\n"
+  source_model: main.households
+  from_sql: main.households h
+  grain: one row per household
+  domains:
+  - socioeconomic
+- name: expenditure_ratio
+  description: 'Expend_Coeff divided by a numeric mapping of the income bracket. The mapping is not documented;
+    this uses `income_bracket_rank` (INTERPRETATION), NULL when the bracket is NULL or ''has no income''
+    (rank 0).
+
+    '
+  sql_expression: "(h.socioeconomic->>'Expend_Coeff')::DOUBLE / NULLIF(CASE lower(trim(regexp_replace(h.socioeconomic->>'Income_Bracket',\
+    \ '\\s+', ' ', 'g')))\n  WHEN 'has no income' THEN 0\n  WHEN 'r$ 440 or less' THEN 1\n  WHEN 'more\
+    \ than r$ 440 and less than r$ 880' THEN 2\n  WHEN 'more than r$ 880 and less than r$ 1,760' THEN\
+    \ 3\n  WHEN 'more than r$ 1,760 and less than r$ 2,640' THEN 4\n  WHEN 'more than r$ 2,640 and less\
+    \ than r$ 4,400' THEN 5\n  WHEN 'more than r$ 4,400 and less than r$ 8,800' THEN 6\n  WHEN 'more than\
+    \ r$ 8,800 and less than r$ 13,200' THEN 7\n  WHEN 'more than r$ 13,200 and less than r$ 17,600' THEN\
+    \ 8\n  WHEN 'more than r$ 17,600 and less than r$ 22,000' THEN 9\n  WHEN 'more than r$ 22,000 and\
+    \ less than r$ 26,400' THEN 10\n  WHEN 'more than r$ 26,400' THEN 11\nEND, 0)\n"
+  source_model: main.households
+  from_sql: main.households h
+  grain: one row per household
+  domains:
+  - socioeconomic
+- name: affluent_household
+  description: 'Tenure_Type ''OWNED'' (own/owned) and Income_Bracket ''High Income'' or ''Very High Income'',
+    exactly as documented. CHECKED: those labels never occur (brackets are stored as R$ ranges), so this
+    is false for every row; report that rather than inventing a cut-off unless the user gives one.
+
+    '
+  sql_expression: 'lower(trim(h.socioeconomic->>''Tenure_Type'')) IN (''own'', ''owned'') AND lower(trim(h.socioeconomic->>''Income_Bracket''))
+    IN (''high income'', ''very high income'')
+
+    '
+  source_model: main.households
+  from_sql: main.households h
+  grain: one row per household
+  domains:
+  - household_classes
+  - socioeconomic
+- name: supported_household
+  description: Household whose service plan has socsupport 'Yes' (normalised). Households with NULL serviceplan
+    are not supported.
+  sql_expression: lower(trim(s.socsupport)) = 'yes'
+  source_model: main.households
+  from_sql: main.households h JOIN main.service_types s ON s.serviceref = h.serviceplan
+  grain: one row per household with a service plan
+  domains:
+  - household_classes
+  - services
+- name: has_cable_tv
+  description: 'Active Cable TV Status: normalised cablestatus in (''avail'',''available'',''yes'') —
+    the documented list. ''y'' and ''have'' also appear in the data but are not in the documented list.'
+  sql_expression: 'lower(trim(regexp_replace(a.cablestatus, ''\s+'', '' '', ''g''))) IN (''avail'', ''available'',
+    ''yes'')
+
+    '
+  source_model: main.amenities
+  from_sql: main.amenities a
+  grain: one row per household amenities record
+  domains:
+  - services
+- name: urban_household
+  description: '''Municipal Piped'' Water Access and high-quality Road Surface. No ''Municipal Piped''
+    value is stored; INTERPRETATION: piped water = water score 4 (''Yes...'') and high-quality road =
+    road score 4 (asphalt/concrete).
+
+    '
+  sql_expression: 'lower(trim(regexp_replace(i.wateraccess, ''\s+'', '' '', ''g''))) LIKE ''yes%'' AND
+    (lower(i.roadsurface) LIKE ''%asphalt%'' OR lower(i.roadsurface) LIKE ''%concrete%'')
+
+    '
+  source_model: main.households
+  from_sql: main.households h JOIN main.properties p ON p.houselink = h.housenum JOIN main.infrastructure
+    i ON i.infraref = p.infralink
+  grain: one row per household with a property
+  domains:
+  - household_classes
+- name: urban_zone
+  description: 'A zone is urban if its loczone is 1. CHECKED: no household has loczone = 1.'
+  sql_expression: h.loczone = 1
+  source_model: main.households
+  from_sql: main.households h
+  grain: one row per household
+  domains:
+  - household_classes
+- name: purge_incomplete_transport_candidate
+  description: 'Read-only preview of the Purge Incomplete Transport Data action: transportation_assets
+    rows whose household has NULL Income_Bracket. Do not DELETE (forbidden).'
+  sql_expression: h.socioeconomic->>'Income_Bracket' IS NULL
+  source_model: main.transportation_assets
+  from_sql: main.transportation_assets t JOIN main.households h ON h.housenum = t.housetag
+  grain: one row per transportation asset record
+  domains:
+  - data_actions
+tables:
+- schema: main
+  table: locations
+  columns:
+  - name: regioncode
+    type: TEXT
+    description: Administrative region name, e.g. Taguatinga, Samambaia. PK with zonenum.
+  - name: zonenum
+    type: BIGINT
+    description: Macrozone number within the region, e.g. 315, 222. PK with regioncode.
+- schema: main
+  table: households
+  columns:
+  - name: housenum
+    type: BIGINT
+    description: Household id (PK).
+  - name: residentcount
+    type: BIGINT
+    description: 'Number of residents (never 0). Integer: cast to DOUBLE before dividing.'
+  - name: locregion
+    type: TEXT
+    description: Region; with loczone references locations(regioncode, zonenum).
+  - name: loczone
+    type: BIGINT
+    description: 'Macrozone. Urban Zone rule: loczone = 1 is urban (no such rows).'
+  - name: serviceplan
+    type: BIGINT
+    description: FK to service_types.serviceref; NULL (8 rows) = not enrolled or undetermined.
+  - name: socioeconomic
+    type: JSON
+    description: JSON with Tenure_Type (text; own/owned=OWNED, rent/rented=RENTED, others; NULL=unknown/disputed),
+      Income_Bracket (R$ range text, NULL=undisclosed/irregular, 110 NULLs), Expend_Coeff (double). Normalise
+      case/whitespace.
+- schema: main
+  table: properties
+  columns:
+  - name: propref
+    type: BIGINT
+    description: Property id (PK).
+  - name: houselink
+    type: BIGINT
+    description: FK to households.housenum, unique (1:1).
+  - name: infralink
+    type: BIGINT
+    description: FK to infrastructure.infraref.
+  - name: dwelling_specs
+    type: JSON
+    description: JSON with Dwelling_Class (text, messy case; brickwork house/brick house, apartment/apt,
+      shack..., unfinished..., other), Bath_Count (int), Room_Count (int bedrooms; 3 rows are 0).
+- schema: main
+  table: infrastructure
+  columns:
+  - name: infraref
+    type: BIGINT
+    description: Infrastructure configuration id (PK).
+  - name: wateraccess
+    type: TEXT
+    description: Piped water access; both stored values start with 'Yes' (indoor room / outside tap).
+      Score 4 for 'Yes', else 1.
+  - name: roadsurface
+    type: TEXT
+    description: '''Asphalt, concrete'' (score 4) or ''Gravel surface'' (score 1).'
+  - name: parkavail
+    type: TEXT
+    description: '''Available'' (score 4) or ''Not available'' (score 1), mixed case.'
+- schema: main
+  table: service_types
+  columns:
+  - name: serviceref
+    type: BIGINT
+    description: Service plan id (PK).
+  - name: domestichelp
+    type: TEXT
+    description: '''No domestic workers'', ''Yes, occasional'', ''Yes, regular'', ''Yes, living-in''.'
+  - name: socsupport
+    type: TEXT
+    description: 'Social assistance participation: ''Yes'' accepts assistance, ''No'' does not. Part of
+      the unique constraint (domestichelp, socsupport).'
+- schema: main
+  table: amenities
+  columns:
+  - name: amenityref
+    type: BIGINT
+    description: Amenity record id (PK).
+  - name: houseid
+    type: BIGINT
+    description: FK to households.housenum, unique (1:1).
+  - name: cablestatus
+    type: TEXT
+    description: 'Cable TV status, very messy text. Documented available values: avail, available, yes
+      (normalised).'
+- schema: main
+  table: transportation_assets
+  columns:
+  - name: transref
+    type: BIGINT
+    description: Transport record id (PK).
+  - name: housetag
+    type: BIGINT
+    description: FK to households.housenum, unique (1:1).
+  - name: vehicleinventory
+    type: JSON
+    description: JSON with Newest_Year (text range, many spellings; see newest_vehicle_year_range) and
+      vehicle_counts {Auto_Count, Bike_Count, Motor_Count} (ints).
+relationships:
+- from: main.households.serviceplan
+  to: main.service_types.serviceref
+  type: many_to_one
+- from: main.properties.houselink
+  to: main.households.housenum
+  type: one_to_one
+- from: main.properties.infralink
+  to: main.infrastructure.infraref
+  type: many_to_one
+- from: main.amenities.houseid
+  to: main.households.housenum
+  type: one_to_one
+- from: main.transportation_assets.housetag
+  to: main.households.housenum
+  type: one_to_one

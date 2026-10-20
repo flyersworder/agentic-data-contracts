@@ -1,0 +1,765 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: robot_fault_prediction, author: claudeopus5.5
+metrics:
+- name: robot_age_days
+  description: 'Robot Age: operational age in days since installation. CURRENT_DATE - robot_details.instdateval
+    (integer days).
+
+    '
+  sql_expression: CURRENT_DATE - rd.instdateval
+  source_model: main.robot_details
+  from_sql: main.robot_details rd
+  grain: one robot
+  domains:
+  - robot_assets
+- name: payload_utilization_ratio
+  description: 'PUR = actual payload weight (actuation_data.payloadwval, kg; NULL = no payload data) /
+    rated payload capacity (robot_details.payloadcapkg).
+
+    '
+  sql_expression: ad.payloadwval / NULLIF(rd.payloadcapkg, 0)
+  source_model: main.actuation_data
+  from_sql: main.actuation_data ad JOIN main.robot_details rd ON rd.botdetreg = ad.actrecref
+  grain: one actuation record
+  domains:
+  - robot_assets
+  - operations
+- name: payload_overload_condition
+  description: 'Payload Overload Condition: PUR > 1.0.'
+  sql_expression: ad.payloadwval / NULLIF(rd.payloadcapkg, 0) > 1.0
+  source_model: main.actuation_data
+  from_sql: main.actuation_data ad JOIN main.robot_details rd ON rd.botdetreg = ad.actrecref
+  grain: one actuation record
+  domains:
+  - robot_assets
+- name: payload_capacity_class
+  description: '''Light-Duty'' < 20 kg, ''Medium-Duty'' 20-150 kg (>=20 and <150), ''Heavy-Duty'' >= 150
+    kg, on robot_details.payloadcapkg.'
+  sql_expression: "CASE WHEN rd.payloadcapkg < 20 THEN 'Light-Duty'\n     WHEN rd.payloadcapkg < 150 THEN\
+    \ 'Medium-Duty'\n     WHEN rd.payloadcapkg >= 150 THEN 'Heavy-Duty' END\n"
+  source_model: main.robot_details
+  from_sql: main.robot_details rd
+  grain: one robot
+  domains:
+  - robot_assets
+- name: firmware_end_of_life
+  description: 'Firmware Lifecycle Stage ''End-of-Life'' (unsupported, potential risk): all versions starting
+    with ''3.''. Current vs Supported is not defined by the documentation for other versions.
+
+    '
+  sql_expression: rd.fwversionval LIKE '3.%'
+  source_model: main.robot_details
+  from_sql: main.robot_details rd
+  grain: one robot
+  domains:
+  - robot_assets
+- name: underutilized_asset
+  description: 'Robot Age > 365 days AND cumulative operating hours (operation.totopshrval) < 2000. One
+    row per operation of the robot (a robot can have several).
+
+    '
+  sql_expression: (CURRENT_DATE - rd.instdateval) > 365 AND o.totopshrval < 2000
+  source_model: main.robot_details
+  from_sql: main.robot_details rd JOIN main.operation o ON o.operrecref = rd.botdetreg
+  grain: one operation of a robot
+  domains:
+  - robot_assets
+- name: workhorse_robot
+  description: Robot Age > 1825 days (5 years) AND cumulative operating hours (operation.totopshrval)
+    > 40000.
+  sql_expression: (CURRENT_DATE - rd.instdateval) > 1825 AND o.totopshrval > 40000
+  source_model: main.robot_details
+  from_sql: main.robot_details rd JOIN main.operation o ON o.operrecref = rd.botdetreg
+  grain: one operation of a robot
+  domains:
+  - robot_assets
+- name: legacy_robot
+  description: 'Legacy Robot: Robot Age > 3650 days (10 years).'
+  sql_expression: (CURRENT_DATE - rd.instdateval) > 3650
+  source_model: main.robot_details
+  from_sql: main.robot_details rd
+  grain: one robot
+  domains:
+  - robot_assets
+- name: top_tier_usage_model
+  description: 'Model series whose total program cycle count (SUM operation.progcyclecount) is at or above
+    the 75th percentile of all models. Aggregate expression with a window: use with GROUP BY rd.modelseriesval,
+    wrap in a subquery to filter.
+
+    '
+  sql_expression: PERCENT_RANK() OVER (ORDER BY SUM(o.progcyclecount)) >= 0.75
+  source_model: main.operation
+  from_sql: main.operation o JOIN main.robot_details rd ON rd.botdetreg = o.operrecref
+  grain: one model series (GROUP BY rd.modelseriesval)
+  domains:
+  - robot_assets
+- name: throughput_rate_per_minute
+  description: Throughput Rate = 60 / cycle_time_seconds (operation.cycletimesecval; NULL = no data).
+  sql_expression: 60.0 / NULLIF(o.cycletimesecval, 0)
+  source_model: main.operation
+  from_sql: main.operation o
+  grain: one operation
+  domains:
+  - operations
+- name: throughput_rate_per_hour
+  description: Throughput Rate (Cycles per Hour) = 3600 / cycle_time_seconds.
+  sql_expression: 3600.0 / NULLIF(o.cycletimesecval, 0)
+  source_model: main.operation
+  from_sql: main.operation o
+  grain: one operation
+  domains:
+  - operations
+- name: is_high_wear_application
+  description: 'High-Wear Applications: Welding, Grinding, Deburring, Palletizing, Machine Tending (only
+    Welding, Palletizing occur in the data).'
+  sql_expression: o.apptypeval IN ('Welding', 'Grinding', 'Deburring', 'Palletizing', 'Machine Tending')
+  source_model: main.operation
+  from_sql: main.operation o
+  grain: one operation
+  domains:
+  - operations
+- name: is_precision_critical_application
+  description: 'Precision-Critical Applications: Assembly, Electronics-Handling, Inspection, Dispensing,
+    Laser Cutting (only Assembly occurs in the data).'
+  sql_expression: o.apptypeval IN ('Assembly', 'Electronics-Handling', 'Inspection', 'Dispensing', 'Laser
+    Cutting')
+  source_model: main.operation
+  from_sql: main.operation o
+  grain: one operation
+  domains:
+  - operations
+- name: intensive_workload
+  description: 'PUR > 0.8 AND Throughput Rate in the top 20th percentile (quintile 1) for its application
+    (NTILE(5) per apptypeval, ordered by throughput descending). Contains a window function: compute in
+    a subquery (add WHERE o.cycletimesecval IS NOT NULL there) and filter outside.
+
+    '
+  sql_expression: 'ad.payloadwval / NULLIF(rd.payloadcapkg, 0) > 0.8 AND NTILE(5) OVER (PARTITION BY o.apptypeval
+    ORDER BY 60.0 / o.cycletimesecval DESC NULLS LAST) = 1
+
+    '
+  source_model: main.actuation_data
+  from_sql: main.actuation_data ad JOIN main.operation o ON o.operreg = ad.actoperref JOIN main.robot_details
+    rd ON rd.botdetreg = ad.actrecref
+  grain: one actuation record
+  domains:
+  - operations
+- name: average_joint_temperature
+  description: 'Mean of joint_health J1..J6 temperature_C: (J1_temp + ... + J6_temp) / 6.'
+  sql_expression: "((jc.joint_health->'J1'->>'temperature_C')::DOUBLE + (jc.joint_health->'J2'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'temperature_C')::DOUBLE + (jc.joint_health->'J4'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'temperature_C')::DOUBLE + (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\
+    \ / 6.0\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: joint_temperature_differential
+  description: GREATEST(J1..J6 temp) - LEAST(J1..J6 temp).
+  sql_expression: "GREATEST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\n\
+    - LEAST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: thermal_anomaly
+  description: Average Joint Temperature > 75°C OR Joint Temperature Differential > 15°C.
+  sql_expression: "((jc.joint_health->'J1'->>'temperature_C')::DOUBLE + (jc.joint_health->'J2'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'temperature_C')::DOUBLE + (jc.joint_health->'J4'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'temperature_C')::DOUBLE + (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\
+    \ / 6.0 > 75\nOR (GREATEST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\n\
+    - LEAST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE))\
+    \ > 15\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: average_joint_vibration
+  description: Mean vibration_mmps (mm/s) over J1..J6 of joint_health.
+  sql_expression: "((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: average_backlash
+  description: Mean backlash_deg (degrees) over J1..J6 of joint_health; indicator of gear wear.
+  sql_expression: "((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: backlash_severity
+  description: 'On Average Backlash: ''Low'' < 0.01, ''Medium'' 0.01-0.05 inclusive (early wear), ''High''
+    > 0.05 (significant wear).'
+  sql_expression: "CASE WHEN ((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 < 0.01 THEN 'Low'\nWHEN ((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 <= 0.05 THEN 'Medium'\nELSE 'High' END\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: mechanical_wear_score
+  description: 0.6 * Average Joint Vibration + 0.4 * Average Backlash.
+  sql_expression: "0.6 * ((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0\n+ 0.4 * ((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: mechanical_wear_tier
+  description: 'Mechanical Wear Score tiers: ''Low'' < 0.5, ''Medium'' 0.5-0.8 inclusive, ''High'' > 0.8.'
+  sql_expression: "CASE WHEN 0.6 * ((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0\n+ 0.4 * ((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 < 0.5 THEN 'Low'\nWHEN 0.6 * ((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0\n+ 0.4 * ((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 <= 0.8 THEN 'Medium'\nELSE 'High' END\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: mechanical_degradation_alert
+  description: Average Backlash in 'High' Backlash Severity (> 0.05) OR Average Joint Vibration > 3.0
+    mm/s.
+  sql_expression: "((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 > 0.05\nOR ((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0 > 3.0\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: critical_condition_robot
+  description: Thermal Anomaly AND Mechanical Degradation Alert (both from the same joint_condition record).
+  sql_expression: "(((jc.joint_health->'J1'->>'temperature_C')::DOUBLE + (jc.joint_health->'J2'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'temperature_C')::DOUBLE + (jc.joint_health->'J4'->>'temperature_C')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'temperature_C')::DOUBLE + (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\
+    \ / 6.0 > 75\nOR (GREATEST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \         (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE)\n\
+    - LEAST((jc.joint_health->'J1'->>'temperature_C')::DOUBLE, (jc.joint_health->'J2'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J3'->>'temperature_C')::DOUBLE, (jc.joint_health->'J4'->>'temperature_C')::DOUBLE,\n\
+    \        (jc.joint_health->'J5'->>'temperature_C')::DOUBLE, (jc.joint_health->'J6'->>'temperature_C')::DOUBLE))\
+    \ > 15)\nAND (((jc.joint_health->'J1'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J2'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J4'->>'backlash_deg')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'backlash_deg')::DOUBLE + (jc.joint_health->'J6'->>'backlash_deg')::DOUBLE)\
+    \ / 6.0 > 0.05\nOR ((jc.joint_health->'J1'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J2'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J3'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J4'->>'vibration_mmps')::DOUBLE\n\
+    \ + (jc.joint_health->'J5'->>'vibration_mmps')::DOUBLE + (jc.joint_health->'J6'->>'vibration_mmps')::DOUBLE)\
+    \ / 6.0 > 3.0)\n"
+  source_model: main.joint_condition
+  from_sql: main.joint_condition jc
+  grain: one joint condition record
+  domains:
+  - joint_health
+- name: controller_stress_score
+  description: (overseerloadvalue + memuseval) / 2.
+  sql_expression: (sc.overseerloadvalue + sc.memuseval) / 2.0
+  source_model: main.system_controller
+  from_sql: main.system_controller sc
+  grain: one controller (actuation) record
+  domains:
+  - controller
+- name: cpu_load_level
+  description: 'On overseerloadvalue (%): ''Normal'' < 70, ''High'' 70-90 inclusive, ''Critical'' > 90.'
+  sql_expression: "CASE WHEN sc.overseerloadvalue < 70 THEN 'Normal'\n     WHEN sc.overseerloadvalue <=\
+    \ 90 THEN 'High'\n     WHEN sc.overseerloadvalue > 90 THEN 'Critical' END\n"
+  source_model: main.system_controller
+  from_sql: main.system_controller sc
+  grain: one controller (actuation) record
+  domains:
+  - controller
+- name: cabinet_humidity_risk
+  description: 'On cabhumiditylevel text like ''47%'' parsed to a number: ''Safe'' < 60, ''Warning'' 60-80
+    inclusive (corrosion risk), ''Danger'' > 80 (electrical fault risk). Column is NULL in every row of
+    this data, so result is NULL.
+
+    '
+  sql_expression: "CASE WHEN TRY_CAST(REPLACE(sc.cabhumiditylevel, '%', '') AS DOUBLE) < 60 THEN 'Safe'\n\
+    \     WHEN TRY_CAST(REPLACE(sc.cabhumiditylevel, '%', '') AS DOUBLE) <= 80 THEN 'Warning'\n     WHEN\
+    \ TRY_CAST(REPLACE(sc.cabhumiditylevel, '%', '') AS DOUBLE) > 80 THEN 'Danger' END\n"
+  source_model: main.system_controller
+  from_sql: main.system_controller sc
+  grain: one controller (actuation) record
+  domains:
+  - controller
+- name: anomalous_controller_stress
+  description: 'Controller Stress Score more than 20% above the average stress score of its model series.
+    Window function: compute in a subquery, filter outside.
+
+    '
+  sql_expression: '(sc.overseerloadvalue + sc.memuseval) / 2.0 > 1.2 * AVG((sc.overseerloadvalue + sc.memuseval)
+    / 2.0) OVER (PARTITION BY rd.modelseriesval)
+
+    '
+  source_model: main.system_controller
+  from_sql: main.system_controller sc JOIN main.actuation_data ad ON ad.actreg = sc.systemoverseeractuation
+    JOIN main.robot_details rd ON rd.botdetreg = ad.actrecref
+  grain: one controller (actuation) record
+  domains:
+  - controller
+- name: remaining_useful_life_days
+  description: rulhours / 24 (float division).
+  sql_expression: mf.rulhours / 24.0
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: predictive_maintenance_urgency
+  description: PMU = (1000 / (rulhours + 1)) + (faultpredscore * 10); float division. NULL when faultpredscore
+    is NULL.
+  sql_expression: (1000.0 / (mf.rulhours + 1)) + (mf.faultpredscore * 10)
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: predictive_maintenance_trigger
+  description: Activated when PMU > 50.
+  sql_expression: (1000.0 / (mf.rulhours + 1)) + (mf.faultpredscore * 10) > 50
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: fault_prediction_score_tier
+  description: '''Low'' < 0.3, ''Medium'' 0.3-0.7 inclusive, ''High'' > 0.7; NULL score gives NULL.'
+  sql_expression: "CASE WHEN mf.faultpredscore < 0.3 THEN 'Low'\n     WHEN mf.faultpredscore <= 0.7 THEN\
+    \ 'Medium'\n     WHEN mf.faultpredscore > 0.7 THEN 'High' END\n"
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: urgent_maintenance_required
+  description: RUL in Days < 7 OR upkeepduedays <= 0 (overdue).
+  sql_expression: mf.rulhours / 24.0 < 7 OR mf.upkeepduedays <= 0
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: imminent_failure_warning
+  description: '''High'' Fault Prediction Score Tier (> 0.7) AND Urgent Maintenance Required.'
+  sql_expression: mf.faultpredscore > 0.7 AND (mf.rulhours / 24.0 < 7 OR mf.upkeepduedays <= 0)
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: maintenance_cost_per_hour
+  description: 'Upkeep cost estimate (text ''$7,299.59'', ''$'' and '','' stripped) / total operational
+    hours of the operation. upkeepcostest is NULL in all rows here.
+
+    '
+  sql_expression: TRY_CAST(REPLACE(REPLACE(mf.upkeepcostest, '$', ''), ',', '') AS DOUBLE) / NULLIF(o.totopshrval,
+    0)
+  source_model: main.maintenance_and_fault
+  from_sql: main.maintenance_and_fault mf JOIN main.operation o ON o.operreg = mf.upkeepoperation
+  grain: one maintenance/fault record
+  domains:
+  - maintenance
+- name: safety_incident_rate
+  description: (collisioncount + zoneviolnum + speedviolnum) * 1000 / operation.totopshrval.
+  sql_expression: (ps.collisioncount + ps.zoneviolnum + ps.speedviolnum) * 1000.0 / NULLIF(o.totopshrval,
+    0)
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.actuation_data ad ON ad.actreg = ps.effectivenessactuation
+    JOIN main.operation o ON o.operreg = ad.actoperref
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: high_safety_risk_unit
+  description: 'High Safety-Risk Unit / High Safety-Risk: Safety Incident Rate > 2.0 OR cumulative collision
+    count > 5. collisioncount is the record''s counter (max 3 per record); for a robot-level cumulative
+    view sum collisions and incidents over the robot''s records (GROUP BY ps.effectivenessrobot).
+
+    '
+  sql_expression: '(ps.collisioncount + ps.zoneviolnum + ps.speedviolnum) * 1000.0 / NULLIF(o.totopshrval,
+    0) > 2.0 OR ps.collisioncount > 5
+
+    '
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.actuation_data ad ON ad.actreg = ps.effectivenessactuation
+    JOIN main.operation o ON o.operreg = ad.actoperref
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: mean_time_between_stoppages
+  description: MTBS = totopshrval / emergencystopcount (NULL when 0 stops).
+  sql_expression: o.totopshrval / NULLIF(ps.emergencystopcount, 0)
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.actuation_data ad ON ad.actreg = ps.effectivenessactuation
+    JOIN main.operation o ON o.operreg = ad.actoperref
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: high_reliability_risk
+  description: 'High Reliability Risk: MTBS < 500 hours.'
+  sql_expression: o.totopshrval / NULLIF(ps.emergencystopcount, 0) < 500
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.actuation_data ad ON ad.actreg = ps.effectivenessactuation
+    JOIN main.operation o ON o.operreg = ad.actoperref
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: overload_frequency
+  description: overloadcnt / (totopshrval / 1000.0).
+  sql_expression: ps.overloadcnt / NULLIF(o.totopshrval / 1000.0, 0)
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.actuation_data ad ON ad.actreg = ps.effectivenessactuation
+    JOIN main.operation o ON o.operreg = ad.actoperref
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: condition_index_tier
+  description: '''Excellent'' > 0.9, ''Good'' 0.7-0.9, ''Fair'' 0.5-0.7, ''Poor'' < 0.5; shared boundaries
+    go to the upper listed band of the range (0.9 Good, 0.7 Good, 0.5 Fair).'
+  sql_expression: "CASE WHEN ps.conditionindexval > 0.9 THEN 'Excellent'\n     WHEN ps.conditionindexval\
+    \ >= 0.7 THEN 'Good'\n     WHEN ps.conditionindexval >= 0.5 THEN 'Fair'\n     WHEN ps.conditionindexval\
+    \ < 0.5 THEN 'Poor' END\n"
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: health_degradation_rate
+  description: HDR = (1.0 - conditionindexval) / Robot Age in days.
+  sql_expression: (1.0 - ps.conditionindexval) / NULLIF(CURRENT_DATE - rd.instdateval, 0)
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.robot_details rd ON rd.botdetreg = ps.effectivenessrobot
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: degrading_robot
+  description: Degrading when HDR > 0.
+  sql_expression: (1.0 - ps.conditionindexval) / NULLIF(CURRENT_DATE - rd.instdateval, 0) > 0
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps JOIN main.robot_details rd ON rd.botdetreg = ps.effectivenessrobot
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: air_pressure_status
+  description: 'airpressval (bar): ''Normal'' 5.5-7.0 inclusive, ''Low'' < 5.5, ''High'' > 7.0.'
+  sql_expression: "CASE WHEN ps.airpressval < 5.5 THEN 'Low'\n     WHEN ps.airpressval <= 7.0 THEN 'Normal'\n\
+    \     WHEN ps.airpressval > 7.0 THEN 'High' END\n"
+  source_model: main.performance_and_safety
+  from_sql: main.performance_and_safety ps
+  grain: one performance/safety record
+  domains:
+  - safety_performance
+- name: relative_positional_error
+  description: poserrmmval / robot_details.reachmmval.
+  sql_expression: ad.poserrmmval / NULLIF(rd.reachmmval, 0)
+  source_model: main.actuation_data
+  from_sql: main.actuation_data ad JOIN main.robot_details rd ON rd.botdetreg = ad.actrecref
+  grain: one actuation record
+  domains:
+  - safety_performance
+- name: precision_performance_degradation
+  description: Relative Positional Error > 0.0001.
+  sql_expression: ad.poserrmmval / NULLIF(rd.reachmmval, 0) > 0.0001
+  source_model: main.actuation_data
+  from_sql: main.actuation_data ad JOIN main.robot_details rd ON rd.botdetreg = ad.actrecref
+  grain: one actuation record
+  domains:
+  - safety_performance
+tables:
+- schema: main
+  table: robot_record
+  columns:
+  - name: recreg
+    type: VARCHAR
+    description: Record registration identifier, e.g. RF100725.
+  - name: rects
+    type: TIMESTAMP
+    description: Record creation timestamp (2025-02-18 or 2025-02-19).
+  - name: botcode
+    type: VARCHAR
+    description: Robot code (PK), e.g. RB2073.
+- schema: main
+  table: robot_details
+  columns:
+  - name: botdetreg
+    type: VARCHAR
+    description: Robot id; = robot_record.botcode.
+  - name: mfgnameval
+    type: VARCHAR
+    description: 'Manufacturer: ABB, FANUC, KUKA, Universal Robots, Yaskawa.'
+  - name: modelseriesval
+    type: VARCHAR
+    description: Model series, e.g. Series_784. 'Robot model' in definitions.
+  - name: bottypeval
+    type: VARCHAR
+    description: 'Robot type: Articulated, Cartesian, Collaborative, Delta, SCARA. Core architectures
+      per documentation: Articulated, SCARA, Delta, Cartesian.'
+  - name: payloadcapkg
+    type: FLOAT
+    description: Rated payload capacity kg (3,5,10,20,50,100,200). See payload_capacity_class.
+  - name: reachmmval
+    type: BIGINT
+    description: Reach in mm.
+  - name: instdateval
+    type: DATE
+    description: Installation date; Robot Age = CURRENT_DATE - instdateval.
+  - name: fwversionval
+    type: VARCHAR
+    description: Firmware version e.g. 9.6.6; versions starting '3.' are End-of-Life.
+  - name: ctrltypeval
+    type: VARCHAR
+    description: Controller type, e.g. Controller_C2.
+- schema: main
+  table: operation
+  columns:
+  - name: operreg
+    type: VARCHAR
+    description: Operation id (PK).
+  - name: operrecref
+    type: VARCHAR
+    description: Robot code (FK robot_record.botcode).
+  - name: totopshrval
+    type: FLOAT
+    description: Total (cumulative) operational hours; NULL = no data.
+  - name: apptypeval
+    type: VARCHAR
+    description: 'Application type: Assembly, Material Handling, Painting, Palletizing, Welding; NULL
+      = none specified.'
+  - name: opermodeval
+    type: VARCHAR
+    description: Operating mode; only 'MANU'.
+  - name: currprogval
+    type: VARCHAR
+    description: Current program; NULL = no program active.
+  - name: progcyclecount
+    type: BIGINT
+    description: Program cycles executed.
+  - name: cycletimesecval
+    type: FLOAT
+    description: Cycle time seconds; NULL = no data.
+  - name: axiscountval
+    type: BIGINT
+    description: Number of axes (4-7).
+- schema: main
+  table: actuation_data
+  columns:
+  - name: actreg
+    type: VARCHAR
+    description: Actuation record id (PK).
+  - name: actoperref
+    type: VARCHAR
+    description: FK operation.operreg.
+  - name: actrecref
+    type: VARCHAR
+    description: FK robot_record.botcode (= robot_details.botdetreg).
+  - name: poserrmmval
+    type: FLOAT
+    description: Position error mm; NULL = no data.
+  - name: payloadwval
+    type: FLOAT
+    description: Actual payload weight kg; NULL = no data. Numerator of PUR.
+  - name: tcpspeedval
+    type: FLOAT
+    description: TCP speed mm/s.
+- schema: main
+  table: joint_condition
+  columns:
+  - name: jcondid
+    type: BIGINT
+    description: PK.
+  - name: jcondoperref
+    type: VARCHAR
+    description: FK operation.operreg.
+  - name: jcdetref
+    type: VARCHAR
+    description: FK robot_details.botdetreg.
+  - name: joint_health
+    type: JSON
+    description: J1..J6 each {temperature_C, vibration_mmps, backlash_deg}; extract (jc.joint_health->'J1'->>'temperature_C')::DOUBLE.
+      No NULLs found.
+- schema: main
+  table: joint_performance
+  columns:
+  - name: jperfid
+    type: BIGINT
+    description: PK.
+  - name: jperfoperref
+    type: VARCHAR
+    description: FK operation.operreg.
+  - name: jperfdetref
+    type: VARCHAR
+    description: FK robot_details.botdetreg.
+  - name: joint_metrics
+    type: JSON
+    description: J1..J6 each {angle_deg, speed_dps, torque_nm}.
+- schema: main
+  table: mechanical_status
+  columns:
+  - name: mechactref
+    type: VARCHAR
+    description: FK actuation_data.actreg.
+  - name: mechoperref
+    type: VARCHAR
+    description: PK, FK operation.operreg.
+  - name: mechdetref
+    type: VARCHAR
+    description: FK robot_details.botdetreg.
+  - name: component_status
+    type: JSON
+    description: brakes.Jn / encoders.Jn = 'Error'|'Normal'|'Warning'|null; gearboxes.Jn = {temperature_C,
+      vibration_mmps}.
+- schema: main
+  table: system_controller
+  columns:
+  - name: systemoverseeractuation
+    type: VARCHAR
+    description: PK, FK actuation_data.actreg.
+  - name: systemoverseeroperation
+    type: VARCHAR
+    description: FK operation.operreg.
+  - name: overseerloadvalue
+    type: FLOAT
+    description: Controller CPU load %, 0-100. See cpu_load_level.
+  - name: memuseval
+    type: FLOAT
+    description: Memory usage %, 0-100.
+  - name: overseerthermallevel
+    type: VARCHAR
+    description: Thermal level text like '38.5°C'; NULL in all rows.
+  - name: cabtempval
+    type: FLOAT
+    description: Cabinet temperature.
+  - name: cabhumiditylevel
+    type: VARCHAR
+    description: Cabinet humidity text like '47%'; NULL in all rows.
+- schema: main
+  table: maintenance_and_fault
+  columns:
+  - name: upkeepactuation
+    type: VARCHAR
+    description: PK, FK actuation_data.actreg.
+  - name: upkeepoperation
+    type: VARCHAR
+    description: FK operation.operreg.
+  - name: faultcodeval
+    type: VARCHAR
+    description: Fault code; NULL = none.
+  - name: issuecategoryval
+    type: VARCHAR
+    description: COM, ELE, MEC, NON, SOF.
+  - name: issuelevelval
+    type: VARCHAR
+    description: Critical level, High level, Medium level, Low level, None level.
+  - name: faultpredscore
+    type: FLOAT
+    description: Fault prediction score 0-1; NULL = none. Tiers Low <0.3, Medium 0.3-0.7, High >0.7.
+  - name: faulttypeestimation
+    type: VARCHAR
+    description: Controller, Gearbox, Joint, Motor; NULL = none.
+  - name: rulhours
+    type: BIGINT
+    description: Remaining useful life hours.
+  - name: upkeepduedays
+    type: BIGINT
+    description: Days until maintenance due; <= 0 means overdue.
+  - name: upkeepcostest
+    type: VARCHAR
+    description: Cost text like '$7,299.59'; NULL in all rows.
+- schema: main
+  table: performance_and_safety
+  columns:
+  - name: effectivenessactuation
+    type: VARCHAR
+    description: PK, FK actuation_data.actreg (join to operation via actuation_data.actoperref).
+  - name: effectivenessrobot
+    type: VARCHAR
+    description: FK robot_details.botdetreg.
+  - name: conditionindexval
+    type: FLOAT
+    description: Condition (health) index 0-1. Tiers Excellent >0.9, Good 0.7-0.9, Fair 0.5-0.7, Poor
+      <0.5.
+  - name: effectivenessindexval
+    type: FLOAT
+    description: Effectiveness index; NULL = no data.
+  - name: qualitymeasureval
+    type: FLOAT
+    description: Quality measure; NULL = no data.
+  - name: energyusekwhval
+    type: VARCHAR
+    description: Text like '70.54 kWh'; NULL in all rows.
+  - name: pwrfactorval
+    type: VARCHAR
+    description: Text like 'PF=0.82'; NULL in all rows.
+  - name: airpressval
+    type: FLOAT
+    description: Air pressure bar (5.0-7.0 in data). Normal 5.5-7.0, Low <5.5, High >7.0.
+  - name: safetystateval
+    type: VARCHAR
+    description: '''✓ Normal'' = normal operation; ''Warning'' = Protective Stop; ''✗ Emergency'' = critical
+      stop.'
+  - name: zoneviolnum
+    type: BIGINT
+    description: Zone violations.
+  - name: emergencystopcount
+    type: BIGINT
+    description: Emergency stops (0-5).
+  - name: collisioncount
+    type: BIGINT
+    description: Collisions (0-3).
+  - name: overloadcnt
+    type: BIGINT
+    description: Overloads (0-5).
+  - name: speedviolnum
+    type: BIGINT
+    description: Speed violations.
+  - name: calibstateval
+    type: VARCHAR
+    description: 'Calibration state: ''Y'' = Success, ''0'' = Failed, ''N'' = Pending.'
+  - name: toolchangecount
+    type: BIGINT
+    description: Tool changes; NULL = no data.
+  - name: toolwearpct
+    type: VARCHAR
+    description: Tool wear percent text; NULL in all rows.

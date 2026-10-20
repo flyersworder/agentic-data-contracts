@@ -1,0 +1,1407 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: insider_trading, author: claudeopus5.5
+metrics:
+- name: account_balance
+  description: 'Trader account balance in USD parsed from traders.trader_fin_data->>''usd_bal'', stored
+    as text like ''$4,692,991 '' ($, commas, trailing space).
+
+    '
+  sql_expression: CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]', '', 'g') AS DOUBLE)
+  source_model: main.traders
+  from_sql: main.traders tr
+  grain: one row per trader
+  domains:
+  - data_formats
+- name: daily_turnover_rate
+  description: 'Daily Turnover Rate (DTR): ratio of a trader''s daily trading volume to their account
+    balance, indicating capital velocity. DTR = Daily Trading Volume / Account Balance = trade_records.vol_day
+    / parsed usd_bal. Note: the stored text column trade_records.bal_turnover (''2.69 times/day'') does
+    NOT equal this formula in the data; use this metric for DTR. Record-level join used by most metrics:
+    trade_records t, traders tr, and LEFT JOINs of every per-record table on the record key plus trader_relationships
+    rel on the trader.
+
+    '
+  sql_expression: t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]', '',
+    'g') AS DOUBLE), 0)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: order_modification_intensity
+  description: 'Order Modification Intensity (OMI): how frequently a trader modifies orders relative to
+    their cancellation rate. OMI = mod_freq / (1 - cancel_pct), undefined (NULL) if cancellation percentage
+    is 1. Fields from order_behaviour.order_metrics (cancel_pct is a 0..1 fraction, NULL when not computed).
+    Observed max OMI is ~0.71.
+
+    '
+  sql_expression: CAST(ob.order_metrics->>'mod_freq' AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct'
+    AS DOUBLE), 0)
+  source_model: main.order_behaviour
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: trader_leverage_exposure
+  description: 'Trader Leverage Exposure (TLE): the trader''s leverage ratio from performance data, trade_records.trade_perf->>''lev_ratio''
+    (NULL for 400 records).
+
+    '
+  sql_expression: CAST(t.trade_perf->>'lev_ratio' AS DOUBLE)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: suspicious_activity_index
+  description: 'Suspicious Activity Index (SAI): composite index quantifying overall suspicious trading
+    behaviour as a weighted sum of normalized risk indicators, including probabilities for spoofing, front-running,
+    wash trading and confirmed layering. INTERPRETATION (weights/normalization are not documented): equal
+    weights 0.25 each of spoof_prob (0..1 after stripping ''%''), front_run/100, wash_flag mapped High=1,
+    Medium=0.5, Low/NULL=0, and layer_idx=''Confirmed''=1 else 0; missing components count 0. Result range
+    0..1.
+
+    '
+  sql_expression: (0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE),
+    0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0, 0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag')
+    WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE 0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed'
+    THEN 1.0 ELSE 0.0 END))
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: pattern_anomaly_score
+  description: 'Pattern Anomaly Score (PAS): deviation of pattern similarity from peer correlation, potentially
+    indicating unique illicit behaviour. PAS = |Pattern Similarity Score - Peer Correlation Score| = |reg_compliance.pat_rec
+    - market_metrics->>''peer_corr''|. INTERPRETATION: pat_rec is the pattern-similarity score; it is
+    stored 0..100 (documented context says 0-1) and is used as stored.
+
+    '
+  sql_expression: ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE))
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: compliance_recidivism_score
+  description: 'Compliance Recidivism Score (CRS): tendency for repeat compliance issues, adjusted for
+    account age. CRS = prev_viol / Max(1, age_days/365), with prev_viol from reg_compliance.compliance_data
+    and age_days from traders.trader_fin_data (365.0 to avoid integer division).
+
+    '
+  sql_expression: CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'
+    AS DOUBLE) / 365.0)
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: investigation_intensity_index
+  description: 'Investigation Intensity Index (III): combines behavioural and network analysis scores.
+    III = 0.6 * behav_score + 0.4 * net_score (reg_compliance).
+
+    '
+  sql_expression: 0.6 * rc.behav_score + 0.4 * rc.net_score
+  source_model: main.reg_compliance
+  from_sql: main.reg_compliance rc
+  grain: one row per compliance case (record)
+  domains:
+  - compliance
+- name: sentiment_divergence_factor
+  description: 'Sentiment Divergence Factor (SDF): |News Sentiment Score - Social Sentiment Score| = |sentiment_data->>''news_score''
+    - sentiment_data->>''soc_sent''|.
+
+    '
+  sql_expression: ABS(CAST(sa.sentiment_data->>'news_score' AS DOUBLE) - CAST(sa.sentiment_data->>'soc_sent'
+    AS DOUBLE))
+  source_model: main.sentiment_analytics
+  from_sql: main.sentiment_analytics sa
+  grain: one row per record
+  domains:
+  - insider_events
+- name: relative_short_interest
+  description: 'Relative Short Interest (RSI): short interest ratio relative to institutional ownership.
+    RSI = short_rt / inst_own, undefined (NULL) if institutional ownership is 0. Both NULL for ~400 rows.
+
+    '
+  sql_expression: sa.short_rt / NULLIF(sa.inst_own, 0)
+  source_model: main.sentiment_analytics
+  from_sql: main.sentiment_analytics sa
+  grain: one row per record
+  domains:
+  - insider_events
+- name: enforcement_financial_impact_ratio
+  description: 'Enforcement Financial Impact Ratio (EFIR): penalty amount over the trader''s account balance
+    at the time of the related transaction. EFIR = enf_actions->>''pen_amt'' / parsed usd_bal of the record''s
+    trader.
+
+    '
+  sql_expression: CAST(ea.enf_actions->>'pen_amt' AS DOUBLE) / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0)
+  source_model: main.enforcement_actions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: high_risk_trader_profile
+  description: 'High-Risk Trader Profile: trader is High-Risk if TLE > 5.0 AND risk level (trader_fin_data->>''risk_lvl'')
+    is ''Aggressive'' OR DTR > 0.5. Grouped as written: (TLE > 5.0 AND Aggressive) OR DTR > 0.5. Evaluated
+    per trade record (aggregate with BOOL_OR by t.tr_anchor for a trader-level flag).
+
+    '
+  sql_expression: ((CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 5.0 AND (tr.trader_fin_data->>'risk_lvl')
+    = 'Aggressive') OR t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]',
+    '', 'g') AS DOUBLE), 0) > 0.5)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: potential_insider_trading_flag
+  description: 'Potential Insider Trading Flag: a transaction is flagged if its information leakage score
+    > 50.0 AND it is linked to a corporate event (evt_near IS NOT NULL) AND the announcement timing is
+    ''Pre-market'' or ''Intraday'' (stored as ''Pre-market hrs before'' / ''Intraday hrs before'', matched
+    by prefix).
+
+    '
+  sql_expression: (ce.leak_score > 50.0 AND ce.evt_near IS NOT NULL AND (ce.announce_time LIKE 'Pre-market%'
+    OR ce.announce_time LIKE 'Intraday%'))
+  source_model: main.corporate_events
+  from_sql: main.corporate_events ce
+  grain: one row per record
+  domains:
+  - insider_events
+- name: leakage_score_band
+  description: 'Information Leakage Score Interpretation (0-100): Low (<20) little evidence of informed
+    trading; Moderate (20-50) warrants attention; High (>50) strongly suggests trading on non-public information
+    and requires investigation.
+
+    '
+  sql_expression: CASE WHEN ce.leak_score < 20 THEN 'Low' WHEN ce.leak_score <= 50 THEN 'Moderate' WHEN
+    ce.leak_score > 50 THEN 'High' END
+  source_model: main.corporate_events
+  from_sql: main.corporate_events ce
+  grain: one row per record
+  domains:
+  - insider_events
+- name: layering_spoofing_pattern
+  description: 'Market Manipulation Pattern: Layering/Spoofing: a record suggests Layering/Spoofing if
+    layer_idx is ''Confirmed'' OR (spoofing probability > 0.75 AND OMI > 1.0). spoof_prob is text ''x.xx%''
+    whose number is a 0..1 probability; it is compared after stripping ''%''.
+
+    '
+  sql_expression: "(ms.layer_idx = 'Confirmed' OR (CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%',\
+    \ '') AS DOUBLE) > 0.75\n    AND CAST(ob.order_metrics->>'mod_freq' AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct'\
+    \ AS DOUBLE), 0) > 1.0))"
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: collusion_network_indicator
+  description: 'Collusion Network Indicator: potential collusion if trader circle size (trader_relationships.circ_size)
+    > 5 AND group behaviour score (trader_links->>''grp_score'') > 0.6 AND communication path (commPath)
+    is ''Regular''. grp_score is stored 0.23..99.87; the threshold 0.6 is applied as stored. Relationship
+    row is per trader (rel_root).
+
+    '
+  sql_expression: (rel.circ_size > 5 AND CAST(rel.trader_links->>'grp_score' AS DOUBLE) > 0.6 AND rel.commPath
+    = 'Regular')
+  source_model: main.trader_relationships
+  from_sql: main.trader_relationships rel
+  grain: one row per trader
+  domains:
+  - manipulation
+- name: elevated_regulatory_scrutiny
+  description: 'Elevated Regulatory Scrutiny: alert_lvl is ''High'' or ''Critical'' AND invest_prior is
+    ''High'' AND mon_inten is ''Intensive''.
+
+    '
+  sql_expression: (rc.alert_lvl IN ('High', 'Critical') AND rc.invest_prior = 'High' AND rc.mon_inten
+    = 'Intensive')
+  source_model: main.reg_compliance
+  from_sql: main.reg_compliance rc
+  grain: one row per compliance case (record)
+  domains:
+  - compliance
+- name: problematic_compliance_history
+  description: 'Problematic Compliance History: more than 3 previous violations OR compliance rating (comp_rate)
+    ''C'' or ''D'' OR CRS > 1.0.
+
+    '
+  sql_expression: (CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) > 3 OR (rc.compliance_data->>'comp_rate')
+    IN ('C', 'D') OR CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'
+    AS DOUBLE) / 365.0) > 1.0)
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: wash_trading_alert
+  description: 'Wash Trading Alert: wash trading suspicion level manip_signals->>''wash_flag'' is ''High''.'
+  sql_expression: ((ms.manip_signals->>'wash_flag') = 'High')
+  source_model: main.manipulation_signals
+  from_sql: main.manipulation_signals ms
+  grain: one row per record
+  domains:
+  - manipulation
+- name: event_driven_trader
+  description: 'Event-Driven Trader: more than 30% (>0.3) of the trader''s transactions are linked to
+    a corporate event (corporate_events.evt_near IS NOT NULL), over all the trader''s trade records. Aggregate:
+    GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: (AVG(CASE WHEN ce.evt_near IS NOT NULL THEN 1.0 ELSE 0.0 END) > 0.3)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - insider_events
+- name: high_cancellation_modification_trader
+  description: 'High Cancellation/Modification Trader: average cancel_pct > 0.5 OR average OMI > 1.5 across
+    the trader''s transactions. GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: (AVG(CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE)) > 0.5 OR AVG(CAST(ob.order_metrics->>'mod_freq'
+    AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0)) > 1.5)
+  source_model: main.order_behaviour
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - trading_behaviour
+- name: significant_enforcement_action
+  description: 'Significant Enforcement Action: penalty impact (enf_actions->>''pen_flag'') is ''Fine''
+    or ''Ban'' OR act_taken is ''Suspension'' OR biz_restrict is ''Full''.
+
+    '
+  sql_expression: ((ea.enf_actions->>'pen_flag') IN ('Fine', 'Ban') OR ea.act_taken = 'Suspension' OR
+    ea.biz_restrict = 'Full')
+  source_model: main.enforcement_actions
+  from_sql: main.enforcement_actions ea
+  grain: one row per enforcement action (record)
+  domains:
+  - compliance
+- name: risk_adjusted_turnover
+  description: Risk-Adjusted Turnover (RAT) = DTR * TLE.
+  sql_expression: (t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]', '',
+    'g') AS DOUBLE), 0)) * CAST(t.trade_perf->>'lev_ratio' AS DOUBLE)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: combined_manipulation_indicator
+  description: Combined Manipulation Indicator (CMI) = (SAI + PAS) / 2.
+  sql_expression: ((0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE),
+    0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0, 0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag')
+    WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE 0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed'
+    THEN 1.0 ELSE 0.0 END)) + ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE))) / 2
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: compliance_health_score
+  description: 'Compliance Health Score (CHS) = 1 / (1 + CRS * numeric grade). INTERPRETATION of the numeric
+    mapping of comp_rate (not documented): A=1, B=2, C=3, D=4 (worse grade = larger penalty).
+
+    '
+  sql_expression: 1.0 / (1 + (CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'
+    AS DOUBLE) / 365.0)) * (CASE (rc.compliance_data->>'comp_rate') WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN
+    'C' THEN 3 WHEN 'D' THEN 4 END))
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: weighted_investigation_score
+  description: 'Weighted Investigation Score (WIS) = III * alert-level multiplier (''Low''=1, ''Medium''=2,
+    ''High''=3, ''Critical''=4; Low and High as documented, Medium/Critical by the same ordinal scale).
+
+    '
+  sql_expression: (0.6 * rc.behav_score + 0.4 * rc.net_score) * (CASE rc.alert_lvl WHEN 'Low' THEN 1 WHEN
+    'Medium' THEN 2 WHEN 'High' THEN 3 WHEN 'Critical' THEN 4 END)
+  source_model: main.reg_compliance
+  from_sql: main.reg_compliance rc
+  grain: one row per compliance case (record)
+  domains:
+  - compliance
+- name: sentiment_weighted_option_volume
+  description: Sentiment-Weighted Option Volume (SWOV) = opt_vol * (1 + SDF).
+  sql_expression: sa.opt_vol * (1 + ABS(CAST(sa.sentiment_data->>'news_score' AS DOUBLE) - CAST(sa.sentiment_data->>'soc_sent'
+    AS DOUBLE)))
+  source_model: main.sentiment_analytics
+  from_sql: main.sentiment_analytics sa
+  grain: one row per record
+  domains:
+  - insider_events
+- name: logarithmic_enforcement_fine_impact
+  description: Logarithmic Enforcement Fine Impact (LEFI) = EFIR * log10(Max(10, pen_amt)).
+  sql_expression: (CAST(ea.enf_actions->>'pen_amt' AS DOUBLE) / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0)) * LOG10(GREATEST(10, CAST(ea.enf_actions->>'pen_amt' AS DOUBLE)))
+  source_model: main.enforcement_actions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: aggressive_trading_intensity
+  description: Aggressive Trading Intensity (ATI) = DTR * TLE * OMI.
+  sql_expression: (t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]', '',
+    'g') AS DOUBLE), 0)) * CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) * (CAST(ob.order_metrics->>'mod_freq'
+    AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0))
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: suspicion_weighted_turnover
+  description: Suspicion-Weighted Turnover (SWT) = SAI * DTR.
+  sql_expression: (0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE),
+    0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0, 0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag')
+    WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE 0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed'
+    THEN 1.0 ELSE 0.0 END)) * (t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0))
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: boosted_insider_leakage_score
+  description: 'Boosted Insider Leakage Score (BILS) = leak_score * (1.5 if Potential Insider Trading
+    Flag is True else 1.0).
+
+    '
+  sql_expression: ce.leak_score * (CASE WHEN (ce.leak_score > 50.0 AND ce.evt_near IS NOT NULL AND (ce.announce_time
+    LIKE 'Pre-market%' OR ce.announce_time LIKE 'Intraday%')) THEN 1.5 ELSE 1.0 END)
+  source_model: main.corporate_events
+  from_sql: main.corporate_events ce
+  grain: one row per record
+  domains:
+  - insider_events
+- name: market_adjusted_pattern_anomaly
+  description: Market-Adjusted Pattern Anomaly (MAPA) = PAS * (1 - market_conditions.mkt_corr).
+  sql_expression: ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)) * (1 - mc.mkt_corr)
+  source_model: main.market_conditions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: high_frequency_high_risk_trader
+  description: 'High-Frequency High-Risk Trader: High-Risk Trader Profile AND trade_records.freq_tag =
+    ''High''.'
+  sql_expression: (((CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 5.0 AND (tr.trader_fin_data->>'risk_lvl')
+    = 'Aggressive') OR t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]',
+    '', 'g') AS DOUBLE), 0) > 0.5) AND t.freq_tag = 'High')
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: suspected_event_driven_insider
+  description: 'Suspected Event-Driven Insider: Event-Driven Trader AND Potential Insider Trading Flag
+    True (on at least one of the trader''s records). GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: (AVG(CASE WHEN ce.evt_near IS NOT NULL THEN 1.0 ELSE 0.0 END) > 0.3 AND COALESCE(BOOL_OR(ce.leak_score
+    > 50.0 AND ce.evt_near IS NOT NULL AND (ce.announce_time LIKE 'Pre-market%' OR ce.announce_time LIKE
+    'Intraday%')), FALSE))
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - insider_events
+- name: confirmed_manipulator_under_scrutiny
+  description: 'Confirmed Manipulator Under Scrutiny: Layering/Spoofing pattern AND Elevated Regulatory
+    Scrutiny on the case.'
+  sql_expression: "((ms.layer_idx = 'Confirmed'\n  OR (CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%',\
+    \ '') AS DOUBLE) > 0.75\n      AND CAST(ob.order_metrics->>'mod_freq' AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct'\
+    \ AS DOUBLE), 0) > 1.0))\nAND rc.alert_lvl IN ('High', 'Critical') AND rc.invest_prior = 'High' AND\
+    \ rc.mon_inten = 'Intensive')"
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+  - compliance
+- name: high_risk_collusion_group_member
+  description: 'High-Risk Collusion Group Member: Collusion Network Indicator AND High-Risk Trader Profile.'
+  sql_expression: "(rel.circ_size > 5 AND CAST(rel.trader_links->>'grp_score' AS DOUBLE) > 0.6 AND rel.commPath\
+    \ = 'Regular' AND ((CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 5.0 AND (tr.trader_fin_data->>'risk_lvl')\
+    \ = 'Aggressive')\n     OR t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',\
+    \ '[$, ]', '', 'g') AS DOUBLE), 0) > 0.5))"
+  source_model: main.trader_relationships
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: chronic_compliance_violator
+  description: 'Chronic Compliance Violator: Problematic Compliance History AND CRS > 1.5.'
+  sql_expression: "((CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) > 3\n  OR (rc.compliance_data->>'comp_rate')\
+    \ IN ('C', 'D')\n  OR CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'\
+    \ AS DOUBLE) / 365.0) > 1.0)\nAND CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'\
+    \ AS DOUBLE) / 365.0) > 1.5)"
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: high_volume_wash_trading_concern
+  description: 'High-Volume Wash Trading Concern: Wash Trading Alert AND trade_records.vol_day > 1,000,000.'
+  sql_expression: ((ms.manip_signals->>'wash_flag') = 'High' AND t.vol_day > 1000000)
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: aggressive_event_speculator
+  description: 'Aggressive Event Speculator: Event-Driven Trader AND risk_lvl ''Aggressive''. GROUP BY
+    t.tr_anchor.'
+  sql_expression: (AVG(CASE WHEN ce.evt_near IS NOT NULL THEN 1.0 ELSE 0.0 END) > 0.3 AND MAX(tr.trader_fin_data->>'risk_lvl')
+    = 'Aggressive')
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - insider_events
+- name: dark_pool_usage_share
+  description: 'Share of a trader''s transactions showing Dark Pool Usage, read as order_behaviour.dark_use
+    > 0 (NULL = not collected, counted as no usage) over all the trader''s records. GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: AVG(CASE WHEN ob.dark_use > 0 THEN 1.0 ELSE 0.0 END)
+  source_model: main.order_behaviour
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - trading_behaviour
+- name: potentially_evasive_order_modifier
+  description: 'Potentially Evasive Order Modifier: High Cancellation/Modification Trader AND Dark Pool
+    Usage in more than 50% of their transactions. GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: "((AVG(CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE)) > 0.5\n  OR AVG(CAST(ob.order_metrics->>'mod_freq'\
+    \ AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0)) > 1.5)\nAND AVG(CASE\
+    \ WHEN ob.dark_use > 0 THEN 1.0 ELSE 0.0 END) > 0.5)"
+  source_model: main.order_behaviour
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - trading_behaviour
+- name: financially_impactful_enforcement_case
+  description: 'Financially Impactful Enforcement Case: Significant Enforcement Action AND EFIR > 0.1.'
+  sql_expression: (((ea.enf_actions->>'pen_flag') IN ('Fine', 'Ban') OR ea.act_taken = 'Suspension' OR
+    ea.biz_restrict = 'Full') AND CAST(ea.enf_actions->>'pen_amt' AS DOUBLE) / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0) > 0.1)
+  source_model: main.enforcement_actions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: peer_mimicry_suspicion
+  description: 'Peer Mimicry Suspicion: low PAS (< 0.1) BUT high peer correlation (peer_corr > 0.7).'
+  sql_expression: (ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)) < 0.1 AND CAST(mc.market_metrics->>'peer_corr'
+    AS DOUBLE) > 0.7)
+  source_model: main.market_conditions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: investigation_compliance_risk_index
+  description: Investigation Compliance Risk Index (ICRI) = WIS * (1 - CHS).
+  sql_expression: "((0.6 * rc.behav_score + 0.4 * rc.net_score) * (CASE rc.alert_lvl WHEN 'Low' THEN 1\
+    \ WHEN 'Medium' THEN 2 WHEN 'High' THEN 3 WHEN 'Critical' THEN 4 END)) * (1 - 1.0 / (1 + (CAST(rc.compliance_data->>'prev_viol'\
+    \ AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days' AS DOUBLE) / 365.0))\n           \
+    \      * (CASE (rc.compliance_data->>'comp_rate') WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3\
+    \ WHEN 'D' THEN 4 END)))"
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: sentiment_driven_leakage_risk
+  description: Sentiment-Driven Leakage Risk (SDLR) = SWOV * leak_score.
+  sql_expression: (sa.opt_vol * (1 + ABS(CAST(sa.sentiment_data->>'news_score' AS DOUBLE) - CAST(sa.sentiment_data->>'soc_sent'
+    AS DOUBLE)))) * ce.leak_score
+  source_model: main.sentiment_analytics
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - insider_events
+- name: unique_pattern_deviation_ratio
+  description: Unique Pattern Deviation Ratio (UPDR) = PAS / Max(0.01, Pattern Similarity Score = pat_rec).
+  sql_expression: ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)) / GREATEST(0.01, rc.pat_rec)
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: recidivism_enforcement_severity
+  description: Recidivism Enforcement Severity (RES) = CRS * EFIR.
+  sql_expression: (CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'
+    AS DOUBLE) / 365.0)) * (CAST(ea.enf_actions->>'pen_amt' AS DOUBLE) / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0))
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: aggressive_suspicion_score
+  description: Aggressive Suspicion Score (ASS) = SAI * ATI.
+  sql_expression: (0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE),
+    0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0, 0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag')
+    WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE 0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed'
+    THEN 1.0 ELSE 0.0 END)) * (t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE), 0)) * CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) * (CAST(ob.order_metrics->>'mod_freq'
+    AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0))
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: capital_adjusted_investigation_intensity
+  description: Capital-Adjusted Investigation Intensity (CAII) = III / Max(1000, account balance).
+  sql_expression: (0.6 * rc.behav_score + 0.4 * rc.net_score) / GREATEST(1000, CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',
+    '[$, ]', '', 'g') AS DOUBLE))
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: market_agnostic_suspicion_index
+  description: Market-Agnostic Suspicion Index (MASI) = (SAI + MAPA) / 2.
+  sql_expression: ((0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE),
+    0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0, 0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag')
+    WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE 0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed'
+    THEN 1.0 ELSE 0.0 END)) + ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)) * (1 -
+    mc.mkt_corr)) / 2
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: cross_modification_ratio
+  description: Cross-Modification Ratio (CMR) = Cross-Trade Frequency (order_behaviour.x_freq) / Max(0.01,
+    OMI).
+  sql_expression: ob.x_freq / GREATEST(0.01, CAST(ob.order_metrics->>'mod_freq' AS DOUBLE) / NULLIF(1
+    - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0))
+  source_model: main.order_behaviour
+  from_sql: main.order_behaviour ob
+  grain: one row per record
+  domains:
+  - trading_behaviour
+- name: insider_sentiment_short_ratio
+  description: Insider Sentiment Short Ratio (ISSR) = BILS * RSI.
+  sql_expression: (ce.leak_score * (CASE WHEN (ce.leak_score > 50.0 AND ce.evt_near IS NOT NULL AND (ce.announce_time
+    LIKE 'Pre-market%' OR ce.announce_time LIKE 'Intraday%')) THEN 1.5 ELSE 1.0 END)) * (sa.short_rt /
+    NULLIF(sa.inst_own, 0))
+  source_model: main.corporate_events
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - insider_events
+- name: risk_adjusted_win_rate
+  description: Risk-Adjusted Win Rate (RAWR) = win_pct / Max(1, TLE); win_pct from trade_perf (NULL when
+    not calculated).
+  sql_expression: CAST(t.trade_perf->>'win_pct' AS DOUBLE) / GREATEST(1, CAST(t.trade_perf->>'lev_ratio'
+    AS DOUBLE))
+  source_model: main.trade_records
+  from_sql: main.trade_records t
+  grain: one row per trade record
+  domains:
+  - trading_behaviour
+- name: high_risk_manipulator_candidate
+  description: 'High-Risk Manipulator Candidate: High-Risk Trader Profile AND Layering/Spoofing pattern.'
+  sql_expression: "(((CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 5.0 AND (tr.trader_fin_data->>'risk_lvl')\
+    \ = 'Aggressive')\n  OR t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$,\
+    \ ]', '', 'g') AS DOUBLE), 0) > 0.5)\nAND (ms.layer_idx = 'Confirmed'\n  OR (CAST(REPLACE(ms.manip_signals->>'spoof_prob',\
+    \ '%', '') AS DOUBLE) > 0.75\n      AND CAST(ob.order_metrics->>'mod_freq' AS DOUBLE) / NULLIF(1 -\
+    \ CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0) > 1.0)))"
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: escalated_compliance_failure
+  description: 'Escalated Compliance Failure: Problematic Compliance History AND Significant Enforcement
+    Action.'
+  sql_expression: "((CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) > 3\n  OR (rc.compliance_data->>'comp_rate')\
+    \ IN ('C', 'D')\n  OR CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'\
+    \ AS DOUBLE) / 365.0) > 1.0)\nAND ((ea.enf_actions->>'pen_flag') IN ('Fine', 'Ban') OR ea.act_taken\
+    \ = 'Suspension' OR ea.biz_restrict = 'Full'))"
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: networked_mimicry_risk
+  description: 'Networked Mimicry Risk: Peer Mimicry Suspicion AND Collusion Network Indicator (of the
+    record''s trader).'
+  sql_expression: (ABS(rc.pat_rec - CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)) < 0.1 AND CAST(mc.market_metrics->>'peer_corr'
+    AS DOUBLE) > 0.7 AND rel.circ_size > 5 AND CAST(rel.trader_links->>'grp_score' AS DOUBLE) > 0.6 AND
+    rel.commPath = 'Regular')
+  source_model: main.market_conditions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: high_scrutiny_wash_trading_case
+  description: 'High-Scrutiny Wash Trading Case: Elevated Regulatory Scrutiny AND High-Volume Wash Trading
+    Concern.'
+  sql_expression: (rc.alert_lvl IN ('High', 'Critical') AND rc.invest_prior = 'High' AND rc.mon_inten
+    = 'Intensive' AND (ms.manip_signals->>'wash_flag') = 'High' AND t.vol_day > 1000000)
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+  - manipulation
+- name: volatile_event_speculator
+  description: 'Volatile Event Speculator: Aggressive Event Speculator AND associated with a high SDF
+    (> 1.0) on at least one of the trader''s records. GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: (AVG(CASE WHEN ce.evt_near IS NOT NULL THEN 1.0 ELSE 0.0 END) > 0.3 AND MAX(tr.trader_fin_data->>'risk_lvl')
+    = 'Aggressive' AND MAX(ABS(CAST(sa.sentiment_data->>'news_score' AS DOUBLE) - CAST(sa.sentiment_data->>'soc_sent'
+    AS DOUBLE))) > 1.0)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - insider_events
+- name: confirmed_evasive_layering_spoofing
+  description: 'Confirmed Evasive Layering/Spoofing: High Cancellation/Modification Trader AND confirmed
+    Layering/Spoofing where layer_idx is ''Confirmed'' or spoofing probability > 0.75 (on at least one
+    record). GROUP BY t.tr_anchor.
+
+    '
+  sql_expression: "((AVG(CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE)) > 0.5\n  OR AVG(CAST(ob.order_metrics->>'mod_freq'\
+    \ AS DOUBLE) / NULLIF(1 - CAST(ob.order_metrics->>'cancel_pct' AS DOUBLE), 0)) > 1.5)\nAND COALESCE(BOOL_OR(ms.layer_idx\
+    \ = 'Confirmed' OR CAST(REPLACE(ms.manip_signals->>'spoof_prob', '%', '') AS DOUBLE) > 0.75), FALSE))"
+  source_model: main.manipulation_signals
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trader (GROUP BY t.tr_anchor)
+  domains:
+  - manipulation
+- name: high_velocity_suspicion_trader
+  description: 'High Velocity Suspicion Trader: RAT > 1.0 AND SAI > 0.6.'
+  sql_expression: ((t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal', '[$, ]', '',
+    'g') AS DOUBLE), 0)) * CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 1.0 AND (0.25 * COALESCE(CAST(REPLACE(ms.manip_signals->>'spoof_prob',
+    '%', '') AS DOUBLE), 0) + 0.25 * COALESCE(CAST(ms.manip_signals->>'front_run' AS DOUBLE) / 100.0,
+    0) + 0.25 * (CASE (ms.manip_signals->>'wash_flag') WHEN 'High' THEN 1.0 WHEN 'Medium' THEN 0.5 ELSE
+    0.0 END) + 0.25 * (CASE WHEN ms.layer_idx = 'Confirmed' THEN 1.0 ELSE 0.0 END)) > 0.6)
+  source_model: main.trade_records
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+- name: high_intensity_insider_investigation
+  description: 'High-Intensity Insider Investigation: Potential Insider Trading Flag AND III > 70.'
+  sql_expression: (ce.leak_score > 50.0 AND ce.evt_near IS NOT NULL AND (ce.announce_time LIKE 'Pre-market%'
+    OR ce.announce_time LIKE 'Intraday%') AND 0.6 * rc.behav_score + 0.4 * rc.net_score > 70)
+  source_model: main.corporate_events
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - insider_events
+  - compliance
+- name: severe_chronic_violator_case
+  description: 'Severe Chronic Violator Case: Elevated Regulatory Scrutiny AND Chronic Compliance Violator.'
+  sql_expression: "(rc.alert_lvl IN ('High', 'Critical') AND rc.invest_prior = 'High' AND rc.mon_inten\
+    \ = 'Intensive' AND (CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) > 3\n  OR (rc.compliance_data->>'comp_rate')\
+    \ IN ('C', 'D')\n  OR CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'\
+    \ AS DOUBLE) / 365.0) > 1.0)\nAND CAST(rc.compliance_data->>'prev_viol' AS DOUBLE) / GREATEST(1, CAST(tr.trader_fin_data->>'age_days'\
+    \ AS DOUBLE) / 365.0) > 1.5)"
+  source_model: main.reg_compliance
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: costly_high_frequency_risk_enforcement
+  description: 'Costly High-Frequency Risk Enforcement: Financially Impactful Enforcement Case AND High-Frequency
+    High-Risk Trader.'
+  sql_expression: "(((ea.enf_actions->>'pen_flag') IN ('Fine', 'Ban') OR ea.act_taken = 'Suspension' OR\
+    \ ea.biz_restrict = 'Full') AND CAST(ea.enf_actions->>'pen_amt' AS DOUBLE) / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',\
+    \ '[$, ]', '', 'g') AS DOUBLE), 0) > 0.1 AND ((CAST(t.trade_perf->>'lev_ratio' AS DOUBLE) > 5.0 AND\
+    \ (tr.trader_fin_data->>'risk_lvl') = 'Aggressive')\n  OR t.vol_day / NULLIF(CAST(regexp_replace(tr.trader_fin_data->>'usd_bal',\
+    \ '[$, ]', '', 'g') AS DOUBLE), 0) > 0.5)\nAND t.freq_tag = 'High')"
+  source_model: main.enforcement_actions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - compliance
+- name: high_sdlr_transaction
+  description: 'High SDLR Transaction: Sentiment-Driven Leakage Risk > 1000.'
+  sql_expression: ((sa.opt_vol * (1 + ABS(CAST(sa.sentiment_data->>'news_score' AS DOUBLE) - CAST(sa.sentiment_data->>'soc_sent'
+    AS DOUBLE)))) * ce.leak_score > 1000)
+  source_model: main.sentiment_analytics
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - insider_events
+- name: premature_resolution_block
+  description: 'Premature Resolution Block: business rule preventing an enforcement action from being
+    marked ''Resolved'' if its linked Investigation Intensity Index is greater than 75. TRUE = resolution
+    blocked. Combine with (ea.enf_actions->>''res_state'') = ''Resolved'' to find actions that violate
+    it.
+
+    '
+  sql_expression: (0.6 * rc.behav_score + 0.4 * rc.net_score > 75)
+  source_model: main.enforcement_actions
+  from_sql: main.enforcement_actions ea JOIN main.reg_compliance rc ON rc.REC_COMP = ea.REC_ENF
+  grain: one row per enforcement action
+  domains:
+  - compliance
+- name: peer_correlation_z_score
+  description: 'Peer Correlation Z-Score: (record peer_corr - average peer_corr for the trader''s category)
+    / standard deviation of peer_corr for that category, category = traders.typeFlag; 0 if the standard
+    deviation is zero or not applicable (NULL). Window function over trade-record rows; uses sample standard
+    deviation (STDDEV_SAMP).
+
+    '
+  sql_expression: "COALESCE((CAST(mc.market_metrics->>'peer_corr' AS DOUBLE)\n  - AVG(CAST(mc.market_metrics->>'peer_corr'\
+    \ AS DOUBLE)) OVER (PARTITION BY tr.typeFlag))\n  / NULLIF(STDDEV_SAMP(CAST(mc.market_metrics->>'peer_corr'\
+    \ AS DOUBLE)) OVER (PARTITION BY tr.typeFlag), 0), 0)"
+  source_model: main.market_conditions
+  from_sql: main.trade_records t JOIN main.traders tr ON tr.TR_KEY = t.tr_anchor LEFT JOIN main.market_conditions
+    mc ON mc.REC_PIN = t.REC_KEY LEFT JOIN main.order_behaviour ob ON ob.REC_NODE = t.REC_KEY LEFT JOIN
+    main.manipulation_signals ms ON ms.REC_TAG = t.REC_KEY LEFT JOIN main.sentiment_analytics sa ON sa.REC_SA
+    = t.REC_KEY LEFT JOIN main.corporate_events ce ON ce.REC_EVT = t.REC_KEY LEFT JOIN main.reg_compliance
+    rc ON rc.REC_COMP = t.REC_KEY LEFT JOIN main.enforcement_actions ea ON ea.REC_ENF = t.REC_KEY LEFT
+    JOIN main.trader_relationships rel ON rel.rel_root = t.tr_anchor
+  grain: one row per trade record
+  domains:
+  - manipulation
+tables:
+- schema: main
+  table: traders
+  columns:
+  - name: TR_KEY
+    type: VARCHAR
+    description: Unique trader account id (PK), e.g. TR73442.
+  - name: typeFlag
+    type: VARCHAR
+    description: 'Trader type / category: Broker, Individual, Institution, Market Maker. The ''trader
+      category'' for the Peer Correlation Z-Score.'
+  - name: trader_fin_data
+    type: JSON
+    description: 'JSON: usd_bal text ''$4,692,991 '' (parse with metric account_balance); risk_lvl Aggressive/Conservative/Moderate
+      (risk level / risk appetite); age_days integer account age in days. Parenthesize (x->>''risk_lvl'')
+      before = comparisons.'
+- schema: main
+  table: instruments
+  columns:
+  - name: SYM_KEY
+    type: VARCHAR
+    description: 'Instrument symbol (PK): AAPL, AMZN, GOOGL, META, MSFT.'
+  - name: inst_info
+    type: JSON
+    description: 'JSON: cap (market cap, NULL if not reported), sector (Consumer, Energy, Finance, Healthcare,
+      Technology; no padding found), stream (Banking, Biotech, Oil & Gas, Retail, Software).'
+- schema: main
+  table: trader_relationships
+  columns:
+  - name: rel_root
+    type: VARCHAR
+    description: Root trader (PK, FK traders.TR_KEY).
+  - name: map_state
+    type: VARCHAR
+    description: 'Mapping state: Complete, Partial, Pending.'
+  - name: addrHits
+    type: BIGINT
+    description: Address matches across linked traders (0-5).
+  - name: commPath
+    type: VARCHAR
+    description: 'Communication path: Regular, Irregular; NULL = not mapped. Collusion requires ''Regular''.'
+  - name: circ_size
+    type: BIGINT
+    description: Trader circle size (1-50). Collusion requires > 5.
+  - name: insider_net_str
+    type: VARCHAR
+    description: Insider network strength text '18.68 connection-point/ownership%'.
+  - name: trader_links
+    type: JSON
+    description: 'JSON: link_count, contact_share (Email/Multiple/Phone), fin_link (Business/Personal),
+      grp_score (group behaviour score, stored 0..100).'
+- schema: main
+  table: trade_records
+  columns:
+  - name: REC_KEY
+    type: VARCHAR
+    description: Trade record key (PK); equals REC_PIN/REC_NODE/REC_TAG/REC_SA/REC_EVT/REC_COMP/REC_ENF
+      of the linked tables.
+  - name: snap_ts
+    type: VARCHAR
+    description: Snapshot time fragment 'mm:ss.f' only; NULL = not captured (400 rows).
+  - name: tr_anchor
+    type: VARCHAR
+    description: Trader key (FK traders.TR_KEY).
+  - name: sym_anchor
+    type: VARCHAR
+    description: Instrument symbol (FK instruments.SYM_KEY).
+  - name: freq_tag
+    type: VARCHAR
+    description: 'Trading frequency scope: High, Low, Medium.'
+  - name: vol_day
+    type: FLOAT
+    description: Average daily trading volume; numerator of DTR; > 1,000,000 for High-Volume Wash Trading
+      Concern.
+  - name: pos_avg
+    type: FLOAT
+    description: Average position size.
+  - name: hold_span
+    type: VARCHAR
+    description: 'Holding style: Intraday (same-day), Swing (few days to weeks), Position (weeks to months),
+      Long-term (months or years).'
+  - name: margin_pct
+    type: FLOAT
+    description: Margin percentage utilised.
+  - name: vol_adj_lev
+    type: VARCHAR
+    description: Volatility-adjusted leverage text '0.19 leverage-point/vol-point'.
+  - name: risk_adj_lev
+    type: VARCHAR
+    description: Risk-adjusted leverage text '20.18 USD/risk-point'.
+  - name: bal_turnover
+    type: VARCHAR
+    description: Stored balance turnover text '2.69 times/day'; does not match vol_day/usd_bal in the
+      data — use metric daily_turnover_rate for DTR.
+  - name: trade_perf
+    type: JSON
+    description: 'JSON: win_pct (historical win percentage), pl_ratio, lev_ratio (TLE). NULLs are JSON
+      null.'
+- schema: main
+  table: market_conditions
+  columns:
+  - name: REC_PIN
+    type: VARCHAR
+    description: Record key (PK) = trade_records.REC_KEY.
+  - name: vol_ano
+    type: FLOAT
+    description: Volume-anomaly indicator.
+  - name: mov_pct
+    type: FLOAT
+    description: Percentage price movement over window.
+  - name: spreadTag
+    type: FLOAT
+    description: Bid-ask spread metric.
+  - name: impactVal
+    type: VARCHAR
+    description: Market impact text like '0.05%'.
+  - name: mkt_corr
+    type: FLOAT
+    description: Market Correlation with the broad index; used in MAPA.
+  - name: rot_imp
+    type: FLOAT
+    description: Sector rotation impact score.
+  - name: ofi_density
+    type: VARCHAR
+    description: Order flow impact density text 'bps/million USD'.
+  - name: liq_imp
+    type: VARCHAR
+    description: Liquidity impact text 'USD/min'.
+  - name: price_accel
+    type: VARCHAR
+    description: Price acceleration text '%/(hour_)' (hour squared); higher = more volatile.
+  - name: market_metrics
+    type: JSON
+    description: 'JSON: px_vol, liq_ratio, peer_corr (Peer Correlation Score, -1..1).'
+- schema: main
+  table: order_status_types
+  columns:
+  - name: STAT_TOKEN
+    type: VARCHAR
+    description: Order-status token (PK).
+  - name: order_status
+    type: JSON
+    description: 'JSON: tick_type (Irregular/Regular/Suspicious), spread_type order type (Market = speed,
+      Limit = price, Mixed = combination).'
+- schema: main
+  table: sentiment_analytics
+  columns:
+  - name: REC_SA
+    type: VARCHAR
+    description: Record key (PK).
+  - name: ins_hold
+    type: FLOAT
+    description: Insider holdings % of float.
+  - name: inst_own
+    type: FLOAT
+    description: Institutional Ownership Percentage; NULL = unavailable; never 0.
+  - name: short_rt
+    type: FLOAT
+    description: Short Interest Ratio; NULL = not provided.
+  - name: opt_vol
+    type: FLOAT
+    description: Option Volume Ratio (options volume); used in SWOV.
+  - name: pc_ratio
+    type: FLOAT
+    description: Put-call ratio.
+  - name: iv_rank
+    type: VARCHAR
+    description: Implied-volatility rank text like '11.39%'.
+  - name: uo_act
+    type: VARCHAR
+    description: 'Unusual options activity: High (significant deviation, potential insider flag), Moderate
+      (less pronounced); NULL = none recorded.'
+  - name: short_press_int
+    type: VARCHAR
+    description: Short pressure intensity text '%/hour'.
+  - name: sentiment_data
+    type: JSON
+    description: 'JSON: news_score, soc_sent, analyst_cnt.'
+- schema: main
+  table: order_behaviour
+  columns:
+  - name: REC_NODE
+    type: VARCHAR
+    description: Record key (PK).
+  - name: OST_ref
+    type: VARCHAR
+    description: FK order_status_types.STAT_TOKEN.
+  - name: dark_use
+    type: FLOAT
+    description: Proportion routed to dark pools (private venues such as ATS for large orders); NULL =
+      not collected. Dark Pool Usage = dark_use > 0.
+  - name: off_mkt
+    type: FLOAT
+    description: Fraction of off-exchange executions (not on lit exchanges, incl. internal crosses).
+  - name: x_freq
+    type: FLOAT
+    description: Cross-Trade Frequency / execution frequency; numerator of CMR.
+  - name: order_metrics
+    type: JSON
+    description: 'JSON: size_var, cancel_pct (0..1 fraction), mod_freq.'
+- schema: main
+  table: manipulation_signals
+  columns:
+  - name: REC_TAG
+    type: VARCHAR
+    description: Record key (PK).
+  - name: layer_idx
+    type: VARCHAR
+    description: 'Layering indicator: Confirmed, Suspected; NULL = not assigned.'
+  - name: stuff_idx
+    type: FLOAT
+    description: Quote-stuffing index.
+  - name: ignite_sig
+    type: VARCHAR
+    description: 'Momentum ignition: Strong (clear manipulative intent), Weak (less evident); NULL = not
+      detected.'
+  - name: close_mark
+    type: VARCHAR
+    description: 'Marking the close (prohibited): Frequent (repeated), Occasional (infrequent); NULL =
+      not set.'
+  - name: manip_signals
+    type: JSON
+    description: 'JSON: spoof_prob text ''x.xx%'' (number is 0..1 probability), wash_flag High/Medium/Low
+      (NULL = not determined), front_run score 0..100.'
+- schema: main
+  table: corporate_events
+  columns:
+  - name: REC_EVT
+    type: VARCHAR
+    description: Record key (PK).
+  - name: evt_near
+    type: VARCHAR
+    description: 'Upcoming event: Earnings, M&A, Restructuring; NULL = no event (record not linked to
+      a corporate event).'
+  - name: announce_time
+    type: VARCHAR
+    description: '''Pre-market hrs before'', ''Intraday hrs before'', ''Post-market hrs before''.'
+  - name: leak_score
+    type: FLOAT
+    description: 'Information Leakage Score 0-100: <20 low, 20-50 moderate, >50 high (investigate).'
+  - name: info_leak_rate
+    type: VARCHAR
+    description: Leak rate text 'score/hour'.
+- schema: main
+  table: reg_compliance
+  columns:
+  - name: REC_COMP
+    type: VARCHAR
+    description: Record key (PK); one compliance case.
+  - name: file_state
+    type: VARCHAR
+    description: 'Filing status: Current, Delayed, Missing.'
+  - name: disc_state
+    type: VARCHAR
+    description: 'Disclosure: Full, Non-compliant, Partial.'
+  - name: restrict_win
+    type: VARCHAR
+    description: 'Trading restriction: Blackout (complete prohibition), Special (tailored, e.g. position
+      limits, pre-trade approval); NULL = not defined.'
+  - name: broker_flag
+    type: VARCHAR
+    description: 'Broker-dealer flag: Complete, Incomplete, Late; NULL = unset.'
+  - name: exch_note
+    type: VARCHAR
+    description: 'Exchange note: Inquiry, Warning; NULL = none.'
+  - name: invest_stat
+    type: VARCHAR
+    description: 'Investigation status: Active, Preliminary; NULL = not specified.'
+  - name: alert_lvl
+    type: VARCHAR
+    description: 'Alert level: Low, Medium, High, Critical (WIS multiplier 1-4).'
+  - name: invest_prior
+    type: VARCHAR
+    description: 'Investigation priority: High, Low, Medium.'
+  - name: case_flag
+    type: VARCHAR
+    description: 'Case flag: Closed, Investigation, Monitoring.'
+  - name: review_freq
+    type: VARCHAR
+    description: 'Review frequency: Daily, Monthly, Weekly; NULL = not defined.'
+  - name: last_rev
+    type: DATE
+    description: Last review date.
+  - name: next_rev
+    type: DATE
+    description: Next review date.
+  - name: mon_inten
+    type: VARCHAR
+    description: 'Monitoring intensity: Enhanced, Intensive, Standard.'
+  - name: sv_sys
+    type: VARCHAR
+    description: 'Surveillance system: Multiple, Primary, Secondary.'
+  - name: det_meth
+    type: VARCHAR
+    description: 'Detection method: Automated, Hybrid, Manual.'
+  - name: fp_rate
+    type: FLOAT
+    description: False-positive rate.
+  - name: model_conf
+    type: FLOAT
+    description: Model confidence.
+  - name: pat_rec
+    type: FLOAT
+    description: Pattern Similarity Score (pattern recognition), stored 0..100 although documented context
+      says 0-1 (near 1/high = similar to illicit patterns).
+  - name: behav_score
+    type: FLOAT
+    description: Behavioral Analysis Score (0..100); III weight 0.6.
+  - name: net_score
+    type: FLOAT
+    description: Network Analysis Score (0..100); III weight 0.4.
+  - name: reg_alert_conc
+    type: VARCHAR
+    description: Alert concentration text 'alerts/billion USD'.
+  - name: reg_resp_spd
+    type: VARCHAR
+    description: Regulatory response speed text 'hours/case'; lower = faster.
+  - name: compliance_data
+    type: JSON
+    description: 'JSON: prev_viol (0-5), comp_rate grade A (excellent), B (good, minor issues), C (significant
+      deficiencies), D (serious/repeated failures), risk_val.'
+- schema: main
+  table: enforcement_actions
+  columns:
+  - name: REC_ENF
+    type: VARCHAR
+    description: Record key (PK); one enforcement action.
+  - name: abuse_prob
+    type: FLOAT
+    description: Abuse probability; NULL = not calculated.
+  - name: evid_pow
+    type: VARCHAR
+    description: 'Evidence strength: Moderate, Strong, Weak.'
+  - name: doc_stat
+    type: VARCHAR
+    description: 'Documentation: Complete, Incomplete, Partial.'
+  - name: act_taken
+    type: VARCHAR
+    description: 'Action taken: Restriction, Suspension, Warning; NULL = none recorded.'
+  - name: esc_lvl
+    type: VARCHAR
+    description: 'Escalation: Compliance, Legal, Supervisor; NULL = not set.'
+  - name: legal_state
+    type: VARCHAR
+    description: 'Legal state: Active, Pending; NULL = not recorded.'
+  - name: settle_state
+    type: VARCHAR
+    description: 'Settlement: Negotiating, Settled; NULL = unknown.'
+  - name: rep_impact
+    type: VARCHAR
+    description: 'Reputational impact: Minimal, Moderate, Severe.'
+  - name: biz_restrict
+    type: VARCHAR
+    description: 'Business restriction: Full, Partial; NULL = not documented.'
+  - name: rem_status
+    type: VARCHAR
+    description: 'Remediation: Completed, Not Required, Pending.'
+  - name: sys_need
+    type: VARCHAR
+    description: 'System changes: Major, Minor, No.'
+  - name: policy_need
+    type: VARCHAR
+    description: 'Policy changes: No, Urgent, Yes.'
+  - name: train_req
+    type: VARCHAR
+    description: 'Training: Comprehensive, Refresher; NULL = not specified.'
+  - name: report_state
+    type: VARCHAR
+    description: 'Reporting: Automated, Hybrid, Manual.'
+  - name: retain_stat
+    type: VARCHAR
+    description: 'Retention: Archived, Current, Deleted; NULL = not indicated.'
+  - name: audit_stat
+    type: VARCHAR
+    description: 'Audit: Complete, Missing, Partial.'
+  - name: conf_lvl
+    type: VARCHAR
+    description: 'Confidentiality level: Highly Sensitive, Normal, Sensitive; NULL = not assigned.'
+  - name: access_res
+    type: VARCHAR
+    description: 'Access restriction: Internal, Public, R.'
+  - name: share_state
+    type: VARCHAR
+    description: 'Data sharing: Allowed, Limited, Prohibited.'
+  - name: enf_actions
+    type: JSON
+    description: 'JSON: pen_amt (penalty amount), res_state (In Progress, Pending, Resolved), pen_flag
+      penalty impact (Ban, Fine, Warning; NULL = not decided). Resolution is blocked when III > 75.'

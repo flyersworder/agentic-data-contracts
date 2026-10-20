@@ -1,0 +1,279 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: organ_transplant, author: claudeopus5.5
+version: '1.0'
+name: organ_transplant
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Organ transplant matching database: donors (demographics, medical_history, hla_info,
+      function_and_recovery), recipients (recipients_demographics, recipients_immunology, clinical) and
+      one row per donor-recipient-organ match (transplant_matching, with 1:1 satellites compatibility_metrics,
+      risk_evaluation, allocation_details, logistics, administrative_and_review, data_source_and_quality,
+      all keyed by the match id TM...).'
+    preferred: true
+    tables:
+    - demographics
+    - recipients_immunology
+    - administrative_and_review
+    - recipients_demographics
+    - transplant_matching
+    - data_source_and_quality
+    - medical_history
+    - compatibility_metrics
+    - hla_info
+    - risk_evaluation
+    - function_and_recovery
+    - allocation_details
+    - clinical
+    - logistics
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_handling
+    summary: 'How values are stored: text-with-units, JSON paths, case noise, NULLs, date formats'
+    description: 'STORAGE FINDINGS (checked against the data). Many numeric facts are text with a unit
+      suffix; extract the leading number with TRY_CAST(regexp_extract(col, ''^([0-9.]+)'', 1) AS DOUBLE):
+      demographics.age_count (''57 years, mature donor''), function_and_recovery.don_crtn_val (''1.62
+      mg/dL''), don_gfr_val (''103.4 mL/min/1.73m²''), org_isch_time (''702 mins''), clinical.wait_time
+      (''104 days''), dial_duration (''45 months''), prev_tx_count (''1 previous transplant, ...''), compatibility_metrics.distance
+      (''1815 miles''), exp_isch_time (''539 minutes ischemia''), exp_time (''142 minutes transport''),
+      cost_est (''US$5210.53'' -- strip ''US$''), risk_evaluation.cost_qaly (''53700 USD/QALY''), resource_consumption
+      (''... units/day''), staff (''... hrs/case''). DISTANCE UNIT: the column meaning says kilometers
+      but every value is suffixed ''miles''; formulas that need Distance_km multiply the number by 1.609344.
+      One distance is 0 -- divide with NULLIF. DONOR BLOOD TYPE is text with a gloss (''B- rare type (specific
+      matching)''); the ABO group is regexp_extract(blood_class, ''^(AB|A|B|O)'', 1) and the Rh sign follows
+      it. Recipient blood_class is clean (''AB+''). JSON columns are DuckDB JSON; read fields with ->>
+      and cast: demographics.physicalstats (Height_Cm, Weight_Kg, Bmi_Value, Gender_Type, Ethnicity),
+      recipients_immunology.hlaprofile (Hla_A_Val, Hla_B_Val, Hla_Dr_Val, Hla_Dq_Val), medical_history.viralstatinfo
+      (Cmv_State, Ebv_State, Hbv_State, Hcv_State, Hiv_State), function_and_recovery.organfuncassess (Liv_Func,
+      Card_Func, Pulm_Func), compatibility_metrics.compatscores (Hla_Score, Size_Score, Age_Score), risk_evaluation.riskmetrics
+      (Immun_Risk, Infect_Risk, Reject_Risk, Cmpl_Risk, Readmit_Risk, Mort_Risk). Keys are case-sensitive
+      as written. CASE NOISE: compatibility_metrics.blood_compat, every *_val status column of administrative_and_review,
+      exp_rev_notes, data_source_and_quality.data_src_val and verif_stat_val have random letter case --
+      always compare on lower(...). Lower-cased domains: blood_compat {compatible, incompatible}; exp_rev_stat_val
+      {approved, modified, pending, rejected}; ec_appro_val {approved, not required, pending, rejected};
+      reg_comp_val {compliant, non-compliant, under review}; docu_stat_val {complete, incomplete, pending};
+      cons_stat_val {obtained, pending, refused}; fin_clear_val and ins_appro_val {approved, pending,
+      rejected}; exp_rev_notes {acceptable match, high risk match, requires discussion}; data_src_val
+      {center database, external lab, manual entry, unos}; verif_stat_val {failed, pending, verified}.
+      MEDICAL URGENCY NOISE: clinical.med_urgency holds ''Status 1A'', ''Status 1B'', ''Status 2'', ''Status
+      3'' and also bare ''2'' and ''3'', which mean ''Status 2'' and ''Status 3''. Treat them as identical.
+      NULLS are real SQL NULLs (no empty strings). Documented NULL meanings: medical_history.med_history
+      NULL = history incomplete/unavailable; alc_cond NULL = alcohol history undocumented; drug_cond NULL
+      = drug history not assessed; clinical.dial_status NULL = not applicable/undocumented; comorbid_detail
+      NULL = comorbidity assessment incomplete; recipients_immunology.life_support NULL = not applicable/undocumented;
+      compatibility_metrics.blood_compat NULL (140 rows) = assessment pending/unavailable; risk_evaluation.surg_risk_val
+      NULL = assessment incomplete (data noise added random NULLs); qol_val NULL = assessment not completed;
+      administrative_and_review status NULLs = pending/not required/under review as described per column;
+      data_src_val NULL = source unknown; verif_stat_val NULL = verification pending/not performed. DATES
+      are text in mixed formats: transplant_matching.created_ts ''YYYY-MM-DD HH:MI:SS.ffffff''; match_ts
+      ''YYYY.MM.DD HH:MI:SS'' (strptime ''%Y.%m.%d %H:%M:%S''); data_source_and_quality.last_up_ts ''YYYY/MM/DD''
+      (strptime ''%Y/%m/%d''); next_rev_dt ''DD/MM/YYYY'' (strptime ''%d/%m/%Y''); function_and_recovery.org_recov_dt
+      ''MM-DD-YYYY HKT'' (strip '' HKT'', strptime ''%m-%d-%Y''). Comma lists: clinical.comorbid_detail
+      (COPD, Diabetes, Heart Disease, Hypertension, up to 3 per row); medical_history.med_history (Cancer,
+      Diabetes, Heart Disease, Hypertension, None -- ''None'' is a list element meaning no condition).
+      JOIN KEYS: satellites of a match join on the match id; use transplant_matching.donor_ref_reg / recip_ref_reg
+      as the authoritative pair (3 compatibility_metrics rows carry different donor/recipient refs).
+
+      '
+    tables:
+    - main.demographics
+    - main.compatibility_metrics
+    - main.clinical
+    - main.administrative_and_review
+    - main.data_source_and_quality
+    - main.function_and_recovery
+    - main.risk_evaluation
+    - main.medical_history
+    - main.recipients_immunology
+  - name: anthropometrics
+    summary: BMI, BMI categories, size compatibility
+    description: 'BMI = weight_kg / height_m^2 (height in cm / 100). Stored BMIs (recipients_demographics.bmi_val,
+      demographics.physicalstats->>''Bmi_Value'') agree with this formula to 0.1 for every row. BMI categories:
+      < 18.5 underweight, 18.5-24.9 normal weight, 25.0-29.9 overweight, > 30.0 obesity (metric bmi_category
+      assigns exactly 30.0 to obesity; the documentation leaves 30.0 itself unassigned). BMI is a factor
+      in the Size Compatibility Score, S_size = 1 - |BMI_donor / BMI_recipient - 1|.
+
+      '
+    tables:
+    - main.demographics
+    - main.recipients_demographics
+  - name: immunology
+    summary: ABO compatibility, HLA, PRA, sensitization, crossmatch, DSA, AMR risk, immunosuppression
+    description: 'ABO BLOOD TYPE COMPATIBILITY: a fundamental matching rule to prevent hyperacute rejection
+      where the recipient blood type determines acceptable donor types. Type O is the universal donor;
+      Type AB is the universal recipient; Type A can receive from A and O; Type B can receive from B and
+      O (Rh is not part of the rule). Metric abo_compatible. The stored compatibility_metrics.blood_compat
+      assessment does NOT agree with this rule on many rows (checked); it is the "ABO compatibility status"
+      used by the Immunological Compatibility Score. HLA TYPING identifies a person''s HLA markers; a
+      closer donor-recipient HLA match reduces rejection risk. HLA Mismatch Score = count of mismatched
+      antigens over A, B, DR. HLA mismatch levels: ''0-mismatch'' is a perfect HLA match and ideal; ''6-mismatch''
+      is a complete mismatch across the A, B and DR loci, the highest immunological barrier outside ABO
+      or positive crossmatch issues. PRA: measures pre-existing antibodies against common HLA antigens
+      (pra_score, 0-100). A pra_score of 80 or higher is a ''high PRA score'' = Immunological Sensitization
+      (highly sensitized; severely limits compatible donors). PRA interpretation: 0-10% low sensitization
+      (easier to find a donor); > 80% high sensitization, likely incompatible with over 80% of donors.
+      The formal definition (>= 80) governs; metric high_pra. CROSSMATCH: final test mixing recipient
+      serum with donor lymphocytes just before surgery. ''Negative'' = no pre-formed donor-specific antibodies,
+      transplant can proceed; ''Positive'' = DSA present, a contraindication (highly risky) predicting
+      immediate/hyperacute rejection. ''Pending'' also occurs. DSA: antibodies directed against a particular
+      donor''s HLA antigens; identified by a positive crossmatch; significant risk for antibody-mediated
+      rejection. recipients_immunology.dsa_state records it (Positive/Negative). AMR RISK STRATIFICATION:
+      for recipients with a ''Positive'' crossmatch, ''High Risk'' = PRA >= 80 AND dsa_state ''Positive'';
+      everyone else is ''Standard Risk''. IMMUNOSUPPRESSION PROTOCOL TIERS: high Immunological Compatibility
+      Score and low (Standard) AMR risk -> standard ''Maintenance Therapy'' (e.g. three-drug cocktail);
+      low compatibility score and High AMR risk -> aggressive ''Induction Therapy'' (potent biologics)
+      followed by intensive maintenance. No numeric cut-off for "high/low compatibility" is stated.
+
+      '
+    tables:
+    - main.recipients_immunology
+    - main.hla_info
+    - main.compatibility_metrics
+    - main.demographics
+    - main.recipients_demographics
+  - name: donor_assessment
+    summary: eGFR, renal function, creatinine and GFR bands, cause of death, high-risk and marginal donors,
+      viral status, LFT
+    description: 'eGFR (simplified, stated for males): 141 * (Cr/0.9)^-0.411 * 0.993^Age, Cr = serum creatinine
+      in mg/dL (don_crtn_val), Age = donor age; the actual formula can be more complex. No female variant
+      is documented, so metric egfr applies it to every donor (donor gender is physicalstats->>''Gender_Type''
+      if you need to restrict). Renal Function Score = 1.0*eGFR - 10.0*Cr. SERUM CREATININE: normal typically
+      0.7-1.3 mg/dL; a high value such as 2.5 mg/dL suggests impaired kidney function. GFR VALUES: > 90
+      mL/min/1.73m² normal; 30-59 moderate kidney disease; < 15 kidney failure (other ranges are not named).
+      The measured GFR is don_gfr_val (text). ANOXIA: cause of death from complete oxygen deprivation,
+      recorded as don_co_desc starting ''Anoxia''; critical for oxygen-sensitive organs (heart, kidneys).
+      Cause of death impact: anoxia can compromise heart and kidney function; head trauma may leave abdominal
+      organs in optimal condition. don_co_desc values: Anoxia..., Stroke..., Trauma..., Other cause....
+      HIGH-RISK DONOR: history of communicable disease (e.g. Hepatitis C, HIV), malignancy, or high-risk
+      social behaviour (e.g. intravenous drug use); requires careful evaluation and informed consent.
+      Metric high_risk_donor. MARGINAL (extended criteria) DONOR acceptance: donors not ideal but not
+      High-Risk, e.g. advanced age (large Donor-Recipient Age Difference), borderline organ function (sub-optimal
+      Renal Function Score) or certain comorbidities; accepted on a risk-benefit analysis against the
+      recipient''s urgent need and organ scarcity. No thresholds are stated -- not encodable as a flag.
+      VIRAL INFECTION STATUS: donors and recipients are screened for CMV, EBV and hepatitis (donor: viralstatinfo
+      JSON incl. HBV, HCV, HIV; recipient: recipients_immunology.cmv_state, ebv_state) to assess infection
+      risk and plan prophylaxis. LIVER FUNCTION TESTS: ALT/AST normal typically below 40-50 U/L; e.g.
+      ALT 200 U/L indicates significant inflammation/damage. No ALT/AST column exists; only the qualitative
+      organfuncassess->>''Liv_Func'' (Normal/Mild/Moderate/Severe).
+
+      '
+    tables:
+    - main.function_and_recovery
+    - main.medical_history
+    - main.demographics
+  - name: recipient_priority
+    summary: Medical urgency, wait-time ratio, urgency score, composite allocation, allocation policy,
+      regional priority
+    description: 'MEDICAL URGENCY STATUS values for calculation: Status 1A = 5, Status 1B = 4, Status
+      2 = 3, Status 3 = 2, all others = 1 (bare ''2''/''3'' in the data are Status 2/3). Tiers: Status
+      1A highest urgency (critically ill, ICU); Status 1B lower but still urgent; lower statuses (Status
+      2...) for more stable patients. RECIPIENT WAIT TIME RATIO: described as wait time relative to the
+      average for the organ and blood type, but the stated formula is wait days / 365.0 (wait in years);
+      metric wait_time_ratio follows the formula. PATIENT URGENCY SCORE = 0.7*Status_medical + 0.3*R_wait.
+      COMPOSITE ALLOCATION SCORE = 0.5*S_urgency + 0.25*S_immune + 0.25*EGS. ALLOCATION POLICY: versioned
+      rule set (allocation_details.allc_pol_vers, e.g. ''v2.7''), a strict hierarchy: Medical Urgency
+      Status is the primary sort; for equal urgency, lower HLA Mismatch Score gets higher priority (metric
+      allocation_policy_rank). REGIONAL ALLOCATION PRIORITY: priority to recipients in the same region
+      as the donor (donor region matched against allc_region), for equitable local access and shorter
+      cold ischemia. The database stores only allc_region per match and no donor region, so this is not
+      computable here. MULTI-ORGAN TRANSPLANT: one recipient receives two or more organs (e.g. heart-lung,
+      kidney-pancreas) from a single donor; allocation weighs recipient need against the organ pool.
+
+      '
+    tables:
+    - main.clinical
+    - main.allocation_details
+    - main.transplant_matching
+  - name: logistics
+    summary: Ischemia time, cold ischemia, static cold storage, logistical feasibility
+    description: 'TOTAL ISCHEMIA TIME = T_cold + T_warm (recovery-to-preservation plus preservation-to-transplant).
+      INTERPRETATION: no warm-ischemia column exists; metric total_ischemia_time sums the per-match expected
+      cold ischemia (exp_isch_time) and expected transport time (exp_time), both minutes. function_and_recovery.org_isch_time
+      is the donor-level recorded cold ischemia time (minutes). COLD ISCHEMIA: period a harvested organ
+      is kept cold (about 4°C) from blood-supply cut-off to transplant; critical to success. STATIC COLD
+      STORAGE: most common preservation (flush with cold solution, store on ice); org_presv_meth starting
+      ''Static cold storage''. Other methods: Machine perfusion, Normothermic perfusion. LOGISTICAL FEASIBILITY
+      INDEX = 700/Distance_km + 300/T_ischemia_mins, distance converted from the stored miles.
+
+      '
+    tables:
+    - main.compatibility_metrics
+    - main.function_and_recovery
+    - main.logistics
+  - name: risk_outcomes
+    summary: Age/size/immune compatibility, EGS, surgical risk, readmission, center performance, match
+      quality, optimal match
+    description: 'Age difference = |Age_recipient - Age_donor|; Age Compatibility Score = exp(-0.03*diff).
+      Immunological Compatibility Score = 0.6*I_ABO + 0.4*(1 - S_mismatch/6), I_ABO 1 for compatible else
+      0 (status from blood_compat; NULL -> 0), S_mismatch = compatibility_metrics.hla_mis_count (0-6).
+      EGS = 1/(1+exp(-(-0.5 + 1.5*S_immune - 0.02*Age_donor))); graft survival is the period a transplanted
+      organ keeps functioning without rejection or failure. Surgical Risk Score = 0.6*N_comorb + 0.4*C_procedure,
+      components normalized: N = comorbidity count / 4 (4 comorbidity types exist), C = risk_evaluation.surg_cmpl_val
+      (0-1). Readmission Risk Index = 0.1 + 0.05*N_conditions + 0.2*S_surgical (raw count). Center Performance
+      Score = 0.6*volume + 0.4*success (cntr_vol_val, cntr_out_val). Comprehensive Match Quality = 0.4*S_immune
+      + 0.2*S_age - 0.3*S_surgical + 0.1*I_logistics. Optimal Donor-Recipient Match: full ABO compatibility
+      AND HLA Mismatch Score exactly 0 AND Size Compatibility Score in [0.9, 1.1] inclusive, all three
+      at once. Resource Utilization Index = S_surgical * Days_stay -- not computable: no length-of-stay
+      column. COMORBIDITY: a recipient''s pre-existing conditions (clinical.comorbid_detail) that increase
+      procedural complexity and risk. Stored model outputs (risk_evaluation egs_val, surg_risk_val, compatscores)
+      are separate from these formula metrics.
+
+      '
+    tables:
+    - main.risk_evaluation
+    - main.compatibility_metrics
+    - main.clinical
+  - name: health_economics
+    summary: QALY, cost-effectiveness ratio and thresholds, net health benefit
+    description: 'QALY = Years_life * Quality_score. CER = Cost_net / QALY_gained. Benchmark in the US:
+      $50,000 to $150,000 per QALY gained; interventions below this threshold are generally good value.
+      risk_evaluation.cost_qaly stores CER as ''N USD/QALY''. NET HEALTH BENEFIT = EGS * QALY_gain - S_surgical
+      * 0.2. No life-years or QALY-gain column exists, so QALY and NHB are not computable here (qol_val
+      is only the quality-of-life score).
+
+      '
+    tables:
+    - main.risk_evaluation
+  - name: care_process
+    summary: Informed consent, post-transplant monitoring, administrative review
+    description: 'INFORMED CONSENT: the recipient (or proxy) must be fully informed, including about use
+      of organs from a High-Risk Donor, before agreeing; recorded as administrative_and_review.cons_stat_val
+      (obtained/pending/refused, case-noisy). POST-TRANSPLANT MONITORING: ongoing surveillance (lab tests,
+      imaging, clinical assessment) to monitor organ function, detect early rejection and manage immunosuppression;
+      no data column records it.
+
+      '
+    tables:
+    - main.administrative_and_review
+  rules:
+  - name: case_insensitive_status
+    description: Compare every case-noisy status column (blood_compat, administrative_and_review statuses,
+      data_src_val, verif_stat_val) with lower(...).
+    enforcement: warn
+  - name: urgency_noise
+    description: Treat med_urgency '2' as 'Status 2' and '3' as 'Status 3'.
+    enforcement: warn
+  - name: high_pra_threshold
+    description: High PRA / Immunological Sensitization means pra_score >= 80.
+    enforcement: warn
+  - name: distance_in_miles
+    description: compatibility_metrics.distance values are miles; convert (x1.609344) wherever a formula
+      requires km.
+    enforcement: warn
+  - name: use_declared_metrics
+    description: Composite scores must reuse the metric SQL in semantic.yml rather than ad-hoc formulas.
+    enforcement: warn

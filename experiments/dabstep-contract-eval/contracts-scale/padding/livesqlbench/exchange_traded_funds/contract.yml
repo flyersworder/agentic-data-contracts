@@ -1,0 +1,267 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: exchange_traded_funds, author: claudeopus5.5
+version: '1.0'
+name: exchange-traded-funds
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Exchange-traded fund reference and analytics data: funds and their families, exchanges
+      and categories; one performance row and at most one risk_metrics row per fund; yearly fund vs category
+      returns; sector, bond-credit and holding allocations. All 15 tables of schema main may be read.'
+    preferred: true
+    tables:
+    - families
+    - funds
+    - performance
+    - family_categories
+    - exchanges
+    - annual_returns
+    - categories
+    - family_exchanges
+    - risk_metrics
+    - sector_allocations
+    - sectors
+    - bond_allocations
+    - bond_ratings
+    - holdings
+    - securities
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_storage
+    summary: 'How values are physically stored: JSON paths, flat mirror columns, NULLs, scales'
+    description: 'VERIFIED AGAINST THE DATA. (1) The JSON columns (funds.fundclass, fundmetrics, tradingdata,
+      allocweights, valuationratios; performance.pricerange52w, returnmetrics, histstats; risk_metrics.risk3y/risk5y/risk10y)
+      are DuckDB JSON holding real JSON (not the Python-dict text shown in samples). Extract with CAST(col->>''$.path''
+      AS DOUBLE), e.g. CAST(f.fundmetrics->>''$.Expense_Net'' AS DOUBLE), CAST(f.tradingdata->>''$.moving_averages.MA_50''
+      AS DOUBLE), CAST(r.risk3y->>''$.risk_measures_3y.R_Squared_3Y'' AS DOUBLE). JSON null comes back
+      as SQL NULL. ALWAYS parenthesize an extraction before IS NULL / IS NOT NULL / NOT IN ((col->>''$.x'')
+      IS NOT NULL) — without parentheses DuckDB binds the predicate to the JSON column and raises a conversion
+      error. (2) The database also carries flat FLOAT (float32) mirror columns of every JSON field (funds.expensenet,
+      benchmarkexp, yieldrate, turnoverratio, networth, vol3m, volrecent, ma50, ma200, equityweight, bondweight,
+      pe_ratio, pb_ratio, ps_ratio, pcf_ratio, avgmaturity, duration, geozone, currencybase, strategytype,
+      capsize, quotemode; performance.high52w, highdelta, highdeltapct, low52w, lowdelta, lowdeltapct,
+      rangemove, rangemovepct, rytd, r1m, r3m, r1y, r3y, r5y, r10y, benchr*, positiveyears, negativeyears,
+      topholdings, topweight; risk_metrics.alpha3y, beta3y, avgreturn3y, rsquared3y, volatility3y, sharperatio3y,
+      treynorratio3y and the 5y/10y equivalents). They agree with the JSON values on every row (checked)
+      but are float32; the metrics read the JSON (double precision). (3) NULLs: missing values are SQL
+      NULL (sample output prints them as nan; there are no NaN floats). annual_returns: 16,298 of 28,748
+      fundperf and 8,004 categoryperf are NULL. performance.histstats Top_Weight and Top_Holdings are
+      NULL on every row — a fund''s largest-holding weight must come from holdings (MAX(holdingpct) per
+      fund). 38 performance rows carry reportdate 1970-01-01, an epoch placeholder meaning unknown. (4)
+      Scales: ratios such as Expense_Net, Benchmark_Exp, Yield_Rate, Turnover_Ratio, Equity_Weight, weightpct,
+      allocationpct, holdingpct and returns are decimals (0.02 = 2%). R-squared in risk_metrics is stored
+      0-100 (95 = 95%), not 0-1 as the column meaning says. Alpha, Volatility and Avg_Return in risk_metrics
+      are in percent units (e.g. Volatility_3Y 22.42). Turnover_Ratio exceeds 1 for 252 funds (max 773.8).
+      (5) Schema-name differences: exchanges.localtime is actually column exchangetime (values ''ny'',
+      ''New York'', ''America/NYC'', ''nyc''); holdings.securityref is actually holdings.securitykey (joins
+      securities.securityref); securities has no instrumentcode column. (6) Cardinality: 2,310 funds,
+      exactly one performance row per fund, 1,507 risk_metrics rows (one per fund at most), 382 funds
+      with bond allocations (9 rating rows each, summing to 1), 1,616 funds with sector allocations (11
+      sectors each), 2,297 funds with holdings. productclass is NULL for 623 funds.
+
+      '
+    tables:
+    - main.funds
+    - main.performance
+    - main.risk_metrics
+    - main.annual_returns
+    - main.holdings
+    - main.exchanges
+    - main.securities
+  - name: cost_and_income
+    summary: Expense ratios, yield and their combinations
+    description: 'NET EXPENSE RATIO: the annual fee charged to investors as a percentage of assets; 0.005
+      = 0.5% annual fee; lower is generally better, as costs directly reduce returns (fundmetrics.Expense_Net).
+      Benchmark_Exp is the benchmark/category average expense ratio. YIELD RATE: the annual dividend per
+      share as a percentage of the share price; 0.02 = 2% yield; crucial for income-focused investors
+      (fundmetrics.Yield_Rate). Relative Expense Ratio = net expense ratio - benchmark expense ratio (relative_expense_ratio).
+      Return on Cost = 1-year return / net expense ratio. Yield-to-Expense Ratio = yield / net expense
+      ratio; Efficient Income Generator when YTER > 15. Net Yield Advantage = Yield Rate - Relative Expense
+      Ratio. Wasted Fee Amount = (net expense - benchmark expense) x Net Worth for a Closet Indexer. Manager
+      Skill Ratio = 3-year alpha / net expense ratio.
+
+      '
+    tables:
+    - main.funds
+    - main.performance
+    - main.risk_metrics
+  - name: performance
+    summary: Annual outperformance, consistency, information ratio and composite performance scores
+    description: 'Annual Fund Outperformance = fund''s annual return - category''s average annual return
+      (annual_returns.fundperf - categoryperf), per fund-year. Cost-Adjusted Annual Outperformance = outperformance
+      - Relative Expense Ratio (higher outperformance and lower/negative relative expense are desirable).
+      Performance-Cost Efficiency Score = outperformance / relative expense. Holistic Outperformance Metric
+      = (outperformance + cost-adjusted outperformance) / 2. Year-over-Year trend = outperformance(current
+      year) - outperformance(previous year). Average Upside / Downside Outperformance = mean outperformance
+      in years with positive / non-positive category returns (a smaller negative downside number = better
+      downside protection); Capture Differential = upside - downside. Positive Return Consistency = positive
+      years / (positive + negative years) x 100. Information Ratio (Simplified) = (fund 3-year return
+      - benchmark 3-year return) / fund 3-year volatility; it feeds CAIR, MAIR, Active Manager Value and
+      Total Value Score. Median 1-Year Return = 50th percentile of 1-year returns for a group. "Last reported
+      year" for a fund means its latest calendaryear where both fundperf and categoryperf are non-NULL
+      (annual_returns has year gaps for 538 funds, so the previous year is matched as calendaryear - 1,
+      not by row order).
+
+      '
+    tables:
+    - main.annual_returns
+    - main.performance
+    - main.funds
+    - main.risk_metrics
+  - name: risk
+    summary: Alpha, beta, R-squared, Sharpe, volatility, drift and risk-based classifications
+    description: 'BETA: market sensitivity; Beta > 1 more volatile than the market, < 1 less volatile,
+      = 1 moves with the market. R-SQUARED: percentage of a fund''s movements explained by its benchmark;
+      95 means 95% of performance attributable to the benchmark (stored 0-100). SHARPE RATIO: excess return
+      per unit of total risk; higher is better; > 1 generally good, > 2 very good, > 3 excellent. Alpha
+      Generator: 5-year alpha > 0. Market-Tracking Fund: 3-year R-squared > 90. Appraisal Ratio = 3-year
+      alpha / (3-year volatility x sqrt(1 - 3-year R-squared)) with R-squared as a fraction (stored value
+      / 100). Active Management Footprint = (1 - 3Y R-squared as fraction) / Turnover Ratio. Cost-Adjusted
+      Alpha = 3Y alpha - Relative Expense Ratio. Beta Drift = Beta(1st period) - Beta(2nd period); R-Squared
+      Drift likewise; Style Drift when |Beta change| > 0.15 or |R-squared change| > 10, comparing recent
+      (3Y) with long-term (10Y). Composite Score = average of within-category percentile ranks of 5Y alpha,
+      3Y Sharpe and inverse net expense; Category Dominator = highest Composite Score in a category with
+      at least 10 funds. Alpha-Turnover Slope and Fit Quality are the slope and R-squared of regressing
+      3Y alpha (Y) on Turnover Ratio (X).
+
+      '
+    tables:
+    - main.risk_metrics
+    - main.funds
+  - name: technical
+    summary: 52-week range position, moving-average momentum, liquidity
+    description: 'Recent (current) price = Low_52W + Low_Delta (= High_52W + High_Delta, verified). Price
+      Position in 52-Week Range = (recent price - 52W low) / (52W high - 52W low) x 100. Short-Term Momentum
+      = MA_50 - MA_200; Golden Cross Signal when momentum > 0. MWPS = Price Position x (1 + Momentum /
+      MA_200). Composite Momentum Strength = Momentum x Price Position. Capital Preservation Index = (1
+      / (1 + Negative Years)) x (1 - (52W Low - Current Price) / 52W Low). Average Daily Value Traded
+      (3M) = Vol_3M x MA_200. Portfolio Liquidity Pressure = Net_Worth x Turnover / (Vol_3M x 252).
+
+      '
+    tables:
+    - main.funds
+    - main.performance
+  - name: portfolio_composition
+    summary: Equity weight, sectors, credit quality, duration, holdings concentration, valuation
+    description: 'EQUITY WEIGHT: share of assets in stocks; 0.9 = 90% in stocks, suggesting a growth-oriented
+      strategy. SECTOR WEIGHT: share of assets in one sector (sector_allocations.weightpct, sums to 1
+      per fund); 0.4 (40%) is a significant bet on that sector. CREDIT QUALITY (bond_ratings.creditmark,
+      stored lower-case: us_government, aaa, aa, a, bbb, bb, b, below_b, others): ''Government'' is the
+      highest quality; ''AAA'' and ''AA'' are high-grade investment quality; ratings below ''BBB'' (bb,
+      b, below_b) are speculative / high-yield. High-Quality Credit Portfolio: us_government + aaa + aa
+      allocations exceed 60% of total bond holdings. DURATION: interest-rate sensitivity; 7 years means
+      the price likely falls about 7% if rates rise 1%. Category Average Duration = sum of fund durations
+      / number of funds (with a duration) in a category; Duration Advantage = category average - fund
+      duration. TURNOVER: 1.0 (100%) = entire portfolio replaced once a year; < 0.3 suggests buy-and-hold,
+      > 1.0 active trading; Low-Turnover Strategy when < 0.3 (30%). High-Conviction Portfolio: single
+      largest holding weight > 8% (0.08), taken from holdings. Composite Valuation Score = 1/4 x (1/PE
+      + 1/PS + 1/PB + 1/PCF). Growth-Value Spectrum Score = ln(PE / PB). Valuation Data Availability:
+      ''Transparent'' if both PE and PB are numeric, else ''Opaque''.
+
+      '
+    tables:
+    - main.funds
+    - main.sector_allocations
+    - main.sectors
+    - main.bond_allocations
+    - main.bond_ratings
+    - main.holdings
+    - main.securities
+  - name: classifications
+    summary: Composite fund classifications built from the base definitions
+    description: 'Total Return Fund: equity weight > 0 and yield > 0. Consistent Outperformer: Alpha Generator
+      and Positive Return Consistency > 80. Passive Alpha Generator: Market-Tracking and Alpha Generator.
+      Elite Active Manager: Consistent Outperformer and High-Conviction. Ideal Index Fund: Market-Tracking,
+      Low-Turnover and negative Relative Expense. Premier Income Fund: Efficient Income Generator and
+      High-Quality Credit. Quality-Income Score: YTER only when High-Quality Credit. Rebound Prospect:
+      last reported year outperformance negative and Golden Cross. High-Fee Strategic Bet: positive Relative
+      Expense and not Market-Tracking. Focused Alpha Leader: Alpha Generator and High-Conviction. Reliable
+      Core Holding: Consistent Outperformer and Total Return Fund. Contrarian Value Play: Price Position
+      < 25%, Low-Turnover and negative Relative Expense. Global Alpha Specialist: Alpha Generator and
+      Geographic Focus other than ''UNITED_STATES'' or ''US''. High-Cost Underperformer: positive Relative
+      Expense and negative Annual Fund Outperformance. Closet Indexer: Market-Tracking and positive Relative
+      Expense. Strategic Beta Fund: Low-Turnover and not Market-Tracking. Fallen Angel: Consistent Outperformer
+      whose most recent 3Y alpha is negative. Q-GARP: Consistent Outperformer with Composite Valuation
+      Score in the top 50th percentile of its category; High-Conviction Value Investor: High-Conviction
+      with CVS in the top 25th percentile of its category. Efficient Core Holding: Ideal Index Fund with
+      high ROC. Momentum-Driven Growth: GVS growth tilt and Golden Cross. Defensive Anchor: 3Y Beta <
+      0.75 and high Capital Preservation Index. True Active Differentiator: AMF > 0.5, Appraisal Ratio
+      > 0.2 and High-Conviction. Speculative Turnaround Play: High-Cost Underperformer with Golden Cross.
+      GEOGRAPHIC FOCUS (fundclass.GeoZone_Class): documented scopes are ''UNITED_STATES'', ''International'',
+      ''Global'', ''Pacific/Asia ex-Japan Stk'', ''Emerging Markets''. In this data every fund carries
+      a spelling of the United States: America, US, U.S.A., USA, U.S., United States, UNITED_STATES, us,
+      usa (case and spelling vary; currency_base likewise varies: usd, Usd, US Dollar, USD, AmericanDollar,
+      US$, DOLLAR, Dollar, US_DOLLAR). The documented Global Alpha Specialist test excludes only the exact
+      values ''UNITED_STATES'' and ''US''; the metric applies that rule as written, so ''usa'', ''U.S.''
+      etc. count as non-US under it — say so when answering. INTERPRETATIONS: "high ROC", "high CPI" and
+      "growth tilt" have no documented threshold; the metrics use "above the median over all funds" and
+      flag it.
+
+      '
+    tables:
+    - main.funds
+    - main.performance
+    - main.risk_metrics
+    - main.annual_returns
+    - main.holdings
+    - main.bond_allocations
+  - name: families
+    summary: 'Fund families: sector concentration profile and Top-Tier status'
+    description: 'A fund family is funds.parentgroup = families.groupname. Family Sector Concentration
+      Profile: for each family, the economic sector with the highest average weight across all of the
+      family''s funds (sector_allocations). Top-Tier Family: average 3-year beta of its funds < 1.0 and
+      5 or more alpha-generating funds (5Y alpha > 0). family_categories and family_exchanges list the
+      categories a family offers and the exchanges it lists on. Exchanges: PCX = NYSEArca, NGM = NasdaqGM,
+      BTS = BATS, PNK = Other OTC.
+
+      '
+    tables:
+    - main.families
+    - main.funds
+    - main.family_categories
+    - main.family_exchanges
+    - main.exchanges
+    - main.categories
+    - main.sector_allocations
+    - main.sectors
+  rules:
+  - name: use_declared_metrics
+    description: 'Every documented definition (ratios, scores, classifications and their thresholds) must
+      be computed with the metric of the same name in semantic.yml, not an ad-hoc formula; thresholds
+      are strict as stated (> 90, > 0, < 30% = < 0.3, > 8% = > 0.08, > 15, > 80, > 60%, < 0.75, > 0.5,
+      > 0.2, < 25, > 0.15, > 10, >= 10 funds, >= 5 funds, < 1.0).
+
+      '
+    enforcement: warn
+  - name: parenthesize_json_extraction
+    description: 'Wrap every ->> extraction in parentheses or CAST before IS NULL / IS NOT NULL / IN /
+      NOT IN; read numeric JSON fields with CAST(... AS DOUBLE).
+
+      '
+    enforcement: warn
+  - name: r_squared_scale
+    description: 'risk_metrics R-squared is stored 0-100. Compare it to 90 / 10 as stored; divide by 100
+      only inside formulas that need a fraction (Appraisal Ratio, Active Management Footprint).
+
+      '
+    enforcement: warn
+  - name: null_means_unknown
+    description: 'NULL components make a metric NULL; a classification evaluating to NULL does not qualify
+      the fund. Do not replace NULL with 0.
+
+      '
+    enforcement: warn

@@ -1,0 +1,274 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: virtual_idol, author: claudeopus5.5
+version: '1.0'
+name: virtual-idol
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Virtual idol fan platform: fans, virtual idols, fan-idol interaction sessions, and per-fan
+      satellite records (membership/spending, engagement, commerce/collection, social community, events/club,
+      loyalty/achievements, retention/influence, preferences/settings, support/feedback, moderation/compliance,
+      additional notes). The same 14 tables also appear under a `public` schema in information_schema;
+      query `main` only.'
+    preferred: true
+    tables:
+    - fans
+    - virtualidols
+    - interactions
+    - membershipandspending
+    - engagement
+    - commerceandcollection
+    - socialcommunity
+    - eventsandclub
+    - loyaltyandachievements
+    - retentionandinfluence
+    - preferencesandsettings
+    - supportandfeedback
+    - moderationandcompliance
+    - additionalnotes
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_conventions
+    summary: 'How values are stored: JSON, text dates, case noise, join paths to a fan'
+    description: 'JSON: every jsonb column is DuckDB JSON. Extract with ->> and the exact key case shown
+      (e.g. gift_metrics->>''Gift_Val_Usd'', network_stats->>''Foll_Count''); ->> returns text, so CAST((col->>''Key'')
+      AS DOUBLE) before arithmetic. ALWAYS PARENTHESIZE the extraction: in DuckDB ->> binds looser than
+      IS NULL / OR, so `x->>''K'' IS NULL OR ...` fails; write `(x->>''K'') IS NULL`. Integer division
+      truncates (7/2 = 3), so cast integer operands to DOUBLE for every ratio.
+
+      CASE NOISE: fans.lang_pref, Demo_Profile.Occu_Path and Interest_Set, interactions.act_kind, act_plat,
+      plat_used, dev_type, socialcommunity.comm_contrib and cont_create_stat, eventsandclub.evt_part and
+      club_contrib have random casing (e.g. Occu_Path has ''Professional'', ''PROFESSIONAL'', ''pRoFESsIonal'').
+      Compare with LOWER(...) = ''professional'' etc. Other categorical columns (memb_kind, churn_flag,
+      status_tag, rew_tier, ...) were found clean.
+
+      DATES: fans.reg_moment is text ''YYYY-MM-DD'' (all rows cast to DATE); virtualidols.deb_date is
+      text ''DD/MM/YYYY''; eventsandclub.club_j_date is text ''YYYY/MM/DD''; preferencesandsettings.last_log_dt
+      is text ''YYYY.MM.DD''; interactions.time_mark is a real TIMESTAMP (2024-02-19 .. 2025-02-18). 119
+      interactions are timestamped before their fan''s reg_moment.
+
+      Rate text columns (engagement_rate ''106 actions/hr'', spend_rate ''32.29 USD/day'', content_creation_rate
+      ''5 posts/week'', ...) hold a number followed by a unit; take the number with CAST(split_part(col,
+      '' '', 1) AS DOUBLE).
+
+      PATH TO A FAN: interactions.interact_fan_pivot and membershipandspending.member_fan_pivot point
+      to fans directly. Other tables reach a fan via membership: commerceandcollection .commerce_member_pivot,
+      eventsandclub.events_member_pivot, preferencesandsettings .preferences_member_pivot, engagement.engage_member_pivot
+      -> membershipandspending.member_reg. socialcommunity, loyaltyandachievements and retentionandinfluence
+      reach a fan through engagement (social_engage_pivot / loyalty_engage_pivot / retain_engage_pivot
+      -> engagement.engage_reg -> engage_member_pivot). supportandfeedback reaches one through preferencesandsettings
+      (support_pref_pivot -> pref_reg). Social and retention records of one fan share the same engagement
+      record (s.social_engage_pivot = r.retain_engage_pivot; all 52 retention rows match). Note: for 27
+      engagement rows the fan of engage_activity_pivot''s interaction differs from the fan of engage_member_pivot;
+      the contract uses the membership path. A fan can have several membership rows (659 rows, 645 fans).
+      Only 39 support, 52 retention, 64 loyalty, 106 preferences rows exist, so metrics using them cover
+      few fans.
+
+      '
+    tables:
+    - main.fans
+    - main.interactions
+    - main.membershipandspending
+    - main.engagement
+  - name: engagement_monetization
+    summary: 'Per-session indices: FMI, CCI, Chattiness, Whale Fan, Engaged Lurker, Peak FMI'
+    description: 'Fan Monetization Index (FMI) = Gift_Val_Usd / sess_dur_min, per interaction; measures
+      direct financial contribution per minute of engagement (propensity for in-session spending). Content
+      Consumption Index (CCI) = watch_hrs / sess_dur_min (hours over minutes, as defined, no unit conversion);
+      passive engagement. Chattiness Score (CS) = Chat_Msg / sess_dur_min; active communication. Whale
+      Fan: FMI > 20 (extremely high in-session spending, top-tier financial contributor). Engaged Lurker:
+      CCI > 0.5 AND CS < 0.5. Peak Monetization Index: maximum FMI across all of a fan''s interaction
+      sessions. Interaction Tone (chat_activity.Msg_Tone): overall sentiment of the fan''s chat messages;
+      documented common values ''Positive'', ''Negative'', ''Neutral'', ''Mixed'' (data holds Positive/Neutral/Negative).
+      Gift Frequency (gift_metrics.Gift_Freq): how often a fan gives virtual gifts; documented categories
+      ''Often'', ''Frequently'', ''Occasionally'', ''Rarely''; the data actually holds ''Often'', ''Frequent'',
+      ''Rarely'', ''Never'' -- filter on stored values.
+
+      '
+    tables:
+    - main.interactions
+    - main.fans
+  - name: spending_membership
+    summary: FFV, MAS, Premium / High-Value Member, Power User, spending frequency
+    description: 'Fan Financial Value (FFV) = spend_usd / (memb_days / 30.44): estimated monthly financial
+      contribution, proxy for lifetime value. Merchandise Affinity Score (MAS) = merch_spend_usd / spend_usd.
+      Premium Member: memb_kind <> ''Free'' (stored values: Free, Basic, Premium, Diamond). High-Value
+      Member: Premium Member AND FFV > 50 USD/month. Power User: Premium Member AND Usage_Metrics.Sess_Count
+      > 400 AND dev_count > 2. Spending Frequency (spend_freq): ''Weekly'' or ''Daily'' = consistent spending;
+      ''Occasional'' = sporadic purchasing (data also has ''Monthly''). One Free membership has memb_days
+      = 0, so FFV divides with NULLIF and is NULL there.
+
+      '
+    tables:
+    - main.membershipandspending
+    - main.commerceandcollection
+    - main.preferencesandsettings
+  - name: social_influence
+    summary: FFR, CCS, CII, SCS, VPS and the influencer / creator / butterfly segments
+    description: 'Follower-to-Following Ratio (FFR) = Foll_Count / Fing_Count, only where Fing_Count >
+      0. Content Creator Score (CCS) = (Art_Subs + Fic_Subs + Cover_Perf_Cnt + Collab_Count) * Cont_Qual_Rate.
+      Community Influence Index (CII) = SQRT(Foll_Count * Cont_Reach) (followers from socialcommunity,
+      reach from retentionandinfluence). Social Capital Score (SCS) = Soc_Net_Sz + Friend_Con * 1.5. Viral
+      Potential Score (VPS) = Viral_Cont * (1 + Trend_Part). Community Influencer: FFR > 2.0 AND CII >
+      10000. Super Creator: CCS > 200. Social Butterfly: SCS > 1000 AND Grp_Memb > 5. Rising Star Influencer:
+      VPS > 50 AND CII between 1000 and 10000 (inclusive). Community Contribution Level (comm_contrib):
+      positive impact on the community, ''High'', ''Medium'', ''Low'' (case noise), often associated with
+      group roles and content creation. Community Role Hierarchy (Grp_Role): ''Member'' standard participant,
+      ''Moderator'' helps enforce rules, ''Leader'' manages the group; NULL = no specific role / regular
+      member.
+
+      '
+    tables:
+    - main.socialcommunity
+    - main.retentionandinfluence
+  - name: loyalty_achievement
+    summary: AD, LPR, Loyal Achiever, Lone Wolf, reward tiers and reputation
+    description: 'Achievement Density (AD) = Ach_Count / memb_days. Loyalty Progression Rate (LPR) = total
+      loyalty points / current tier level = fans.pts_val / fans.tier_step (tier_step is never 0). Loyal
+      Achiever: AD > 0.2 AND LPR > 500. Lone Wolf: AD > 0.5 AND SCS < 100 (high goal engagement, low social
+      connectivity). Loyalty Reward Tiers (rew_tier): ''Bronze'', ''Silver'', ''Gold'', ''Platinum'',
+      each unlocking different rewards. Reputation Level (repute_lv): standing and trustworthiness; common
+      levels ''Respected'', ''Established'', ''Elite'' (data also has ''New'').
+
+      '
+    tables:
+    - main.loyaltyandachievements
+    - main.engagement
+    - main.membershipandspending
+    - main.fans
+  - name: support_feedback
+    summary: SLS, NPS tiers, High-Maintenance Fan, Platform Promoter
+    description: 'Support Load Score (SLS) = Supp_Tix + Bug_Subs + Tech_Issue_Rpt. High-Maintenance Fan:
+      SLS > 10. NPS Score Tiers on NPS_Val (0..10): Promoters 9-10, Passives 7-8, Detractors 0-6. Platform
+      Promoter: NPS tier = ''Promoters''.
+
+      '
+    tables:
+    - main.supportandfeedback
+  - name: events_collection
+    summary: EPS, Event Enthusiast, Idol Superfan, Collection Rate, Collector Fan, trade level
+    description: 'Event Participation Score (EPS) = On_Evt_Att * 1 + Off_Evt_Att * 1.5 + Meet_Att * 2.
+      Event Enthusiast: EPS > 25. Idol Superfan: both Whale Fan and Event Enthusiast. Collection Rate
+      (CR) = dig_own + phys_own. Collector Fan: CR > 50 AND coll_comp_rate > 75 (coll_comp_rate is stored
+      as a percentage 0-100, max 99.9). Trade Activity Level (trade_level): engagement in trading digital
+      or physical collectibles; ''High'', ''Medium'', ''Low'' reflect frequency and volume of trades;
+      NULL = tracking incomplete / no trading.
+
+      '
+    tables:
+    - main.eventsandclub
+    - main.commerceandcollection
+  - name: retention_risk
+    summary: PSS, churn flag, At-Risk Fan, fan status, moderation status
+    description: 'Platform Stickiness Score (PSS) = (Int_Consist + Plat_Stable) / 2. At-Risk Fan: PSS
+      < 0.4 OR churn_flag = ''High''. Churn Risk Flag: ''High'' strong probability of churning soon, ''Medium''
+      moderate risk, ''Low'' loyal and stable user. Fan Status (status_tag): ''Active'' regular recent
+      activity, ''Inactive'' no recent activity, ''VIP'' special high-value status granted on contribution
+      and spending (data also has ''Blocked''). Moderation Status (mod_stat): ''Good Standing'' no issues,
+      ''Warning'' minor violation, ''Restricted'' temporary limitations due to a serious violation.
+
+      '
+    tables:
+    - main.preferencesandsettings
+    - main.retentionandinfluence
+    - main.fans
+    - main.moderationandcompliance
+  - name: demographics
+    summary: Fan Age Category, Professional Fan, occupation, idol type, privacy, language setting
+    description: 'Fan Age Category on Demo_Profile.Age_Count: Teen (<=18), Young Adult (19-29), Adult
+      (30-49), Senior (>=50); 18 fans have no age (NULL category). Professional Fan: category ''Adult''
+      or ''Senior'' AND occupation ''Professional'' (compare LOWER(Occu_Path) = ''professional'' because
+      of case noise). Occupation Path: declared occupation category such as ''Professional'', ''Student'',
+      ''Creative'', ''Technical'' (data has Professional, Student, Creative, Other; NULL = not provided).
+      Idol Type (kind_tag): ''2D'' traditionally animated, ''3D'' computer-generated models, ''AI Generated''
+      created and/or operated by AI (data also has ''Mixed Reality''). Privacy (priv_set): ''Public''
+      anyone can see the profile, ''Private'' restricted to approved connections (data also ''Friends
+      Only''). Language Preference Setting (engagement.lang_pref): ''Original'' = content in the idol''s
+      primary language, ''Translated'' = prefers translated versions, ''Both'' = either form.
+
+      '
+    tables:
+    - main.fans
+    - main.virtualidols
+    - main.preferencesandsettings
+    - main.engagement
+  - name: fan_segments
+    summary: 2x2 Fan Segments by FFV and SLS
+    description: 'Fan Segments: fans ranked on FFV and on SLS, each split into top / bottom 50% (NTILE(2)),
+      giving four quadrants: ''Ideal Fans'', ''At-Risk VIPs'', ''Quiet Majority'', ''Resource Drain''.
+      INTERPRETATION of quadrant assignment (the documentation names the quadrants but not the mapping):
+      Ideal Fans = top FFV & bottom SLS; At-Risk VIPs = top FFV & top SLS; Quiet Majority = bottom FFV
+      & bottom SLS; Resource Drain = bottom FFV & top SLS. See metric fan_segment.
+
+      '
+    tables:
+    - main.membershipandspending
+    - main.preferencesandsettings
+    - main.supportandfeedback
+  - name: temporal_analysis
+    summary: Conversion funnel, cumulative spending, cohorts, time to first gift, ripple effect, session
+      window
+    description: 'Conversion Funnel Analysis: compute Time to Conversion and Interactions Before Conversion.
+      The subscription date is not stored and must be estimated as current date - memb_days (metric estimated_subscription_date);
+      time to conversion = estimated subscription date - registration date; interactions before conversion
+      = the fan''s interactions with time_mark before that date. Cumulative Spending: running total of
+      the fan''s spending up to a point in time, computed as SUM(Gift_Val_Usd) OVER (PARTITION BY fan
+      ORDER BY time_mark) over interactions. Spending Velocity Cohort Analysis: identify a fan cohort,
+      compute each fan''s daily Cumulative Spending trajectory (days since registration), then for each
+      milestone (e.g. 7, 30, 90 days) average the daily cumulative totals for all days up to that milestone
+      across the cohort. Average Time to First Gift: per fan, the minimum day difference between registration
+      date and the date of any interaction with Gift_Val_Usd > 0; then averaged across the cohort (every
+      interaction has Gift_Val_Usd > 0 in this data; some differences are negative). Session Time Window:
+      a session is all interactions with the same idol within 5 minutes before or after a key interaction.
+      Ripple Effect Analysis: find interactions involving the target segment (e.g. influencers), build
+      each one''s session with the Session Time Window, and aggregate the behaviour (e.g. chat sentiment
+      Msg_Tone) of all non-target users in that session.
+
+      '
+    tables:
+    - main.interactions
+    - main.fans
+    - main.membershipandspending
+  - name: database_operations
+    summary: Archival, indexes, upserts, constraints, domains -- definitions only; all are forbidden here
+    description: 'These definitions describe write/DDL operations. This contract is READ-ONLY: DELETE,
+      INSERT, UPDATE, CREATE, ALTER, DROP, MERGE, COPY etc. are forbidden, so none can be run; answer
+      such requests by explaining or drafting SQL, never executing it. Data Archival Process: a routine
+      transactional task that first copies a specific subset of old or inactive data (defined by age and
+      user status) from a source table to an archive table, then deletes that same subset from the source,
+      to improve performance. Composite Index: an index on two or more columns (CREATE INDEX), speeding
+      queries that filter on all or the leading columns. Upsert Operation: INSERT ... ON CONFLICT DO UPDATE,
+      updating the existing row on a key conflict instead of failing. Data Integrity Constraint: a rule
+      on a column limiting type, format or range, often a CHECK clause in CREATE TABLE / ALTER TABLE,
+      validated on insert or update. Monetary Domain: a custom type made with CREATE DOMAIN on a numeric
+      type with a CHECK that the value is non-negative.
+
+      '
+    tables: []
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_metrics
+    description: 'Indices, thresholds and segments must use the metric definitions in semantic.yml (exact
+      thresholds, strict > / < as defined, JSON keys cast to DOUBLE, case-insensitive comparison on noisy
+      text columns).
+
+      '
+    enforcement: warn

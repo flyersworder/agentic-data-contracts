@@ -1,0 +1,240 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cybermarket_pattern, author: claudeopus5.5
+version: '1.0'
+name: cybermarket-pattern
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Cyber-marketplace intelligence database: platforms (markets), vendors, buyers, product
+      listings, transactions and their sold products, and per-transaction risk analytics, communications,
+      connection security and alert cases. Most per-transaction tables (risk_analytics, communications,
+      connection_security, alerts) key 1:1 on transactions.EventCode.'
+    preferred: true
+    tables:
+    - markets
+    - vendors
+    - buyers
+    - products
+    - transactions
+    - transaction_products
+    - vendor_markets
+    - vendor_countries
+    - vendor_payment_methods
+    - risk_analytics
+    - communications
+    - connection_security
+    - alerts
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: platforms
+    summary: 'Marketplace platforms: risk score, data-protection efficiency, Secure Platform, operational
+      status'
+    description: 'MARKETPLACE RISK SCORE (MRS) evaluates the overall risk of a platform: MRS = (0.4 *
+      vuln_count + 0.3 * event_count + 0.3 * reputation_score) / 100, with vuln_count = platform_compliance.vuln_inst_count,
+      event_count = platform_compliance.sec_event_count, reputation_score = markets.RepScore (stored as
+      text like ''$65.20 ''; 387 of 954 rows are NULL = not yet assessed, so MRS is NULL for them). Metric
+      `marketplace_risk_score`.
+
+      DATA PROTECTION EFFICIENCY (DPE) = protection_measures / vulnerability_instances = platform_compliance.protection_meas_count
+      / platform_compliance.vuln_inst_count (metric `data_protection_efficiency`). Do not confuse with
+      connection_security.Data_proctecteff, a different stored per-session value (vulnerabilities per
+      GB).
+
+      SECURE PLATFORM: a platform with fewer than ten unresolved security vulnerabilities (vuln_inst_count
+      < 10) AND more than fifteen active protection measures (protection_meas_count > 15). Strict inequalities:
+      10 vulnerabilities or exactly 15 measures does NOT qualify. Metric `is_secure_platform`.
+
+      PLATFORM OPERATIONAL STATUS (markets.OperStatus): Active = the marketplace is online, accepting
+      new listings and processing transactions normally; Closed = operators have permanently shut down
+      the marketplace, no further log ins or transactions are possible; Suspended = temporarily offline,
+      often due to policy violations or maintenance, and may return to service; Under Investigation =
+      law enforcement or compliance review is in progress, user activity is restricted or frozen.
+
+      '
+    tables:
+    - main.markets
+    - main.vendor_markets
+  - name: vendors
+    summary: 'Vendors: High Risk Vendor, Advanced tier, CEI, liquidity, velocity, escrow compliance, access
+      levels'
+    description: 'HIGH RISK VENDOR: a vendor flagged with active investigation or high law-enforcement
+      interest — there is an active regulatory or law-enforcement investigation in progress (InvestigationFlag
+      = ''Active'') OR formal records indicate high interest from authorities (LE_Interest = ''High'').
+      Either condition suffices. Metric `is_high_risk_vendor`.
+
+      ADVANCED VERIFICATION TIER: vendors who have completed multi factor or document backed identity
+      validation are classified as Advanced tier (VerTier = ''Advanced''). VerTier also holds ''Basic''
+      and ''Premium'' (Premium is a separate tier, not Advanced); NULL = not yet assigned.
+
+      COMPLIANCE EFFICIENCY INDEX (CEI) = compliance_score / violation_count = vendor_compliance_ratings.reg_compliance_scr
+      / viol_count (metric `compliance_efficiency_index`). vendors.RegStandeff stores a precomputed text
+      version (''11.61 Score/violation'').
+
+      PLATFORM LIQUIDITY RATE (PLR) = successful_txns * average_price / days_active = vendors.CompletedTxns
+      * AVG(listing price of the vendor''s products) / vendors.DaysActive (metric `platform_liquidity_rate`).
+      The stored vendor_compliance_ratings.liq_rate text (''783.97 USD/day'') is a precomputed value that
+      does NOT reproduce from the formula.
+
+      TRANSACTION VELOCITY RATE (TVR) = total_transactions / active_time_in_hours = TotalTxns / (DaysActive
+      * 24) (metric `transaction_velocity_rate`).
+
+      ESCROW COMPLIANCE: a vendor is Escrow Compliant when they consistently route payments through an
+      escrow mechanism until delivery is confirmed. See `vendor_escrow_usage_rate` and `is_escrow_compliant_vendor`.
+
+      VENDOR ACCESS LEVELS (AccessLevel): Full = vendor can create listings, modify inventory, withdraw
+      funds, and communicate without restriction; Partial = vendor functionality is limited, typically
+      view only or blocked from withdrawals until verification is complete. NULL = not set.
+
+      '
+    tables:
+    - main.vendors
+    - main.products
+    - main.vendor_markets
+    - main.vendor_countries
+    - main.vendor_payment_methods
+  - name: buyers
+    summary: 'Buyers: risk-dollar ratio, Suspicious Buyer, authentication levels, spend patterns'
+    description: 'BUYER RISK DOLLAR RATIO (BRDR) = risk_score / total_spending_usd = the buyer''s buyer_risk_profile.risk_metric_scr
+      divided by the sum of transaction_financials.value_amt_usd over the buyer''s transactions (metric
+      `buyer_risk_dollar_ratio`). The stored buyer_risk_profile.risk_dollar_ratio text (''0.0644 RiskScore/USD'')
+      is precomputed and does not reproduce from the formula.
+
+      SUSPICIOUS BUYER: labeled Suspicious when their behavioural consistency score is low AND their risk
+      per dollar metric is notably high (the summary says "low behavior consistency or high risk ratio";
+      the full definition requires both). Metric `is_suspicious_buyer`.
+
+      BUYER AUTHENTICATION LEVELS (AuthLevel): Advanced = account protected by multi factor authentication
+      or hardware-backed credentials, offering high assurance; Basic = single factor authentication such
+      as a password, with no secondary verification. NULL = not determined.
+
+      SPEND PATTERN CATEGORIES (buyer_risk_profile.spend_pattern): High = frequent, high value purchases
+      indicative of heavy marketplace engagement; Low = infrequent, low value purchases typical of casual
+      or opportunistic buyers; Medium = steady purchasing cadence with moderate transaction amounts; Variable
+      = irregular bursts of spending with no predictable pattern.
+
+      '
+    tables:
+    - main.buyers
+    - main.transactions
+  - name: transactions
+    summary: 'Transactions: cross-border, escrow usage states, route complexity, product categories'
+    description: 'CROSS-BORDER TRANSACTION: the shipment passes from one country to another, triggering
+      customs or import controls. Stored as transactions.CrossBorder BIGINT 1 (Yes) / 0 (No), not a boolean.
+      Metric `is_cross_border_transaction`.
+
+      ESCROW USAGE STATES (transaction_financials.escrow_used_stat): Yes = funds were held in escrow pending
+      delivery confirmation or dispute resolution, reducing counterparty risk; No = payment was released
+      directly without escrow protection, increasing the chance of fraud. NULL (400 of 1000) = unavailable.
+
+      SHIPPING ROUTE COMPLEXITY (RouteComplex): Simple, Medium, Complex.
+
+      PRODUCT CATEGORIES (ProdCat): Data = digital information assets such as credential dumps, personal
+      records, or proprietary databases; Digital = intangible goods like software licenses, media subscriptions,
+      or downloadable files; Physical = tangible merchandise shipped to the buyer, including hardware
+      devices or printed documents; Service = intangible labor or expertise, e.g. penetration testing,
+      content creation, or laundering assistance.
+
+      VALUE FORMATS: transaction_financials.value_amt_usd is numeric text (e.g. ''78.035...'', range 5.9–199.9,
+      no ''$''), cast directly to DOUBLE; fee_amt_usd is text like ''$637.83 '' — strip ''$'', '','' and
+      spaces before casting.
+
+      '
+    tables:
+    - main.transactions
+    - main.transaction_products
+    - main.products
+  - name: risk
+    summary: 'Risk analytics: Fraud-Flagged Transaction, wallet turnover'
+    description: 'FRAUD-FLAGGED TRANSACTION: transactions with a machine learning fraud probability exceeding
+      70 percent (risk_analytics.FraudProb > 70; FraudProb is stored on a 0–100 scale, so compare with
+      70, not 0.7; exactly 70 is not flagged). Metric `is_fraud_flagged_transaction`.
+
+      WALLET TURNOVER RATE (WTR) = value_moved / wallet_age_in_days = wallet_risk_assessment.wallet_value_usd
+      / wallet_age_days (metric `wallet_turnover_rate`). Distinct from the stored turnover_rate_val.
+
+      risk_analytics.ML_Risk is documented as High/Low/Medium but is stored as numeric text (0.006–9.998).
+
+      '
+    tables:
+    - main.risk_analytics
+  - name: security
+    summary: 'Connection security: Premium Authentication, anonymity cost index, threat handling, anonymity
+      levels'
+    description: 'PREMIUM AUTHENTICATION: sessions secured by two factor or multi factor authentication
+      — connection_security_metrics.auth_protocol_type IN (''2FA'', ''Multi-factor''); ''Basic'' is not
+      Premium. Metric `has_premium_authentication`.
+
+      ANONYMITY COST INDEX (ACI) = traceability_cost / anonymity_score = TraceScore / AnonLevel (metric
+      `anonymity_cost_index`).
+
+      THREAT HANDLING RATE (THR) = threats_handled / total_hours. No threat-count or hour column exists;
+      the rate is stored precomputed as Threat_handle_rate text (''0.12 Threats/hour''); metric `threat_handling_rate`
+      parses it.
+
+      SESSION ANONYMITY LEVELS: documented values High, Medium, Low. In the data AnonLevel is stored as
+      numeric text from 1.0 to 10.0 (no High/Medium/Low labels occur); treat higher numbers as more anonymous.
+
+      Other text-with-unit columns (Data_proctecteff, encrytion_cost, anonymity_cost, Bot_act_index, Connection_duration)
+      are parsed with CAST(split_part(col, '' '', 1) AS DOUBLE). encryption_strength_scr and data_protection_class
+      in the JSON are stored as numbers-as-text, not the documented labels.
+
+      '
+    tables:
+    - main.connection_security
+  - name: communications
+    summary: 'Communications: Suspicion Signal Density, Traceable Communication, language patterns'
+    description: 'SUSPICION SIGNAL DENSITY (SSD) = keyword_matches / total_messages = communication_details.keyword_match_count
+      / msg_count_total (metric `suspicion_signal_density`; msg_count_total is 10–497, never 0).
+
+      TRACEABLE COMMUNICATION: message threads exhibiting a high volume of flagged keywords and linguistic
+      anomalies are marked as Traceable for further review. Metric `is_traceable_communication`.
+
+      LANGUAGE PATTERNS (lang_pattern_type): Consistent = uniform grammar, vocabulary and tone across
+      messages, suggesting a single genuine author; Suspicious = irregular phrasing, sudden language switches,
+      or machine translated text indicating possible deception; Variable = mixed linguistic styles from
+      multiple senders or intentionally altered patterns to hinder profiling.
+
+      '
+    tables:
+    - main.communications
+  - name: alerts
+    summary: 'Alert cases: Tier-3 escalation, severity levels'
+    description: 'TIER-3 ESCALATION CASE: alert cases escalated to Tier-3 represent the highest priority
+      and warrant immediate incident response action. Tier-3 is stored as alert_case_management.escalation_tier_stat
+      = ''Level3'' (values Level1/Level2/Level3; NULL = not assigned). Metric `is_tier3_escalation_case`.
+
+      ALERT SEVERITY LEVELS (severity_level_stat): Critical, High, Medium, Low (Critical highest).
+
+      '
+    tables:
+    - main.alerts
+  rules:
+  - name: use_declared_definitions
+    description: 'Ratios, flags and thresholds named in the documentation (MRS, TVR, CEI, DPE, ACI, BRDR,
+      PLR, THR, SSD, WTR, High Risk Vendor, Secure Platform, Fraud-Flagged, Premium Authentication, Tier-3,
+      etc.) must be computed with the metric SQL in semantic.yml, including its text parsing and strict
+      thresholds.
+
+      '
+    enforcement: warn
+  - name: parse_text_numbers
+    description: 'Numeric values stored as text (''$917 '', ''$65.20 '', ''0.12 Threats/hour'') must be
+      parsed (strip ''$'', '','', spaces; or take the part before the first space) before arithmetic or
+      comparison; never compare them as strings.
+
+      '
+    enforcement: warn

@@ -1,0 +1,675 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: organ_transplant, author: claudeopus5.5
+metrics:
+- name: bmi
+  description: 'Body Mass Index = weight_kg / height_m^2 (height cm / 100). Recipient version shown; for
+    donors use CAST(d.physicalstats->>''Weight_Kg'' AS DOUBLE) / (CAST(d.physicalstats->>''Height_Cm''
+    AS DOUBLE)/100)^2. Stored bmi_val / Bmi_Value match this formula for every row.
+
+    '
+  sql_expression: r.wt_kg / ((r.ht_cm / 100.0) ^ 2)
+  source_model: main.recipients_demographics
+  from_sql: main.recipients_demographics r
+  grain: one recipient
+  domains:
+  - anthropometrics
+- name: bmi_category
+  description: 'BMI weight-status category: < 18.5 underweight, 18.5-24.9 normal weight, 25.0-29.9 overweight,
+    > 30.0 obesity (exactly 30.0 placed in obesity; the documentation leaves it unassigned). Recipient
+    version; swap in the donor BMI for donors.
+
+    '
+  sql_expression: "CASE WHEN r.bmi_val < 18.5 THEN 'Underweight'\n     WHEN r.bmi_val < 25 THEN 'Normal\
+    \ weight'\n     WHEN r.bmi_val < 30 THEN 'Overweight'\n     WHEN r.bmi_val >= 30 THEN 'Obesity' END\n"
+  source_model: main.recipients_demographics
+  from_sql: main.recipients_demographics r
+  grain: one recipient
+  domains:
+  - anthropometrics
+- name: donor_age
+  description: Donor age in years, parsed from text like '57 years, mature donor'.
+  sql_expression: CAST(regexp_extract(d.age_count, '^([0-9]+)', 1) AS INTEGER)
+  source_model: main.demographics
+  from_sql: main.demographics d
+  grain: one donor
+  domains:
+  - data_handling
+  - risk_outcomes
+- name: donor_recipient_age_difference
+  description: '|Age_recipient - Age_donor| for a match; donor age parsed from text.'
+  sql_expression: abs(r.age_count - CAST(regexp_extract(d.age_count, '^([0-9]+)', 1) AS INTEGER))
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg
+    JOIN main.recipients_demographics r ON r.recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record (transplant_matching row)
+  domains:
+  - risk_outcomes
+- name: age_compatibility_score
+  description: S_age = exp(-0.03 * |Age_recipient - Age_donor|).
+  sql_expression: exp(-0.03 * abs(r.age_count - CAST(regexp_extract(d.age_count, '^([0-9]+)', 1) AS INTEGER)))
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg
+    JOIN main.recipients_demographics r ON r.recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: size_compatibility_score
+  description: 'S_size = 1 - |BMI_donor / BMI_recipient - 1|, donor BMI from physicalstats->>''Bmi_Value'',
+    recipient BMI from bmi_val. Maximum 1.
+
+    '
+  sql_expression: 1 - abs(CAST(d.physicalstats->>'Bmi_Value' AS DOUBLE) / NULLIF(r.bmi_val, 0) - 1)
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg
+    JOIN main.recipients_demographics r ON r.recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - anthropometrics
+  - risk_outcomes
+- name: abo_compatible
+  description: 'ABO rule: O is the universal donor, AB the universal recipient, A receives from A and
+    O, B from B and O; Rh ignored. Donor group parsed from text like ''B- rare type ...''. This is "Full
+    ABO Blood Type Compatibility" for the Optimal Match. The stored blood_compat column does not agree
+    with this rule on many rows.
+
+    '
+  sql_expression: "(regexp_extract(d.blood_class, '^(AB|A|B|O)', 1) = 'O'\n OR regexp_extract(r.blood_class,\
+    \ '^(AB|A|B|O)', 1) = 'AB'\n OR regexp_extract(d.blood_class, '^(AB|A|B|O)', 1) = regexp_extract(r.blood_class,\
+    \ '^(AB|A|B|O)', 1))\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg
+    JOIN main.recipients_demographics r ON r.recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - immunology
+- name: hla_mismatch_score_computed
+  description: 'Formula form of the HLA Mismatch Score: number of loci among A, B, DR where the donor
+    value (hla_info) differs from the recipient value (hlaprofile JSON), range 0-3. Typing values are
+    random-looking numbers, so this is almost always 3. The stored compatibility_metrics.hla_mis_count
+    (0-6, the scale of the documented 0-/6-mismatch levels) is the operational HLA Mismatch Score used
+    by the composite metrics.
+
+    '
+  sql_expression: 'CAST(h.hla_a_val <> CAST(ri.hlaprofile->>''Hla_A_Val'' AS DOUBLE) AS INTEGER) + CAST(h.hla_b_val
+    <> CAST(ri.hlaprofile->>''Hla_B_Val'' AS DOUBLE) AS INTEGER) + CAST(h.hla_dr_val <> CAST(ri.hlaprofile->>''Hla_Dr_Val''
+    AS DOUBLE) AS INTEGER)
+
+    '
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.hla_info h ON h.immu_don_registry = tm.donor_ref_reg
+    JOIN main.recipients_immunology ri ON ri.immu_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - immunology
+- name: hla_mismatch_level
+  description: 'HLA mismatch level from hla_mis_count: 0 = perfect match (ideal), 6 = complete mismatch
+    across A, B, DR (highest barrier outside ABO/crossmatch).'
+  sql_expression: "CASE WHEN cm.hla_mis_count = 0 THEN '0-mismatch (perfect match)'\n     WHEN cm.hla_mis_count\
+    \ = 6 THEN '6-mismatch (complete mismatch)'\n     WHEN cm.hla_mis_count IS NOT NULL THEN 'partial\
+    \ mismatch' END\n"
+  source_model: main.compatibility_metrics
+  from_sql: main.compatibility_metrics cm
+  grain: one match record
+  domains:
+  - immunology
+- name: immunological_compatibility_score
+  description: 'S_immune = 0.6*I_ABO + 0.4*(1 - S_mismatch/6). I_ABO = 1 when the ABO compatibility status
+    lower(blood_compat) = ''compatible'', else 0 (NULL/pending -> 0); S_mismatch = hla_mis_count.
+
+    '
+  sql_expression: '0.6 * (CASE WHEN lower(trim(cm.blood_compat)) = ''compatible'' THEN 1 ELSE 0 END) +
+    0.4 * (1 - cm.hla_mis_count / 6.0)
+
+    '
+  source_model: main.compatibility_metrics
+  from_sql: main.compatibility_metrics cm
+  grain: one match record
+  domains:
+  - immunology
+  - risk_outcomes
+- name: expected_graft_survival_score
+  description: EGS = 1 / (1 + exp(-(-0.5 + 1.5*S_immune - 0.02*Age_donor))), S_immune as in immunological_compatibility_score.
+    Distinct from stored risk_evaluation.egs_val.
+  sql_expression: "1 / (1 + exp(-(-0.5\n  + 1.5 * (0.6 * (CASE WHEN lower(trim(cm.blood_compat)) = 'compatible'\
+    \ THEN 1 ELSE 0 END) + 0.4 * (1 - cm.hla_mis_count / 6.0))\n  - 0.02 * CAST(regexp_extract(d.age_count,\
+    \ '^([0-9]+)', 1) AS INTEGER))))\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.compatibility_metrics cm ON cm.match_comp_registry
+    = tm.match_rec_registry JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: high_pra
+  description: 'High PRA score / Immunological Sensitization: pra_score >= 80.'
+  sql_expression: ri.pra_score >= 80
+  source_model: main.recipients_immunology
+  from_sql: main.recipients_immunology ri
+  grain: one recipient
+  domains:
+  - immunology
+- name: pra_sensitization_level
+  description: 'PRA interpretation: 0-10 low sensitization; >= 80 high (formal sensitization definition);
+    otherwise intermediate (not named).'
+  sql_expression: "CASE WHEN ri.pra_score >= 80 THEN 'High'\n     WHEN ri.pra_score <= 10 THEN 'Low'\n\
+    \     WHEN ri.pra_score IS NOT NULL THEN 'Intermediate' END\n"
+  source_model: main.recipients_immunology
+  from_sql: main.recipients_immunology ri
+  grain: one recipient
+  domains:
+  - immunology
+- name: amr_risk_category
+  description: 'AMR risk: ''High Risk'' when cross_result = ''Positive'' AND pra_score >= 80 AND dsa_state
+    = ''Positive''; otherwise ''Standard Risk''.'
+  sql_expression: "CASE WHEN ri.cross_result = 'Positive' AND ri.pra_score >= 80 AND ri.dsa_state = 'Positive'\n\
+    \     THEN 'High Risk' ELSE 'Standard Risk' END\n"
+  source_model: main.recipients_immunology
+  from_sql: main.recipients_immunology ri
+  grain: one recipient
+  domains:
+  - immunology
+- name: crossmatch_contraindicated
+  description: 'Positive crossmatch: donor-specific antibodies present, transplant contraindicated (hyperacute
+    rejection risk). ''Negative'' = can proceed.'
+  sql_expression: ri.cross_result = 'Positive'
+  source_model: main.recipients_immunology
+  from_sql: main.recipients_immunology ri
+  grain: one recipient
+  domains:
+  - immunology
+- name: serum_creatinine
+  description: Donor serum creatinine in mg/dL parsed from text like '1.62 mg/dL'.
+  sql_expression: TRY_CAST(regexp_extract(fr.don_crtn_val, '^([0-9.]+)', 1) AS DOUBLE)
+  source_model: main.function_and_recovery
+  from_sql: main.function_and_recovery fr
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: creatinine_normal
+  description: True when donor serum creatinine is in the normal 0.7-1.3 mg/dL range (2.5 mg/dL is the
+    documented example of impaired function).
+  sql_expression: TRY_CAST(regexp_extract(fr.don_crtn_val, '^([0-9.]+)', 1) AS DOUBLE) BETWEEN 0.7 AND
+    1.3
+  source_model: main.function_and_recovery
+  from_sql: main.function_and_recovery fr
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: egfr
+  description: 'eGFR = 141 * (Cr/0.9)^-0.411 * 0.993^Age (simplified formula stated for males; applied
+    to all donors since no other variant is documented). Cr from don_crtn_val, age from demographics.age_count.
+
+    '
+  sql_expression: '141 * power(TRY_CAST(regexp_extract(fr.don_crtn_val, ''^([0-9.]+)'', 1) AS DOUBLE)
+    / 0.9, -0.411) * power(0.993, CAST(regexp_extract(d.age_count, ''^([0-9]+)'', 1) AS INTEGER))
+
+    '
+  source_model: main.function_and_recovery
+  from_sql: 'main.function_and_recovery fr JOIN main.demographics d ON d.contrib_registry = fr.recov_don_registry
+
+    '
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: renal_function_score
+  description: S_renal = 1.0*eGFR - 10.0*Cr, using the egfr formula and parsed creatinine.
+  sql_expression: '141 * power(TRY_CAST(regexp_extract(fr.don_crtn_val, ''^([0-9.]+)'', 1) AS DOUBLE)
+    / 0.9, -0.411) * power(0.993, CAST(regexp_extract(d.age_count, ''^([0-9]+)'', 1) AS INTEGER)) - 10.0
+    * TRY_CAST(regexp_extract(fr.don_crtn_val, ''^([0-9.]+)'', 1) AS DOUBLE)
+
+    '
+  source_model: main.function_and_recovery
+  from_sql: 'main.function_and_recovery fr JOIN main.demographics d ON d.contrib_registry = fr.recov_don_registry
+
+    '
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: gfr_stage
+  description: 'Stage from measured don_gfr_val (text ''N mL/min/1.73m²''): > 90 normal; 30-59 moderate
+    kidney disease; < 15 kidney failure; other ranges not named.'
+  sql_expression: "CASE WHEN TRY_CAST(regexp_extract(fr.don_gfr_val, '^([0-9.]+)', 1) AS DOUBLE) > 90\
+    \ THEN 'Normal'\n     WHEN TRY_CAST(regexp_extract(fr.don_gfr_val, '^([0-9.]+)', 1) AS DOUBLE) BETWEEN\
+    \ 30 AND 59 THEN 'Moderate kidney disease'\n     WHEN TRY_CAST(regexp_extract(fr.don_gfr_val, '^([0-9.]+)',\
+    \ 1) AS DOUBLE) < 15 THEN 'Kidney failure'\n     WHEN fr.don_gfr_val IS NOT NULL THEN 'Not classified'\
+    \ END\n"
+  source_model: main.function_and_recovery
+  from_sql: main.function_and_recovery fr
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: anoxia_donor
+  description: Donor cause of death is Anoxia (don_co_desc begins 'Anoxia').
+  sql_expression: fr.don_co_desc LIKE 'Anoxia%'
+  source_model: main.function_and_recovery
+  from_sql: main.function_and_recovery fr
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: static_cold_storage
+  description: Organ preserved by Static Cold Storage (org_presv_meth begins 'Static cold storage').
+  sql_expression: fr.org_presv_meth LIKE 'Static cold storage%'
+  source_model: main.function_and_recovery
+  from_sql: main.function_and_recovery fr
+  grain: one donor
+  domains:
+  - logistics
+- name: high_risk_donor
+  description: 'High-Risk Donor: communicable disease (viralstatinfo Hcv_State or Hiv_State = ''Positive''),
+    malignancy (med_history list contains ''Cancer''), or high-risk drug use (drug_cond ''Current use,
+    high risk assessment''). INTERPRETATION: IV use is not distinguished in the data; current drug use
+    stands in for it. Hepatitis B (Hbv_State) can be added since the listed diseases are examples.
+
+    '
+  sql_expression: 'COALESCE(mh.viralstatinfo->>''Hcv_State'' = ''Positive'', FALSE) OR COALESCE(mh.viralstatinfo->>''Hiv_State''
+    = ''Positive'', FALSE) OR COALESCE(mh.med_history LIKE ''%Cancer%'', FALSE) OR COALESCE(mh.drug_cond
+    LIKE ''Current use%'', FALSE)
+
+    '
+  source_model: main.medical_history
+  from_sql: main.medical_history mh
+  grain: one donor
+  domains:
+  - donor_assessment
+- name: total_ischemia_time
+  description: 'T_ischemia = T_cold + T_warm in minutes. INTERPRETATION: exp_isch_time (expected cold
+    ischemia) + exp_time (expected transport), parsed from text; no warm-ischemia column exists.
+
+    '
+  sql_expression: 'TRY_CAST(regexp_extract(cm.exp_isch_time, ''^([0-9.]+)'', 1) AS DOUBLE) + TRY_CAST(regexp_extract(cm.exp_time,
+    ''^([0-9.]+)'', 1) AS DOUBLE)
+
+    '
+  source_model: main.compatibility_metrics
+  from_sql: main.compatibility_metrics cm
+  grain: one match record
+  domains:
+  - logistics
+- name: distance_km
+  description: 'Distance in km: stored values are suffixed ''miles'', so number * 1.609344.'
+  sql_expression: TRY_CAST(regexp_extract(cm.distance, '^([0-9.]+)', 1) AS DOUBLE) * 1.609344
+  source_model: main.compatibility_metrics
+  from_sql: main.compatibility_metrics cm
+  grain: one match record
+  domains:
+  - logistics
+- name: logistical_feasibility_index
+  description: I_logistics = 700/Distance_km + 300/T_ischemia_mins (distance converted from miles; NULL
+    if either is 0).
+  sql_expression: "700 / NULLIF(TRY_CAST(regexp_extract(cm.distance, '^([0-9.]+)', 1) AS DOUBLE) * 1.609344,\
+    \ 0) + 300 / NULLIF(TRY_CAST(regexp_extract(cm.exp_isch_time, '^([0-9.]+)', 1) AS DOUBLE)\n      \
+    \         + TRY_CAST(regexp_extract(cm.exp_time, '^([0-9.]+)', 1) AS DOUBLE), 0)\n"
+  source_model: main.compatibility_metrics
+  from_sql: main.compatibility_metrics cm
+  grain: one match record
+  domains:
+  - logistics
+  - risk_outcomes
+- name: medical_urgency_value
+  description: Status 1A = 5, Status 1B = 4, Status 2 (or noisy '2') = 3, Status 3 (or noisy '3') = 2,
+    all other statuses = 1.
+  sql_expression: "CASE WHEN cl.med_urgency = 'Status 1A' THEN 5\n     WHEN cl.med_urgency = 'Status 1B'\
+    \ THEN 4\n     WHEN cl.med_urgency IN ('Status 2', '2') THEN 3\n     WHEN cl.med_urgency IN ('Status\
+    \ 3', '3') THEN 2\n     ELSE 1 END\n"
+  source_model: main.clinical
+  from_sql: main.clinical cl
+  grain: one recipient
+  domains:
+  - recipient_priority
+- name: wait_time_ratio
+  description: R_wait = wait days / 365.0 (wait_time text 'N days').
+  sql_expression: TRY_CAST(regexp_extract(cl.wait_time, '^([0-9]+)', 1) AS DOUBLE) / 365.0
+  source_model: main.clinical
+  from_sql: main.clinical cl
+  grain: one recipient
+  domains:
+  - recipient_priority
+- name: patient_urgency_score
+  description: S_urgency = 0.7*Status_medical + 0.3*R_wait.
+  sql_expression: "0.7 * (CASE WHEN cl.med_urgency = 'Status 1A' THEN 5 WHEN cl.med_urgency = 'Status\
+    \ 1B' THEN 4\n            WHEN cl.med_urgency IN ('Status 2', '2') THEN 3 WHEN cl.med_urgency IN ('Status\
+    \ 3', '3') THEN 2 ELSE 1 END)\n+ 0.3 * (TRY_CAST(regexp_extract(cl.wait_time, '^([0-9]+)', 1) AS DOUBLE)\
+    \ / 365.0)\n"
+  source_model: main.clinical
+  from_sql: main.clinical cl
+  grain: one recipient
+  domains:
+  - recipient_priority
+- name: comorbidity_count
+  description: Number of comma-separated comorbidities in clinical.comorbid_detail (0-3 in data); NULL
+    (assessment incomplete) counted as 0.
+  sql_expression: CASE WHEN cl.comorbid_detail IS NULL THEN 0 ELSE len(string_split(cl.comorbid_detail,
+    ',')) END
+  source_model: main.clinical
+  from_sql: main.clinical cl
+  grain: one recipient
+  domains:
+  - risk_outcomes
+- name: surgical_risk_score
+  description: 'S_surgical = 0.6*N_comorbidities + 0.4*C_procedure with normalized components: N = comorbidity
+    count / 4 (four comorbidity types exist), C = risk_evaluation.surg_cmpl_val. Distinct from stored
+    surg_risk_val.
+
+    '
+  sql_expression: '0.6 * ((CASE WHEN cl.comorbid_detail IS NULL THEN 0 ELSE len(string_split(cl.comorbid_detail,
+    '','')) END) / 4.0) + 0.4 * re.surg_cmpl_val
+
+    '
+  source_model: main.risk_evaluation
+  from_sql: 'main.transplant_matching tm JOIN main.risk_evaluation re ON re.risk_eval_registry = tm.match_rec_registry
+    LEFT JOIN main.clinical cl ON cl.clin_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: readmission_risk_index
+  description: I_readmission = 0.1 + 0.05*N_conditions (raw comorbidity count) + 0.2*S_surgical.
+  sql_expression: "0.1 + 0.05 * (CASE WHEN cl.comorbid_detail IS NULL THEN 0 ELSE len(string_split(cl.comorbid_detail,\
+    \ ',')) END) + 0.2 * (0.6 * ((CASE WHEN cl.comorbid_detail IS NULL THEN 0 ELSE len(string_split(cl.comorbid_detail,\
+    \ ',')) END) / 4.0)\n         + 0.4 * re.surg_cmpl_val)\n"
+  source_model: main.risk_evaluation
+  from_sql: 'main.transplant_matching tm JOIN main.risk_evaluation re ON re.risk_eval_registry = tm.match_rec_registry
+    LEFT JOIN main.clinical cl ON cl.clin_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: center_performance_score
+  description: S_center = 0.6*V_transplants + 0.4*R_success = 0.6*cntr_vol_val + 0.4*cntr_out_val.
+  sql_expression: 0.6 * re.cntr_vol_val + 0.4 * re.cntr_out_val
+  source_model: main.risk_evaluation
+  from_sql: main.risk_evaluation re
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: composite_allocation_score
+  description: S_allocation = 0.5*S_urgency + 0.25*S_immune + 0.25*EGS.
+  sql_expression: "0.5 * (0.7 * (CASE WHEN cl.med_urgency = 'Status 1A' THEN 5 WHEN cl.med_urgency = 'Status\
+    \ 1B' THEN 4\n                   WHEN cl.med_urgency IN ('Status 2', '2') THEN 3 WHEN cl.med_urgency\
+    \ IN ('Status 3', '3') THEN 2 ELSE 1 END)\n       + 0.3 * (TRY_CAST(regexp_extract(cl.wait_time, '^([0-9]+)',\
+    \ 1) AS DOUBLE) / 365.0))\n+ 0.25 * (0.6 * (CASE WHEN lower(trim(cm.blood_compat)) = 'compatible'\
+    \ THEN 1 ELSE 0 END) + 0.4 * (1 - cm.hla_mis_count / 6.0)) + 0.25 * (1 / (1 + exp(-(-0.5\n    + 1.5\
+    \ * (0.6 * (CASE WHEN lower(trim(cm.blood_compat)) = 'compatible' THEN 1 ELSE 0 END) + 0.4 * (1 -\
+    \ cm.hla_mis_count / 6.0))\n    - 0.02 * CAST(regexp_extract(d.age_count, '^([0-9]+)', 1) AS INTEGER)))))\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.compatibility_metrics cm ON cm.match_comp_registry
+    = tm.match_rec_registry JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg JOIN main.clinical
+    cl ON cl.clin_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - recipient_priority
+- name: comprehensive_match_quality_score
+  description: S_match = 0.4*S_immune + 0.2*S_age - 0.3*S_surgical + 0.1*I_logistics, each as in its own
+    metric.
+  sql_expression: "0.4 * (0.6 * (CASE WHEN lower(trim(cm.blood_compat)) = 'compatible' THEN 1 ELSE 0 END)\
+    \ + 0.4 * (1 - cm.hla_mis_count / 6.0)) + 0.2 * exp(-0.03 * abs(r.age_count - CAST(regexp_extract(d.age_count,\
+    \ '^([0-9]+)', 1) AS INTEGER))) - 0.3 * (0.6 * ((CASE WHEN cl.comorbid_detail IS NULL THEN 0 ELSE\
+    \ len(string_split(cl.comorbid_detail, ',')) END) / 4.0)\n         + 0.4 * re.surg_cmpl_val)\n+ 0.1\
+    \ * (700 / NULLIF(TRY_CAST(regexp_extract(cm.distance, '^([0-9.]+)', 1) AS DOUBLE) * 1.609344, 0)\n\
+    \         + 300 / NULLIF(TRY_CAST(regexp_extract(cm.exp_isch_time, '^([0-9.]+)', 1) AS DOUBLE)\n \
+    \                       + TRY_CAST(regexp_extract(cm.exp_time, '^([0-9.]+)', 1) AS DOUBLE), 0))\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.compatibility_metrics cm ON cm.match_comp_registry
+    = tm.match_rec_registry JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg JOIN main.recipients_demographics
+    r ON r.recip_registry = tm.recip_ref_reg JOIN main.risk_evaluation re ON re.risk_eval_registry = tm.match_rec_registry
+    LEFT JOIN main.clinical cl ON cl.clin_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+- name: optimal_donor_recipient_match
+  description: 'All three at once: ABO rule compatible, hla_mis_count = 0, size compatibility score in
+    [0.9, 1.1] inclusive.'
+  sql_expression: "(regexp_extract(d.blood_class, '^(AB|A|B|O)', 1) = 'O'\n OR regexp_extract(r.blood_class,\
+    \ '^(AB|A|B|O)', 1) = 'AB'\n OR regexp_extract(d.blood_class, '^(AB|A|B|O)', 1) = regexp_extract(r.blood_class,\
+    \ '^(AB|A|B|O)', 1))\nAND cm.hla_mis_count = 0 AND (1 - abs(CAST(d.physicalstats->>'Bmi_Value' AS\
+    \ DOUBLE) / NULLIF(r.bmi_val, 0) - 1)) BETWEEN 0.9 AND 1.1\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm JOIN main.compatibility_metrics cm ON cm.match_comp_registry
+    = tm.match_rec_registry JOIN main.demographics d ON d.contrib_registry = tm.donor_ref_reg JOIN main.recipients_demographics
+    r ON r.recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - risk_outcomes
+  - immunology
+- name: allocation_policy_rank
+  description: 'Allocation policy order: Medical Urgency Status value descending first, then lower hla_mis_count
+    first. Ranked within each donor and organ''s candidate pool; change the PARTITION BY for another pool.
+
+    '
+  sql_expression: "RANK() OVER (PARTITION BY tm.donor_ref_reg, tm.org_spec ORDER BY\n  (CASE WHEN cl.med_urgency\
+    \ = 'Status 1A' THEN 5 WHEN cl.med_urgency = 'Status 1B' THEN 4\n        WHEN cl.med_urgency IN ('Status\
+    \ 2', '2') THEN 3 WHEN cl.med_urgency IN ('Status 3', '3') THEN 2 ELSE 1 END) DESC,\n  cm.hla_mis_count\
+    \ ASC NULLS LAST)\n"
+  source_model: main.transplant_matching
+  from_sql: 'main.transplant_matching tm LEFT JOIN main.compatibility_metrics cm ON cm.match_comp_registry
+    = tm.match_rec_registry LEFT JOIN main.clinical cl ON cl.clin_recip_registry = tm.recip_ref_reg
+
+    '
+  grain: one match record
+  domains:
+  - recipient_priority
+- name: multi_organ_transplant
+  description: 'A donor-recipient pair matched for two or more distinct organs. Aggregate: GROUP BY tm.donor_ref_reg,
+    tm.recip_ref_reg.'
+  sql_expression: COUNT(DISTINCT tm.org_spec) >= 2
+  source_model: main.transplant_matching
+  from_sql: main.transplant_matching tm
+  grain: one donor-recipient pair (GROUP BY tm.donor_ref_reg, tm.recip_ref_reg)
+  domains:
+  - recipient_priority
+- name: cost_per_qaly
+  description: Cost-Effectiveness Ratio (cost per QALY, USD) parsed from risk_evaluation.cost_qaly text
+    'N USD/QALY'.
+  sql_expression: TRY_CAST(regexp_extract(re.cost_qaly, '^([0-9.]+)', 1) AS DOUBLE)
+  source_model: main.risk_evaluation
+  from_sql: main.risk_evaluation re
+  grain: one match record
+  domains:
+  - health_economics
+- name: cost_effectiveness_category
+  description: 'Against the US benchmark of $50,000-$150,000 per QALY: below 50,000 = below threshold
+    (good value); 50,000-150,000 = within benchmark; above 150,000 = above benchmark.'
+  sql_expression: "CASE WHEN TRY_CAST(regexp_extract(re.cost_qaly, '^([0-9.]+)', 1) AS DOUBLE) < 50000\
+    \ THEN 'Below threshold (good value)'\n     WHEN TRY_CAST(regexp_extract(re.cost_qaly, '^([0-9.]+)',\
+    \ 1) AS DOUBLE) <= 150000 THEN 'Within benchmark range'\n     WHEN re.cost_qaly IS NOT NULL THEN 'Above\
+    \ benchmark' END\n"
+  source_model: main.risk_evaluation
+  from_sql: main.risk_evaluation re
+  grain: one match record
+  domains:
+  - health_economics
+tables:
+- schema: main
+  table: demographics
+  columns:
+  - name: contrib_registry
+    type: VARCHAR
+    description: Donor id (D...).
+  - name: age_count
+    type: VARCHAR
+    description: Donor age as text 'N years, <band>'; use metric donor_age.
+  - name: blood_class
+    type: VARCHAR
+    description: Donor blood type with gloss, e.g. 'B- rare type (specific matching)'; ABO group = regexp_extract(blood_class,
+      '^(AB|A|B|O)', 1).
+  - name: physicalstats
+    type: JSON
+    description: 'JSON: Height_Cm, Weight_Kg, Bmi_Value, Gender_Type (M/F), Ethnicity. Read with ->> and
+      cast.'
+- schema: main
+  table: medical_history
+  columns:
+  - name: med_history
+    type: VARCHAR
+    description: Comma list of Cancer, Diabetes, Heart Disease, Hypertension, None. NULL = history incomplete/unavailable.
+  - name: drug_cond
+    type: VARCHAR
+    description: '''Current use, high risk assessment'' or ''Past use, recovery documented''; NULL = not
+      assessed.'
+  - name: alc_cond
+    type: VARCHAR
+    description: Alcohol use; NULL = undocumented.
+  - name: viralstatinfo
+    type: JSON
+    description: JSON Cmv_State, Ebv_State, Hbv_State, Hcv_State, Hiv_State (Positive/Negative).
+- schema: main
+  table: function_and_recovery
+  columns:
+  - name: don_crtn_val
+    type: VARCHAR
+    description: Serum creatinine text 'N mg/dL'; normal 0.7-1.3.
+  - name: don_gfr_val
+    type: VARCHAR
+    description: Measured GFR text 'N mL/min/1.73m²'.
+  - name: don_co_desc
+    type: VARCHAR
+    description: 'Cause of death: Anoxia..., Stroke..., Trauma..., Other cause....'
+  - name: org_presv_meth
+    type: VARCHAR
+    description: Static cold storage..., Machine perfusion..., Normothermic perfusion....
+  - name: org_isch_time
+    type: VARCHAR
+    description: Recorded cold ischemia time text 'N mins'.
+  - name: org_recov_dt
+    type: VARCHAR
+    description: Recovery date text 'MM-DD-YYYY HKT'.
+- schema: main
+  table: clinical
+  columns:
+  - name: med_urgency
+    type: VARCHAR
+    description: Status 1A/1B/2/3; bare '2' and '3' are noisy Status 2/3. See medical_urgency_value.
+  - name: wait_time
+    type: VARCHAR
+    description: Wait time text 'N days'.
+  - name: comorbid_detail
+    type: VARCHAR
+    description: Comma list of COPD, Diabetes, Heart Disease, Hypertension; NULL = assessment incomplete.
+- schema: main
+  table: recipients_immunology
+  columns:
+  - name: pra_score
+    type: REAL
+    description: PRA 0-100; >= 80 = high PRA / sensitized.
+  - name: cross_result
+    type: VARCHAR
+    description: Positive (contraindication), Negative (proceed), Pending.
+  - name: dsa_state
+    type: VARCHAR
+    description: Donor-specific antibodies Positive/Negative.
+  - name: hlaprofile
+    type: JSON
+    description: JSON Hla_A_Val, Hla_B_Val, Hla_Dr_Val, Hla_Dq_Val (numbers).
+- schema: main
+  table: compatibility_metrics
+  columns:
+  - name: hla_mis_count
+    type: BIGINT
+    description: HLA mismatches 0-6; the operational HLA Mismatch Score.
+  - name: blood_compat
+    type: VARCHAR
+    description: Compatible/Incompatible in random case (use lower()); NULL = pending. Does not always
+      agree with the ABO rule.
+  - name: distance
+    type: VARCHAR
+    description: Text 'N miles' (meaning says km; values are miles). See distance_km.
+  - name: exp_isch_time
+    type: VARCHAR
+    description: Expected cold ischemia 'N minutes ischemia'.
+  - name: exp_time
+    type: VARCHAR
+    description: Expected transport 'N minutes transport'.
+  - name: cost_est
+    type: VARCHAR
+    description: Estimated cost text 'US$N'.
+- schema: main
+  table: risk_evaluation
+  columns:
+  - name: surg_cmpl_val
+    type: REAL
+    description: Surgical complexity 0-1; C_procedure in surgical_risk_score.
+  - name: surg_risk_val
+    type: REAL
+    description: Stored surgical risk; NULL = incomplete (noise).
+  - name: cntr_vol_val
+    type: REAL
+    description: Center volume score (V_transplants).
+  - name: cntr_out_val
+    type: REAL
+    description: Center outcomes score (R_success).
+  - name: cost_qaly
+    type: VARCHAR
+    description: CER text 'N USD/QALY'.
+- schema: main
+  table: transplant_matching
+  columns:
+  - name: match_rec_registry
+    type: VARCHAR
+    description: Match id; satellites join on it.
+  - name: match_ts
+    type: VARCHAR
+    description: Text 'YYYY.MM.DD HH:MI:SS'.
+- schema: main
+  table: data_source_and_quality
+  columns:
+  - name: last_up_ts
+    type: VARCHAR
+    description: Text 'YYYY/MM/DD'.
+  - name: next_rev_dt
+    type: VARCHAR
+    description: Text 'DD/MM/YYYY'.
+  - name: verif_stat_val
+    type: VARCHAR
+    description: verified/pending/failed, random case.
+- schema: main
+  table: administrative_and_review
+  columns:
+  - name: cons_stat_val
+    type: VARCHAR
+    description: Consent obtained/pending/refused, random case; NULL = incomplete.
+- schema: main
+  table: allocation_details
+  columns:
+  - name: allc_pol_vers
+    type: VARCHAR
+    description: Allocation policy version, e.g. 'v2.7'.
+  - name: allc_region
+    type: VARCHAR
+    description: Recipient's allocation region Region_1..Region_10.
+- schema: main
+  table: hla_info
+  columns:
+  - name: hla_a_val
+    type: REAL
+    description: Donor HLA-A typing value.
+- schema: main
+  table: recipients_demographics
+  columns:
+  - name: bmi_val
+    type: REAL
+    description: Recipient BMI; equals wt_kg/(ht_cm/100)^2.
+- schema: main
+  table: logistics
+  columns:
+  - name: trans_method
+    type: VARCHAR
+    description: Charter Air, Commercial Air, Ground, Helicopter.

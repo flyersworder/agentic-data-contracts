@@ -1,0 +1,817 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: archeology_scan, author: claudeopus5.5
+metrics:
+- name: scan_resolution_index
+  description: 'SRI = log10(Scan Resolution mm x 10^3) / log10(Point Density pts/m2) x 5. Lower values
+    indicate higher quality resolution and more balanced scanning parameters. One value per point cloud
+    (= per scan session).
+
+    '
+  sql_expression: LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: scan_coverage_effectiveness
+  description: 'SCE = Coverage% x (1 + Overlap%/100 x (1 - Coverage%/100)). Higher values indicate more
+    effective coverage with appropriate overlap.
+
+    '
+  sql_expression: CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: point_cloud_density_ratio
+  description: 'PCDR = Total Points / (Point-Cloud Density Code (Cloud_Dense) x Surface Area m2). Surface
+    area is spatial.spatial_dims Area_M2, joined 1:1 on (arcref, crewref). Higher values suggest more
+    efficient and spatially consistent scanning.
+
+    '
+  sql_expression: CAST(pc.cloud_metrics->>'Total_Pts' AS DOUBLE) / (CAST(pc.cloud_metrics->>'Cloud_Dense'
+    AS DOUBLE) * CAST(sp.spatial_dims->>'Area_M2' AS DOUBLE))
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc JOIN main.spatial sp ON sp.arcref = pc.arcref AND sp.crewref = pc.crewref
+  grain: one point cloud with its spatial measurement record
+  domains:
+  - scan_quality
+- name: scan_quality_score
+  description: 'SQS = (10/SRI)^1.5 x (SCE/100) x (1 - Noise dB/30)^2. Higher values indicate exponentially
+    better scan quality with emphasis on resolution. Observed range ~1.8-11.3.
+
+    '
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2)
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: is_high_resolution_scan
+  description: 'High Resolution Scan: Scan Resolution <= 1.0 mm AND Point Density >= 1000 pts/m2 (sub-millimetre
+    precision).'
+  sql_expression: CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) <= 1.0 AND CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE) >= 1000
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: is_comprehensive_coverage
+  description: 'Comprehensive Coverage: Coverage >= 95% AND Overlap >= 30%.'
+  sql_expression: CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) >= 95 AND CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) >= 30
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: is_premium_quality_scan
+  description: 'Premium Quality Scan: High Resolution Scan AND Comprehensive Coverage AND SQS > 7.5 (strict).
+    Suitable for conservation planning and scholarly publication.
+
+    '
+  sql_expression: CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) <= 1.0 AND CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE) >= 1000 AND CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) >= 95 AND CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) >= 30 AND POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000)
+    / LOG10(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) / 100) * POWER(1 - CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) > 7.5
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc
+  grain: one point cloud record
+  domains:
+  - scan_quality
+- name: spatial_density_index
+  description: SDI = Total Points / (Surface Area m2 x 10^4) x (Point Density / Point-Cloud Density Code)^0.5.
+  sql_expression: CAST(pc.cloud_metrics->>'Total_Pts' AS DOUBLE) / (CAST(sp.spatial_dims->>'Area_M2' AS
+    DOUBLE) * 10000) * SQRT(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE) / CAST(pc.cloud_metrics->>'Cloud_Dense'
+    AS DOUBLE))
+  source_model: main.pointcloud
+  from_sql: main.pointcloud pc JOIN main.spatial sp ON sp.arcref = pc.arcref AND sp.crewref = pc.crewref
+  grain: one point cloud with its spatial measurement record
+  domains:
+  - scan_quality
+- name: is_spatially_complex_site
+  description: 'Spatially Complex Site: Surface Area > 100 m2 AND SDI > 50. The spatial record is keyed
+    by project/operator (no zoneref); to attribute to a site go through scans on (arcref, crewref) and
+    use scans.zoneref.
+
+    '
+  sql_expression: CAST(sp.spatial_dims->>'Area_M2' AS DOUBLE) > 100 AND CAST(pc.cloud_metrics->>'Total_Pts'
+    AS DOUBLE) / (CAST(sp.spatial_dims->>'Area_M2' AS DOUBLE) * 10000) * SQRT(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE) / CAST(pc.cloud_metrics->>'Cloud_Dense' AS DOUBLE)) > 50
+  source_model: main.spatial
+  from_sql: main.pointcloud pc JOIN main.spatial sp ON sp.arcref = pc.arcref AND sp.crewref = pc.crewref
+  grain: one point cloud with its spatial measurement record
+  domains:
+  - scan_quality
+- name: scan_time_efficiency
+  description: 'STE = SQS x sqrt(Coverage%) / (Scan Duration min x sqrt(Number of Scans)). INTERPRETATION:
+    there is no duration column; duration (min) = scans.size GB x 1024 / scanning_rate MB/min. Number
+    of scans = leading integer of scans.scancount.
+
+    '
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * SQRT(CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE)) / ((CAST(split_part(s.size, ' ', 1) AS DOUBLE) * 1024 / CAST(split_part(s.scanning_rate,
+    ' ', 1) AS DOUBLE)) * SQRT(CAST(regexp_extract(s.scancount, '^[0-9]+') AS DOUBLE)))
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref
+  grain: one scan session (1:1 with its point cloud)
+  domains:
+  - scan_quality
+- name: mesh_complexity_ratio
+  description: MCR = Faces / (Vertices x Resolution mm^2) x 10^3. Higher = more complex mesh for its resolution.
+  sql_expression: CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS
+    DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000
+  source_model: main.mesh
+  from_sql: main.mesh m
+  grain: one mesh record
+  domains:
+  - mesh_models
+- name: texture_density_index
+  description: TDI = Texture Size px (Tex_Pix) / (sqrt(Faces) x Resolution mm) x 10^-2. Higher = more
+    detailed textures.
+  sql_expression: CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS
+    DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01
+  source_model: main.mesh
+  from_sql: main.mesh m
+  grain: one mesh record
+  domains:
+  - mesh_models
+- name: model_fidelity_score
+  description: MFS = MCR x (TDI/10) x (1 + exp(-Geometric Accuracy mm (Geom_Delta_Mm))).
+  sql_expression: (CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS
+    DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix'
+    AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE)))
+  source_model: main.mesh
+  from_sql: main.mesh m
+  grain: one mesh record
+  domains:
+  - mesh_models
+- name: is_high_fidelity_mesh
+  description: 'High Fidelity Mesh: MCR > 5.0 AND Mesh Resolution < 1.0 mm AND Geometric Accuracy < 0.5
+    mm (all strict).'
+  sql_expression: CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS
+    DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000 > 5.0 AND CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE) < 1.0 AND CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE) < 0.5
+  source_model: main.mesh
+  from_sql: main.mesh m
+  grain: one mesh record
+  domains:
+  - mesh_models
+- name: mesh_quality_classification
+  description: 'Per site: ''No Mesh Data'' when the site has no mesh rows, ''Has High-Fidelity Meshes''
+    when at least one mesh is high fidelity, else ''Standard Mesh Quality''. Aggregate; GROUP BY si.zoneregistry.
+
+    '
+  sql_expression: CASE WHEN COUNT(m.facetregistry) = 0 THEN 'No Mesh Data' WHEN BOOL_OR(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000 > 5.0 AND CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE) < 1.0 AND CAST(m.mesh_specs->>'Geom_Delta_Mm'
+    AS DOUBLE) < 0.5) THEN 'Has High-Fidelity Meshes' ELSE 'Standard Mesh Quality' END
+  source_model: main.sites
+  from_sql: main.sites si LEFT JOIN main.mesh m ON m.zoneref = si.zoneregistry
+  grain: one site (after GROUP BY si.zoneregistry)
+  domains:
+  - mesh_models
+- name: mesh_to_point_ratio
+  description: 'MPR = Mesh Vertices / Total Points x 100 x (MCR/10)^0.3; ~25-30 optimal decimation. Mesh
+    is linked to point clouds through the site: mesh.zoneref = scans.zoneref, then scans -> pointcloud
+    on (arcref, crewref); fans out per scan x mesh.
+
+    '
+  sql_expression: CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) / CAST(pc.cloud_metrics->>'Total_Pts' AS
+    DOUBLE) * 100 * POWER((CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts'
+    AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) / 10, 0.3)
+  source_model: main.mesh
+  from_sql: main.mesh m JOIN main.scans s ON s.zoneref = m.zoneref JOIN main.pointcloud pc ON pc.arcref
+    = s.arcref AND pc.crewref = s.crewref
+  grain: one mesh x one scan session at the same site
+  domains:
+  - mesh_models
+- name: is_resource_intensive_model
+  description: 'Resource-Intensive Model: Mesh Faces > 2,000,000 AND MPR < 15.'
+  sql_expression: CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) > 2000000 AND CAST(m.mesh_specs->>'Facet_Verts'
+    AS DOUBLE) / CAST(pc.cloud_metrics->>'Total_Pts' AS DOUBLE) * 100 * POWER((CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000) / 10, 0.3) < 15
+  source_model: main.mesh
+  from_sql: main.mesh m JOIN main.scans s ON s.zoneref = m.zoneref JOIN main.pointcloud pc ON pc.arcref
+    = s.arcref AND pc.crewref = s.crewref
+  grain: one mesh x one scan session at the same site
+  domains:
+  - mesh_models
+- name: is_texture_critical_artifact
+  description: 'Texture-Critical Artifact: features Texture_Study containing ''Detailed'' or ''Critical''
+    AND TDI > 8.0. Feature joined to the mesh made with the same equipment at the same site (zoneref,
+    equipref). Data: Texture_Study holds only Completed/Partial/Not Required, so this returns no rows.
+
+    '
+  sql_expression: ((f.feature_analysis->'Analysis_Status'->>'Texture_Study') LIKE '%Detailed%' OR (f.feature_analysis->'Analysis_Status'->>'Texture_Study')
+    LIKE '%Critical%') AND CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01 > 8.0
+  source_model: main.features
+  from_sql: main.features f JOIN main.mesh m ON m.zoneref = f.zoneref AND m.equipref = f.equipref
+  grain: one feature analysis record with its mesh
+  domains:
+  - mesh_models
+- name: feature_extraction_efficiency
+  description: 'FEE = (Detected Features (Trait_Count) + Artifact Count (Arti_Count)) / (PCDR x sqrt(Point-Cloud
+    Density Code)) x 10^3. Features link to point clouds via the site (features.zoneref = scans.zoneref)
+    and PCDR''s area via spatial on (arcref, crewref).
+
+    '
+  sql_expression: (CAST(f.feature_analysis->>'Trait_Count' AS DOUBLE) + CAST(f.feature_analysis->>'Arti_Count'
+    AS DOUBLE)) / ((CAST(pc.cloud_metrics->>'Total_Pts' AS DOUBLE) / (CAST(pc.cloud_metrics->>'Cloud_Dense'
+    AS DOUBLE) * CAST(sp.spatial_dims->>'Area_M2' AS DOUBLE))) * SQRT(CAST(pc.cloud_metrics->>'Cloud_Dense'
+    AS DOUBLE))) * 1000
+  source_model: main.features
+  from_sql: main.features f JOIN main.scans s ON s.zoneref = f.zoneref JOIN main.pointcloud pc ON pc.arcref
+    = s.arcref AND pc.crewref = s.crewref JOIN main.spatial sp ON sp.arcref = s.arcref AND sp.crewref
+    = s.crewref
+  grain: one feature record x one scan session at the same site
+  domains:
+  - scan_quality
+  - mesh_models
+- name: environmental_suitability_index
+  description: 'ESI = 100 - 2.5 x |Ambic_Temp - 20| - |(Hume_Pct - 50)/2|^1.5 - 600/(Illume_Lux + 100).
+    Higher = more ideal scanning conditions. Observed range ~-61 to 97.
+
+    '
+  sql_expression: 100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp' AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct'
+    AS DOUBLE) - 50) / 2), 1.5) - 600 / (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100)
+  source_model: main.environment
+  from_sql: main.environment e
+  grain: one environment record
+  domains:
+  - environment
+- name: is_optimal_scanning_conditions
+  description: 'Optimal Scanning Conditions: ESI > 85 (moderate temperature, humidity ~50%, good illumination).'
+  sql_expression: 100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp' AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct'
+    AS DOUBLE) - 50) / 2), 1.5) - 600 / (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100) > 85
+  source_model: main.environment
+  from_sql: main.environment e
+  grain: one environment record
+  domains:
+  - environment
+- name: environmental_condition_class
+  description: 'ECCS: ''Optimal Scanning Conditions'' ESI > 85; ''Good Scanning Conditions'' 70-85; ''Acceptable
+    Scanning Conditions'' 50-70; ''Challenging Scanning Conditions'' ESI < 50. Tie-break: exactly 85 and
+    70 are Good, exactly 50 is Acceptable.
+
+    '
+  sql_expression: CASE WHEN ee.esi > 85 THEN 'Optimal Scanning Conditions' WHEN ee.esi >= 70 THEN 'Good
+    Scanning Conditions' WHEN ee.esi >= 50 THEN 'Acceptable Scanning Conditions' ELSE 'Challenging Scanning
+    Conditions' END
+  source_model: main.environment
+  from_sql: (SELECT e.airregistry, e.zoneref, e.equipref, 100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp'
+    AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct' AS DOUBLE) - 50) / 2), 1.5) - 600 /
+    (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100) AS esi FROM main.environment e) ee
+  grain: one environment record
+  domains:
+  - environment
+- name: environmental_impact_factor
+  description: 'EIF = SQS / (ESI + 10) x 100; near 100 = minimal environmental interference. Environment
+    linked to the scan via site (environment.zoneref = scans.zoneref; fans out up to 4 environment rows
+    per site). ESI + 10 can be <= 0 (ESI min ~-61); zero is NULLed.
+
+    '
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) / NULLIF(100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp'
+    AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct' AS DOUBLE) - 50) / 2), 1.5) - 600 /
+    (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100) + 10, 0) * 100
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.environment e ON e.zoneref = s.zoneref
+  grain: one scan session x one environment record at its site
+  domains:
+  - environment
+  - scan_quality
+- name: is_environmental_challenge_scan
+  description: 'Environmental Challenge Scan: EIF > 120.'
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) / NULLIF(100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp'
+    AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct' AS DOUBLE) - 50) / 2), 1.5) - 600 /
+    (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100) + 10, 0) * 100 > 120
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.environment e ON e.zoneref = s.zoneref
+  grain: one scan session x one environment record at its site
+  domains:
+  - environment
+- name: equipment_effectiveness_ratio
+  description: 'EER = SQS x EquipStatus_value / (Battery% x (101 - EquipAge_days)/365) x 25. INTERPRETATION:
+    equipment reaches a scan through the environment record at the scan''s site (environment.zoneref =
+    scans.zoneref, equipment = environment.equipref). EquipStatus_value: Excellent 1.0, Good 0.8, Fair
+    0.5, Poor 0.2 (doc gives only the endpoints). Battery% = leading integer of powerlevel (0 -> NULL).
+    EquipAge_days = scan date (first 10 chars of chronotag) - equiptune; it can be negative (calibration
+    after scan) or >= 101 (negative/zero denominator; zero is NULLed).
+
+    '
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * (CASE WHEN q.equipstatus LIKE 'Excellent%'
+    THEN 1.0 WHEN q.equipstatus LIKE 'Good%' THEN 0.8 WHEN q.equipstatus LIKE 'Fair%' THEN 0.5 WHEN q.equipstatus
+    LIKE 'Poor%' THEN 0.2 END) / NULLIF(CAST(regexp_extract(q.powerlevel, '^[0-9]+') AS DOUBLE) * (101
+    - CAST(CAST(substr(s.chronotag, 1, 10) AS DATE) - q.equiptune AS DOUBLE)) / 365.0, 0) * 25
+  source_model: main.equipment
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.environment e ON e.zoneref = s.zoneref JOIN main.equipment q ON q.equipregistry = e.equipref
+  grain: one scan session x one environment record (and its equipment) at its site
+  domains:
+  - equipment
+- name: is_equipment_optimization_opportunity
+  description: 'Equipment Optimization Opportunity: EER < 30 AND ESI > 80 (same joins and interpretations
+    as equipment_effectiveness_ratio).'
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * (CASE WHEN q.equipstatus LIKE 'Excellent%'
+    THEN 1.0 WHEN q.equipstatus LIKE 'Good%' THEN 0.8 WHEN q.equipstatus LIKE 'Fair%' THEN 0.5 WHEN q.equipstatus
+    LIKE 'Poor%' THEN 0.2 END) / NULLIF(CAST(regexp_extract(q.powerlevel, '^[0-9]+') AS DOUBLE) * (101
+    - CAST(CAST(substr(s.chronotag, 1, 10) AS DATE) - q.equiptune AS DOUBLE)) / 365.0, 0) * 25 < 30 AND
+    100 - 2.5 * ABS(CAST(e.ambient_cond->>'Ambic_Temp' AS DOUBLE) - 20) - POWER(ABS((CAST(e.ambient_cond->>'Hume_Pct'
+    AS DOUBLE) - 50) / 2), 1.5) - 600 / (CAST(e.ambient_cond->>'Illume_Lux' AS DOUBLE) + 100) > 80
+  source_model: main.equipment
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.environment e ON e.zoneref = s.zoneref JOIN main.equipment q ON q.equipregistry = e.equipref
+  grain: one scan session x one environment record (and its equipment) at its site
+  domains:
+  - equipment
+  - environment
+- name: processing_efficiency_ratio
+  description: 'PER = File Size GB (scans.size) x log10(Total Points) / (Flow_Hrs x (Proc_CPU + Proc_GPU)/200).
+    Processing joins to the scan through the site (processing.zoneref = scans.zoneref); fans out per scan
+    x processing record.
+
+    '
+  sql_expression: CAST(split_part(s.size, ' ', 1) AS DOUBLE) * LOG10(CAST(pc.cloud_metrics->>'Total_Pts'
+    AS DOUBLE)) / (CAST(p.system_usage->>'Flow_Hrs' AS DOUBLE) * (CAST(p.system_usage->>'Proc_CPU' AS
+    DOUBLE) + CAST(p.system_usage->>'Proc_GPU' AS DOUBLE)) / 200)
+  source_model: main.processing
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.processing p ON p.zoneref = s.zoneref
+  grain: one scan session x one processing record at its site
+  domains:
+  - processing
+- name: is_processing_bottleneck
+  description: 'Processing Bottleneck: PER < 0.5.'
+  sql_expression: CAST(split_part(s.size, ' ', 1) AS DOUBLE) * LOG10(CAST(pc.cloud_metrics->>'Total_Pts'
+    AS DOUBLE)) / (CAST(p.system_usage->>'Flow_Hrs' AS DOUBLE) * (CAST(p.system_usage->>'Proc_CPU' AS
+    DOUBLE) + CAST(p.system_usage->>'Proc_GPU' AS DOUBLE)) / 200) < 0.5
+  source_model: main.processing
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.processing p ON p.zoneref = s.zoneref
+  grain: one scan session x one processing record at its site
+  domains:
+  - processing
+- name: processing_resource_utilization
+  description: 'PRU = Flow_Hrs x (Proc_CPU + Proc_GPU)/2 / (File Size GB x 10 x log10(Mesh Vertices +
+    10^4)); lower = more efficient. Mesh = the mesh with the same (zoneref, equipref) as the processing
+    record; file size from scans at the same site.
+
+    '
+  sql_expression: CAST(p.system_usage->>'Flow_Hrs' AS DOUBLE) * (CAST(p.system_usage->>'Proc_CPU' AS DOUBLE)
+    + CAST(p.system_usage->>'Proc_GPU' AS DOUBLE)) / 2 / (CAST(split_part(s.size, ' ', 1) AS DOUBLE) *
+    10 * LOG10(CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) + 10000))
+  source_model: main.processing
+  from_sql: main.processing p JOIN main.mesh m ON m.zoneref = p.zoneref AND m.equipref = p.equipref JOIN
+    main.scans s ON s.zoneref = p.zoneref
+  grain: one processing record (with its mesh) x one scan session at its site
+  domains:
+  - processing
+- name: workflow_efficiency_class
+  description: '''Optimized'' PRU < 5.0; ''Acceptable'' 5.0 <= PRU <= 10.0; ''Needs Optimization'' PRU
+    > 10.0.'
+  sql_expression: CASE WHEN w.pru < 5.0 THEN 'Optimized' WHEN w.pru <= 10.0 THEN 'Acceptable' WHEN w.pru
+    > 10.0 THEN 'Needs Optimization' END
+  source_model: main.processing
+  from_sql: (SELECT p.flowregistry, s.questregistry, CAST(p.system_usage->>'Flow_Hrs' AS DOUBLE) * (CAST(p.system_usage->>'Proc_CPU'
+    AS DOUBLE) + CAST(p.system_usage->>'Proc_GPU' AS DOUBLE)) / 2 / (CAST(split_part(s.size, ' ', 1) AS
+    DOUBLE) * 10 * LOG10(CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) + 10000)) AS pru FROM main.processing
+    p JOIN main.mesh m ON m.zoneref = p.zoneref AND m.equipref = p.equipref JOIN main.scans s ON s.zoneref
+    = p.zoneref) w
+  grain: one processing record x one scan session at its site
+  domains:
+  - processing
+- name: is_processing_optimized_workflow
+  description: 'Processing Optimized Workflow: PRU < 5.0 AND MFS > 7.0 (MFS of the mesh sharing zoneref
+    and equipref).'
+  sql_expression: CAST(p.system_usage->>'Flow_Hrs' AS DOUBLE) * (CAST(p.system_usage->>'Proc_CPU' AS DOUBLE)
+    + CAST(p.system_usage->>'Proc_GPU' AS DOUBLE)) / 2 / (CAST(split_part(s.size, ' ', 1) AS DOUBLE) *
+    10 * LOG10(CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) + 10000)) < 5.0 AND (CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm'
+    AS DOUBLE))) > 7.0
+  source_model: main.processing
+  from_sql: main.processing p JOIN main.mesh m ON m.zoneref = p.zoneref AND m.equipref = p.equipref JOIN
+    main.scans s ON s.zoneref = p.zoneref
+  grain: one processing record (with its mesh) x one scan session at its site
+  domains:
+  - processing
+- name: meets_registration_quality_threshold
+  description: 'Registration Quality Threshold: Log_Accu_Mm < 1.0 AND Err_Val_Mm < 2.0.'
+  sql_expression: CAST(r.reg_accuracy->>'Log_Accu_Mm' AS DOUBLE) < 1.0 AND CAST(r.reg_accuracy->>'Err_Val_Mm'
+    AS DOUBLE) < 2.0
+  source_model: main.registration
+  from_sql: main.registration r
+  grain: one registration record
+  domains:
+  - registration
+- name: registration_accuracy_ratio
+  description: RAR = Scan Resolution / (Log_Accu_Mm x sqrt(1 + Err_Val_Mm/Log_Accu_Mm)); > 1 desirable.
+    Registration joins pointcloud 1:1 on (arcref, crewref).
+  sql_expression: CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) / (CAST(r.reg_accuracy->>'Log_Accu_Mm'
+    AS DOUBLE) * SQRT(1 + CAST(r.reg_accuracy->>'Err_Val_Mm' AS DOUBLE) / CAST(r.reg_accuracy->>'Log_Accu_Mm'
+    AS DOUBLE)))
+  source_model: main.registration
+  from_sql: main.registration r JOIN main.pointcloud pc ON pc.arcref = r.arcref AND pc.crewref = r.crewref
+  grain: one registration record with its point cloud
+  domains:
+  - registration
+- name: registration_confidence_level
+  description: '''High Confidence'' RAR > 1.5 AND Log_Method containing ''Target''; ''Medium Confidence''
+    1.0 <= RAR <= 1.5; ''Low Confidence'' otherwise (including RAR > 1.5 without a Target method).
+
+    '
+  sql_expression: CASE WHEN rc.rar > 1.5 AND rc.method LIKE '%Target%' THEN 'High Confidence' WHEN rc.rar
+    BETWEEN 1.0 AND 1.5 THEN 'Medium Confidence' ELSE 'Low Confidence' END
+  source_model: main.registration
+  from_sql: (SELECT r.logregistry, r.reg_accuracy->>'Log_Method' AS method, CAST(pc.cloud_metrics->>'Scan_Resol_Mm'
+    AS DOUBLE) / (CAST(r.reg_accuracy->>'Log_Accu_Mm' AS DOUBLE) * SQRT(1 + CAST(r.reg_accuracy->>'Err_Val_Mm'
+    AS DOUBLE) / CAST(r.reg_accuracy->>'Log_Accu_Mm' AS DOUBLE))) AS rar FROM main.registration r JOIN
+    main.pointcloud pc ON pc.arcref = r.arcref AND pc.crewref = r.crewref) rc
+  grain: one registration record
+  domains:
+  - registration
+- name: archaeological_documentation_completeness
+  description: 'ADC = 0.4 x SQS + 0.4 x MFS + 0.2 x SCE - 5 x sqrt(Noise dB/10). Mesh linked to the scan
+    via site (mesh.zoneref = scans.zoneref); one row per scan x mesh.
+
+    '
+  sql_expression: POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * 0.4 + (CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm'
+    AS DOUBLE))) * 0.4 + CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100)) * 0.2 - 5 * SQRT(CAST(pc.cloud_metrics->>'Noise_Db'
+    AS DOUBLE) / 10)
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.mesh m ON m.zoneref = s.zoneref
+  grain: one scan session x one mesh at its site
+  domains:
+  - documentation_quality
+- name: digital_preservation_quality
+  description: 'DPQ = 0.3 x ADC + 0.3 x MFS + 0.2 x RAR + 0.2 x SCE - 2 x sqrt(Err_Val_Mm / Scan Resolution
+    mm). Registration joined to the scan on (arcref, crewref).
+
+    '
+  sql_expression: 0.3 * (POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000)
+    / LOG10(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) / 100) * POWER(1 - CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * 0.4
+    + (CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) *
+    POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix'
+    AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE))) * 0.4 + CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100)) * 0.2 - 5 * SQRT(CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 10)) + 0.3 * ((CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm'
+    AS DOUBLE)))) + 0.2 * (CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) / (CAST(r.reg_accuracy->>'Log_Accu_Mm'
+    AS DOUBLE) * SQRT(1 + CAST(r.reg_accuracy->>'Err_Val_Mm' AS DOUBLE) / CAST(r.reg_accuracy->>'Log_Accu_Mm'
+    AS DOUBLE)))) + 0.2 * (CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) - 2 * SQRT(CAST(r.reg_accuracy->>'Err_Val_Mm'
+    AS DOUBLE) / CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE))
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.mesh m ON m.zoneref = s.zoneref JOIN main.registration r ON r.arcref = s.arcref AND r.crewref
+    = s.crewref
+  grain: one scan session x one mesh at its site (with the scan's registration)
+  domains:
+  - documentation_quality
+- name: is_multi_phase_documentation_project
+  description: 'Multi-Phase Documentation Project: project with multiple scans (COUNT DISTINCT questregistry
+    > 1) where ADC < 70 for individual scans but DPQ > 80 combined. INTERPRETATION: aggregate per project
+    (GROUP BY s.arcref); individual-scan condition read as AVG(ADC) < 70, combined as AVG(DPQ) > 80, over
+    the same join rows as digital_preservation_quality.
+
+    '
+  sql_expression: COUNT(DISTINCT s.questregistry) > 1 AND AVG(POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm'
+    AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) / 100) * POWER(1 - CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * 0.4
+    + (CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) *
+    POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix'
+    AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE))) * 0.4 + CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100)) * 0.2 - 5 * SQRT(CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 10)) < 70 AND
+    AVG(0.3 * (POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100))) / 100) * POWER(1 -
+    CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * 0.4 + (CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix' AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces'
+    AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm'
+    AS DOUBLE))) * 0.4 + CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) / 100)) * 0.2 - 5 * SQRT(CAST(pc.cloud_metrics->>'Noise_Db'
+    AS DOUBLE) / 10)) + 0.3 * ((CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts'
+    AS DOUBLE) * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix'
+    AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE)))) + 0.2 * (CAST(pc.cloud_metrics->>'Scan_Resol_Mm'
+    AS DOUBLE) / (CAST(r.reg_accuracy->>'Log_Accu_Mm' AS DOUBLE) * SQRT(1 + CAST(r.reg_accuracy->>'Err_Val_Mm'
+    AS DOUBLE) / CAST(r.reg_accuracy->>'Log_Accu_Mm' AS DOUBLE)))) + 0.2 * (CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) - 2 * SQRT(CAST(r.reg_accuracy->>'Err_Val_Mm' AS DOUBLE) / CAST(pc.cloud_metrics->>'Scan_Resol_Mm'
+    AS DOUBLE))) > 80
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.mesh m ON m.zoneref = s.zoneref JOIN main.registration r ON r.arcref = s.arcref AND r.crewref
+    = s.crewref
+  grain: one project (after GROUP BY s.arcref)
+  domains:
+  - documentation_quality
+- name: is_full_archaeological_digital_twin
+  description: 'Full Archaeological Digital Twin, per site (GROUP BY s.zoneref): the site has at least
+    one Premium Quality Scan, at least one High Fidelity Mesh, at least one registration meeting the Registration
+    Quality Threshold, and ADC > 85 (INTERPRETATION: max ADC over the site''s scan x mesh rows).
+
+    '
+  sql_expression: BOOL_OR(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) <= 1.0 AND CAST(pc.cloud_metrics->>'Point_Dense'
+    AS DOUBLE) >= 1000 AND CAST(pc.cloud_metrics->>'Cover_Pct' AS DOUBLE) >= 95 AND CAST(pc.cloud_metrics->>'Lap_Pct'
+    AS DOUBLE) >= 30 AND POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm' AS DOUBLE) * 1000)
+    / LOG10(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) / 100) * POWER(1 - CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) > 7.5)
+    AND BOOL_OR(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE)
+    * POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000 > 5.0 AND CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE) < 1.0 AND CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE) < 0.5) AND BOOL_OR(CAST(r.reg_accuracy->>'Log_Accu_Mm'
+    AS DOUBLE) < 1.0 AND CAST(r.reg_accuracy->>'Err_Val_Mm' AS DOUBLE) < 2.0) AND MAX(POWER(10.0 / (LOG10(CAST(pc.cloud_metrics->>'Scan_Resol_Mm'
+    AS DOUBLE) * 1000) / LOG10(CAST(pc.cloud_metrics->>'Point_Dense' AS DOUBLE)) * 5), 1.5) * ((CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100))) / 100) * POWER(1 - CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 30, 2) * 0.4
+    + (CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE) / (CAST(m.mesh_specs->>'Facet_Verts' AS DOUBLE) *
+    POWER(CAST(m.mesh_specs->>'Facet_Res_Mm' AS DOUBLE), 2)) * 1000) * ((CAST(m.mesh_specs->>'Tex_Pix'
+    AS DOUBLE) / (SQRT(CAST(m.mesh_specs->>'Facet_Faces' AS DOUBLE)) * CAST(m.mesh_specs->>'Facet_Res_Mm'
+    AS DOUBLE)) * 0.01) / 10) * (1 + EXP(-CAST(m.mesh_specs->>'Geom_Delta_Mm' AS DOUBLE))) * 0.4 + CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) * (1 + CAST(pc.cloud_metrics->>'Lap_Pct' AS DOUBLE) / 100 * (1 - CAST(pc.cloud_metrics->>'Cover_Pct'
+    AS DOUBLE) / 100)) * 0.2 - 5 * SQRT(CAST(pc.cloud_metrics->>'Noise_Db' AS DOUBLE) / 10)) > 85
+  source_model: main.scans
+  from_sql: main.scans s JOIN main.pointcloud pc ON pc.arcref = s.arcref AND pc.crewref = s.crewref JOIN
+    main.mesh m ON m.zoneref = s.zoneref JOIN main.registration r ON r.arcref = s.arcref AND r.crewref
+    = s.crewref
+  grain: one site (after GROUP BY s.zoneref)
+  domains:
+  - documentation_quality
+- name: is_degradation_risk_zone
+  description: 'Degradation Risk Zone: Pres_Stat containing ''Poor'' or ''Critical'' AND conservation.structstate
+    not containing ''Stable'' (case-sensitive LIKE; ''Unstable condition...'' and ''Moderate condition...''
+    qualify, ''Stable condition...'' does not). Evaluated per site x conservation record (conservation.zoneref
+    = sites.zoneregistry); a site without conservation records yields NULL (not in zone).
+
+    '
+  sql_expression: ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat') LIKE
+    '%Critical%') AND c.structstate NOT LIKE '%Stable%'
+  source_model: main.sites
+  from_sql: main.sites si JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record
+  domains:
+  - conservation
+- name: risk_zone_category
+  description: '''Degradation Risk Zone'' when is_degradation_risk_zone holds, else ''Not in Risk Zone''
+    (includes sites with no conservation record).'
+  sql_expression: CASE WHEN ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat')
+    LIKE '%Critical%') AND c.structstate NOT LIKE '%Stable%' THEN 'Degradation Risk Zone' ELSE 'Not in
+    Risk Zone' END
+  source_model: main.sites
+  from_sql: main.sites si LEFT JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record (or the site alone)
+  domains:
+  - conservation
+- name: conservation_priority_index
+  description: 'CPI = 100 - PS + AF x (1 + TS/10) in a Degradation Risk Zone, else 50 - PS + AF x (1 +
+    TS/20). PS: Excellent 10, Good 30, Fair 50, Poor 70, Critical 90. INTERPRETATION: AF = (2025 - signed
+    year)/1000 where signed year is the guessdate number, negative for BCE (''-2929 BCE'' and ''2929 BCE''
+    both = -2929); TS = 10 when typesite is ''Rare'' or ''Unique'' (case-insensitive; none in data), else
+    0. NULL guessdate -> NULL CPI. Observed max ~47, so CPI > 60 / > 75 match nothing.
+
+    '
+  sql_expression: CASE WHEN ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat')
+    LIKE '%Critical%') AND c.structstate NOT LIKE '%Stable%' THEN 100 - (CASE si.site_status->>'Pres_Stat'
+    WHEN 'Excellent' THEN 10 WHEN 'Good' THEN 30 WHEN 'Fair' THEN 50 WHEN 'Poor' THEN 70 WHEN 'Critical'
+    THEN 90 END) + ((2025 - CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate,
+    '-?[0-9]+') AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) / 1000.0)
+    * (1 + (CASE WHEN lower(si.typesite) IN ('rare', 'unique') THEN 10 ELSE 0 END) / 10.0) ELSE 50 - (CASE
+    si.site_status->>'Pres_Stat' WHEN 'Excellent' THEN 10 WHEN 'Good' THEN 30 WHEN 'Fair' THEN 50 WHEN
+    'Poor' THEN 70 WHEN 'Critical' THEN 90 END) + ((2025 - CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate,
+    '-?[0-9]+') AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) / 1000.0)
+    * (1 + (CASE WHEN lower(si.typesite) IN ('rare', 'unique') THEN 10 ELSE 0 END) / 20.0) END
+  source_model: main.sites
+  from_sql: main.sites si JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record
+  domains:
+  - conservation
+- name: is_digital_conservation_priority
+  description: 'Highest Digital Conservation Priority: in a Degradation Risk Zone AND (Estimated Date
+    older than 1000 BCE, i.e. signed year < -1000, OR Site Type ''Rare''/''Unique'').
+
+    '
+  sql_expression: ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat') LIKE
+    '%Critical%') AND c.structstate NOT LIKE '%Stable%' AND ((CASE WHEN si.guessdate LIKE '%BCE' THEN
+    -ABS(CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate,
+    '-?[0-9]+') AS INTEGER) END) < -1000 OR lower(si.typesite) IN ('rare', 'unique'))
+  source_model: main.sites
+  from_sql: main.sites si JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record
+  domains:
+  - conservation
+- name: is_conservation_emergency
+  description: 'Conservation Emergency: in a Degradation Risk Zone AND CPI > 75 (risk-zone branch of CPI).'
+  sql_expression: ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat') LIKE
+    '%Critical%') AND c.structstate NOT LIKE '%Stable%' AND 100 - (CASE si.site_status->>'Pres_Stat' WHEN
+    'Excellent' THEN 10 WHEN 'Good' THEN 30 WHEN 'Fair' THEN 50 WHEN 'Poor' THEN 70 WHEN 'Critical' THEN
+    90 END) + ((2025 - CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate,
+    '-?[0-9]+') AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) / 1000.0)
+    * (1 + (CASE WHEN lower(si.typesite) IN ('rare', 'unique') THEN 10 ELSE 0 END) / 10.0) > 75
+  source_model: main.sites
+  from_sql: main.sites si JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record
+  domains:
+  - conservation
+- name: is_high_temporal_value_site
+  description: 'High Temporal Value Site: Estimated Date before 500 CE (signed year < 500) AND CPI > 60.'
+  sql_expression: (CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate, '-?[0-9]+')
+    AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) < 500 AND (CASE WHEN
+    ((si.site_status->>'Pres_Stat') LIKE '%Poor%' OR (si.site_status->>'Pres_Stat') LIKE '%Critical%')
+    AND c.structstate NOT LIKE '%Stable%' THEN 100 - (CASE si.site_status->>'Pres_Stat' WHEN 'Excellent'
+    THEN 10 WHEN 'Good' THEN 30 WHEN 'Fair' THEN 50 WHEN 'Poor' THEN 70 WHEN 'Critical' THEN 90 END) +
+    ((2025 - CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate, '-?[0-9]+')
+    AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) / 1000.0) * (1 +
+    (CASE WHEN lower(si.typesite) IN ('rare', 'unique') THEN 10 ELSE 0 END) / 10.0) ELSE 50 - (CASE si.site_status->>'Pres_Stat'
+    WHEN 'Excellent' THEN 10 WHEN 'Good' THEN 30 WHEN 'Fair' THEN 50 WHEN 'Poor' THEN 70 WHEN 'Critical'
+    THEN 90 END) + ((2025 - CASE WHEN si.guessdate LIKE '%BCE' THEN -ABS(CAST(regexp_extract(si.guessdate,
+    '-?[0-9]+') AS INTEGER)) ELSE CAST(regexp_extract(si.guessdate, '-?[0-9]+') AS INTEGER) END) / 1000.0)
+    * (1 + (CASE WHEN lower(si.typesite) IN ('rare', 'unique') THEN 10 ELSE 0 END) / 20.0) END) > 60
+  source_model: main.sites
+  from_sql: main.sites si JOIN main.conservation c ON c.zoneref = si.zoneregistry
+  grain: one site x one conservation record
+  domains:
+  - conservation
+tables:
+- schema: main
+  table: pointcloud
+  columns:
+  - name: cloudregistry
+    type: BIGINT
+    description: Point cloud record id.
+  - name: crewref
+    type: VARCHAR
+    description: Operator (personnel). With arcref, links 1:1 to scans, registration and spatial.
+  - name: arcref
+    type: VARCHAR
+    description: Project.
+  - name: cloud_metrics
+    type: JSON
+    description: 'Keys Scan_Resol_Mm (mm; smallest distinguishable feature: 0.5 mm fine tool marks, 2.0
+      mm only general shape), Point_Dense (pts/m2; ~100 basic topography, 1,000 structural details, 10,000+
+      surface textures/fine engravings), Cover_Pct (%; >95 near-complete, 80 significant gaps), Total_Pts,
+      Cloud_Dense (the ''Point-Cloud Density Code''), Lap_Pct (overlap %), Noise_Db (dB; <1.0 clean, >3.0
+      significant noise), Ref_Pct. No NULLs observed; extract with CAST(cloud_metrics->>''Key'' AS DOUBLE).
+
+      '
+- schema: main
+  table: mesh
+  columns:
+  - name: facetregistry
+    type: BIGINT
+    description: Mesh id.
+  - name: zoneref
+    type: VARCHAR
+    description: Site; up to 4 meshes per site.
+  - name: equipref
+    type: VARCHAR
+    description: Equipment; (zoneref, equipref) unique.
+  - name: mesh_specs
+    type: JSON
+    description: 'Facet_Verts, Facet_Faces, Facet_Res_Mm (mesh resolution mm), Tex_Dist (1K/2K/4K or null),
+      Tex_Pix (texture px), UV_Map_Qual, Geom_Delta_Mm (geometric accuracy: average deviation scan vs
+      model; <0.1 mm museum quality, ~1.0 mm general documentation with uncertainty for fine features).
+
+      '
+- schema: main
+  table: sites
+  columns:
+  - name: phasefactor
+    type: VARCHAR
+    description: 'Cultural period (NULL = undetermined). Standardized periods e.g. ''Neolithic'' (10,000-4,500
+      BCE), ''Bronze Age'' (3,300-1,200 BCE), ''Roman'' (27 BCE-476 CE), ''Medieval'' (476-1453 CE); they
+      determine research methodology, conservation approach and interpretation. Data mixes cases (''Iron
+      Age'',''IRON AGE'').
+
+      '
+  - name: guessdate
+    type: VARCHAR
+    description: 'Estimated Date. Documented conventions like ''3500-3000 BCE'', ''1st c. CE'', ''ca.
+      1450 CE'' with precision from years to centuries. Data holds only ''N CE'', ''N BCE'', ''-N BCE''
+      (all BCE forms mean N years BCE). Signed year = CASE WHEN guessdate LIKE ''%BCE'' THEN -ABS(n) ELSE
+      n END.
+
+      '
+  - name: typesite
+    type: VARCHAR
+    description: Site type (NULL = pending). Inconsistent spellings ('Burial','Bur.','BUR','Religious','REL','SETT'...).
+      No 'Rare'/'Unique' values.
+  - name: site_status
+    type: JSON
+    description: Keys Pres_Stat (Critical/Excellent/Fair/Good/Poor = Preservation Status), Entry_Stat,
+      Safe_Rank, Insur_Stat, Risk_Eval, Health_Eval, Env_Haz.
+- schema: main
+  table: conservation
+  columns:
+  - name: structstate
+    type: VARCHAR
+    description: 'Structural Stability. Documented classes: ''Stable'' (integrity under normal conditions),
+      ''Unstable'' (deterioration requiring intervention), ''Critical'' (imminent collapse, emergency
+      stabilization). Stored values: ''Stable condition, structure secure for access'', ''Unstable condition,
+      restricted access for safety'', ''Moderate condition, careful monitoring required''. Match ''Stable''
+      with case-sensitive LIKE ''%Stable%'' (does not match ''Unstable'').
+
+      '
+  - name: zoneref
+    type: VARCHAR
+    description: Site; a site can have several conservation records.
+- schema: main
+  table: processing
+  columns:
+  - name: flowstage
+    type: VARCHAR
+    description: 'Processing stage. Documented sequence: ''Raw'' (unprocessed), ''Aligned'' (scans registered
+      together), ''Cleaned'' (noise/artifacts removed), ''Meshed'' (converted to polygon mesh), ''Textured''
+      (textures applied); each a discrete milestone. Stored: Raw, Aligned, Meshed, Textured, Final (no
+      ''Cleaned'').
+
+      '
+  - name: system_usage
+    type: JSON
+    description: Flow_Hrs (processing hours), Proc_CPU %, Proc_GPU %, Mem_Usage_Gb, Remain_Gb.
+- schema: main
+  table: registration
+  columns:
+  - name: reg_accuracy
+    type: JSON
+    description: 'Log_Accu_Mm (registration accuracy mm), Err_Val_Mm (error mm), Log_Method (registration
+      method), Err_Scale, Transform, Ctrl_Pts and Ref_Mark (strings). Documented methods: ''ICP'' (Iterative
+      Closest Point), ''Target-based'' (physical reference markers), ''Hybrid'' (automatic + manual),
+      ''SLAM'' (Simultaneous Localization and Mapping), each with distinct accuracy characteristics. Stored:
+      Feature-based, Hybrid, Target-based.
+
+      '
+- schema: main
+  table: scans
+  columns:
+  - name: size
+    type: VARCHAR
+    description: File size, always 'NN.NN GB'; CAST(split_part(size,' ',1) AS DOUBLE).
+  - name: scanning_rate
+    type: VARCHAR
+    description: Always 'N MB/min'.
+  - name: scancount
+    type: VARCHAR
+    description: Number of scans, leading integer (1-20).
+  - name: chronotag
+    type: VARCHAR
+    description: '''YYYY-MM-DD HH:MM:SS.ffffff GMT+8'' text; date = CAST(substr(chronotag,1,10) AS DATE).'
+- schema: main
+  table: equipment
+  columns:
+  - name: equipstatus
+    type: VARCHAR
+    description: '''Excellent condition...'', ''Good condition...'', ''Fair condition...'', ''Poor condition...''.'
+  - name: powerlevel
+    type: VARCHAR
+    description: Battery % as leading integer 0-100, e.g. '62% battery, extended operation available'.
+  - name: equiptune
+    type: DATE
+    description: Last calibration date (2024-08-23 to 2025-02-19).

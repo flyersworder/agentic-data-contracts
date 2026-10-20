@@ -1,0 +1,488 @@
+{
+ "gpt-6-luna": {
+  "contract_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 8051,
+    "reverse_logistics": 8450,
+    "solar_panel": 8100
+   },
+   "fits": true
+  },
+  "contract_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 9129,
+    "reverse_logistics": 9280,
+    "solar_panel": 8930
+   },
+   "fits": true
+  },
+  "contract_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 10421,
+    "reverse_logistics": 10818,
+    "solar_panel": 9897
+   },
+   "fits": true
+  },
+  "contract_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 11971,
+    "reverse_logistics": 12095,
+    "solar_panel": 11330
+   },
+   "fits": true
+  },
+  "contract_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 20109,
+    "reverse_logistics": 20795,
+    "solar_panel": 20446
+   },
+   "fits": true
+  },
+  "contract_text_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 29049,
+    "reverse_logistics": 23678,
+    "solar_panel": 24812
+   },
+   "fits": true
+  },
+  "contract_text_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 63631,
+    "reverse_logistics": 47482,
+    "solar_panel": 48616
+   },
+   "fits": true
+  },
+  "contract_text_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 101343,
+    "reverse_logistics": 91231,
+    "solar_panel": 82853
+   },
+   "fits": true
+  },
+  "contract_text_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 235808,
+    "reverse_logistics": 160491,
+    "solar_panel": 168189
+   },
+   "fits": true
+  },
+  "contract_text_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 549881,
+    "reverse_logistics": 551821,
+    "solar_panel": 551359
+   },
+   "fits": true
+  },
+  "contract_text_first_1x": {
+   "tokens": {
+    "labor_certification_applications": 29049,
+    "reverse_logistics": 23678,
+    "solar_panel": 24812
+   },
+   "fits": true
+  },
+  "contract_text_first_2x": {
+   "tokens": {
+    "labor_certification_applications": 63631,
+    "reverse_logistics": 47482,
+    "solar_panel": 48616
+   },
+   "fits": true
+  },
+  "contract_text_first_4x": {
+   "tokens": {
+    "labor_certification_applications": 101343,
+    "reverse_logistics": 91231,
+    "solar_panel": 82853
+   },
+   "fits": true
+  },
+  "contract_text_first_8x": {
+   "tokens": {
+    "labor_certification_applications": 235808,
+    "reverse_logistics": 160491,
+    "solar_panel": 168189
+   },
+   "fits": true
+  },
+  "contract_text_first_all": {
+   "tokens": {
+    "labor_certification_applications": 549881,
+    "reverse_logistics": 551821,
+    "solar_panel": 551359
+   },
+   "fits": true
+  },
+  "manual_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 12783,
+    "reverse_logistics": 10605,
+    "solar_panel": 12454
+   },
+   "fits": true
+  },
+  "manual_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 20570,
+    "reverse_logistics": 16176,
+    "solar_panel": 18025
+   },
+   "fits": true
+  },
+  "manual_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 29464,
+    "reverse_logistics": 26836,
+    "solar_panel": 24943
+   },
+   "fits": true
+  },
+  "manual_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 41055,
+    "reverse_logistics": 37333,
+    "solar_panel": 35415
+   },
+   "fits": true
+  },
+  "manual_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 93387,
+    "reverse_logistics": 93999,
+    "solar_panel": 93623
+   },
+   "fits": true
+  }
+ },
+ "gpt-6-sol": {
+  "contract_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 8051,
+    "reverse_logistics": 8450,
+    "solar_panel": 8100
+   },
+   "fits": true
+  },
+  "contract_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 9129,
+    "reverse_logistics": 9280,
+    "solar_panel": 8930
+   },
+   "fits": true
+  },
+  "contract_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 10421,
+    "reverse_logistics": 10818,
+    "solar_panel": 9897
+   },
+   "fits": true
+  },
+  "contract_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 11971,
+    "reverse_logistics": 12095,
+    "solar_panel": 11330
+   },
+   "fits": true
+  },
+  "contract_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 20109,
+    "reverse_logistics": 20795,
+    "solar_panel": 20446
+   },
+   "fits": true
+  },
+  "contract_text_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 29049,
+    "reverse_logistics": 23678,
+    "solar_panel": 24812
+   },
+   "fits": true
+  },
+  "contract_text_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 63631,
+    "reverse_logistics": 47482,
+    "solar_panel": 48616
+   },
+   "fits": true
+  },
+  "contract_text_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 101343,
+    "reverse_logistics": 91231,
+    "solar_panel": 82853
+   },
+   "fits": true
+  },
+  "contract_text_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 235808,
+    "reverse_logistics": 160491,
+    "solar_panel": 168189
+   },
+   "fits": true
+  },
+  "contract_text_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 549881,
+    "reverse_logistics": 551821,
+    "solar_panel": 551359
+   },
+   "fits": true
+  },
+  "contract_text_first_1x": {
+   "tokens": {
+    "labor_certification_applications": 29049,
+    "reverse_logistics": 23678,
+    "solar_panel": 24812
+   },
+   "fits": true
+  },
+  "contract_text_first_2x": {
+   "tokens": {
+    "labor_certification_applications": 63631,
+    "reverse_logistics": 47482,
+    "solar_panel": 48616
+   },
+   "fits": true
+  },
+  "contract_text_first_4x": {
+   "tokens": {
+    "labor_certification_applications": 101343,
+    "reverse_logistics": 91231,
+    "solar_panel": 82853
+   },
+   "fits": true
+  },
+  "contract_text_first_8x": {
+   "tokens": {
+    "labor_certification_applications": 235808,
+    "reverse_logistics": 160491,
+    "solar_panel": 168189
+   },
+   "fits": true
+  },
+  "contract_text_first_all": {
+   "tokens": {
+    "labor_certification_applications": 549881,
+    "reverse_logistics": 551821,
+    "solar_panel": 551359
+   },
+   "fits": true
+  },
+  "manual_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 12783,
+    "reverse_logistics": 10605,
+    "solar_panel": 12454
+   },
+   "fits": true
+  },
+  "manual_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 20570,
+    "reverse_logistics": 16176,
+    "solar_panel": 18025
+   },
+   "fits": true
+  },
+  "manual_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 29464,
+    "reverse_logistics": 26836,
+    "solar_panel": 24943
+   },
+   "fits": true
+  },
+  "manual_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 41055,
+    "reverse_logistics": 37333,
+    "solar_panel": 35415
+   },
+   "fits": true
+  },
+  "manual_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 93387,
+    "reverse_logistics": 93999,
+    "solar_panel": 93623
+   },
+   "fits": true
+  }
+ },
+ "qwen3.8-27b": {
+  "contract_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 8783,
+    "reverse_logistics": 9172,
+    "solar_panel": 8917
+   },
+   "fits": true
+  },
+  "contract_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 9900,
+    "reverse_logistics": 10022,
+    "solar_panel": 9767
+   },
+   "fits": true
+  },
+  "contract_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 11235,
+    "reverse_logistics": 11630,
+    "solar_panel": 10772
+   },
+   "fits": true
+  },
+  "contract_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 12837,
+    "reverse_logistics": 12945,
+    "solar_panel": 12252
+   },
+   "fits": true
+  },
+  "contract_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 21254,
+    "reverse_logistics": 21939,
+    "solar_panel": 21667
+   },
+   "fits": true
+  },
+  "contract_text_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 30974,
+    "reverse_logistics": 24996,
+    "solar_panel": 26386
+   },
+   "fits": true
+  },
+  "contract_text_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 66797,
+    "reverse_logistics": 49908,
+    "solar_panel": 51298
+   },
+   "fits": true
+  },
+  "contract_text_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 105880,
+    "reverse_logistics": 95595,
+    "solar_panel": 86597
+   },
+   "fits": true
+  },
+  "contract_text_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": null,
+    "reverse_logistics": 166838,
+    "solar_panel": 174571
+   },
+   "fits": false
+  },
+  "contract_text_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": null,
+    "reverse_logistics": null,
+    "solar_panel": null
+   },
+   "fits": false
+  },
+  "contract_text_first_1x": {
+   "tokens": {
+    "labor_certification_applications": 30974,
+    "reverse_logistics": 24996,
+    "solar_panel": 26386
+   },
+   "fits": true
+  },
+  "contract_text_first_2x": {
+   "tokens": {
+    "labor_certification_applications": 66797,
+    "reverse_logistics": 49908,
+    "solar_panel": 51298
+   },
+   "fits": true
+  },
+  "contract_text_first_4x": {
+   "tokens": {
+    "labor_certification_applications": 105880,
+    "reverse_logistics": 95595,
+    "solar_panel": 86597
+   },
+   "fits": true
+  },
+  "contract_text_first_8x": {
+   "tokens": {
+    "labor_certification_applications": null,
+    "reverse_logistics": 166838,
+    "solar_panel": 174571
+   },
+   "fits": false
+  },
+  "contract_text_first_all": {
+   "tokens": {
+    "labor_certification_applications": null,
+    "reverse_logistics": null,
+    "solar_panel": null
+   },
+   "fits": false
+  },
+  "manual_scaled_1x": {
+   "tokens": {
+    "labor_certification_applications": 13887,
+    "reverse_logistics": 11435,
+    "solar_panel": 13460
+   },
+   "fits": true
+  },
+  "manual_scaled_2x": {
+   "tokens": {
+    "labor_certification_applications": 22023,
+    "reverse_logistics": 17407,
+    "solar_panel": 19432
+   },
+   "fits": true
+  },
+  "manual_scaled_4x": {
+   "tokens": {
+    "labor_certification_applications": 31255,
+    "reverse_logistics": 28597,
+    "solar_panel": 26720
+   },
+   "fits": true
+  },
+  "manual_scaled_8x": {
+   "tokens": {
+    "labor_certification_applications": 43608,
+    "reverse_logistics": 39625,
+    "solar_panel": 37750
+   },
+   "fits": true
+  },
+  "manual_scaled_all": {
+   "tokens": {
+    "labor_certification_applications": 98993,
+    "reverse_logistics": 99602,
+    "solar_panel": 99313
+   },
+   "fits": true
+  }
+ }
+}

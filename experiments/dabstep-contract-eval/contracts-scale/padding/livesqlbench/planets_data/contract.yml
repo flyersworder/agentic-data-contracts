@@ -1,0 +1,189 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: planets_data, author: claudeopus5.5
+version: '1.0'
+name: planets-data
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Exoplanet catalogue (NASA Exoplanet Archive style). One row per host star in `stars`,
+      one row per planet in `planets`; orbital_characteristics, physical_properties and data_quality_tracking
+      each hold at most one row per planet (checked: 3371, 3359 and 3372 rows for 3372 planets, no planet
+      repeated), so joining them to planets does not multiply rows. planet_instrument_observations links
+      planets to the facilities ''kep'', ''k2'', ''ttv'' (each planet at most once per facility).'
+    preferred: true
+    tables:
+    - stars
+    - planets
+    - orbital_characteristics
+    - physical_properties
+    - planet_instrument_observations
+    - instruments_surveys
+    - data_quality_tracking
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: unit_conversions
+    summary: 'Unit conversions: parsecs to light-years, Jupiter to Earth units'
+    description: 'Distance in light-years = stellardist (parsecs) * 3.26156. Planet mass in Earth masses
+      M_E = massjup * 317.83. Planet radius in Earth radii R_E = radjup * 11.209. Use exactly these factors
+      (metrics distance_light_years, planet_mass_earth, planet_radius_earth); later definitions (surface
+      gravity, escape velocity, mass-radius ratio, Super-Earth) are built on them.
+
+      '
+    tables:
+    - main.stars
+    - main.physical_properties
+  - name: stellar_astrophysics
+    summary: Stellar luminosity, HR diagram, density, gravitational parameter, habitable zone
+    description: 'Stellar properties live in the JSON column stars.stellarprops, read as TRY_CAST(s.stellarprops->''physical''->>''Temp_Value''
+      AS DOUBLE) (Kelvin), ...->>''Radius_Value'' (solar radii), ...->>''Mass_Value'' (solar masses).
+      JSON nulls come back as SQL NULL through ->>. STELLAR LUMINOSITY (Stefan-Boltzmann): L = (R/R_sun)^2
+      * (T/T_sun)^4 with T_sun = 5778 K; radius is already in solar radii, so L = R^2 * (T/5778)^4. HR
+      DIAGRAM POSITION: the pair (effective temperature, stellar luminosity). HABITABLE ZONE (AU): inner
+      boundary r_i = sqrt(L/1.1) (too hot for liquid water inside it); outer boundary r_o = sqrt(L/0.53)
+      (too cold beyond it). STELLAR DENSITY: rho = M / (4/3 * pi * R^3). GRAVITATIONAL PARAMETER: mu =
+      G * M. KEPLER''S THIRD LAW VERIFICATION: M_star (solar masses) = a^3 / P^2 with a in AU and P in
+      years (period days / 365.25).
+
+      '
+    tables:
+    - main.stars
+  - name: planetary_astrophysics
+    summary: 'Planet-level derived quantities: gravity, T_eq, transit depth, velocities, ratios, Goldilocks'
+    description: 'SURFACE GRAVITY relative to Earth g = M_E / R_E^2 (Earth units). EQUILIBRIUM TEMPERATURE
+      T_eq = T_star * sqrt(R_star / (2a)). TRANSIT DEPTH dF = (R_p / R_star)^2, the planet/star surface-area
+      ratio. ESCAPE VELOCITY v_e = sqrt(2 G M_p / R_p), from Earth-unit mass and radius converted to SI.
+      ORBITAL VELOCITY (circular orbit) v_orb = sqrt(G M_star / a). MASS-RADIUS RATIO MRR = M_E / R_E.
+      PLANET-STAR MASS RATIO q = M_p / M_star in the same units. ORBITAL PERIOD RATIO of two adjacent
+      planets = P_out / P_in. GOLDILOCKS VALUE G = (a - r_i) / (r_o - r_i); 0.5 is perfectly centred in
+      the habitable zone. Each formula requires its inputs non-NULL; a NULL input gives NULL and such
+      planets must not be counted as satisfying a condition. Unit constants used where the definitions
+      need SI or common units (the documentation does not state them; these are standard values): 1 R_sun
+      = 0.00465047 AU, R_J/R_sun = 0.102763, M_J/M_sun = 9.5458e-4, G = 6.674e-11 m^3 kg^-1 s^-2, M_earth
+      = 5.972e24 kg, R_earth = 6.371e6 m, G*M_sun = 1.32712440018e20 m^3/s^2, 1 AU = 1.495978707e11 m,
+      M_sun = 1.98847e33 g, R_sun = 6.957e10 cm.
+
+      '
+    tables:
+    - main.planets
+    - main.stars
+    - main.orbital_characteristics
+    - main.physical_properties
+  - name: planet_classification
+    summary: 'Planet and system classes: gas giant, rocky, hot Jupiter, Super-Earth, habitable, compact...'
+    description: 'Gas Giant Planet: mass > 0.1 Jupiter masses (massjup > 0.1). Rocky Planet: bulk density
+      > 3 g/cm^3 (densvalue > 3). Short-Period Planet: orbital period < 10 days. Hot Jupiter: both a Gas
+      Giant Planet and a Short-Period Planet. Super-Earth: a Rocky Planet with mass between 1 and 10 Earth
+      masses (massjup*317.83 BETWEEN 1 AND 10, inclusive). Planet in Habitable Zone: semi-major axis a
+      between r_i and r_o (inclusive). Potentially Habitable Exoplanet: Rocky Planet AND Planet in Habitable
+      Zone. High Eccentricity Planet: eccentricity > 0.25. Retrograde Orbit: inclination > 90 degrees.
+      Inflated Gas Giant: Gas Giant Planet with density < 0.5 g/cm^3. Multi-planetary System: star with
+      compcount (confirmed companions) > 1. Use stars.compcount, not a count of planets rows (they disagree
+      for 1 star). Compact System: a Multi-planetary System where the Orbital Period Ratio of every adjacent
+      pair of planets (planets of the host ordered by period, planets with NULL period excluded) is <
+      3; at least one computable pair is required.
+
+      '
+    tables:
+    - main.planets
+    - main.stars
+    - main.orbital_characteristics
+    - main.physical_properties
+  - name: data_quality
+    summary: Uncertainties, relative uncertainty, high precision, limit flags, minimum mass, blends
+    description: 'RELATIVE UNCERTAINTY of value v with positive error e1 and negative error e2: U_rel
+      = ((e1 - e2) / 2) / v * 100 (%). e2 is stored as a negative number (checked: no positive perioderr2
+      / masserr2), so (e1 - e2)/2 is the mean half-width. Pairs: period (perioderr1/2 vs orbital_characteristics.period),
+      mass (masserr1/2 vs massjup), radius (raderr1/2 vs radjup), semi-major axis, eccentricity, inclination,
+      density, distance, stellar temperature, mass, radius. Missing errors are SQL NULL (the ''nan'' in
+      previews is NULL; isnan() finds none). HIGH-PRECISION MEASUREMENT: relative uncertainty < 5%. WELL-CHARACTERIZED
+      PLANET: mass, radius AND orbital period are all High-Precision Measurements. MINIMUM MASS STATUS:
+      masssource = ''Msini'' — mass measured as M*sin(i) (e.g. radial velocity) because inclination is
+      unknown; it is a lower limit. ''Mass'' is true mass; ''Msin(i)/sin(i)'' is inclination-corrected
+      (not minimum). masssource is NULL for 2198 planets (no mass measurement). UPPER LIMIT VALUE: a limit
+      flag = 1 means the true value is <= the stated value; 0 = measured value, -1 = lower limit, NULL
+      = unknown. Flags are in JSON data_quality_tracking.limitflags: planetary_limits.{Period_Lim, Semimaj_Lim,
+      Ecc_Lim, Incl_Lim, Mass_Lim, Rad_Lim, Dens_Lim}, stellar_limits.{Dist_Lim, OptMag_Lim, Temp_Lim,
+      StellarMass_Lim, StellarRad_Lim}; read with TRY_CAST(q.limitflags->''planetary_limits''->>''Mass_Lim''
+      AS DOUBLE) = 1. BLENDED MEASUREMENT: a blend flag = 1 means the measurement is affected by light
+      from stellar companions (unresolved nearby stars), potentially reducing accuracy. Flags: stellarprops->''photometry''->>''Mag_Blend'',
+      stellarprops->''physical''->>''Temp_Blend'', ''Mass_Blend'', ''Rad_Blend'' (0 clean, 1 blended,
+      NULL unknown).
+
+      '
+    tables:
+    - main.data_quality_tracking
+    - main.stars
+    - main.physical_properties
+    - main.orbital_characteristics
+  - name: discovery
+    summary: Discovery method standardization, transit / RV discovery, Kepler and TTV planets
+    description: 'planets.discmethod holds noisy raw labels. DISCOVERY METHOD STANDARDIZATION: ''Radial
+      Velocity'' = RadVel, RV, RV Method, Radial Velocity, Doppler; ''Transit'' = Transit, TR, Transit
+      Method, Photometry, Photometric; ''Imaging'' = Direct Imaging, DI, Imaging, IMG, Direct; ''TTV''
+      = TTV, Transit Timing Variations, Transit Timing, TTV Method, Timing Var; ''Microlensing'' = Microlensing,
+      ML, μLens (stored as the Greek mu character), Lensing, Gravitational; every other label (Pulsar,
+      PSR Timing, PT, Pulsation Timing Variations, ETV, Eclipse Timing, Eclipse Timing Variations, Timing
+      Variations, Brightness Mod, OBM, Phase Curve, Orbital Mod, AST) is ''Other''. Discovery via Transit
+      Method / via Radial Velocity use exactly the Transit / Radial Velocity label lists. Kepler Mission
+      Discovery: planet with an observation record linked to facility ''kep'' (2329 planets). Transit
+      Timing Variation (TTV) Method planet: observation record linked to facility ''ttv'' (225 planets).
+      Facility ''k2'' = K2 mission. Note the TTV-facility definition is distinct from discmethod = TTV
+      labels.
+
+      '
+    tables:
+    - main.planets
+    - main.planet_instrument_observations
+    - main.instruments_surveys
+  - name: value_scales
+    summary: Meaning and typical ranges of catalogue values
+    description: 'Stellar distance: parsecs, 1 pc ~ 3.26 light-years; from nearby stars (~1.3 pc) to thousands
+      of pc (data: 3.21 to 8500, NULL for 513 stars). Apparent (optical) magnitude: logarithmic, smaller
+      = brighter; magnitude 1.0 is 100 times brighter than 6.0; brightest stars are negative (Sirius -1.46).
+      Stellar temperature: Kelvin; red dwarfs ~3000 K, Sun-like ~5800 K, hot blue >30000 K. Stellar mass:
+      solar masses; host stars ~0.1 to several M_sun. Stellar radius: solar radii; from neutron stars
+      to giants like Betelgeuse. Orbital period: days; hot Jupiters a few days, distant orbits thousands
+      of years. Eccentricity: dimensionless 0 to <1; 0 circle, 0.1 slightly elliptical, 0.7 very elongated
+      comet-like. Planet mass: Jupiter masses; Earth ~0.003 M_J; exoplanets from below Earth mass to >20
+      M_J. Planet radius: Jupiter radii; Earth ~0.09 R_J. Planet density: g/cm^3; puffy gas giants <1,
+      rocky Earth-like ~5.5.
+
+      '
+    tables:
+    - main.stars
+    - main.orbital_characteristics
+    - main.physical_properties
+  rules:
+  - name: use_declared_definitions
+    description: 'Classifications (gas giant, rocky, hot Jupiter, Super-Earth, habitable zone, compact
+      system, high precision, etc.) and derived quantities must use the metric SQL and thresholds in semantic.yml
+      (strict > / < as stated), not ad-hoc thresholds.
+
+      '
+    enforcement: warn
+  - name: standardize_discovery_method
+    description: 'Never group or filter on raw planets.discmethod values for a method; use the discovery_method_standardized
+      mapping or the label lists in the discovery domain.
+
+      '
+    enforcement: warn
+  - name: json_access_with_cast
+    description: 'Read JSON fields with ->> and TRY_CAST(... AS DOUBLE); stars.coordsys, stars.stellarprops
+      and data_quality_tracking.limitflags are JSON.
+
+      '
+    enforcement: warn

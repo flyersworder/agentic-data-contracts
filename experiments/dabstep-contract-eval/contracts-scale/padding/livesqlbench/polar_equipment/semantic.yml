@@ -1,0 +1,1264 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: polar_equipment, author: claudeopus5.5
+metrics:
+- name: eer
+  description: 'Equipment Efficiency Rating: overall efficiency from performance, reliability and environmental
+    impact. EER = (performance score + reliability index) / 2 * (1 - environmental impact index / 100);
+    higher = more efficient with lower environmental impact. performance_score and environmental_impact_idx
+    come from the type''s EquipmentType.type_indices JSON; reliability index is Equipment.RELIAB_IDX (0-99.7).
+    Observed range 3.0-54.5.
+
+    '
+  sql_expression: ((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE
+    / 100.0)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType"
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+- name: ors
+  description: 'Operational Readiness Score: readiness for immediate deployment. ORS = 10 * (1 - operation
+    hours / maintenance cycle hours) if OPER_status = ''Active''; 5 * (1 - ratio) if ''Standby''; 0 otherwise.
+    NULL for Active/Standby records whose maintCycleHrs is NULL. Strongly negative when hours exceed the
+    cycle (observed -2990 to 8.3). In the wide equipment join, equipment with no OperationMaintenance
+    row falls into "otherwise" = 0.
+
+    '
+  sql_expression: CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs",
+    0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0))
+    ELSE 0 END
+  source_model: main.OperationMaintenance
+  from_sql: main."OperationMaintenance" om
+  grain: one operation/maintenance record (one equipment)
+  domains:
+  - operations_maintenance
+- name: esi
+  description: 'Energy Sustainability Index: energy efficiency percent (battery_telemetry power_state.conversion_eff_pct,
+    70-95) times 1.5 if primary power source is ''Solar'', ''Wind'' or ''Hybrid'', 1.0 if ''Battery'',
+    0.7 if ''Diesel'', 0 otherwise. Higher for renewables, lower for fossil fuels. Stored values give
+    49-142.5.
+
+    '
+  sql_expression: (pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    IN ('Solar', 'Wind', 'Hybrid') THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Diesel' THEN
+    0.7 ELSE 0 END
+  source_model: main.PowerBattery
+  from_sql: main."PowerBattery" pb
+  grain: one power/battery record (one equipment)
+  domains:
+  - energy
+- name: ssf
+  description: 'Structural Safety Factor: safety margin of structures under extreme weather. SSF = (100
+    - structural load percent) / 100 * (0.5 if snow load (kg/m2) > 100 or wind speed (m/s) > 20; else
+    0.8 if snow load > 50 or wind speed > 10; else 1.0). Conditions are checked in that order. From WeatherAndStructure
+    (structLoadPct, snowLoad_kgm2, windSpeed_ms).
+
+    '
+  sql_expression: (100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR ws."windSpeed_ms"
+    > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END
+  source_model: main.WeatherAndStructure
+  from_sql: main."WeatherAndStructure" ws
+  grain: one weather/structure record
+  domains:
+  - weather_structure
+- name: cri
+  description: 'Communication Reliability Index: (0 if antenna status ''Error'', 5 if ''Warning'', 10
+    if ''Normal'', 0 otherwise) * (1 - network latency (ms) / 1000). Lower latency and better antenna
+    status = higher reliability. Latency is 100-1999 ms, so CRI is negative when latency > 1000 (observed
+    -9.9 to 9.0).
+
+    '
+  sql_expression: CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10
+    ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)
+  source_model: main.Communication
+  from_sql: main."Communication" c
+  grain: one communication record (one equipment)
+  domains:
+  - communication
+- name: vpc
+  description: 'Vehicle Performance Composite: (1 - (brake pad wear % + track wear %) / 200) * vehicle
+    speed (km/h) / 50 * engine load % / 100; lower wear and optimal engine load = better. Brake pad wear
+    and track wear from ground_vehicle_status (NULL for 150 rows each -> VPC NULL); engine load from EngineAndFluids
+    engine_core.load_pct via ChassisAndVehicle.engine_link (only 467 chassis rows have an engine). Speed
+    is stored as text ''<number> m/s''; the numeric part is used as-is as the documented speed value (no
+    unit conversion).
+
+    '
+  sql_expression: (1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE)
+    / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'), '-?[0-9]+(\.[0-9]+)?')
+    AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE / 100.0)
+  source_model: main.ChassisAndVehicle
+  from_sql: main."ChassisAndVehicle" cv LEFT JOIN main."EngineAndFluids" ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one chassis record (one equipment)
+  domains:
+  - vehicles
+- name: tie
+  description: 'Thermal Insulation Efficiency: 0.9 - heat loss (kWh)/10 if insulation status ''Good'';
+    0.6 - heat loss/10 if ''Fair''; 0.3 - heat loss/10 if ''Poor''. Lower heat loss and better insulation
+    = higher efficiency. heatLoss_kwh is NULL for 150 rows (TIE NULL).
+
+    '
+  sql_expression: CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN 'Fair'
+    THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END
+  source_model: main.ThermalSolarWindAndGrid
+  from_sql: main."ThermalSolarWindAndGrid" th
+  grain: one thermal/solar/wind/grid record
+  domains:
+  - life_support
+  - weather_structure
+- name: wrmi
+  description: 'Water Resource Management Index: water level % / 100 * water quality index / 100 * (1
+    - waste tank level % / 100). Higher quality and appropriate water/waste levels = better management.
+    waterQualityIdx is BIGINT, divided by 100.0 to avoid integer division.
+
+    '
+  sql_expression: (ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0) * (1 - ww."wasteTankPct"
+    / 100.0)
+  source_model: main.WaterAndWaste
+  from_sql: main."WaterAndWaste" ww
+  grain: one water/waste record (one equipment)
+  domains:
+  - water
+- name: ser
+  description: 'Scientific Equipment Reliability: measurement accuracy percent * (1.0 if calibration status
+    ''Valid'', 0.7 if ''Due'', 0.3 if ''Expired''). measureAccPct is stored 90-100, so SER is 27-100 and
+    the documented thresholds (0.9, 0.7) are exceeded by every row.
+
+    '
+  sql_expression: s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN
+    'Expired' THEN 0.3 END
+  source_model: main.Scientific
+  from_sql: main."Scientific" s
+  grain: one scientific record (one equipment)
+  domains:
+  - scientific
+- name: rec
+  description: 'Renewable Energy Contribution (%): (solar output W + wind output W) / (fuel cell output
+    W + solar output W + wind output W) * 100; higher = greater reliance on renewables. windOutput_w is
+    NULL for 150 rows -> REC NULL.
+
+    '
+  sql_expression: (th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" + th."solarOutput_w"
+    + th."windOutput_w", 0) * 100
+  source_model: main.ThermalSolarWindAndGrid
+  from_sql: main."ThermalSolarWindAndGrid" th
+  grain: one thermal/solar/wind/grid record
+  domains:
+  - energy
+- name: extreme_weather_ready
+  description: 'Extreme Weather Readiness (EWR, documentation entry 10): equipment is ''Extreme Weather
+    Ready'' (TRUE) if SSF > 0.7 AND heater status not ''Off'' (cabin hvac.heater_state) AND insulation
+    status not ''Poor'' AND emergency light status = ''On'' or ''Testing''. Missing data -> FALSE. NOTE:
+    the separate EWRS definition (metric ewrs) states insulation status != ''Good'' instead; the two documented
+    definitions conflict - use the one the question names (EWR vs EWRS). Uses the wide per-equipment join
+    (all telemetry LEFT JOINed to Equipment).
+
+    '
+  sql_expression: COALESCE(((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR
+    ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE
+    1.0 END) > 0.7 AND (cab.cabin_env_snapshot->'hvac'->>'heater_state') <> 'Off' AND th."insulationStat"
+    <> 'Poor' AND ls."emerLightStat" IN ('On', 'Testing'), FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment (every joined table has at most one row per equipment)
+  domains:
+  - weather_structure
+- name: ewrs
+  description: 'Extreme Weather Readiness Status (EWRS): ''Extreme Weather Ready'' when SSF > 0.7 AND
+    heater status != ''Off'' AND insulation status != ''Good'' (as documented for EWRS) AND emergency
+    light status in (''On'', ''Testing''); otherwise ''Not Ready'' (including missing data). Conflicts
+    with entry 10 (extreme_weather_ready, insulation != ''Poor'').
+
+    '
+  sql_expression: CASE WHEN ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR
+    ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE
+    1.0 END) > 0.7 AND (cab.cabin_env_snapshot->'hvac'->>'heater_state') <> 'Off' AND th."insulationStat"
+    <> 'Good' AND ls."emerLightStat" IN ('On', 'Testing') THEN 'Extreme Weather Ready' ELSE 'Not Ready'
+    END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - weather_structure
+- name: critical_equipment
+  description: 'Critical Equipment: TRUE when the equipment belongs to the ''Safety'' type, has safety
+    index > 0.75, and is associated with any life-critical system: a life support status, an oxygen supply
+    status (LightingAndSafety lifeSupportStat / O2SupplyStat present), or a heater system (cabin hvac.heater_state
+    present) where external temperature < 0 °C. INTERPRETATION: "associated with" = the equipment has
+    such a record. The 0.75 threshold is applied to the stored safety_idx (0-100 scale; Safety type =
+    34.6), so it passes; if the question intends the 0-1 scale (safety_idx/100 > 0.75) no Safety equipment
+    qualifies.
+
+    '
+  sql_expression: COALESCE(e."EquipType" = 'Safety' AND (et.type_indices->>'safety_idx')::DOUBLE > 0.75
+    AND (ls."lifeSupportStat" IS NOT NULL OR ls."O2SupplyStat" IS NOT NULL OR ((cab.cabin_env_snapshot->'hvac'->>'heater_state')
+    IS NOT NULL AND ws."extTempC" < 0)), FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+  - life_support
+- name: maintenance_priority_level
+  description: 'Maintenance Priority Level: ''Immediate Attention'' if operation hours > maintenance cycle
+    hours OR OPER_status = ''Repair''; else ''Scheduled Service'' if operation hours > 0.8 * maintenance
+    cycle hours; else ''Routine Maintenance''. Records with NULL maintCycleHrs fall to ''Routine Maintenance''
+    unless in Repair.
+
+    '
+  sql_expression: CASE WHEN om."OPER_hours" > om."maintCycleHrs" OR om."OPER_status" = 'Repair' THEN 'Immediate
+    Attention' WHEN om."OPER_hours" > 0.8 * om."maintCycleHrs" THEN 'Scheduled Service' ELSE 'Routine
+    Maintenance' END
+  source_model: main.OperationMaintenance
+  from_sql: main."OperationMaintenance" om
+  grain: one operation/maintenance record
+  domains:
+  - operations_maintenance
+- name: failed_inspection_lockout_violation
+  description: 'Failed Inspection Activation Lockout: equipment may not be set to OPER_status ''Active''
+    while inspect_status = ''Failed''. TRUE flags a record that is Active despite a Failed inspection
+    (a violation of the protocol); inspect_status = ''Failed'' alone marks equipment that would be blocked
+    from activation.
+
+    '
+  sql_expression: COALESCE(om."OPER_status" = 'Active' AND om.inspect_status = 'Failed', FALSE)
+  source_model: main.OperationMaintenance
+  from_sql: main."OperationMaintenance" om
+  grain: one operation/maintenance record
+  domains:
+  - operations_maintenance
+- name: energy_sustainability_class
+  description: 'Energy Sustainability Classification: ''Green'' if ESI > 0.8, ''Intermediate'' if ESI
+    between 0.4 and 0.8 (inclusive), ''High Impact'' if ESI < 0.4. Green = environmentally sustainable.
+    With stored ESI 49-142.5 every row with a known source is ''Green''.
+
+    '
+  sql_expression: CASE WHEN ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE
+    WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid') THEN
+    1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) > 0.8 THEN 'Green' WHEN ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE
+    * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid')
+    THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) >= 0.4 THEN 'Intermediate' WHEN ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE
+    * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid')
+    THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) < 0.4 THEN 'High Impact' END
+  source_model: main.PowerBattery
+  from_sql: main."PowerBattery" pb
+  grain: one power/battery record
+  domains:
+  - energy
+- name: reliable_coverage
+  description: 'Communication Zone Status: TRUE (''Reliable Coverage'') for a communication record with
+    CRI > 7, satellite status (sat_conn_stat) = ''Connected'', and emergency beacon status (cabin_env_snapshot.emergency)
+    != ''Inactive''. Stored beacon values are Active/Standby/ Testing; equipment with no cabin record
+    has no beacon and is FALSE. The zone is the station c.loc_link: a zone has Reliable Coverage when
+    its equipment meets this (aggregate with BOOL_AND per loc_link for "all equipment in the zone").
+
+    '
+  sql_expression: COALESCE((CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal'
+    THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) > 7 AND c.sat_conn_stat = 'Connected' AND (cab.cabin_env_snapshot->>'emergency')
+    <> 'Inactive', FALSE)
+  source_model: main.Communication
+  from_sql: main."Communication" c LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = c."equipRef"
+  grain: one communication record (one equipment); zone = c.loc_link
+  domains:
+  - communication
+- name: vehicle_safe_for_operation
+  description: 'Vehicle Operational Safety Threshold: ''Safe for Operation'' (TRUE) when VPC > 0.6, brake
+    fluid level > 50%, brake pad wear < 70%, and tire pressure > 200 kPa. Missing data -> FALSE.
+
+    '
+  sql_expression: COALESCE(((1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE
+    + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE) / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'),
+    '-?[0-9]+(\.[0-9]+)?') AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE
+    / 100.0)) > 0.6 AND (cv.ground_vehicle_status->'brake_system'->>'fluid_level_pct')::DOUBLE > 50 AND
+    (cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE < 70 AND (cv.ground_vehicle_status->'tires'->>'pressure_kpa')::DOUBLE
+    > 200, FALSE)
+  source_model: main.ChassisAndVehicle
+  from_sql: main."ChassisAndVehicle" cv LEFT JOIN main."EngineAndFluids" ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one chassis record (one equipment)
+  domains:
+  - vehicles
+- name: research_grade_data
+  description: 'Scientific Data Reliability Classification: data is ''Research Grade'' when collected
+    by equipment with SER > 0.9, valid calibration status (calibrStat = ''Valid''), and under appropriate
+    environmental conditions for the equipment type. The environmental condition is not defined in the
+    documentation and is NOT encoded; this metric checks the two computable conditions only - state that
+    caveat in answers.
+
+    '
+  sql_expression: COALESCE((s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN
+    0.7 WHEN 'Expired' THEN 0.3 END) > 0.9 AND s."calibrStat" = 'Valid', FALSE)
+  source_model: main.Scientific
+  from_sql: main."Scientific" s
+  grain: one scientific record
+  domains:
+  - scientific
+- name: cabin_habitability_standard
+  description: 'Cabin Habitability Standard: TRUE when cabin temperature is between 18 and 24 °C (inclusive),
+    oxygen > 19.5%, CO2 < 1000 ppm, ventilation functioning and heating operational. INTERPRETATION: functioning
+    ventilation = hvac.vent_state in (''On'',''Auto'') (not ''Off''/NULL); operational heating = hvac.heater_state
+    in (''On'',''Auto''). Cabin temperature NULL for 48 rows -> FALSE.
+
+    '
+  sql_expression: COALESCE((cab.cabin_env_snapshot->'air_metrics'->>'temperature_c')::DOUBLE BETWEEN 18
+    AND 24 AND (cab.cabin_env_snapshot->'air_metrics'->>'o2_pct')::DOUBLE > 19.5 AND (cab.cabin_env_snapshot->'air_metrics'->>'co2_ppm')::DOUBLE
+    < 1000 AND (cab.cabin_env_snapshot->'hvac'->>'vent_state') IN ('On', 'Auto') AND (cab.cabin_env_snapshot->'hvac'->>'heater_state')
+    IN ('On', 'Auto'), FALSE)
+  source_model: main.CabinEnvironment
+  from_sql: main."CabinEnvironment" cab
+  grain: one cabin record
+  domains:
+  - life_support
+- name: water_conservation_required
+  description: 'Water Conservation Requirement: conservation measures must be implemented when WRMI <
+    0.5 (low water, poor quality or high waste tank level needing immediate attention).
+
+    '
+  sql_expression: ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0) * (1 - ww."wasteTankPct"
+    / 100.0)) < 0.5
+  source_model: main.WaterAndWaste
+  from_sql: main."WaterAndWaste" ww
+  grain: one water/waste record
+  domains:
+  - water
+- name: energy_sustainable_operation
+  description: 'Sustainable Energy Operation: ''Energy-Sustainable'' when REC > 70% (more than 70% of
+    energy from renewables) while maintaining full operational capability and adequate power reserves
+    for at least 48 hours in an emergency. Only the REC condition is computable (no column records operational
+    capability or 48-hour reserves); state that caveat. NULL when REC is NULL.
+
+    '
+  sql_expression: ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" + th."solarOutput_w"
+    + th."windOutput_w", 0) * 100) > 70
+  source_model: main.ThermalSolarWindAndGrid
+  from_sql: main."ThermalSolarWindAndGrid" th
+  grain: one thermal/solar/wind/grid record
+  domains:
+  - energy
+- name: water_quality_class
+  description: 'Water Quality Classification System (WQCS) on waterQualityIdx: ''High-Quality'' (>= 91,
+    all purposes incl. direct consumption); ''Good'' (>= 71 and < 91, safe after standard treatment);
+    ''Moderate'' (>= 51 and < 71, washing but not consumption); ''Poor'' (>= 26 and < 51, limited non-contact
+    uses only); ''Unsafe'' (< 26, unsuitable for any use, immediate remediation).
+
+    '
+  sql_expression: CASE WHEN ww."waterQualityIdx" >= 91 THEN 'High-Quality' WHEN ww."waterQualityIdx" >=
+    71 THEN 'Good' WHEN ww."waterQualityIdx" >= 51 THEN 'Moderate' WHEN ww."waterQualityIdx" >= 26 THEN
+    'Poor' WHEN ww."waterQualityIdx" < 26 THEN 'Unsafe' END
+  source_model: main.WaterAndWaste
+  from_sql: main."WaterAndWaste" ww
+  grain: one water/waste record
+  domains:
+  - water
+- name: ospi
+  description: 'Overall Safety Performance Index: OSPI = safety index / 100 * EER * 0.8 (safety_idx from
+    EquipmentType.type_indices, 0-100 scale).
+
+    '
+  sql_expression: (et.type_indices->>'safety_idx')::DOUBLE / 100.0 * (((et.type_indices->>'performance_score')::DOUBLE
+    + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) *
+    0.8
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType"
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+- name: ptec
+  description: 'Polar Transportation Efficiency Coefficient: PTEC = VPC * (0.6 + 0.4 * ESI / 100). VPC
+    from chassis + engine, ESI from the equipment''s PowerBattery row.
+
+    '
+  sql_expression: ((1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE)
+    / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'), '-?[0-9]+(\.[0-9]+)?')
+    AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE / 100.0)) *
+    (0.6 + 0.4 * ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    IN ('Solar', 'Wind', 'Hybrid') THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Diesel' THEN
+    0.7 ELSE 0 END) / 100.0)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - vehicles
+  - energy
+- name: vehicle_ptec_rank
+  description: 'Vehicle Efficiency and Sustainability Report: compute VPC and ESI per vehicle, then PTEC,
+    and rank vehicles by PTEC, highest first (rank 1 = best). Rows with NULL PTEC are ranked last (NULLS
+    LAST is explicit because DESC otherwise puts NULLs first); filter them out for the report, and add
+    e."EquipType" = ''Vehicle'' if the question restricts to vehicle-type equipment.
+
+    '
+  sql_expression: RANK() OVER (ORDER BY ((1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE
+    + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE) / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'),
+    '-?[0-9]+(\.[0-9]+)?') AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE
+    / 100.0)) * (0.6 + 0.4 * ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE
+    WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid') THEN
+    1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) / 100.0) DESC NULLS LAST)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - vehicles
+- name: bscsi
+  description: 'Base Station Communication Stability Index: BSCSI = CRI * (1 + 0.2 * radio signal (dBm)
+    / 100) * (1 - 0.01 * (1000 - latency (ms))). Apply the Complete Data Set rule (bscsi_complete_record)
+    before aggregating.
+
+    '
+  sql_expression: (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10
+    ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) * (1 + 0.2 * c."radioSignal_dBm" / 100.0) * (1 - 0.01
+    * (1000 - c."netLatency_ms"))
+  source_model: main.Communication
+  from_sql: main."Communication" c
+  grain: one communication record
+  domains:
+  - communication
+- name: bscsi_complete_record
+  description: 'Complete Data Set rule: records used for BSCSI analysis must have non-null antenna status,
+    network latency (ms) and radio signal (dBm). Use as a WHERE filter.
+
+    '
+  sql_expression: c.antenna_stat IS NOT NULL AND c."netLatency_ms" IS NOT NULL AND c."radioSignal_dBm"
+    IS NOT NULL
+  source_model: main.Communication
+  from_sql: main."Communication" c
+  grain: one communication record
+  domains:
+  - communication
+- name: lssr
+  description: 'Life Support System Reliability: LSSR = 0.7 * ORS + 0.3 * TIE (ORS from OperationMaintenance,
+    TIE from the equipment''s ThermalSolarWindAndGrid row via PowerBattery).
+
+    '
+  sql_expression: 0.7 * (CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs",
+    0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0))
+    ELSE 0 END) + 0.3 * (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN
+    'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - life_support
+- name: lsrc
+  description: 'Life Support Reliability Classification: ''High Reliability'' if LSSR >= 0.8, ''Moderate
+    Reliability'' if 0.6 <= LSSR < 0.8, ''Low Reliability'' if LSSR < 0.6 (NULL LSSR -> NULL).
+
+    '
+  sql_expression: CASE WHEN (0.7 * (CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours"
+    / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" /
+    NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) + 0.3 * (CASE th."insulationStat" WHEN 'Good' THEN 0.9
+    - th."heatLoss_kwh" / 10.0 WHEN 'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 -
+    th."heatLoss_kwh" / 10.0 END)) >= 0.8 THEN 'High Reliability' WHEN (0.7 * (CASE WHEN om."OPER_status"
+    = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" =
+    'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) + 0.3 * (CASE
+    th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN 'Fair' THEN 0.6 - th."heatLoss_kwh"
+    / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END)) >= 0.6 THEN 'Moderate Reliability' WHEN
+    (0.7 * (CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs",
+    0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0))
+    ELSE 0 END) + 0.3 * (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN
+    'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END)) <
+    0.6 THEN 'Low Reliability' END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - life_support
+- name: smsp
+  description: 'Scientific Mission Success Probability: SMSP = SER * (0.8 + 0.2 * CRI / 10).
+
+    '
+  sql_expression: (s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN
+    'Expired' THEN 0.3 END) * (0.8 + 0.2 * (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN
+    5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) / 10.0)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - scientific
+- name: cses
+  description: 'Critical Scientific Equipment Status: ''Fully Operational'' if SER > 0.9 and SMSP > 0.85;
+    else ''Degraded Operation'' if SER > 0.7 and SMSP > 0.6; else ''Needs Repair'' (includes NULLs).
+
+    '
+  sql_expression: CASE WHEN (s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due'
+    THEN 0.7 WHEN 'Expired' THEN 0.3 END) > 0.9 AND ((s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid'
+    THEN 1.0 WHEN 'Due' THEN 0.7 WHEN 'Expired' THEN 0.3 END) * (0.8 + 0.2 * (CASE c.antenna_stat WHEN
+    'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0))
+    / 10.0)) > 0.85 THEN 'Fully Operational' WHEN (s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid'
+    THEN 1.0 WHEN 'Due' THEN 0.7 WHEN 'Expired' THEN 0.3 END) > 0.7 AND ((s."measureAccPct" * CASE s."calibrStat"
+    WHEN 'Valid' THEN 1.0 WHEN 'Due' THEN 0.7 WHEN 'Expired' THEN 0.3 END) * (0.8 + 0.2 * (CASE c.antenna_stat
+    WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms"
+    / 1000.0)) / 10.0)) > 0.6 THEN 'Degraded Operation' ELSE 'Needs Repair' END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - scientific
+- name: rssi
+  description: 'Resource Self-Sufficiency Index: RSSI = 0.6 * REC + 0.4 * WRMI (REC in percent, WRMI 0-1,
+    as documented). Computed per equipment; for a site average/aggregate over the station''s equipment.
+
+    '
+  sql_expression: 0.6 * ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" + th."solarOutput_w"
+    + th."windOutput_w", 0) * 100) + 0.4 * ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0)
+    * (1 - ww."wasteTankPct" / 100.0))
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - energy
+  - water
+- name: ecac
+  description: 'Extreme Climate Adaptation Coefficient: ECAC = SSF * (1 + TIE * 0.5) * (0.7 if external
+    temperature < -30 °C; else 0.85 if < -15 °C; else 1.0).
+
+    '
+  sql_expression: ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR ws."windSpeed_ms"
+    > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END) * (1 +
+    (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN 'Fair' THEN 0.6 - th."heatLoss_kwh"
+    / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END) * 0.5) * CASE WHEN ws."extTempC" < -30
+    THEN 0.7 WHEN ws."extTempC" < -15 THEN 0.85 ELSE 1.0 END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - weather_structure
+- name: eoc_operates_safely
+  description: 'Extreme Operating Conditions: equipment ''operates safely under extreme conditions'' (TRUE)
+    when SSF > 0.65 and ECAC > 0.8.
+
+    '
+  sql_expression: COALESCE(((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR
+    ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE
+    1.0 END) > 0.65 AND (((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR ws."windSpeed_ms"
+    > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END) * (1 +
+    (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN 'Fair' THEN 0.6 - th."heatLoss_kwh"
+    / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END) * 0.5) * CASE WHEN ws."extTempC" < -30
+    THEN 0.7 WHEN ws."extTempC" < -15 THEN 0.85 ELSE 1.0 END) > 0.8, FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - weather_structure
+- name: cear
+  description: 'Comprehensive Environmental Adaptability Rating: ''Excellent Adaptability'' if ECAC >
+    0.85 and SSF > 0.8 and insulation status = ''Good''; else ''Good Adaptability'' if ECAC > 0.7 and
+    SSF > 0.65 and insulation status != ''Poor''; else ''Limited Adaptability''.
+
+    '
+  sql_expression: CASE WHEN (((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100
+    OR ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8
+    ELSE 1.0 END) * (1 + (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN
+    'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END) *
+    0.5) * CASE WHEN ws."extTempC" < -30 THEN 0.7 WHEN ws."extTempC" < -15 THEN 0.85 ELSE 1.0 END) > 0.85
+    AND ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR ws."windSpeed_ms"
+    > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END) > 0.8
+    AND th."insulationStat" = 'Good' THEN 'Excellent Adaptability' WHEN (((100 - ws."structLoadPct") /
+    100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2"
+    > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE 1.0 END) * (1 + (CASE th."insulationStat" WHEN 'Good'
+    THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN 'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN
+    0.3 - th."heatLoss_kwh" / 10.0 END) * 0.5) * CASE WHEN ws."extTempC" < -30 THEN 0.7 WHEN ws."extTempC"
+    < -15 THEN 0.85 ELSE 1.0 END) > 0.7 AND ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2"
+    > 100 OR ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN
+    0.8 ELSE 1.0 END) > 0.65 AND th."insulationStat" <> 'Poor' THEN 'Good Adaptability' ELSE 'Limited
+    Adaptability' END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - weather_structure
+- name: loss
+  description: 'Long-term Operational Stability Score: LOSS = 0.5 * EER + 0.5 * ORS * (1 - operation hours
+    / 20000).
+
+    '
+  sql_expression: 0.5 * (((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX") / 2.0 * (1
+    - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) + 0.5 * (CASE WHEN om."OPER_status"
+    = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" =
+    'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) * (1 - om."OPER_hours"
+    / 20000.0)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+  - operations_maintenance
+- name: cori
+  description: 'Comprehensive Operational Reliability Indicator: CORI = 0.4 * EER + 0.4 * ORS + 0.2 *
+    CRI.
+
+    '
+  sql_expression: 0.4 * (((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX") / 2.0 * (1
+    - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) + 0.4 * (CASE WHEN om."OPER_status"
+    = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" =
+    'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) + 0.2 * (CASE
+    c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms"
+    / 1000.0))
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+- name: ewrii
+  description: 'Energy-Water Resource Integration Index: EWRII = 0.5 * ESI + 0.5 * WRMI * (1 - heater
+    temperature (°C) / 100), heater temperature = cabin hvac.heater_temp_c (only equipment with a cabin
+    record).
+
+    '
+  sql_expression: 0.5 * ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE WHEN
+    (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid') THEN 1.5 WHEN
+    (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) + 0.5 * ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0)
+    * (1 - ww."wasteTankPct" / 100.0)) * (1 - (cab.cabin_env_snapshot->'hvac'->>'heater_temp_c')::DOUBLE
+    / 100.0)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - energy
+  - water
+- name: errs_emergency_response_ready
+  description: 'Emergency Response Readiness Status: a polar site is ''emergency response ready'' when
+    its critical equipment (critical_equipment) maintains OSPI > 0.75 and LSSR > 0.8, with emergency communication
+    status = ''Operational'', backup power status (backupPowerStat) = ''Active'' and battery level (soc_pct)
+    > 85. NO column stores an emergency communication status and no status column uses the value ''Operational'',
+    so that condition cannot be verified; this expression checks every other condition and the answer
+    must state that the ''Operational'' requirement is unverifiable. Site = station (c.loc_link); a site
+    is ready when its critical equipment meets this.
+
+    '
+  sql_expression: COALESCE((e."EquipType" = 'Safety' AND (et.type_indices->>'safety_idx')::DOUBLE > 0.75
+    AND (ls."lifeSupportStat" IS NOT NULL OR ls."O2SupplyStat" IS NOT NULL OR ((cab.cabin_env_snapshot->'hvac'->>'heater_state')
+    IS NOT NULL AND ws."extTempC" < 0))) AND ((et.type_indices->>'safety_idx')::DOUBLE / 100.0 * (((et.type_indices->>'performance_score')::DOUBLE
+    + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) *
+    0.8) > 0.75 AND (0.7 * (CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs",
+    0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0))
+    ELSE 0 END) + 0.3 * (CASE th."insulationStat" WHEN 'Good' THEN 0.9 - th."heatLoss_kwh" / 10.0 WHEN
+    'Fair' THEN 0.6 - th."heatLoss_kwh" / 10.0 WHEN 'Poor' THEN 0.3 - th."heatLoss_kwh" / 10.0 END)) >
+    0.8 AND th."backupPowerStat" = 'Active' AND (pb.battery_telemetry->'battery_pack'->>'soc_pct')::DOUBLE
+    > 85, FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - life_support
+  - equipment_efficiency
+- name: spo_sustainable
+  description: 'Sustainable Polar Operations: ''sustainable'' (TRUE) when RSSI > 0.7 and EWRII > 0.65,
+    with waste management status (wasteMgmtStat) = ''Normal'' and environmental impact index < 6.0. The
+    stored environmental_impact_idx is 36.7-87.3, so the < 6.0 condition as documented is never met.
+
+    '
+  sql_expression: COALESCE((0.6 * ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w"
+    + th."solarOutput_w" + th."windOutput_w", 0) * 100) + 0.4 * ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx"
+    / 100.0) * (1 - ww."wasteTankPct" / 100.0))) > 0.7 AND (0.5 * ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE
+    * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid')
+    THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) + 0.5 * ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0)
+    * (1 - ww."wasteTankPct" / 100.0)) * (1 - (cab.cabin_env_snapshot->'hvac'->>'heater_temp_c')::DOUBLE
+    / 100.0)) > 0.65 AND ls."wasteMgmtStat" = 'Normal' AND (et.type_indices->>'environmental_impact_idx')::DOUBLE
+    < 6.0, FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - energy
+  - water
+- name: pvsoc_suitable
+  description: 'Polar Vehicle Safe Operation Conditions: ''suitable for polar missions'' (TRUE) when PTEC
+    > 0.7 and VPC > 0.75, OPER_status = ''Active'' and safety index >= 0.8 (applied to the stored 0-100
+    safety_idx).
+
+    '
+  sql_expression: COALESCE((((1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE
+    + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE) / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'),
+    '-?[0-9]+(\.[0-9]+)?') AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE
+    / 100.0)) * (0.6 + 0.4 * ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE * CASE
+    WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid') THEN
+    1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) / 100.0)) > 0.7 AND ((1 - ((cv.ground_vehicle_status->'brake_system'->>'pad_wear_pct')::DOUBLE
+    + (cv.ground_vehicle_status->'tracks'->>'wear_pct')::DOUBLE) / 200.0) * (TRY_CAST(regexp_extract((cv.ground_vehicle_status->'vehicle_motion'->>'speed_kmh'),
+    '-?[0-9]+(\.[0-9]+)?') AS DOUBLE) / 50.0) * ((ef.engine_fluids_snapshot->'engine_core'->>'load_pct')::DOUBLE
+    / 100.0)) > 0.75 AND om."OPER_status" = 'Active' AND (et.type_indices->>'safety_idx')::DOUBLE >= 0.8,
+    FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - vehicles
+- name: cnra
+  description: 'Communication Network Resilience Assessment: ''High Resilience'' if CRI > 0.8 and BSCSI
+    > 0.85; else ''Medium Resilience'' if CRI > 0.6 and BSCSI > 0.7; else ''Low Resilience''. Apply bscsi_complete_record
+    first.
+
+    '
+  sql_expression: CASE WHEN (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal'
+    THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) > 0.8 AND ((CASE c.antenna_stat WHEN 'Error'
+    THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0))
+    * (1 + 0.2 * c."radioSignal_dBm" / 100.0) * (1 - 0.01 * (1000 - c."netLatency_ms"))) > 0.85 THEN 'High
+    Resilience' WHEN (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN
+    10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) > 0.6 AND ((CASE c.antenna_stat WHEN 'Error' THEN
+    0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) * (1
+    + 0.2 * c."radioSignal_dBm" / 100.0) * (1 - 0.01 * (1000 - c."netLatency_ms"))) > 0.7 THEN 'Medium
+    Resilience' ELSE 'Low Resilience' END
+  source_model: main.Communication
+  from_sql: main."Communication" c
+  grain: one communication record
+  domains:
+  - communication
+- name: cipl
+  description: 'Critical Infrastructure Protection Level: ''A'' if SSF > 0.8, LOSS > 0.85 and OSPI > 0.9;
+    else ''B'' if SSF > 0.7, LOSS > 0.75 and OSPI > 0.8; else ''C''.
+
+    '
+  sql_expression: CASE WHEN ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100 OR
+    ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8 ELSE
+    1.0 END) > 0.8 AND (0.5 * (((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX") / 2.0
+    * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) + 0.5 * (CASE WHEN om."OPER_status"
+    = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" =
+    'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) * (1 - om."OPER_hours"
+    / 20000.0)) > 0.85 AND ((et.type_indices->>'safety_idx')::DOUBLE / 100.0 * (((et.type_indices->>'performance_score')::DOUBLE
+    + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) *
+    0.8) > 0.9 THEN 'A' WHEN ((100 - ws."structLoadPct") / 100.0 * CASE WHEN ws."snowLoad_kgm2" > 100
+    OR ws."windSpeed_ms" > 20 THEN 0.5 WHEN ws."snowLoad_kgm2" > 50 OR ws."windSpeed_ms" > 10 THEN 0.8
+    ELSE 1.0 END) > 0.7 AND (0.5 * (((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX")
+    / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) + 0.5 * (CASE WHEN om."OPER_status"
+    = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) WHEN om."OPER_status" =
+    'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0)) ELSE 0 END) * (1 - om."OPER_hours"
+    / 20000.0)) > 0.75 AND ((et.type_indices->>'safety_idx')::DOUBLE / 100.0 * (((et.type_indices->>'performance_score')::DOUBLE
+    + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE / 100.0)) *
+    0.8) > 0.8 THEN 'B' ELSE 'C' END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - equipment_efficiency
+  - weather_structure
+- name: lsmv_viable
+  description: 'Long-term Scientific Mission Viability: missions are ''long-term viable'' when all involved
+    scientific equipment maintains SMSP > 0.8 and overall site operations maintain CORI > 0.75, with calibration
+    status = ''Valid'' and data logging status = ''Active''. This is the per-equipment condition; for
+    a site/mission use BOOL_AND over the involved scientific equipment (e.g. grouped by c.loc_link).
+
+    '
+  sql_expression: COALESCE(((s."measureAccPct" * CASE s."calibrStat" WHEN 'Valid' THEN 1.0 WHEN 'Due'
+    THEN 0.7 WHEN 'Expired' THEN 0.3 END) * (0.8 + 0.2 * (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN
+    'Warning' THEN 5 WHEN 'Normal' THEN 10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0)) / 10.0)) > 0.8
+    AND (0.4 * (((et.type_indices->>'performance_score')::DOUBLE + e."RELIAB_IDX") / 2.0 * (1 - (et.type_indices->>'environmental_impact_idx')::DOUBLE
+    / 100.0)) + 0.4 * (CASE WHEN om."OPER_status" = 'Active' THEN 10 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs",
+    0)) WHEN om."OPER_status" = 'Standby' THEN 5 * (1 - om."OPER_hours" / NULLIF(om."maintCycleHrs", 0))
+    ELSE 0 END) + 0.2 * (CASE c.antenna_stat WHEN 'Error' THEN 0 WHEN 'Warning' THEN 5 WHEN 'Normal' THEN
+    10 ELSE 0 END * (1 - c."netLatency_ms" / 1000.0))) > 0.75 AND s."calibrStat" = 'Valid' AND s."dataLogStat"
+    = 'Active', FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - scientific
+- name: pbess_energy_secure
+  description: 'Polar Base Energy Security Status: ''energy secure'' (TRUE) when REC > 65%, ESI > 0.7,
+    RSSI > 0.75, battery level (soc_pct) > 75 and hydrogen level (H2LevelPct) > 70.
+
+    '
+  sql_expression: COALESCE(((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" +
+    th."solarOutput_w" + th."windOutput_w", 0) * 100) > 65 AND ((pb.battery_telemetry->'power_state'->>'conversion_eff_pct')::DOUBLE
+    * CASE WHEN (pb.battery_telemetry->'power_state'->>'primary_source') IN ('Solar', 'Wind', 'Hybrid')
+    THEN 1.5 WHEN (pb.battery_telemetry->'power_state'->>'primary_source') = 'Battery' THEN 1.0 WHEN (pb.battery_telemetry->'power_state'->>'primary_source')
+    = 'Diesel' THEN 0.7 ELSE 0 END) > 0.7 AND (0.6 * ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w"
+    + th."solarOutput_w" + th."windOutput_w", 0) * 100) + 0.4 * ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx"
+    / 100.0) * (1 - ww."wasteTankPct" / 100.0))) > 0.75 AND (pb.battery_telemetry->'battery_pack'->>'soc_pct')::DOUBLE
+    > 75 AND th."H2LevelPct" > 70, FALSE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - energy
+- name: escs
+  description: 'Energy Sustainability Classification System on REC: ''Energy-Sustainable'' if REC > 70;
+    ''Moderately Sustainable'' if 50 < REC <= 70; ''Low Sustainability'' if REC <= 50 (NULL REC -> NULL).
+
+    '
+  sql_expression: CASE WHEN ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" +
+    th."solarOutput_w" + th."windOutput_w", 0) * 100) > 70 THEN 'Energy-Sustainable' WHEN ((th."solarOutput_w"
+    + th."windOutput_w") / NULLIF(th."fuelCellOutput_w" + th."solarOutput_w" + th."windOutput_w", 0) *
+    100) > 50 THEN 'Moderately Sustainable' WHEN ((th."solarOutput_w" + th."windOutput_w") / NULLIF(th."fuelCellOutput_w"
+    + th."solarOutput_w" + th."windOutput_w", 0) * 100) <= 50 THEN 'Low Sustainability' END
+  source_model: main.ThermalSolarWindAndGrid
+  from_sql: main."ThermalSolarWindAndGrid" th
+  grain: one thermal/solar/wind/grid record
+  domains:
+  - energy
+- name: wrmsc
+  description: 'Water Resource Management Status Classification: ''Conservation Needed'' if WRMI < 0.5
+    (critical limitations, immediate conservation); ''Monitoring Advised'' if 0.5 <= WRMI < 0.7 (adequate,
+    regular monitoring); ''Sustainable Management'' if WRMI >= 0.7 (optimal, unrestricted operations).
+
+    '
+  sql_expression: CASE WHEN ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx" / 100.0) * (1 - ww."wasteTankPct"
+    / 100.0)) < 0.5 THEN 'Conservation Needed' WHEN ((ww."waterLevelPct" / 100.0) * (ww."waterQualityIdx"
+    / 100.0) * (1 - ww."wasteTankPct" / 100.0)) < 0.7 THEN 'Monitoring Advised' WHEN ((ww."waterLevelPct"
+    / 100.0) * (ww."waterQualityIdx" / 100.0) * (1 - ww."wasteTankPct" / 100.0)) >= 0.7 THEN 'Sustainable
+    Management' END
+  source_model: main.WaterAndWaste
+  from_sql: main."WaterAndWaste" ww
+  grain: one water/waste record
+  domains:
+  - water
+- name: external_temperature_zone
+  description: 'Temperature zone used by Temperature-Zoned Average Battery Health: ''Extreme Cold'' if
+    external temperature < -40 °C; ''Standard Cold'' if -40 <= temp < -20; ''Mild Cold'' if temp >= -20.
+    External temperature = WeatherAndStructure.extTempC linked to the equipment through OperationMaintenance.
+
+    '
+  sql_expression: CASE WHEN ws."extTempC" < -40 THEN 'Extreme Cold' WHEN ws."extTempC" < -20 THEN 'Standard
+    Cold' WHEN ws."extTempC" >= -20 THEN 'Mild Cold' END
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one equipment
+  domains:
+  - weather_structure
+  - energy
+- name: avg_battery_health_by_temperature_zone
+  description: 'Temperature-Zoned Average Battery Health: the mean battery health percent (battery_pack.health_pct)
+    of all equipment operating in a temperature zone. GROUP BY the external_temperature_zone expression
+    and exclude rows with no zone (no linked weather record) or no battery.
+
+    '
+  sql_expression: AVG((pb.battery_telemetry->'battery_pack'->>'health_pct')::DOUBLE)
+  source_model: main.Equipment
+  from_sql: main."Equipment" e JOIN main."EquipmentType" et ON et."EquipType" = e."EquipType" LEFT JOIN
+    main."OperationMaintenance" om ON om."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WeatherAndStructure"
+    ws ON ws.opmaint_link = om."OP_MAINT_ID" LEFT JOIN main."PowerBattery" pb ON pb.equip_ref = e."EQUIP_CODE"
+    LEFT JOIN main."ThermalSolarWindAndGrid" th ON th.batt_link = pb."PWR_BATT_ID" LEFT JOIN main."Communication"
+    c ON c."equipRef" = e."EQUIP_CODE" LEFT JOIN main."CabinEnvironment" cab ON cab."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."LightingAndSafety" ls ON ls."equipRef" = e."EQUIP_CODE" LEFT JOIN main."WaterAndWaste"
+    ww ON ww."equipRef" = e."EQUIP_CODE" LEFT JOIN main."Scientific" s ON s."equipRef" = e."EQUIP_CODE"
+    LEFT JOIN main."ChassisAndVehicle" cv ON cv."equipRef" = e."EQUIP_CODE" LEFT JOIN main."EngineAndFluids"
+    ef ON ef."ENGINE_ID" = cv.engine_link
+  grain: one temperature zone (after grouping by external_temperature_zone)
+  domains:
+  - energy
+  - weather_structure
+tables:
+- schema: main
+  table: EquipmentType
+  columns:
+  - name: EquipType
+    type: VARCHAR
+    description: 'Equipment type (PK): Communication, Generator, Safety, Scientific, Shelter, Vehicle.'
+  - name: type_indices
+    type: JSON
+    description: 'Per-type indices: performance_score, energy_efficiency_idx, safety_idx, environmental_impact_idx
+      (extract with (type_indices->>''safety_idx'')::DOUBLE). Stored on a 0-100 scale: safety_idx 17.7-75.9,
+      environmental_impact_idx 36.7-87.3. Safety index meaning (documentation, 0-1 scale): below 0.5 significant
+      safety concerns requiring immediate attention or limited operation; 0.5-0.7 acceptable for normal
+      operations with appropriate precautions; above 0.7 excellent safety features suitable for all conditions
+      including elevated risk.'
+- schema: main
+  table: Equipment
+  columns:
+  - name: EQUIP_CODE
+    type: VARCHAR
+    description: Equipment id (PK), e.g. PE593707; every telemetry table references it.
+  - name: EquipType
+    type: VARCHAR
+    description: FK to EquipmentType.
+  - name: RELIAB_IDX
+    type: FLOAT
+    description: 'Reliability index, stored 0-99.7. Documentation meaning (0-1 scale): below 0.5 equipment
+      fails frequently and requires constant maintenance; 0.5-0.8 occasional failures needing regular
+      maintenance; above 0.8 highly reliable with minimal downtime. Used in EER.'
+  - name: utilPercent
+    type: FLOAT
+    description: Utilization percentage 0-100.
+- schema: main
+  table: OperationMaintenance
+  columns:
+  - name: equipRef
+    type: VARCHAR
+    description: FK to Equipment (one record per equipment).
+  - name: OPER_hours
+    type: FLOAT
+    description: 'Total operational hours (30-49961): cumulative active use. New equipment typically 0-100
+      h, mid-life 100-1000 h, equipment approaching maintenance or replacement typically exceeds 1000
+      h. The ratio OPER_hours / maintCycleHrs is critical for preventative maintenance scheduling (ORS,
+      maintenance priority).'
+  - name: maintCycleHrs
+    type: FLOAT
+    description: Maintenance cycle hours; NULL (124 rows) = no cycle defined.
+  - name: OPER_status
+    type: VARCHAR
+    description: Active, Maintenance, Repair, Standby, Storage. May not be set to 'Active' while inspect_status
+      = 'Failed' (Failed Inspection Activation Lockout).
+  - name: inspect_status
+    type: VARCHAR
+    description: Failed, Passed, Pending. 'Failed' blocks activation.
+  - name: comm_link
+    type: BIGINT
+    description: Always NULL in the data.
+- schema: main
+  table: PowerBattery
+  columns:
+  - name: equip_ref
+    type: VARCHAR
+    description: FK to Equipment (one row per equipment, 899 rows).
+  - name: battery_telemetry
+    type: JSON
+    description: 'power_state {system_state, primary_source (Battery/Diesel/Hybrid/Solar/Wind), instant_consumption_w,
+      conversion_eff_pct (energy efficiency percent, 70-95)}, battery_pack {soc_pct (battery level %),
+      health_pct, cycle_count, temperature_c}, charging {charge_state, current_a, voltage_v}. Power consumption
+      meaning: small scientific instruments 5-50 W, communication equipment 20-200 W, heating systems
+      500-5000 W, vehicle systems 1000-10000 W; crucial for power budgeting and power source sizing. Energy
+      efficiency percent meaning: typically 10-99%; below 30% inefficient older systems, 30-60% standard
+      conventional, 60-80% high-efficiency modern, above 80% cutting-edge optimal efficiency minimizing
+      waste and cost.'
+- schema: main
+  table: EngineAndFluids
+  columns:
+  - name: engine_fluids_snapshot
+    type: JSON
+    description: fuel, oil, coolant, hydraulic, engine_core {rpm, load_pct, block_temp_c, lifetime_hours}.
+      coolant.pressure_kpa_or_code is text '<number> hPa'.
+  - name: opmaint_link
+    type: BIGINT
+    description: Always NULL in the data.
+- schema: main
+  table: ChassisAndVehicle
+  columns:
+  - name: engine_link
+    type: BIGINT
+    description: FK to EngineAndFluids; set for 467 rows (same equipment).
+  - name: ground_vehicle_status
+    type: JSON
+    description: brake_system {pad_wear_pct (NULL 150 rows), fluid_level_pct, pressure_kpa_or_code text
+      '<n> hPa'}, tires {pressure_kpa, temperature_c, tread_depth_mm}, tracks {wear_pct (NULL 150 rows),
+      tension_kN}, suspension, vehicle_motion {speed_kmh stored as TEXT '<number> m/s' for all rows, payload_kg,
+      heading_deg, attitude_angle_deg}.
+- schema: main
+  table: Transmission
+  columns:
+  - name: TRANS_gear
+    type: VARCHAR
+    description: Gear as text '-1.0'..'6.0'; NULL for 144 rows.
+- schema: main
+  table: Communication
+  columns:
+  - name: loc_link
+    type: VARCHAR
+    description: Station (zone) of the equipment; FK to Location.
+  - name: antenna_stat
+    type: VARCHAR
+    description: Error, Normal, Warning (drives CRI).
+  - name: netLatency_ms
+    type: FLOAT
+    description: Network latency ms, 100.6-1999.
+  - name: radioSignal_dBm
+    type: FLOAT
+    description: Radio signal dBm (negative).
+  - name: sat_conn_stat
+    type: VARCHAR
+    description: Connected, Disconnected, Limited.
+  - name: opmaint_link
+    type: BIGINT
+    description: Always NULL in the data.
+- schema: main
+  table: Location
+  columns:
+  - name: STATION_name
+    type: VARCHAR
+    description: Station name (PK), 20 stations.
+  - name: locType
+    type: VARCHAR
+    description: Antarctic or Arctic.
+- schema: main
+  table: CabinEnvironment
+  columns:
+  - name: cabin_env_snapshot
+    type: JSON
+    description: 'emergency (beacon: Active/Standby/Testing), air_metrics {temperature_c (NULL 48 rows),
+      humidity_pct, pressure_kpa, co2_ppm, o2_pct, air_quality_idx}, hvac {vent_state (NULL 57 rows),
+      vent_speed_pct, heater_state On/Off/Auto, heater_temp_c, defroster_state}, access {...}. CO2 meaning:
+      below 600 ppm excellent ventilation; 600-1000 good air quality; 1000-2500 poor ventilation that
+      may cause drowsiness and reduced cognitive function; above 2500 may cause headaches, sleepiness
+      and significantly impaired cognitive performance.'
+- schema: main
+  table: LightingAndSafety
+  columns:
+  - name: emerLightStat
+    type: VARCHAR
+    description: Off, On, Testing.
+  - name: lifeSupportStat
+    type: VARCHAR
+    description: Critical, Normal, Warning.
+  - name: O2SupplyStat
+    type: VARCHAR
+    description: Critical, Normal, Warning.
+  - name: wasteMgmtStat
+    type: VARCHAR
+    description: Critical, Normal, Warning.
+- schema: main
+  table: WaterAndWaste
+  columns:
+  - name: waterQualityIdx
+    type: BIGINT
+    description: 'Water quality index 0-100 (integer: divide by 100.0). Classified by water_quality_class.'
+  - name: waterTempC
+    type: VARCHAR
+    description: Text '<number> °C'.
+- schema: main
+  table: Scientific
+  columns:
+  - name: calibrStat
+    type: VARCHAR
+    description: Due, Expired, Valid.
+  - name: measureAccPct
+    type: FLOAT
+    description: Measurement accuracy %, 90-100.
+  - name: dataLogStat
+    type: VARCHAR
+    description: Active, Error, Paused.
+- schema: main
+  table: WeatherAndStructure
+  columns:
+  - name: opmaint_link
+    type: BIGINT
+    description: Link to OperationMaintenance (and so to equipment); NULL for 141 rows.
+  - name: extTempC
+    type: FLOAT
+    description: External temperature °C. Typical polar range -70 to 10 °C; below -40 °C extreme cold
+      requiring special equipment protection; -20 to -40 °C standard cold weather protocols; above -20
+      °C relatively mild but still normal cold weather precautions.
+  - name: windSpeed_ms
+    type: FLOAT
+    description: Wind speed m/s. Typical 0-60; below 5 calm; 5-15 moderate with minor operational impact;
+      15-25 strong, additional safety measures; above 25 dangerous, may require suspension of outdoor
+      activities and securing equipment.
+  - name: snowLoad_kgm2
+    type: BIGINT
+    description: Snow load kg/m2 (integer).
+  - name: structLoadPct
+    type: FLOAT
+    description: Structural load %.
+- schema: main
+  table: ThermalSolarWindAndGrid
+  columns:
+  - name: batt_link
+    type: BIGINT
+    description: FK to PowerBattery (unique; 899 rows) - the join path to equipment.
+  - name: insulationStat
+    type: VARCHAR
+    description: Fair, Good, Poor.
+  - name: heatLoss_kwh
+    type: FLOAT
+    description: Heat loss kWh; NULL 150 rows.
+  - name: windOutput_w
+    type: FLOAT
+    description: Wind output W; NULL 150 rows.
+  - name: backupPowerStat
+    type: VARCHAR
+    description: Active, Fault, Standby.
+  - name: fuelCellEffPct
+    type: FLOAT
+    description: Fuel cell efficiency %. Typically 40-90%; below 50% older or degraded fuel cell technology;
+      50-70% standard efficiency modern cells for general use; above 70% high-performance with optimal
+      chemical-to-electrical conversion and minimal waste heat.
+  - name: H2LevelPct
+    type: FLOAT
+    description: Hydrogen level %.
+- schema: main
+  table: StationEquipmentType
+  columns:
+  - name: station_name
+    type: VARCHAR
+    description: FK to Location.
+  - name: equip_type
+    type: VARCHAR
+    description: FK to EquipmentType.

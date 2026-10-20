@@ -1,0 +1,230 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: archeology_scan, author: claudeopus5.5
+version: '1.0'
+name: archeology-scan
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Archaeological 3D scanning database: projects, personnel, sites, equipment, scan sessions,
+      point clouds, registrations, meshes, spatial measurements, feature analyses, processing workflows,
+      environmental conditions, conservation assessments and quality control records.'
+    preferred: true
+    tables:
+    - projects
+    - personnel
+    - sites
+    - equipment
+    - scans
+    - pointcloud
+    - registration
+    - mesh
+    - spatial
+    - features
+    - processing
+    - environment
+    - conservation
+    - qualitycontrol
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_access
+    summary: How values are stored and how tables link (checked against the data)
+    description: 'JSON columns (cloud_metrics, reg_accuracy, mesh_specs, spatial_dims, feature_analysis,
+      system_usage, calib_status, geo_position, site_status, ambient_cond) are DuckDB JSON. Extract with
+      ->> and CAST to DOUBLE, and put parentheses around the extraction (write CAST(x->>''K'' AS DOUBLE)
+      or (x->>''K'') IS NULL): `x->>''K''::DOUBLE` casts the key literal, not the value. Nested keys:
+      spatial_dims->''Bounding_Box''->>''Box_X'', feature_analysis->''Analysis_Status''->>''Texture_Study''.
+      reg_accuracy Ctrl_Pts and Ref_Mark are stored as JSON strings. Text-with-unit columns must be parsed:
+      scans.size is always ''NN.NN GB'' (CAST(split_part(size,'' '',1) AS DOUBLE)); scans.scanning_rate
+      always ''N MB/min''; scans.scan_cost always ''N USD/GB''; scans.scancount starts with an integer
+      (''5 scans, ...'', ''1 scan, single capture session''; 1-20); processing.processing_rate always
+      ''N MB/s''; equipment.powerlevel starts with the battery percentage 0-100 (''62% battery, ...'';
+      regexp_extract(powerlevel,''^[0-9]+'')); scans.chronotag is ''YYYY-MM-DD HH:MM:SS.ffffff GMT+8''
+      (date = CAST(substr(chronotag,1,10) AS DATE); 2024-02-19 to 2025-02-18). projects.authhalt is text
+      ''DD/MM/YYYY''. sites.guessdate is ''N CE'', ''N BCE'' or ''-N BCE'' (the minus sign is redundant:
+      both BCE forms are years before the common era); signed year = CASE WHEN guessdate LIKE ''%BCE''
+      THEN -ABS(n) ELSE n END. sites.typesite and processing.coordframe hold inconsistent spellings/cases
+      (e.g. ''Burial'',''Bur.'',''BUR''; ''Religious'',''REL''; ''WGS84'',''wgs84'') — normalise with
+      lower()/prefix matching when grouping. LINKS (verified): a point cloud belongs to exactly one scan
+      session via (arcref, crewref) — each (arcref, crewref) is unique in scans, pointcloud, registration
+      and spatial, so these four join 1:1 on that pair. Site-level tables (mesh, processing, environment,
+      features, conservation) join to scans only by zoneref and a site can have up to 4 rows in each,
+      so such joins fan out (one row per scan x site record). mesh, processing, environment and features
+      also share (zoneref, equipref) with each other, which is unique in mesh, processing and environment.
+
+      '
+    tables:
+    - main.scans
+    - main.pointcloud
+    - main.registration
+    - main.spatial
+    - main.mesh
+    - main.processing
+    - main.environment
+    - main.features
+    - main.conservation
+    - main.sites
+    - main.equipment
+    - main.projects
+  - name: scan_quality
+    summary: Point-cloud indices SRI, SCE, PCDR, SQS, SDI, STE and scan classes
+    description: 'Scan Resolution Index SRI = log10(resolution mm x 10^3)/log10(point density pts/m2)
+      x 5; lower is better. Scan Coverage Effectiveness SCE = Coverage% x (1 + Overlap%/100 x (1 - Coverage%/100));
+      higher is better. Point Cloud Density Ratio PCDR = Total Points / (Point-Cloud Density Code (Cloud_Dense)
+      x Surface Area m2 (spatial.Area_M2)); higher = more efficient, spatially consistent scanning. Scan
+      Quality Score SQS = (10/SRI)^1.5 x (SCE/100) x (1 - Noise dB/30)^2; higher is exponentially better.
+      Spatial Density Index SDI = Total Points/(Area m2 x 10^4) x (Point Density / Cloud Density Code)^0.5.
+      Scan Time Efficiency STE = SQS x sqrt(Coverage%) / (Scan Duration min x sqrt(Number of Scans)).
+      High Resolution Scan: resolution <= 1.0 mm AND point density >= 1000 pts/m2. Comprehensive Coverage:
+      coverage >= 95% AND overlap >= 30%. Premium Quality Scan: High Resolution AND Comprehensive Coverage
+      AND SQS > 7.5. Spatially Complex Site: Surface Area > 100 m2 AND SDI > 50. REFERENCE VALUES. Scan
+      resolution (mm) is the smallest distinguishable feature: 0.5 mm documents fine tool marks, 2.0 mm
+      only general shape and macroscopic features. Point density (pts/m2): ~100 basic topography, 1,000
+      structural details, 10,000+ surface textures and fine engravings. Noise level (dB, signal-to-noise):
+      below 1.0 clean data for detailed analysis, above 3.0 significant noise obscuring small features.
+      Coverage %: above 95% near-complete documentation; 80% may have significant gaps needing additional
+      scanning or interpolation.
+
+      '
+    tables:
+    - main.pointcloud
+    - main.scans
+    - main.spatial
+  - name: mesh_models
+    summary: Mesh indices MCR, TDI, MFS, MPR and mesh classes
+    description: 'Mesh Complexity Ratio MCR = Faces/(Vertices x Resolution mm^2) x 10^3; higher = more
+      complex for a given resolution. Texture Density Index TDI = Texture px (Tex_Pix)/(sqrt(Faces) x
+      Resolution mm) x 10^-2. Model Fidelity Score MFS = MCR x (TDI/10) x (1 + exp(-Geometric Accuracy
+      mm)). Mesh-to-Point Ratio MPR = Vertices/ Total Points x 100 x (MCR/10)^0.3; 25-30 indicates optimal
+      decimation. High Fidelity Mesh: MCR > 5.0 AND Mesh Resolution < 1.0 mm AND Geometric Accuracy <
+      0.5 mm. Resource-Intensive Model: Faces > 2,000,000 AND MPR < 15. Texture-Critical Artifact: Texture
+      Analysis containing ''Detailed'' or ''Critical'' AND TDI > 8.0 (data note: Texture_Study only holds
+      Completed / Partial / Not Required, and observed TDI max is ~0.18, so no rows qualify). Mesh Quality
+      Classification per site: ''Has High-Fidelity Meshes'' (>= 1 high- fidelity mesh), ''Standard Mesh
+      Quality'' (meshes, none high-fidelity), ''No Mesh Data'' (no mesh rows). Geometric accuracy (Geom_Delta_Mm)
+      is the average deviation between scan data and final model: below 0.1 mm museum quality; around
+      1.0 mm general documentation.
+
+      '
+    tables:
+    - main.mesh
+    - main.features
+    - main.pointcloud
+  - name: environment
+    summary: Environmental Suitability Index, ECCS classes, EIF
+    description: 'ESI = 100 - 2.5 x |Temp C - 20| - |(Humidity% - 50)/2|^1.5 - 600/(Lux + 100); higher
+      is better. Optimal Scanning Conditions: ESI > 85. ECCS four tiers: ''Optimal Scanning Conditions''
+      ESI > 85; ''Good Scanning Conditions'' 70-85; ''Acceptable Scanning Conditions'' 50-70; ''Challenging
+      Scanning Conditions'' < 50 (boundaries: exactly 85 and 70 -> Good, exactly 50 -> Acceptable). Environmental
+      Impact Factor EIF = SQS/(ESI + 10) x 100; values near 100 = minimal interference. Environmental
+      Challenge Scan: EIF > 120. Equipment Optimization Opportunity: EER < 30 AND ESI > 80.
+
+      '
+    tables:
+    - main.environment
+    - main.scans
+    - main.equipment
+  - name: processing
+    summary: Processing indices PER, PRU and workflow classes
+    description: 'Processing Efficiency Ratio PER = File Size GB x log10(Total Points) / (Processing hours
+      x (CPU% + GPU%)/200); higher is better. Processing Bottleneck: PER < 0.5. Processing Resource Utilization
+      PRU = Processing hours x (CPU% + GPU%)/2 / (File Size GB x 10 x log10(Mesh Vertices + 10^4)); lower
+      is better. Processing Optimized Workflow: PRU < 5.0 AND MFS > 7.0. Workflow Efficiency Classification:
+      ''Optimized'' PRU < 5.0, ''Acceptable'' 5.0-10.0 (inclusive), ''Needs Optimization'' PRU > 10.0.
+      Processing stages as documented: ''Raw'' unprocessed, ''Aligned'' scans registered, ''Cleaned''
+      noise removed, ''Meshed'' converted to polygon mesh, ''Textured'' textures applied; each a discrete
+      milestone. Data holds Raw, Aligned, Meshed, Textured and ''Final'' (no ''Cleaned'').
+
+      '
+    tables:
+    - main.processing
+    - main.mesh
+    - main.scans
+    - main.pointcloud
+  - name: registration
+    summary: Registration threshold, RAR, confidence levels
+    description: 'Registration Quality Threshold: Registration Accuracy (Log_Accu_Mm) < 1.0 mm AND Error
+      Value (Err_Val_Mm) < 2.0 mm. Registration Accuracy Ratio RAR = Scan Resolution / (Reg Accuracy x
+      sqrt(1 + Error/Reg Accuracy)); > 1 desirable. Registration Confidence Level: ''High Confidence''
+      RAR > 1.5 AND method containing ''Target''; ''Medium Confidence'' RAR between 1.0 and 1.5; ''Low
+      Confidence'' otherwise. Methods as documented: ''ICP'' (Iterative Closest Point), ''Target-based''
+      (physical reference markers), ''Hybrid'' (automatic + manual), ''SLAM'' (Simultaneous Localization
+      and Mapping); data holds Feature-based, Hybrid, Target-based.
+
+      '
+    tables:
+    - main.registration
+    - main.pointcloud
+  - name: documentation_quality
+    summary: ADC, DPQ, Full Digital Twin, Multi-Phase project
+    description: 'ADC = 0.4 x SQS + 0.4 x MFS + 0.2 x SCE - 5 x sqrt(Noise dB/10). DPQ = 0.3 x ADC + 0.3
+      x MFS + 0.2 x RAR + 0.2 x SCE - 2 x sqrt(Error mm / Scan Resolution mm). Full Archaeological Digital
+      Twin: a site with Premium Quality Scans, High Fidelity Mesh, Registration Quality Threshold met
+      and ADC > 85. Multi-Phase Documentation Project: project with multiple scans where ADC < 70 for
+      the individual scans but DPQ > 80 combined.
+
+      '
+    tables:
+    - main.scans
+    - main.pointcloud
+    - main.mesh
+    - main.registration
+  - name: conservation
+    summary: Degradation Risk Zone, CPI, priorities and emergencies
+    description: 'Degradation Risk Zone: Preservation Status (sites.site_status Pres_Stat) containing
+      ''Poor'' or ''Critical'' AND Structural Stability (conservation.structstate) not containing ''Stable''
+      (case-sensitive: ''Unstable condition...'' does NOT contain ''Stable'', so it qualifies). Risk Zone
+      Category: ''Degradation Risk Zone'' vs ''Not in Risk Zone''. Conservation Priority Index CPI = 100
+      - PS + AF x (1 + TS/10) in a risk zone, else 50 - PS + AF x (1 + TS/20); PS Excellent=10, Good=30,
+      Fair=50, Poor=70, Critical=90; AF = age in millennia from Estimated Date; TS 0-10 site type rarity.
+      Digital Conservation Priority (highest): risk zone AND (Estimated Date older than 1000 BCE OR Site
+      Type ''Rare''/''Unique''), to receive Premium Quality Scans. Conservation Emergency: risk zone AND
+      CPI > 75, requiring at least Premium Quality Scans before intervention. High Temporal Value Site:
+      Estimated Date before 500 CE AND CPI > 60. Structural stability as documented: ''Stable'' integrity
+      under normal conditions, ''Unstable'' deterioration requiring intervention, ''Critical'' imminent
+      collapse. Data holds ''Stable condition...'', ''Unstable condition...'', ''Moderate condition, careful
+      monitoring required''. Cultural period: standardized periods e.g. ''Neolithic'' (10,000-4,500 BCE),
+      ''Bronze Age'' (3,300-1,200 BCE), ''Roman'' (27 BCE-476 CE), ''Medieval'' (476-1453 CE). Estimated
+      dating conventions e.g. ''3500-3000 BCE'', ''1st c. CE'', ''ca. 1450 CE''; precision varies from
+      years to centuries.
+
+      '
+    tables:
+    - main.sites
+    - main.conservation
+  - name: equipment
+    summary: Equipment Effectiveness Ratio
+    description: 'EER = SQS x EquipStatus_value / (Battery % x (101 - EquipAge_days)/365) x 25; EquipStatus_value
+      1.0 for ''Excellent'' to 0.2 for ''Poor''; EquipAge_days = days since calibration date (equiptune).
+      Higher = more efficient use of equipment.
+
+      '
+    tables:
+    - main.equipment
+    - main.environment
+    - main.scans
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_metrics
+    description: 'Indices, thresholds and classifications must be computed with the metric SQL in semantic.yml
+      (same JSON paths, casts, thresholds and strict/inclusive comparisons) rather than ad-hoc formulas.
+
+      '
+    enforcement: warn

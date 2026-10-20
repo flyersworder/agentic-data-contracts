@@ -1,0 +1,211 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: disaster_relief, author: claudeopus5.5
+version: '1.0'
+name: disaster_relief
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Disaster relief database: disaster events and their impact, relief operations, supplies,
+      transportation, distribution hubs, staffing, financials, beneficiaries, environment/health and coordination/evaluation
+      records.'
+    preferred: true
+    tables:
+    - disasterevents
+    - humanresources
+    - transportation
+    - supplies
+    - distributionhubs
+    - operations
+    - financials
+    - beneficiariesandassessments
+    - environmentandhealth
+    - coordinationandevaluation
+    - operation_hub_map
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: disaster_impact
+    summary: Human and infrastructure impact of disasters, severity indices and disaster classes
+    description: 'Impact numbers live in disasterevents.impact_summary (DuckDB JSON). Extract with ->/->>
+      and cast: population_impact.{affected,displaced,casualties,injured,missing} (integers; JSON null
+      for displaced in 400 of 1000 rows, never null for affected, affected never 0), infrastructure_damage.{infra_damage_pct,power_outage_pct,
+      water_damage_pct} (percent 0-100), communication_and_transport.{communication_state (Down/Limited/OP),
+      transport_access (Full/Limited/Minimal)}. ->> returns SQL NULL for JSON null. Wrap a ->> extraction
+      in parentheses before comparing it with = (operator precedence otherwise breaks the expression).
+      Definitions: Disaster Mortality Rate (DMR) = percentage of the total affected population that resulted
+      in a confirmed death (casualties / affected * 100). Population Displacement Rate (PDR) = displaced
+      / affected * 100. Infrastructure Damage Index (IDI), 0-100 = (COALESCE(infra,0)+COALESCE(power,0)+COALESCE(water,0))/3.
+      Population Impact Score (PIS) = 10*COALESCE(casualties,0) + 3*COALESCE(injured,0) + 2*COALESCE(missing,0)
+      + 1*COALESCE(displaced,0). Overall Disaster Severity Index (DSI) = 0.6*PIS + 0.4*IDI. Major Disaster:
+      DSI between 500,000 and 2,000,000 (inclusive; national-level response); no current row reaches it
+      (max DSI ~71,364). Catastrophic Disaster: DSI > 15,000 (maximum-level international response). The
+      two thresholds overlap as documented; apply each as written. Mass Casualty Incident (MCI): total
+      fatalities and injuries > 100 OR Medical Support Ratio < 0.01. Hazard Severity Levels (haz_level
+      ''Severity-N'' = ''Level N''): Level 1 minor, localized event; Level 3 moderate event with regional
+      impact; Level 5 catastrophic event with widespread severe impact requiring international assistance.
+      Damage Report Categories: Minor = limited damage; Moderate = visible damage to some structures;
+      Severe = widespread destruction; Catastrophic = near-total destruction of the built environment
+      in the affected area.
+
+      '
+    tables:
+    - main.disasterevents
+  - name: logistics
+    summary: 'Supplies, transportation, hubs: sufficiency, throughput, strain, fragility, gridlock'
+    description: 'Supply Sufficiency (Days) = LEAST(food_tons*1000/(affected*2), water_liters/(affected*3))
+      (2 kg food and 3 L water per person per day; most limiting resource). Imminent Supply Depletion
+      Alert: sufficiency < 2 days (supplies run out within 48 hours). Shelter Gap = GREATEST(0, displaced
+      - shelter_units); Severe Shelter Crisis: gap > 1,000. Logistical Throughput per Vehicle (LTV) =
+      daily_tons / vehiclecount (vehiclecount NULL in 392 of 987 rows = not recorded -> LTV NULL). Hub
+      Strain Index (HSI) = 0.5*((hubutilpct/100)+(stockturnrate/10)) + 0.5*avg DSI of the disasters the
+      hub serves (served = transportation rows with transport_hub_ref = hub); Overwhelmed Logistical Hub:
+      HSI > 1,000,000 (no current hub qualifies; max ~34,000). Hub Overload: (hubutilpct/100)+(stockturnrate/10)
+      > 1.5. Supply Chain Fragility Index (SCFI) = 0.5*((hubutilpct/100)+(stockturnrate/10)) + 0.5*break_rate;
+      Fragile Supply Chain / Operation with Fragile Supply Chain: SCFI > 5.0. break_rate is stored as
+      a percentage (0-9.99). Average Vehicle Breakdown Rate = mean break_rate over the chosen cohort of
+      transport rows. Logistical Gridlock: operation supply_flow_state = ''Disrupted'' AND disaster transport_access
+      = ''Minimal''. Gridlock Severity Index (GSI) = ((10 - priority_score)*0.5) + (total_personnel*0.2)
+      + (transport_restriction_score*30) with priority_score Critical=1, High=2, Medium=3, Low=4 and transport_restriction_score
+      Minimal=1.0, Limited=0.5 (Full=0). Aid Delivery Cost per Ton (ADC) = transport costs / total tons
+      delivered for the same transport (financials.transportcostsusd joined on the disaster / delivery_metrics
+      total_tons). Supply Flow States: Stable = goods moving predictably and efficiently; Strained = functioning
+      but with delays or difficulties; Disrupted = broken, goods not reaching destinations. Last-Mile
+      Delivery Status: On Track = proceeding as planned; Delayed = facing obstacles, behind schedule;
+      Suspended = halted due to safety, access or other critical issues. Join facts: at most one supplies/transportation/financials
+      row per disaster; transportation.transportsupref -> supplies; hubs via transport_hub_ref / supplyhubref.
+      operation_hub_map.hub_role values stored are ''main'',''backup'',''overflow'' (documentation calls
+      them Primary Hub, Backup Hub, Forward Depot).
+
+      '
+    tables:
+    - main.supplies
+    - main.transportation
+    - main.distributionhubs
+    - main.operation_hub_map
+    - main.operations
+  - name: operations
+    summary: Operation status, emergency levels, phases, effectiveness and risk classes
+    description: 'operations has no disaster column; an operation is paired with a disaster through the
+      link tables financials (fin_ops_ref, findistref), humanresources, beneficiariesandassessments and
+      coordinationandevaluation (each row carries both an ops ref and a disaster ref). Emergency Alert
+      Levels: Yellow = monitoring required; Orange = active response, regional command; Red = full-scale
+      emergency, national command; Black = catastrophic event, international-level coordination. Full-Scale
+      Emergency: emerglevel ''Red'' or ''Black''. Response Phases: Initial = first 24-72 hours, life-saving
+      focus; Emergency = active, large-scale relief; Recovery = transition to restoring services; Reconstruction
+      = long-term rebuilding of infrastructure and society. Response Effectiveness Score (RES) = 0.4*success_rate
+      + 0.3*bene_feedbackscore*10 + 0.3*distequityidx*100. Highly Effective Operation: RES > 75 AND CQI
+      > 75. Failing Operation: LTV < 1.0 OR RES < 40. High-Risk Operation: safety_ranking ''High Risk''
+      OR security incidents exceed 5 per week. High Risk Operation (active variant): opsstatus ''Active''
+      AND (safety_ranking ''High Risk'' OR more than 5 security incidents). High Cost, Low Impact Operation:
+      CPPA above average AND RES below average. Total Humanitarian Footprint (THF) = total personnel,
+      paid staff plus volunteers. Medical Support Ratio (MSR) = medical staff / (casualties + injured).
+      Medical Staff Ratio = medical staff / affected * 1000.
+
+      '
+    tables:
+    - main.operations
+    - main.humanresources
+    - main.beneficiariesandassessments
+    - main.transportation
+  - name: finance
+    summary: Costs, burn rate, runway, financial health and funding alerts
+    description: 'Text money columns: budgetallotusd like ''$4,227,090.00'' (strip ''$'' and '',''), funds_util_pct
+      like ''9.8%'' (strip ''%''; value is a percent 0-100), costbeneusd like ''$844.12''. All rows follow
+      these formats; cost columns are never NULL. Total cost of an operation = ops_costs_usd + transportcostsusd
+      + storage_costs_usd + personnelcostsusd. Cost Per Person Affected (CPPA) = total cost / affected
+      population. Cost Per Beneficiary (CPB) = total costs of completed operations / total affected population
+      (ratio of sums). Financial Burn Rate (FBR) = total operational costs / (current_date - ops_start_date)
+      in days. Budget Runway (Days) = (allocated budget - total operational costs) / FBR. Funding Crisis:
+      funding_state ''Critical'' AND runway < 7 days. Financial Health Score (FHS) = 0.5*(100 - funds_util_pct)
+      + 0.5*((budget - COALESCE(resource_gaps_usd,0))/NULLIF(budget,0))*100; Financially Unstable: FHS
+      < 50. High Burn Rate Alert: total costs > 20% of total allocated budget. Funding States: Adequate
+      = sufficient funds available; Limited = funding available but does not cover all needs, requiring
+      prioritization; Critical = a severe funding gap threatens essential activities. DONOR_COMMITMENTS_USD
+      NULL means no donor commitments.
+
+      '
+    tables:
+    - main.financials
+    - main.operations
+    - main.disasterevents
+  - name: beneficiaries
+    summary: Beneficiary registration, equity and community partnership
+    description: 'Distribution Equity Index (distequityidx, 0-1): 1.0 = perfect equity; below 0.7 may
+      indicate significant disparities; below 0.5 indicates severe inequity (stored values 0.5-1.0). Successful
+      Community Partnership: commengagelvl ''High'' AND distequityidx > 0.9. bene_feedbackscore stored
+      1.0-5.0, NULL = feedback not recorded.
+
+      '
+    tables:
+    - main.beneficiariesandassessments
+  - name: health_environment
+    summary: Public health risk score and public health emergency
+    description: 'health_environment_profile JSON: health.{disease_risk High/Medium/Low, medical_capacity,
+      vaccination_coverage, mental_health_aid}, environment.{sanitation_coverage (percent), water_quality_index
+      stored as text like ''85.6 WQI'' (strip '' WQI'' and cast), ...}. Public Health Risk Score (PHRS)
+      = ((1 - MSR)*40) + (disease_risk_score*10) + (sanitation_risk*0.15) + (water_quality_risk*0.15),
+      disease_risk_score High=3, Medium=2, else 1; sanitation_risk = 100 - sanitation_coverage; water_quality_risk
+      = 100 - WQI. MSR comes from the humanresources row of the same disaster. Public Health Emergency:
+      PHRS > 70 (critical threshold).
+
+      '
+    tables:
+    - main.environmentandhealth
+    - main.humanresources
+    - main.disasterevents
+  - name: coordination
+    summary: Coordination quality, accountability, media, data quality
+    description: 'Coordination Quality Index (CQI) = (report_compliance + stakeholder_satisf*20 + dataqualityvalue*20)/3.0.
+      Coordination Effectiveness Levels: Low = poor communication, duplicated efforts; Medium = functional
+      coordination with some gaps; High = seamless, efficient, collaborative partnership among all stakeholders.
+      High-Accountability Response: compliancestate ''Compliant'' AND audit_state ''Completed'' AND qualitycontrolsteps
+      ''Strong''. Negative Media Narrative: mediacoversentiment ''Negative'' AND public perception score
+      below 60. public_perception is stored as text like ''3.5★'' (values 1.0-5.0 stars); the documented
+      threshold 60 is applied as written to the numeric star value, so every Negative-sentiment row currently
+      qualifies. Data Quality Value: documented as 0-100 with bands > 90 Excellent, 70-89 Good, 50-69
+      Fair, below 50 Poor (decisions based on unreliable information). The stored dataqualityvalue is
+      an integer 1-5 (and CQI multiplies it by 20), so on raw values every row bands as Poor; state this
+      when banding. Security incidents: secincidentcount (0-100) is the recorded incident count; the documented
+      "exceeds 5 per week" test is applied to it directly (no time window column).
+
+      '
+    tables:
+    - main.coordinationandevaluation
+  - name: readiness
+    summary: Operational Readiness Score (ORS) - no formula given
+    description: 'Operational Readiness Score (ORS): a score from 0 to 100 assessing the readiness of
+      the response team and their equipment; a composite of personnel availability (staffing_details.availability_and_equipment.availability_pct),
+      equipment status (ppe_status Critical/LTD/✓, comm_equipment Insufficient/Limited/Sufficient) and
+      maintenance levels (transportation.delivery_metrics.vehicle_metrics.maintenance_state). The documentation
+      gives no weights or formula, so no metric is defined; do not invent one without stating the assumption.
+
+      '
+    tables:
+    - main.humanresources
+    - main.transportation
+  rules:
+  - name: use_declared_metrics
+    description: 'Indices, rates and classification flags must be computed with the metric SQL in semantic.yml
+      (same formulas, thresholds, JSON paths and text parsing), not ad-hoc variants.
+
+      '
+    enforcement: warn
+  - name: cast_before_divide
+    description: 'Integer division truncates in this database; cast counts (JSON integers, BIGINT columns)
+      to DOUBLE before dividing, as the metrics do.
+
+      '
+    enforcement: warn

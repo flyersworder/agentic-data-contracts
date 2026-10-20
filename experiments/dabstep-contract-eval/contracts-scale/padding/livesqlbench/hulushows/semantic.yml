@@ -1,0 +1,982 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: hulushows, author: claudeopus5.5
+metrics:
+- name: user_score_numeric
+  description: 'Numeric user score from core.genreclass.User_Score. Handles documented formats ''4.35'',
+    ''4.35★'', ''$4.35M'', ''4.35 RTG'' (take the number) and ''435 bp'' (basis points, divide by 100).
+    Observed data: all plain decimals 2.19-4.80, none NULL.
+
+    '
+  sql_expression: "CASE WHEN (c.genreclass->>'User_Score') ILIKE '%bp%'\n     THEN TRY_CAST(regexp_extract((c.genreclass->>'User_Score'),\
+    \ '(\\d+(\\.\\d+)?)', 1) AS DOUBLE) / 100\n     ELSE TRY_CAST(regexp_extract((c.genreclass->>'User_Score'),\
+    \ '(\\d+(\\.\\d+)?)', 1) AS DOUBLE) END\n"
+  source_model: main.core
+  from_sql: main.core c
+  grain: one content entry
+  domains:
+  - data_quality
+- name: peak_rating_canonical
+  description: 'Peak_Rating mapped onto the six canonical TV ratings (TV-Y, TV-Y7, TV-G, TV-PG, TV-14,
+    TV-MA); ''Not Rated'', NULL and unknown values give NULL. Mapping verified on the data.
+
+    '
+  sql_expression: "CASE WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y','TVY') THEN 'TV-Y'\n\
+    \     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y7','TVY7','TV-Y7-FV') THEN 'TV-Y7'\n\
+    \     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-G','TVG','G','GENERAL','ALL') THEN\
+    \ 'TV-G'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-PG','TVPG','PG','PARENTAL\
+    \ GUIDANCE') THEN 'TV-PG'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-14','TV14','T14','14+','T','TEEN','FOURTEEN')\
+    \ THEN 'TV-14'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-MA','TVMA','MA','MATURE','ADULT','18+')\
+    \ THEN 'TV-MA'\nEND\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - ratings
+- name: peak_rating_ordinal
+  description: 'Canonical peak rating as maturity ordinal: TV-Y=1, TV-Y7=2, TV-G=3, TV-PG=4, TV-14=5,
+    TV-MA=6; NULL if unrated.'
+  sql_expression: "CASE WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y','TVY') THEN 1\n \
+    \    WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y7','TVY7','TV-Y7-FV') THEN 2\n   \
+    \  WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-G','TVG','G','GENERAL','ALL') THEN 3\n\
+    \     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-PG','TVPG','PG','PARENTAL GUIDANCE')\
+    \ THEN 4\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-14','TV14','T14','14+','T','TEEN','FOURTEEN')\
+    \ THEN 5\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-MA','TVMA','MA','MATURE','ADULT','18+')\
+    \ THEN 6\nEND\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - ratings
+- name: most_common_peak_rating
+  description: 'Most commonly assigned peak TV rating across all show-tier distribution records (typical
+    maturity level of the catalog), after canonical normalisation, NULL/unrated excluded. Result on this
+    data: TV-14.
+
+    '
+  sql_expression: "MODE(CASE WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y','TVY') THEN\
+    \ 'TV-Y'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y7','TVY7','TV-Y7-FV') THEN\
+    \ 'TV-Y7'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-G','TVG','G','GENERAL','ALL')\
+    \ THEN 'TV-G'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-PG','TVPG','PG','PARENTAL\
+    \ GUIDANCE') THEN 'TV-PG'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-14','TV14','T14','14+','T','TEEN','FOURTEEN')\
+    \ THEN 'TV-14'\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-MA','TVMA','MA','MATURE','ADULT','18+')\
+    \ THEN 'TV-MA' END)\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: whole table (or any filter)
+  domains:
+  - ratings
+- name: has_high_res_logo
+  description: 'True when the company has a high-resolution logo. HasLogo_Flag is text with variants TRUE/FALSE/Yes/No/1/0
+    (observed ''True''/''False''); NULL stays NULL (unknown).
+
+    '
+  sql_expression: "CASE WHEN upper(trim((co.brandingassets->>'HasLogo_Flag'))) IN ('TRUE','YES','Y','1','T')\
+    \ THEN TRUE\n     WHEN upper(trim((co.brandingassets->>'HasLogo_Flag'))) IN ('FALSE','NO','N','0','F')\
+    \ THEN FALSE END\n"
+  source_model: main.companies
+  from_sql: main.companies co
+  grain: one company
+  domains:
+  - data_quality
+  - studios
+- name: is_movie
+  description: 'True when the content is a movie. Movie_Flag variants: TRUE/Y/Movie (movie) vs FALSE/N/Series
+    (not a movie); observed value is ''no'' in all rows, so no movies exist.
+
+    '
+  sql_expression: "CASE WHEN upper(trim((a.accessflags->>'Movie_Flag'))) IN ('TRUE','Y','YES','1','MOVIE')\
+    \ THEN TRUE\n     WHEN upper(trim((a.accessflags->>'Movie_Flag'))) IN ('FALSE','N','NO','0','SERIES')\
+    \ THEN FALSE END\n"
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: one content entry
+  domains:
+  - data_quality
+- name: launch_date
+  description: 'show_rollups.launchmoment parsed to DATE (first availability in that tier). Accepts ''YYYY-MM-DD
+    HH:MM'', ''YYYY-MM-DD'', ''Mon D, YYYY'', ''DD/MM/YY''. Observed: ISO dates or NULL (568 rows NULL).
+
+    '
+  sql_expression: "CAST(COALESCE(try_strptime(sr.launchmoment, '%Y-%m-%d %H:%M'), try_strptime(sr.launchmoment,\
+    \ '%Y-%m-%d'),\n              try_strptime(sr.launchmoment, '%b %d, %Y'), try_strptime(sr.launchmoment,\
+    \ '%d/%m/%y')) AS DATE)\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - data_quality
+  - tiers
+- name: latest_add_date
+  description: show_rollups.latestadd parsed to DATE; stored as 'M/D/YYYY' (e.g. 12/8/2016) or NULL (no
+    update since first appearance).
+  sql_expression: CAST(try_strptime(sr.latestadd, '%m/%d/%Y') AS DATE)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - data_quality
+  - tiers
+- name: cache_date
+  description: 'availabilitys.cache_time parsed to DATE. Documented formats ''2024-12-08'', ''2024/12/8'',
+    ''24/12/8'', ''Dec 8, 2024'', ''08/12/24'', ISO-8601; observed all ISO-8601 with offset on 2017-08-10.
+
+    '
+  sql_expression: "CAST(COALESCE(try_strptime(a.cache_time, '%Y-%m-%dT%H:%M:%S%z'), try_strptime(a.cache_time,\
+    \ '%Y-%m-%d'),\n              try_strptime(a.cache_time, '%Y/%m/%d'), try_strptime(a.cache_time, '%y/%m/%d'),\n\
+    \              try_strptime(a.cache_time, '%b %d, %Y')) AS DATE)\n"
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: one content entry
+  domains:
+  - data_quality
+- name: is_subscriber_only
+  description: 'Subscriber-only content: not available in the free tier, accessible only to paying users
+    (accessflags.Subscriber_Only true; JSON boolean).'
+  sql_expression: upper(trim((a.accessflags->>'Subscriber_Only'))) IN ('TRUE','YES','Y','1')
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: one content entry
+  domains:
+  - tiers
+- name: is_showtime_exclusive
+  description: 'Showtime exclusive: content only accessible to Showtime subscribers, i.e. the Showtime_Only
+    flag is true.'
+  sql_expression: upper(trim((a.accessflags->>'Showtime_Only'))) IN ('TRUE','YES','Y','1')
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: one content entry
+  domains:
+  - tiers
+- name: is_premium_access_content
+  description: 'Premium access content: exclusively for paying subscribers or special tiers -- Subscriber_Only
+    = TRUE or Showtime_Only = TRUE.'
+  sql_expression: (upper(trim((a.accessflags->>'Subscriber_Only'))) IN ('TRUE','YES','Y','1') OR upper(trim((a.accessflags->>'Showtime_Only')))
+    IN ('TRUE','YES','Y','1'))
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: one content entry
+  domains:
+  - tiers
+- name: premium_exclusivity_score
+  description: PES = subscriber-only content / total content, over availabilitys rows in scope (based
+    on access restrictions).
+  sql_expression: CAST(COUNT(*) FILTER (WHERE upper(trim((a.accessflags->>'Subscriber_Only'))) IN ('TRUE','YES','Y','1'))
+    AS DOUBLE) / NULLIF(COUNT(*), 0)
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a
+  grain: set of content entries
+  domains:
+  - tiers
+- name: tier_count
+  description: Number of distinct subscription tiers a show appears in (rows in show_rollups). Group by
+    sr.srkeys. Every show has 7; add Media_Total > 0 if 'has media in tier' is meant.
+  sql_expression: COUNT(DISTINCT sr.srlinks)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: is_multi_tier
+  description: 'Multi-tier presence: content available in two or more distinct subscription tiers. Group
+    by sr.srkeys.'
+  sql_expression: COUNT(DISTINCT sr.srlinks) >= 2
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: is_multitier_syndicated
+  description: 'Multitier syndicated show / multi-tier syndication: available in three or more distinct
+    subscription tiers (viewing plans). Group by sr.srkeys.'
+  sql_expression: COUNT(DISTINCT sr.srlinks) >= 3
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: average_media_per_tier
+  description: AMT = sum of Media_Total over a show's tiers / number of tiers. Group by sr.srkeys.
+  sql_expression: SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE)) / NULLIF(COUNT(DISTINCT
+    sr.srlinks), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+  - media_volumes
+- name: tier_normalized_media_load
+  description: TNML = total media volume / number of availability tiers (tiers = distinct srlinks). Same
+    arithmetic as AMT. Group by sr.srkeys.
+  sql_expression: SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE)) / NULLIF(COUNT(DISTINCT
+    sr.srlinks), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+  - media_volumes
+- name: normalized_media_volume
+  description: NMV = total media volume (sum of Media_Total across tiers) / (number of tiers + 1). Group
+    by sr.srkeys.
+  sql_expression: SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE)) / (COUNT(DISTINCT
+    sr.srlinks) + 1)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+  - media_volumes
+- name: tier_distribution_ratio
+  description: TDR = Media_Total of a tier / sum of Media_Total over all tiers of the same show (window
+    over sr.srkeys). Row-level.
+  sql_expression: CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE) / NULLIF(SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE)) OVER (PARTITION BY sr.srkeys), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - tiers
+- name: availability_entropy_score
+  description: 'AES = -sum p_i ln p_i, p_i = share of the show''s Media_Total in tier i (natural log;
+    tiers with zero media contribute 0). Max on this data ln(7)=1.9459. Group by sr.srkeys.
+
+    '
+  sql_expression: "-SUM(CASE WHEN CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE)\
+    \ > 0\n     THEN (CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE) / st.show_media_total)\n\
+    \          * ln(CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE) / st.show_media_total)\
+    \ END)\n"
+  source_model: main.show_rollups
+  from_sql: 'main.show_rollups sr JOIN (SELECT srkeys, SUM(CAST((contentvols->''standard_content''->>''Media_Total'')
+    AS DOUBLE)) AS show_media_total FROM main.show_rollups GROUP BY srkeys) st ON st.srkeys = sr.srkeys
+
+    '
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: unrated_proportion_per_tier
+  description: UPT = sum Unrated_Vol / sum Media_Total per access tier. Group by r.tiertype.
+  sql_expression: SUM(CAST((sr.ratinginfo->>'Unrated_Vol') AS DOUBLE)) / NULLIF(SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE)), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr JOIN main.rollups r ON r.tierkey = sr.srlinks
+  grain: one tier (GROUP BY r.tiertype)
+  domains:
+  - ratings
+  - tiers
+- name: unrated_share
+  description: Unrated share = amount of unrated material (Unrated_Vol) / all available content (Media_Total),
+    summed over the records in scope.
+  sql_expression: SUM(CAST((sr.ratinginfo->>'Unrated_Vol') AS DOUBLE)) / NULLIF(SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE)), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: set of show-tier records
+  domains:
+  - ratings
+- name: is_legacy_uploaded
+  description: 'Missing launch moment: launchmoment IS NULL while Media_Total > 0 -> legacy-uploaded /
+    untracked rollup entry.'
+  sql_expression: sr.launchmoment IS NULL AND CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE) > 0
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - tiers
+- name: temporal_staleness_days
+  description: 'TSI = current date - latest update date, in days. A NULL latestadd means no addition since
+    first appearance, so the launch date is used instead.
+
+    '
+  sql_expression: "current_date - COALESCE(CAST(try_strptime(sr.latestadd, '%m/%d/%Y') AS DATE),\n  CAST(COALESCE(try_strptime(sr.launchmoment,\
+    \ '%Y-%m-%d %H:%M'), try_strptime(sr.launchmoment, '%Y-%m-%d'),\n                try_strptime(sr.launchmoment,\
+    \ '%b %d, %Y'), try_strptime(sr.launchmoment, '%d/%m/%y')) AS DATE))\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - tiers
+- name: show_longevity_years
+  description: Longevity = current year - release year, release year = year of the show's earliest launch
+    date across tiers. Group by sr.srkeys.
+  sql_expression: "EXTRACT(year FROM current_date) - EXTRACT(year FROM MIN(CAST(COALESCE(try_strptime(sr.launchmoment,\
+    \ '%Y-%m-%d %H:%M'),\n  try_strptime(sr.launchmoment, '%Y-%m-%d'), try_strptime(sr.launchmoment, '%b\
+    \ %d, %Y'), try_strptime(sr.launchmoment, '%d/%m/%y')) AS DATE)))\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: launch_year
+  description: 'Launch year of a title = year of its earliest parsed launch date across tiers (GROUP BY
+    sr.srkeys). Launch Year Distribution: count titles per launch_year (wrap in a subquery, then GROUP
+    BY launch_year, COUNT(*)); titles with no launch date get NULL.
+
+    '
+  sql_expression: "EXTRACT(year FROM MIN(CAST(COALESCE(try_strptime(sr.launchmoment, '%Y-%m-%d %H:%M'),\
+    \ try_strptime(sr.launchmoment, '%Y-%m-%d'),\n  try_strptime(sr.launchmoment, '%b %d, %Y'), try_strptime(sr.launchmoment,\
+    \ '%d/%m/%y')) AS DATE)))\n"
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - tiers
+- name: content_size_index
+  description: 'CSI = Ep_Vol + Clip_Vol + FilmClip_Vol + Feature_Vol + Game_Vol + Trailer_Vol per show-tier.
+    INTERPRETATION: the documented formula lists ''Film Clip Vol'' twice (''Film Cli pVol''); the repeated
+    term is read as Clip_Vol so each of the six video types counts once. NULL Ep_Vol counts as 0.
+
+    '
+  sql_expression: 'COALESCE(CAST((sr.contentvols->''standard_content''->>''Ep_Vol'') AS DOUBLE), 0) +
+    COALESCE(CAST((sr.contentvols->''standard_content''->>''Clip_Vol'') AS DOUBLE), 0) + COALESCE(CAST((sr.contentvols->''standard_content''->>''FilmClip_Vol'')
+    AS DOUBLE), 0) + COALESCE(CAST((sr.contentvols->''standard_content''->>''Feature_Vol'') AS DOUBLE),
+    0) + COALESCE(CAST((sr.contentvols->''standard_content''->>''Game_Vol'') AS DOUBLE), 0) + COALESCE(CAST((sr.contentvols->''standard_content''->>''Trailer_Vol'')
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: html5_episode_ratio
+  description: HER = H5_Episodes / Ep_Vol per show-tier (NULL when Ep_Vol is NULL or 0).
+  sql_expression: CAST((sr.html5metrics->'html5_volumes'->>'H5_Episodes') AS DOUBLE) / NULLIF(CAST((sr.contentvols->'standard_content'->>'Ep_Vol')
+    AS DOUBLE), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: is_html5_compatible_show
+  description: 'HTML5 compatible show: more than 0 HTML5-compatible full episodes (H5_Episodes > 0) in
+    any tier. Group by sr.srkeys; for a single tier use the row value.'
+  sql_expression: MAX(CAST((sr.html5metrics->'html5_volumes'->>'H5_Episodes') AS DOUBLE)) > 0
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show (GROUP BY sr.srkeys)
+  domains:
+  - media_volumes
+- name: media_platform_compatibility_rate
+  description: MPCR = H5_MediaTotal / Media_Total per show-tier.
+  sql_expression: CAST((sr.html5metrics->'html5_volumes'->>'H5_MediaTotal') AS DOUBLE) / NULLIF(CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: html5_depth_index
+  description: HDI = H5_Clips + H5_Episodes + H5_Trailers + H5_Games.
+  sql_expression: 'CAST((sr.html5metrics->''html5_volumes''->>''H5_Clips'') AS DOUBLE) + CAST((sr.html5metrics->''html5_volumes''->>''H5_Episodes'')
+    AS DOUBLE) + CAST((sr.html5metrics->''html5_volumes''->>''H5_Trailers'') AS DOUBLE) + CAST((sr.html5metrics->''html5_volumes''->>''H5_Games'')
+    AS DOUBLE)
+
+    '
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: is_single_platform_dependent
+  description: 'Single-platform dependency: all available content is playable in HTML5 (H5_MediaTotal
+    = Media_Total, with Media_Total > 0).'
+  sql_expression: CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE) > 0 AND CAST((sr.html5metrics->'html5_volumes'->>'H5_MediaTotal')
+    AS DOUBLE) = CAST((sr.contentvols->'standard_content'->>'Media_Total') AS DOUBLE)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: season_episode_ratio
+  description: SE_Ratio = Ep_Vol / Season_Vol (average episodes per season) per show-tier; NULL when seasons
+    are 0.
+  sql_expression: CAST((sr.contentvols->'standard_content'->>'Ep_Vol') AS DOUBLE) / NULLIF(CAST((sr.contentvols->'standard_content'->>'Season_Vol')
+    AS DOUBLE), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: clip_to_feature_ratio
+  description: CFR = FilmClip_Vol / Feature_Vol (short-form film clips vs long-form features); NULL when
+    Feature_Vol = 0.
+  sql_expression: CAST((sr.contentvols->'standard_content'->>'FilmClip_Vol') AS DOUBLE) / NULLIF(CAST((sr.contentvols->'standard_content'->>'Feature_Vol')
+    AS DOUBLE), 0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: trailer_coverage_ratio
+  description: TCR = total Trailer_Vol / number of content items (show-tier records) in scope, indicating
+    marketing completeness.
+  sql_expression: SUM(CAST((sr.contentvols->'standard_content'->>'Trailer_Vol') AS DOUBLE)) / NULLIF(COUNT(*),
+    0)
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: set of show-tier records
+  domains:
+  - media_volumes
+- name: is_empty_clip_bucket
+  description: 'Empty clip bucket: FilmClip_Vol = 0 and Ep_Vol > 0 -> ''clip bucket empty'' status.'
+  sql_expression: CAST((sr.contentvols->'standard_content'->>'FilmClip_Vol') AS DOUBLE) = 0 AND CAST((sr.contentvols->'standard_content'->>'Ep_Vol')
+    AS DOUBLE) > 0
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: peak_media_load
+  description: 'Peak media load = larger of trailer volume and feature volume, GREATEST(Trailer_Vol, Feature_Vol).
+    The entry''s explanation also says ''trailers and full episodes''; the headline (trailer or feature)
+    is followed here -- substitute Ep_Vol if the question says episodes.
+
+    '
+  sql_expression: GREATEST(CAST((sr.contentvols->'standard_content'->>'Trailer_Vol') AS DOUBLE), CAST((sr.contentvols->'standard_content'->>'Feature_Vol')
+    AS DOUBLE))
+  source_model: main.show_rollups
+  from_sql: main.show_rollups sr
+  grain: one show-tier record
+  domains:
+  - media_volumes
+- name: content_volume_level
+  description: Videos_Total > 500 'High'; 200-500 inclusive 'Medium'; otherwise (incl. NULL) 'Low'.
+  sql_expression: "CASE WHEN CAST((ci.mediacounts->'content_volumes'->>'Videos_Total') AS DOUBLE) > 500\
+    \ THEN 'High'\n     WHEN CAST((ci.mediacounts->'content_volumes'->>'Videos_Total') AS DOUBLE) >= 200\
+    \ THEN 'Medium'\n     ELSE 'Low' END\n"
+  source_model: main.content_info
+  from_sql: main.content_info ci
+  grain: one content entry
+  domains:
+  - media_volumes
+- name: clip_availability_flag
+  description: '''Has Clips'' if the show has at least one film clip (content_info Film_Clips >= 1), else
+    ''No Clips''.'
+  sql_expression: CASE WHEN CAST((ci.mediacounts->'content_volumes'->>'Film_Clips') AS DOUBLE) >= 1 THEN
+    'Has Clips' ELSE 'No Clips' END
+  source_model: main.content_info
+  from_sql: main.content_info ci
+  grain: one content entry
+  domains:
+  - media_volumes
+- name: is_long_running_series
+  description: 'Long-running: continues for 10 or more years or installments; installments = Seasons_Total
+    >= 10 (124 entries).'
+  sql_expression: CAST((ci.mediacounts->'content_volumes'->>'Seasons_Total') AS DOUBLE) >= 10
+  source_model: main.content_info
+  from_sql: main.content_info ci
+  grain: one content entry
+  domains:
+  - franchises
+- name: is_limited_series
+  description: 'Limited series: only a single season and no more than ten episodes (Seasons_Total = 1
+    AND Episode_Total <= 10).'
+  sql_expression: CAST((ci.mediacounts->'content_volumes'->>'Seasons_Total') AS DOUBLE) = 1 AND CAST((ci.mediacounts->'content_volumes'->>'Episode_Total')
+    AS DOUBLE) <= 10
+  source_model: main.content_info
+  from_sql: main.content_info ci
+  grain: one content entry
+  domains:
+  - franchises
+- name: title_to_episode_ratio
+  description: TER = length(content_title) / (Episode_Total + 1); NULL when Episode_Total is NULL.
+  sql_expression: CAST(length(c.content_title) AS DOUBLE) / (CAST((ci.mediacounts->'content_volumes'->>'Episode_Total')
+    AS DOUBLE) + 1)
+  source_model: main.core
+  from_sql: main.core c JOIN main.content_info ci ON ci.content_key = c.content_key
+  grain: one content entry
+  domains:
+  - media_volumes
+- name: multi_genre_spread_score
+  description: MGSS = number of genre pieces Hierarchical_Genres is split into by '~' and '|' (= delimiter
+    count + 1). Max observed 7.
+  sql_expression: len(string_split_regex((c.genreclass->>'Hierarchical_Genres'), '[~|]'))
+  source_model: main.core
+  from_sql: main.core c
+  grain: one content entry
+  domains:
+  - genres
+- name: genre_fragmentation_index
+  description: 'GFI = number of genre tokens / (1 + number of ''~'' or ''|'' delimiters). Tokens counted
+    with repeats, so for every non-null hierarchy this equals 1.0.
+
+    '
+  sql_expression: 'CAST(len(string_split_regex((c.genreclass->>''Hierarchical_Genres''), ''[~|]'')) AS
+    DOUBLE) / (1 + length((c.genreclass->>''Hierarchical_Genres'')) - length(regexp_replace((c.genreclass->>''Hierarchical_Genres''),
+    ''[~|]'', '''', ''g'')))
+
+    '
+  source_model: main.core
+  from_sql: main.core c
+  grain: one content entry
+  domains:
+  - genres
+- name: is_over_fragmented
+  description: 'Over-fragmented offering: more than six nested genre categories (genre tokens > 6) and
+    short-form video assets (Clip_Vol + FilmClip_Vol + Trailer_Vol, summed across tiers) exceed long-form
+    features (Feature_Vol summed across tiers). Group by c.content_key.
+
+    '
+  sql_expression: "MAX(len(string_split_regex((c.genreclass->>'Hierarchical_Genres'), '[~|]'))) > 6 AND\
+    \ SUM(CAST((sr.contentvols->'standard_content'->>'Clip_Vol') AS DOUBLE) + CAST((sr.contentvols->'standard_content'->>'FilmClip_Vol')\
+    \ AS DOUBLE)\n        + CAST((sr.contentvols->'standard_content'->>'Trailer_Vol') AS DOUBLE))\n  \
+    \  > SUM(CAST((sr.contentvols->'standard_content'->>'Feature_Vol') AS DOUBLE))\n"
+  source_model: main.core
+  from_sql: main.core c JOIN main.show_rollups sr ON sr.srkeys = c.content_key
+  grain: one content entry (GROUP BY c.content_key)
+  domains:
+  - genres
+- name: normalized_user_score
+  description: NUS = (score - min) / (max - min), min/max over all content in the query (window).
+  sql_expression: "(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)', 1) AS DOUBLE)\n\
+    \  - MIN(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)', 1) AS DOUBLE))\
+    \ OVER ())\n/ NULLIF(MAX(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)',\
+    \ 1) AS DOUBLE)) OVER ()\n  - MIN(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\\
+    .\\d+)?)', 1) AS DOUBLE)) OVER (), 0)\n"
+  source_model: main.core
+  from_sql: main.core c
+  grain: one content entry
+  domains:
+  - data_quality
+- name: average_episode_rating
+  description: AER = mean user score across all entries (episodes) of a show, show = series_id. Group
+    by c.series_id.
+  sql_expression: 'AVG(TRY_CAST(regexp_extract((c.genreclass->>''User_Score''), ''(\d+(\.\d+)?)'', 1)
+    AS DOUBLE))
+
+    '
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: user_score_dispersion
+  description: USD = variance (sample, VAR_SAMP) of entry user scores within a show (series_id).
+  sql_expression: 'VAR_SAMP(TRY_CAST(regexp_extract((c.genreclass->>''User_Score''), ''(\d+(\.\d+)?)'',
+    1) AS DOUBLE))
+
+    '
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: episode_rating_band
+  description: 'Average user score per show (series_id) banded: Low < 3.5, Medium 3.5 to 4.2 inclusive,
+    High > 4.2.'
+  sql_expression: "CASE WHEN AVG(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)',\
+    \ 1) AS DOUBLE)) < 3.5 THEN 'Low'\n     WHEN AVG(TRY_CAST(regexp_extract((c.genreclass->>'User_Score'),\
+    \ '(\\d+(\\.\\d+)?)', 1) AS DOUBLE)) <= 4.2 THEN 'Medium'\n     ELSE 'High' END\n"
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: user_score_tier
+  description: 'TieredUserScoreCoverage band: Low [0,2), Medium [2,4), High [4,5]. Count shows per band
+    with GROUP BY this expression.'
+  sql_expression: "CASE WHEN TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)',\
+    \ 1) AS DOUBLE) < 2 THEN 'Low'\n     WHEN TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\\
+    d+(\\.\\d+)?)', 1) AS DOUBLE) < 4 THEN 'Medium'\n     WHEN TRY_CAST(regexp_extract((c.genreclass->>'User_Score'),\
+    \ '(\\d+(\\.\\d+)?)', 1) AS DOUBLE) <= 5 THEN 'High' END\n"
+  source_model: main.core
+  from_sql: main.core c
+  grain: one content entry
+  domains:
+  - data_quality
+- name: is_high_visibility_empty_bucket
+  description: 'Popular (highly rated: user score > 4.2, interpretation) show with no extra video segments
+    and no trailers: SUM(Clip_Vol) = 0 and SUM(Trailer_Vol) = 0 across tiers. Group by c.content_key.
+    ''Highly rated but visually empty'' = the top-scored show among those with no clips and no trailers.
+
+    '
+  sql_expression: 'MAX(TRY_CAST(regexp_extract((c.genreclass->>''User_Score''), ''(\d+(\.\d+)?)'', 1)
+    AS DOUBLE)) > 4.2 AND SUM(CAST((sr.contentvols->''standard_content''->>''Clip_Vol'') AS DOUBLE)) =
+    0 AND SUM(CAST((sr.contentvols->''standard_content''->>''Trailer_Vol'') AS DOUBLE)) = 0
+
+    '
+  source_model: main.core
+  from_sql: main.core c JOIN main.show_rollups sr ON sr.srkeys = c.content_key
+  grain: one content entry (GROUP BY c.content_key)
+  domains:
+  - media_volumes
+- name: annotated_content_ratio
+  description: ACR = share of content items whose annotations are non-NULL and non-blank (310 of 1000).
+  sql_expression: CAST(COUNT(*) FILTER (WHERE c.annotations IS NOT NULL AND trim(c.annotations) <> '')
+    AS DOUBLE) / NULLIF(COUNT(*), 0)
+  source_model: main.core
+  from_sql: main.core c
+  grain: set of content entries
+  domains:
+  - media_volumes
+- name: promotional_message_count
+  description: 'PMC / promotional intensity: number of filled (non-NULL, non-blank) notes among the 8
+    slots (Avail/Promo/Alert/Expire x free_tier/member_tier).'
+  sql_expression: '(CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Avail_Note'')), '''') IS NOT
+    NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Promo_Note'')), '''')
+    IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Alert_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Expire_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Avail_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Promo_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Alert_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Expire_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END)
+
+    '
+  source_model: main.promo_info
+  from_sql: main.promo_info p
+  grain: one content entry
+  domains:
+  - promotions
+- name: max_promo_saturation_ratio
+  description: PSR = filled promo slots / 8 (1.0 = all filled); this metric is the maximum PSR over content
+    in scope.
+  sql_expression: 'MAX((CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Avail_Note'')), '''')
+    IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Promo_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Alert_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''free_tier''->>''Expire_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Avail_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Promo_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Alert_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN nullif(trim((p.tiernotices->''member_tier''->>''Expire_Note'')),
+    '''') IS NOT NULL THEN 1 ELSE 0 END) / 8.0)
+
+    '
+  source_model: main.promo_info
+  from_sql: main.promo_info p
+  grain: set of content entries
+  domains:
+  - promotions
+- name: high_res_branding_ratio
+  description: HBR = companies with a high-res logo / total companies (14/34 on this data).
+  sql_expression: CAST(COUNT(*) FILTER (WHERE upper(trim((co.brandingassets->>'HasLogo_Flag'))) IN ('TRUE','YES','Y','1','T'))
+    AS DOUBLE) / NULLIF(COUNT(*), 0)
+  source_model: main.companies
+  from_sql: main.companies co
+  grain: set of companies
+  domains:
+  - studios
+- name: is_studio_brand_consistent
+  description: 'Studio brand consistency: studio HBR over its shows = 1 (every linked show''s studio carries
+    a high-res logo). Group by c.studiolink.'
+  sql_expression: AVG(CASE WHEN upper(trim((co.brandingassets->>'HasLogo_Flag'))) IN ('TRUE','YES','Y','1','T')
+    THEN 1.0 ELSE 0.0 END) = 1
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: high_res_utilization_rate
+  description: HRUR = movies whose studio has a high-res logo / total movies. Movie_Flag is 'no' everywhere,
+    so the result is NULL (no movies).
+  sql_expression: "CAST(COUNT(*) FILTER (WHERE upper(trim((a.accessflags->>'Movie_Flag'))) IN ('TRUE','Y','YES','1','MOVIE')\n\
+    \       AND upper(trim((co.brandingassets->>'HasLogo_Flag'))) IN ('TRUE','YES','Y','1','T')) AS DOUBLE)\n\
+    / NULLIF(COUNT(*) FILTER (WHERE upper(trim((a.accessflags->>'Movie_Flag'))) IN ('TRUE','Y','YES','1','MOVIE')),\
+    \ 0)\n"
+  source_model: main.availabilitys
+  from_sql: main.availabilitys a JOIN main.core c ON c.content_key = a.content_key LEFT JOIN main.companies
+    co ON co.entity_key = c.studiolink
+  grain: set of content entries
+  domains:
+  - studios
+  - data_quality
+- name: boolean_value_redundancy_rate
+  description: 'BVRR = distinct raw representations / total non-null values of a boolean-like field. Shown
+    for companies.HasLogo_Flag (2/34); swap the field (e.g. accessflags Movie_Flag) as needed.
+
+    '
+  sql_expression: CAST(COUNT(DISTINCT (co.brandingassets->>'HasLogo_Flag')) AS DOUBLE) / NULLIF(COUNT((co.brandingassets->>'HasLogo_Flag')),
+    0)
+  source_model: main.companies
+  from_sql: main.companies co
+  grain: one field over a table
+  domains:
+  - data_quality
+- name: studio_productivity_index
+  description: SPI = studio's total Videos_Total / (total Seasons_Total + 1). Group by c.studiolink.
+  sql_expression: SUM(CAST((ci.mediacounts->'content_volumes'->>'Videos_Total') AS DOUBLE)) / (COALESCE(SUM(CAST((ci.mediacounts->'content_volumes'->>'Seasons_Total')
+    AS DOUBLE)), 0) + 1)
+  source_model: main.core
+  from_sql: main.core c JOIN main.content_info ci ON ci.content_key = c.content_key
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: is_iconic_comedy_studio
+  description: 'Iconic comedy brand: studio with at least three highly-rated comedy shows (distinct titles
+    with Primary_Genre ''Comedy'' and user score > 4.2 -- the 4.2 cut is the High band of episode_rating_band,
+    an interpretation). Group by c.studiolink / co.company_name.
+
+    '
+  sql_expression: "COUNT(DISTINCT c.content_title) FILTER (WHERE (c.genreclass->>'Primary_Genre') = 'Comedy'\n\
+    \  AND TRY_CAST(regexp_extract((c.genreclass->>'User_Score'), '(\\d+(\\.\\d+)?)', 1) AS DOUBLE) >\
+    \ 4.2) >= 3\n"
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: studio_activity_index
+  description: SAI = number of distinct titles (content_title) linked to a studio via studiolink.
+  sql_expression: COUNT(DISTINCT c.content_title)
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: studio_catalog_size
+  description: Studio catalog size = number of unique titles (DISTINCT content_title) per studio.
+  sql_expression: COUNT(DISTINCT c.content_title)
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: title_count_per_studio
+  description: Total number of title entries (content_key rows) tied to each studio.
+  sql_expression: COUNT(c.content_key)
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: average_title_length_per_studio
+  description: Average number of characters in content_title over a studio's shows.
+  sql_expression: AVG(length(c.content_title))
+  source_model: main.core
+  from_sql: main.core c JOIN main.companies co ON co.entity_key = c.studiolink
+  grain: one studio (GROUP BY c.studiolink)
+  domains:
+  - studios
+- name: series_entry_count
+  description: 'Distinct titles/entries per series: COUNT(DISTINCT content_key) grouped by series_id.'
+  sql_expression: COUNT(DISTINCT c.content_key)
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: series_size
+  description: Series size = number of individual titles (rows) associated with each series_id.
+  sql_expression: COUNT(*)
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: series_title_uniformity_flag
+  description: '''True'' if every entry in the series shares the same canonical_name, else ''False'' (all
+    109 series are uniform).'
+  sql_expression: CASE WHEN COUNT(DISTINCT c.canonical_name) = 1 AND COUNT(c.canonical_name) = COUNT(*)
+    THEN 'True' ELSE 'False' END
+  source_model: main.core
+  from_sql: main.core c
+  grain: one series (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: franchise_show_count
+  description: 'Franchise engagement summary, part 1: number of shows (content entries) per franchise
+    (series_id).'
+  sql_expression: COUNT(DISTINCT c.content_key)
+  source_model: main.core
+  from_sql: main.core c JOIN main.content_info ci ON ci.content_key = c.content_key
+  grain: one franchise (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: franchise_episode_total
+  description: 'Franchise engagement summary, part 2: total episode count, SUM of content_info Episode_Total
+    over entries sharing the series_id.'
+  sql_expression: SUM(CAST((ci.mediacounts->'content_volumes'->>'Episode_Total') AS DOUBLE))
+  source_model: main.core
+  from_sql: main.core c JOIN main.content_info ci ON ci.content_key = c.content_key
+  grain: one franchise (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: is_underutilized_franchise
+  description: 'Underutilized franchise: >= 3 content items and aggregate Media_Total (all tiers, all
+    items) < 10.'
+  sql_expression: COUNT(DISTINCT c.content_key) >= 3 AND SUM(CAST((sr.contentvols->'standard_content'->>'Media_Total')
+    AS DOUBLE)) < 10
+  source_model: main.core
+  from_sql: main.core c JOIN main.show_rollups sr ON sr.srkeys = c.content_key
+  grain: one franchise (GROUP BY c.series_id)
+  domains:
+  - franchises
+- name: is_syndicated_franchise
+  description: 'Syndicated franchise engagement: franchise with at least 3 shows (content entries) available
+    in 3 or more unique subscription tiers.'
+  sql_expression: COUNT(DISTINCT c.content_key) >= 3 AND COUNT(DISTINCT sr.srlinks) >= 3
+  source_model: main.core
+  from_sql: main.core c JOIN main.show_rollups sr ON sr.srkeys = c.content_key
+  grain: one franchise (GROUP BY c.series_id)
+  domains:
+  - franchises
+  - tiers
+- name: rating_diversity_score
+  description: RDS = STDDEV_SAMP of peak_rating_ordinal (TV-Y=1..TV-MA=6) across all records of a franchise
+    group; unrated excluded.
+  sql_expression: "STDDEV_SAMP(CASE WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y','TVY')\
+    \ THEN 1\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-Y7','TVY7','TV-Y7-FV') THEN\
+    \ 2\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-G','TVG','G','GENERAL','ALL')\
+    \ THEN 3\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-PG','TVPG','PG','PARENTAL\
+    \ GUIDANCE') THEN 4\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-14','TV14','T14','14+','T','TEEN','FOURTEEN')\
+    \ THEN 5\n     WHEN upper(trim((sr.ratinginfo->>'Peak_Rating'))) IN ('TV-MA','TVMA','MA','MATURE','ADULT','18+')\
+    \ THEN 6 END)\n"
+  source_model: main.core
+  from_sql: main.core c JOIN main.show_rollups sr ON sr.srkeys = c.content_key
+  grain: one franchise (GROUP BY c.series_id)
+  domains:
+  - ratings
+  - franchises
+tables:
+- schema: main
+  table: companies
+  columns:
+  - name: entity_key
+    type: BIGINT
+    description: Primary key of the production company / studio / distributor; core.studiolink points
+      here.
+  - name: chanref
+    type: BIGINT
+    description: Legacy channel reference ID; may have gaps; NULL when unavailable.
+  - name: company_name
+    type: VARCHAR
+    description: Official full name (e.g. 'FBC', 'ComedyCentral').
+  - name: short_name
+    type: VARCHAR
+    description: Common short name; NULL for 4 companies.
+  - name: canonical_name
+    type: VARCHAR
+    description: Normalised canonical name for search/matching.
+  - name: brandingassets
+    type: JSON
+    description: KeyArt_URL, NetworkLogo_URL, HasLogo_Flag (text boolean with variants TRUE/FALSE/Yes/No/1/0;
+      observed 'True'/'False'). Use metric has_high_res_logo.
+- schema: main
+  table: core
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: Primary key of a show / content entry.
+  - name: canonical_name
+    type: VARCHAR
+    description: Canonical show name (e.g. 'family-guy'); shared by all entries of a series.
+  - name: content_title
+    type: VARCHAR
+    description: Display title; 109 distinct titles over 1000 rows.
+  - name: series_id
+    type: BIGINT
+    description: Parent series / franchise id -- the Franchise Group key (109 groups, up to 10 entries
+      each).
+  - name: studiolink
+    type: BIGINT
+    description: FK to companies.entity_key, primary production studio.
+  - name: annotations
+    type: VARCHAR
+    description: Free-text annotations (fields 0 and 1 concatenated); NULL in 690 rows. Used by annotated_content_ratio.
+  - name: genreclass
+    type: JSON
+    description: Primary_Genre (see genres domain), Hierarchical_Genres ('~' sub-genre, '|' alternative),
+      Content_Type (labels 'show','movie','special'; observed all 'show'), User_Score (text; formats '4.35','4.35★','$4.35M','4.35
+      RTG','435 bp' -- use user_score_numeric).
+- schema: main
+  table: content_info
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: PK, 1:1 with core.content_key.
+  - name: story_outline
+    type: VARCHAR
+    description: Plot synopsis.
+  - name: mediacounts
+    type: JSON
+    description: 'content_volumes: Clips_Total, Episode_Total, Feature_Films, Film_Clips, Seasons_Total,
+      Videos_Total (show-level counts; Episode_Total/Seasons_Total/Videos_Total may be NULL).'
+  - name: visualassets
+    type: JSON
+    description: Thumbnail_URL, KeyArt_URL, Link_Desc, Art_Copyright.
+- schema: main
+  table: availabilitys
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: PK, 1:1 with core.content_key.
+  - name: cache_time
+    type: VARCHAR
+    description: Last cache timestamp as text; documented mixed formats, observed ISO-8601. Use cache_date.
+  - name: auth_name
+    type: VARCHAR
+    description: Authentication level name required; NULL when none needed.
+  - name: accessflags
+    type: JSON
+    description: Movie_Flag (text variants TRUE/FALSE/Y/N/Movie/Series; observed 'no'), Showtime_Only,
+      Subscriber_Only, COPPA_Comp, Web_Only (JSON booleans).
+- schema: main
+  table: promo_info
+  columns:
+  - name: content_key
+    type: BIGINT
+    description: PK, 1:1 with core.content_key.
+  - name: tiernotices
+    type: JSON
+    description: 'free_tier and member_tier objects each with Avail_Note, Expire_Note, Alert_Note, Promo_Note
+      (NULL when absent): 8 promo slots.'
+- schema: main
+  table: rollups
+  columns:
+  - name: tierkey
+    type: BIGINT
+    description: Tier id 1..7.
+  - name: tiertype
+    type: VARCHAR
+    description: free (free content), subscriber (paid), current (currently available), free_on_web ('free
+      on website'), subscriber_on_device ('subscriber on device'), auth_on_web ('auth on website'), showtime
+      ('show time', Showtime premium).
+- schema: main
+  table: show_rollups
+  columns:
+  - name: srkeys
+    type: BIGINT
+    description: FK to core.content_key; every show has 7 rows (one per tier).
+  - name: srlinks
+    type: BIGINT
+    description: FK to rollups.tierkey.
+  - name: launchmoment
+    type: VARCHAR
+    description: First availability in this tier as text (observed YYYY-MM-DD, NULL in 568 rows). Use
+      launch_date. NULL with Media_Total > 0 = legacy-uploaded.
+  - name: latestadd
+    type: VARCHAR
+    description: Most recent addition, 'M/D/YYYY' text; NULL means no new additions since first appearance.
+      Use latest_add_date.
+  - name: contentvols
+    type: JSON
+    description: 'standard_content: Ep_Vol (NULL in 247 rows), Clip_Vol (may use ''288K'' notation), Feature_Vol,
+      FilmClip_Vol, Trailer_Vol, Game_Vol, Season_Vol, Media_Total.'
+  - name: html5metrics
+    type: JSON
+    description: 'html5_volumes: H5_Clips, H5_Episodes, H5_Games, H5_Features, H5_Trailers, H5_FilmClips,
+      H5_MediaTotal -- media supporting cross-platform HTML5 playback.'
+  - name: ratinginfo
+    type: JSON
+    description: TV_Rating (NULL in all rows), Peak_Rating (noisy; use peak_rating_canonical), Unrated_Vol
+      (count of items without official rating).
+relationships:
+- from: main.core.studiolink
+  to: main.companies.entity_key
+  type: many_to_one
+- from: main.content_info.content_key
+  to: main.core.content_key
+  type: one_to_one
+- from: main.availabilitys.content_key
+  to: main.core.content_key
+  type: one_to_one
+- from: main.promo_info.content_key
+  to: main.core.content_key
+  type: one_to_one
+- from: main.show_rollups.srkeys
+  to: main.core.content_key
+  type: many_to_one
+- from: main.show_rollups.srlinks
+  to: main.rollups.tierkey
+  type: many_to_one

@@ -367,3 +367,45 @@ Made in revision, from the builder check and the methods review:
   as they are checked against reported input tokens.
 - The concrete detector for "contains a padding metric's SQL".
 - The smoke's question sample, worker counts and the trace-cap fix.
+
+## Amendments while building the materials (2026-10-20, before any agent run)
+
+- **Padding authored.** 19 contracts by `dce.author` (claudeopus5.5, one
+  draw each, $36 in all), `contracts-scale/padding/livesqlbench/`.
+- **Rules.** Only the padding rules that enforce (a `query_check` or
+  `result_check`) are dropped. The padding's prose rules stay, namespaced:
+  they change nothing enforced on base queries, and they are part of a real
+  contract. The governed prompt therefore grows by the padding's index lines
+  and prose rules.
+- **Run order.** The runner's task-major order is kept: all arm-levels of a
+  task run together, which the paired comparisons rely on. Tasks are grouped
+  by database, so each prefix is reused within minutes; the cache-hit rate
+  per arm-level is reported. (The design had said runs are grouped by arm.)
+- **Levels** add whole padding contracts, so they overshoot their targets;
+  `sizes.json` records the actual multiples (labor 1x 75k characters, 2x
+  206k, 4x 338k, 8x 817k, all 1.92M; the other two bases similar).
+- **Every padding schema is marked `preferred`,** as authored, like the
+  base's; the mark does not single out the base.
+- **The merged trees are not committed** (about 20 MB, rebuilt
+  deterministically by `prep/scale/build.py contracts --out`); their
+  checksums are, in `merged.sha256`, and the job checks its rebuild
+  against them.
+- **Limits** (`limits.jsonl`): gpt-6-luna and gpt-6-sol returned a 2.4M
+  character (596k token) prompt whole; qwen3.8-27b's window is 262,144
+  tokens, of which the harness reserves 64,000 for output. Conversation
+  growth (95th percentile, `contract_text` in 4b): 2.2k tokens on the GPT
+  models, 4.3k on Qwen.
+- **Tokens** (`fit.json`; sol shares luna's tokenizer, identical counts at
+  every probe size). Largest prompt over the bases, luna / Qwen:
+  governed 8-21k at every level; text 29k, 63k, 101k, 235k, 551k / 30k, 66k,
+  105k, does not fit, does not fit; prose 12k to 93k / 13k to 99k. So the
+  **common top is 4x**; each GPT model's own top is "all", Qwen's 4x.
+  `manual_scaled` runs at 1x and 4x, and `contract_text_first` at 4x (at 1x
+  there is no padding to place the base among).
+- **Power** (`power.json`, from experiment 4's contract outcomes, which sit
+  at 99-100% on the GPT models): at k=3 the minimum detectable drop for
+  (37) is 2 points spread over runs and 6 points concentrated on whole
+  tasks, so k stays 3. Under no change, (40)'s bound clears -5 points in
+  every simulation.
+- **Checks** (`CHECKS.md`): all pass. The governed prompt grows from about
+  3k characters at 1x to about 57k at "all".

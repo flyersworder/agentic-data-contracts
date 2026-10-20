@@ -1,0 +1,372 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cold_chain_pharma_compliance, author: claudeopus5.5
+version: '1.0'
+name: cold-chain-pharma-compliance
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Cold-chain pharmaceutical shipment compliance database. One shipment (shipments.reckey)
+      has at most one row in each of environmentalmonitoring, qualitycompliance, incidentandriskmanagement,
+      insuranceclaims and reviewsandimprovements (all keyed by the shipment key) and one device link in
+      shipsensorlink (821 shipments, 821 rows each). Products/productbatches, carriers/vehicles and monitoringdevices
+      are reference tables. IMPORTANT: there is NO column linking a shipment to a product batch, a product,
+      a vehicle or a carrier; the only shipment-to-reference link is the monitoring device (environmentalmonitoring.devlink
+      = shipsensorlink.devnode, verified identical for all 821 shipments).'
+    preferred: true
+    tables:
+    - shipments
+    - environmentalmonitoring
+    - products
+    - productbatches
+    - carriers
+    - vehicles
+    - monitoringdevices
+    - qualitycompliance
+    - incidentandriskmanagement
+    - insuranceclaims
+    - reviewsandimprovements
+    - shipsensorlink
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: temperature_control
+    summary: Temperature excursions, severity, time in range, stability budget, quality zones
+    description: 'TEMPERATURE EXCURSION DURATION (TED): the total time a shipment spends outside its required
+      temperature range during transit, TED = sum of t_i, t_i the duration in minutes of each individual
+      excursion event. Stored per shipment as env_metrics.temperature.excursion_duration_min (minutes,
+      0-120); individual events are NOT stored, only the total, the count (excursion_count, 0-10) and
+      recorded avg/min/max temperature.
+
+      TESI = TED x (|T_max - T_allowed| + |T_min - T_allowed|) / 2, T_max/T_min the max/min temperatures
+      recorded during excursions, T_allowed the allowed range midpoint (metric tesi).
+
+      CRITICAL TEMPERATURE EXPOSURE: product temperature deviates more than 5°C from its specified range
+      for more than 60 consecutive minutes (metric critical_temperature_exposure).
+
+      COLD CHAIN COMPLIANCE RATE (CCCR) = N_compliant / N_total x 100%, N_compliant = shipments with zero
+      temperature excursions (metric cold_chain_compliance_rate).
+
+      TIME IN RANGE PERCENTAGE (TIRP) = (T_total - TED) / T_total x 100%, T_total the total transit time
+      (metric tirp).
+
+      QUALITY RISK ZONES: ''Green Zone'' (TIRP > 98% and no excursions > 30 min), ''Yellow Zone'' (95%
+      <= TIRP <= 98% or any excursion 30-60 min), ''Red Zone'' (TIRP < 95% or any excursion > 60 min)
+      (metric quality_risk_zone).
+
+      MEAN KINETIC TEMPERATURE: MKT = (-dH/R) / ln( (sum_i e^(-dH/(R T_i))) / n ), dH the activation energy
+      (usually 83.144 kJ/mol for pharmaceuticals), R the gas constant 8.3144 J/mol/K, T_i each temperature
+      point in Kelvin. NOT COMPUTABLE: individual temperature points are not stored (only avg/min/max).
+
+      PHARMACEUTICAL STABILITY BUDGET: the maximum cumulative duration (typically hours or days) a product
+      can experience conditions outside its labelled storage requirements without significant impact to
+      quality, safety or efficacy; null means the budget has not been determined. No budget column exists;
+      metric stability_budget_hours derives one from the sensitivity tier (interpretation). STABILITY
+      BUDGET CONSUMPTION RATE: SBCR = TED / SB_total x 100%, SB_total the total budget allocated for the
+      product. Not computable per shipment because no shipment-to-batch link exists; when a budget is
+      known compute 100 * TED_minutes / (budget_hours * 60).
+
+      EXCURSION IMPACT ASSESSMENT: EIA = sum_i |T_i - T_limit| x t_i, T_i the temperature during excursion
+      i, T_limit the nearest limit (upper or lower), t_i its duration in HOURS (metric excursion_impact_assessment,
+      approximation).
+
+      TEMPERATURE ACCURACY IMPACT FACTOR: TAIF = |T_max - T_upper|/A + |T_min - T_lower|/A, A the device''s
+      stated accuracy in °C (metric taif).
+
+      ACCEPTABLE TEMPERATURE DEVIATION LIMITS: refrigerated (2-8°C): brief excursions (< 30 min) to 0-12°C
+      may be acceptable; frozen (-20°C): brief excursions to -15°C; ultra-frozen (-70°C): brief excursions
+      to -60°C; controlled room temperature (15-25°C): brief excursions to 10-30°C (metric within_acceptable_deviation_limits
+      for the refrigerated case).
+
+      TEMPERATURE PROFILE CATEGORIZATION: ''Stable'' (minimal variations within range), ''Cyclic'' (regular
+      patterns within range), ''Trend'' (gradual increase or decrease over time), ''Excursion'' (periods
+      outside acceptable range), ''Erratic'' (unpredictable variations suggesting monitoring issues).
+      No column stores it.
+
+      DATA FINDING (the required range of a shipment): because shipments cannot be joined to batches,
+      the shipment''s required range is not available. All recorded telemetry is consistent with the 2-8°C
+      refrigerated class (min_c -2..4, max_c 6..12, mean avg_c 5.06), so temperature metrics use 2°C /
+      8°C as the limits and 5°C as T_allowed; each such metric says so.
+
+      '
+    tables:
+    - main.environmentalmonitoring
+    - main.shipments
+    - main.monitoringdevices
+  - name: monitoring
+    summary: Monitoring data completeness, gaps, failures, devices, calibration, tracking
+    description: 'TEMPERATURE MONITORING GAP: a period of over 15 minutes with no temperature data points
+      recorded in a shipment that should have continuous monitoring (metric temperature_monitoring_gap).
+
+      COLD CHAIN MONITORING COMPLIANCE SCORE: CCMCS = 0.4 x GPS% + 0.4 x Temp% + 0.2 x (100 - ER), GPS%
+      the GPS completeness percentage, Temp% the percentage of expected temperature readings received,
+      ER the error rate of readings (metric ccmcs).
+
+      CRITICAL MONITORING FAILURE: GPS completeness below 80% OR temperature monitoring gaps exceeding
+      30 minutes during transit (metric critical_monitoring_failure).
+
+      LOCATION TRACKING STATES: ''Active'' (providing regular updates), ''Intermittent'' (occasional gaps),
+      ''Failed'' (no longer providing location data), null (tracking not implemented for this shipment).
+      Data: all 821 rows are non-null.
+
+      SHOCK EVENT SIGNIFICANCE LEVELS: ''Minor'' (unlikely to cause damage), ''Moderate'' (potential to
+      damage if repeated), ''Severe'' (likely to damage product or packaging); null means no shock monitoring
+      was implemented. The data stores only shock_event_count and shock_monitor (Active/Passive/null =
+      not monitored), not a significance level.
+
+      PACKAGE INTEGRITY MONITORING SYSTEMS: Shock Indicators (mechanical devices showing a package received
+      an impact), Tilt Indicators (package tilted beyond acceptable angles), Electronic Impact Recorders
+      (detailed shock measurements), Pressure Indicators (pressure changes in sealed containers).
+
+      QUALIFICATION STATUS OF TEMPERATURE MONITORING DEVICES: ''Fully Qualified'' (calibrated with NIST-traceable
+      standards and validated for pharmaceutical use), ''Partially Qualified'' (calibrated but not fully
+      validated), ''Unqualified'' (not formally qualified), null = unknown. No column stores it.
+
+      RISK-BASED MONITORING INTENSITY: high-risk products (biologics, vaccines) require continuous temperature
+      monitoring with 5-minute intervals, medium-risk products 15-minute intervals, low-risk products
+      30-minute intervals; null monitoring frequency indicates unplanned or non-standardized monitoring
+      (metric required_monitoring_interval_min; device interval is monitoringdevices.recintmin, NULL =
+      not configured).
+
+      DATA LOGGER RELIABILITY SCORE: DLRS = 100 - (10 F_r + 5 F_d + 3 F_c + 2 F_b), F_r reading-failure
+      rate, F_d download-failure rate, F_c calibration drift rate, F_b battery failure rate, all per 100
+      deployments. NOT COMPUTABLE: no failure data.
+
+      ELECTRONIC MONITORING SYSTEM TIERS: Tier 1 (basic data loggers with manual download), Tier 2 (enhanced
+      loggers with USB or Bluetooth download), Tier 3 (network-connected devices with real-time alerts),
+      Tier 4 (fully integrated IoT systems with predictive capabilities and automated interventions).
+      No column.
+
+      MONITORING DEVICE CALIBRATION STATUS: ''Current'' (calibrated within required timeframe, typically
+      12 months), ''Expired'' (calibration period elapsed), ''Exempt'' (single-use devices with factory
+      calibration), null = unknown or not documented (metric device_calibration_status).
+
+      VEHICLE TEMPERATURE MONITORING TYPES: ''Continuous'' (uninterrupted monitoring throughout transport),
+      ''Interval'' (periodic checks at predetermined times), ''None'' (no active monitoring), null = type
+      not specified. Data in vehicles.temp_mon_sys holds Continuous, Interval and Manual (no ''None'',
+      no nulls).
+
+      '
+    tables:
+    - main.environmentalmonitoring
+    - main.monitoringdevices
+    - main.shipsensorlink
+    - main.vehicles
+  - name: routes_delivery
+    summary: Route risk, lanes, delivery timeliness, markets, last mile
+    description: 'ROUTE RISK CLASSIFICATION: ''Low Risk'' (0-1 historical excursion events per 10 shipments),
+      ''Medium Risk'' (2-4 per 10 shipments), ''High Risk'' (5+ per 10 shipments) (metric route_risk_classification).
+      A route/lane is identified by shipment_overview.route.route_string (''Origin -> Destination'');
+      it stays filled even when origin/destination nation is NULL. 22 shipments have a NULL shipment_overview.
+      Note shipment_overview.route.risk_note (High/Medium/Low) is a separate qualitative note, not this
+      classification.
+
+      ON-TIME DELIVERY PERFORMANCE: OTDP = actual_duration / planned_duration x 100%; 100% exact on-time,
+      < 100% early, > 100% late (metric otdp).
+
+      DELIVERY PERFORMANCE CLASSIFICATION: ''Early'' (> 2 hours before scheduled time), ''On-Time'' (within
+      +/-2 hours), ''Delayed'' (2-24 hours after), ''Severely Delayed'' (> 24 hours after) (metric delivery_performance_class).
+
+      MAJOR PHARMACEUTICAL MARKETS: United States, European Union (specifically Germany, France, Italy,
+      Spain and United Kingdom), Japan, China, Brazil, India, Russia. Nations are stored as full country
+      names (not ISO codes): ''United States of America'' (NOT ''United States Virgin Islands'' / ''Minor
+      Outlying Islands''), ''United Kingdom''; Russia does not occur in the data (metrics is_major_pharma_market_destination
+      / _origin).
+
+      HIGH-RISK SHIPPING ORIGIN-DESTINATION PAIRS: lanes that 1) cross more than three climate zones,
+      2) involve more than two carrier transfers, 3) include countries with historical customs delays
+      exceeding 48 hours, or 4) have previously documented temperature excursion rates above 15%. Only
+      criterion 4 is computable (metric high_risk_lane_by_excursion_rate); no climate-zone, carrier-transfer
+      or customs-delay-duration data exists.
+
+      LANE RISK POTENTIAL: LRP = (TE_total + SD_total + CD_total) / N_shipments, total temperature excursions,
+      shipping delays and customs delays on the lane, over the lane''s shipment count (metric lane_risk_potential).
+
+      LAST MILE DELIVERY RISK: lack of temperature-controlled vehicles, multiple stops increasing door-opening
+      frequency, variable driver training in handling procedures, inconsistent receiving procedures at
+      destinations, limited monitoring capabilities compared to main transport segments. LAST MILE DELIVERY
+      METRICS: First Attempt Delivery Success Rate, Temperature Deviation Frequency, Receiver Wait Time,
+      Documentation Completion Rate, Handler Qualification Status. None is recorded in this database.
+
+      '
+    tables:
+    - main.shipments
+    - main.environmentalmonitoring
+    - main.qualitycompliance
+  - name: products_storage
+    summary: Product categories, storage classes, sensitivity tiers, packaging
+    description: 'TEMPERATURE SENSITIVITY TIERS (productbatches.tempsense): ''Low'' (can tolerate up to
+      24 hours of minor temperature deviations), ''Medium'' (up to 8 hours), ''High'' (cannot tolerate
+      deviations beyond 2 hours).
+
+      TIER 1 COLD CHAIN PRODUCTS: both a ''High'' temperature sensitivity and a value exceeding $100,000
+      USD (metric is_tier1_cold_chain_batch; value is the text column valusd, e.g. ''$57,421.85 '', parsed
+      by metric batch_declared_value_usd).
+
+      PRODUCT STORAGE CLASSIFICATIONS: ''2-8°C'' (refrigerated), ''-20°C'' (frozen), ''-70°C'' (ultra-low
+      temperature), ''15-25°C'' (controlled room temperature). DATA FINDING: store_cond and the tempmin/tempmax
+      columns are frequently inconsistent (e.g. store_cond ''2-8°C'' with tempmin -70 / tempmax -55);
+      use the column the question names.
+
+      TEMPERATURE-SENSITIVE PRODUCT CATEGORIES: Vaccines, Biologics (including monoclonal antibodies and
+      recombinant proteins), Blood Products (including plasma and platelets), Insulin products — the four
+      values of products.prodcat.
+
+      STORAGE REQUIREMENTS FOR BIOLOGICS: most biologics require ''2-8°C'' or ''-20°C'', certain specialized
+      biologics ''-70°C''; room temperature (15-25°C) is rarely suitable unless specifically formulated
+      for stability at those temperatures.
+
+      PACKING INTEGRITY RISK FACTOR: PIRF = S x D x T / P, S shock event count, D distance in thousands
+      of km, T temperature factor (1 for 15-25°C, 1.5 for 2-8°C, 2 for -20°C, 2.5 for -70°C), P packaging
+      robustness factor (1-10, 10 most robust). P is not recorded (metrics packaging_temperature_factor,
+      pirf_before_packaging_factor).
+
+      HUMIDITY SENSITIVITY CATEGORIES: ''Not Sensitive'' (tolerates wide humidity variations), ''Moderately
+      Sensitive'' (limited variations), ''Highly Sensitive'' (requires strict humidity control), null
+      = not specified. No column.
+
+      PREMIUM TRANSPORT CONTAINER TYPES: Envirotainer RAP e2, Envirotainer RKN e1, va-Q-tainer USx, CSafe
+      RKN, DoKaSch Opticooler, Sonoco ThermoSafe PharmaPort 360. Not present in data (pack_type holds
+      Ampoule/Container/Syringe/Vial).
+
+      PACKAGE THERMAL EFFICIENCY RATING: ''Basic'' (< 24 h of protection), ''Standard'' (24-48 h), ''Enhanced''
+      (48-96 h), ''Extended'' (> 96 h). No column.
+
+      THERMODYNAMIC STABILITY CLASS: Class A (highly stable, tolerates brief excursions with minimal degradation),
+      Class B (moderately stable), Class C (limited stability, strict temperature control), Class D (highly
+      unstable, no excursions permitted). No column.
+
+      '
+    tables:
+    - main.products
+    - main.productbatches
+  - name: carriers_vehicles
+    summary: Carrier certification, vehicle qualification, carrier performance index
+    description: 'GDP CERTIFICATION STATUS (carriers.carriercert): ''None'' (no certification), ''GDP''
+      (Good Distribution Practice certified), ''CEIV Pharma'' (IATA Center of Excellence for Independent
+      Validators), ''Both'' (GDP and CEIV Pharma). Null values indicate pending certification status verification.
+      Data: 281 NULL (true SQL NULL), no ''None'' values.
+
+      COLD CHAIN VEHICLE QUALIFICATION STATUS (vehicles.veh_qual): ''Validated'' (fully validated through
+      performance and temperature mapping studies), ''Qualified'' (basic qualification but not fully validated),
+      ''Unqualified'' (not formally qualified). Data also holds ''Under Review'' (undocumented) and no
+      ''Unqualified''.
+
+      CARRIER PERFORMANCE INDEX: CPI = 0.4 x CCCR + 0.3 x (100 - ATNR) + 0.2 x (100 - ASDI) + 0.1 x DPR,
+      CCCR Cold Chain Compliance Rate, ATNR Average Temperature Non-conformance Rate, ASDI Average Shock
+      and Damage Incidents, DPR Documentation Problem Rate. NOT COMPUTABLE: no column links a shipment
+      to a carrier or vehicle, and ATNR/ASDI/DPR are not further defined.
+
+      '
+    tables:
+    - main.carriers
+    - main.vehicles
+  - name: quality_release
+    summary: Quality agreements, regulatory status, release decisions, security, QMS and documentation
+      frameworks
+    description: 'QUALITY AGREEMENT STATUS (qc_checklist.gdp_quality.quality_agreement_status): ''Active''
+      (agreement in force), ''Expired'' (lapsed), ''Pending'' (under review), null (no formal agreement
+      exists).
+
+      REGULATORY COMPLIANCE STATUS (customs_and_regulatory.regulatory_compliance_status): ''Compliant''
+      (meets all regulatory requirements), ''Non-compliant'' (fails one or more critical requirements),
+      ''Under Review'' (being assessed), null (not yet determined).
+
+      PRODUCT RELEASE DECISION FRAMEWORK: considers 1) presence of temperature excursions, 2) stability
+      data for the specific excursion profile, 3) package integrity, 4) product appearance, 5) analytical
+      testing results if required. Outcomes ''Released'' (meets all criteria), ''Released with CAPA''
+      (meets essential criteria but requires corrective action), ''Quarantined'' (requires further investigation),
+      ''Rejected'' (failed critical criteria). Data (release.product_release_status) holds Released, Quarantined,
+      Rejected only.
+
+      SECURITY INCIDENT SEVERITY SCALE (security.security_incident, stored as TEXT ''0'',''1'',''2''):
+      ''0'' no security concerns, ''1'' minor procedural deviation, ''2'' moderate concern without evidence
+      of tampering, ''3'' clear evidence of attempted tampering, ''4'' confirmed breach with product access;
+      null = assessment not performed. Only 0-2 occur.
+
+      BATCH RELEASE CRITICAL PATH ELEMENTS: complete temperature history with no unexplained gaps; confirmation
+      that any excursions were within stability budgets; intact security seals or acceptable explanation
+      for compromised seals; complete chain-of-custody documentation; acceptable visual inspection results.
+
+      QMS MATURITY MODEL: Level 1 Basic (minimal documentation, reactive), Level 2 Developing (standard
+      procedures established), Level 3 Defined (well documented and followed), Level 4 Managed (measured
+      and controlled), Level 5 Optimized (fully integrated, continuous improvement).
+
+      SERIALIZATION MATURITY MODEL: Level 0 no serialization, Level 1 batch-level tracking only, Level
+      2 package-level serialization without systematic verification, Level 3 verified package-level serialization,
+      Level 4 end-to-end serialized supply chain with real-time visibility.
+
+      VALIDATION DOCUMENTATION REQUIREMENTS: Validation Master Plan, Risk Assessment, User Requirements
+      Specification, Design Qualification, Installation Qualification, Operational Qualification, Performance
+      Qualification, Temperature Mapping Studies, Final Validation Report.
+
+      GDP CORRECTIVE ACTION CATEGORIES: Training Enhancement, Documentation Update, Process Modification,
+      Equipment Upgrade, Supplier Management, Transport Adjustment, Monitoring Improvement, Regulatory
+      Compliance Actions.
+
+      DATA INTEGRITY COMPONENTS (ALCOA+): Attributable (traceable to individual/system), Legible (readable
+      and permanent), Contemporaneous (recorded at time of activity), Original (source data or certified
+      copy), Accurate (error-free), plus Complete (all data included), Consistent (expected sequence followed),
+      Enduring (preserved for required period), Available (accessible when needed). Related recorded statuses:
+      reviewsandimprovements.dataintegrity, audittrailcomplete, e_sigstat. None of the frameworks above
+      (QMS, serialization, validation documents, corrective-action categories) has a column.
+
+      '
+    tables:
+    - main.qualitycompliance
+    - main.incidentandriskmanagement
+    - main.reviewsandimprovements
+  - name: risk_scores
+    summary: 'Composite scores that cannot be fully computed: SRS, SCRS, CCER'
+    description: 'SHIPMENT RISK SCORE: SRS = 0.3 x TESI + 0.25 x PIRF + 0.25 x (100 - CCMCS) + 0.2 x RRF,
+      RRF the Route Risk Factor (1-10 based on Route Risk Classification). NOT FULLY COMPUTABLE: PIRF
+      needs the packaging robustness factor P (not recorded) and the documentation gives no mapping from
+      risk class to the 1-10 RRF. The components tesi, pirf_before_packaging_factor, ccmcs and route_risk_classification
+      are metrics; if a question supplies P and an RRF mapping, combine them with these weights.
+
+      SUPPLY CHAIN RESILIENCE SCORE: SCRS = 0.4 x ART + 0.3 x RRD + 0.2 x SBP + 0.1 x SMC (Alternative
+      Route Availability, Redundant Resources Depth, Supplier Backup Presence, Stock Management Capability,
+      each 0-10). NOT COMPUTABLE: no inputs.
+
+      COLD CHAIN COST EFFICIENCY RATIO: CCER = (C_monitoring + C_packaging + C_transport) / V_product
+      x 100%. NOT COMPUTABLE: no cost breakdown; product value is productbatches.valusd.
+
+      '
+    tables: []
+  - name: regulatory_reference
+    summary: Primary cold chain monitoring authorities
+    description: 'Primary regulatory authorities for pharmaceutical cold chains: FDA (US Food and Drug
+      Administration), EMA (European Medicines Agency), MHRA (UK Medicines and Healthcare products Regulatory
+      Agency), Health Canada, TGA (Australian Therapeutic Goods Administration), PMDA (Japanese Pharmaceuticals
+      and Medical Devices Agency), WHO (World Health Organization). Reference only; no column.
+
+      '
+    tables: []
+  rules:
+  - name: json_extraction_parenthesize
+    description: 'Read JSON fields with json_extract_string(col, ''$.path'') and CAST the result (numbers
+      are JSON numbers except gps_completeness_pct and security_incident, which are JSON strings). If
+      you use the ->> operator, wrap it in parentheses: its precedence is lower than OR/comparison operators
+      in DuckDB, and an unparenthesized `x->>''$.a'' IS NULL OR ...` raises a conversion error.
+
+      '
+    enforcement: warn
+  - name: no_shipment_batch_join
+    description: 'Never invent a join between shipments and productbatches/products/vehicles/ carriers:
+      no such key exists. Use the declared metric definitions (and their stated 2-8°C assumption) instead
+      of ad-hoc formulas.
+
+      '
+    enforcement: warn

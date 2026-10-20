@@ -1,0 +1,170 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: insider_trading, author: claudeopus5.5
+version: '1.0'
+name: insider-trading
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Insider-trading / market-surveillance database. One trade record (trade_records.REC_KEY,
+      e.g. IT291460) is the hub: market_conditions.REC_PIN, order_behaviour.REC_NODE, manipulation_signals.REC_TAG,
+      sentiment_analytics.REC_SA, corporate_events.REC_EVT, reg_compliance.REC_COMP and enforcement_actions.REC_ENF
+      all carry the same record key (one row each per record). trade_records.tr_anchor -> traders.TR_KEY,
+      trade_records.sym_anchor -> instruments.SYM_KEY, trader_relationships.rel_root -> traders.TR_KEY
+      (one row per trader), order_behaviour.OST_ref -> order_status_types.STAT_TOKEN.'
+    preferred: true
+    tables:
+    - traders
+    - instruments
+    - trader_relationships
+    - trade_records
+    - market_conditions
+    - order_status_types
+    - sentiment_analytics
+    - order_behaviour
+    - manipulation_signals
+    - corporate_events
+    - reg_compliance
+    - enforcement_actions
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_formats
+    summary: 'How values are stored: JSON paths, unit-suffixed text, NULLs'
+    description: 'Verified against the data. All *_data / *_info / *_metrics / *_signals / *_links / *_perf
+      / *_status / enf_actions columns are DuckDB JSON; read a field with col->>''field'' (text) and CAST(...
+      AS DOUBLE) for numbers. JSON nulls come back as SQL NULL from ->>. PRECEDENCE TRAP: in DuckDB ->>
+      binds more loosely than = and IN, so always parenthesize: (tr.trader_fin_data->>''risk_lvl'') =
+      ''Aggressive'', never tr.trader_fin_data->>''risk_lvl'' = ''Aggressive'' (that errors or misparses).
+      traders.trader_fin_data->>''usd_bal'' is text like ''$4,692,991 '' (dollar sign, thousands commas,
+      trailing space): parse as CAST(regexp_replace(tr.trader_fin_data->>''usd_bal'', ''[$, ]'', '''',
+      ''g'') AS DOUBLE). age_days is an integer: divide by 365.0, not 365, to avoid integer division.
+      manipulation_signals.manip_signals->>''spoof_prob'' is text like ''0.88%''; after removing ''%''
+      the values lie in 0..1 (max 1.0), so the documented "spoofing probability > 0.75" compares the stripped
+      number with 0.75. Unit-suffixed text columns (vol_adj_lev ''0.19 leverage-point/vol-point'', risk_adj_lev
+      ''20.18 USD/risk-point'', bal_turnover ''2.69 times/day'', impactVal ''0.05%'', ofi_density ''bps/million
+      USD'', liq_imp ''USD/min'', price_accel ''%/(hour_)'', iv_rank ''11.39%'', short_press_int ''%/hour'',
+      info_leak_rate ''score/hour'', reg_alert_conc ''alerts/billion USD'', reg_resp_spd ''hours/case'',
+      insider_net_str ''connection-point/ownership%''): take the leading number with CAST(split_part(col,
+      '' '', 1) AS DOUBLE) (strip ''%'' where present). trade_records.snap_ts is VARCHAR holding only
+      a ''mm:ss.f'' fragment (e.g. ''12:24.1''), NULL for 400 of 998 records — it is not a usable timestamp.
+      Categorical "not set" values are real SQL NULL, not empty strings (e.g. corporate_events.evt_near
+      NULL for 249 rows, layer_idx NULL 336). sentiment_analytics.short_rt / inst_own are NULL for ~400
+      rows; inst_own is never 0. Score scales found: reg_compliance.pat_rec 0..100, behav_score 0..100,
+      net_score 0..100; trader_relationships grp_score 0.23..99.87; market_metrics peer_corr -0.99..1.0;
+      cancel_pct 0..0.3; dark_use 0..0.4 (NULL for 399 rows). instruments sector has no padding. Most
+      traders have exactly one trade record (994 traders, max 2 records).
+
+      '
+    tables:
+    - main.traders
+    - main.trade_records
+    - main.manipulation_signals
+    - main.sentiment_analytics
+  - name: trading_behaviour
+    summary: Trader activity metrics, holding style, order types, venues
+    description: 'TRADER POSITION HOLDING STYLE (trade_records.hold_span): the position holding span indicates
+      strategy: ''Intraday'' for same-day trades; ''Swing'' for holds of a few days to weeks; ''Position''
+      for weeks to months; ''Long-term'' for months or years. DARK POOL USAGE VENUES (order_behaviour.dark_use):
+      dark pools are private exchanges (e.g., Alternative Trading Systems) used for large orders to reduce
+      market impact. Usage patterns can be analyzed for regulatory compliance or signs of avoiding market
+      transparency. OFF-MARKET TRADING ACTIVITY (order_behaviour.off_mkt): off-market activity describes
+      trades not on lit exchanges. ''Internal crosses'' involve a broker matching buy/sell orders from
+      their own clients internally, which requires monitoring for fairness. ORDER TYPE DISTRIBUTION (order_status_types.order_status->>''spread_type''):
+      ''Market'' orders prioritize speed; ''Limit'' orders prioritize price; ''Mixed'' suggests a combination
+      of strategies. Metrics: daily_turnover_rate, trader_leverage_exposure, order_modification_intensity,
+      risk_adjusted_turnover, aggressive_trading_intensity, risk_adjusted_win_rate, cross_modification_ratio,
+      high_risk_trader_profile, high_frequency_high_risk_trader, high_cancellation_modification_trader,
+      potentially_evasive_order_modifier.
+
+      '
+    tables:
+    - main.trade_records
+    - main.traders
+    - main.order_behaviour
+    - main.order_status_types
+  - name: manipulation
+    summary: Market manipulation signals and patterns
+    description: 'MOMENTUM IGNITION SIGNALS (manipulation_signals.ignite_sig): indicates attempts to create
+      false price movement. ''Strong'' suggests clear patterns of manipulative intent; ''Weak'' suggests
+      such patterns are less evident; NULL = ignition signal not detected. MARKING THE CLOSE PATTERNS
+      (manipulation_signals.close_mark): trading near market close to manipulate the closing price. ''Frequent''
+      indicates repeated activity; ''Occasional'' suggests it is infrequent. This is a prohibited practice.
+      PATTERN SIMILARITY SCORE CONTEXT: a score from 0-1 comparing trading to known illicit behaviours;
+      values near 1 indicate high similarity to known illicit trading patterns, values near 0 indicate
+      patterns do not strongly match known manipulative techniques. INTERPRETATION: the only pattern column
+      is reg_compliance.pat_rec, which is stored on a 0..100 scale; the metrics use it as stored (no rescaling).
+      Metrics: suspicious_activity_index, pattern_anomaly_score, layering_spoofing_pattern, wash_trading_alert,
+      collusion_network_indicator, peer_mimicry_suspicion and the composites built on them.
+
+      '
+    tables:
+    - main.manipulation_signals
+    - main.order_behaviour
+    - main.market_conditions
+    - main.trader_relationships
+  - name: insider_events
+    summary: Corporate events, information leakage and option activity
+    description: 'INFORMATION LEAKAGE SCORE INTERPRETATION (corporate_events.leak_score): a score from
+      0-100. Low scores (<20) suggest little evidence of informed trading. Moderate scores (20-50) warrant
+      attention. High scores (>50) strongly suggest trading based on non-public information and require
+      investigation (metric leakage_score_band). UNUSUAL OPTION ACTIVITY LEVEL (sentiment_analytics.uo_act):
+      indicates deviations from normal options patterns. ''High'' suggests significant deviations, a potential
+      flag for insider information. ''Moderate'' indicates some unusual activity, but less pronounced.
+      NULL = no unusual-options activity recorded. A record is "linked to a corporate event" when corporate_events.evt_near
+      IS NOT NULL. announce_time values are ''Pre-market hrs before'', ''Intraday hrs before'', ''Post-market
+      hrs before''; match the documented ''Pre-market''/''Intraday'' by prefix (LIKE ''Pre-market%'').
+
+      '
+    tables:
+    - main.corporate_events
+    - main.sentiment_analytics
+  - name: compliance
+    summary: Regulatory compliance cases, ratings, restrictions and enforcement
+    description: 'COMPLIANCE RATING GRADE (reg_compliance.compliance_data->>''comp_rate''): ''A'' represents
+      excellent compliance; ''B'' indicates good compliance with minor issues; ''C'' suggests significant
+      compliance deficiencies; ''D'' signifies serious or repeated compliance failures. TRADING RESTRICTION
+      PERIOD TYPES (reg_compliance.restrict_win): ''Blackout'' is a complete prohibition on trading. ''Special''
+      indicates other, specific restrictions tailored to a case, such as position size limits or pre-trade
+      approvals. NULL = restriction window not defined. A "compliance case" is one reg_compliance row
+      (keyed by the record key); an "enforcement action/case" is one enforcement_actions row; the trader
+      of either is trade_records.tr_anchor of the same record key. PREMATURE RESOLUTION BLOCK: block an
+      enforcement action from being marked ''Resolved'' if its linked ''Investigation Intensity Index''
+      is greater than 75, ensuring high-risk cases receive sufficient review (metric premature_resolution_block).
+
+      '
+    tables:
+    - main.reg_compliance
+    - main.enforcement_actions
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Indices, flags and thresholds documented for this database must be computed with the
+      metric SQL in semantic.yml (exact thresholds, strict > comparisons, AND/OR grouping as written),
+      not ad-hoc formulas.
+
+      '
+    enforcement: warn
+  - name: premature_resolution_block
+    description: 'An enforcement action must not be treated or reported as legitimately ''Resolved'' when
+      its linked Investigation Intensity Index (0.6*behav_score + 0.4*net_score) is greater than 75; such
+      cases are blocked from resolution.
+
+      '
+    enforcement: warn

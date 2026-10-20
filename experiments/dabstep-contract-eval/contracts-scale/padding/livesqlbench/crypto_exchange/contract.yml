@@ -1,0 +1,226 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: crypto_exchange, author: claudeopus5.5
+version: '1.0'
+name: crypto-exchange
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Crypto exchange database: orders, their executions and fees, users and account balances,
+      order-book snapshots (marketdata), daily market statistics, analytics indicators, risk/margin positions,
+      system monitoring and the exchange/order-type map.'
+    preferred: true
+    tables:
+    - orders
+    - marketdata
+    - users
+    - orderExecutions
+    - fees
+    - marketstats
+    - analyticsindicators
+    - riskandmargin
+    - accountbalances
+    - systemmonitoring
+    - Exchange_OrderType_Map
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_formats
+    summary: 'How values are stored: JSON fields, money/percent text, joins and fan-out'
+    description: 'JSON. orders.order_attributes, marketdata.orderbook_metrics, analyticsindicators.indicator_bundle
+      and riskandmargin.margin_risk_profile are DuckDB JSON. Extract with ->> and CAST to DOUBLE, e.g.
+      CAST(md.orderbook_metrics->>''mid_price'' AS DOUBLE); nested paths use ''$.group.field'', e.g. CAST(ai.indicator_bundle->>''$.order_flow.large_order_ratio''
+      AS DOUBLE). IMPORTANT: in DuckDB the ->> operator binds more loosely than = and comparison operators,
+      so always parenthesise an extraction before comparing: (o.order_attributes->>''side'') = ''Buy''.
+      Numeric JSON fields mix integer and double JSON types; casting to DOUBLE handles both. In margin_risk_profile,
+      leverage, leverage_multiplier and the *_risk factors are JSON strings holding numbers (''5'', ''0.124'')
+      - cast them.
+
+      TEXT-ENCODED NUMBERS (checked against the data). fees.FEE_TOTAL (''$26.60 ''), accountbalances.walletSum
+      (''$316,482.99 ''), orderbook_metrics.index_price, margin_risk_profile.liquidation_price and insurance_fund_share,
+      order_attributes.notional_value are money strings with ''$'', thousands commas and a trailing space:
+      parse with CAST(regexp_replace(x, ''[$, ]'', '''', ''g'') AS DOUBLE). Percent strings (orderbook_metrics.spread_pct
+      ''11.99%'', fees.rebRate ''0.09%'', marketstats.priceShiftDay ''7.96%'', margin_ratio_pct, collateral_ratio_pct)
+      parse with CAST(replace(x, ''%'', '''') AS DOUBLE) and are then in percent units. marketstats.vol_meter
+      (the volatility rating) is text holding a number 0.24-99.98, NULL in 100 of 1000 rows; use TRY_CAST(vol_meter
+      AS DOUBLE). marketstats.MAXsupPLY is text like ''188,391,541 tokens''. fees.REB_TOTAL is plain numeric
+      text.
+
+      JOINS. orders.exchSpot = marketdata.EXCH_SPOT = marketstats.md_link = analyticsindicators.md_ref
+      (market key). orders.ORD_STAMP = orderExecutions.Ord_Link = fees.Order_Link = riskandmargin.ordStamp.
+      orders.UserRef = users.USERSTAMP = accountbalances.userTAG. FAN-OUT: marketdata has 605 rows (one
+      per market); marketstats and analyticsindicators have 1000 rows each over those 605 markets (several
+      snapshots per market); fees has 1000 rows for 970 orders; accountbalances has 1000 rows for 201
+      users (several balance records per user); riskandmargin has only 2 positions (Isolated on OR6015391,
+      Cross on OR8906157). Metrics that cross these joins return one value per joined row combination
+      - say which snapshot/record you use. systemmonitoring has no key to any other table. Integer division
+      truncates (PostgreSQL semantics): multiply by 1.0 before dividing counts.
+
+      '
+    tables:
+    - main.orders
+    - main.marketdata
+    - main.marketstats
+    - main.analyticsindicators
+    - main.riskandmargin
+    - main.accountbalances
+    - main.fees
+  - name: market_microstructure
+    summary: Order-book spread, liquidity, depth imbalance, slippage and liquidity crisis
+    description: 'Spread Percentage = (best ask - best bid) / midpoint price * 100, from marketdata.orderbook_metrics
+      (metric spread_percentage; this is computed, not the stored text spread_pct). Raw spread = spread_abs
+      (equals best_ask - best_bid in the data). Liquidity Ratio = (quantity at best bid + quantity at
+      best ask) * midpoint price / 24h volume, with bid_size, ask_size, mid_price and marketstats.VOLday
+      (metric liquidity_ratio). Liquidity Crisis: Liquidity Ratio below 0.01. Order Book Imbalance Ratio
+      = (deeper bid liquidity - deeper ask liquidity) / (deeper bid + deeper ask liquidity) using bid_depth
+      / ask_depth; positive = stronger buying pressure, negative = stronger selling pressure. Slippage
+      Impact = order quantity / quantity available at best bid or ask * raw spread. Whale Order: order
+      quantity exceeds 10% of the available liquidity at the best bid or ask. Market Depth Ratio, Volatility-Adjusted
+      Spread, Optimal Trading Window and Market Maker Activity are metrics of the same names.
+
+      '
+    tables:
+    - main.marketdata
+    - main.marketstats
+    - main.orders
+  - name: execution_and_fees
+    summary: Fill rate, execution cost, fees, market efficiency, maker/taker
+    description: 'Order Fill Rate = (order quantity - unfilled units) / order quantity * 100 (unfilled
+      = orderExecutions.remain_amt). True Cost of Execution = total fee charged + (order quantity * limit
+      or stop price * Slippage Impact * 0.01). Market Impact Cost = order quantity * limit price * large
+      order ratio * 0.01. Market Efficiency Ratio = Slippage Impact / average slippage measure (AVG of
+      systemmonitoring.SLIP_ratio). fees.FeeRate is a fraction (0.001 = 0.1 %); FEE_TOTAL is a money string.
+
+      '
+    tables:
+    - main.orders
+    - main.orderExecutions
+    - main.fees
+    - main.systemmonitoring
+  - name: arbitrage
+    summary: Arbitrage Potential Score, windows, ROI, high-quality opportunities
+    description: 'APS = arbitrage potential + cross-exchange spread + (funding-rate gap * 2) + basis gap,
+      from indicator_bundle.cross_venue. Arbitrage Window: APS exceeds 0.05. Arbitrage ROI = APS * limit
+      or stop price / (total fee charged * 2) (fees on both legs). High-Quality Arbitrage Opportunity:
+      an Arbitrage Window where Arbitrage ROI exceeds 0.5% (0.005 as a ratio) and Market Efficiency Ratio
+      is below 1.2. Data note: the maximum APS in the data is 0.0471, so no row currently qualifies as
+      an Arbitrage Window.
+
+      '
+    tables:
+    - main.analyticsindicators
+    - main.orders
+    - main.fees
+  - name: position_risk
+    summary: PVaR, margin utilisation, leverage, liquidation and position classifications
+    description: 'Position Value at Risk = position notional * volatility rating * 0.01. Realized Risk
+      Ratio = realized PnL / PVaR. Risk-Adjusted Return = realized PnL / (PVaR * position risk ratio).
+      Margin Utilization = initial margin required / margin account balance * 100. Margin Call Risk: Margin
+      Utilization > 80%. Effective Leverage = position leverage * position notional / total wallet balance;
+      Effective Leverage Risk Classification ''High Risk'' if > 20 else ''Normal''. Over-Leveraged Position:
+      leverage * volatility measure > 500. Critically Over-Leveraged: Over-Leveraged and Effective Leverage
+      > 20 and Margin Utilization > 90%. Liquidation Risk Level: ''High Risk'' when liquidation price
+      >= market price * 0.95, else ''Safe''. Liquidation Cascade Risk: more than 15% of open positions
+      ''High Risk'' and |Order Book Imbalance Ratio| > 0.3. Flash Crash Vulnerability: Liquidation Cascade
+      Risk present, more than 30% of positions Over-Leveraged, and a Liquidity Crisis. Risk-to-Reward
+      Ratio, Risk-Efficient Position (RAR > 1.5 and Risk-to-Reward < 0.5), Liquidity Constrained Position
+      (Market Depth Ratio < 2.0), Profit Factor = sum of positive realized PnL / |sum of negative realized
+      PnL|. Realized PnL = accountbalances.REAL_LINE; margin account balance = accountbalances.marg_sum;
+      wallet = walletSum.
+
+      '
+    tables:
+    - main.riskandmargin
+    - main.accountbalances
+    - main.marketstats
+    - main.marketdata
+    - main.orders
+  - name: technical_and_flow
+    summary: Technical signal strength, momentum, breakouts, participant flow
+    description: 'Technical Signal Strength = (|RSI - 50| + |MACD| + Bollinger width * 0.01) / 3 * (+1
+      Buy, -1 Sell, 0 Hold). Momentum Divergence: price makes new highs/lows while buy/sell pressure moves
+      the opposite way. Technical Breakout: price above day high or below day low with day volume at least
+      50% above the 30-day average. Technical Reversal Signal: |TSS| > 8 with Momentum Divergence. Perfect
+      Technical Setup: TSS > 7, technical meter direction matches market sentiment, no Momentum Divergence.
+      Smart Money Flow: smart-money force exceeds both retail-flow and institutional-flow share by at
+      least 20%. Flow Dominance categorises Smart Money / Retail / Institutional Dominant (exceeds both
+      others * 1.2) else Mixed. Whale-Driven Market: whale activity ''High'' and at least one Whale Order
+      in the Smart Money Flow direction.
+
+      SMART MONEY ACCURACY (NOT COMPUTABLE HERE). Defined as the proportion of times the Smart Money Flow
+      direction matches the 4-hour price movement: COUNT(CASE WHEN (smart money > retail AND smart money
+      > institutional AND next_price_4h > mid_price) OR (smart money < retail AND smart money < institutional
+      AND next_price_4h < mid_price) THEN 1 ELSE 0 END) / COUNT(*). No column stores next_price_4h (a
+      price 4 hours later) and every marketdata snapshot is at 2025-02-19 00:00, so this cannot be computed.
+      Note also that COUNT over a CASE returning 1 or 0 counts every row; the intended numerator is SUM(CASE
+      ... THEN 1 ELSE 0 END).
+
+      '
+    tables:
+    - main.analyticsindicators
+    - main.marketdata
+    - main.marketstats
+  - name: enums
+    summary: Meanings of enum values (side, status, time in force, position side, leverage, sentiment,
+      signal, whale, maker, exec tune)
+    description: 'dealedge (order_attributes.side): ''Buy'' = purchase the base asset using the quote
+      asset (e.g. buying BTC with USDT); ''Sell'' = sell the base asset for the quote asset. orderflow
+      (order_attributes.status): ''New'' = newly placed, not matched; ''PartiallyFilled'' = some portion
+      executed but not all; ''Cancelled'' = cancelled before full execution; ''Filled'' = completely executed.
+      timespan (order_attributes.time_in_force): ''IOC'' Immediate-or-Cancel = execute the immediately
+      available portion or cancel; ''GTC'' Good-Till-Cancelled = active until explicitly cancelled; ''GTD''
+      Good-Till-Date = active until a specified date; ''FOK'' Fill-or-Kill = execute completely immediately
+      or cancel entirely. posedge (margin_risk_profile.position_side): ''Long'' profits from price increases;
+      ''Short'' profits from price decreases. posmagn (margin_risk_profile.leverage_multiplier, same value
+      set as leverage): ''1'',''2'',''3'',''5'',''10'',''20'',''50'',''100'' leverage multipliers; ''10''
+      = 10x, amplifying profits and losses tenfold vs unleveraged. mktfeel (sentiment.market_sentiment):
+      ''Bearish'' negative, expecting decreases; ''Bullish'' positive, expecting increases; ''Neutral''
+      balanced, no strong bias. techmeter (sentiment.signal): ''Buy'' indicators suggest buying; ''Sell''
+      suggest selling; ''Hold'' maintain positions without new trades. whalemotion (participant_flow.whale_activity):
+      ''Low'' minimal, ''Medium'' moderate, ''High'' significant large-trader activity, potentially signalling
+      important moves. makermotion (participant_flow.market_maker_note): ''Low'' minimal market-maker
+      activity with potentially wider spreads, ''Medium'' normal, ''High'' substantial, typically tighter
+      spreads and higher liquidity. exectune (orderExecutions.EXECtune): ''Maker'' added liquidity by
+      not matching immediately; ''Taker'' removed liquidity by matching immediately on placement.
+
+      '
+    tables:
+    - main.orders
+    - main.riskandmargin
+    - main.analyticsindicators
+    - main.orderExecutions
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Computations of the documented measures and classifications must reuse the metric SQL
+      in semantic.yml (thresholds: Whale Order 10%, Liquidation High Risk 0.95, Arbitrage Window 0.05,
+      Over-Leveraged 500, Liquidity Crisis 0.01, Margin Call 80%, Breakout 50% above average, Critically
+      Over-Leveraged EL>20 and MU>90%, HQ arbitrage ROI>0.5% and MER<1.2, Technical Reversal |TSS|>8,
+      Liquidity Constrained MDR<2.0, Optimal window VAS<1.0, Risk-Efficient RAR>1.5 and RtR<0.5, Cascade
+      >15% and |OBIR|>0.3, Perfect setup TSS>7, Flash crash >30% over-leveraged, Flow dominance 1.2x,
+      EL risk >20).
+
+      '
+    enforcement: warn
+  - name: parse_text_numbers
+    description: 'Money and percent strings must be parsed (strip ''$'', '','', spaces, ''%'') before
+      arithmetic; JSON extractions must be CAST to DOUBLE and parenthesised before comparison.
+
+      '
+    enforcement: warn

@@ -1,0 +1,682 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: virtual_idol, author: claudeopus5.5
+metrics:
+- name: fan_monetization_index
+  description: 'FMI: a fan''s direct financial contribution per minute of engagement (propensity for in-session
+    spending). FMI = Total Gift Value in USD / Session Duration in Minutes, per interaction row. Gift_Val_Usd
+    is a JSON key of interactions.gift_metrics; sess_dur_min is never 0 or NULL in the data (NULLIF kept
+    for safety).
+
+    '
+  sql_expression: CAST((i.gift_metrics->>'Gift_Val_Usd') AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE),
+    0)
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - engagement_monetization
+- name: content_consumption_index
+  description: 'CCI: passive engagement, hours of content watched relative to session time. CCI = watch_hrs
+    / sess_dur_min (hours divided by minutes, exactly as defined).
+
+    '
+  sql_expression: CAST(i.watch_hrs AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE), 0)
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - engagement_monetization
+- name: chattiness_score
+  description: 'CS: active communication during a session. CS = Chat_Msg (chat_activity JSON) / sess_dur_min.
+
+    '
+  sql_expression: CAST((i.chat_activity->>'Chat_Msg') AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE),
+    0)
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - engagement_monetization
+- name: is_whale_fan
+  description: 'Whale Fan: extremely high in-session spending, top-tier financial contributor; FMI > 20.
+    Evaluated per interaction; a fan is a Whale Fan when any of its sessions qualifies, i.e. peak_monetization_index
+    > 20 (INTERPRETATION for fan-level use).
+
+    '
+  sql_expression: CAST((i.gift_metrics->>'Gift_Val_Usd') AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE),
+    0) > 20
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - engagement_monetization
+- name: is_engaged_lurker
+  description: 'Engaged Lurker: consumes a lot of content but chats minimally; CCI > 0.5 AND CS < 0.5.
+
+    '
+  sql_expression: (CAST(i.watch_hrs AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE), 0) > 0.5) AND
+    (CAST((i.chat_activity->>'Chat_Msg') AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS DOUBLE), 0) < 0.5)
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - engagement_monetization
+- name: peak_monetization_index
+  description: 'Peak Monetization Index: the highest FMI a fan achieved in any single interaction session
+    (MAX of FMI over the fan''s interactions). Group by i.interact_fan_pivot.
+
+    '
+  sql_expression: MAX(CAST((i.gift_metrics->>'Gift_Val_Usd') AS DOUBLE) / NULLIF(CAST(i.sess_dur_min AS
+    DOUBLE), 0))
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: aggregate; group by i.interact_fan_pivot for one row per fan
+  domains:
+  - engagement_monetization
+- name: fan_financial_value
+  description: 'FFV: estimated monthly financial contribution (proxy for lifetime value). FFV = spend_usd
+    / (memb_days / 30.44). One row has memb_days = 0 -> NULL.
+
+    '
+  sql_expression: CAST(m.spend_usd AS DOUBLE) / NULLIF(CAST(m.memb_days AS DOUBLE) / 30.44, 0)
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m
+  grain: one membership record (fan via m.member_fan_pivot)
+  domains:
+  - spending_membership
+- name: merchandise_affinity_score
+  description: 'MAS: share of total spending dedicated to merchandise. MAS = merch_spend_usd / spend_usd,
+    commerce record joined to its membership record.
+
+    '
+  sql_expression: CAST(c.merch_spend_usd AS DOUBLE) / NULLIF(CAST(m.spend_usd AS DOUBLE), 0)
+  source_model: main.commerceandcollection
+  from_sql: main.commerceandcollection c JOIN main.membershipandspending m ON m.member_reg = c.commerce_member_pivot
+  grain: one commerce record with its membership record
+  domains:
+  - spending_membership
+- name: is_premium_member
+  description: 'Premium Member: paid membership, memb_kind is not ''Free'' (stored: Free, Basic, Premium,
+    Diamond; no NULLs, clean casing).
+
+    '
+  sql_expression: m.memb_kind <> 'Free'
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m
+  grain: one membership record
+  domains:
+  - spending_membership
+- name: is_high_value_member
+  description: 'High-Value Member: Premium Member AND FFV > 50 USD per month.
+
+    '
+  sql_expression: m.memb_kind <> 'Free' AND CAST(m.spend_usd AS DOUBLE) / NULLIF(CAST(m.memb_days AS DOUBLE)
+    / 30.44, 0) > 50
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m
+  grain: one membership record
+  domains:
+  - spending_membership
+- name: is_power_user
+  description: 'Power User: Premium Member AND total session count (usage_metrics.Sess_Count) > 400 AND
+    more than 2 devices (dev_count > 2).
+
+    '
+  sql_expression: m.memb_kind <> 'Free' AND CAST((p.usage_metrics->>'Sess_Count') AS BIGINT) > 400 AND
+    p.dev_count > 2
+  source_model: main.preferencesandsettings
+  from_sql: main.preferencesandsettings p JOIN main.membershipandspending m ON m.member_reg = p.preferences_member_pivot
+  grain: one preferences record with its membership record
+  domains:
+  - spending_membership
+- name: follower_to_following_ratio
+  description: 'FFR: Foll_Count / Fing_Count (network_stats JSON), defined only where Following Count
+    > 0 (NULL otherwise; no zero in current data).
+
+    '
+  sql_expression: "CASE WHEN CAST((s.network_stats->>'Fing_Count') AS DOUBLE) > 0\n     THEN CAST((s.network_stats->>'Foll_Count')\
+    \ AS DOUBLE) / CAST((s.network_stats->>'Fing_Count') AS DOUBLE) END"
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s
+  grain: one social community record
+  domains:
+  - social_influence
+- name: content_creator_score
+  description: 'CCS = (sum of content submissions + collaborations) * average content quality rating =
+    (Art_Subs + Fic_Subs + Cover_Perf_Cnt + Collab_Count) * Cont_Qual_Rate (content_creation JSON). Submissions
+    are fan art, fan fiction and cover performances; UGC_Val is a separate total and is not added. Cont_Qual_Rate
+    is already one rating per record (average it when aggregating several records).
+
+    '
+  sql_expression: "(CAST((s.content_creation->>'Art_Subs') AS DOUBLE) + CAST((s.content_creation->>'Fic_Subs')\
+    \ AS DOUBLE)\n + CAST((s.content_creation->>'Cover_Perf_Cnt') AS DOUBLE) + CAST((s.content_creation->>'Collab_Count')\
+    \ AS DOUBLE))\n* CAST((s.content_creation->>'Cont_Qual_Rate') AS DOUBLE)"
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s
+  grain: one social community record
+  domains:
+  - social_influence
+- name: is_super_creator
+  description: 'Super Creator: prolific, high-quality content creator; CCS > 200.'
+  sql_expression: "(CAST((s.content_creation->>'Art_Subs') AS DOUBLE) + CAST((s.content_creation->>'Fic_Subs')\
+    \ AS DOUBLE)\n + CAST((s.content_creation->>'Cover_Perf_Cnt') AS DOUBLE) + CAST((s.content_creation->>'Collab_Count')\
+    \ AS DOUBLE))\n* CAST((s.content_creation->>'Cont_Qual_Rate') AS DOUBLE) > 200"
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s
+  grain: one social community record
+  domains:
+  - social_influence
+- name: social_capital_score
+  description: 'SCS: size and strength of the social network. SCS = Soc_Net_Sz + Friend_Con * 1.5.'
+  sql_expression: CAST((s.network_stats->>'Soc_Net_Sz') AS DOUBLE) + CAST((s.network_stats->>'Friend_Con')
+    AS DOUBLE) * 1.5
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s
+  grain: one social community record
+  domains:
+  - social_influence
+- name: is_social_butterfly
+  description: 'Social Butterfly: SCS > 1000 AND member of more than 5 community groups (Grp_Memb > 5).'
+  sql_expression: CAST((s.network_stats->>'Soc_Net_Sz') AS DOUBLE) + CAST((s.network_stats->>'Friend_Con')
+    AS DOUBLE) * 1.5 > 1000 AND CAST((s.network_stats->>'Grp_Memb') AS INTEGER) > 5
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s
+  grain: one social community record
+  domains:
+  - social_influence
+- name: community_influence_index
+  description: 'CII = SQRT(Follower Count * Content Reach): Foll_Count from socialcommunity.network_stats,
+    Cont_Reach from retentionandinfluence.infl_impact, joined through the shared engagement record (all
+    52 retention rows match a social row).
+
+    '
+  sql_expression: SQRT(CAST((s.network_stats->>'Foll_Count') AS DOUBLE) * CAST((r.infl_impact->>'Cont_Reach')
+    AS DOUBLE))
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s JOIN main.retentionandinfluence r ON r.retain_engage_pivot = s.social_engage_pivot
+  grain: one social record paired with the retention record of the same engagement record
+  domains:
+  - social_influence
+- name: is_community_influencer
+  description: 'Community Influencer: FFR > 2.0 AND CII > 10000.'
+  sql_expression: CAST((s.network_stats->>'Fing_Count') AS DOUBLE) > 0 AND CAST((s.network_stats->>'Foll_Count')
+    AS DOUBLE) / CAST((s.network_stats->>'Fing_Count') AS DOUBLE) > 2.0 AND SQRT(CAST((s.network_stats->>'Foll_Count')
+    AS DOUBLE) * CAST((r.infl_impact->>'Cont_Reach') AS DOUBLE)) > 10000
+  source_model: main.socialcommunity
+  from_sql: main.socialcommunity s JOIN main.retentionandinfluence r ON r.retain_engage_pivot = s.social_engage_pivot
+  grain: one social record paired with the retention record of the same engagement record
+  domains:
+  - social_influence
+- name: viral_potential_score
+  description: VPS = Viral_Cont * (1 + Trend_Part) (infl_impact JSON).
+  sql_expression: CAST((r.infl_impact->>'Viral_Cont') AS DOUBLE) * (1 + CAST((r.infl_impact->>'Trend_Part')
+    AS DOUBLE))
+  source_model: main.retentionandinfluence
+  from_sql: main.retentionandinfluence r
+  grain: one retention record
+  domains:
+  - social_influence
+- name: is_rising_star_influencer
+  description: 'Rising Star Influencer: VPS > 50 AND CII between 1000 and 10000 (inclusive).'
+  sql_expression: CAST((r.infl_impact->>'Viral_Cont') AS DOUBLE) * (1 + CAST((r.infl_impact->>'Trend_Part')
+    AS DOUBLE)) > 50 AND SQRT(CAST((s.network_stats->>'Foll_Count') AS DOUBLE) * CAST((r.infl_impact->>'Cont_Reach')
+    AS DOUBLE)) BETWEEN 1000 AND 10000
+  source_model: main.retentionandinfluence
+  from_sql: main.socialcommunity s JOIN main.retentionandinfluence r ON r.retain_engage_pivot = s.social_engage_pivot
+  grain: one social record paired with the retention record of the same engagement record
+  domains:
+  - social_influence
+- name: achievement_density
+  description: 'AD = total achievements unlocked (achiev_stats.Ach_Count) / membership duration in days
+    (memb_days), loyalty record -> engagement -> membership.
+
+    '
+  sql_expression: CAST((l.achiev_stats->>'Ach_Count') AS DOUBLE) / NULLIF(CAST(m.memb_days AS DOUBLE),
+    0)
+  source_model: main.loyaltyandachievements
+  from_sql: main.loyaltyandachievements l JOIN main.engagement e ON e.engage_reg = l.loyalty_engage_pivot
+    JOIN main.membershipandspending m ON m.member_reg = e.engage_member_pivot
+  grain: one loyalty record with its engagement and membership record
+  domains:
+  - loyalty_achievement
+- name: loyalty_progression_rate
+  description: 'LPR = Total Loyalty Points / Current Tier Level = fans.pts_val / fans.tier_step (cast
+    to DOUBLE; tier_step is never 0 or NULL).
+
+    '
+  sql_expression: CAST(f.pts_val AS DOUBLE) / NULLIF(CAST(f.tier_step AS DOUBLE), 0)
+  source_model: main.fans
+  from_sql: main.fans f
+  grain: one fan
+  domains:
+  - loyalty_achievement
+- name: is_loyal_achiever
+  description: 'Loyal Achiever: AD > 0.2 AND LPR > 500.'
+  sql_expression: CAST((l.achiev_stats->>'Ach_Count') AS DOUBLE) / NULLIF(CAST(m.memb_days AS DOUBLE),
+    0) > 0.2 AND CAST(f.pts_val AS DOUBLE) / NULLIF(CAST(f.tier_step AS DOUBLE), 0) > 500
+  source_model: main.loyaltyandachievements
+  from_sql: main.loyaltyandachievements l JOIN main.engagement e ON e.engage_reg = l.loyalty_engage_pivot
+    JOIN main.membershipandspending m ON m.member_reg = e.engage_member_pivot JOIN main.fans f ON f.user_registry
+    = m.member_fan_pivot
+  grain: one loyalty record with its engagement, membership and fan
+  domains:
+  - loyalty_achievement
+- name: is_lone_wolf
+  description: 'Lone Wolf: AD > 0.5 AND SCS < 100 (social record of the same engagement record).'
+  sql_expression: CAST((l.achiev_stats->>'Ach_Count') AS DOUBLE) / NULLIF(CAST(m.memb_days AS DOUBLE),
+    0) > 0.5 AND CAST((s.network_stats->>'Soc_Net_Sz') AS DOUBLE) + CAST((s.network_stats->>'Friend_Con')
+    AS DOUBLE) * 1.5 < 100
+  source_model: main.loyaltyandachievements
+  from_sql: main.loyaltyandachievements l JOIN main.engagement e ON e.engage_reg = l.loyalty_engage_pivot
+    JOIN main.membershipandspending m ON m.member_reg = e.engage_member_pivot JOIN main.socialcommunity
+    s ON s.social_engage_pivot = e.engage_reg
+  grain: one loyalty record with its engagement, membership and social record
+  domains:
+  - loyalty_achievement
+- name: support_load_score
+  description: SLS = Supp_Tix + Bug_Subs + Tech_Issue_Rpt (feedback_data JSON).
+  sql_expression: CAST((sf.feedback_data->>'Supp_Tix') AS INTEGER) + CAST((sf.feedback_data->>'Bug_Subs')
+    AS INTEGER) + CAST((sf.feedback_data->>'Tech_Issue_Rpt') AS INTEGER)
+  source_model: main.supportandfeedback
+  from_sql: main.supportandfeedback sf
+  grain: one support record
+  domains:
+  - support_feedback
+- name: is_high_maintenance_fan
+  description: 'High-Maintenance Fan: SLS > 10.'
+  sql_expression: CAST((sf.feedback_data->>'Supp_Tix') AS INTEGER) + CAST((sf.feedback_data->>'Bug_Subs')
+    AS INTEGER) + CAST((sf.feedback_data->>'Tech_Issue_Rpt') AS INTEGER) > 10
+  source_model: main.supportandfeedback
+  from_sql: main.supportandfeedback sf
+  grain: one support record
+  domains:
+  - support_feedback
+- name: nps_score_tier
+  description: 'NPS tier on NPS_Val: Promoters 9-10, Passives 7-8, Detractors 0-6.'
+  sql_expression: "CASE WHEN CAST((sf.feedback_data->>'NPS_Val') AS INTEGER) >= 9 THEN 'Promoters'\n \
+    \    WHEN CAST((sf.feedback_data->>'NPS_Val') AS INTEGER) >= 7 THEN 'Passives'\n     WHEN CAST((sf.feedback_data->>'NPS_Val')\
+    \ AS INTEGER) >= 0 THEN 'Detractors' END"
+  source_model: main.supportandfeedback
+  from_sql: main.supportandfeedback sf
+  grain: one support record
+  domains:
+  - support_feedback
+- name: is_platform_promoter
+  description: 'Platform Promoter: NPS tier ''Promoters'' (NPS_Val 9-10).'
+  sql_expression: CAST((sf.feedback_data->>'NPS_Val') AS INTEGER) BETWEEN 9 AND 10
+  source_model: main.supportandfeedback
+  from_sql: main.supportandfeedback sf
+  grain: one support record
+  domains:
+  - support_feedback
+- name: event_participation_score
+  description: EPS = On_Evt_Att * 1 + Off_Evt_Att * 1.5 + Meet_Att * 2 (evt_participation JSON).
+  sql_expression: CAST((ev.evt_participation->>'On_Evt_Att') AS DOUBLE) * 1 + CAST((ev.evt_participation->>'Off_Evt_Att')
+    AS DOUBLE) * 1.5 + CAST((ev.evt_participation->>'Meet_Att') AS DOUBLE) * 2
+  source_model: main.eventsandclub
+  from_sql: main.eventsandclub ev
+  grain: one events record (fan via events_member_pivot -> membership)
+  domains:
+  - events_collection
+- name: is_event_enthusiast
+  description: 'Event Enthusiast: EPS > 25.'
+  sql_expression: CAST((ev.evt_participation->>'On_Evt_Att') AS DOUBLE) * 1 + CAST((ev.evt_participation->>'Off_Evt_Att')
+    AS DOUBLE) * 1.5 + CAST((ev.evt_participation->>'Meet_Att') AS DOUBLE) * 2 > 25
+  source_model: main.eventsandclub
+  from_sql: main.eventsandclub ev
+  grain: one events record
+  domains:
+  - events_collection
+- name: is_idol_superfan
+  description: 'Idol Superfan: both a Whale Fan (peak FMI > 20 over the fan''s interactions) and an Event
+    Enthusiast (EPS > 25 on an events record of the fan''s membership).
+
+    '
+  sql_expression: "pk.peak_fmi > 20 AND CAST((ev.evt_participation->>'On_Evt_Att') AS DOUBLE) * 1\n  \
+    \  + CAST((ev.evt_participation->>'Off_Evt_Att') AS DOUBLE) * 1.5\n    + CAST((ev.evt_participation->>'Meet_Att')\
+    \ AS DOUBLE) * 2 > 25"
+  source_model: main.fans
+  from_sql: "main.fans f JOIN (SELECT interact_fan_pivot,\n             MAX(CAST((gift_metrics->>'Gift_Val_Usd')\
+    \ AS DOUBLE) / NULLIF(CAST(sess_dur_min AS DOUBLE), 0)) AS peak_fmi\n      FROM main.interactions\
+    \ GROUP BY interact_fan_pivot) pk ON pk.interact_fan_pivot = f.user_registry\nJOIN main.membershipandspending\
+    \ m ON m.member_fan_pivot = f.user_registry JOIN main.eventsandclub ev ON ev.events_member_pivot =\
+    \ m.member_reg"
+  grain: one fan x membership x events record
+  domains:
+  - events_collection
+  - engagement_monetization
+- name: collection_rate
+  description: CR = dig_own + phys_own (total collectibles owned).
+  sql_expression: c.dig_own + c.phys_own
+  source_model: main.commerceandcollection
+  from_sql: main.commerceandcollection c
+  grain: one commerce record
+  domains:
+  - events_collection
+- name: is_collector_fan
+  description: 'Collector Fan: CR > 50 AND coll_comp_rate > 75 (stored as percent 0-100).'
+  sql_expression: c.dig_own + c.phys_own > 50 AND c.coll_comp_rate > 75
+  source_model: main.commerceandcollection
+  from_sql: main.commerceandcollection c
+  grain: one commerce record
+  domains:
+  - events_collection
+- name: platform_stickiness_score
+  description: PSS = (Int_Consist + Plat_Stable) / 2 (usage_metrics JSON; both 0-1).
+  sql_expression: (CAST((p.usage_metrics->>'Int_Consist') AS DOUBLE) + CAST((p.usage_metrics->>'Plat_Stable')
+    AS DOUBLE)) / 2
+  source_model: main.preferencesandsettings
+  from_sql: main.preferencesandsettings p
+  grain: one preferences record
+  domains:
+  - retention_risk
+- name: is_at_risk_fan
+  description: 'At-Risk Fan: PSS < 0.4 OR churn_flag = ''High''. Fan -> membership -> preferences (PSS)
+    and membership -> engagement -> retention (churn flag), both LEFT JOINed; a missing side counts as
+    not satisfying that condition. Aggregate with BOOL_OR(...) GROUP BY f.user_registry for a per-fan
+    flag.
+
+    '
+  sql_expression: COALESCE((CAST((p.usage_metrics->>'Int_Consist') AS DOUBLE) + CAST((p.usage_metrics->>'Plat_Stable')
+    AS DOUBLE)) / 2 < 0.4, FALSE) OR COALESCE(r.churn_flag = 'High', FALSE)
+  source_model: main.fans
+  from_sql: main.fans f JOIN main.membershipandspending m ON m.member_fan_pivot = f.user_registry LEFT
+    JOIN main.preferencesandsettings p ON p.preferences_member_pivot = m.member_reg LEFT JOIN main.engagement
+    e ON e.engage_member_pivot = m.member_reg LEFT JOIN main.retentionandinfluence r ON r.retain_engage_pivot
+    = e.engage_reg
+  grain: one fan x membership x preferences x engagement x retention combination
+  domains:
+  - retention_risk
+- name: fan_age_category
+  description: Teen (<=18), Young Adult (19-29), Adult (30-49), Senior (>=50) on Demo_Profile.Age_Count;
+    NULL age -> NULL.
+  sql_expression: "CASE WHEN CAST((f.demo_profile->>'Age_Count') AS INTEGER) <= 18 THEN 'Teen'\n     WHEN\
+    \ CAST((f.demo_profile->>'Age_Count') AS INTEGER) <= 29 THEN 'Young Adult'\n     WHEN CAST((f.demo_profile->>'Age_Count')\
+    \ AS INTEGER) <= 49 THEN 'Adult'\n     WHEN CAST((f.demo_profile->>'Age_Count') AS INTEGER) >= 50\
+    \ THEN 'Senior' END"
+  source_model: main.fans
+  from_sql: main.fans f
+  grain: one fan
+  domains:
+  - demographics
+- name: is_professional_fan
+  description: 'Professional Fan: Fan Age Category ''Adult'' or ''Senior'' (age >= 30) AND occupation
+    path ''Professional'', compared case-insensitively because Occu_Path has case noise.
+
+    '
+  sql_expression: CAST((f.demo_profile->>'Age_Count') AS INTEGER) >= 30 AND LOWER((f.demo_profile->>'Occu_Path'))
+    = 'professional'
+  source_model: main.fans
+  from_sql: main.fans f
+  grain: one fan
+  domains:
+  - demographics
+- name: fan_segment
+  description: 'Fan Segments 2x2: NTILE(2) on FFV and on SLS (rank 1 = top 50%) over membership records
+    that have a support record (membership -> preferences -> support; 39 rows). Quadrants (INTERPRETATION
+    of the mapping): top FFV & bottom SLS = ''Ideal Fans''; top FFV & top SLS = ''At-Risk VIPs''; bottom
+    FFV & bottom SLS = ''Quiet Majority''; bottom FFV & top SLS = ''Resource Drain''. NULL FFV sorts last
+    (bottom half).
+
+    '
+  sql_expression: "CASE\n  WHEN NTILE(2) OVER (ORDER BY CAST(m.spend_usd AS DOUBLE) / NULLIF(CAST(m.memb_days\
+    \ AS DOUBLE) / 30.44, 0) DESC NULLS LAST) = 1\n   AND NTILE(2) OVER (ORDER BY CAST((sf.feedback_data->>'Supp_Tix')\
+    \ AS INTEGER) + CAST((sf.feedback_data->>'Bug_Subs') AS INTEGER) + CAST((sf.feedback_data->>'Tech_Issue_Rpt')\
+    \ AS INTEGER) DESC) = 2 THEN 'Ideal Fans'\n  WHEN NTILE(2) OVER (ORDER BY CAST(m.spend_usd AS DOUBLE)\
+    \ / NULLIF(CAST(m.memb_days AS DOUBLE) / 30.44, 0) DESC NULLS LAST) = 1 THEN 'At-Risk VIPs'\n  WHEN\
+    \ NTILE(2) OVER (ORDER BY CAST((sf.feedback_data->>'Supp_Tix') AS INTEGER) + CAST((sf.feedback_data->>'Bug_Subs')\
+    \ AS INTEGER) + CAST((sf.feedback_data->>'Tech_Issue_Rpt') AS INTEGER) DESC) = 2 THEN 'Quiet Majority'\n\
+    \  ELSE 'Resource Drain'\nEND"
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m JOIN main.preferencesandsettings p ON p.preferences_member_pivot
+    = m.member_reg JOIN main.supportandfeedback sf ON sf.support_pref_pivot = p.pref_reg
+  grain: one membership x preferences x support record
+  domains:
+  - fan_segments
+- name: estimated_subscription_date
+  description: 'Conversion funnel: the subscription date is not stored; estimate it as current date -
+    membership duration in days.
+
+    '
+  sql_expression: CAST(current_date - CAST(m.memb_days AS INTEGER) AS DATE)
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m
+  grain: one membership record
+  domains:
+  - temporal_analysis
+- name: time_to_conversion_days
+  description: Days from registration (reg_moment as DATE) to the estimated subscription date.
+  sql_expression: CAST(current_date - CAST(m.memb_days AS INTEGER) AS DATE) - CAST(f.reg_moment AS DATE)
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m JOIN main.fans f ON f.user_registry = m.member_fan_pivot
+  grain: one membership record with its fan
+  domains:
+  - temporal_analysis
+- name: interactions_before_conversion
+  description: Number of the fan's interactions with time_mark before the estimated subscription date.
+    Group by m.member_reg.
+  sql_expression: COUNT(i.activity_reg) FILTER (WHERE i.time_mark < CAST(current_date - CAST(m.memb_days
+    AS INTEGER) AS DATE))
+  source_model: main.membershipandspending
+  from_sql: main.membershipandspending m LEFT JOIN main.interactions i ON i.interact_fan_pivot = m.member_fan_pivot
+  grain: aggregate; group by m.member_reg
+  domains:
+  - temporal_analysis
+- name: cumulative_spending
+  description: 'Running total of a fan''s gift spending (Gift_Val_Usd) up to each interaction, ordered
+    by time_mark (window function).
+
+    '
+  sql_expression: SUM(CAST((i.gift_metrics->>'Gift_Val_Usd') AS DOUBLE)) OVER (PARTITION BY i.interact_fan_pivot
+    ORDER BY i.time_mark)
+  source_model: main.interactions
+  from_sql: main.interactions i
+  grain: one interaction session
+  domains:
+  - temporal_analysis
+- name: avg_time_to_first_gift
+  description: 'Average Time to First Gift: per fan, minimum day difference between registration date
+    and the date of any interaction with Gift_Val_Usd > 0, then averaged over the cohort (add the cohort
+    filter inside the subquery). Some differences are negative because interactions precede reg_moment.
+
+    '
+  sql_expression: AVG(fg.days_to_first_gift)
+  source_model: main.interactions
+  from_sql: "(SELECT f.user_registry,\n        MIN(CAST(i.time_mark AS DATE) - CAST(f.reg_moment AS DATE))\
+    \ AS days_to_first_gift\n FROM main.fans f JOIN main.interactions i ON i.interact_fan_pivot = f.user_registry\n\
+    \ WHERE CAST((i.gift_metrics->>'Gift_Val_Usd') AS DOUBLE) > 0\n GROUP BY f.user_registry) fg"
+  grain: one fan with at least one gift interaction
+  domains:
+  - temporal_analysis
+- name: session_time_window_match
+  description: 'Session Time Window: interaction o belongs to the session of key interaction k when it
+    is with the same idol and within 5 minutes before or after k.time_mark. Used by Ripple Effect Analysis
+    (aggregate non-target users'' behaviour such as Msg_Tone in each key session).
+
+    '
+  sql_expression: o.time_mark BETWEEN k.time_mark - INTERVAL 5 MINUTE AND k.time_mark + INTERVAL 5 MINUTE
+  source_model: main.interactions
+  from_sql: main.interactions k JOIN main.interactions o ON o.interact_idol_pivot = k.interact_idol_pivot
+  grain: one (key interaction, candidate interaction) pair with the same idol
+  domains:
+  - temporal_analysis
+tables:
+- schema: main
+  table: fans
+  columns:
+  - name: status_tag
+    type: VARCHAR
+    description: 'Fan status: ''Active'' regular recent activity; ''Inactive'' no recent activity; ''VIP''
+      special high-value status granted on contribution and spending. Data also contains ''Blocked''.'
+  - name: reg_moment
+    type: VARCHAR
+    description: Registration date as text 'YYYY-MM-DD'; CAST(reg_moment AS DATE) works for all rows.
+  - name: tier_step
+    type: SMALLINT
+    description: Current loyalty tier level; denominator of Loyalty Progression Rate. Never 0/NULL.
+  - name: pts_val
+    type: BIGINT
+    description: Accumulated loyalty points; numerator of Loyalty Progression Rate.
+  - name: lang_pref
+    type: VARCHAR
+    description: 'Preferred language; NULL = not specified / platform default. Random case noise: compare
+      with LOWER().'
+  - name: demo_profile
+    type: JSON
+    description: 'JSON keys Age_Count, Gender_Type (Female/Male/Other/Undisclosed), Loc_Nation, Loc_Town,
+      Occu_Path, Interest_Set. Occupation Path = declared occupation category such as ''Professional'',
+      ''Student'', ''Creative'', ''Technical'' (data: Professional, Student, Creative, Other with random
+      case noise; NULL = not provided/privacy). 18 rows lack Age_Count. Extract as (demo_profile->>''Key'').'
+- schema: main
+  table: virtualidols
+  columns:
+  - name: kind_tag
+    type: VARCHAR
+    description: 'Idol type: ''2D'' traditionally animated characters; ''3D'' computer-generated models;
+      ''AI Generated'' created and/or operated by AI. Data also has ''Mixed Reality''.'
+  - name: deb_date
+    type: VARCHAR
+    description: Debut date as text 'DD/MM/YYYY' (use strptime(deb_date, '%d/%m/%Y')).
+- schema: main
+  table: interactions
+  columns:
+  - name: time_mark
+    type: TIMESTAMP
+    description: Interaction timestamp (2024-02-19 to 2025-02-18).
+  - name: sess_dur_min
+    type: SMALLINT
+    description: Session duration in minutes; denominator of FMI, CCI and CS. Never 0/NULL.
+  - name: watch_hrs
+    type: FLOAT
+    description: Hours of content watched; numerator of CCI.
+  - name: gift_metrics
+    type: JSON
+    description: Keys Gift_Tot, Gift_Freq, Fav_Gift_Tag, Gift_Val_Usd (all rows > 0). Gift Frequency classifies
+      how often a fan gives virtual gifts; documented categories 'Often', 'Frequently', 'Occasionally',
+      'Rarely', but stored values are 'Often', 'Frequent', 'Rarely', 'Never'.
+  - name: chat_activity
+    type: JSON
+    description: 'Keys Chat_Msg, Chat_Lang, Msg_Tone, Emoji_Count, Stk_Count. Msg_Tone = Interaction Tone,
+      overall sentiment of the fan''s chat messages; common values ''Positive'', ''Negative'', ''Neutral'',
+      ''Mixed'' (stored: Positive/Neutral/Negative).'
+  - name: act_kind
+    type: VARCHAR
+    description: Interaction type (vote, comment, gift, share, live stream) with random case noise; NULL
+      = classification failed. Compare with LOWER().
+- schema: main
+  table: membershipandspending
+  columns:
+  - name: memb_kind
+    type: VARCHAR
+    description: 'Membership type: Free, Basic, Premium, Diamond. Premium Member = memb_kind <> ''Free''.'
+  - name: memb_days
+    type: SMALLINT
+    description: Membership duration in days; one row is 0. Used for FFV, AD and estimated subscription
+      date.
+  - name: spend_usd
+    type: FLOAT
+    description: Total spending in USD (numerator of FFV, denominator of MAS).
+  - name: spend_freq
+    type: VARCHAR
+    description: 'Spending Frequency: ''Weekly'' or ''Daily'' = consistent spending; ''Occasional'' =
+      sporadic purchasing. Data also has ''Monthly''.'
+- schema: main
+  table: commerceandcollection
+  columns:
+  - name: coll_comp_rate
+    type: FLOAT
+    description: Collection completion rate as a percentage 0-100 (Collector Fan requires > 75).
+  - name: trade_level
+    type: VARCHAR
+    description: 'Trade Activity Level for digital or physical collectibles: ''High'', ''Medium'', ''Low''
+      reflect frequency and volume of trades. NULL = tracking incomplete or no trading.'
+- schema: main
+  table: socialcommunity
+  columns:
+  - name: comm_contrib
+    type: VARCHAR
+    description: 'Community Contribution Level: positive impact on the community, ''High'', ''Medium'',
+      ''Low'', often associated with group roles and content creation. Random case noise (e.g. ''HIgH'');
+      compare with LOWER().'
+  - name: network_stats
+    type: JSON
+    description: 'Keys Soc_Net_Sz, Foll_Count, Fing_Count (never 0), Friend_Con, Grp_Memb, Grp_Role. Community
+      Role Hierarchy (Grp_Role): ''Member'' standard participant, ''Moderator'' helps enforce rules, ''Leader''
+      manages the group; NULL = no specific role.'
+  - name: content_creation
+    type: JSON
+    description: Keys Art_Subs, Fic_Subs, Cover_Perf_Cnt, UGC_Val, Cont_Qual_Rate, Collab_Count; used
+      by Content Creator Score.
+- schema: main
+  table: eventsandclub
+  columns:
+  - name: evt_participation
+    type: JSON
+    description: Keys Off_Evt_Att, On_Evt_Att, Meet_Att, Conc_Att, Vote_Part_Rate (percent); used by Event
+      Participation Score.
+  - name: club_j_date
+    type: VARCHAR
+    description: Fan club join date as text 'YYYY/MM/DD'.
+- schema: main
+  table: loyaltyandachievements
+  columns:
+  - name: rew_tier
+    type: VARCHAR
+    description: 'Loyalty Reward Tier: ''Bronze'', ''Silver'', ''Gold'', ''Platinum'', each unlocking
+      different rewards.'
+  - name: repute_lv
+    type: VARCHAR
+    description: 'Reputation Level: standing and trustworthiness in the community; common levels ''Respected'',
+      ''Established'', ''Elite'' (data also ''New'').'
+  - name: achiev_stats
+    type: JSON
+    description: Keys Ach_Count, Badge_Coll, Spec_Titles, Rank_Pos, Infl_Score; Ach_Count feeds Achievement
+      Density.
+- schema: main
+  table: retentionandinfluence
+  columns:
+  - name: churn_flag
+    type: VARCHAR
+    description: 'Churn Risk Flag: ''High'' strong probability of churning soon; ''Medium'' moderate risk;
+      ''Low'' loyal and stable user.'
+  - name: infl_impact
+    type: JSON
+    description: Keys Cont_Reach, Viral_Cont, Trend_Part, React_Count, Hash_Use; used by CII and VPS.
+- schema: main
+  table: preferencesandsettings
+  columns:
+  - name: priv_set
+    type: VARCHAR
+    description: 'Privacy Setting: ''Public'' anyone can see the profile; ''Private'' visibility restricted
+      to approved connections. Data also has ''Friends Only''.'
+  - name: dev_count
+    type: SMALLINT
+    description: Number of registered devices (Power User requires > 2).
+  - name: last_log_dt
+    type: VARCHAR
+    description: Last login date as text 'YYYY.MM.DD'.
+  - name: usage_metrics
+    type: JSON
+    description: Keys Sess_Count, Time_Hrs, Avg_Daily_Min, Peak_Sess, Int_Consist, Plat_Stable; PSS uses
+      Int_Consist and Plat_Stable.
+- schema: main
+  table: supportandfeedback
+  columns:
+  - name: feedback_data
+    type: JSON
+    description: Keys Tech_Issue_Rpt, Supp_Tix, Fb_Subs, Feat_Req_Subs, Bug_Subs, Sat_Rate, NPS_Val (0-10).
+      SLS and NPS tiers use these.
+- schema: main
+  table: engagement
+  columns:
+  - name: lang_pref
+    type: VARCHAR
+    description: 'Language Preference Setting: ''Original'' = content in the idol''s primary language;
+      ''Translated'' = prefers translated versions; ''Both'' = either form.'
+- schema: main
+  table: moderationandcompliance
+  columns:
+  - name: mod_stat
+    type: VARCHAR
+    description: 'Moderation Status: ''Good Standing'' no issues; ''Warning'' minor violation; ''Restricted''
+      temporary limitations due to a serious violation.'

@@ -1,0 +1,158 @@
+{
+ "labor_certification_applications": {
+  "order": [
+   "reverse_logistics",
+   "solar_panel",
+   "exchange_traded_funds",
+   "planets_data",
+   "hulushows",
+   "insider_trading",
+   "museum_artifact",
+   "disaster_relief",
+   "organ_transplant",
+   "cold_chain_pharma_compliance",
+   "cross_border",
+   "crypto_exchange",
+   "mental_health",
+   "sports_events",
+   "cybermarket_pattern",
+   "virtual_idol",
+   "robot_fault_prediction",
+   "archeology_scan",
+   "households",
+   "fake_account",
+   "polar_equipment"
+  ],
+  "levels": {
+   "1x": {
+    "padding": 0,
+    "chars": 74957,
+    "multiple": 1.0
+   },
+   "2x": {
+    "padding": 2,
+    "chars": 205744,
+    "multiple": 2.74
+   },
+   "4x": {
+    "padding": 4,
+    "chars": 338050,
+    "multiple": 4.51
+   },
+   "8x": {
+    "padding": 7,
+    "chars": 816970,
+    "multiple": 10.9
+   },
+   "all": {
+    "padding": 21,
+    "chars": 1919160,
+    "multiple": 25.6
+   }
+  }
+ },
+ "reverse_logistics": {
+  "order": [
+   "labor_certification_applications",
+   "solar_panel",
+   "households",
+   "crypto_exchange",
+   "cold_chain_pharma_compliance",
+   "mental_health",
+   "cybermarket_pattern",
+   "virtual_idol",
+   "sports_events",
+   "disaster_relief",
+   "polar_equipment",
+   "organ_transplant",
+   "hulushows",
+   "robot_fault_prediction",
+   "exchange_traded_funds",
+   "fake_account",
+   "planets_data",
+   "cross_border",
+   "archeology_scan",
+   "museum_artifact",
+   "insider_trading"
+  ],
+  "levels": {
+   "1x": {
+    "padding": 0,
+    "chars": 61761,
+    "multiple": 1.0
+   },
+   "2x": {
+    "padding": 1,
+    "chars": 147237,
+    "multiple": 2.38
+   },
+   "4x": {
+    "padding": 4,
+    "chars": 311349,
+    "multiple": 5.04
+   },
+   "8x": {
+    "padding": 6,
+    "chars": 551708,
+    "multiple": 8.93
+   },
+   "all": {
+    "padding": 21,
+    "chars": 1926933,
+    "multiple": 31.2
+   }
+  }
+ },
+ "solar_panel": {
+  "order": [
+   "labor_certification_applications",
+   "reverse_logistics",
+   "hulushows",
+   "cross_border",
+   "households",
+   "mental_health",
+   "organ_transplant",
+   "museum_artifact",
+   "fake_account",
+   "cold_chain_pharma_compliance",
+   "archeology_scan",
+   "polar_equipment",
+   "planets_data",
+   "disaster_relief",
+   "exchange_traded_funds",
+   "cybermarket_pattern",
+   "sports_events",
+   "robot_fault_prediction",
+   "crypto_exchange",
+   "insider_trading",
+   "virtual_idol"
+  ],
+  "levels": {
+   "1x": {
+    "padding": 0,
+    "chars": 63773,
+    "multiple": 1.0
+   },
+   "2x": {
+    "padding": 1,
+    "chars": 149249,
+    "multiple": 2.34
+   },
+   "4x": {
+    "padding": 3,
+    "chars": 273937,
+    "multiple": 4.3
+   },
+   "8x": {
+    "padding": 6,
+    "chars": 570552,
+    "multiple": 8.95
+   },
+   "all": {
+    "padding": 21,
+    "chars": 1927172,
+    "multiple": 30.22
+   }
+  }
+ }
+}

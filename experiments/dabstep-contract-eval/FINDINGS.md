@@ -1578,6 +1578,159 @@ turn limit. The family counts and the `fee_ids_by_at_aci` reading are
 exploratory. Traces: `~/data/dce-held-results/exp5b/`, `exp5-qwen/`,
 `exp5c/`.
 
+### Gaps the documentation leaves open: predictions (32)-(36)
+
+Experiments 4 to 5c held the knowledge fixed and varied its delivery. The
+author of those contracts had complete documentation. Experiment 4b asks the
+question a deployment faces: when the documentation leaves something open,
+does an author who can query the data recover it? And is the contract's gain
+then the author's knowledge? Design: `docs/superpowers/specs/
+2026-10-19-experiment-4b-design.md`.
+
+Experiment 4's three databases and 60 questions, each KB opened by gaps.
+G1 is the rule table's wildcard stored as a sentinel, in all three
+databases. G2 is a silent encoding of a quantity the C questions read: in
+reverse_logistics a score stored one higher, in solar_panel a fraction
+stored where the KB implies a percentage. G3 removes the precedence among
+matching rules from reverse_logistics' KB. Blind raters labelled the gaps
+(`prep/procedures4b/subsets.json`):
+- settled by the data: solar G1 and G2 (20 questions);
+- split: labor G1, reverse_logistics G1 (through R06) and G2 (21);
+- convention-only: G3 (9);
+- no gap: labor's C questions (10).
+
+Settled and split together form the data-informed subset: 41 questions in
+five gap clusters. `dce.author` drew three contracts per database with the
+data open and one without.
+
+The six arms ran together in each repeat:
+- `schema_only`: no KB;
+- `manual_gap`: the gapped KB;
+- `manual_full`: the complete KB;
+- `contract_gap`: the governed contract from draw 1;
+- `manual_noted`: the gapped KB plus draw 1's resolutions, written as notes
+  by a writer and checked by a checker;
+- `contract_text`: the same contract's files in the prompt over plain tools.
+
+Models: gpt-6-luna, qwen3.8-27b and gpt-6-sol, k=3. Run commit `a6342d0`
+(tag `exp4b-run`); results `e1467c2`; `analysis/procedures_gap.py`.
+
+**Recovery, scored before any agent ran** (`contracts-procedures4b/
+RECOVERY.md`). All four predictions hold.
+- **(32)** 12 of 15 data gap-draws were recovered.
+- **(32g)** By label: settled 6 of 6, split 6 of 9, convention-only 0 of 3.
+- **(32c)** The no-data control recovered none of five.
+- **(33)** Every draw, the no-data control included, resolved G3 as the
+  lowest `rule_id`; the gold is most specific wins.
+
+The three split misses are all reverse_logistics G2. Each data draw saw
+that the score runs from 2 to 11 and kept it as stored.
+
+| accuracy | schema_only | manual_gap | manual_full | contract_gap | manual_noted | contract_text |
+|---|---:|---:|---:|---:|---:|---:|
+| data-informed (41), pooled | 10.8% | 47.7% | 97.6% | 74.5% | 75.3% | 74.0% |
+| settled (20) | 7.2% | 59.4% | 98.3% | 99.4% | 100.0% | 98.9% |
+| split (21) | 14.3% | 36.5% | 96.8% | 50.8% | 51.9% | 50.3% |
+| convention-only (9) | 2.5% | 0.0% | 97.5% | 0.0% | 0.0% | 0.0% |
+| no gap (10) | 0.0% | 100.0% | 98.9% | 100.0% | 100.0% | 100.0% |
+| gpt-6-luna, data-informed | 10.6% | 25.2% | 95.9% | 75.6% | 75.6% | 74.8% |
+| qwen3.8-27b, data-informed | 8.1% | 68.3% | 98.4% | 72.4% | 74.8% | 71.5% |
+| gpt-6-sol, data-informed | 13.8% | 49.6% | 98.4% | 75.6% | 75.6% | 75.6% |
+
+- **(34) holds: the gaps bite.** `manual_full` beats `manual_gap` by 49.9
+  points, 38 tasks to 1 (p = 7e-11). It holds on every model (+70.7,
+  +30.1, +48.8) and every cluster.
+- **(35) holds.** `contract_gap` beats `manual_gap` by 26.8 points, 28 tasks
+  to 1 (p = 6e-8). It holds on every model (+50.4, +4.1, +26.0) and on four
+  of five clusters. The fifth is reverse_logistics G2, where both score 0.
+- **(36) holds: the gain is the author's knowledge.** The knowledge share
+  is 1.03, with 95% interval [0.98, 1.35] over gap clusters. It is 1.00 on
+  luna and on sol. On Qwen it is 1.60, over a denominator of 4.1 points.
+- **Form and tools add nothing here.** `contract_text` against
+  `manual_noted` is -1.4 points (1 task to 3); `contract_gap` against
+  `contract_text` is +0.5 (2 to 0). The three knowledge-equal arms tie on
+  every label, and all knowledge arms tie on the no-gap control.
+- **The author's misses travel with the contract.** On reverse_logistics
+  G2 and on G3, every arm built from draw 1 scores 0 and `manual_full`
+  97-98%. That is the whole of the contract arms' 23-point deficit to
+  complete documentation on the data-informed subset (-23.0 points, 6 tasks
+  to 12). It also covers G3's nine questions (0 to 9).
+
+As fixed in the run commit, (35) and (36) holding means **the DABStep
+decomposition replicates on new domains when the knowledge has to be
+recovered**. The contract carries what its author recovered, no more and no
+less. What the data settles is recovered in every draw. What the data only
+suggests is recovered two times in three. A convention the data cannot
+reveal was missed in every draw. The recovery failures read as forecast:
+the contract does no better than the gapped KB where the author kept a
+wrong reading.
+
+Qwen reads the gapped KB better than the GPT models: 68.3% against 25.2%
+and 49.6%. With prose it runs 8-12 `execute_sql` calls a run, against 2-5
+for the GPT models, and so finds some gaps itself. That leaves the contract
+only 4.1 points to add on Qwen, and a share computed over 4.1 points is not
+informative beyond its sign.
+
+**One question explained: reverse_logistics R06.** R06 is the only question
+in the reverse_logistics G1 cluster. `schema_only` gets it right in all six
+luna and sol runs, and `manual_gap` gets it wrong in all six. `manual_gap`
+reads `ANY` as a literal (the gap). `schema_only` sees `ANY` in the data and
+treats it as a wildcard. It also uses a different quantity: the customer
+profile's `total_returns` (20) where the KB means the returns that month
+(13). Both counts fall in the rule table's 8-or-more band, so the matching
+set and the verdict come out the same. Its 78% there is a coincidence of a
+set-valued answer, not knowledge. Luna's one `manual_full` miss is a SQL
+slip: it computes the monthly count with a window inside a CTE already
+filtered to the one case, so the count is 1.
+
+**Efficiency** (reported, not predicted; per model, since prices differ).
+The mean run on the data-informed subset; input is fresh plus cached.
+
+| model | arm | turns | input | m$ a run | m$ a correct answer |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | manual_full | 4.1 | 55.1k | 2.02 | 2.11 |
+| | contract_gap | 5.2 | 63.9k | 2.33 | 3.08 |
+| | manual_noted | 3.7 | 55.6k | 1.93 | 2.55 |
+| | contract_text | 2.6 | 73.8k | 1.82 | 2.43 |
+| qwen3.8-27b | manual_full | 10.3 | 240.7k | 1.03 | 1.04 |
+| | contract_gap | 5.2 | 71.9k | 0.36 | 0.50 |
+| | manual_noted | 8.3 | 180.6k | 0.87 | 1.16 |
+| | contract_text | 3.2 | 98.8k | 0.30 | 0.42 |
+| gpt-6-sol | manual_full | 4.4 | 57.6k | 31.83 | 32.36 |
+| | contract_gap | 5.2 | 62.7k | 41.55 | 54.96 |
+| | manual_noted | 3.8 | 56.5k | 32.10 | 42.45 |
+| | contract_text | 3.8 | 109.2k | 42.68 | 56.45 |
+
+- **Where input is cached** (luna, sol), the static prompts are cheapest.
+  On luna `contract_text` and the notes tie (cheaper on 25 tasks of 41,
+  p = 0.21); on sol the notes win (`contract_text` is cheaper on 3). The
+  governed `contract_gap` costs more than the notes on 37 of 41 tasks on
+  luna and 40 of 41 on sol, about 20% and 30% more a run.
+- **Where it is not** (Qwen; output metered only), both contract forms cost
+  under half of the prose. `contract_gap` is cheaper than `manual_noted` on
+  39 of 41 tasks. That comes from behaviour, not context size: with the
+  contract, Qwen stops exploring. It runs 5.2 and 3.2 turns against 8.3,
+  and a sixth of the reasoning tokens.
+- **Progressive disclosure saves input but not money, at this scale.**
+  `contract_gap` fetches contract text on demand: about four lookups a run.
+  That brings 13% less input into context than `contract_text` on luna,
+  27% less on Qwen and 43% less on sol. It also takes more turns on 39 or
+  more of 41 tasks on every model. In dollars it costs more on luna (37 of
+  41 tasks) and Qwen (32 of 41), and ties on sol (cheaper on 20, dearer on
+  21). The fetched
+  text is billed fresh, and each extra turn re-sends the prefix. One
+  contract of three databases is too small for the saving to pay. The test
+  at a size where it should is gap 8 of `docs/paper-plan.md`.
+- Every contract arm reasons less than the prose arms on every model:
+  luna 311 and 297 reasoning tokens against 491 for the notes and 847 for
+  the gapped KB.
+
+Run health: three repeats per model at about $0.86 (luna), $15.30 (sol)
+and $0.38 (Qwen, output only) each. Three Qwen runs ended in an error and
+were retried; one Qwen run ended at the turn limit and counts as wrong. The
+R06 reading and the efficiency figures are exploratory. Traces:
+`~/data/dce-held-results/exp4b/`.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

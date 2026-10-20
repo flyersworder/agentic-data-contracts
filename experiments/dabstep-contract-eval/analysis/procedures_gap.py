@@ -47,6 +47,13 @@ against contract_text (tools); the G3 subset descriptively; manual_full
 against schema_only (manipulation check). Graded as LiveSQLBench is; there
 is no separate end-to-end view for SQL answers.
 
+Also reported, per model since prices differ: what the mean run spends --
+turns, tool calls, the governed arm's lookups of contract text, fresh and
+cached input, output and reasoning tokens, dollars, and dollars per correct
+answer -- with sign tests over tasks on dollars and turns between the arms
+that carry the same knowledge. qwen3.8-27b's route meters output only and
+has no cache tier.
+
 Run:  uv run python analysis/procedures_gap.py
 """
 
@@ -87,7 +94,12 @@ GRADIENT = ("settled", "split", "convention-only")
 RESAMPLES = 10_000
 SEED = 2026
 
+# The governed arm's tools that fetch contract text on demand.
+LOOKUPS = ("list_metrics", "lookup_metric", "lookup_domain", "lookup_relationships")
+METRICS = ("turns", "calls", "lookups", "fresh", "cached", "output", "reasoning", "usd")
+
 Score = dict[str, Counter[str]]
+Runs = dict[str, dict[str, list[dict]]]
 
 
 def label_of(tags: list[str], labels: dict[str, list[str]]) -> str:
@@ -131,6 +143,56 @@ def scores(results: Path, pattern: str) -> Score:
                 r["verdict"] == "correct"
             )
     return score
+
+
+def run_costs(results: Path, pattern: str) -> Runs:
+    """arm -> task -> one entry per run over the three repeats: its cost
+    (input split into fresh and cached) and whether it was correct."""
+    out: Runs = {}
+    for i in (1, 2, 3):
+        for r in load(results / pattern.format(i)):
+            calls = r["tool_calls"]
+            cached = r.get("cached_tokens") or 0
+            run = {
+                "turns": r["turns"],
+                "calls": len(calls),
+                "lookups": sum(c in LOOKUPS for c in calls),
+                "fresh": r["input_tokens"] - cached,
+                "cached": cached,
+                "output": r["output_tokens"],
+                "reasoning": r.get("reasoning_tokens") or 0,
+                "usd": r["usd"],
+                "correct": r["verdict"] == "correct",
+            }
+            out.setdefault(r["arm"], {}).setdefault(str(r["task_id"]), []).append(run)
+    return out
+
+
+def efficiency(by_arm: Runs, tasks: list[str]) -> dict[str, dict]:
+    """arm -> the mean run's METRICS over `tasks`, and the dollars spent per
+    correct answer (None when no run was correct)."""
+    out = {}
+    for arm, per in by_arm.items():
+        rs = [r for t in tasks for r in per.get(t, [])]
+        correct = sum(r["correct"] for r in rs)
+        out[arm] = {k: sum(r[k] for r in rs) / len(rs) for k in METRICS}
+        out[arm]["usd_per_correct"] = (
+            sum(r["usd"] for r in rs) / correct if correct else None
+        )
+    return out
+
+
+def cheaper(by_arm: Runs, a: str, b: str, tasks, key: str = "usd"):
+    """Tasks on which a's mean run spends less `key` than b's, tasks on
+    which it spends more, and the two-sided sign test."""
+
+    def mean(arm: str, t: str) -> float:
+        return sum(r[key] for r in by_arm[arm][t]) / len(by_arm[arm][t])
+
+    up = sum(mean(a, t) < mean(b, t) for t in tasks)
+    down = sum(mean(a, t) > mean(b, t) for t in tasks)
+    n = up + down
+    return up, down, binomtest(up, n, 0.5).pvalue if n else 1.0
 
 
 def pool(by_model: dict[str, Score]) -> Score:
@@ -377,6 +439,37 @@ def main() -> None:
                 f"   {name}: {a} vs {b}: {_gap(pooled, a, b, among) / runs:+.1%}, "
                 f"{up} / {down}, two-sided p = {p:.2g}"
             )
+
+    print("== efficiency, per model (prices differ), the mean run")
+    every = sorted(tags)
+    for m, pattern in FILES.items():
+        if m not in by_model:
+            continue
+        by_arm = run_costs(RESULTS, pattern)
+        for among, name in ((informed, "data-informed"), (every, "all")):
+            print(f"   {m}, {name} ({len(among)}):")
+            for arm, e in efficiency(by_arm, among).items():
+                per_correct = e["usd_per_correct"]
+                print(
+                    f"      {arm:14s} turns {e['turns']:4.1f}  calls "
+                    f"{e['calls']:4.1f}  lookups {e['lookups']:3.1f}  fresh "
+                    f"{e['fresh']:7,.0f}  cached {e['cached']:7,.0f}  output "
+                    f"{e['output']:6,.0f}  reasoning {e['reasoning']:6,.0f}  "
+                    f"m$ {1000 * e['usd']:6.2f}  m$/correct "
+                    + ("-" if per_correct is None else f"{1000 * per_correct:.2f}")
+                )
+        for a, b in (
+            ("contract_gap", "contract_text"),
+            ("contract_gap", "manual_noted"),
+            ("contract_text", "manual_noted"),
+            ("contract_gap", "manual_full"),
+        ):
+            for key in ("usd", "turns"):
+                up, down, p = cheaper(by_arm, a, b, informed, key)
+                print(
+                    f"      data-informed, {a} spends less {key} than {b}: "
+                    f"{up} / {down}, two-sided p = {p:.2g}"
+                )
 
 
 if __name__ == "__main__":

@@ -200,3 +200,92 @@ def test_scores_count_correct_runs_per_task_and_model(tmp_path, n_rows):
     score = pg.scores(tmp_path, "f-r{}.jsonl")
     assert score["manual_gap"]["t1"] == 3
     assert score["manual_gap"]["t2"] == 0
+
+
+def _write_runs(tmp_path, rows):
+    base = {"model": "m", "gold": "x", "cached_tokens": 0, "reasoning_tokens": 0}
+    for i in (1, 2, 3):
+        (tmp_path / f"f-r{i}.jsonl").write_text(
+            "\n".join(
+                json.dumps({**base, **r, "order": n}) for n, r in enumerate(rows)
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_runs_carry_the_cost_of_each_run(tmp_path):
+    _write_runs(
+        tmp_path,
+        [
+            {
+                "task_id": "t1",
+                "arm": "contract_gap",
+                "verdict": "correct",
+                "turns": 4,
+                "tool_calls": ["lookup_metric", "lookup_domain", "run_query"],
+                "input_tokens": 1000,
+                "cached_tokens": 600,
+                "output_tokens": 50,
+                "reasoning_tokens": 20,
+                "usd": 0.002,
+            }
+        ],
+    )
+    (run, *_) = pg.run_costs(tmp_path, "f-r{}.jsonl")["contract_gap"]["t1"]
+    assert run == {
+        "turns": 4,
+        "calls": 3,
+        "lookups": 2,
+        "fresh": 400,
+        "cached": 600,
+        "output": 50,
+        "reasoning": 20,
+        "usd": 0.002,
+        "correct": True,
+    }
+
+
+def _run(usd, correct, turns=1):
+    return {
+        "turns": turns,
+        "calls": 0,
+        "lookups": 0,
+        "fresh": 0,
+        "cached": 0,
+        "output": 0,
+        "reasoning": 0,
+        "usd": usd,
+        "correct": correct,
+    }
+
+
+def test_efficiency_is_the_mean_run_and_the_cost_of_a_correct_answer():
+    by_arm = {
+        "a": {"t1": [_run(1.0, True), _run(3.0, False)], "t2": [_run(2.0, True)]},
+        "b": {"t1": [_run(1.0, False)], "t2": [_run(1.0, False)]},
+    }
+    eff = pg.efficiency(by_arm, ["t1", "t2"])
+    assert eff["a"]["usd"] == 2.0
+    assert eff["a"]["usd_per_correct"] == 3.0
+    # Only the tasks asked for count.
+    assert pg.efficiency(by_arm, ["t2"])["a"]["usd"] == 2.0
+    # No correct answer: no cost per correct answer.
+    assert eff["b"]["usd_per_correct"] is None
+
+
+def test_cheaper_compares_each_tasks_mean_run():
+    by_arm = {
+        "a": {
+            "t1": [_run(1.0, True)],
+            "t2": [_run(1.0, True)],
+            "t3": [_run(5.0, True)],
+        },
+        "b": {
+            "t1": [_run(2.0, True)],
+            "t2": [_run(3.0, True)],
+            "t3": [_run(5.0, True)],
+        },
+    }
+    assert pg.cheaper(by_arm, "a", "b", ["t1", "t2", "t3"]) == (2, 0, 0.5)
+    by_arm["a"]["t1"] = [_run(1.0, True, turns=9)]
+    assert pg.cheaper(by_arm, "a", "b", ["t1", "t2"], "turns")[:2] == (0, 1)

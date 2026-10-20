@@ -39,6 +39,7 @@ from dce.compile.emit import render_compiled
 from dce.compile.entries import KBEntry
 from dce.compile.inputs import CompileInputs
 from dce.frozen import load_contract_at
+from dce.scale import insert_mid
 from dce.tools import ArmSetup, _ungoverned_tools, governed_arm
 
 DEFAULT_DATA = Path.home() / "data" / "livesqlbench"
@@ -94,6 +95,47 @@ CONTRACT_TEXT_NOTE = (
     "They define the tables, the metrics as SQL, and how the domain's rules "
     "are to be read."
 )
+
+#: Experiment 6 (docs/superpowers/specs/2026-10-20-experiment-6-disclosure-
+#: scale-design.md): the base contract diluted with other databases'
+#: contracts, at five sizes. Each arm-level is an arm of its own,
+#: `<kind>_<level>`: the governed arm; the merged files in the prompt; the
+#: same with the base first (the position control); and the prose, the base's
+#: KB among the padding databases' KBs. Merged contracts live under
+#: `contracts-scale/merged/<level>/` (`first/<level>/` for the control),
+#: `levels.json` names each level's padding databases in order, and a padding
+#: database's KB is `LSB_DATA/padding/<db>/<db>_kb.jsonl` unless the data
+#: directory holds it as one of its own.
+SCALE_ROOT = DEFAULT_CONTRACTS.parent.parent / "contracts-scale"
+SCALE_LEVELS: tuple[str, ...] = ("1x", "2x", "4x", "8x", "all")
+SCALE_KINDS: tuple[str, ...] = (
+    "contract_scaled",
+    "contract_text_scaled",
+    "contract_text_first",
+    "manual_scaled",
+)
+SCALE_ARMS: tuple[str, ...] = tuple(
+    f"{kind}_{level}" for kind in SCALE_KINDS for level in SCALE_LEVELS
+)
+SCALE_GOVERNED: frozenset[str] = frozenset(
+    f"contract_scaled_{level}" for level in SCALE_LEVELS
+)
+#: The scale arms' runaway guard, never binding before `REQUEST_LIMIT`: 50
+#: requests of the largest level (about 450k tokens) and their growth.
+SCALE_TOKEN_BUDGET = 35_000_000
+#: The most characters a token holds in these prompts (3.9-4.2 measured on
+#: the three routes), with margin: a request reporting fewer tokens than its
+#: prompt's characters over this was truncated by the route.
+SCALE_CHARS_PER_TOKEN_MAX = 6
+
+
+def _scale_kind(arm: str) -> tuple[str, str] | None:
+    """(kind, level) of a scale arm, else None."""
+    if arm not in SCALE_ARMS:
+        return None
+    kind, level = arm.rsplit("_", 1)
+    return kind, level
+
 
 #: Names the grading rules on every row. Bump it whenever `lsb_grade` changes
 #: what counts as correct.
@@ -229,9 +271,10 @@ class LiveSQLBench:
         *CORRECTED_ARMS,
         *STYLED_ARMS,
         *GAP_ARMS,
+        *SCALE_ARMS,
     )
     governed_arms: frozenset[str] = frozenset(
-        {"contract", *EXTRA_CONTRACTS, "contract_corrected"}
+        {"contract", *EXTRA_CONTRACTS, "contract_corrected", *SCALE_GOVERNED}
     )
     roles = {
         "baseline": "schema_only",
@@ -255,13 +298,21 @@ class LiveSQLBench:
         gold: dict,
         contracts: Path = DEFAULT_CONTRACTS,
         extra_contracts: dict[str, Path] | None = None,
+        scale: Path = SCALE_ROOT,
     ) -> None:
         self._data = data
         self._contracts = contracts
+        self._scale = scale
         self._roots = {
             "contract": contracts,
             "contract_corrected": data / "corrected" / "contracts",
             **(extra_contracts or EXTRA_CONTRACTS),
+            **{
+                arm: scale / ("first" if k == "contract_text_first" else "merged") / lv
+                for arm in SCALE_ARMS
+                for k, lv in [arm.rsplit("_", 1)]
+                if k != "manual_scaled"
+            },
         }
         self._records = records  # (public task, frozen entry), in file order
         self._gold = gold
@@ -274,6 +325,7 @@ class LiveSQLBench:
         *,
         extra_contracts: dict[str, Path] | None = None,
         dbs: tuple[str, ...] | list[str] | None = None,
+        scale: Path = SCALE_ROOT,
     ) -> LiveSQLBench:
         frozen = json.loads(
             (data / "tasks_frozen_full_v1.json").read_text(encoding="utf-8")
@@ -325,6 +377,7 @@ class LiveSQLBench:
             gold=gold,
             contracts=contracts,
             extra_contracts=extra_contracts,
+            scale=scale,
         )
 
     @classmethod
@@ -353,6 +406,12 @@ class LiveSQLBench:
                 "arms load, one folder per database (default: the compiled ones)"
             ),
         )
+        parser.add_argument(
+            "--lsb-scale",
+            type=Path,
+            default=SCALE_ROOT,
+            help="(livesqlbench) experiment 6's merged contracts and levels.json",
+        )
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> LiveSQLBench:
@@ -360,6 +419,7 @@ class LiveSQLBench:
             args.lsb_data,
             contracts=getattr(args, "lsb_contracts", DEFAULT_CONTRACTS),
             dbs=getattr(args, "lsb_dbs", None),
+            scale=getattr(args, "lsb_scale", SCALE_ROOT),
         )
 
     def tasks(self) -> list[Task]:
@@ -402,6 +462,15 @@ class LiveSQLBench:
         return load_contract_at(self._contract_dir(db, arm) / "contract.yml")
 
     def build_arm(self, arm: str, task: Task, db: Path) -> ArmSetup:
+        setup = self._build_arm(arm, task, db)
+        if _scale_kind(arm):
+            setup.token_budget = SCALE_TOKEN_BUDGET
+            setup.min_input_tokens = (
+                len(setup.system_prompt) // SCALE_CHARS_PER_TOKEN_MAX
+            )
+        return setup
+
+    def _build_arm(self, arm: str, task: Task, db: Path) -> ArmSetup:
         name = task.meta["db"]
         prompt = self._context(name)
         if arm in self.governed_arms:
@@ -409,8 +478,14 @@ class LiveSQLBench:
             return governed_arm(
                 prompt, db, self._contract(name, arm), init_sql=AGENT_INIT_SQL
             )
-        if arm == "contract_text":
-            folder = self._contract_dir(name, "contract_gap")
+        kind = (_scale_kind(arm) or ("", ""))[0]
+        if arm == "contract_text" or kind in (
+            "contract_text_scaled",
+            "contract_text_first",
+        ):
+            folder = self._contract_dir(
+                name, "contract_gap" if arm == "contract_text" else arm
+            )
             files = "\n\n".join(
                 f"### {f}\n\n```yaml\n"
                 f"{(folder / f).read_text(encoding='utf-8').strip()}\n```"
@@ -435,6 +510,8 @@ class LiveSQLBench:
                 prompt += "\n\n## Compiled definitions\n\n" + render_compiled(
                     self._contract_dir(name)
                 )
+        elif kind == "manual_scaled":
+            prompt += "\n\n" + self._scaled_kb(name, arm.rsplit("_", 1)[1])
         elif arm != "schema_only":
             raise ValueError(f"unknown arm: {arm!r}; expected one of {self.arms}")
         return ArmSetup(prompt, _ungoverned_tools(db, init_sql=AGENT_INIT_SQL), None)
@@ -447,6 +524,31 @@ class LiveSQLBench:
         if arm == "manual_full":
             return self._data / "full" / "kb" / f"{db}_kb.jsonl"
         return self._db_dir(db) / f"{db}_kb.jsonl"
+
+    def _levels(self) -> dict:
+        return json.loads((self._scale / "levels.json").read_text(encoding="utf-8"))
+
+    def _padding_kb(self, db: str) -> Path:
+        own = self._db_dir(db) / f"{db}_kb.jsonl"
+        return own if own.is_file() else self._data / "padding" / db / f"{db}_kb.jsonl"
+
+    def _scaled_kb_files(self, db: str, level: str) -> list[tuple[str, Path]]:
+        """(database, KB file) for the base and each padding database of
+        `level`, in padding order, base first."""
+        padding = self._levels()[db][level]
+        return [(db, self._kb_path(db, "manual_prompt"))] + [
+            (p, self._padding_kb(p)) for p in padding
+        ]
+
+    def _scaled_kb(self, db: str, level: str) -> str:
+        """The base's KB among the padding databases' KBs, each under a
+        heading of its database's name, the base at the padding's size
+        midpoint as in the merged contract."""
+        base, *padding = [
+            f"## Knowledge base: {name}\n\n" + render_manual(_read_jsonl(path))
+            for name, path in self._scaled_kb_files(db, level)
+        ]
+        return "\n\n".join(insert_mid(padding, [base]))
 
     def _notes_path(self, db: str) -> Path:
         return self._contract_dir(db, "contract_gap") / "notes.md"
@@ -473,6 +575,14 @@ class LiveSQLBench:
         if arm == "contract_text":
             joined += (
                 f"\ncontract {contract_digest(self._contract(name, 'contract_gap'))}"
+            )
+        kind = (_scale_kind(arm) or ("", ""))[0]
+        if kind in ("contract_text_scaled", "contract_text_first"):
+            joined += f"\ncontract {contract_digest(self._contract(name, arm))}"
+        if kind == "manual_scaled":
+            joined += f"\narm {arm}" + "".join(
+                f"\nkb {p} {_sha256(path)}"
+                for p, path in self._scaled_kb_files(name, arm.rsplit("_", 1)[1])
             )
         if arm == "manual_compiled":
             joined += f"\ncontract {contract_digest(self._contract(name))}"
@@ -537,8 +647,16 @@ class LiveSQLBench:
                 )
         if {"contract_text", "manual_noted"} & set(arms) and "contract_gap" not in arms:
             self._check_contracts("contract_gap", dbs, appendix=False)
+        for arm in arms:
+            if (_scale_kind(arm) or ("", ""))[0] == "manual_scaled":
+                self._check_scaled_kb(arm, dbs)
         for arm in ("contract", *self.extra_arms):
-            if arm == "manual_corrected" or arm in STYLED_ARMS or arm in GAP_ARMS:
+            if (
+                arm == "manual_corrected"
+                or arm in STYLED_ARMS
+                or arm in GAP_ARMS
+                or arm.startswith("manual_scaled_")
+            ):
                 continue
             if arm == "contract":
                 if not {"manual_compiled", "contract"} & set(arms):
@@ -546,6 +664,19 @@ class LiveSQLBench:
             elif arm not in arms:
                 continue
             self._check_contracts(arm, dbs, appendix="manual_compiled" in arms)
+
+    def _check_scaled_kb(self, arm: str, dbs: list[str]) -> None:
+        level = arm.rsplit("_", 1)[1]
+        try:
+            files = [f for db in dbs for f in self._scaled_kb_files(db, level)]
+        except (OSError, KeyError, ValueError) as exc:
+            raise SystemExit(
+                f"{arm}: no level {level} in {self._scale / 'levels.json'} "
+                f"for {dbs}: {type(exc).__name__}: {exc}"
+            ) from exc
+        missing = [str(path) for _, path in files if not path.is_file()]
+        if missing:
+            raise SystemExit(f"{arm}: KB files missing: {missing}")
 
     def _check_contracts(self, arm: str, dbs: list[str], *, appendix: bool) -> None:
         missing, broken = [], []

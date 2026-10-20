@@ -80,6 +80,7 @@ def test_class_attributes(bench):
         "manual_full",
         "manual_noted",
         "contract_text",
+        *livesqlbench_module.SCALE_ARMS,
     )
     assert LiveSQLBench.governed_arms == frozenset(
         {
@@ -88,6 +89,7 @@ def test_class_attributes(bench):
             "contract_authored",
             "contract_gap",
             "contract_corrected",
+            *livesqlbench_module.SCALE_GOVERNED,
         }
     )
     assert LiveSQLBench.roles == {

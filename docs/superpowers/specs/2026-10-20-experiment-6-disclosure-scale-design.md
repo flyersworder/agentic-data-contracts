@@ -409,3 +409,16 @@ Made in revision, from the builder check and the methods review:
   every simulation.
 - **Checks** (`CHECKS.md`): all pass. The governed prompt grows from about
   3k characters at 1x to about 57k at "all".
+
+## Amendment during the run (2026-10-20, 12:05, after 33 of gpt-6-sol's runs)
+
+gpt-6-sol's `contract_text_scaled` at 8x and all is dropped for cost, by the
+user's decision. On sol's route those two arm-levels cost about $1.55 a task
+(about $280 over three repeats, more than the rest of sol's arms together).
+They enter no registered prediction: (37)-(39) are tested at the common top,
+4x, and (40) concerns Qwen. What is lost is sol's own top level, a secondary
+report; gpt-6-luna's is kept. sol's job was restarted with 11 arm-levels; the
+four rows of the dropped arm-levels it had finished (two tasks, all correct)
+stay in its file, are reported as partial, and enter no table or test. Seen
+before the decision: sol's first 33 runs (all correct) and their costs, and
+the first rows of the other two models (175 of 176 correct).

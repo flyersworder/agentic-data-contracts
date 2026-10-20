@@ -39,6 +39,7 @@ the row. That asymmetry is deliberate and is the same reasoning as
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -50,6 +51,12 @@ from pathlib import Path
 #: is marked, never silently short.
 MAX_TRACE_BYTES: int = 8_000_000
 
+#: A system prompt longer than this is kept as its length and sha256, not
+#: its text. Experiment 6's text arms carry up to 1.9M characters of contract
+#: there, and the row's arm digest already pins the files it was built from;
+#: the transcript's worth is the tool calls and returns, all kept.
+MAX_PROMPT_CHARS: int = 250_000
+
 _SLUG = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -57,6 +64,20 @@ def _slug(value: str) -> str:
     """Filesystem-safe token. Model ids carry `/`, which would otherwise
     silently create directories (`z-ai/glm-5.3-flash` -> a `z-ai` dir)."""
     return _SLUG.sub("-", str(value)).strip("-") or "unknown"
+
+
+def _digest_long_prompts(messages: list) -> list:
+    for message in messages:
+        for part in message.get("parts") or []:
+            text = part.get("content")
+            if (
+                part.get("part_kind") == "system-prompt"
+                and isinstance(text, str)
+                and len(text) > MAX_PROMPT_CHARS
+            ):
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                part["content"] = f"[system prompt: {len(text)} chars, sha256 {digest}]"
+    return messages
 
 
 def drop_provider_urls(value):
@@ -100,8 +121,10 @@ def write_trace(
         directory.mkdir(parents=True, exist_ok=True)
         try:
             payload = json.dumps(
-                drop_provider_urls(
-                    ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+                _digest_long_prompts(
+                    drop_provider_urls(
+                        ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+                    )
                 ),
                 ensure_ascii=False,
                 separators=(",", ":"),

@@ -388,3 +388,30 @@ def test_a_written_trace_carries_no_provider_url(tmp_path):
     assert rel is not None
     text = json.dumps(read_trace(tmp_path / rel))
     assert "internal.example" not in text
+
+
+def test_a_very_long_system_prompt_is_kept_as_its_digest(tmp_path: Path):
+    """Experiment 6's text arms carry up to 1.9M characters of contract in
+    the system prompt; the row's arm digest reproduces it, so the trace keeps
+    its sha256 and length and every tool call and return."""
+    import hashlib
+
+    from dce.trace import MAX_PROMPT_CHARS
+    from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+
+    long = "x" * (MAX_PROMPT_CHARS + 1)
+    short = "base prompt"
+    for prompt in (long, short):
+        messages = [
+            ModelRequest(parts=[SystemPromptPart(content=prompt), UserPromptPart("q")]),
+            *_messages(),
+        ]
+        write_trace(tmp_path / "t", task_id="1", arm="a", model="m", messages=messages)
+        trace = read_trace(tmp_path / "t" / trace_name("1", "a", "m"))
+        system = trace[0]["parts"][0]["content"]
+        if prompt is long:
+            digest = hashlib.sha256(long.encode("utf-8")).hexdigest()
+            assert system == f"[system prompt: {len(long)} chars, sha256 {digest}]"
+        else:
+            assert system == short
+        assert trace[1]["parts"][0]["args"]["sql"].startswith("SELECT")

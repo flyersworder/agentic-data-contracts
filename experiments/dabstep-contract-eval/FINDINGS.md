@@ -271,6 +271,11 @@ sign enforced:
 So on Qwen it is small in either direction, and its sign depends on the
 scoring view. gpt-6-sol's panel has no affected rows.
 
+The repeats vary, even on Qwen at temperature 0 with seed 0. Between any
+two repeats, 12.5-14.2% of Qwen's task-arm verdicts change, against
+8.3-9.7% on gpt-6-sol and 11.7-12.0% on gpt-6-luna (experiment 5). Serving
+is not deterministic, so three repeats measure variance on every model.
+
 ## The result is entirely in the hard tasks
 
 On easy tasks the four arms are within noise of each other on all four runs
@@ -1643,6 +1648,36 @@ a repeat, no errors; one `manual_summed` run per Qwen repeat ended at the
 turn limit. The family counts and the `fee_ids_by_at_aci` reading are
 exploratory. Traces: `~/data/dce-held-results/exp5b/`, `exp5-qwen/`,
 `exp5c/`.
+
+### The note on tasks nobody read (exploratory)
+
+`SUM_NOTE` was written after reading transcripts of 34 rule-matching tasks:
+those `contract_text` solved and `manual_resolved` missed in both of
+experiment 5's first two gpt-6-luna repeats. (28) was then tested on all
+199 rule-matching tasks, those 34 included. A reviewer's objection follows:
+the note may be fitted to the tasks that inspired it.
+`analysis/heldout_note.py` rebuilds the 34 from the rows and repeats each
+comparison on the other 165, which no transcript reading touched. No
+Qwen transcript was read before the note was written, so on Qwen all 199
+are unseen in that sense.
+
+| on the 165 never read | gpt-6-luna | Qwen 3.8 |
+|---|---|---|
+| `manual_summed` vs `manual_resolved` | +19.2 points, 64 tasks to 4 | +33.9, 78 to 4 |
+| `contract_text` vs `manual_summed` | -2.6, 15 to 18 (p = 0.73) | -16.0, 9 to 53 |
+| `contract_text_noted` vs `manual_summed` (5c) | +2.2, 24 to 13 (p = 0.10) | +4.6, 23 to 7 (p = 0.005) |
+
+**The second fact is knowledge, not a fit to the inspected tasks.** The note
+lifts the prose by 19 and 34 points on tasks nobody read.
+
+**The form gain is weaker on unread tasks.** On luna, experiment 5c's 3.7
+points came mostly from the 34 inspected tasks (+10.8 there, 8 tasks to 0).
+On the 165 unread ones it is +2.2 and not significant. On Qwen it holds at
++4.6.
+
+So "with the facts stated alike, the contract's form adds to them" stands on
+Qwen. On luna it rests largely on the tasks whose transcripts suggested the
+note.
 
 ### Gaps the documentation leaves open: predictions (32)-(36)
 

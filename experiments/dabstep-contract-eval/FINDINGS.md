@@ -2829,6 +2829,29 @@ across 9 tasks where the earlier scan recorded 27 across 8 — a detail of
 statement splitting, affecting no conclusion. Run C's zero is unambiguous
 under either, and the same detector is what produced run D's 22 across 2.)
 
+### Across every run since: corrupted working copies
+
+The count above is of mutating statements *submitted*, in runs A-D.
+Every run also gets its own working copy of the database, which the
+harness checks afterwards (`db_corrupted`). That gives a stronger outcome
+measure, and it now covers every DABStep run: the k=3 panels, the
+knowledge-or-delivery series, experiments 5-5c and the compiler runs.
+Smoke files are excluded; `analysis/corruption.py` prints the numbers.
+
+- **Governed arms:** 0 corrupted copies in 22,946 runs. These are the
+  contract arms behind the governed tools, including `contract_hollow`
+  and the compiled contracts.
+- **Ungoverned arms:** 50 corrupted copies in 29,866 runs. These are
+  `schema_only`, the manual arms, and the contract's text over the plain
+  tools.
+- **Where they fall:** 44 are Qwen 3.8's (18 `manual_prompt`, 24
+  `manual_resolved`, one each `manual_summed` and `schema_only`). The rest
+  are glm 3, Sonnet 5 1, deepseek 1 and gpt-6-sol 1.
+
+The contract's text over the plain tools never corrupted a copy. Its
+prompt states the same forbidden operations, so the declared rules,
+read from the prompt, seem to do the deterring here too.
+
 ### The harness converts a harmless idiom into a harmful one
 
 The mutating statements are not malformed SQL. `execute_sql` opens a fresh

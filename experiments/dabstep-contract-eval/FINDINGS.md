@@ -147,6 +147,12 @@ the p=0.058 above is the all-401 test, which the easy tasks dilute. So the
 honest summary is not "scaffolding does nothing" but **"scaffolding does
 something on three of four models, and always less than the content does."**
 
+> **Revised (2026-10-21).** The k=3 panels do not bear this out on gpt-6-sol.
+> Its hollow arm is 7.1 points *below* the bare schema (26 tasks to 70). On
+> Qwen 3.8 the two are level or the hollow arm is behind, by scoring view.
+> The scaffolding step's sign varies by model; the content step dominates
+> on every one. See *The k=3 panels: content and scaffolding*.
+
 What survives unchanged is the part the fourth arm was built for. The
 deflationary reading of arm C — that the contract helps by narrowing the
 tables in view, imposing a procedure, or making the agent slow down rather
@@ -204,6 +210,66 @@ scaffolding step being real there.
 Prompt length is deliberately not held constant (1,984 vs 2,475 chars).
 Padding with filler would swap one confound for another — text that reads as
 content but carries none. The variable under test is knowledge, not tokens.
+
+## The k=3 panels: content and scaffolding
+
+Runs A-D ran once each. The two gateway panels repeat the four arms three
+times, on 401 tasks:
+- gpt-6-sol: panel commit `0b2c79c`, Responses route;
+- qwen3.8-27b: panel commit `18e0797`.
+
+They are the main decomposition. Runs A-D supply breadth across four more
+models. `analysis/panel_decomposition.py` prints every number here. Each
+task scores 0-3 over the repeats, and the sign tests are two-sided with
+ties dropped. Official verdicts are first; the end-to-end view differs
+only on Qwen (*Knowledge or delivery, on a weaker model*).
+
+| model, view | schema_only | contract_hollow | manual_prompt | contract |
+|---|---:|---:|---:|---:|
+| gpt-6-sol, all 401 | 44.5% | 37.4% | 65.1% | 81.0% |
+| gpt-6-sol, hard 332 | 38.0% | 29.4% | 59.5% | 79.4% |
+| Qwen 3.8, official, all | 24.4% | 20.0% | 30.6% | 49.7% |
+| Qwen 3.8, end-to-end, all | 28.4% | 28.6% | 47.3% | 66.8% |
+| Qwen 3.8, end-to-end, hard | 18.4% | 18.6% | 39.2% | 62.3% |
+
+**The content step is large and certain on both models.** `contract`
+against `contract_hollow`:
+- gpt-6-sol: +43.6 points, 219 tasks to 15 (p = 1e-47);
+- Qwen: +29.7 points official and +38.2 end-to-end, 200 tasks to 17 and
+  200 to 11.
+
+**The scaffolding step is not positive on either model.**
+`contract_hollow` against `schema_only`:
+- gpt-6-sol: -7.1 points, 26 tasks to 70 (p = 8e-6), and -8.5 on the hard
+  tasks. The deficit is significant in every repeat (McNemar 11/37, 18/44,
+  13/46).
+- Qwen, official: -4.3 points, 18 tasks to 44 (p = 0.001).
+- Qwen, end-to-end: +0.2, 31 to 25 (p = 0.5).
+
+The governed tools with nothing behind them cost gpt-6-sol accuracy. So the
+k=1 summary above, "scaffolding does something on three of four models
+... none favours the bare schema", does not survive repetition on gpt-6-sol.
+gpt-5.6-sol at k=1 gained 14.2 points from it; gpt-6-sol at k=3 loses 7.1.
+These are different models, so this is no direct contradiction of run C.
+But the sign of the scaffolding step varies by model. What every run agrees
+on is that the content step dominates.
+
+The manual pasted into the prompt beats the bare schema on both models:
+- gpt-6-sol: +20.6 points, 124 tasks to 28;
+- Qwen: +6.2 official and +18.9 end-to-end.
+
+The contract beats the manual by 16.0 points on gpt-6-sol and 19.1-19.5
+on Qwen. That lead is what *Knowledge or delivery?* below takes apart.
+
+The scorer's blindness to sign (*The scorer ignores sign*, under
+Operational findings) touches Qwen's baseline arms most. Re-graded with the
+sign enforced:
+- Qwen's scaffolding step is -3.4 points official (p = 0.012);
+- end-to-end it is +1.2 (p = 0.053), and +1.4 on the hard tasks
+  (p = 0.033).
+
+So on Qwen it is small in either direction, and its sign depends on the
+scoring view. gpt-6-sol's panel has no affected rows.
 
 ## The result is entirely in the hard tasks
 
@@ -2886,6 +2952,41 @@ disposable per-worker copy, so nothing real was harmed.
 are the defensible number.
 
 ## Operational findings
+
+### The scorer ignores sign
+
+DABStep's official scorer, vendored verbatim, reads the first number in
+an answer with a pattern that has no minus sign (`extract_numeric`). So
+`5.24` matches a gold of `-5.24`, and the reverse. Nine questions have a
+negative gold: 1931, 2057, 2229, 2419, 2463, 2477, 2481, 2491 and 2499.
+Each asks for the change in a merchant's fees under a what-if, and the
+gold is negative when the fees fall.
+
+Across every DABStep result file, 114 official verdicts are correct on a
+number of the opposite sign, and the end-to-end view credits 43 more. Their 21
+distinct answer texts were all read. All give the magnitude bare or as "the delta is 74.67", and
+none states the direction in words. They are wrong answers credited as
+right.
+
+They fall mostly on Qwen, and mostly on its baseline arms. In the Qwen
+panel there are 16 for `schema_only` against 5 for `contract_hollow` and
+none for `contract`. In experiment 5, `manual_resolved` has 5-6 a repeat.
+
+`analysis/sign_regrade.py` re-grades with the sign enforced, in both
+views. It runs each DABStep analysis twice and prints what moves:
+- **No registered prediction changes its outcome:** (16), (17), (26)-(31Q),
+  and the knowledge-or-delivery predictions.
+- **The large changes are on Qwen:**
+  - the note's share of the gap falls from 41% to 38%;
+  - the panel's scaffolding step moves from -4.3 to -3.4 points (official)
+    and from +0.2 to +1.2 (end-to-end);
+  - experiment 5c's (30Q) lead grows from +5.5 to +6.4 points.
+- **Runs A-D:** glm and deepseek move by one or two tasks an arm. Sonnet 5,
+  gpt-5.6-sol and every gpt-6 run do not move.
+
+The official verdicts stay the headline everywhere, as fixed; the re-grade
+is reported beside them. The defect inflates the arms that fail more
+often, so it works slightly against the contract arms.
 
 ### Two harness defects found by a post-hoc code review
 

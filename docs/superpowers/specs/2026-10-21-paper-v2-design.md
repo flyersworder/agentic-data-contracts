@@ -162,8 +162,9 @@ From `03-system.tex`, compressed:
 
 New, the **three authoring paths**, which section 7 compares:
 - **by hand**: the DABStep contract;
-- **compiled from documentation alone**: `dce/compile`, with a Sonnet 5 or
-  Opus 5.5 compiler, one-table or with declared joins;
+- **compiled entry by entry** from the documentation: `dce/compile`, with a
+  Sonnet 5 or Opus 5.5 compiler, one-table or with declared joins. The
+  compiler can query the database read-only to check its SQL;
 - **authored with the data open**: `dce.author`, which reads the whole
   knowledge base, explores the data read-only and writes the contract.
 

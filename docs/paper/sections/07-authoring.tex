@@ -1,0 +1,141 @@
+\section{Where the Knowledge Comes From}
+\label{sec:authoring}
+
+If the contract's value is the knowledge it states, its value is its
+author's. Section~\ref{sec:contract} describes three ways to author one:
+by hand; compiled, entry by entry, from the documentation; and authored
+whole by a model that reads all of the documentation and explores the
+data. This section compares them on both benchmarks.
+
+\subsection{Compiled from documentation, a contract is worth the manual}
+\label{sec:compiled}
+
+The compiler reads a manual or KB entry by entry and turns each into a
+contract definition, checking its SQL against the database read-only and
+refusing what it cannot state; it adds no knowledge the manual lacks, and on LiveSQLBench every one of the 1{,}369
+KB definitions is in the compiled contracts verbatim. Compiled knowledge,
+delivered either way, does what the manual does. On LiveSQLBench's 302
+primary tasks \mLuna{} scores 35.5\% with the KB as a manual, 36.8\% with
+the manual plus every compiled metric's SQL (\armMsql{}), and 35.9\% with
+the compiled contract behind the governed tools; contrary to its
+registered prediction, the contract does not beat \armMsql{} (22 tasks to
+25). \mQwen{} gives
+37.3\%, 37.7\% and 37.7\%. On DABStep the same compiler (Sonnet~5) yields
+45.6\% on \mLuna{}, level with the manual's 45.3\% in an earlier run and far below the
+hand-written contract's 80.2\% (196 tasks to 18). On both benchmarks the
+agent reads what it is given, looking a metric up in 86 to 93\% of
+compiled-contract runs on LiveSQLBench, so the null is not a contract left
+unread. A blind review of the 355 compiled metrics that primary tasks
+depend on found 247 faithful and 60 wrong in a way that changes results,
+most often a \texttt{NULL} silently counted or a unit misread.
+
+\subsection{A better compile closes the gap where the knowledge is
+determined}
+\label{sec:better-compile}
+
+On DABStep the compiler is the limit, not the method. With Opus~5.5 as the
+compiler and a contract format that can declare a multi-table metric, the
+fee formula compiles, and the compiled contract reaches 76.6\% against the
+Sonnet compile's 47.3\% (172 tasks to 15) and the hand-written contract's
+80.0\%. Neither change works alone: a one-table Opus compile scores
+47.4\%. The best compile still trails the hand-written contract (58 tasks
+to 22), by 3.4 points. This is still a compile, entry by entry
+from the manual: DABStep's fee procedure is determined by the manual and
+the data, so a careful enough reader recovers it.
+
+On LiveSQLBench a better author changes nothing. Experiment~2 gave three
+databases (55 primary tasks) two new contracts: an Opus compile with
+declared joins, and one written whole by an Opus author session that read
+the entire KB and explored the data read-only, without seeing any task.
+Against the Sonnet compile, neither differs (3 tasks to 4, and 5 to 3);
+between any two contract arms only 7 or 8 of the 55 tasks score
+differently. Section~\ref{sec:lsb-knowledge} says why. Most of the hard
+knowledge there is not hard to write down; the KB does not settle it, so
+no author can recover the gold's choice.
+
+Experiment~3 tested that directly, with oracle knowledge. Each database's
+primary tasks were split in half before anything was written. From the
+gold of the 27 training tasks only, 35 corrections were written as general
+facts about KB entries (a scale, a threshold, how a missing value counts,
+a grain), never a question's filter or output form, and applied both to
+the manual and to the Opus contract. They lift the training tasks by
+about 21 points in both deliveries (7 tasks to 0 each). On the 28 held-out
+tasks they lift the manual by 2 tasks to 0 ($p{=}0.25$) and the contract
+not at all (0 tasks to 2), although half of those tasks use an entry a correction names. A
+choice learned from one task's gold does not carry to another's through
+the same entry; two training golds already used one entry differently. On
+LiveSQLBench the undetermined knowledge is settled task by task in the
+gold, and a contract, which can only hold what holds across questions,
+has nothing to hold there.
+
+\subsection{An author with the data recovers what the data settles}
+\label{sec:gaps}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+& \textsc{gapped} & \textsc{full} & \textsc{authored} & \textsc{noted} & \armT{} \\
+\midrule
+data-informed (41) & 47.7 & 97.6 & 74.5 & 75.3 & 74.0 \\
+\quad settled (20) & 59.4 & 98.3 & 99.4 & 100.0 & 98.9 \\
+\quad split (21) & 36.5 & 96.8 & 50.8 & 51.9 & 50.3 \\
+convention-only (9) & 0.0 & 97.5 & 0.0 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}
+\caption{Experiment 4b, accuracy (\%) pooled over \mLuna{}, \mQwen{} and
+\mSol{}, $k{=}3$. \textsc{gapped}: the KB with gaps opened;
+\textsc{full}: the complete KB; \textsc{authored}: the contract an author
+wrote from the gapped KB with the data open; \textsc{noted}: the gapped
+KB plus that author's resolutions as notes; \armT{}: the authored
+contract's files in the prompt.}
+\label{tab:gaps}
+\end{table}
+
+Real documentation leaves things open. Experiment 4b opened gaps in the
+complete KBs of experiment~4 and asked whether an author with the data
+recovers them, and whether the contract's gain is then the author's
+knowledge. The gaps were a wildcard stored as a sentinel (in all three
+databases), a quantity stored in an encoding the KB does not state (a
+score one higher, a fraction where the KB implies a percentage), and, in
+one database, the precedence among matching rules removed. Blind raters
+labelled each gap by what the data reveals: \emph{settled},
+\emph{split}, or \emph{convention-only}. The author drew three contracts
+per database with the data open, and one without.
+
+Recovery was scored before any agent ran. Over five gaps and three draws, the
+data draws recovered 12 of 15: settled 6 of 6, split 6 of 9,
+convention-only 0 of 3. The draw
+without data recovered none of five. Every draw, with data or without,
+resolved the precedence gap as the lowest rule id; the gold is the most
+specific rule. The agents then show the recovered knowledge doing the
+work (Table~\ref{tab:gaps}). The authored contract beats the gapped KB by
+26.8 points on the 41 data-informed questions (28 tasks to 1,
+$p{=}6{\times}10^{-8}$), on every model. The \emph{knowledge share}, the
+part of that gain reproduced by the gapped KB plus the author's
+resolutions written as notes, is 1.03 (95\% interval 0.98 to 1.35 over
+gap clusters). The three arms that hold the author's knowledge tie on
+every label, whatever their form. And the author's misses travel with the
+contract: on the encoding the data only suggested and on the precedence
+convention it cannot reveal, every arm built from that author scores 0,
+and the complete KB 97 to 98\%.
+
+\subsection{What decides when a contract pays}
+\label{sec:account}
+
+Three accounts were tested and dropped along the way. Reuse is not it: a
+LiveSQLBench database's most reused KB entry serves a median 32\% of its
+tasks against DABStep's 44\%, and the contract's gain does not rise with
+reuse on either model. The type of knowledge is not it: a rule-matching
+procedure, stated completely, gets through prose as well as through a
+contract (Section~\ref{sec:procedures}). And how the contract is
+delivered is not it, for accuracy, once the facts are equal
+(Section~\ref{sec:delivery}). What survives is completeness and
+determinability. \textbf{A contract pays where it states something true
+that the prose leaves out, and an author can state only what the
+documentation or the data determines.} DABStep's fee procedure is
+determined, and the manual states it badly, so a careful author gains 35
+points. LiveSQLBench's hard knowledge is not determined, so no author
+gains much.

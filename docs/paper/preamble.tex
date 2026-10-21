@@ -24,6 +24,21 @@
 \newcommand{\mDS}{DeepSeek}
 \newcommand{\mSON}{Sonnet~5}
 \newcommand{\mGPT}{GPT-5.6}
+% The k=3 models: a frontier model, the small tier of its family, and an
+% open-weight model served at FP8.
+\newcommand{\mSol}{GPT-6~sol}
+\newcommand{\mLuna}{GPT-6~luna}
+\newcommand{\mQwen}{Qwen~3.8}
+% Arms added after the four-arm ablation. The manual gains notes stating
+% the facts the contract carries (w: the empty-list wildcard, s: that
+% overlapping fee rules each apply); text is the contract's own files in
+% the prompt over the plain tools.
+\newcommand{\armMw}{\textsc{manual+w}}
+\newcommand{\armMws}{\textsc{manual+ws}}
+\newcommand{\armT}{\textsc{text}}
+\newcommand{\armTws}{\textsc{text+ws}}
+\newcommand{\armMsql}{\textsc{manual+sql}}
+\newcommand{\armComp}{\textsc{compiled}}
 
 % Appendix cross-references. The extended build resolves them; the
 % submission build, which has no appendix, points at the extended version.

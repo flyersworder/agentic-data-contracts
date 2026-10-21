@@ -1,0 +1,116 @@
+\section{Knowledge Does the Work}
+\label{sec:results}
+\label{sec:knowledge}
+
+\subsection{Content against scaffolding, on six models}
+\label{sec:decomposition}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\tabhead{Model} & $k$ & \armS{} & \armH{} & \armM{} & \armC{} \\
+\midrule
+\mSol{} & 3 & 38.0 & 29.4 & 59.5 & \textbf{79.4} \\
+\mQwen{}, official & 3 & 13.9 & 8.3 & 20.2 & \textbf{42.9} \\
+\mQwen{}, end-to-end & 3 & 18.4 & 18.6 & 39.2 & \textbf{62.3} \\
+\midrule
+\mGLM{} & 1 & 13.9 & 19.3 & 22.9 & \textbf{55.1} \\
+\mDS{} & 1 & 22.6 & 22.6 & 42.9 & \textbf{56.6} \\
+\mSON{} & 1 & 22.9 & 38.0 & 23.8 & \textbf{68.4} \\
+\mGPT{} & 1 & 37.0 & 51.2 & 50.3 & \textbf{77.4} \\
+\bottomrule
+\end{tabular}
+\caption{DABStep hard-task accuracy (\%), $n{=}332$ (\mDS{}: 226 of its
+complete-case set). The $k{=}3$ panels are the primary decomposition; the
+four $k{=}1$ runs give breadth. \armS{} to \armH{} adds the governed tools,
+the retrieval instruction and the rules with every field of prose emptied;
+\armH{} to \armC{} restores the prose.}
+\label{tab:decomposition}
+\end{table}
+
+The four-arm ablation separates the contract's content from the
+scaffolding that delivers it. \armH{} keeps the contract's tools, its
+instruction to look things up before writing SQL, its table allow-list
+and its operation rules, and empties every field of prose
+(Section~\ref{sec:hollow}). Table~\ref{tab:decomposition} gives the
+hard-task accuracy of all four arms on six models: two panels repeated
+three times, and the four single runs of the preprint.
+
+\textbf{The content step is large and certain on every model.} Restoring
+the prose (\armH{} to \armC{}) adds 50.0 hard-task points on \mSol{} (205
+tasks to 12 over the three repeats, $p{=}2{\times}10^{-46}$) and 34.5 to
+43.8 on \mQwen{} depending on the scoring view (189 tasks to 10 and to 8).
+On the four single runs it adds 26.2 to 35.8 points.
+
+\textbf{The scaffolding step is small, and its sign depends on the
+model.} The preprint found it absent on the two flash models and worth 14
+to 15 points on \mSON{} and \mGPT{}, and concluded that scaffolding is
+``a real but secondary effect''. Repetition does not bear that out on the
+newer frontier model. On \mSol{} the empty tools cost accuracy: \armH{} is
+7.1 points below \armS{} over all tasks (26 tasks to 70,
+$p{=}8{\times}10^{-6}$), and the deficit is significant in each repeat
+separately. On \mQwen{} the step is $-4.3$ points under the official
+verdicts and $+0.2$ under the end-to-end view ($p{=}0.5$), the view that
+also credits an answer stated as the last paragraph after its working
+(Section~\ref{sec:grading}). In the single runs the transcripts show how
+empty tools can hurt: the agent calls \texttt{lookup\_domain}, is told
+nothing is available, and searches harder; on \mGLM{} and \mSON{} \armH{}
+burns more reasoning than any other arm (\appref{app:efficiency}). What every run agrees on is the
+ordering of the two steps. \textbf{The content step dominates the
+scaffolding step on all six models}, and the sceptical reading that the
+contract helps by narrowing the tables, imposing a procedure or slowing
+the agent down predicts the opposite.
+
+The manual pasted into the prompt carries the same domain, and it helps
+too: \armM{} beats \armS{} by 21.6 hard-task points on \mSol{} (112 tasks
+to 27) and by 6.3 or 20.8 on \mQwen{}. The contract beats the manual by
+19.9 points on \mSol{} (116 tasks to 9) and 22.7 to 23.2 on \mQwen{}.
+That gap is what the preprint attributed to delivery, and what
+Section~\ref{sec:delivery} takes apart.
+
+\subsection{On LiveSQLBench, knowledge helps where it is determined}
+\label{sec:lsb-knowledge}
+
+LiveSQLBench supplies each database's knowledge base (KB), so the knowledge
+arms there are built from the benchmark's own documentation
+(Section~\ref{sec:benchmarks}). On the 302 primary tasks the KB as a manual
+beats the bare schema on both models: 35.5\% against 20.0\% on \mLuna{}
+(71 tasks to 8, $p{=}10^{-13}$) and 37.3\% against 23.2\% on \mQwen{} (68
+to 13). The ceiling is low, and a blind test says why.
+
+Two raters per task, blind to every run and contract, read the question,
+the gold SQL and its result, and the KB entries the gold uses, and judged
+whether the question and the KB settle every choice that changes the
+result. They agree on 83\% of the four-way labels ($\kappa{=}0.79$ on
+settled or not). Where both say settled, the task is \emph{determined}: 138
+of 302. Where both say not, it is \emph{undetermined}: 132. The knowledge
+arms solve 60\% of determined tasks and 14\% of undetermined ones, on each
+model alike. Determined tasks are also easier without knowledge
+(\armS{} 39\% against 6\%), so part of the gap is difficulty; but the
+knowledge's own gain over \armS{} is $+21$ points where the KB settles the
+gold and $+8$ where it does not ($p{=}0.002$). The raters call the KB
+ambiguous on 109 tasks and contradicted by the gold on 43 to 45; in a
+closer reading of 55 tasks the open choices were most often how a
+\texttt{NULL} or an unlisted category is scored, which fields a formula
+averages, and which of two columns holds a quantity. Section~\ref{sec:authoring}
+returns to what an author can and cannot add there.
+
+\subsection{What a pre-computed layer would add}
+\label{sec:ceiling}
+
+Compiling the DABStep contract's own SQL expressions into two views gives
+the layer a context-layer product would ship. Instantiated with each
+task's parameters, it reproduces the gold answer on every one of the 176
+hard tasks whose question shape it covers, chosen from question text alone.
+On those tasks whatever an agent misses is a failure to derive from
+knowledge it provably had. In the four single runs that \emph{derivation
+gap} is 39.2, 37.3, 26.1 and 5.1 points, falling with capability, while
+the shortfall on the 148 tasks that need reasoning beyond the views moves
+under no ordering (\appref{app:buckets}). Pre-computing a metric pays
+where agents fail to derive it, and on the strongest of the four that is
+5 points of the tasks the views cover. The contract's gain also stays
+inside its domain: on the hard tasks that do not concern fees it holds no
+detectable advantage in any of the four runs (\appref{app:domain}).

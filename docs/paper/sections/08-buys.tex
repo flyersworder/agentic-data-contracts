@@ -1,0 +1,117 @@
+\section{What Delivery Buys}
+\label{sec:buys}
+
+If delivery does not decide accuracy once the facts are equal, what is the
+governed contract for? Three things, each measured: it keeps cost flat as
+the contract grows, it records which knowledge each answer used, and its
+declared rules keep the agent from writing to the warehouse.
+
+\subsection{Cost and scale}
+\label{sec:scale}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+& & 1x & 2x & 4x & 8x & all \\
+\midrule
+\multicolumn{2}{@{}l}{prompt, k tokens: governed} & 8 & 9 & 10 & 12 & 20 \\
+\multicolumn{2}{@{}l}{\phantom{prompt, k tokens:} text} & 26 & 53 & 92 & 188 & 551 \\
+\midrule
+\mLuna{} & governed & 2.22 & 2.23 & 2.34 & 2.44 & 2.97 \\
+& text & 1.75 & 2.93 & 4.05 & 7.57 & 19.10 \\
+\mSol{} & governed & 42.0 & 42.3 & 44.3 & 46.4 & 57.4 \\
+& text & 40.3 & 67.4 & 104.2 & --- & --- \\
+\bottomrule
+\end{tabular}
+\caption{Experiment 6: dollars per run ($\times 10^{-3}$) as the contract
+grows from one database (1x) to 22 (all), $k{=}3$ on 60 questions;
+prompt sizes are \mLuna{}'s tokens.
+Governed: the merged contract behind the governed tools. Text: the same
+files in the prompt over plain tools. \mSol{}'s text arm at 8x and all was
+dropped for cost by a recorded amendment. Accuracy is 98 to 100\% in every
+cell.}
+\label{tab:scale}
+\end{table}
+
+Experiment 4b found that looking knowledge up as needed saves input but
+not money: one database's contract, about 25k tokens, fits in a cached
+prompt, so loading it whole is nearly free. Experiment 6 grows the
+contract until that should change. Experiment 4's three databases and 60
+questions are kept, each with its base contract, and padded with real but
+irrelevant contracts: the other two bases first, then 19 contracts the
+author wrote for other LiveSQLBench databases, each namespaced under its
+database's name, with the base at the middle. Five levels take whole
+contracts, up to all 22 databases. The governed arm's prompt holds an
+index that grows from 8k tokens to 20k; the text arm's holds the files,
+from 26k to 551k (Table~\ref{tab:scale}). The common top level, the
+largest that both arms fit on every model, is 4x: \mQwen{}'s window does
+not fit the text arm beyond it.
+
+\textbf{Size costs no accuracy, up to 4x.} The text arm at 4x is below
+itself at 1x on 3 tasks and above on none; the 95\% interval of the mean
+drop is $[+0.0, +1.3]$ points, inside the registered $\pm$5-point
+equivalence bound. \mLuna{}'s text arm, with all 22 databases (551k
+tokens) in its prompt, still scores 98.3\%, though that level was not
+tested. With no drop to hold, the predictions that the governed arm's drop
+is smaller, or that it drops at all, both fail. \mQwen{}'s governed arm
+scores 100\% at 8x and at all 22 databases, where the text arm does not
+fit its window. Within this design, then, the model is not lost in a long
+prompt. The design's scope bounds that: the padding is other databases
+with distinct names, and the questions sit at the ceiling at 1x. A
+contract padded with neighbouring domains of one warehouse would be the
+harder test.
+
+\textbf{Cost is where the deliveries differ.} At one database the text arm
+is as cheap or cheaper: its prompt is cached, and it takes 2.7 to 4.1
+turns against the governed arm's 5. From 2x the governed arm is cheaper,
+on 58 of 60 tasks at 4x on \mLuna{} and on all 60 on \mSol{}
+($p{=}2{\times}10^{-15}$ and $9{\times}10^{-19}$): 1.7 and 2.4 times
+cheaper there, and 6.4 times cheaper on \mLuna{} at 22 databases. The
+governed arm's input doubles from 1x to all, as its index grows; the text
+arm's grows 21-fold. Under one fixed price the result holds fully cached
+and uncached, and uncached the governed arm is cheaper even at one
+database. The traces show why the governed arm's cost stays flat: its
+lookups never name a padding database or metric, and no query touches a
+padding table. Padding reaches its context only through an unfiltered
+metric listing, in 0 to 1.7\% of runs on the GPT models and up to 9\% on
+\mQwen{}.
+
+\subsection{A record of what each answer used}
+\label{sec:audit}
+
+Every governed lookup names a domain or metric and returns its
+definition, so the trace records which knowledge each answer consulted
+before its query was written. The text arm's trace shows the SQL, and
+that the whole contract was in context, not which definition was relied
+on. This analysis was not predicted. In experiment 6 the final SQL
+contains a looked-up metric's expression verbatim in 91\% of \mLuna{}'s
+governed runs, 98\% of \mSol{}'s and 87\% of \mQwen{}'s runs with a
+lookup. A departure does not mark a wrong answer: in experiment 6 every
+run that departed from its looked-up formula was right. What the record does is locate an
+error's source. Of experiment 4b's 175 wrong governed answers, 174 are in
+the database whose contract carries the author's misses, and 90 applied
+the wrong definition verbatim; each names the contract entry that
+produced it, to be fixed once for every later answer.
+\textbf{The trust the governed contract offers is accountability, not
+detection.}
+
+\subsection{Governance}
+\label{sec:governance}
+
+The contract also declares forbidden operations, rendered into the prompt
+and enforced by the tools' static checks. In the four single runs the
+ungoverned arms submitted 166 mutating statements over 26 tasks and the
+governed arms none (Fisher $p{=}3{\times}10^{-8}$ pooled). Over every
+DABStep run since, the harness's integrity check on each run's working
+copy found \textbf{50 corrupted copies in 29{,}866 ungoverned runs and
+none in 22{,}946 governed ones}, on nine models; 44 of the 50 are
+\mQwen{}'s. Two escalations in the single runs show the hazard: an agent
+lost a temporary table to the tool's per-call connection, diagnosed it,
+and switched to persistent tables (\appref{app:escalations}). The
+enforcement layer never had to fire: the governed arms never attempted a
+write, so the mechanism measured is deterrence by declared rule, and the
+contract's text over the plain tools, whose prompt states the same rules,
+also never corrupted a copy.

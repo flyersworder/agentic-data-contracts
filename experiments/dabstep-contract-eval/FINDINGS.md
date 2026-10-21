@@ -1474,6 +1474,29 @@ beats `manual_resolved` on the rule-matching tasks (28) and ties
 arms run together. Its 12-task smoke: `manual_resolved` 8, `manual_summed`
 11, `contract_text` 12.
 
+**Where the summing convention came from (traced 2026-10-21).** The
+upstream merge squashed the history. The pre-squash commits survive locally
+on branch `archive/dabstep-eval-presquash`, and they give this order, all
+on 2026-08-30:
+
+- **09:56, `46b0ed6`:** the design sets the rule "No question text, no gold
+  answer, and no score is consulted while authoring".
+- **10:34, `18577ac`:** the golds are reconstructed, into the gitignored
+  `data/golds.json`.
+- **11:37, `a2abf7c`:** the contract's first freeze ("Authored blind: no
+  DABStep question, gold answer, or score was read").
+- **11:54 to 12:26:** three re-freezes, each justified from the two
+  documents, before any score existed.
+
+`total_transaction_fees` and the empty-list `INTERPRETATION` are both in
+the first freeze, word for word as in every later version. The summing
+definition joins each transaction to "the fee rule that matches it",
+singular, and sums the join. That reads as the ordinary join-and-sum idiom,
+written without noticing that several rules can match one transaction,
+which is why it was never marked as an interpretation. The golds were on
+disk an hour before the freeze. The rule and the commit say they were not
+read, and that cannot be verified from outside.
+
 ### Where the tools help: retrieval at the point of use, not validation
 
 The governed tools' 5-point lead on the non-rule-matching tasks sits in

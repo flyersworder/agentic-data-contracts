@@ -109,15 +109,22 @@ treatment, not a cleaner control.
 \subsection{Three ways to author a contract}
 \label{sec:authoring-paths}
 
-\textbf{By hand.} The DABStep contract was written from \texttt{manual.md},
-the dataset README and the data, content-hashed and frozen about 35
-commits before the first run; every result row records its digest. It
-states two facts the manual does not (Section~\ref{sec:delivery}): that
-the data stores ``all'' as an empty list, which its author took from the
-data and marked as an interpretation, and that overlapping fee rules each
-apply, which it states without marking. What cannot be verified from
-outside is that no benchmark question was read while it was written. We
-claim provenance; we cannot prove intent.
+\textbf{By hand.} The DABStep contract was written in one session on
+2026-08-30 from \texttt{manual.md}, the dataset README and the data. A
+design rule fixed that morning, before any gold existed, barred consulting
+any question, gold or score while authoring. The golds were reconstructed
+about an hour before the first freeze, into a file kept outside the
+repository; the freeze commit records that none was read. Three re-freezes
+followed before any score existed, each justified from the two documents.
+The contract states two facts the manual does not
+(Section~\ref{sec:delivery}), both present in the first freeze and never
+edited. That the data stores ``all'' as an empty list was taken from the
+data and marked as an interpretation. That overlapping fee rules each
+apply was not marked: the definition sums over a join of each
+transaction to ``the fee rule that matches it'', the ordinary
+join-and-sum idiom, which reads as a convention written without noticing
+it was one rather than a decision informed by the golds. We can show the
+order and the rules; we cannot prove from outside that they were kept.
 
 \textbf{Compiled.} The compiler (\texttt{dce.compile}) turns a manual or KB
 into a contract entry by entry. For each entry a model writes a definition,

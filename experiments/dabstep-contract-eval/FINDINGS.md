@@ -2902,6 +2902,12 @@ Smoke files are excluded; `analysis/corruption.py` prints the numbers.
 - **Ungoverned arms:** 50 corrupted copies in 29,866 runs. These are
   `schema_only`, the manual arms, and the contract's text over the plain
   tools.
+- **The paper's seven models only:** 0 of 22,138 governed runs and 50 of
+  29,008 ungoverned. Leaving out a Qwen 3.6 sweep and a 62-row
+  deepseek-v4-pro probe changes no corrupted copy.
+- **What this measures:** a corrupted copy, not an attempted write. The
+  count of submitted mutating statements above covers runs A-D only; the
+  later runs were not searched for attempts.
 - **Where they fall:** 44 are Qwen 3.8's (18 `manual_prompt`, 24
   `manual_resolved`, one each `manual_summed` and `schema_only`). The rest
   are glm 3, Sonnet 5 1, deepseek 1 and gpt-6-sol 1.

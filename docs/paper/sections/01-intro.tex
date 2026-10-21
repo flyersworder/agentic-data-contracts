@@ -46,81 +46,69 @@ layer over an enterprise schema moves GPT-4 from 16\% to
 delivers it, and none says what pre-computing the same content would have
 bought.
 
-\subsection*{Contribution}
+\subsection*{What we did, and what we found}
 
-We report a controlled ablation on DABStep~\cite{dabstep}, run on four model
-families, that separates all three. The instrument is a \emph{data contract}:
-a YAML artifact that carries a domain's semantics (what a fee is, how a rule
-matches a transaction) together with the rules an agent's tools enforce
-(which tables may be read, which operations are forbidden). Two properties of
-that artifact make the separation possible.
+We separate the parts with a \emph{data contract} as the instrument: a YAML
+artifact that carries a domain's semantics together with the rules an
+agent's tools enforce, and that can be emptied of its prose, compiled into
+views, delivered in the prompt or behind tools, and written by different
+authors. We run it on two benchmarks with documentation, DABStep and
+LiveSQLBench, across seven models, three of them repeated three times.
+After the first four-arm runs, every experiment fixed its predictions in a
+commit before it ran: 53 in all, of which 20 failed. Four findings.
 
-First, the contract can be \emph{hollowed}. A generator empties every field
-of prose --- domain summaries, metric descriptions, the SQL expression that
-carries the fee formula, column and relationship descriptions --- and leaves
-names, types, structure, the table allow-list, the forbidden operations and
-all nine governed tools byte-for-byte identical. An agent given the hollow
-contract still receives the instruction to look things up, still has the
-tool, and still calls it. It is simply told nothing when it does.
+\textbf{Knowledge does the work} (Section~\ref{sec:knowledge}). Removing
+the contract's prose while keeping its tools, instruction and rules drops
+hard-task accuracy by 26 to 50 points on every model; the tools and
+instruction without the prose are worth between $-9$ and $+15$, depending
+on the model. On LiveSQLBench the documentation helps nearly three times
+as much where it determines the gold as where it does not.
 
-Second, the contract \emph{compiles}. Its declared SQL expressions, transcribed
-into two views, reproduce the benchmark's gold answer on every one of the 176
-tasks they cover. That is the accuracy a pre-computed layer built from the
-same content would reach, and it turns each arm's accuracy into a recovery
-rate against a proven ceiling.
+\textbf{What looked like delivery was knowledge}
+(Section~\ref{sec:delivery}). The contract beats the same domain's manual
+pasted into the prompt by 16 to 23 points. Our preprint attributed that to
+delivery: the rule one lookup away rather than buried in a long prompt. A
+sequence of controlled experiments says otherwise. Two facts the manual
+leaves out, stated in words, recover most of the gap; once both sides state
+the facts alike, the contract's form adds 4 to 6 points, and the governed
+tools add a rule put in front of the agent at the moment it writes the
+query.
 
-Together the two place the arms on a ladder: schema alone, scaffolding
-without content, content delivered through scaffolding, and content
-compiled. Beside the ladder sits the practitioner's baseline, the same
-knowledge pasted verbatim into the prompt: content without scaffolding.
-Reading the ladder gives four findings and one non-finding.
+\textbf{Where the knowledge comes from decides what it is worth}
+(Section~\ref{sec:authoring}). A contract compiled entry by entry from the
+documentation is worth what the documentation is, on both benchmarks. On
+DABStep a better compile closes 90\% of the gap to the hand-written
+contract, because the knowledge is determined by the manual and the data;
+on LiveSQLBench no author gains, because the gold settles what the
+documentation leaves open, task by task. An author who can query the data
+recovers what the data settles, two thirds of what it only suggests, and
+none of the conventions it cannot reveal, and the contract then carries
+exactly that knowledge.
 
-\textbf{Content dominates; scaffolding is real but secondary}
-(Section~\ref{sec:decomposition}). Restoring the prose to the hollow contract
-raises hard-task accuracy by 26 to 36 points on every model. Adding the empty
-scaffolding to a bare schema is worth 0 to 5 points on the two flash models
-(not significant over all tasks) and 14 to 15 on the two frontier models. The content step
-exceeds the scaffolding step by $1.8{\times}$ to $6.6{\times}$, and on one
-model is the whole effect.
+\textbf{Delivery buys cost, scale, accountability and governance, not
+accuracy} (Section~\ref{sec:buys}). Grown from one database to 22, the
+contract in the prompt loses no accuracy up to four times its size, but
+the governed contract is cheaper from twice its size, 1.7 to 2.4 times
+cheaper at four times, and runs where the prompt no longer fits the
+context window. Its lookups name the definition behind each answer, which
+locates the source of a wrong one. And across every DABStep run, the
+ungoverned arms corrupted their working copy of the database 50 times and
+the governed arms never.
 
-\textbf{The contract beats the prompt because its rule is reachable, not
-because it knows more} (Section~\ref{sec:why}). Both the contract arm and the
-prompt arm are given the fee-matching rule; only the contract arm applies it.
-Read in the submitted SQL, the contract arm writes every one of the six fee
-clauses a task needs 39\%, 65\%, 55\% and 98\% of the time; the prompt arm,
-3\%, 9\%, 4\% and 4\%. On one model the 24{,}000-character prompt is
-indistinguishable from a bare schema on hard tasks, while the contract
-carrying the same knowledge sits 45 points above both. The contract arm also
-does the least work on every model, and is the cheapest way to buy a correct
-answer on three of the four.
+\textbf{What a practitioner should take from this.} Write the knowledge
+down completely, with the data open, and state the conventions a reader
+could get wrong; that is where the accuracy is. Do not expect a format or
+a retrieval loop to supply what the documentation does not determine. For
+one database the prompt is the simplest and, with caching, the cheapest
+delivery; as the contract grows past about twice that, look things up as
+needed, and keep the lookup log. Pre-compute a metric only where agents
+demonstrably fail to derive it.
 
-\textbf{The derivation gap closes with capability; the composition gap does
-not} (Section~\ref{sec:ceiling}). On the 176 tasks the compiled contract
-answers outright, the contract arm falls short of the ceiling by 39.2, 37.3,
-26.1 and 5.1 points in order of model capability. On tasks that compose the
-same semantics further, the shortfall moves between 54 and 40 points with no
-clean ordering. The cost of making an agent derive a query rather than call a
-macro is transient; the cost of the reasoning built on top of it is not yet.
-
-\textbf{Declared rules deter mutation without being enforced}
-(Section~\ref{sec:governance}). Ungoverned arms submitted 166 mutating
-statements across 26 tasks and corrupted the warehouse twice; governed arms
-submitted none and never attempted one, so the validator behind the rules
-never fired.
-
-The non-finding: on the 38, 30, 38 and 38 hard tasks outside the domain the
-contract describes, it holds no detectable advantage over the prompt, and on
-the strongest model the bare schema leads that slice. The gain is
-domain-specific by construction. That is what a domain contract should do,
-and it is the sharpest limit on what one benchmark can show.
-
-\textbf{What a practitioner should take from this.} Spend on the
-semantics first: write down what the columns mean and how the metrics are
-defined, once per domain, in a form an agent can fetch one rule at a time.
-That step bought most of the gain on every model, and the prose often
-exists already. Build the retrieval scaffolding second; on frontier models
-it is worth 14 to 15 points, on flash models close to nothing. Pre-compute
-a macro only for a metric the agent demonstrably fails to derive, because
-the shortfall macros close is already 5 points on the strongest model and
-falling with capability, while the per-metric cost of writing and
-maintaining them falls with nothing.
+\textbf{Contributions.} (1)~The decomposition of a context layer into
+content and scaffolding, on two benchmarks and seven models.
+(2)~A revised account of delivery, with the experiments that revised it,
+including our own preprint's. (3)~An authoring result that ties a
+contract's value to whether its knowledge is determinable. (4)~Measurements
+of what delivery buys: cost and scale, accountability, governance.
+(5)~The harness, contracts, compilers, predictions and results, released
+with the paper.

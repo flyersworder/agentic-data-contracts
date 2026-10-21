@@ -1,34 +1,26 @@
-\section{The System Under Test}
+\section{The Instrument}
 \label{sec:system}
 
 \texttt{agentic-data-contracts} is an open-source Python library that loads a
-data contract and exposes a warehouse to an agent through nine governed
-tools. The library is the instrument, not the contribution, and the
-experiment is designed so that its identity does not matter: the hollow arm
-runs the identical library, tools and rules with the prose removed.
+data contract and exposes a database to an agent through nine governed
+tools. The library is the instrument, not the contribution: the hollow arm
+runs the identical library, tools and rules with the prose removed, and the
+text arms put the same contract in the prompt over plain tools.
 
 \subsection{The contract}
 \label{sec:contract}
 
-The contract is two YAML files, 60{,}181 characters together.
-\texttt{contract.yml} declares the five tables the agent may read, the eleven
-operations it may not issue (\texttt{DELETE}, \texttt{DROP},
-\texttt{UPDATE}, \texttt{INSERT}, \texttt{CREATE}, \texttt{ALTER} and five
-more), and eight domains, each with a one-line summary and a prose
-description; the \texttt{fees} description restates the manual's account of
-every column of the fee-rule table. \texttt{semantic.yml} declares 14
-metrics, each with a description and an executable
-\texttt{sql\_expression}, the five tables with a description per column, and
-one relationship. Figure~\ref{fig:contract} shows one metric as it appears in
-the contract and in its hollow counterpart. Seven metric descriptions carry a
-sentence beginning \texttt{INTERPRETATION}, marking where the contract
-commits to a reading the manual does not force; Section~\ref{sec:threats}
-returns to them.
-
-The same file supplies both the semantics the agent reads and the rules the
-tool layer enforces. The agent reads the first through
-\texttt{lookup\_domain} and \texttt{lookup\_metric}; the tool layer checks
-every statement against the second before it reaches the database.
+A contract is two YAML files. \texttt{contract.yml} declares the tables the
+agent may read, the operations it may not issue (\texttt{DELETE},
+\texttt{DROP}, \texttt{UPDATE}, \texttt{INSERT}, \texttt{CREATE},
+\texttt{ALTER} and five more), and the domains, each with a summary and a
+prose description. \texttt{semantic.yml} declares the metrics, each with a
+description and an executable \texttt{sql\_expression} (from 0.62, a
+metric may declare the join it spans), the tables with a description per
+column, and the relationships. The DABStep contract is 60{,}181 characters
+with 14 metrics; Figure~\ref{fig:contract} shows one, as it appears in the
+contract and in its hollow counterpart. The same files supply the semantics
+the agent reads and the rules the tool layer enforces.
 
 \begin{figure*}[t]
 \begin{minipage}[t]{0.63\textwidth}
@@ -100,39 +92,44 @@ hollow arm holds fixed.\par}
 \subsection{The hollow contract}
 \label{sec:hollow}
 
-The hollow contract is generated from the frozen contract by a script, not
-written by hand, so the only difference between the two artifacts is the one
-the generator makes, and it is auditable as a diff. Emptied: domain summaries
-and descriptions, metric descriptions, every \texttt{sql\_expression}
-(the fee formula lives there), and all column and relationship descriptions.
-Retained byte-for-byte: every name, every type, the structure, the table
-allow-list, the forbidden operations and the identical nine-tool surface. An
-agent that calls \texttt{lookup\_domain} against it is told \emph{``No
-documentation is available for this domain.''}
+The hollow contract is generated from the frozen one by a script, so the
+only difference is the one the generator makes, auditable as a diff.
+Emptied: domain prose, metric descriptions, every \texttt{sql\_expression}
+and all column and relationship descriptions. Retained byte for byte:
+every name, type and structure, the table allow-list, the forbidden
+operations and the nine tools. A lookup against it returns \emph{``No
+documentation is available for this domain.''} The test suite asserts that
+no 6-gram of \texttt{manual.md} survives into it while the real contract
+shares 6-grams with the manual, and the transcripts confirm the loop ran:
+on \mGLM{} the hollow arm called \texttt{lookup\_domain} on 272 of 401
+tasks. Prompt length is not held constant (1{,}984 characters against
+2{,}475): text that reads as content but carries none would be a different
+treatment, not a cleaner control.
 
-The control is verified in both directions. The test suite asserts that no
-6-gram of \texttt{manual.md} survives into the hollow contract, and that the
-real contract does share 6-grams with it; the second half is what makes the
-first meaningful. The transcripts confirm that the retrieval loop ran: on
-\mGLM{} the hollow arm called \texttt{lookup\_domain} on 272 of 401 tasks and
-received the placeholder 282 times. Prompt length is deliberately not held
-constant (1{,}984 characters against the contract arm's 2{,}475): padding the
-hollow arm with text that reads as content but carries none would be a
-different treatment, not a cleaner control. The variable under test is
-knowledge, not tokens.
+\subsection{Three ways to author a contract}
+\label{sec:authoring-paths}
 
-\subsection{Provenance and freeze}
-\label{sec:freeze}
+\textbf{By hand.} The DABStep contract was written from \texttt{manual.md},
+the dataset README and the data, content-hashed and frozen about 35
+commits before the first run; every result row records its digest. It
+states two facts the manual does not (Section~\ref{sec:delivery}): that
+the data stores ``all'' as an empty list, which its author took from the
+data and marked as an interpretation, and that overlapping fee rules each
+apply, which it states without marking. What cannot be verified from
+outside is that no benchmark question was read while it was written. We
+claim provenance; we cannot prove intent.
 
-The most obvious way to fake this result is to write a contract that answers
-the benchmark. The contract's header records that every fact in it came from
-\texttt{manual.md} and the dataset README and nothing else, which a reader
-can verify by reading the 60{,}181-character contract against the
-22{,}127-character manual. The artifact is content-hashed
-(\texttt{sha256:e438ecf7\ldots}), was frozen roughly 35 commits before the
-first run, and every result row records its digest, so a post-hoc edit would
-invalidate every row.\footnote{On three of the four models the hollow arm's
-rows carry the real contract's hash rather than the hollow artifact's, a
-stamping defect that changes no result (\appref{app:harness}).} What cannot be verified from outside is that
-no benchmark question was read while the contract was authored. We claim
-provenance; we cannot prove intent.
+\textbf{Compiled.} The compiler (\texttt{dce.compile}) turns a manual or KB
+into a contract entry by entry. For each entry a model writes a definition,
+checks its SQL against the database read-only, and either emits it or
+refuses it with a reason; refused entries keep their text. It translates
+the documentation rather than extending it: on LiveSQLBench every one of
+the 1{,}369 KB definitions appears verbatim in the compiled contracts. We use
+Sonnet~5 and Opus~5.5 as compiler models, with and without declared joins.
+
+\textbf{Authored.} The author (\texttt{dce.author}) is one model session
+per database that reads the whole KB, explores the data read-only, writes
+the whole contract, and maps every KB entry to where the contract holds
+it. It sees no task, question, gold or result. A checker compares its
+definitions with reference implementations where those exist
+(experiments 4 and 4b).

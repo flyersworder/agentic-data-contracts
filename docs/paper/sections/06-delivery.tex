@@ -11,6 +11,7 @@ order the transcripts suggested it.
 
 \subsection{One fact the manual leaves out}
 \label{sec:one-fact}
+\label{sec:interpretation}
 
 The manual says a null fee field ``applies to all possible values''. The
 fee data never uses null for its three list-typed fields; it stores ``all''
@@ -32,7 +33,7 @@ there by 32 tasks to 0.
 \begin{table}[t]
 \centering
 \footnotesize
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}llrr@{}}
 \toprule
 \tabhead{Arm} & \tabhead{Knows, and how} & \mLuna{} & \mQwen{} \\
@@ -40,7 +41,7 @@ there by 32 tasks to 0.
 \armMw{} & one fact, prose & 53.9$^\dagger$ & 43.4$^\dagger$ \\
 \armMws{} & both facts, prose & 84.1 & 84.1 \\
 \armT{} & contract files, prompt & 80.4 & 70.7 \\
-\armTws{} & files + both notes, prompt & \textbf{87.8} & \textbf{89.6} \\
+\armTws{} & files + notes, prompt & \textbf{87.8} & \textbf{89.6} \\
 \armC{} & contract, governed tools & 82.6$^\dagger$ & 79.6$^\dagger$ \\
 \bottomrule
 \end{tabular}
@@ -92,7 +93,7 @@ twice, in the contract and in the note, and the prose once, so part of
 the lead may be repetition rather than form.
 
 \subsection{What the governed tools add}
-\label{sec:tools}
+\label{sec:tools-add}
 
 \armT{} and \armC{} hold the same contract and differ only in delivery: the
 files in the prompt over plain tools, or the governed lookups. On

@@ -1,0 +1,47 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+Context layers work; the open question was which part of one does the
+work. On two benchmarks and seven models the answer is the knowledge.
+Emptying a contract's prose while keeping its tools and rules removes most
+of its gain on every model, and the tools without the prose are worth
+little or less. What looked like an advantage of delivery on DABStep was
+mostly two facts the manual left out; stated alike, the contract's form
+adds a few points, and its tools add a rule put in view as the query is
+written. A contract is worth what its author could determine: compiled
+from the documentation it is worth the documentation, written by a careful
+author it carries a determined procedure exactly, and on LiveSQLBench,
+where the gold settles what the documentation leaves open, no author
+gains. An author with the data recovers what the data settles and nothing
+the data cannot reveal.
+
+Delivery still matters, for other reasons. Looking a contract up as
+needed costs no accuracy; its cost rises by about a third as the contract
+grows to 22 databases, while the prompt's rises elevenfold; and it runs
+where the prompt no longer fits. The lookup log names the definition behind each answer,
+which makes a wrong answer traceable to the entry that caused it. And the
+contract's declared rules kept every governed run from writing to the
+database, across every DABStep run we made.
+
+\paragraph{Future work,} in order of what it would settle. A second
+benchmark whose documentation states rules once for many tasks would test
+whether the contract's form gain is general or belongs to one procedure. A
+contract padded with neighbouring domains of one warehouse, rather than
+other databases, is the harder test of a long prompt. Human raters would
+check the model raters on which the determinacy and load results rest. And
+a validator that can state ``a filter on this list column must accept the
+empty-list wildcard'' would let the governed tools catch the error they now
+only prevent by retrieval.
+
+\section*{Artifact Availability}
+
+The library, the harness, every contract and compiler, the analysis
+scripts, the run commits and the raw result rows are tracked at
+\url{https://github.com/flyersworder/agentic-data-contracts}. Every row
+records its commit, contract digest, gold-set hash, scorer, model,
+endpoint, token counts, cost and a post-run integrity check of its
+database copy. The transcripts of the four single runs are attached to
+the release tagged \texttt{dabstep-eval-2026-09}, with SHA-256 digests.
+LiveSQLBench's gold SQL, gold results and task-to-knowledge mapping are
+the benchmark's private material and are not redistributed; analyses that
+depend on them print aggregates only.

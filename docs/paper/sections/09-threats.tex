@@ -1,0 +1,64 @@
+\section{Threats to Validity}
+\label{sec:threats}
+
+\paragraph{Two benchmarks, one natural procedure.} The contract's form adds
+a few points only on tasks governed by a rule-matching procedure, and the
+only natural one in either benchmark is DABStep's fee matching. Experiment
+4 builds three more, but they are ours, and complete prose carries them at
+the ceiling. A second, independent benchmark whose documentation states
+rules once for many tasks would test the form result properly; EntSQL,
+DataSpace and BI-Bench give nearly every task its own document or project,
+leaving no rules to state once~\cite{entsql,dataspace,bi-bench}.
+
+\paragraph{The raters are models.} The raters who judged determinacy,
+procedural load and the gaps of experiment 4b, and the failure auditors,
+are instances of one model family. Each analysis plan was fixed
+before any rating was read, and the raters saw no run, contract or result,
+but their agreement ($\kappa$ 0.68 to 0.96) overstates what human raters
+would reach; on one batch two raters matched on all 71 loads with
+different notes.
+
+\paragraph{Ceilings.} Experiments 4 and 6 sit at the ceiling at their base
+level, so they could show a drop but not a gain, and their constructed
+questions are easier than the benchmarks' own. Experiment 6's padding is
+other databases under distinct names; neighbouring domains of one warehouse
+would be the harder test of a long prompt.
+
+\paragraph{Repetition.} \armTws{} states each fact twice, once in the
+contract and once in the note, against the prose's once, so part of the
+form gain of Section~\ref{sec:alike} may be repetition.
+
+\paragraph{Scoring views and graders.}\label{sec:threats-golds} \mQwen{} states its working before
+its answer, which the official DABStep scorer marks wrong; we report the
+end-to-end view beside it, and on experiment 5b the order of the arms
+changes between the two views. The vendored DABStep scorer also ignores the
+sign of a number: on nine fee-change questions with negative golds, 114
+official verdicts and 43 end-to-end ones credit an answer of the wrong
+sign, mostly in \mQwen{}'s baseline arms. Re-grading with the sign enforced
+changes no prediction's outcome; it moves \mQwen{}'s scaffolding step from
+$-4.3$ to $-3.4$ points (official) and from $+0.2$ to $+1.2$
+(end-to-end), and we keep the official verdicts. LiveSQLBench's official
+rules strip every \texttt{DISTINCT} from both answer and gold, which leans
+against the compiled contracts' \texttt{IS DISTINCT FROM}; grading without
+the stripping moves each arm by under two points and no outcome. DABStep's
+reconstructed golds run 3 to 6 points high on the hard split, on both
+arms of the officially graded pair.
+
+\paragraph{Variance and multiplicity.}\label{sec:power} A near-replicate of the \mGLM{}
+contract arm at temperature~0 disagreed with the original on 94 of 401
+tasks, symmetrically; the four single runs are therefore read only through
+paired tests, and the repeated experiments carry the claims. The GPT-6
+models accept only their default temperature. No multiplicity correction
+is applied across the 53 predictions; that 20 of them failed is the
+clearest sign they were not fitted.
+
+\paragraph{Contamination.} Both benchmarks are public, and we ran no
+contamination probe. A memorising model should not care which context it
+is handed, yet the hollow and full contracts, which differ only in their
+prose, differ by 26 to 50 points on the same tasks and model. That is an inference, not a measurement.
+
+\paragraph{Run health.} \mDS{}'s single run lost 29\% of its rows to rate
+limiting and is reported on its complete-case set. In experiment 6, 174 to
+180 of each arm-level's 180 runs kept a trace; the rest ran before a pod
+restart. \mSol{}'s text arm at 8x and all 22 databases was dropped for
+cost by a recorded amendment, before any test.

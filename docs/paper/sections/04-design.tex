@@ -14,23 +14,57 @@ gold (332 hard, 69 easy; Section~\ref{sec:grading}).
 \textbf{LiveSQLBench}~\cite{livesqlbench} (Base-Full v1) asks SQL
 questions over 22 databases in as many domains, each shipped with a
 knowledge base (KB) of 30 to 96 entries that define its metrics, classes
-and conventions. We port it from PostgreSQL to DuckDB: the grader runs an
-answer's final SQL on a read-only copy with PostgreSQL's NULL ordering and
-integer division, and compares the result with the frozen PostgreSQL gold.
-The 302 \emph{primary} tasks are those whose gold reproduces in DuckDB;
-73 more reproduce only as a set and are reported apart. Its
-knowledge is mostly composite (dependent formulas, bands, a change of
-grain) rather than a single procedure that many tasks share.
+and conventions. Of its 600 tasks, 411 are read-only queries; the rest
+change data and are out of scope. We port it from PostgreSQL to DuckDB:
+the grader runs an answer's final SQL on a read-only copy with
+PostgreSQL's NULL ordering and integer division, and compares the result
+with the frozen PostgreSQL gold. Run 20 times in DuckDB, 302 golds
+reproduce exactly (the \emph{primary} tasks), 73 reproduce only as a set
+and are reported apart, and 36 are excluded, as not reproducible or
+because they read the clock. Its knowledge is mostly composite (dependent
+formulas, bands, a change of grain) rather than one procedure that many
+tasks share.
 
 \textbf{Constructed questions.} Experiments 4, 4b and 6 need knowledge that
-is complete by construction. On three LiveSQLBench databases from three
-domains (returns logistics, labour certification, solar plants) each
-received a rule-matching procedure and a composite, written as KB entries,
-reimplemented from their text by an independent reviewer and answered by a
-blind solver given only the KB: 60 questions in matched shapes, ten per
-piece and database.
+is complete by construction. We chose three LiveSQLBench databases from
+three domains (returns logistics, labour certification, solar plants) and
+wrote two new pieces of knowledge into each one's KB: a rule-matching
+procedure and a composite. An independent reviewer reimplemented every
+piece from its text, and a blind solver given only the KB answered all 60
+questions: ten per piece and database, in matched shapes.
 
-\subsection{Arms}
+\begin{table*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lL{6.6cm}lL{3.4cm}cr@{}}
+\toprule
+\tabhead{Exp.} & \tabhead{Question} & \tabhead{Benchmark, tasks} & \tabhead{Models} & $k$ & \tabhead{Held} \\
+\midrule
+A--D & content against scaffolding: the four-arm ablation & DABStep, 401 & \mGLM{}, \mDS{}, \mSON{}, \mGPT{} & 1 & --- \\
+panel & the same, repeated & DABStep, 401 & \mSol{}, \mQwen{} & 3 & --- \\
+one fact & does one fact the manual lacks explain the contract's lead? & DABStep, 401 & \mSol{}, \mQwen{}, \mLuna{} & 3 & 2/3 \\
+LSB 1 & compiled knowledge, delivered three ways & LiveSQLBench, 302 & \mLuna{}, \mQwen{} & 3 & 2+1/5 \\
+compiler & compiled against hand-written, on DABStep; a stronger compiler & DABStep, 401 & \mLuna{} & 3 & 2+2/4 \\
+LSB 2 & a better author on LiveSQLBench & LiveSQLBench, 55 & \mLuna{} & 3 & 0/3 \\
+LSB 3 & oracle corrections, split into training and held-out tasks & LiveSQLBench, 55 & \mLuna{} & 3 & 1/3 \\
+load & is the gain where the knowledge is procedural? (blind ratings) & both, 401 + 302 & (existing runs) & --- & 3/4 \\
+4 & a constructed rule-matching procedure and composite, plain and styled prose & constructed, 60 & \mLuna{}, \mSol{}; \mQwen{} & 3 & 2/8 \\
+5 & the contract's text in the prompt against its governed tools & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 4/4 \\
+5b & the second fact, stated in prose & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 3/4 \\
+5c & both facts stated alike in prose and in the contract's text & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 1/3 \\
+4b & gaps in the documentation, and an author who can query the data & constructed, 60 & \mLuna{}, \mQwen{}, \mSol{} & 3 & 7/7 \\
+6 & the contract grown from one database to 22 & constructed, 60 & \mLuna{}, \mSol{}, \mQwen{} & 3 & 2+1/5 \\
+\bottomrule
+\end{tabular}
+\caption{The experiments, roughly in the order they ran. \emph{Held}:
+registered predictions that held, of those fixed; ``+$n$'' counts
+predictions that held in part (LSB 1, compiler) or were read as
+equivalent (6). \appref{app:predictions} lists all 53.}
+\label{tab:experiments}
+\end{table*}
+
+\subsection{Arms and experiments}
 \label{sec:arms}
 
 \begin{table}[t]
@@ -75,9 +109,13 @@ is not ignorance but a long prompt. \armH{} is \armC{} with every field of
 prose emptied, the control that turns the four arms into an ablation.
 
 The second block exists because \armM{} and \armC{} were not
-knowledge-equal: the contract's author had added facts from the data
-(Section~\ref{sec:delivery}). Each note is written once, never reworded
-between runs, and the text arms carry the contract's two files verbatim.
+knowledge-equal: the contract states two facts the manual does not
+(Section~\ref{sec:delivery}). \armMw{} adds the first as a note
+(\emph{w}, the empty-list wildcard) and \armMws{} adds both (\emph{s},
+that overlapping fee rules each apply). Each note is written once and
+never reworded between runs, and the text arms carry the contract's two
+files verbatim. Table~\ref{tab:experiments} lists the experiments; most
+were designed from what the one before found.
 
 \subsection{Models}
 \label{sec:models}
@@ -85,26 +123,24 @@ between runs, and the text arms carry the contract's two files verbatim.
 \begin{table}[t]
 \centering
 \footnotesize
-\setlength{\tabcolsep}{2pt}
-\begin{tabular}{@{}lL{1.7cm}rL{2.6cm}@{}}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}llL{1.9cm}r@{}}
 \toprule
-\tabhead{Model} & \tabhead{Route} & $k$ & \tabhead{Used in} \\
+\tabhead{Model} & \tabhead{Pinned id} & \tabhead{Route} & $k$ \\
 \midrule
-\mSol{} & gateway & 3 & panel; one fact; 4, 4b, 6 \\
-\mLuna{} & gateway & 3 & one fact; compiler; 5--5c; LSB 1--6 \\
-\mQwen{} 27B & self-hosted, FP8 & 3 & panel; one fact; 5--5c; LSB 1, 4--6 \\
+\mSol{} & \texttt{gpt-6-sol} & gateway & 3 \\
+\mLuna{} & \texttt{gpt-6-luna} & gateway & 3 \\
+\mQwen{} & \texttt{qwen3.8-27b} & self-hosted, FP8 & 3 \\
 \midrule
-\mGLM{} & OpenRouter & 1 & four-arm ablation \\
-\mDS{} & OpenRouter & 1 & four-arm ablation \\
-\mSON{} & gateway & 1 & four-arm ablation \\
-\mGPT{} & OpenRouter & 1 & four-arm ablation \\
+\mGLM{} & \texttt{glm-5.3-flash} & OpenRouter, fp8 & 1 \\
+\mDS{} & \texttt{deepseek-v4-flash} & OpenRouter, fp8 & 1 \\
+\mSON{} & Claude Sonnet~5 & gateway & 1 \\
+\mGPT{} & \texttt{gpt-5.6-sol} & OpenRouter & 1 \\
 \bottomrule
 \end{tabular}
-\caption{The seven models. The $k{=}3$ models carry every
-knowledge-or-delivery result; the four single runs are the preprint's
-ablation, kept for breadth; the two flash models ran at fp8. The gateway
-is an enterprise LiteLLM proxy. \mGPT{} and \mSol{} are different
-models.}
+\caption{The seven models. The gateway is an enterprise LiteLLM proxy.
+\mGLM{} and \mDS{} are the two flash-tier models; \mGPT{} and \mSol{} are
+different models.}
 \label{tab:models}
 \end{table}
 
@@ -112,11 +148,13 @@ Three models carry the repeated experiments (Table~\ref{tab:models}):
 \mSol{}, a frontier model; \mLuna{}, the small tier of its family on the
 same deployment, which varies capability alone; and \mQwen{}, an
 open-weight model served at FP8 with thinking on, temperature~0 and
-seed~0, which varies vendor, family and serving stack. GPT-6 accepts only
-its default temperature, so its repeats measure sampling variance as well
-as the arms. Reasoning effort is \texttt{medium} for the GPT models. The
-four single runs of the preprint, each pinned to one provider endpoint,
-supply breadth across four more model families
+seed~0, which varies vendor, family and serving stack. The GPT-6 models
+accept only their default temperature. Serving is not deterministic even
+for \mQwen{}: between any two repeats 12.5 to 14.2\% of its task-arm
+verdicts change (8.3 to 9.7\% on \mSol{}, about 12\% on \mLuna{}), so the
+repeats measure variance on every model. Reasoning effort is
+\texttt{medium} for the GPT models. The four single runs, each pinned to
+one provider endpoint, supply breadth across four more model families
 (\appref{app:harness}); their \mDS{} run lost 29\% of its rows to rate
 limiting and is reported on its 279-task complete-case set
 (\appref{app:truncation}).
@@ -124,55 +162,62 @@ limiting and is reported on its 279-task complete-case set
 \subsection{Pre-registration and statistics}
 \label{sec:prereg}
 
-From the knowledge-or-delivery series on, every experiment fixed its arms,
-its endpoints, its predictions and how each outcome would be read in a run
-commit before the run began; a smoke run after that commit could not
-change them, and every result row stamps the commit it ran on. The four single
+From the one-fact experiment on, every experiment committed its arms,
+endpoints and how each outcome would be read before it ran, and most also
+fixed numbered predictions; a smoke run after that commit could not change
+them, and every result row stamps the commit it ran on. The four single
 runs had a pre-registered design and primary model but no numbered
-predictions. Across both benchmarks, 53 predictions were fixed in 16 run
-commits: 29 held, 3 held in part, 20 failed, and one was read as
-equivalent, which its run commit registered as an outcome of its own
-(\appref{app:predictions} lists them). A test is reported as fixed even
-where its reading later proved too narrow, and analyses chosen after a
-result was seen are labelled exploratory.
+predictions, and neither panel fixed any. In all, 53 predictions were
+fixed in 15 commits: 29 held, 3 held in part, 20 failed, and one was read
+as equivalent, an outcome its commit registered in advance
+(\appref{app:predictions}). Analyses chosen after a result was seen are
+labelled exploratory.
 
-The unit is the task, scored by its correct runs over the repeats. Arms
-are compared with sign tests over tasks, ties dropped: one-sided where a
-direction was predicted, and required to hold in direction on each model
-when pooled over models. Where a null was registered as a tie, it is read
-by a $\pm$5-point bound, with bootstrap intervals over tasks where an
-equivalence was registered. The four single runs use McNemar's exact test
-over paired tasks~\cite{mcnemar,dietterich}. No multiplicity correction
-is applied; Section~\ref{sec:threats} says what that exposes.
+The unit is the task. With $k$ repeats a task scores 0 to $k$ for each
+arm, its number of correct runs, and a comparison between two arms counts
+the tasks on which each scores higher, dropping ties. Arms are compared by
+sign tests on those counts: one-sided where a direction was predicted, and
+required to hold in direction on each model when pooled over models.
+Where a null was registered as a tie, it is read by a $\pm$5-point bound,
+with bootstrap intervals over tasks where an equivalence was registered.
+The four single runs use McNemar's exact test over paired
+tasks~\cite{mcnemar,dietterich}. Accuracy is \emph{strict}: a run that
+ends in an error or at the turn limit counts as wrong. No multiplicity
+correction is applied; Section~\ref{sec:threats} says what that exposes.
 
 \subsection{Grading}
 \label{sec:grading}
 \label{sec:golds}
 
 DABStep withholds its test golds. We reconstruct them from the
-leaderboard's published per-task files by plurality over answers the
-benchmark's grader marked correct (a 75\% threshold, median realised share
-0.981), which yields 401 golds after excluding five consensus answers that
+leaderboard's published per-task files: for each task, the answer that at
+least 75\% of the submissions graded correct agree on (the median share is
+0.981). That yields 401 golds after excluding five consensus answers that
 verification showed wrong (\appref{app:golds}). We then measured the
 reconstruction: \armC{} and \armM{} on \mGLM{}, swept over all 450 tasks
 and submitted, were graded by the leaderboard against the withheld golds
-at 51.9\% and 18.8\% on the hard tasks; our golds run about 3 to 6 points
-high, on both arms (\appref{app:leniency}). Answers are graded by
-DABStep's own scorer, vendored verbatim. \mQwen{} often states its
-working and then the answer as its last paragraph, which the scorer marks
-wrong; the \emph{end-to-end} view grades that last paragraph with the same
-scorer, never downgrades, and is reported beside the official verdicts on
-\mQwen{}. On the GPT-6 models the two views agree. LiveSQLBench answers are
-SQL, graded by its official Soft-EX rules, reproduced exactly.
+at 51.9\% and 18.8\% on the hard tasks, and our golds run about 3 to 6
+points high on the hard split, on both arms (\appref{app:leniency}). The
+reconstructed golds are not redistributed; the script that rebuilds them
+from the public files is. Answers are graded by DABStep's own scorer,
+vendored verbatim. \mQwen{} often states its working and then the answer
+as its last paragraph, which the scorer marks wrong; the
+\emph{end-to-end} view grades that last paragraph with the same scorer,
+never downgrades, and is reported beside the official verdicts on
+\mQwen{}. On the GPT-6 models the two views agree. LiveSQLBench answers
+are SQL, graded by the benchmark's Soft-EX rules, which compare the
+answer's result table with the gold's after normalising decimals, rounding
+and \texttt{DISTINCT}; we reproduce them exactly.
 
 \subsection{What is held fixed}
 \label{sec:fixed}
 
 Within a run everything but the arm is fixed: the row limit (50 rows per
 result), the request limit, the token budget, the model and its settings,
-the endpoint, the task set, the golds and the scorer. In each repeated
-experiment the arms run together within each repeat and pair within it.
-An agent that exhausts its budget is forced to a final answer rather than
-discarded, and a run that ends in an error counts as wrong; a retry pass
-reruns transient errors once. Harness defects found along the way are
-recorded with the rows they affected (\appref{app:harness}).
+the endpoint, the task set, the golds and the scorer. In most repeated
+experiments the arms ran together within each repeat; where an arm ran
+separately (\armMw{} on \mSol{}, \armMws{} on \mLuna{}), it pairs by task
+and repeat. An agent that exhausts its budget is forced to a final answer
+rather than discarded, and a retry pass reruns transient errors once.
+Harness defects found along the way are recorded with the rows they
+affected (\appref{app:harness}).

@@ -1,10 +1,11 @@
 \section{What Delivery Buys}
 \label{sec:buys}
 
-If delivery does not decide accuracy once the facts are equal, what is the
-governed contract for? Three things, each measured: it keeps cost flat as
-the contract grows, it records which knowledge each answer used, and its
-declared rules keep the agent from writing to the warehouse.
+With the facts equal, delivery moves accuracy by a few points at most
+(Section~\ref{sec:delivery}). What else is the governed contract for?
+Three things, each measured: it keeps cost nearly flat as the contract
+grows, it records which knowledge each answer used, and its declared rules
+keep the agent from writing to the database.
 
 \subsection{Cost and scale}
 \label{sec:scale}
@@ -54,8 +55,8 @@ not fit the text arm beyond it.
 itself at 1x on 3 tasks and above on none; the 95\% interval of the mean
 drop is $[+0.0, +1.3]$ points, inside the registered $\pm$5-point
 equivalence bound. \mLuna{}'s text arm, with all 22 databases (551k
-tokens) in its prompt, still scores 98.3\%, though that level was not
-tested. With no drop to hold, the predictions that the governed arm's drop
+tokens) in its prompt, still scores 98.3\%, though that level was not part of a
+registered test. With no drop to hold, the predictions that the governed arm's drop
 is smaller, or that it drops at all, both fail. \mQwen{}'s governed arm
 scores 100\% at 8x and at all 22 databases, where the text arm does not
 fit its window. Within this design, then, the model is not lost in a long
@@ -98,20 +99,23 @@ produced it, to be fixed once for every later answer.
 \textbf{The trust the governed contract offers is accountability, not
 detection.}
 
-\subsection{Governance}
+\subsection{Declared rules deter writes}
 \label{sec:governance}
 
 The contract also declares forbidden operations, rendered into the prompt
-and enforced by the tools' static checks. In the four single runs the
-ungoverned arms submitted 166 mutating statements over 26 tasks and the
-governed arms none (Fisher $p{=}3{\times}10^{-8}$ pooled). Over every
-DABStep run since, the harness's integrity check on each run's working
-copy found \textbf{50 corrupted copies in 29{,}866 ungoverned runs and
-none in 22{,}946 governed ones}, on nine models; 44 of the 50 are
-\mQwen{}'s. Two escalations in the single runs show the hazard: an agent
-lost a temporary table to the tool's per-call connection, diagnosed it,
-and switched to persistent tables (\appref{app:escalations}). The
-enforcement layer never had to fire: the governed arms never attempted a
-write, so the mechanism measured is deterrence by declared rule, and the
-contract's text over the plain tools, whose prompt states the same rules,
-also never corrupted a copy.
+and enforced by the tools' static checks. In the four single runs, where
+every submitted statement was read, the ungoverned arms submitted 166
+mutating statements over 26 tasks and the governed arms none. Every
+DABStep run since was checked by the harness's integrity test on its own
+working copy of the database. On the seven models, it found \textbf{50
+corrupted copies in 29{,}008 ungoverned runs and none in 22{,}138
+governed ones}; 44 of the 50 are \mQwen{}'s, 18 with \armM{} and 24 with
+\armMw{}. One escalation in the single runs shows the hazard: an agent
+lost a temporary table to the plain tool's per-call connection, diagnosed
+it, and switched to persistent tables (\appref{app:escalations}). The
+validator never had to block a write in the single runs, so what was
+measured there is deterrence by declared rule rather than enforcement; the
+later runs show no corruption, which bounds attempts that succeeded, not
+attempts. The contract's text over the plain tools, whose prompt states
+the same forbidden operations, also never corrupted a copy: the rules
+deter wherever they are stated.

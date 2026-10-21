@@ -25,7 +25,7 @@ DABStep, one fact, \mLuna{} & (1) & the share lies between \mQwen{}'s and \mSol{
 LiveSQLBench 1, compiled & (1) & \armM{} beats \armS{}, on both models & \texttt{1c1e302} & holds \\
  & (2) & \armMsql{} within 3 points of \armM{} & \texttt{1c1e302} & holds \\
  & (3) & on \mLuna{} the compiled contract beats \armMsql{}, by less than its DABStep lead & \texttt{1c1e302} & fails \\
- & (4) & on \mQwen{} \armC{} is at or below \armMsql{}, its advantage smaller than on \mLuna{} & \texttt{1c1e302} & holds in part \\
+ & (4) & on \mQwen{} \armComp{} is at or below \armMsql{}, its advantage smaller than on \mLuna{} & \texttt{1c1e302} & holds in part \\
 DABStep compiler & (5) & the compiled contract falls between \armM{} and the hand-written \armC{}, its loss in the fee families & \texttt{1c1e302} & mostly holds \\
 LiveSQLBench 1, \mQwen{} & (6) & faithful definitions help and refused ones hurt (group A minus group B above zero) & \texttt{20171bd} & fails \\
 \midrule
@@ -63,11 +63,11 @@ DABStep 5b, the second fact & (28), (28Q) & \armMws{} beats \armMw{} on rule-mat
 DABStep 5c, facts alike & (30), (30Q) & \armTws{} and \armMws{} tie on rule-matching tasks & \texttt{a960495} & fail (text ahead) \\
  & (31Q) & the notes lift \mQwen{}'s \armT{} & \texttt{a960495} & holds \\
 \midrule
-LiveSQLBench 4b, gaps & (32), (32g), (32c) & two thirds of data gap-draws recovered, ordered settled, split, convention-only; the no-data control at most one of five & \texttt{a6342d0} & hold \\
- & (33) & no data draw resolves precedence as the gold does (most specific wins) & \texttt{a6342d0} & holds \\
- & (34) & the complete KB beats the gapped KB & \texttt{a6342d0} & holds \\
- & (35) & the authored contract beats the gapped KB & \texttt{a6342d0} & holds \\
- & (36) & the knowledge share is at least 0.5 & \texttt{a6342d0} & holds \\
+LiveSQLBench 4b, gaps & (32), (32g), (32c) & two thirds of data gap-draws recovered, ordered settled, split, convention-only; the no-data control at most one of five & \texttt{a7ee6b4} & hold \\
+ & (33) & no data draw resolves precedence as the gold does (most specific wins) & \texttt{a7ee6b4} & holds \\
+ & (34) & the complete KB beats the gapped KB & \texttt{a7ee6b4} & holds \\
+ & (35) & the authored contract beats the gapped KB & \texttt{a7ee6b4} & holds \\
+ & (36) & the knowledge share is at least 0.5 & \texttt{a7ee6b4} & holds \\
 \midrule
 LiveSQLBench 6, scale & (37) & the text arm at the common top is below itself at 1x & \texttt{fbca5ec} & equivalent \\
  & (38) & the governed arm's drop is smaller than the text arm's & \texttt{fbca5ec} & fails \\
@@ -76,8 +76,11 @@ LiveSQLBench 6, scale & (37) & the text arm at the common top is below itself at
  & (40) & the governed arm holds where the text arm does not fit & \texttt{fbca5ec} & holds \\
 \bottomrule
 \end{tabular}
-\caption{53 predictions in 16 commits: 29 held, 3 held in part, 20
-failed, and one was read as equivalent, which its run commit registered as
-a separate outcome. Rows listing several numbers count each.}
+\caption{53 predictions in 15 commits: 29 held, 3 held in part (``mostly
+holds'' is counted here), 20 failed, and one was read as equivalent, which
+its commit registered as a separate outcome. Rows listing several numbers
+count each. Experiment 4b's predictions were first written in its design
+(\texttt{d76d21e}) and re-specified in \texttt{a7ee6b4}, before any
+contract was authored.}
 \label{tab:predictions}
 \end{table*}

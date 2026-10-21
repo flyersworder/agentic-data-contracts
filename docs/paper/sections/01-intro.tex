@@ -54,25 +54,26 @@ agent's tools enforce, and that can be emptied of its prose, compiled into
 views, delivered in the prompt or behind tools, and written by different
 authors. We run it on two benchmarks with documentation, DABStep and
 LiveSQLBench, across seven models, three of them repeated three times.
-After the first four-arm runs, every experiment fixed its predictions in a
-commit before it ran: 53 in all, of which 20 failed. Four findings.
+After the first four-arm runs, most experiments fixed numbered predictions
+in a commit before they ran: 53 in all, of which 20 failed. Four findings.
 
 \textbf{Knowledge does the work} (Section~\ref{sec:knowledge}). Removing
 the contract's prose while keeping its tools, instruction and rules drops
 hard-task accuracy by 26 to 50 points on every model; the tools and
-instruction without the prose are worth between $-9$ and $+15$, depending
-on the model. On LiveSQLBench the documentation helps nearly three times
-as much where it determines the gold as where it does not.
+instruction without the prose are worth between $-9$ and $+15$ points,
+depending on the model. On LiveSQLBench the documentation helps nearly
+three times as much where it determines the gold as where it does not.
 
 \textbf{What looked like delivery was knowledge}
-(Section~\ref{sec:delivery}). The contract beats the same domain's manual
-pasted into the prompt by 16 to 23 points. Our preprint attributed that to
-delivery: the rule one lookup away rather than buried in a long prompt. A
-sequence of controlled experiments says otherwise. Two facts the manual
-leaves out, stated in words, recover most of the gap; once both sides state
-the facts alike, the contract's form adds 4 to 6 points, and the governed
-tools add a rule put in front of the agent at the moment it writes the
-query.
+(Section~\ref{sec:delivery}). On DABStep the contract beats the same
+domain's manual, pasted into the prompt, by 20 to 23 hard-task points. The
+natural reading, and our preprint's, is delivery: the rule one lookup away
+rather than buried in a long prompt. Controlled experiments on two models
+say otherwise. Two facts the manual leaves out, stated in words, recover
+most of the gap, including on tasks whose transcripts nobody read. Once the
+prose and the contract state the same facts, the contract's format adds a
+few points at most, and the governed tools add a rule put in front of the
+agent as it writes the query, on some task families.
 
 \textbf{Where the knowledge comes from decides what it is worth}
 (Section~\ref{sec:authoring}). A contract compiled entry by entry from the
@@ -81,17 +82,18 @@ DABStep a better compile closes 90\% of the gap to the hand-written
 contract, because the knowledge is determined by the manual and the data;
 on LiveSQLBench no author gains, because the gold settles what the
 documentation leaves open, task by task. An author who can query the data
-recovers what the data settles, two thirds of what it only suggests, and
-none of the conventions it cannot reveal, and the contract then carries
+recovers what the data settles and two thirds of what it only suggests,
+misses the convention it cannot reveal, and the contract then carries
 exactly that knowledge.
 
-\textbf{Delivery buys cost, scale, accountability and governance, not
-accuracy} (Section~\ref{sec:buys}). Grown from one database to 22, the
-contract in the prompt loses no accuracy up to four times its size, but
-the governed contract is cheaper from twice its size, 1.7 to 2.4 times
-cheaper at four times, and runs where the prompt no longer fits the
-context window. Its lookups name the definition behind each answer, which
-locates the source of a wrong one. And across every DABStep run, the
+\textbf{Delivery buys cost, scale, accountability and governance, and
+little accuracy} (Section~\ref{sec:buys}). On constructed questions
+answered at the ceiling, growing the contract from one database to 22
+costs the prompt no accuracy up to four times its size. But the governed
+contract is cheaper from twice its size, 1.7 to 2.4 times cheaper at four
+times, and runs where the prompt no longer fits the context window. Its
+lookups name the definition behind each answer, which locates the source of
+a wrong one. And across every DABStep run on the seven models, the
 ungoverned arms corrupted their working copy of the database 50 times and
 the governed arms never.
 
@@ -106,9 +108,8 @@ demonstrably fail to derive it.
 
 \textbf{Contributions.} (1)~The decomposition of a context layer into
 content and scaffolding, on two benchmarks and seven models.
-(2)~A revised account of delivery, with the experiments that revised it,
-including our own preprint's. (3)~An authoring result that ties a
-contract's value to whether its knowledge is determinable. (4)~Measurements
-of what delivery buys: cost and scale, accountability, governance.
-(5)~The harness, contracts, compilers, predictions and results, released
-with the paper.
+(2)~A revised account of delivery, with the experiments that revised it.
+(3)~An authoring result that ties a contract's value to whether its
+knowledge is determinable. (4)~Measurements of what delivery buys: cost
+and scale, accountability, governance. (5)~The harness, contracts,
+compilers, predictions and results, released with the paper.

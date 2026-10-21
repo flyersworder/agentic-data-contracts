@@ -21,7 +21,8 @@ the compiled contract behind the governed tools; contrary to its
 registered prediction, the contract does not beat \armMsql{} (22 tasks to
 25). \mQwen{} gives
 37.3\%, 37.7\% and 37.7\%. On DABStep the same compiler (Sonnet~5) yields
-45.6\% on \mLuna{}, level with the manual's 45.3\% in an earlier run and far below the
+45.6\% on \mLuna{} in its own run, level with the manual's 45.3\% in an
+earlier run and far below the
 hand-written contract's 80.2\% (196 tasks to 18). On both benchmarks the
 agent reads what it is given, looking a metric up in 86 to 93\% of
 compiled-contract runs on LiveSQLBench, so the null is not a contract left
@@ -33,11 +34,11 @@ most often a \texttt{NULL} silently counted or a unit misread.
 determined}
 \label{sec:better-compile}
 
-On DABStep the compiler is the limit, not the method. With Opus~5.5 as the
-compiler and a contract format that can declare a multi-table metric, the
+On DABStep the compiler is the limit, not the method. A later run put four
+contracts side by side on \mLuna{}. With Opus~5.5 as the compiler and a contract format that can declare a multi-table metric, the
 fee formula compiles, and the compiled contract reaches 76.6\% against the
 Sonnet compile's 47.3\% (172 tasks to 15) and the hand-written contract's
-80.0\%. Neither change works alone: a one-table Opus compile scores
+80.0\% in the same run. Neither change works alone: a one-table Opus compile scores
 47.4\%. The best compile still trails the hand-written contract (58 tasks
 to 22), by 3.4 points. This is still a compile, entry by entry
 from the manual: DABStep's fee procedure is determined by the manual and
@@ -102,8 +103,9 @@ databases), a quantity stored in an encoding the KB does not state (a
 score one higher, a fraction where the KB implies a percentage), and, in
 one database, the precedence among matching rules removed. Blind raters
 labelled each gap by what the data reveals: \emph{settled},
-\emph{split}, or \emph{convention-only}. The author drew three contracts
-per database with the data open, and one without.
+\emph{split}, or \emph{convention-only}. The author wrote three
+contracts per database in independent sessions with the data open
+(\emph{draws}), and one without the data as a control.
 
 Recovery was scored before any agent ran. Over five gaps and three draws, the
 data draws recovered 12 of 15: settled 6 of 6, split 6 of 9,
@@ -111,12 +113,16 @@ convention-only 0 of 3. The draw
 without data recovered none of five. Every draw, with data or without,
 resolved the precedence gap as the lowest rule id; the gold is the most
 specific rule. The agents then show the recovered knowledge doing the
-work (Table~\ref{tab:gaps}). The authored contract beats the gapped KB by
+work (Table~\ref{tab:gaps}). Five arms ran on the three models: the KB
+with the gaps opened (\textsc{gapped}), the complete KB (\textsc{full}),
+the contract the first draw wrote (\textsc{authored}), the gapped KB plus
+that draw's resolutions written as notes (\textsc{noted}), and the
+authored contract's files in the prompt (\armT{}). The authored contract beats the gapped KB by
 26.8 points on the 41 data-informed questions (28 tasks to 1,
 $p{=}6{\times}10^{-8}$), on every model. The \emph{knowledge share}, the
-part of that gain reproduced by the gapped KB plus the author's
-resolutions written as notes, is 1.03 (95\% interval 0.98 to 1.35 over
-gap clusters). The three arms that hold the author's knowledge tie on
+part of that gain \textsc{noted} reproduces, is 1.03; its 95\% interval,
+0.98 to 1.35, is bootstrapped over only five gap clusters and is a rough
+guide. The three arms that hold the author's knowledge tie on
 every label, whatever their form. And the author's misses travel with the
 contract: on the encoding the data only suggested and on the precedence
 convention it cannot reveal, every arm built from that author scores 0,

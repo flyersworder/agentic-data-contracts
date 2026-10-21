@@ -1731,6 +1731,141 @@ were retried; one Qwen run ended at the turn limit and counts as wrong. The
 R06 reading and the efficiency figures are exploratory. Traces:
 `~/data/dce-held-results/exp4b/`.
 
+### Disclosure at scale: predictions (37)-(40)
+
+Experiment 4b found that progressive disclosure saves input but not money
+on one database's contract: about 25k tokens fit in a cached prompt, so
+loading it all up front is nearly free. Experiment 6 grows the contract
+until it should pay. Design: `docs/superpowers/specs/
+2026-10-20-experiment-6-disclosure-scale-design.md`, with one amendment.
+
+Experiment 4's three databases and 60 questions, each base contract at the
+ceiling. Padding is real but irrelevant: the other two base contracts
+first, then 19 contracts `dce.author` wrote for other LiveSQLBench
+databases, in a seeded order. Each padding contract is namespaced into its
+own database's name, its enforcing rules dropped and its prose kept. The
+base sits at the middle of the merged contract. Five levels take whole
+contracts: 1x (the base alone), 2x, 4x, 8x and all (22 databases).
+
+The arms:
+- `contract_scaled_<level>`: the governed contract, with an index in the
+  prompt and lookups on demand;
+- `contract_text_scaled_<level>`: the same merged files in the prompt over
+  plain tools, at every level that fits;
+- `manual_scaled`: the base KB plus the padding KBs as prose, at 1x and 4x;
+- `contract_text_first_4x`: the text arm with the base first, a position
+  control.
+
+Prompt size grows very differently. The governed prompt grows from 8k
+tokens at 1x to 10k at 4x and 20k at all. The text arm's grows from 26k to
+92k and 551k. 4x is the common top: the largest level both arms fit on
+every model. Qwen's 262k window, less the output reserve, does not fit the
+text arm at 8x or all. gpt-6-luna, gpt-6-sol and qwen3.8-27b, k=3. Run
+commit `fbca5ec` (tag `exp6-run`); results `a6ffe53`;
+`analysis/disclosure_scale.py` and `analysis/disclosure_mechanism.py`.
+
+**Amendment, before any test.** gpt-6-sol's text arm at 8x and all was
+dropped for cost. A run at "all" cost $1.13. By then 33 sol runs were in,
+all correct. sol's four finished runs at those levels are kept in its
+file, and enter no table or test. Every prediction is still tested at 4x
+on all three models.
+
+| accuracy, pooled | 1x | 2x | 4x | 8x | all |
+|---|---:|---:|---:|---:|---:|
+| `contract_scaled` | 99.6% | 99.8% | 99.4% | 99.6% | 99.8% |
+| `contract_text_scaled` | 100.0% | 99.4% | 99.4% | 100.0%* | 98.3%* |
+| `manual_scaled` | 98.3% | | 97.8% | | |
+| `contract_text_first` | | | 99.6% | | |
+
+\* gpt-6-luna only.
+
+- **(37) is equivalent: size costs the text arm no accuracy, up to 4x.** The
+  text arm at 4x is below itself at 1x on 3 tasks and above on none
+  (p = 0.12). The 95% interval of the mean drop is [+0.0, +1.3] points,
+  inside the ±5-point bound. The drops by model: luna +1.7 points, sol 0,
+  Qwen 0. luna's text arm at "all", 551k tokens in the prompt, still scores
+  98.3%.
+- **(38) and (38b) fail.** There is no drop for disclosure to hold:
+  4 tasks to 2 (p = 0.34), and the governed arm against itself 3 to 2
+  (p = 0.5).
+- **(39) holds: disclosure is cheaper at size.** At 4x the governed arm
+  costs less per run on luna on 58 of 60 tasks (p = 2e-15), and on sol on
+  all 60 (p = 9e-19).
+- **(40) holds.** Qwen's governed arm scores 100% at 8x and at all, where
+  the text arm does not fit its window, against 100% at 1x.
+
+As fixed in the run commit, (37) equivalent reads: **up to the common top,
+the whole contract in the prompt costs no accuracy, and disclosure's case is
+cost and size.** Both hold: (39) and (40).
+
+**Cost** (per model, since prices differ). The mean run's dollars, and its
+input (fresh plus cached):
+
+| model | arm | 1x | 2x | 4x | 8x | all |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-luna | governed | 2.22 m$, 62k | 2.23, 67k | 2.34, 73k | 2.44, 82k | 2.97, 129k |
+| | text | 1.75 m$, 71k | 2.93, 166k | 4.05, 264k | 7.57, 562k | 19.10, 1,511k |
+| gpt-6-sol | governed | 42.0 m$, 63k | 42.3, 67k | 44.3, 75k | 46.4, 83k | 57.4, 130k |
+| | text | 40.3 m$, 101k | 67.4, 220k | 104.2, 384k | | |
+| qwen3.8-27b | governed | 72k | 73k | 83k | 89k | 134k |
+| | text | 86k | 168k | 279k | | |
+
+- **The crossover is 2x.** At 1x the text arm is as cheap or cheaper:
+  1.75 against 2.22 m$ on luna, 40.3 against 42.0 on sol. From 2x on, the
+  governed arm is cheaper. At 4x the text arm costs 1.7 times as much on
+  luna and 2.4 times on sol. At "all" it costs 6.4 times as much on luna.
+- **Turns do not change; the prompt does.** The governed arm takes about
+  5.1 turns at every level, the text arm 2.7-4.1. From 1x to all, the
+  governed arm's input doubles (62k to 129k on luna): its index grows, and
+  is re-sent each turn. The text arm's input grows 21-fold.
+- **The result does not rest on how a route bills.** Under one fixed price
+  at 4x, the governed arm costs 37 against 70 m$ on luna fully cached, and
+  169 against 545 uncached. On Qwen the figures are 43 against 76 cached,
+  and 192 against 578 uncached. Uncached, it is already cheaper at 1x on
+  every model. Qwen's own route meters only output, so its prompts are
+  free. There the text arm costs less (0.26 against 0.35 m$ at 4x), because
+  it takes fewer turns.
+- Caching holds up for both arms: 91-95% of the governed arm's input is
+  cached, and 96-98% of the text arm's.
+
+**Mechanism** (from the traces). The governed arm makes the same number of
+lookups at every level: luna 4.0-4.3 a run, sol 4.7-5.7, Qwen 3.0-3.4. No
+lookup on any model names a padding database or one of its metrics, and no
+SQL from any arm touches a padding table. A lookup result mentions padding
+in 0-1.7% of runs on luna and sol, and in 9.2% (8x) and 6.3% (all) on
+Qwen. Those are `list_metrics` calls without a domain, which return every
+domain's metrics. The largest tool result is 13.7k characters on sol and
+Qwen. On luna one unfiltered call at "all" returned 315k. **The index
+steers the model to the base domain; padding reaches its context only when
+it lists metrics unfiltered.**
+
+**Reported, not predicted.**
+- **Prose.** `manual_scaled` is below the governed arm by 1.3 points at 1x
+  (1 task to 8, two-sided p = 0.039) and by 1.7 at 4x (2 to 7, p = 0.18).
+  The gap is on luna (97.8% and 96.1%) and Qwen (97.8% at both); sol
+  scores 99.4%. Qwen again explores with prose: 9-9.5 turns and 206-321k
+  input a run.
+- **Position.** Moving the base to the front of the text arm's prompt
+  changes nothing at 4x: +0.2 points (2 tasks to 1, p = 1).
+
+**What this does not show.** Accuracy sits at the ceiling at 1x (99.6% and
+100%), so the test of (37) could detect a drop but not a gain. The
+experiment shows that these models find the base in a prompt of up to 551k
+tokens of real but irrelevant contracts. It does not show the same for
+harder questions, or for padding that resembles the base. The padding here
+is other databases, namespaced by name; a contract padded with neighbouring
+domains of one database would be the harder test.
+
+Run health:
+- **Cost a repeat:** luna about $3.40, sol about $38-41, Qwen $0.28
+  (output only). Totals: $10.10, $116.26 and $0.84.
+- **Failures:** no overflow and no truncated prompt. One error, on Qwen
+  `manual_scaled_1x`, which counts as wrong.
+- **Traces:** none was cut at the cap. 174-180 of each arm-level's 180
+  runs have a trace; the rest ran before a pod restart, and their traces
+  were lost with the pod's disk.
+- Traces: `~/data/dce-held-results/exp6/`.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

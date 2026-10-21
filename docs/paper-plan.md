@@ -238,6 +238,11 @@ the rest are writing.
    contract. Then find the size at which `contract_text` starts to lose
    accuracy or cost while `contract_gap` holds steady. Run it after 4b
    finishes. Without it, the scale limit goes in §threats.
+   **Closed by experiment 6** (FINDINGS.md, *Disclosure at scale*). Accuracy
+   holds for both arms up to 22 databases; the governed arm is cheaper from
+   2x on (1.7x on luna, 2.4x on sol at 4x) and runs where the text arm does
+   not fit Qwen's window. The case for disclosure is cost and size, not
+   accuracy.
 
 ## PVLDB timing and what remains (2026-09-05)
 

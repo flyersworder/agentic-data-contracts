@@ -91,3 +91,34 @@ def test_the_reading_follows_the_registered_outcomes():
     assert "inconclusive between" in ds.reading(
         p37=True, eq37=False, p38=False, p38b=False
     )
+
+
+def test_an_arm_not_run_on_every_task_k_times_is_left_out():
+    full = {t: [{}, {}, {}] for t in TASKS}
+    runs = {
+        "contract_scaled_4x": full,
+        "contract_text_scaled_8x": {t: [{}, {}, {}] for t in TASKS[:2]},
+        "contract_text_scaled_all": {**full, "t0": [{}, {}]},
+    }
+    assert ds.complete(runs, TASKS, runs=3) == {"contract_scaled_4x"}
+
+
+def test_the_own_top_counts_only_the_levels_run():
+    fit = {"m": {f"{k}_{lv}": {"fits": True} for k in ds.KINDS for lv in ds.LEVELS}}
+    assert ds.own_top(fit, "m") == "all"
+    ran = {
+        "contract_text_scaled_1x",
+        "contract_text_scaled_2x",
+        "contract_text_scaled_4x",
+    }
+    assert ds.own_top(fit, "m", ran) == "4x"
+
+
+def test_pooled_accuracy_counts_only_the_models_that_ran_the_arm():
+    one = {t: 3 for t in TASKS}
+    by_model = {
+        "m1": _score(contract_scaled_1x=one, contract_text_scaled_8x=one),
+        "m2": _score(contract_scaled_1x={t: 0 for t in TASKS}),
+    }
+    assert ds.accuracy(by_model, "contract_scaled_1x", TASKS) == 0.5
+    assert ds.accuracy(by_model, "contract_text_scaled_8x", TASKS) == 1.0

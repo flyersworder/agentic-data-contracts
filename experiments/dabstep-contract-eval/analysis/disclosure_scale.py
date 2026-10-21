@@ -83,8 +83,25 @@ def common_top(fit: dict) -> str:
     ][-1]
 
 
-def own_top(fit: dict, model: str) -> str:
-    return [lv for lv in LEVELS if _fits(fit, model, f"contract_text_scaled_{lv}")][-1]
+def own_top(fit: dict, model: str, ran: set[str] | None = None) -> str:
+    """The largest level at which the text arm fits `model` and, given
+    `ran`, was run."""
+    return [
+        lv
+        for lv in LEVELS
+        if _fits(fit, model, f"contract_text_scaled_{lv}")
+        and (ran is None or f"contract_text_scaled_{lv}" in ran)
+    ][-1]
+
+
+def complete(by_arm: pg.Runs, tasks: list[str], *, runs: int) -> set[str]:
+    """The arms run `runs` times on every task; a level dropped mid-run
+    (gpt-6-sol's text arm at 8x and all, by amendment) enters no table."""
+    return {
+        arm
+        for arm, per in by_arm.items()
+        if all(len(per.get(t, [])) == runs for t in tasks)
+    }
 
 
 def _one_sided(up: int, down: int) -> float:
@@ -126,6 +143,12 @@ def smaller_drop(by_model: dict[str, Score], top: str, tasks: list[str]) -> dict
     }
     holds = p < 0.05 and all(g > 0 for g in models.values())
     return {"up": up, "down": down, "p": p, "models": models, "holds": holds}
+
+
+def accuracy(by_model: dict[str, Score], arm: str, tasks: list[str]) -> float:
+    """`arm`'s accuracy pooled over the models that ran it, k=3 each."""
+    ran = [s for s in by_model.values() if arm in s]
+    return sum(pg._mean(s, arm, tasks) for s in ran) / (3 * len(ran))
 
 
 def interval(
@@ -185,21 +208,36 @@ def _fixed_usd(run: dict, cached: bool) -> float:
 
 def main() -> None:
     fit = json.loads(FIT.read_text(encoding="utf-8"))
-    by_model = {
-        m: pg.scores(RESULTS, pattern)
+    costs = {
+        m: pg.run_costs(RESULTS, pattern)
         for m, pattern in FILES.items()
         if (RESULTS / pattern.format(1)).exists()
     }
-    if not by_model:
+    if not costs:
         print("no agent results yet")
         return
+    tasks = sorted(
+        {t for by_arm in costs.values() for per in by_arm.values() for t in per}
+    )
+    ran = {m: complete(by_arm, tasks, runs=3) for m, by_arm in costs.items()}
+    for m, by_arm in costs.items():
+        for arm in sorted(set(by_arm) - ran[m]):
+            n = sum(len(v) for v in by_arm[arm].values())
+            print(f"== partial, left out: {m} {arm} ({n} runs)")
+    costs = {
+        m: {a: v for a, v in by_arm.items() if a in ran[m]}
+        for m, by_arm in costs.items()
+    }
+    by_model = {
+        m: {a: v for a, v in pg.scores(RESULTS, FILES[m]).items() if a in ran[m]}
+        for m in costs
+    }
     pooled = pg.pool(by_model)
     runs = 3 * len(by_model)
-    tasks = sorted({t for s in pooled.values() for t in s})
     top = common_top(fit)
     print(
         f"== common top {top}; own tops "
-        + ", ".join(f"{m} {own_top(fit, m)}" for m in by_model)
+        + ", ".join(f"{m} {own_top(fit, m, ran[m])}" for m in by_model)
     )
 
     print("== accuracy, pooled and per model")
@@ -210,7 +248,7 @@ def main() -> None:
             for m, s in by_model.items()
             if arm in s
         )
-        print(f"   {arm:26s} {pg._mean(pooled, arm, tasks) / runs:6.1%}   {per}")
+        print(f"   {arm:26s} {accuracy(by_model, arm, tasks):6.1%}   {per}")
 
     r37 = drop(by_model, "contract_text_scaled", top, tasks)
     lo, hi = interval(
@@ -233,7 +271,6 @@ def main() -> None:
         f"      (37) mean drop 95% interval [{lo:+.1%}, {hi:+.1%}]: equivalent {eq37}"
     )
 
-    costs = {m: pg.run_costs(RESULTS, FILES[m]) for m in by_model}
     gov, text = f"contract_scaled_{top}", f"contract_text_scaled_{top}"
     held = []
     for m in COST_MODELS:

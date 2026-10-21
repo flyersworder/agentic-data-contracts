@@ -1866,6 +1866,51 @@ Run health:
   were lost with the pod's disk.
 - Traces: `~/data/dce-held-results/exp6/`.
 
+### What the lookup log tells an auditor (exploratory)
+
+The governed arm leaves a record of which knowledge each answer consulted:
+every `lookup_metric` names a metric and returns its `sql_expression`. This
+asks whether that record supports trust in two senses. Does the final SQL
+implement what was looked up? And does a departure flag a wrong answer?
+`analysis/lookup_fidelity.py` parses each metric expression and the run's
+last `run_query` (DuckDB, table aliases stripped). A run counts as
+**exact** if a looked-up expression is a subtree of the SQL, and as
+**columns** if only the expression's columns appear. This was not
+predicted. It reads the traces of experiment 6's governed arm at every
+level and 4b's `contract_gap`.
+
+**Models use what they look up.** In experiment 6, the final SQL contains a
+looked-up metric verbatim in 91% of luna's runs (811 of 894), 98% of
+sol's (865 of 885), and 87% of Qwen's runs with a lookup (421 of 485).
+Qwen answered without any metric lookup in 385 runs, all correct. 4b is
+similar: 82%, 96% and 78%.
+
+**A departure does not flag a wrong answer.** Every experiment 6 run that
+departed from its looked-up formula was right: 75 on luna, 17 on sol, 64
+on Qwen. Eight of the nine wrong answers used a looked-up metric exactly;
+their errors lie in filters or joins, which a metric check cannot see. In
+4b, Qwen's 61 runs without a lookup score 30% against 87% for exact
+use. But all 43 wrong ones are reverse_logistics questions, where every
+arm built from that contract scores 0. On the questions where it both
+looked up and skipped, the two score the same (6 of 10 right without, 6
+of 8 with). The lookup log is not a per-answer correctness signal.
+
+**It does locate the source of an error.** Of 4b's 175 wrong governed
+answers, 174 are in reverse_logistics, the database whose contract carries
+the author's misses (G2 and G3). 90 of them applied the contract's metric
+verbatim: sol on G2's C questions, both GPT models on G3's R questions.
+Each such answer names its source definition, so an auditor can trace a
+wrong figure to the contract entry that produced it, and fix that entry
+once for every later answer. With the contract in the prompt, the SQL can
+be matched against definitions after the fact. Only the log records what
+the agent read before writing it.
+
+So the trust the contract offers is accountability, not detection. It does
+not tell a right answer from a wrong one. It tells you which definition an
+answer came from, and so where a correction belongs. Caveats: the
+classifier is syntactic, so "columns" may be an equivalent rewrite. Rules
+read through `lookup_domain` are not checked.
+
 ## The contract compiles, so the residual gap is derivation, not information
 
 `analysis/macro.sql` is a pre-computed fee layer — two DuckDB views — built by

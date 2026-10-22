@@ -171,6 +171,25 @@ def all_ratings() -> tuple[dict[str, dict], dict[str, dict]]:
     return first, second
 
 
+def main_runs() -> tuple[dict[str, dict[str, Counter[str]]], dict[str, str]]:
+    """The main runs' primary tasks: model -> arm -> task -> correct runs over
+    the three repeats; and task -> its database."""
+    score: dict[str, dict[str, Counter[str]]] = {}
+    db_of: dict[str, str] = {}
+    for model, pattern in MAIN_RUNS.items():
+        s: dict[str, Counter[str]] = {}
+        for i in (1, 2, 3):
+            path = ROOT / "results/livesqlbench" / (pattern.format(i) + ".jsonl")
+            for r in load(path):
+                if r["subset"] == "primary":
+                    s.setdefault(r["arm"], Counter())[r["task_id"]] += (
+                        r["verdict"] == "correct"
+                    )
+                    db_of[r["task_id"]] = r["db"]
+        score[model] = s
+    return score, db_of
+
+
 def main_all() -> None:
     first, second = all_ratings()
     tasks = sorted(set(first) & set(second))
@@ -193,17 +212,7 @@ def main_all() -> None:
     print(
         "groups: " + ", ".join(f"{g} {n}" for g, n in Counter(group.values()).items())
     )
-    score: dict[str, dict[str, Counter[str]]] = {}
-    for model, pattern in MAIN_RUNS.items():
-        s: dict[str, Counter[str]] = {}
-        for i in (1, 2, 3):
-            path = ROOT / "results/livesqlbench" / (pattern.format(i) + ".jsonl")
-            for r in load(path):
-                if r["subset"] == "primary":
-                    s.setdefault(r["arm"], Counter())[r["task_id"]] += (
-                        r["verdict"] == "correct"
-                    )
-        score[model] = s
+    score, _ = main_runs()
     know = {
         t: sum(score[m][a][t] for m in MAIN_RUNS for a in KNOWLEDGE_ARMS) / 18
         for t in tasks

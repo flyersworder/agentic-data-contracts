@@ -3850,6 +3850,331 @@ of its work (runs B, C and D).
 The contrasts stay paired and same-task and their directions are not in
 doubt; their magnitudes carry this alongside the flip rate above.
 
+## Clustered inference and intervals (review round 2)
+
+Exploratory, written after every result it re-reads, in answer to a second
+review round. Every p-value above treats tasks as independent, and they are
+not. `analysis/clustered.py` re-reads the paired contrasts with the cluster
+as the unit:
+
+- **DABStep:** the question shape (`templates.shape_of`) is the primary
+  cluster. The 332 hard tasks fall in 38 shapes; the 69 easy tasks are 69
+  shapes; the 199 rule-matching tasks are 25. The sensitivity column is the
+  macro family (`counterfactuals.family_of`, 11 families over 176 hard
+  tasks), with every other task its own cluster (167 clusters on the hard
+  set).
+- **LiveSQLBench:** the database (22 for the main runs, 3 for experiments 2
+  and 3).
+- **Experiment 4b:** the gap cluster (5). **Experiment 6:** the knowledge
+  piece, a database's ten R or ten C questions (6).
+
+For each contrast the script prints the effect in points, a bootstrap
+interval over tasks, a bootstrap interval over clusters (whole clusters
+resampled, the ratio of summed differences to summed tasks) and a sign test
+over clusters (each cluster's summed difference, ties dropped, two-sided).
+Both bootstraps use 10,000 resamples and seed 2026. Below six clusters the
+two-sided sign test cannot reach p < 0.05, and a cluster interval over three
+to six clusters is not a reliable 95% interval. Intervals below are 95%, in
+points, by shape unless named otherwise. "Survives" means the shape interval
+excludes zero; where the shape sign test disagrees, the table says so.
+
+### The k=3 panels, hard tasks
+
+Official and end-to-end scores are identical on gpt-6-sol.
+
+| contrast | model, view | effect [over tasks] | by shape | shapes | by family | survives |
+|---|---|---|---|---|---|---|
+| HOLLOW - SCHEMA | sol | -8.5 [-11.8, -5.3] | [-16.3, -1.9] | 5/15, p = 0.04 | [-18.2, -1.1] | yes |
+| CONTRACT - HOLLOW | sol | +50.0 [+44.9, +55.0] | [+32.1, +66.2] | 23/5, p = 9e-4 | [+34.2, +61.2] | yes |
+| CONTRACT - MANUAL | sol | +19.9 [+16.0, +23.8] | [+7.0, +33.7] | 15/4, p = 0.02 | [+6.9, +32.8] | yes |
+| MANUAL - SCHEMA | sol | +21.6 [+17.1, +26.0] | [+8.9, +35.4] | 19/6, p = 0.02 | [+10.7, +32.0] | yes |
+| HOLLOW - SCHEMA | Qwen official | -5.5 [-8.1, -3.1] | [-10.5, -1.4] | 6/8, p = 0.79 | [-9.6, -2.6] | interval only |
+| CONTRACT - HOLLOW | Qwen official | +34.5 [+30.5, +38.5] | [+23.6, +45.4] | 30/2, p = 3e-7 | [+26.0, +42.5] | yes |
+| CONTRACT - MANUAL | Qwen official | +22.7 [+18.4, +27.0] | [+11.3, +35.2] | 29/4, p = 1e-5 | [+13.3, +32.5] | yes |
+| MANUAL - SCHEMA | Qwen official | +6.3 [+3.5, +9.2] | [+1.4, +11.6] | 16/6, p = 0.05 | [+1.1, +11.1] | interval only |
+| HOLLOW - SCHEMA | Qwen end-to-end | +0.2 [-1.7, +2.1] | [-3.4, +3.4] | 10/4, p = 0.18 | [-1.9, +2.3] | null |
+| CONTRACT - HOLLOW | Qwen end-to-end | +43.8 [+38.9, +48.6] | [+28.1, +59.8] | 28/3, p = 5e-6 | [+28.7, +56.7] | yes |
+| CONTRACT - MANUAL | Qwen end-to-end | +23.2 [+18.1, +28.4] | [+7.4, +40.7] | 23/7, p = 0.005 | [+7.6, +39.8] | yes |
+| MANUAL - SCHEMA | Qwen end-to-end | +20.8 [+17.2, +24.6] | [+11.8, +31.0] | 19/3, p = 9e-4 | [+9.7, +31.9] | yes |
+
+Qwen's official MANUAL - SCHEMA splits 27 families to 24 (p = 0.78).
+
+**The decomposition survives clustering.** The content step is +34 to +50
+points with shape intervals whose lower ends lie at +24 to +32. The sol
+scaffolding deficit survives, narrowly by the shape sign test. Qwen's
+official deficit (-5.5) has an interval clear of zero, but 6 shapes go
+one way and 8 the other.
+
+**The content step lives in the fee tasks** (reviewer R3, W4). The fee
+bucket is the 294 hard tasks whose question names fees (*Where the effect
+lives*); the other 38 hard tasks are the non-fee bucket.
+
+| CONTRACT - HOLLOW | sol | Qwen official | Qwen end-to-end |
+|---|---|---|---|
+| fee hard (294, 31 shapes) | +57.6, shape [+39.6, +73.5], 23/0 | +38.5 [+27.1, +50.1], 28/1 | +49.5 [+33.1, +66.6], 27/1 |
+| non-fee hard (38, 7 shapes) | -8.8 [-16.7, -1.8]; shape [-33.3, -2.7], 0/5, p = 0.06 | +3.5 [-1.8, +9.6] | -0.9 [-6.1, +5.3] |
+| easy (69, each its own shape) | +13.0 [+4.3, +22.7], 14/3, p = 0.01 | +6.3 [-2.4, +15.5], 11/7 | +11.6 [+2.4, +21.3], 11/3, p = 0.06 |
+
+Off the fee domain the content buys nothing on Qwen. On sol it costs
+about 9 points (10 task-runs of 114): 4 in the 30-task "most expensive MCC
+/ ACI" family, which sol's bare arm partly solves, and 6 in the eight
+average-transaction-value tasks. Five of the seven non-fee shapes go
+against the content and none for it. On easy tasks it buys 6 to 13 points; that is significant on sol
+only.
+
+### The two facts, on the 199 rule-matching tasks
+
+| contrast | effect [over tasks] | by shape (25) | shapes | by family (109) | survives |
+|---|---|---|---|---|---|
+| (28) luna, MANUAL+WS - MANUAL+W | +28.5 [+23.5, +33.7] | [+14.2, +43.3] | 18/1, p = 8e-5 | [+16.1, +40.8] | yes |
+| (28Q) Qwen | +42.7 [+36.7, +49.1] | [+23.6, +62.0] | 20/0, p = 2e-6 | [+26.1, +59.5] | yes |
+| (29) luna, TEXT - MANUAL+WS | +0.8 [-2.5, +4.2] | [-4.5, +5.8] | 8/5, p = 0.58 | [-3.2, +4.5] | tie; within +/-5 except by shape |
+| (29Q) Qwen | -16.6 [-21.3, -12.1] | [-31.6, -5.3] | 3/15, p = 0.008 | [-22.2, -11.4] | yes |
+| (30) luna, TEXT+WS - MANUAL+WS | +3.7 [+1.0, +6.5] | [+0.6, +7.9] | 11/2, p = 0.02 | [+0.9, +7.3] | yes |
+| (30Q) Qwen | +5.5 [+2.0, +9.2] | [-0.4, +10.4] | 11/4, p = 0.12 | [+1.3, +9.3] | by family only |
+| (30) luna, the 165 never read | +2.2 [-0.8, +5.3] | [-0.4, +5.7] | 10/3, p = 0.09 | [-0.7, +5.7] | no |
+| (30Q) Qwen, the 165 never read | +4.6 [+1.2, +8.3] | [-0.5, +9.7] | 8/5, p = 0.58 | [+0.6, +8.7] | by family only |
+| luna tools, CONTRACT - TEXT, rule-matching | -0.7 [-3.0, +1.7] | [-4.9, +3.0] | 3/4 | [-4.2, +2.4] | tie |
+| luna tools, the other 202 (82 shapes) | +5.1 [+1.7, +8.7] | [-1.8, +11.1] | 8/10, p = 0.81 | [-1.8, +10.7] | **no** |
+| Qwen tools, rule-matching | +10.1 [+6.2, +13.9] | [+3.1, +16.7] | 14/7, p = 0.19 | [+1.9, +16.8] | interval only |
+| Qwen tools, the other 202 | -6.9 [-12.4, -1.8] | [-22.0, +9.4] | 10/9 | [-21.5, +9.4] | **no** |
+
+**The facts' lift is robust on both models.** **The form gain is
+registered-direction but loosely bounded.** With the facts stated alike,
+the contract's text leads by +3.7 [+0.6, +7.9] on luna and +5.5
+[-0.4, +10.4] on Qwen. Upper limits of 8 and 10 points are not "a few
+points at most". On the 165 unread tasks neither model's gain clears
+clustering. So the earlier reading, "clearly on Qwen, not significantly on
+luna", does not hold at the shape level. Both are positive in direction,
+and both are unresolved.
+
+**The governed tools' accuracy gain on luna's other 202 tasks does not
+survive.** Over tasks it is +5.1 (38 tasks to 15, p = 0.002). Over shapes
+its interval spans zero, and the shapes split 8 to 10: three families carry
+it. Qwen's -6.9 there does not survive either.
+
+**The (28) selection on luna (M6).** The 34 inspected tasks were chosen on
+`manual_resolved`'s r1 and r2 rows, which (28) reuses as its comparator.
+Repeat r3 played no part in the choice, so it gives a selection-free
+comparison:
+
+| (28) on luna | effect [over tasks] | by shape |
+|---|---|---|
+| the 34 inspected, r3 only | +67.6 [+50.0, +82.4], 23/0 | [+50.0, +79.4] |
+| the 165 never read, r1-r3 | +19.2 [+14.7, +23.8] | [+8.5, +31.9] |
+| the 165 never read, r3 only | +20.6 [+13.9, +27.3] | [+8.9, +35.5] |
+| all 199, r3 only | +28.6 [+22.1, +35.2] | [+13.4, +44.6] |
+
+`manual_resolved` scores 0% on the 34 in r1 and r2, by construction, and
+11.8% in r3. On the 165 it scores 65.5%, 65.5% and 61.8%. Removing the 34
+removed tasks that `manual_resolved` had failed twice, which raises its r1
+and r2 accuracy on the remainder. So +19.2 on the 165 is **biased down**,
+which is conservative; r3 alone gives +20.6. The bias runs up on the 34
+and down on the 165, and on all 199 it nets out: r3 alone gives +28.6,
+against the registered +28.5. **The selection moved the estimate between
+the two subsets, not its total.**
+
+**Experiment 5's gap-recovery shares (m3).** (MANUAL+W - MANUAL) /
+(CONTRACT - MANUAL), all 401 tasks, end-to-end:
+
+| model | share | over tasks | by shape | by family |
+|---|---|---|---|---|
+| gpt-6-sol | 0.77 | [0.64, 0.88] | [0.16, 1.01] | [0.18, 1.00] |
+| gpt-6-luna | 0.38 | [0.30, 0.45] | [0.16, 0.60] | [0.16, 0.59] |
+| qwen3.8-27b | 0.41 | [0.25, 0.60] | [-0.07, 1.49] | [-0.09, 1.47] |
+
+Over tasks, sol's share sits above the other two. Over shapes, all three
+overlap. The share is set by which families the note repairs (every
+rule-set family, no total-fee family), so a handful of clusters decides it.
+Prediction (1) failed on point estimates; under clustering it is
+inconclusive, and the ordering of shares across models is not established.
+
+### LiveSQLBench
+
+**The knowledge gain survives.** MANUAL - SCHEMA on the 302 primary tasks:
+
+- luna: +15.6 [+11.6, +19.6]; by database [+10.6, +20.6]; 18 databases to 2
+  (p = 4e-4).
+- Qwen: +14.1 [+9.8, +18.4]; by database [+9.1, +19.0]; 19 to 2 (p = 2e-4).
+
+**Determinacy (M3).** This is the confound check's gain: the three
+knowledge arms on both models (18 runs a task) minus `schema_only` (6).
+Intervals are by database.
+
+| labels | determined: gain | undetermined: gain | difference, points | difference, log-odds |
+|---|---|---|---|---|
+| consensus (138 / 132) | +20.8 pts, +0.84 log-odds | +7.6, +0.89 | +13.2 [+4.8, +22.4] | -0.04 [-0.70, +0.51] |
+| first rater alone (156 / 146) | +21.1, +0.86 | +9.0, +0.95 | +12.1 [+3.4, +20.7] | -0.09 [-0.71, +0.44] |
+| second rater alone (152 / 150) | +20.9, +0.85 | +9.5, +1.02 | +11.4 [+3.9, +19.4] | -0.17 [-0.77, +0.31] |
+
+The 32 split tasks, as a middle group, gain +22.7 points [+9.9, +36.3]
+(+1.52 log-odds) from 9% to 32%. That is the largest gain on either scale,
+not an intermediate one.
+
+**"Nearly three times" is a statement about the points scale only.** In
+points, the determined tasks gain more under every labelling, and the
+difference clears clustering. In log-odds the two gains are equal: the
+difference is about zero, with an interval of about +/-0.6. From baselines
+of 39% and 6%, determinacy cannot be separated from the floor. Which rater's
+labels are used does not matter.
+
+**The nulls, as bounds (M7).**
+
+- **Experiment 2** (55 tasks, three databases, luna):
+  - the Opus compile against the Sonnet compile: +1.8 [-3.0, +7.3], 5 tasks
+    to 3;
+  - the author session against the Sonnet compile: -1.8 [-9.1, +5.5], 3 to 4.
+
+  These exclude gains above 7.3 and 5.5 points. They do not exclude
+  moderate ones. Three databases allow no cluster inference.
+- **Experiment 3**, the 28 held-out tasks:
+  - the manual's corrections: +3.6 [0.0, +9.5], 2 tasks to 0;
+  - the contract's: -3.6 [-9.5, 0.0], 0 to 2.
+
+  On the training tasks the same corrections gain +21.0 [+7.4, +35.8] and
+  +22.2 [+8.6, +38.3]. The held-out intervals exclude any transfer of that
+  size, and any gain above about 10 points. Smaller gains are not excluded.
+
+### Experiment 4b: authored against gapped, by gap cluster (M2b)
+
+CONTRACT_gap - MANUAL_gap on the 41 data-informed questions. The per-gap
+gains are listed in the order labor g1 (10 questions), reverse_logistics
+g1 (1), reverse_logistics g2 (10), solar g1 (10), solar g2 (10).
+
+| model | effect [over tasks] | tasks | per gap | gaps, one-sided p |
+|---|---|---|---|---|
+| gpt-6-luna | +50.4 [+38.2, +62.6] | 28/0 | +67, +100, 0, +33, +97 | 4/0, 0.06 |
+| qwen3.8-27b | +4.1 [-0.8, +9.8] | 6/2 | +3, -33, 0, 0, +17 | 2/1, 0.5 |
+| gpt-6-sol | +26.0 [+13.8, +39.8] | 12/0 | +3, +100, 0, 0, +93 | 3/0, 0.12 |
+| pooled | +26.8 [+18.7, +35.8] | 28/1 | +24, +56, 0, +11, +69 | 4/0, 0.06 |
+
+**(35)'s p = 6e-8 is over tasks.** Over gap clusters the evidence is 4 of
+5 clusters with one tie: p = 0.06 one-sided, near the 0.03 floor that five
+clusters allow. The registered "majority of gap clusters" condition holds.
+Qwen's gain does not clear even the task interval, so "on every model"
+holds in direction only.
+
+### Experiment 6: the equivalence as an exact bound (m2)
+
+TEXT at 1x against the common top, 4x: 60 tasks, 9 runs each.
+
+- The drop is +0.6 points [0.0, +1.3]. Three runs were lost and none
+  gained: 3 of 540.
+- The exact 95% interval on the lost-run rate is [0.11%, 1.61%].
+- The three losses fall in three different knowledge pieces (the R
+  questions of each database). The design effect over pieces is 0.62, so
+  clustering does not widen the bound.
+- The cruder per-task bound is 3 of 60 tasks with any loss, at most 13.9%
+  of tasks.
+
+The governed arm drops +0.2 [-0.6, +0.9] over the same range: 3 runs lost
+and 2 gained. **The +/-5-point equivalence survives an exact, clustered
+treatment**, within the ceiling-level scope the questions set.
+
+### The A/A noise floor
+
+Each arm experiment 5c reran, against its earlier files, by task and repeat:
+
+| arm, model | subset | drift [over tasks] | by shape | shapes |
+|---|---|---|---|---|
+| MANUAL+WS luna (5c - 5b) | rule-matching | +1.7 [-1.0, +4.4] | [-1.6, +4.4] | 9/8 |
+| MANUAL+WS luna | other 202 | +0.8 [-2.5, +4.1] | [-1.1, +2.6] | 8/7 |
+| TEXT luna (5c - 5) | rule-matching | -2.8 [-5.4, -0.5] | [-7.8, +0.9] | 3/6 |
+| TEXT luna | other 202 | +0.5 [-2.1, +3.1] | [-2.1, +3.1] | 6/7 |
+| MANUAL+WS Qwen (5c - 5) | rule-matching | -2.0 [-5.5, +1.3] | [-4.2, 0.0] | 4/7 |
+| MANUAL+WS Qwen | other 202 | +1.3 [-1.2, +3.8] | [-0.7, +3.4] | 10/5 |
+| TEXT Qwen (5c - 5) | rule-matching | +1.2 [-2.3, +4.7] | [-1.4, +4.5] | 9/9 |
+| TEXT Qwen | other 202 | -2.3 [-5.6, +1.0] | [-5.1, +1.1] | 8/8 |
+
+Identical arms move by up to 2.8 points between runs. One of eight
+intervals excludes zero over tasks; none does over shapes (luna's TEXT
+drift is 6 families to 20, p = 0.009). A cross-run contrast smaller than
+about 3 points is inside this floor. The cross-run contrasts in the paper
+are (28) on luna and the sol share (MANUAL+W ran a day after the panel).
+Both are many times that size.
+
+### Corrupted copies, stratified by whether the rules were stated (m5, W4)
+
+Every contract arm's prompt lists the forbidden operations. The governed
+arms render the contract's constraints ("Forbidden operations: DELETE,
+DROP, ..."). The TEXT arms paste `contract.yml`, `forbidden_operations`
+included. No schema or manual arm states them, and the manual and the
+payments readme say nothing about writes. `analysis/corruption.py` now
+splits the paper's seven models this way:
+
+| model | rules stated | not stated | Fisher p |
+|---|---|---|---|
+| qwen3.8-27b | 0 / 8,421 (<= 0.044%) | 44 / 8,421 (0.52%) | 1e-13 |
+| glm-5.3-flash | 0 / 1,252 (<= 0.29%) | 3 / 1,255 | 0.25 |
+| Sonnet 5 | 0 / 802 (<= 0.46%) | 1 / 802 | 1 |
+| deepseek-v4-flash | 0 / 802 (<= 0.46%) | 1 / 802 | 1 |
+| gpt-6-sol | 0 / 4,010 (<= 0.092%) | 1 / 3,609 | 0.47 |
+| gpt-5.6-sol | 0 / 836 (<= 0.44%) | 0 / 886 | 1 |
+| gpt-6-luna | 0 / 13,233 (<= 0.028%) | 0 / 6,015 | 1 |
+| all seven | **0 / 29,356** (exact <= 0.013%; rule of three 1.0e-4) | **50 / 21,790** (0.23%, [0.17%, 0.30%]) | |
+
+Upper bounds are the exact 95% limits. Of the stated runs, 7,218 are the
+TEXT arms over the plain tools, with no enforcement (luna and Qwen, 3,609
+each), and none corrupted a copy. Qwen's TEXT arms (0 of 3,609) against
+its unstated arms (44 of 8,421) give p = 2e-7. **The operative variable is
+whether the rules are stated, not whether they are enforced.** Only Qwen
+supports the contrast on its own; the other models' unstated cells hold 0
+to 3 events.
+
+### Operating numbers, the k=3 runs
+
+`analysis/cost_decomposition.py --operating` gives the mean run over every
+graded run. Dollars are the route's bill in milli-dollars; per correct
+answer they use the official verdicts. The rows carry no timing field, so
+wall-clock is read from each run's trace, first message to last. It
+includes the route's queueing.
+
+| run | arm | m$ / run | m$ / correct | turns | input | of it cached | output | wall-clock mean / median s |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| sol panel | SCHEMA | 31.4 | 70.6 | 8.7 | 27,822 | 21,910 | 1,518 | 32.2 / 23.3 |
+| | HOLLOW | 32.3 | 86.4 | 9.0 | 47,736 | 42,486 | 1,333 | 33.8 / 28.6 |
+| | MANUAL | 30.4 | **46.8** | 8.0 | 56,425 | 53,039 | 1,306 | 28.3 / 22.6 |
+| | CONTRACT | 48.0 | 59.2 | 7.6 | 69,231 | 59,559 | 1,672 | 30.2 / 27.5 |
+| Qwen panel | SCHEMA | 1.58 | 6.50 | 13.3 | 179,842 | - | 11,994 | 177 / 49 |
+| | HOLLOW | 2.12 | 10.59 | 11.7 | 179,868 | - | 16,068 | 255 / 123 |
+| | MANUAL | 1.66 | 5.43 | 12.8 | 229,275 | - | 12,571 | 193 / 45 |
+| | CONTRACT | **0.82** | **1.66** | 7.7 | 101,525 | - | 6,246 | 109 / 37 |
+| luna 5c | MANUAL+WS | 1.66 | 2.18 | 7.2 | 50,359 | 46,790 | 1,674 | 28.6 / 23.3 |
+| | TEXT | 1.69 | 2.19 | 5.6 | 82,339 | 80,370 | 1,375 | 23.8 / 18.7 |
+| | TEXT+WS | 1.56 | **1.89** | 5.3 | 79,069 | 77,316 | 1,221 | 20.8 / 18.2 |
+| Qwen 5c | MANUAL+WS | 0.88 | 1.61 | 10.4 | 149,121 | - | 6,684 | 106 / 49 |
+| | TEXT | 1.02 | 2.19 | 9.0 | 290,413 | - | 7,688 | 128 / 54 |
+| | TEXT+WS | **0.54** | **0.93** | 7.8 | 240,525 | - | 4,107 | 75 / 43 |
+
+Qwen's route meters output only and has no cache tier. On sol the
+contract is the dearest arm per run (+58% over MANUAL) and second per
+correct answer. On Qwen it is the cheapest on both counts and the fastest,
+at about 60% of the other arms' turns. With the facts stated alike (5c), TEXT+WS is the
+cheapest per correct answer on both models.
+
+### What survives clustering, and what does not
+
+Survives: the content step, on both panels and both views; the sol
+scaffolding deficit; CONTRACT over MANUAL; MANUAL over SCHEMA (except
+Qwen's official view); (28), (28Q) and (29Q); (30) on luna; the
+LiveSQLBench knowledge gain; the determinacy gap in points; experiment 6's
+equivalence; the stated-rules corruption contrast on Qwen.
+
+Does not survive, or only on one clustering:
+
+- luna's governed tools on the other 202 tasks (+5.1);
+- Qwen's tools on either subset;
+- (30Q) by shape, and both models' form gain on the 165 unread tasks;
+- Qwen's official scaffolding deficit and manual gain, by the shape sign
+  test;
+- (35)'s p = 6e-8, which is 0.06 over gap clusters;
+- the ordering of the one-fact shares across models;
+- the determinacy ratio on the log-odds scale;
+- (29)'s +/-5 equivalence, by shape (upper limit +5.8).
+
+The LiveSQLBench nulls are now bounds. A better author gains at most about
+7 points, and a gold-derived correction transfers at most about 10.
+
 ## What these runs do not show
 
 - **The pre-registered primary comparison was never run.** It names
@@ -3970,6 +4295,9 @@ uv run python analysis/knowledge_reuse.py                 # reuse; needs the pri
 uv run python analysis/lsb_distinct_regrade.py            # DISTINCT stripping; needs the private golds
 uv run python analysis/lsb_kb_clarity.py [--all]          # blind test (55, or all 302); needs the private audit files
 uv run python analysis/lsb_corrected.py                   # experiment 3; needs the private results and corrections
+uv run python analysis/clustered.py                       # clustered CIs (review round 2); needs the private ratings
+uv run python analysis/corruption.py                      # corrupted copies, by whether the rules were stated
+uv run python analysis/cost_decomposition.py --operating  # k=3 operating numbers; reads traces and held archives
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

@@ -51,7 +51,8 @@ def normalise(question: str, merchants: list[str], mcc_descriptions: list[str]) 
     return re.sub(r"\s+", " ", q).strip()
 
 
-def main() -> None:
+def _entities() -> tuple[list[str], list[str]]:
+    """The merchants and MCC descriptions DABStep varies between siblings."""
     con = duckdb.connect()
     con.execute(f"ATTACH '{ROOT / 'data' / 'dabstep.duckdb'}' AS src (READ_ONLY)")
     merchants = [
@@ -66,10 +67,31 @@ def main() -> None:
             "SELECT DISTINCT description FROM src.merchant_category_codes"
         ).fetchall()
     ]
+    con.close()
+    return merchants, descriptions
 
-    tasks = json.loads((ROOT / "data" / "tasks.json").read_text())
-    tasks = tasks if isinstance(tasks, list) else tasks.get("tasks", tasks)
-    golds = json.loads((ROOT / "data" / "golds.json").read_text())["golds"]
+
+def _tasks() -> list[dict]:
+    tasks = json.loads((ROOT / "data" / "tasks.json").read_text(encoding="utf-8"))
+    return tasks if isinstance(tasks, list) else tasks.get("tasks", tasks)
+
+
+def shape_of() -> dict[str, str]:
+    """task_id -> its question shape, for all 450 tasks: the cluster the
+    clustered analyses resample (`clustered.py`)."""
+    merchants, descriptions = _entities()
+    return {
+        str(t["task_id"]): normalise(t["question"], merchants, descriptions)
+        for t in _tasks()
+    }
+
+
+def main() -> None:
+    merchants, descriptions = _entities()
+    tasks = _tasks()
+    golds = json.loads((ROOT / "data" / "golds.json").read_text(encoding="utf-8"))[
+        "golds"
+    ]
     golded = [t for t in tasks if str(t["task_id"]) in golds]
 
     for label, rows in (("all 450 tasks", tasks), ("401 golded", golded)):

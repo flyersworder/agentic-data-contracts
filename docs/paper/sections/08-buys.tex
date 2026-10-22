@@ -5,8 +5,8 @@ With the facts equal, delivery moves accuracy by a few points
 (Section~\ref{sec:delivery}). What else is the governed contract
 for? Two things that delivery buys, each measured: it keeps cost nearly
 flat as the contract grows, and it records which knowledge each answer
-used. A third, safety, turns out to come from stating the rules, however
-they are delivered.
+used. A third, safety, goes with stating the rules, however they are
+delivered.
 
 \subsection{Cost and scale}
 \label{sec:scale}
@@ -64,8 +64,10 @@ it.
 
 \textbf{Size costs no accuracy, up to 4x, in an easy regime.} The prompt
 arm at 4x is below itself at 1x on 3 tasks and above on none: 3 of 540
-runs lost, an exact 95\% bound of 1.6\%, inside the registered
-$\pm$5-point equivalence bound (37). \mLuna{}'s prompt arm, with
+runs lost, all on \mLuna{}, inside the registered $\pm$5-point
+equivalence bound (37). Treating the runs as independent puts the loss
+below 1.6\%; the runs share 60 questions in six pieces, so that bound
+describes these questions, not a population of them. \mLuna{}'s prompt arm, with
 all 22 databases (551k tokens) in its prompt, still scores 98.3\%, though
 that level was not part of a registered test. With no drop to hold, the
 predictions that the lookup arm's drop is smaller, or that it drops at
@@ -83,12 +85,13 @@ accuracy; it is not a test of context rot.
 
 \textbf{Cost is where the deliveries differ.} At one database the prompt
 arm is as cheap or cheaper: its prompt is cached, and it takes 2.7 to 3.8
-turns against the lookup arm's 5. From 2x the lookup arm is cheaper, on 58
+turns against the lookup arm's 5. From 2x the lookup arm is cheaper on the GPT models, on 58
 of 60 tasks at 4x on \mLuna{} and on all 60 on \mSol{} (39), $p{<}10^{-10}$
 on each: 1.7 and 2.4 times cheaper there, and 6.4 times cheaper on
 \mLuna{} at 22 databases. The lookup arm's input tokens double from 1x to
-22x, as its index grows; the prompt arm's grow 21-fold. Under one fixed
-price the result holds fully cached and uncached, and uncached the lookup
+22x, as its index grows; the prompt arm's grow 21-fold. On \mQwen{}, priced by its output alone, the prompt arm stays
+cheaper at 4x. Under one fixed price the result holds fully cached and
+uncached, and uncached the lookup
 arm is cheaper even at one database. The traces show why the lookup arm's
 cost stays flat: its lookups never name a padding database or metric, and
 no query touches a padding table. Padding reaches its context only through
@@ -102,12 +105,10 @@ so the cost can be recomputed at any price.
 \subsection{A record of what each answer used}
 \label{sec:audit}
 
-Every governed lookup names a domain or metric and returns its
-definition, so the trace records which knowledge each answer read before
-its query was written. A log of the SQL alone shows what was computed, and
-one can match it against the contract's expressions, as we do below; the
-lookup log adds what the agent read, including when it then departed from
-it. This analysis was not predicted. In the scale experiment the final SQL
+Every governed lookup names the definition it returns, so the trace
+records which knowledge each answer read before its query was written; a
+log of the SQL alone shows only what was computed. This analysis was not
+predicted. In the scale experiment the final SQL
 contains a looked-up metric's expression verbatim in 91\% of \mLuna{}'s
 lookup runs, 98\% of \mSol{}'s and 87\% of \mQwen{}'s runs with a lookup.
 A departure does not mark a wrong answer: there every run that departed
@@ -118,7 +119,7 @@ applied the wrong definition verbatim; each names the contract entry that
 produced it, to be fixed once for every later answer. The record does not
 detect a wrong answer; it says where to fix one.
 
-\subsection{Stated rules deter writes}
+\subsection{Runs that state the rules do not write}
 \label{sec:governance}
 
 The contract declares forbidden operations, rendered into the prompt and
@@ -137,8 +138,10 @@ counts are too small to compare. One
 escalation in the single runs shows the hazard: an agent lost a temporary
 table to the plain tool's per-call connection, diagnosed it, and switched
 to persistent tables (\appref{app:escalations}). The validator never had
-to block a write, so what was measured is deterrence by a stated rule, in
-the tools or in the prompt, not enforcement; and the later runs bound
+to block a write, so this is not enforcement. Nor is it a clean test of
+stating the rules: the arms that state them also hold the contract's
+knowledge and workflow, which may leave less reason for a scratch table,
+so it is an association that a rules-only arm would settle; and the later runs bound
 writes that succeeded, not attempts. The plain tools here open a writable
 connection, so the hazard is real, but a read-only role removes it
 outright and remains the baseline; the stated rules matter where a

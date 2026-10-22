@@ -59,11 +59,10 @@ a hierarchical semantic layer, refined iteratively, reaching
 100\%~\cite{motherduck-semantic}. The system atop the validated leaderboard
 validates helper functions against the benchmark's
 golds~\cite{nvidia-kgmon}, and others encode the fee procedure as
-versioned code~\cite{oceanbase-datapilot}. Pre-built views suit a question
+versioned code~\cite{oceanbase-datapilot}. \ifextended Pre-built views suit a question
 space enumerable in advance, which is DABStep's construction; we measure
-the layer that must cover the unanticipated question. Tuned layers also do
-not travel: EvoOntology loses 6.6 to 10.9 points when its evolved layer
-serves a different model~\cite{evoontology}.
+the layer that must cover the unanticipated question. \fi Tuned layers also
+do not travel~\cite{evoontology}.
 
 \textbf{Documentation as knowledge.} BIRD withholds and supplies
 human-written evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA
@@ -117,7 +116,6 @@ What is new here is a decomposition with knowledge held equal by
 construction where it matters: a control that removes the content while
 holding the scaffolding fixed, notes that add one fact at a time, the same
 knowledge delivered three ways, three ways of authoring it, a test of
-whether the documentation determines the gold, and 53 predictions fixed
-before their runs. That knowledge outweighs delivery confirms what the
+whether the documentation determines the gold, and 53 predictions committed in advance. That knowledge outweighs delivery confirms what the
 long-context literature leads one to expect; the determinacy and authoring
 results are the parts it does not predict.

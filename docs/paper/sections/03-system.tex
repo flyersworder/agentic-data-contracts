@@ -18,7 +18,7 @@ agent may read, the operations it may not issue (\texttt{DELETE},
 prose description. \texttt{semantic.yml} declares the metrics, each with a
 description and an executable \texttt{sql\_expression} (from library version 0.62, a
 metric may declare the join it spans), the tables with a description per
-column, and the relationships. The DABStep contract is 60{,}181 characters
+column, and the relationships. The DABStep contract is 59{,}465 characters
 with 14 metrics; Figure~\ref{fig:contract} shows one, as it appears in the
 contract and in its hollow counterpart. The same files supply the semantics
 the agent reads and the rules the tool layer enforces.
@@ -114,17 +114,20 @@ treatment, not a cleaner control.
 \subsection{Three ways to author a contract}
 \label{sec:authoring-paths}
 
-\textbf{By hand.} The DABStep contract was written in one session on
-2026-08-30 from \texttt{manual.md}, the dataset README and the data, under
-a rule that barred consulting any question, gold or score, and frozen
-before any run (\appref{app:golds} gives the timeline;
+\textbf{Interactively.} The DABStep contract used throughout, the
+\emph{original} contract, was written in one interactive session on
+2026-08-30: a model (Opus~5) drafted most of it from \texttt{manual.md},
+the dataset README and the data, under the author's direction and review,
+and under a rule that barred consulting any question, gold or score. It
+was frozen before any run (\appref{app:golds} gives the timeline;
 Section~\ref{sec:threats} what it cannot prove). It states two facts the
 manual does not (Section~\ref{sec:delivery}), both in its first freeze and
 never edited. That the data stores ``all'' as an empty list was taken from
 the data and marked as an interpretation. That the fees of overlapping
 rules add up was not marked: the contract sums over a join of each
 transaction to ``the fee rule that matches it'', which counts every rule
-that matches, the ordinary join-and-sum idiom.
+that matches. That is a convention the data cannot settle, adopted as the
+ordinary join-and-sum idiom (Section~\ref{sec:account}).
 
 \textbf{Compiled.} The compiler turns a manual or a knowledge base (KB)
 into a contract entry by entry. For each entry a model writes a definition,

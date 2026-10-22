@@ -26,12 +26,12 @@ LiveSQLBench 1, compiled & (1) & \armM{} beats \armS{}, on both models & \texttt
  & (2) & \armMsql{} within 3 points of \armM{} & \texttt{1c1e302} & holds \\
  & (3) & on \mLuna{} the compiled contract beats \armMsql{}, by less than its DABStep lead & \texttt{1c1e302} & fails \\
  & (4) & on \mQwen{} \armComp{} is at or below \armMsql{}, its advantage smaller than on \mLuna{} & \texttt{1c1e302} & holds in part \\
-DABStep compiler & (5) & the compiled contract falls between \armM{} and the hand-written \armC{}, its loss in the fee families & \texttt{1c1e302} & mostly holds$^a$ \\
+DABStep compiler & (5) & the compiled contract falls between \armM{} and the original \armC{}, its loss in the fee families & \texttt{1c1e302} & mostly holds$^a$ \\
 LiveSQLBench 1, \mQwen{} & (6) & faithful definitions help and refused ones hurt (group A minus group B above zero) & \texttt{20171bd} & fails \\
 \midrule
 DABStep, stronger compiler & (7) & Opus with joins beats the Sonnet compile, by 30 points or more on the fee families & \texttt{3f60a9c} & holds \\
  & (8) & joins beat the one-table Opus compile, confined to the fee families & \texttt{3f60a9c} & holds in part \\
- & (9) & the hand-written contract still beats the best compile, mostly on the rest & \texttt{3f60a9c} & holds \\
+ & (9) & the original contract still beats the best compile, mostly on the rest & \texttt{3f60a9c} & holds \\
 \midrule
 LiveSQLBench 2, authors & (10) & the Sonnet compile within 5 points of \armM{} & \texttt{3e0915a} & fails, narrowly \\
  & (11) & the Opus author beats the Sonnet compile & \texttt{3e0915a} & fails \\

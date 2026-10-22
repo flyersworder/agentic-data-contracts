@@ -121,6 +121,7 @@ there.
 \subsection{What a pre-computed layer would add}
 \label{sec:ceiling}
 
+\ifextended
 Compiling the DABStep contract's own SQL expressions into two views gives
 an oracle for the layer a context-layer product would ship; no agent is
 given the views. Instantiated by us with each task's parameters, they
@@ -137,3 +138,11 @@ where agents fail to derive it, and on the strongest of the four that is
 5 points of the tasks the views cover. The contract's gain also stays
 inside its domain: on the hard tasks that do not concern fees it holds no
 detectable advantage in any of the four runs (\appref{app:domain}).
+\else
+Compiling the contract's own SQL expressions into two views gives an
+oracle for a pre-computed layer: instantiated by us, they reproduce the
+gold on all 176 hard tasks whose shape they cover. The four single runs
+miss 39.2, 37.3, 26.1 and 5.1 points of those tasks, falling with
+capability (\appref{app:buckets}): pre-computing a metric pays where agents
+fail to derive it, which on the strongest model is little.
+\fi

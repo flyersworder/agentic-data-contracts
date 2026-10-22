@@ -61,7 +61,7 @@ questions: ten per piece and database, in matched shapes.
 \ref{sec:procedures} & constructed procedures & 4 & a rule-matching procedure and a composite, plain and styled & constructed, 60 & \mLuna{}, \mSol{}; \mQwen{} & 3 & 2/8 \\
 \midrule
 \ref{sec:compiled} & LSB compile & LSB 1 & compiled knowledge, delivered three ways & LiveSQLBench, 302 & \mLuna{}, \mQwen{} & 3 & 2+1/5 \\
-\ref{sec:compiled} & DABStep compile & compiler & compiled against hand-written; a stronger compiler & DABStep, 401 & \mLuna{} & 3 & 2+2/4 \\
+\ref{sec:compiled} & DABStep compile & compiler & compiled against the original; a stronger compiler & DABStep, 401 & \mLuna{} & 3 & 2+2/4 \\
 \ref{sec:better-compile} & LSB author & LSB 2 & a stronger compile and a whole-contract author & LiveSQLBench, 55 & \mLuna{} & 3 & 0/3 \\
 \ref{sec:better-compile} & LSB oracle & LSB 3 & corrections from training golds, tested on held-out tasks & LiveSQLBench, 55 & \mLuna{} & 3 & 1/3 \\
 \ref{sec:gaps} & gaps & 4b & gaps in the documentation, and an author who can query the data & constructed, 60 & \mLuna{}, \mQwen{}, \mSol{} & 3 & 7/7 \\
@@ -92,7 +92,7 @@ read as equivalent (scale). \appref{app:predictions} lists all 53.}
 \armS{} & none & plain tools \\
 \armM{} & the manual or KB & prompt, plain tools \\
 \armH{} & none (contract emptied) & governed tools \\
-\armC{} & hand-written contract & governed tools \\
+\armC{} & original contract & governed tools \\
 \midrule
 \armMw{}, \armMws{} & \armM{} + one or two facts & prompt, plain tools \\
 \armT{} & \armC{}'s files & prompt, plain tools \\
@@ -122,7 +122,7 @@ writing SQL. \armS{} gives the agent only the plain tools and the schema.
 DABStep the 22{,}126 characters of \texttt{manual.md}, on LiveSQLBench the
 database's KB. It is the comparison a practitioner faces, since the
 alternative to a contract is not ignorance but a long prompt. \armC{} is
-the hand-written contract behind the governed tools, and \armH{} the same
+the original contract behind the governed tools, and \armH{} the same
 with every description and SQL definition emptied, the control that turns
 the four arms into an ablation.
 
@@ -222,9 +222,11 @@ limiting and is reported on its 279-task complete-case set
 \label{sec:prereg}
 
 From the one-fact experiment on, every experiment committed its arms,
-endpoints and how each outcome would be read before it ran, and most also
-fixed numbered predictions; a smoke run after that commit could not change
-them, and every result row stamps the commit it ran on. The four single
+endpoints and how each outcome would be read before its sweep, and most
+also fixed numbered predictions; every result row stamps the commit it ran
+on. Most commits came before any run or after a smoke run only. One,
+LiveSQLBench's (6), came after Qwen's per-arm totals for two repeats were
+seen, but before the subgroup statistic it predicts; its commit says so. The four single
 runs had a pre-registered design and primary model but no numbered
 predictions, and neither panel fixed any. In all, 53 predictions were
 fixed in 15 commits: 29 held, 3 held in part, 20 failed, and one was read
@@ -271,8 +273,6 @@ reconstruction: \armC{} and \armM{} on \mGLM{}, swept over all 450 tasks
 and submitted, were graded by the leaderboard against the withheld golds
 at 51.9\% and 18.8\% on the hard tasks, and our golds run about 3 to 6
 points high on the hard split, on both arms (\appref{app:leniency}).
-% DECISION(author): gold redistribution -- result rows carry the
-% reconstructed golds and the rebuild script is public; state the policy.
 Answers are graded by DABStep's own scorer,
 vendored verbatim. \mQwen{} often states its working and then the answer
 as its last paragraph, which the scorer marks wrong; the
@@ -281,7 +281,13 @@ never downgrades, and is reported beside the official verdicts on
 \mQwen{}. On the GPT-6 models the two views agree. LiveSQLBench answers
 are SQL, graded by the benchmark's Soft-EX rules, which compare the
 answer's result table with the gold's after normalising decimals, rounding
-and \texttt{DISTINCT}; we reproduce them exactly.
+and \texttt{DISTINCT}. Our DuckDB port departs from them in three
+documented ways, all fixed when the task set was frozen: JSON text is
+parsed, nested dates are normalised, and numbers match within one
+two-place rounding step (floats also within $10^{-5}$ relative), so that
+every frozen gold grades as correct against itself. Matching one database
+instance is not semantic equivalence~\cite{test-suites}; both benchmarks
+grade that way.
 
 \subsection{What is held fixed}
 \label{sec:fixed}

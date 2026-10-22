@@ -2,8 +2,8 @@
 \label{sec:authoring}
 
 If the contract's value is the knowledge it states, its value is its
-author's. Section~\ref{sec:contract} describes three ways to author one:
-by hand; compiled, entry by entry, from the documentation; and authored
+author's. Section~\ref{sec:authoring-paths} describes three ways to author one:
+interactively, a model drafting under the author's direction; compiled, entry by entry, from the documentation; and authored
 whole by a model that reads all of the documentation and explores the
 data. This section compares them on both benchmarks.
 
@@ -22,7 +22,7 @@ registered prediction (3), the contract does not beat \armMsql{} (22 tasks
 to 25). \mQwen{} gives
 37.3\%, 37.7\% and 37.7\%. On DABStep the same compiler (Sonnet~5) yields
 45.6\% on \mLuna{} over all tasks, against the manual's 45.3\% in an
-earlier run (not paired, so not tested) and the hand-written contract's
+earlier run (not paired, so not tested) and the original contract's
 80.2\% in the same run (196 tasks to 18). On both benchmarks the
 agent reads what it is given, looking a metric up in 86 to 93\% of
 compiled-contract runs on LiveSQLBench, so the null is not a contract left
@@ -37,9 +37,10 @@ most often a \texttt{NULL} silently counted or a unit misread.
 On DABStep the compiler is the limit, not the method. A later run put four
 contracts side by side on \mLuna{}. With Opus~5.5 as the compiler and a contract format that can declare a multi-table metric, the
 fee formula compiles, and the compiled contract reaches 76.6\% against the
-Sonnet compile's 47.3\% (172 tasks to 15) and the hand-written contract's
-80.0\% in the same run. Neither change works alone: a one-table Opus
-compile scores 47.4\%. The best compile still trails the hand-written
+Sonnet compile's 47.3\% (172 tasks to 15) and the original contract's
+80.0\% in the same run. Opus without joins compiles a one-table
+contract that scores 47.4\%; Sonnet with joins still refused the formula,
+and was not run as an agent arm. The best compile still trails the original
 contract (58 tasks to 22), by 3.4 points. It works entry by entry from the
 manual, but its checks against the data found what the manual leaves out:
 its notes record that the data stores ``all'' as an empty list and that
@@ -56,7 +57,8 @@ declared joins, and one written whole by an Opus author session that read
 the entire KB and explored the data read-only, without seeing any task.
 Against the Sonnet compile, neither differs: the Opus compile 5 tasks to
 3 ($+1.8$ points, interval $-3$ to $+7$), the author 3 to 4 ($-1.8$, $-9$
-to $+6$), which excludes a gain of more than about 7 points;
+to $+6$; intervals over tasks, since three databases are too few to
+cluster), which on these tasks excludes a gain of more than about 7 points;
 between any two contract arms only 7 or 8 of the 55 tasks score
 differently. Section~\ref{sec:lsb-knowledge} says why. Most of the hard
 knowledge there is not hard to write down; the KB does not settle it, so
@@ -96,7 +98,8 @@ convention-only (9) & 0.0 & 97.5 & 0.0 & 0.0 & 0.0 \\
 \bottomrule
 \end{tabular}
 \caption{The gaps experiment, accuracy (\%) pooled over \mLuna{},
-\mQwen{} and \mSol{}, $k{=}3$. Rows: questions by what the data reveals
+\mQwen{} and \mSol{}, $k{=}3$; the 41 data-informed questions come from
+five gaps (\textsc{authored} over \textsc{gapped}: 4 gaps to 0, one tied). Rows: questions by what the data reveals
 about their gap (defined in the text); convention-only questions need the
 precedence rule. \textsc{gapped}: the KB with gaps opened;
 \textsc{full}: the complete KB; \textsc{authored}: the contract an author
@@ -155,9 +158,14 @@ contract (Section~\ref{sec:procedures}). And delivery, once the facts are equal,
 adds a few points on the rule-matching tasks (Section~\ref{sec:delivery}), not the
 20 to 35 at issue. What survives is completeness and
 determinability. \textbf{A contract pays where it states something true
-that the prose leaves out, and an author can state only what the
-documentation or the data determines.} DABStep's fee procedure is
-determined, and the manual states it badly, so the hand-written contract
-leads the first compile by 35 points over all tasks on \mLuna{}.
-LiveSQLBench's hard knowledge is not determined, so no author we tried
+that the prose leaves out. An author can supply what the documentation or
+the data determines, and a convention neither determines only when the
+gold happens to use the author's default.} DABStep shows both. The
+empty-list wildcard is settled by the data. That the fees of overlapping
+rules add up is a convention, and the original contract and the Opus
+compile both wrote the ordinary join-and-sum, which is the gold's; so the
+original contract leads the first compile by 35 points over all tasks on
+\mLuna{}. The gaps experiment's precedence rule is a convention too, but
+its gold is not the default, and every author missed it. LiveSQLBench's
+hard knowledge is settled task by task in the gold, so no author we tried
 gained detectably.

@@ -5,8 +5,9 @@ Context layers work; the open question was which part of one does the
 work. On two benchmarks and seven models the answer is the knowledge:
 emptying a contract removes most of its gain, and what looked like an
 advantage of delivery was mostly two facts the manual left out. A contract
-pays where it states something true that the documentation leaves out, and
-its author can state only what the documentation or the data determines.
+pays where it states something true that the documentation leaves out;
+its author can supply what the documentation or the data determines, and
+a convention only when the gold shares the author's default.
 
 Delivery still matters, for other reasons. Looking a contract up as
 needed is cheaper from twice a database's size, its cost per run rising by
@@ -34,6 +35,5 @@ records its commit, contract digest, gold-set hash, scorer, model,
 endpoint, token counts, cost and a post-run integrity check of its
 database copy. The transcripts of the four single runs are attached to
 the release tagged \texttt{dabstep-eval-2026-09}, with SHA-256 digests.
-LiveSQLBench's gold SQL, gold results and task-to-knowledge mapping are
-the benchmark's private material and are not redistributed; analyses that
-depend on them print aggregates only.
+LiveSQLBench's private gold, results and task mapping are not
+redistributed; analyses that use them print aggregates only.

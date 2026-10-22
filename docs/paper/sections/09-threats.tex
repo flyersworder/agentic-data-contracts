@@ -10,9 +10,9 @@ rules once for many tasks would test the form result properly; EntSQL,
 DataSpace and BI-Bench give nearly every task its own document or project,
 leaving no rules to state once~\cite{entsql,dataspace,bi-bench}.
 
-\paragraph{The raters are models.} The raters who judged determinacy,
-procedural load and the gaps, and the failure auditors, are instances of
-one model family, and no human checked them. The determinacy raters read
+\paragraph{The raters are models.} The gap raters were \mSol{} and
+Opus~5.5; the raters of determinacy and procedural load, and the failure
+auditors, were instances of one model family. No human checked them. The determinacy raters read
 the gold, so ``determined'' is partly ``a reader of the KB would reach this
 gold'' (Section~\ref{sec:lsb-knowledge}), and that plan was written down
 before any rating was read but not committed apart from its results, so
@@ -22,13 +22,16 @@ first. The raters saw no run, contract or result, but their agreement
 human raters would reach; on one batch two raters matched on all 71 loads
 with different notes.
 
+\ifextended
 \paragraph{Ceilings and the scale regime.} The constructed questions sit at
 the ceiling at their base level, so they could show a drop but not a gain,
 and they are easier than the benchmarks' own. The scale experiment's
 questions name their metric, and its padding is other databases under
 distinct names: the regime in which long prompts are known to hold up
 (Section~\ref{sec:scale}).
+\fi
 
+\ifextended
 \paragraph{Selection.} The second fact was found by reading 34 tasks'
 transcripts, and \mLuna{}'s registered test of it reuses the runs that
 picked those tasks; on the third repeat alone the lift is the same, and
@@ -37,17 +40,17 @@ carry the claim as well (Section~\ref{sec:second-fact}). The
 rule-matching subset itself was chosen after a load prediction failed, so
 effects measured on it are enriched for the fee procedure and do not
 describe DABStep as a whole.
+\fi
 
-\paragraph{Provenance of the hand-written contract.} The golds existed an
+\paragraph{Provenance of the original contract.} The golds existed an
 hour before its first freeze, in the same working tree
 (\appref{app:golds}). We can show the order and the rule against
 consulting them, not that the rule was kept. The Opus compile, made
 without the golds, surfaced the wildcard and the overlap of rules from
 the data
 (Section~\ref{sec:better-compile}), which is a partial check.
-% DECISION(author): how the contract was written (AI-assisted session?),
-% and whether its author had read the MotherDuck reports or public DABStep
-% notebooks before 2026-08-30.
+% DECISION(author): whether the author had read the MotherDuck reports or
+% public DABStep notebooks before 2026-08-30.
 
 \ifextended
 \paragraph{Scoring views and graders.}\label{sec:threats-golds} \mQwen{} states its working before
@@ -112,9 +115,8 @@ where it does not help: its tools without knowledge cost \mSol{}
 accuracy, a first compile is worth the manual, and at one database the
 prompt is cheaper.
 
-\paragraph{Contamination.} We ran no probe; a memorising model should be
-indifferent to its context, yet the hollow and full contracts differ by 26
-to 50 points.
+\paragraph{Contamination.} Both benchmarks are public, and we did not
+measure contamination.
 
 \ifextended
 \paragraph{Run health.} \mDS{}'s single run lost 29\% of its rows to rate

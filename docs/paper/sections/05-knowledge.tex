@@ -2,7 +2,7 @@
 \label{sec:results}
 \label{sec:knowledge}
 
-\subsection{Content against scaffolding, on six models}
+\subsection{Knowledge against scaffolding, on six of the seven models}
 \label{sec:decomposition}
 
 \begin{table}[t]
@@ -26,39 +26,48 @@
 \caption{DABStep hard-task accuracy (\%), $n{=}332$ (\mDS{}: 226 of its
 complete-case set). The $k{=}3$ panels are the primary decomposition; the
 four $k{=}1$ runs give breadth. \armS{} to \armH{} adds the governed tools,
-the retrieval instruction and the rules with every field of prose emptied;
-\armH{} to \armC{} restores the prose.}
+the retrieval instruction and the rules with every description and SQL
+definition emptied; \armH{} to \armC{} restores them. \mQwen{}'s
+end-to-end row also credits an answer given as its final paragraph
+(Section~\ref{sec:grading}).}
 \label{tab:decomposition}
 \end{table}
 
-The four-arm ablation separates the contract's content from the
+The four-arm ablation separates the contract's knowledge from the
 scaffolding that delivers it. \armH{} keeps the contract's tools, its
 instruction to look things up before writing SQL, its table allow-list
-and its operation rules, and empties every field of prose
+and its operation rules, and empties every description and SQL definition
 (Section~\ref{sec:hollow}). Table~\ref{tab:decomposition} gives the
 hard-task accuracy of all four arms on six models: two panels repeated
-three times, and the four single runs of the preprint. (\mLuna{}, the
+three times, and four single runs. (\mLuna{}, the
 seventh model, did not run the hollow arm.)
 
-\textbf{The content step is large and certain on every model.} Restoring
-the prose (\armH{} to \armC{}) adds 50.0 hard-task points on \mSol{} (205
-tasks to 12 over the three repeats, $p{=}2{\times}10^{-46}$) and 34.5 to
-43.8 on \mQwen{} depending on the scoring view (189 tasks to 10 and to 8).
-On the four single runs it adds 26.2 to 35.8 points.
+\textbf{The knowledge step is large and certain on every model that ran
+it.} Restoring
+the knowledge (\armH{} to \armC{}) adds 50.0 hard-task points on \mSol{} (205
+tasks to 12 over the three repeats; 95\% interval over the 38 question
+shapes $+32$ to $+66$, 23 shapes to 5) and 34.5 to 43.8 on \mQwen{}
+depending on the scoring view (189 tasks to 10 and to 8; over shapes, from
+$+24$ at the lowest). On the four single runs it adds 26.2 to 35.8 points.
+It is the fee procedure that it adds: on the 294 hard tasks that concern
+fees the step is $+57.6$ points on \mSol{}; on the other 38 it is $-8.8$
+on \mSol{} and $-0.9$ on \mQwen{} (end-to-end), and on the easy tasks $+13$
+and $+12$.
 
 \textbf{The scaffolding step is small, and its sign depends on the
 model.} In the single runs it is $+0.0$ points on \mDS{}, $+5.4$ on \mGLM{}
 and $+14$ to $+15$ on \mSON{} and \mGPT{}. Repeated, it is negative on the
 newer frontier model: on \mSol{} the empty tools cost 8.5 hard-task points
-(7.1 over all tasks, 26 tasks to 70, $p{=}8{\times}10^{-6}$), and the
+(23 tasks to 66; over shapes $-16$ to $-2$, 5 shapes to 15), and the
 deficit is significant in each repeat separately. On \mQwen{} the step is
-$-5.5$ hard-task points under the official verdicts and $+0.2$ under the
-end-to-end view ($p{=}0.4$), which also credits an answer given as the
+$-5.5$ hard-task points under the official verdicts (over shapes $-10.5$ to
+$-1.4$, though the shapes split 6 to 8) and $+0.2$ under the end-to-end
+view ($p{=}0.4$), which also credits an answer given as the
 last paragraph after its working (Section~\ref{sec:grading}). In the single runs the transcripts show how
 empty tools can hurt: the agent calls \texttt{lookup\_domain}, is told
 nothing is available, and searches harder; on \mGLM{} and \mSON{} \armH{}
 burns more reasoning than any other arm (\appref{app:efficiency}). What every run agrees on is the
-ordering of the two steps. \textbf{The content step dominates the
+ordering of the two steps. \textbf{The knowledge step dominates the
 scaffolding step on all six models}, and the sceptical reading that the
 contract helps by narrowing the tables, imposing a procedure or slowing
 the agent down predicts the opposite.
@@ -66,10 +75,10 @@ the agent down predicts the opposite.
 The manual pasted into the prompt carries the same domain, and it helps
 too: \armM{} beats \armS{} by 21.6 hard-task points on \mSol{} (112 tasks
 to 27) and by 6.3 or 20.8 on \mQwen{}. The contract beats the manual by
-19.9 hard-task points on \mSol{} (116 tasks to 9) and 22.7 to 23.2 on
-\mQwen{}.
-That gap is what the preprint attributed to delivery, and what
-Section~\ref{sec:delivery} takes apart.
+19.9 hard-task points on \mSol{} (116 tasks to 9; over shapes $+7$ to
+$+34$) and 22.7 to 23.2 on \mQwen{}.
+That gap looks like delivery, and Section~\ref{sec:delivery} takes it
+apart.
 
 \subsection{On LiveSQLBench, knowledge helps where it is determined}
 \label{sec:lsb-knowledge}
@@ -77,39 +86,51 @@ Section~\ref{sec:delivery} takes apart.
 LiveSQLBench supplies each database's knowledge base (KB), so the knowledge
 arms there are built from the benchmark's own documentation
 (Section~\ref{sec:benchmarks}). On the 302 primary tasks the KB as a manual
-beats the bare schema on both models: 35.5\% against 20.0\% on \mLuna{}
-(71 tasks to 8, $p{=}10^{-13}$) and 37.3\% against 23.2\% on \mQwen{} (68
-to 13). The ceiling is low, and a blind test says why.
+beats the bare schema on both models, as registered in (1): 35.5\%
+against 20.0\% on \mLuna{} (71 tasks to 8, $p{<}10^{-10}$) and 37.3\%
+against 23.2\% on \mQwen{} (68 to 13). The ceiling is low, and a blind test
+says why.
 
-Two raters per task, blind to every run and contract, read the question,
-the gold SQL and its result, and the KB entries the gold uses, and judged
-whether the question and the KB settle every choice that changes the
-result. Each assigns one of four labels (the KB is clear, ambiguous,
-contradicted by the gold, or silent on what the gold needs); they agree on
-83\% of tasks, $\kappa{=}0.79$ on settled or not. Where both say settled, the task is \emph{determined}: 138
-of 302. Where both say not, it is \emph{undetermined}: 132. The knowledge
-arms solve 60\% of determined tasks and 14\% of undetermined ones, on each
-model alike. Determined tasks are also easier without knowledge
-(\armS{} 39\% against 6\%), so part of the gap is difficulty; but the
-knowledge's own gain over \armS{} is $+21$ points where the KB settles the
-gold and $+8$ where it does not ($p{=}0.002$). The raters call the KB
+Two model raters (Section~\ref{sec:threats}), each alone and blind to every
+run and contract, read each task's question, gold SQL and result and the
+KB entries the gold uses, and judged whether the question and the KB settle
+every choice that changes the result. Each assigns one of four labels (the
+KB is clear, ambiguous, contradicted by the gold, or silent on what the
+gold needs); they agree on 83\% of tasks, $\kappa{=}0.79$ on settled or
+not. Where both say settled, the task is \emph{determined}: 138 of 302.
+Where both say not, it is \emph{undetermined}: 132; the raters split on
+the other 32. The knowledge arms solve 60\% of determined tasks and 14\% of
+undetermined ones, on each model alike. Because the raters saw the gold,
+``determined'' partly means ``a reader of the KB would reach this gold'',
+and determined tasks are also easier without knowledge (\armS{} 39\%
+against 6\%). The knowledge's own gain over \armS{} is $+21$ points where
+the KB settles the gold and $+8$ where it does not (Mann--Whitney on
+per-task gains, $p{=}0.002$, \emph{expl.}), but from such different
+baselines the comparison depends on the scale. In points the difference is
+$+13$ (95\% interval over databases $+5$ to $+22$); in log-odds the two
+gains are equal ($-0.04$, interval $-0.70$ to $+0.51$), and the 32 tasks the
+raters split on gain the most. What the ratings show robustly is where the
+accuracy is, not that knowledge works differently there. The raters call the KB
 ambiguous on 109 tasks and contradicted by the gold on 43 to 45; in a
 closer reading of 55 tasks the open choices were most often how a
 \texttt{NULL} or an unlisted category is scored, which fields a formula
-averages, and which of two columns holds a quantity. Section~\ref{sec:authoring}
-returns to what an author can and cannot add there.
+averages, and which of two columns holds a quantity.
+Section~\ref{sec:authoring} returns to what an author can and cannot add
+there.
 
 \subsection{What a pre-computed layer would add}
 \label{sec:ceiling}
 
 Compiling the DABStep contract's own SQL expressions into two views gives
-the layer a context-layer product would ship. Instantiated with each
-task's parameters, it reproduces the gold answer on every one of the 176
-hard tasks whose question shape it covers, chosen from question text alone.
+an oracle for the layer a context-layer product would ship; no agent is
+given the views. Instantiated by us with each task's parameters, they
+reproduce the gold answer on every one of the 176 hard tasks whose
+question shape they cover, selected by a pattern over the question text.
 On those tasks whatever an agent misses is a failure to derive from
 knowledge it provably had. In the four single runs that \emph{derivation
 gap} is 39.2 points on \mGLM{}, 37.3 on \mDS{}, 26.1 on \mSON{} and 5.1 on
-\mGPT{}, falling with capability, while
+\mGPT{}, falling with capability (single runs, so a trend, not a
+per-model estimate), while
 the shortfall on the 148 tasks that need reasoning beyond the views moves
 under no ordering (\appref{app:buckets}). Pre-computing a metric pays
 where agents fail to derive it, and on the strongest of the four that is

@@ -101,3 +101,22 @@ single-word comparison matches \texttt{D:219.36} against a bare \texttt{D}.
 The 19 are wrong \emph{values} that the reconstructed golds concealed, not
 wrong renderings of right ones. \appref{app:leniency} bounds what this
 does to the results.
+
+\paragraph{When the golds existed, relative to the contract.} A design
+rule committed at 09:56 on 2026-08-30, before any gold existed, barred
+consulting any question, gold or score while authoring the contract. The
+golds were reconstructed at 10:34 the same day, into a git-ignored file in
+the same working tree. The contract was first frozen at 11:37; the freeze
+commit records that no question, gold or score was read. Three re-freezes
+followed before any score existed, each justified from the two documents.
+Both facts that Section~\ref{sec:delivery} turns on are in the first
+freeze, unchanged since: the empty-list wildcard, marked as an
+interpretation taken from the data, and the summing over every matching
+rule, written unmarked as the join-and-sum idiom. The commits show the
+order and the rule; they cannot show from outside that the rule was kept.
+The stronger compile of Section~\ref{sec:better-compile}, made by a model
+that never had the golds, surfaced both from the data in part: its notes
+record the empty-list wildcard and that several rules can match one
+payment, and its fee definition returns one row per matching rule, though
+the note leaves open how overlapping fees combine. That is a partial
+check.

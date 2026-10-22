@@ -2,24 +2,26 @@
 fetches at query time, produce large accuracy gains on text-to-SQL
 benchmarks, but a with/without comparison cannot say which part of the
 layer does the work. Using a data contract as the instrument, we separate
-the knowledge a layer carries from the scaffolding and format that deliver
-it, on DABStep and LiveSQLBench, across seven models, with 53 predictions
+the knowledge a layer carries from the tools and format that deliver it,
+on DABStep and LiveSQLBench, across seven models, with 53 predictions
 fixed before their runs. The knowledge does the work: emptying the
-contract's prose while keeping its tools and rules costs 26 to 50
-hard-task points on every model, while the tools alone are worth $-9$ to
-$+15$. What looked like an advantage of delivery was mostly knowledge: on
-DABStep, two facts missing from the manual, stated in words, recover most
-of the contract's lead over the pasted manual on two models, including on
-tasks whose transcripts nobody read; once both state the same facts, the
-contract's format adds a few points at most. A contract is worth what its
-author could determine. Compiled from documentation, it is worth the
-documentation on both benchmarks; on LiveSQLBench, knowledge helps nearly
-three times as much where the documentation determines the gold; an author
-who can query the data recovers what the data settles and misses the
-convention it cannot reveal. Delivery buys other things. On constructed
-questions at the ceiling, the contract in the prompt loses no accuracy up
-to four times a database's size, but looking it up as needed is cheaper
-from twice that size and runs past the context window; the lookup log
-traces a wrong answer to the definition behind it; and no governed run
-corrupted its database copy, against 50 ungoverned ones. This version
-revises our preprint, which credited the contract's lead to delivery.
+contract's descriptions and SQL definitions while keeping its tools and
+rules costs 26 to 50 points of accuracy on DABStep's hard tasks, nearly
+all of which turn on its fee procedure, on every model that ran it, while
+the tools alone are worth $-9$ to $+15$. Most of what looked like an
+advantage of delivery was knowledge: two facts missing from DABStep's
+manual, stated in words, recover most of the contract's lead over the
+pasted manual, also on held-out tasks; stated alike, the contract's format
+adds about 4 to 6 points on the rule-matching tasks. A contract pays where
+it states something true that the documentation leaves out, and an author
+can state only what the documentation or the data settles: a model that
+checks its definitions against the data recovers what the data settles and
+misses conventions it cannot reveal, and on LiveSQLBench, whose
+documentation leaves most of the gold's choices open, no author we tried
+gained detectably. Delivery buys other things. On questions that name the
+metric they need, a contract four times a database's size costs the prompt
+no accuracy, but looking definitions up is cheaper from twice that size
+and works past the context window, and the lookup log traces a wrong
+answer to the definition behind it. No run whose prompt stated the
+forbidden operations, through the tools or as text, corrupted its database
+copy: none of 29{,}356, against 50 of 21{,}790 without them.

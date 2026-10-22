@@ -23,93 +23,115 @@ bundles at least three things:
 
 \begin{enumerate}
 \itemsep2pt
-\item \textbf{Semantic content}: prose describing what the columns mean, how
-      the metrics are defined and which conventions hold.
-\item \textbf{Retrieval scaffolding}: the tools that fetch that content, the
+\item \textbf{Knowledge}: descriptions of what the columns mean, how
+      the metrics are defined and which conventions hold, in words and
+      often as SQL.
+\item \textbf{Retrieval scaffolding}: the tools that fetch that knowledge, the
       instruction to fetch it before writing SQL, and the narrowed table
       surface that comes with a curated catalogue.
 \item \textbf{Pre-computed artifacts}: views and macros that encode a metric
       once, so the agent calls it instead of deriving it.
 \end{enumerate}
 
-Semantic content is written once per domain and often exists already, in a
+Knowledge is written once per domain and often exists already, in a
 vendor manual or a data dictionary. Scaffolding is engineering, paid once.
 Pre-computed macros are paid \emph{per metric}, forever, and cover only the
 metrics somebody anticipated. A practitioner deciding where to spend needs to
 know which of the three bought the 72 points.
 
-Prior work has isolated the first. BIRD withholds and supplies human-written
-evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA reports that
-database documentation doubles parser accuracy~\cite{kaggledbqa}; an ontology
-layer over an enterprise schema moves GPT-4 from 16\% to
-54\%~\cite{sequeda-kg}. None separates content from the scaffolding that
-delivers it, and none says what pre-computing the same content would have
-bought.
+Prior work has measured parts of this. BIRD withholds and supplies
+human-written evidence, worth 20 points to GPT-4~\cite{bird}, and
+documentation and ontologies raise accuracy
+elsewhere~\cite{kaggledbqa,sequeda-kg}. Long-context studies deliver the
+same schema and documentation whole or retrieved, and find long context as
+accurate and retrieval cheaper~\cite{chung-long-context,death-schema-linking,rag-or-long-context}.
+These compare amounts or deliveries of the same material. None removes the
+knowledge while holding its delivery fixed, asks whether the documentation
+determines the answer at all, or asks who wrote it.
 
 \subsection*{What we did, and what we found}
 
 We separate the parts with a \emph{data contract} as the instrument: a YAML
-artifact that carries a domain's semantics together with the rules an
-agent's tools enforce, and that can be emptied of its prose, compiled into
-views, delivered in the prompt or behind tools, and written by different
-authors. We run it on two benchmarks with documentation, DABStep and
-LiveSQLBench, across seven models, three of them repeated three times.
-After the first four-arm runs, most experiments fixed numbered predictions
-in a commit before they ran: 53 in all, of which 20 failed. Four findings.
+artifact that carries a domain's definitions together with the rules an
+agent's tools enforce, and that can be emptied of its knowledge, delivered
+in the prompt or behind lookup tools, and written by different authors
+(Figure~\ref{fig:ladder}). We use two benchmarks because they differ in
+the property that turns out to matter. DABStep's documentation, read
+closely together with its data, settles its answers; LiveSQLBench's, by
+the consensus of two raters, settles fewer than half. Questions we constructed on
+three LiveSQLBench databases add a third test bed whose knowledge is
+complete by design. We ran seven models, three of them repeated three
+times. Most experiments fixed numbered predictions in a commit before they
+ran: 53 in all, of which 20 failed. Four findings.
 
-\textbf{Knowledge does the work} (Section~\ref{sec:knowledge}). Removing
-the contract's prose while keeping its tools, instruction and rules drops
-hard-task accuracy by 26 to 50 points on every model; the tools and
-instruction without the prose are worth between $-9$ and $+15$ points,
-depending on the model. On LiveSQLBench the documentation helps nearly
-three times as much where it determines the gold as where it does not.
+\textbf{Knowledge does the work} (Section~\ref{sec:knowledge}). Emptying
+the contract's descriptions and SQL definitions while keeping its tools,
+instruction and rules drops DABStep hard-task accuracy by 26 to 50 points
+on all six models that ran it, concentrated on the tasks that need the
+fee procedure; the tools and instruction alone are worth
+between $-9$ and $+15$ points, depending on the model. On LiveSQLBench,
+agents with the documentation solve 60\% of the tasks it settles and 14\%
+of those it clearly leaves open.
 
 \textbf{What looked like delivery was knowledge}
 (Section~\ref{sec:delivery}). On DABStep the contract beats the same
 domain's manual, pasted into the prompt, by 20 to 23 hard-task points. The
-natural reading, and our preprint's, is delivery: the rule one lookup away
-rather than buried in a long prompt. Controlled experiments on two models
-say otherwise. Two facts the manual leaves out, stated in words, recover
-most of the gap, including on tasks whose transcripts nobody read. Once the
-prose and the contract state the same facts, the contract's format adds a
-few points at most, and the governed tools add a rule put in front of the
-agent as it writes the query, on some task families.
+natural reading, and the one an earlier version of this paper gave, is
+delivery: the rule one lookup away rather than buried in a long prompt. Controlled experiments say otherwise. Two
+facts the manual leaves out, stated in words, recover most of the gap,
+including on held-out tasks whose transcripts were never inspected. Once
+the prose and the contract state the same facts, the contract's format adds
+about 4 to 6 points on the tasks that match payments to fee rules, and looking a
+rule up as the query is written adds a few points on some fee families.
 
-\textbf{Where the knowledge comes from decides what it is worth}
-(Section~\ref{sec:authoring}). A contract compiled entry by entry from the
-documentation is worth what the documentation is, on both benchmarks. On
-DABStep a better compile closes 90\% of the gap to the hand-written
-contract, because the knowledge is determined by the manual and the data;
-on LiveSQLBench no author gains, because the gold settles what the
-documentation leaves open, task by task. An author who can query the data
-recovers what the data settles and two thirds of what it only suggests,
-misses the convention it cannot reveal, and the contract then carries
-exactly that knowledge.
+\textbf{What a contract is worth depends on what its author could
+determine} (Section~\ref{sec:authoring}). A model that compiles the
+documentation entry by entry, checking each definition against the data,
+yields the documentation plus what those checks reveal: on LiveSQLBench,
+the KB; on DABStep, with a stronger compiler whose data checks surfaced the
+empty-list wildcard and the overlap of fee rules, 90\% of the way from the first compile to the hand-written
+contract. An author who can
+query the data recovers what the data settles and two of the three gaps it
+only suggests, misses the convention it cannot reveal, and the contract
+then carries exactly that knowledge. On LiveSQLBench, where the gold
+settles task by task what the documentation leaves open, no author we tried
+gained detectably.
 
-\textbf{Delivery buys cost, scale, accountability and governance, and
-little accuracy} (Section~\ref{sec:buys}). On constructed questions
-answered at the ceiling, growing the contract from one database to 22
-costs the prompt no accuracy up to four times its size. But the governed
-contract is cheaper from twice its size, 1.7 to 2.4 times cheaper at four
+\textbf{Delivery buys cost, scale and accountability; stated rules buy
+safety} (Section~\ref{sec:buys}). On constructed questions that name the
+metric they need, padding the contract with unrelated databases to four
+times its size costs the prompt no accuracy, in the easier regime of
+long-context studies~\cite{nolima,context-rot}. But the lookup
+arm is cheaper from twice the size, 1.7 to 2.4 times cheaper at four
 times, and runs where the prompt no longer fits the context window. Its
 lookups name the definition behind each answer, which locates the source of
-a wrong one. And across every DABStep run on the seven models, the
-ungoverned arms corrupted their working copy of the database 50 times and
-the governed arms never.
+a wrong one. And across every DABStep run, none of 29{,}356 runs whose
+prompt stated the forbidden operations, in the contract's tools or its
+text, corrupted its copy of the database, against 50 of 21{,}790 whose
+prompt did not.
 
-\textbf{What a practitioner should take from this.} Write the knowledge
-down completely, with the data open, and state the conventions a reader
-could get wrong; that is where the accuracy is. Do not expect a format or
-a retrieval loop to supply what the documentation does not determine. For
-one database the prompt is the simplest and, with caching, the cheapest
-delivery; as the contract grows past about twice that, look things up as
-needed, and keep the lookup log. Pre-compute a metric only where agents
-demonstrably fail to derive it.
+\textbf{What a practitioner should take from this.}
+\begin{itemize}
+\itemsep0pt
+\item Write the knowledge down completely, with the data open, and state
+      every convention a reader could get wrong: wildcards, how overlapping
+      rules combine, units and encodings, how a \texttt{NULL} counts.
+      That is where the accuracy is.
+\item Do not expect a format, a retrieval loop or a stronger model to
+      supply what the documentation does not determine; check whether it
+      does before blaming the agent.
+\item For one database the prompt is the simplest and, with caching, the
+      cheapest delivery. Past about twice that, look definitions up as
+      needed, and keep the lookup log: it is how a wrong answer is traced
+      to the entry that caused it.
+\item State the forbidden operations, and serve the agent through a
+      read-only role regardless.
+\item Pre-compute a metric only where agents demonstrably fail to derive
+      it.
+\end{itemize}
 
-\textbf{Contributions.} (1)~The decomposition of a context layer into
-content and scaffolding, on two benchmarks and seven models.
-(2)~A revised account of delivery, with the experiments that revised it.
-(3)~An authoring result that ties a contract's value to whether its
-knowledge is determinable. (4)~Measurements of what delivery buys: cost
-and scale, accountability, governance. (5)~The harness, contracts,
-compilers, predictions and results, released with the paper.
+\textbf{Contributions.} (1)~A decomposition of a context layer into
+knowledge and scaffolding, on two benchmarks and seven models; (2)~a
+revised account of delivery; (3)~determinability as the bound on what any
+layer or author can add; (4)~measurements of what delivery buys; (5)~the
+harness, contracts, predictions and results.

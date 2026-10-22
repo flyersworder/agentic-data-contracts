@@ -26,7 +26,7 @@ LiveSQLBench 1, compiled & (1) & \armM{} beats \armS{}, on both models & \texttt
  & (2) & \armMsql{} within 3 points of \armM{} & \texttt{1c1e302} & holds \\
  & (3) & on \mLuna{} the compiled contract beats \armMsql{}, by less than its DABStep lead & \texttt{1c1e302} & fails \\
  & (4) & on \mQwen{} \armComp{} is at or below \armMsql{}, its advantage smaller than on \mLuna{} & \texttt{1c1e302} & holds in part \\
-DABStep compiler & (5) & the compiled contract falls between \armM{} and the hand-written \armC{}, its loss in the fee families & \texttt{1c1e302} & mostly holds \\
+DABStep compiler & (5) & the compiled contract falls between \armM{} and the hand-written \armC{}, its loss in the fee families & \texttt{1c1e302} & mostly holds$^a$ \\
 LiveSQLBench 1, \mQwen{} & (6) & faithful definitions help and refused ones hurt (group A minus group B above zero) & \texttt{20171bd} & fails \\
 \midrule
 DABStep, stronger compiler & (7) & Opus with joins beats the Sonnet compile, by 30 points or more on the fee families & \texttt{3f60a9c} & holds \\
@@ -66,7 +66,7 @@ DABStep 5c, facts alike & (30), (30Q) & \armTws{} and \armMws{} tie on rule-matc
 LiveSQLBench 4b, gaps & (32), (32g), (32c) & two thirds of data gap-draws recovered, ordered settled, split, convention-only; the no-data control at most one of five & \texttt{a7ee6b4} & hold \\
  & (33) & no data draw resolves precedence as the gold does (most specific wins) & \texttt{a7ee6b4} & holds \\
  & (34) & the complete KB beats the gapped KB & \texttt{a7ee6b4} & holds \\
- & (35) & the authored contract beats the gapped KB & \texttt{a7ee6b4} & holds \\
+ & (35) & the authored contract beats the gapped KB & \texttt{a7ee6b4} & holds$^b$ \\
  & (36) & the knowledge share is at least 0.5 & \texttt{a7ee6b4} & holds \\
 \midrule
 LiveSQLBench 6, scale & (37) & the text arm at the common top is below itself at 1x & \texttt{fbca5ec} & equivalent \\
@@ -81,6 +81,10 @@ holds'' is counted here), 20 failed, and one was read as equivalent, which
 its commit registered as a separate outcome. Rows listing several numbers
 count each. Experiment 4b's predictions were first written in its design
 (\texttt{d76d21e}) and re-specified in \texttt{a7ee6b4}, before any
-contract was authored.}
+contract was authored. Grades are as made at the time; two notes from
+review: $^a$the compiled contract's 45.6\% and the manual's 45.3\% come
+from different runs, so ``between'' is not established; $^b$the test is
+over questions, which come from five gaps, and over gaps it is four to
+none with one tie, one-sided $p{=}0.06$.}
 \label{tab:predictions}
 \end{table*}

@@ -1,121 +1,146 @@
-\section{What Delivery Buys}
+\section{Beyond Accuracy}
 \label{sec:buys}
 
-With the facts equal, delivery moves accuracy by a few points at most
-(Section~\ref{sec:delivery}). What else is the governed contract for?
-Three things, each measured: it keeps cost nearly flat as the contract
-grows, it records which knowledge each answer used, and its declared rules
-keep the agent from writing to the database.
+With the facts equal, delivery moves accuracy by a few points
+(Section~\ref{sec:delivery}). What else is the governed contract
+for? Two things that delivery buys, each measured: it keeps cost nearly
+flat as the contract grows, and it records which knowledge each answer
+used. A third, safety, turns out to come from stating the rules, however
+they are delivered.
 
 \subsection{Cost and scale}
 \label{sec:scale}
 
-\begin{table}[t]
+\begin{figure}[t]
 \centering
-\footnotesize
-\setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}llrrrrr@{}}
-\toprule
-& & 1x & 2x & 4x & 8x & all \\
-\midrule
-\multicolumn{2}{@{}l}{prompt, k tokens: governed} & 8 & 9 & 10 & 12 & 20 \\
-\multicolumn{2}{@{}l}{\phantom{prompt, k tokens:} text} & 26 & 53 & 92 & 188 & 551 \\
-\midrule
-\mLuna{} & governed & 2.22 & 2.23 & 2.34 & 2.44 & 2.97 \\
-& text & 1.75 & 2.93 & 4.05 & 7.57 & 19.10 \\
-\mSol{} & governed & 42.0 & 42.3 & 44.3 & 46.4 & 57.4 \\
-& text & 40.3 & 67.4 & 104.2 & --- & --- \\
-\bottomrule
-\end{tabular}
-\caption{Experiment 6: dollars per run ($\times 10^{-3}$) as the contract
-grows from one database (1x) to 22 (all), $k{=}3$ on 60 questions;
-prompt sizes are \mLuna{}'s tokens.
-Governed: the merged contract behind the governed tools. Text: the same
-files in the prompt over plain tools. \mSol{}'s text arm at 8x and all was
-dropped for cost by a recorded amendment. Accuracy is 98 to 100\% in every
-cell.}
-\label{tab:scale}
-\end{table}
+\begin{tikzpicture}
+\begin{axis}[
+  width=\columnwidth, height=4.6cm,
+  xmode=log, ymode=log, log basis x=2,
+  xtick={1,2,4,8,22}, xticklabels={1x,2x,4x,8x,22x},
+  xlabel={contract size (databases' worth)},
+  ylabel={\$ per run ($\times 10^{-3}$)},
+  label style={font=\scriptsize}, tick label style={font=\scriptsize},
+  legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west,
+    draw=none, fill=none, cells={anchor=west}},
+  legend columns=2,
+  ymin=1, ymax=200, grid=major, grid style={gray!20}]
+\addplot[thick, black, mark=*, mark size=1.3pt] coordinates
+  {(1,42.04) (2,42.29) (4,44.28) (8,46.42) (22,57.42)};
+\addlegendentry{\mSol{}, lookup}
+\addplot[thick, black, dashed, mark=o, mark size=1.5pt] coordinates
+  {(1,40.25) (2,67.37) (4,104.21)};
+\addlegendentry{\mSol{}, prompt}
+\addplot[thick, gray, mark=*, mark size=1.3pt] coordinates
+  {(1,2.22) (2,2.23) (4,2.34) (8,2.44) (22,2.97)};
+\addlegendentry{\mLuna{}, lookup}
+\addplot[thick, gray, dashed, mark=o, mark size=1.5pt] coordinates
+  {(1,1.75) (2,2.93) (4,4.05) (8,7.57) (22,19.10)};
+\addlegendentry{\mLuna{}, prompt}
+\end{axis}
+\end{tikzpicture}
+\caption{The scale experiment: dollars per run as the contract grows from
+one database to 22, $k{=}3$ on 60 questions. \emph{Lookup}: the merged
+contract behind the governed tools, whose prompt index grows from 8k to
+20k tokens. \emph{Prompt}: the same files in the prompt over plain tools,
+26k to 551k tokens. \mSol{}'s prompt arm at 8x and 22x was dropped for
+cost by a recorded amendment; \mQwen{}'s does not fit its window beyond
+4x. Accuracy is 98 to 100\% at every point.}
+\label{fig:scale}
+\end{figure}
 
-Experiment 4b found that looking knowledge up as needed saves input but
-not money: one database's contract, about 25k tokens, fits in a cached
-prompt, so loading it whole is nearly free. Experiment 6 grows the
-contract until that should change. Experiment 4's three databases and 60
-questions are kept, each with its base contract, and padded with real but
-irrelevant contracts: the other two bases first, then 19 contracts the
-author wrote for other LiveSQLBench databases, each namespaced under its
-database's name, with the base at the middle. Five levels take whole
-contracts, up to all 22 databases. The governed arm's prompt holds an
-index that grows from 8k tokens to 20k; the text arm's holds the files,
-from 26k to 551k (Table~\ref{tab:scale}). The common top level, the
-largest that both arms fit on every model, is 4x: \mQwen{}'s window does
-not fit the text arm beyond it.
+The gaps experiment found that looking knowledge up as needed saves input
+but not money: one database's contract, about 25k tokens, fits in a cached
+prompt, so loading it whole is nearly free. The scale experiment grows the
+contract until that should change. The constructed questions' three
+databases and 60 questions are kept, each with its own contract, and
+padded with real but irrelevant contracts: the other two constructed
+databases' first, then 19 contracts the author wrote for other
+LiveSQLBench databases, each namespaced under its database's name, with
+the original at the middle. Five levels take whole contracts, up to all 22
+databases (Figure~\ref{fig:scale}). The largest level that both arms fit
+on every model is 4x: \mQwen{}'s window does not fit the prompt arm beyond
+it.
 
-\textbf{Size costs no accuracy, up to 4x.} The text arm at 4x is below
-itself at 1x on 3 tasks and above on none; the 95\% interval of the mean
-drop is $[+0.0, +1.3]$ points, inside the registered $\pm$5-point
-equivalence bound. \mLuna{}'s text arm, with all 22 databases (551k
-tokens) in its prompt, still scores 98.3\%, though that level was not part of a
-registered test. With no drop to hold, the predictions that the governed arm's drop
-is smaller, or that it drops at all, both fail. \mQwen{}'s governed arm
-scores 100\% at 8x and at all 22 databases, where the text arm does not
-fit its window. Within this design, then, the model is not lost in a long
-prompt. The design's scope bounds that: the padding is other databases
-with distinct names, and the questions sit at the ceiling at 1x. A
-contract padded with neighbouring domains of one warehouse would be the
-harder test.
+\textbf{Size costs no accuracy, up to 4x, in an easy regime.} The prompt
+arm at 4x is below itself at 1x on 3 tasks and above on none: 3 of 540
+runs lost, an exact 95\% bound of 1.6\%, inside the registered
+$\pm$5-point equivalence bound (37). \mLuna{}'s prompt arm, with
+all 22 databases (551k tokens) in its prompt, still scores 98.3\%, though
+that level was not part of a registered test. With no drop to hold, the
+predictions that the lookup arm's drop is smaller, or that it drops at
+all, both fail. \mQwen{}'s lookup arm scores 100\% at 8x and at all 22
+databases, where the prompt arm does not fit its window. The regime is the
+easy one for long contexts: each question names the metric it needs word
+for word, the padding is other databases under distinct names, the
+questions sit at the ceiling at 1x, and the registered test stops at about
+92k tokens. Long-context studies find the largest losses where the
+question shares no words with what it needs, where distractors resemble
+it, or where the task is harder~\cite{nolima,context-rot,ruler}, and some
+loss from length alone~\cite{context-rot,length-alone-hurts}. At these lengths and with these questions
+we saw none. The result says that a contract's size alone need not cost
+accuracy; it is not a test of context rot.
 
-\textbf{Cost is where the deliveries differ.} At one database the text arm
-is as cheap or cheaper: its prompt is cached, and it takes 2.7 to 4.1
-turns against the governed arm's 5. From 2x the governed arm is cheaper,
-on 58 of 60 tasks at 4x on \mLuna{} and on all 60 on \mSol{}
-($p{=}2{\times}10^{-15}$ and $9{\times}10^{-19}$): 1.7 and 2.4 times
-cheaper there, and 6.4 times cheaper on \mLuna{} at 22 databases. The
-governed arm's input doubles from 1x to all, as its index grows; the text
-arm's grows 21-fold. Under one fixed price the result holds fully cached
-and uncached, and uncached the governed arm is cheaper even at one
-database. The traces show why the governed arm's cost stays flat: its
-lookups never name a padding database or metric, and no query touches a
-padding table. Padding reaches its context only through an unfiltered
-metric listing, in 0 to 1.7\% of runs on the GPT models and up to 9\% on
-\mQwen{}.
+\textbf{Cost is where the deliveries differ.} At one database the prompt
+arm is as cheap or cheaper: its prompt is cached, and it takes 2.7 to 3.8
+turns against the lookup arm's 5. From 2x the lookup arm is cheaper, on 58
+of 60 tasks at 4x on \mLuna{} and on all 60 on \mSol{} (39), $p{<}10^{-10}$
+on each: 1.7 and 2.4 times cheaper there, and 6.4 times cheaper on
+\mLuna{} at 22 databases. The lookup arm's input tokens double from 1x to
+22x, as its index grows; the prompt arm's grow 21-fold. Under one fixed
+price the result holds fully cached and uncached, and uncached the lookup
+arm is cheaper even at one database. The traces show why the lookup arm's
+cost stays flat: its lookups never name a padding database or metric, and
+no query touches a padding table. Padding reaches its context only through
+an unfiltered metric listing, in 0 to 1.7\% of runs on the GPT models and
+up to 9\% on \mQwen{}. On the DABStep panels, per correct answer, the contract cost \mSol{} more
+than the manual (59 against 47 thousandths of a dollar) and \mQwen{} less
+(1.7 against 5.4)\ifextended; the median question took 28 seconds against
+23 on \mSol{} and 37 against 45 on \mQwen{}\fi. Every row records its token counts,
+so the cost can be recomputed at any price.
 
 \subsection{A record of what each answer used}
 \label{sec:audit}
 
 Every governed lookup names a domain or metric and returns its
-definition, so the trace records which knowledge each answer consulted
-before its query was written. The text arm's trace shows the SQL, and
-that the whole contract was in context, not which definition was relied
-on. This analysis was not predicted. In experiment 6 the final SQL
+definition, so the trace records which knowledge each answer read before
+its query was written. A log of the SQL alone shows what was computed, and
+one can match it against the contract's expressions, as we do below; the
+lookup log adds what the agent read, including when it then departed from
+it. This analysis was not predicted. In the scale experiment the final SQL
 contains a looked-up metric's expression verbatim in 91\% of \mLuna{}'s
-governed runs, 98\% of \mSol{}'s and 87\% of \mQwen{}'s runs with a
-lookup. A departure does not mark a wrong answer: in experiment 6 every
-run that departed from its looked-up formula was right. What the record does is locate an
-error's source. Of experiment 4b's 175 wrong governed answers, 174 are in
-the database whose contract carries the author's misses, and 90 applied
-the wrong definition verbatim; each names the contract entry that
-produced it, to be fixed once for every later answer.
-\textbf{The trust the governed contract offers is accountability, not
-detection.}
+lookup runs, 98\% of \mSol{}'s and 87\% of \mQwen{}'s runs with a lookup.
+A departure does not mark a wrong answer: there every run that departed
+from its looked-up formula was right. What the record does is locate an
+error's source. Of the gaps experiment's 175 wrong governed answers, 174
+are in the database whose contract carries the author's misses, and 90
+applied the wrong definition verbatim; each names the contract entry that
+produced it, to be fixed once for every later answer. The record does not
+detect a wrong answer; it says where to fix one.
 
-\subsection{Declared rules deter writes}
+\subsection{Stated rules deter writes}
 \label{sec:governance}
 
-The contract also declares forbidden operations, rendered into the prompt
-and enforced by the tools' static checks. In the four single runs, where
-every submitted statement was read, the ungoverned arms submitted 166
-mutating statements over 26 tasks and the governed arms none. Every
-DABStep run since was checked by the harness's integrity test on its own
-working copy of the database. On the seven models, it found \textbf{50
-corrupted copies in 29{,}008 ungoverned runs and none in 22{,}138
-governed ones}; 44 of the 50 are \mQwen{}'s, 18 with \armM{} and 24 with
-\armMw{}. One escalation in the single runs shows the hazard: an agent
-lost a temporary table to the plain tool's per-call connection, diagnosed
-it, and switched to persistent tables (\appref{app:escalations}). The
-validator never had to block a write in the single runs, so what was
-measured there is deterrence by declared rule rather than enforcement; the
-later runs show no corruption, which bounds attempts that succeeded, not
-attempts. The contract's text over the plain tools, whose prompt states
-the same forbidden operations, also never corrupted a copy: the rules
-deter wherever they are stated.
+The contract declares forbidden operations, rendered into the prompt and
+enforced by the tools' static checks. In the four single runs, where every
+submitted statement was read, the arms without the contract's rules
+submitted 166 mutating statements over 26 tasks and the governed arms
+none. Every DABStep run since was checked by the harness's integrity test
+on its own working copy of the database. On the seven models it found
+\textbf{no corrupted copy in 29{,}356 runs whose prompt stated the
+forbidden operations, against 50 in 21{,}790 whose prompt did not}
+(0.23\%). The first group includes 7{,}218 runs of the contract's text over
+the plain tools, where nothing enforced the rules. 44 of the 50 are
+\mQwen{}'s, 42 of them in \armM{} and \armMw{}: 44 of its 8{,}421 runs
+without the rules, none of its 8{,}421 with them; on the other models the
+counts are too small to compare. One
+escalation in the single runs shows the hazard: an agent lost a temporary
+table to the plain tool's per-call connection, diagnosed it, and switched
+to persistent tables (\appref{app:escalations}). The validator never had
+to block a write, so what was measured is deterrence by a stated rule, in
+the tools or in the prompt, not enforcement; and the later runs bound
+writes that succeeded, not attempts. The plain tools here open a writable
+connection, so the hazard is real, but a read-only role removes it
+outright and remains the baseline; the stated rules matter where a
+deployment cannot or does not grant one, and enforcement was never
+exercised.

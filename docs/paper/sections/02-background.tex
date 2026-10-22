@@ -23,9 +23,15 @@ LiveSQLBench~\cite{livesqlbench} supplies, for each of its 22 databases, a
 knowledge base of metric, class and convention definitions written for the
 benchmark, so its documentation is native rather than a vendor manual
 repurposed. Its knowledge is spread across many entries, most of them used by a
-single task, rather than concentrated in one procedure. The two benchmarks
-therefore differ in exactly the property this paper turns out to need:
-whether the documentation determines what the gold requires.
+single task, rather than concentrated in one procedure. We chose the two
+for breadth; that they differ in whether the documentation determines what
+the gold requires is something we found by running both
+(Section~\ref{sec:lsb-knowledge}), and it is the property the account of
+Section~\ref{sec:authoring} turns on. BIRD-Interact builds on
+LiveSQLBench by masking knowledge on purpose~\cite{bird-interact}; we ask
+how much of it the released KB leaves open without masking. Enterprise
+benchmarks whose schemas exceed a context window~\cite{spider2,beaver} are
+outside our scope: both of ours fit.
 
 \subsection{Three kinds of layer}
 \label{sec:layers}
@@ -38,62 +44,80 @@ time; MotherDuck Guides~\cite{motherduck-guides} is the best-documented
 instance. \emph{Data contracts} come from governance: a declarative
 artifact stating what a dataset contains and what may be done with it,
 with the Open Data Contract Standard~\cite{odcs} the emerging
-specification, in a line of dataset documentation from
-datasheets~\cite{datasheets} to Croissant~\cite{croissant}. The artifact
-under test is of the third kind and serves two purposes at once: the same
-YAML supplies the semantics the agent reads and the rules the tool layer
-enforces. A view or macro is compiled ahead of time by a human and covers
-the metrics somebody anticipated; a contract is compiled per query by the
-model and covers whatever question arrives.
+specification\ifextended, in a line of dataset documentation from
+datasheets~\cite{datasheets} to Croissant~\cite{croissant}\fi. The
+artifact under test is of the third kind: the same YAML supplies the
+semantics the agent reads and the rules the tool layer enforces.
 
 \subsection{What has been measured}
 \label{sec:prior}
 
 \textbf{Context layers on DABStep.} MotherDuck's Guides raise DABStep
-accuracy by 72 points and cut cost by 55\%~\cite{motherduck-guides}. A
-second report gives a progression rather than a number: retrieving
-context fragments by vector search ``capped out around 88\%'', baking the
-knowledge into the warehouse as comments, macros and derived tables
-reached 93\%, and a hierarchical semantic layer refined iteratively reached
-100\%~\cite{motherduck-semantic}. The system atop the validated leaderboard,
-at 89.95\% hard, validates candidate helper functions against the
-benchmark's gold answers~\cite{nvidia-kgmon}; nothing forbids that, and we
-allege no violation. Pre-built views are most effective when the question
-space is enumerable in advance, which is DABStep's construction; our
-figures measure the layer that must cover the unanticipated question, so
-they measure a harder task, not a worse attempt at the same one. The tuned
-artifacts also do not travel: the author of the 100\% result calls it
-``coupled'' to the serving model~\cite{motherduck-semantic}, and
-EvoOntology measures that coupling, losing 6.6 to 10.9 points when its
-evolved layer serves a different model~\cite{evoontology}.
+accuracy by 72 points and cut cost by 55\%~\cite{motherduck-guides}; a
+second report finds vector-search retrieval ``capped out around 88\%'' and
+a hierarchical semantic layer, refined iteratively, reaching
+100\%~\cite{motherduck-semantic}. The system atop the validated leaderboard
+validates helper functions against the benchmark's
+golds~\cite{nvidia-kgmon}, and others encode the fee procedure as
+versioned code~\cite{oceanbase-datapilot}. Pre-built views suit a question
+space enumerable in advance, which is DABStep's construction; we measure
+the layer that must cover the unanticipated question. Tuned layers also do
+not travel: EvoOntology loses 6.6 to 10.9 points when its evolved layer
+serves a different model~\cite{evoontology}.
 
 \textbf{Documentation as knowledge.} BIRD withholds and supplies
 human-written evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA
 finds database documentation doubles parser accuracy~\cite{kaggledbqa};
 an ontology over an enterprise schema moves GPT-4 from 16\% to
-54\%~\cite{sequeda-kg}. These isolate the value of the content. None
-separates it from the scaffolding that delivers it, asks whether the
-documentation determines the answer, or asks who wrote it.
+54\%~\cite{sequeda-kg}; semantic-layer benchmarks compare a curated metric
+layer with text-to-SQL~\cite{dbt-benchmark,semantic-paired}. Evidence can
+also be generated, by a model trained for it or from the
+data~\cite{knowledge-to-sql,seed}, the precedent for our compiled and
+authored contracts. These measure the value of the content. None removes it
+while holding its delivery fixed, or asks whether the documentation
+determines the answer. Benchmark golds are often wrong or
+ambiguous~\cite{annotation-errors,bird-noise,ambrosia}; our determinacy
+ratings (Section~\ref{sec:lsb-knowledge}) measure a related property, how
+much of the gold the documentation settles.
 
-\textbf{Delivery: long context and loading on demand.} Retrieval quality
-falls for material placed in the middle of a long
-prompt~\cite{lost-in-the-middle}, and the belief that a model loses
-relevant context as a prompt grows is one reason agent frameworks load
-documentation, tools and skills on demand instead of up front. That
-pattern is usually argued for rather than measured. Section~\ref{sec:scale}
-measures it on contracts of up to 551k tokens. A tool's documentation
-shapes what an agent does with it~\cite{tool-documentation}; emptying a
-component's content while holding its form fixed, our hollow control, is
-the move of~\cite{min-demonstrations}, applied there to demonstrations.
+\textbf{Delivery: long context and retrieval.} The same material can be
+put whole in the prompt or retrieved when needed. For NL2SQL, long-context
+models given the full schema, documentation, hints and examples prove
+robust to the extra material~\cite{chung-long-context}, and schema linking stops paying
+once the schema fits~\cite{death-schema-linking}; in general, long context
+matches or beats retrieval in accuracy while retrieval is far
+cheaper~\cite{rag-or-long-context}, retrieval helps long-context models
+too~\cite{retrieval-meets-long-context}, and loading
+tool descriptions on demand cuts prompt size~\cite{rag-mcp}. Long prompts
+do lose accuracy where the needle shares no words with the question, where
+distractors resemble it, as tasks grow harder~\cite{nolima,context-rot,ruler},
+and even from length alone with retrieval
+perfect~\cite{length-alone-hurts};
+retrieval quality also falls for material in the middle of a long
+prompt~\cite{lost-in-the-middle}. Section~\ref{sec:scale} measures delivery
+for definitions an agent writes SQL from, in the easy regime of that
+literature, and confirms its accuracy and cost results there. Retrieving
+documentation next to where code is written helps code
+generation~\cite{docprompting}, and a prompt's representation of the same
+schema moves text-to-SQL accuracy~\cite{dail-sql}, our ``form''. A tool's
+documentation shapes what an agent does with it~\cite{tool-documentation};
+emptying a component's content while holding its form fixed, our hollow
+control, is the move of~\cite{min-demonstrations}, applied there to
+demonstrations.
 
 \textbf{Governance.} Capabilities can be enforced outside the model, as
 in CaMeL~\cite{camel}; agents' compliance with a policy given in the
 prompt is what $\tau$-bench measures~\cite{tau-bench}; and models break
 simple stated rules with no adversary present~\cite{rules}, the
-expectation Section~\ref{sec:governance} runs against.
+expectation Section~\ref{sec:governance} runs against. Least privilege, a
+read-only role, removes the hazard outright and is the baseline any
+deployment should keep.
 
-What is new here is the decomposition on two benchmarks, with knowledge
-held equal by construction where it matters: a control that removes the
-content while holding the scaffolding fixed, notes that add one fact at a
-time, the same knowledge delivered three ways, three ways of authoring it,
-and 53 predictions fixed before their runs.
+What is new here is a decomposition with knowledge held equal by
+construction where it matters: a control that removes the content while
+holding the scaffolding fixed, notes that add one fact at a time, the same
+knowledge delivered three ways, three ways of authoring it, a test of
+whether the documentation determines the gold, and 53 predictions fixed
+before their runs. That knowledge outweighs delivery confirms what the
+long-context literature leads one to expect; the determinacy and authoring
+results are the parts it does not predict.

@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Run one read-only query:  ./q <db> "<sql>"
+
+Sends the query to the server listening on q.sock next to this file and prints
+its reply. Standard library only: the sandbox has no project environment.
+"""
+
+import json
+import socket
+import sys
+from pathlib import Path
+
+if len(sys.argv) != 3:
+    sys.exit('usage: ./q <db> "<sql>"')
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+    s.connect(str(Path(__file__).resolve().parent / "q.sock"))
+    s.sendall((json.dumps({"db": sys.argv[1], "sql": sys.argv[2]}) + "\n").encode())
+    s.shutdown(socket.SHUT_WR)
+    chunks = []
+    while data := s.recv(65536):
+        chunks.append(data)
+print(b"".join(chunks).decode("utf-8", "replace"))

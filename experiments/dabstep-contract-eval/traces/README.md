@@ -30,7 +30,7 @@ with SHA-256 digests in the release notes. Unpack them here to reproduce the
 post-hoc analyses. Run D's `provider_url` field reads `litellm-gateway`; it
 originally named the enterprise gateway host and nothing else was altered.
 
-The later runs are attached to the release tagged `dabstep-eval-2026-10`, one archive per run, with the same digests. These are the panels repeated three times, the arms added to them, the compiled contracts and the constructed-question experiments. The release notes cover the details.
+The later runs are attached to the release tagged `dabstep-eval-2026-10`, one archive per run, with the same digests. These are the panels repeated three times, the arms added to them, the compiled contracts and the constructed-question experiments. The release notes cover the details. Zenodo archives the same files as [10.5281/zenodo.23598750](https://doi.org/10.5281/zenodo.23598750), and the code at that tag as [10.5281/zenodo.23598672](https://doi.org/10.5281/zenodo.23598672).
 
 - **Coverage:** 57,626 of those runs' 57,834 rows have a transcript.
 - **Missing:** the 208 rows without one are the first rows of four runs: `exp4-sol-r3`, `exp6-qwen-r1`, `exp6-sol-r1` and `exp6-luna-r1`. Those cluster jobs kept transcripts in the pod's temporary storage and rows in persistent storage, so a pod restart kept the rows and lost the transcripts written before it. The release's `MISSING.tsv` lists the 208 rows. Cluster jobs should write `--traces` to persistent storage.

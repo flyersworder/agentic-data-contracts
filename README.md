@@ -51,6 +51,8 @@ That table is the claim; [`experiments/dabstep-contract-eval/`](experiments/dabs
 
 Scope, stated plainly. The effect concentrates in the domain-specific task bucket; the non-fee bucket shows no contract advantage on any model. The table's golds are reconstructed for 401 of 450 tasks, and the leaderboard check shows that scoring runs ~6 points optimistic on hard tasks, one-sidedly; correcting for it moves the arm gaps by under 3 points, in both directions. Only the contract arm was submitted, so the gap above is not graded the same way on both sides. And this is one benchmark at k=1, where a replicate finds 23% of task verdicts flip at temperature 0. Full results, every caveat, and all 6,416 transcripts: **[`FINDINGS.md`](experiments/dabstep-contract-eval/FINDINGS.md)**.
 
+Archived on Zenodo for the paper: the code at release `dabstep-eval-2026-10`, [10.5281/zenodo.23598672](https://doi.org/10.5281/zenodo.23598672), and that release's transcripts, [10.5281/zenodo.23598750](https://doi.org/10.5281/zenodo.23598750).
+
 **Works with:** any Python agent framework — first-class helpers for the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), [LangChain](https://github.com/langchain-ai/langchain) / [deepagents](https://github.com/langchain-ai/deepagents), and [Pydantic AI](https://github.com/pydantic/pydantic-ai), plus a framework-free path (the tools are plain async functions). Optionally integrates with [ai-agent-contracts](https://pypi.org/project/ai-agent-contracts/) for formal resource governance.
 
 > **See it running:** [three example agents](#examples) — `revenue_agent` (finance), `growth_agent` (experimentation), `ops_agent` (SRE) — each runs end-to-end in demo mode with no API key.

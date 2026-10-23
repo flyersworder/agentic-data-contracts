@@ -13,15 +13,19 @@ leaving no rules to state once~\cite{entsql,dataspace,bi-bench}.
 \paragraph{The raters are models.} The gap raters were \mSol{} and
 Opus~5.5; the raters of determinacy and procedural load, the failure
 auditors and the checks of the constructed questions were separate
-Opus~5.5 sessions. No human checked them. The determinacy raters read
-the gold, so ``determined'' is partly ``a reader of the KB would reach this
-gold'' (Section~\ref{sec:lsb-knowledge}), and that plan was written down
-before any rating was read but not committed apart from its results, so
-its timing rests on our word; the procedural-load plan was committed
-first. The raters saw no run, contract or result, but their agreement
-($\kappa$ 0.68 to 0.96, Cohen's on derived binary labels) overstates what
-human raters would reach; on one batch two raters matched on all 71 loads
-with different notes.
+Opus~5.5 sessions. The determinacy raters read the gold, so
+``determined'' is partly ``a reader of the KB would reach this gold''
+(Section~\ref{sec:lsb-knowledge}); their plan was written before any
+rating was read but committed only with the results, the procedural-load
+plan before. One rater each from two other families, GPT-6.1~sol and
+Gemini~4~Argon, each sandboxed with nothing but its packet, re-rated every
+item under a plan committed first. Their agreement with the Opus raters
+matches the Opus raters' own on DABStep ($\kappa$ 0.84 to 0.97) and is
+lower on determinacy (0.64 to 0.75, against 0.79). Of the 11 subset
+results significant here, all hold on the GPT rater's subsets and on the
+new pair's, and 10 on Gemini's alone, where the 11th keeps its sign
+(\appref{app:cross-family}). No human has checked any rater, and model
+agreement may overstate what humans would reach.
 
 \ifextended
 \paragraph{Ceilings and the scale regime.} The constructed questions sit at

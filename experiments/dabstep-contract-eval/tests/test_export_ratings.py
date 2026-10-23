@@ -95,3 +95,29 @@ def test_no_released_determinacy_file_carries_a_note():
     for path in files:
         for line in path.read_text(encoding="utf-8").splitlines():
             assert set(json.loads(line)) == {"id", "kb_clarity", "decisive"}
+
+
+def test_the_cross_family_export_follows_the_same_cut(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    key = {
+        "P001": {"bench": "dabstep", "task": "1857"},
+        "P002": {"bench": "livesqlbench", "task": "shop_1"},
+    }
+    dab = {"id": "P001", "rule_matching": True, "notes": "fee rules"}
+    _write(src / "gpt" / "c01.jsonl", [dab, {"id": "P002", "notes": "KB 12"}])
+    _write(src / "gpt" / "c01.a1.jsonl", [dab])  # attempts are not exported
+    det = {"id": "C001", "kb_clarity": "clear", "decisive": False, "notes": "gold"}
+    _write(src / "gpt" / "det-c1.jsonl", [det])
+
+    ex.export_cross_family(src, dst, key)
+
+    rows = (dst / "gpt" / "c01.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(r) for r in rows] == [dab]
+    rows = (dst / "gpt" / "det-c1.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(r) for r in rows] == [
+        {"id": "C001", "kb_clarity": "clear", "decisive": False}
+    ]
+    assert sorted(p.name for p in (dst / "gpt").iterdir()) == [
+        "c01.jsonl",
+        "det-c1.jsonl",
+    ]

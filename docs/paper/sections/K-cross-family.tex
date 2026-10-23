@@ -1,0 +1,66 @@
+\section{Raters from Other Model Families}
+\label{app:cross-family}
+
+Every determinacy and procedural-load rating in the paper came from Opus~5.5 sessions. To test whether the subsets depend on that one model, one rater each from two other families re-rated every item: GPT-6.1~sol and Gemini~4~Argon, through Copilot CLI at high reasoning effort. Each rater had the Opus raters' packets, rubrics and prompts, with only file locations changed, and the same read-only access to the data.
+
+Each session ran in its own user, mount and PID namespace. Its home directory held only the CLI, a fresh state folder and its own packet, so it could not see the repository, the results, the other ratings or any other session.
+
+The plan was committed before any rating. It fixed the agreement measures, the alternative subsets, the results to recompute and what counts as robust. All 32 sessions produced valid ratings. Four lost their model connection at the same moment, wrote nothing, and were rerun once, as the plan allows.
+
+Agreement across families matches the Opus raters' own on DABStep and is lower on determinacy (Table~\ref{tab:cross-agree}).
+
+The alternative subsets apply the paper's rules to the new labels, with one rater standing in for both where a family has only one. They give these rule-matching sets:
+\begin{itemize}
+\itemsep0pt
+\item GPT alone: 205;
+\item Gemini alone: 222;
+\item the two together: 202, against the paper's 199.
+\end{itemize}
+On LiveSQLBench they give 176, 156 and 142 determined tasks, against the paper's 138.
+
+The test is the plan's: a result significant in the paper must keep its sign and stay significant, by question shape on DABStep and by database on LiveSQLBench. Of the 11 such results, 11 hold on GPT's subsets and on the pair's, and 10 on Gemini's (Table~\ref{tab:cross-robust}). The exception is \mQwen{}'s lookup step on rule-matching tasks, which keeps its sign while its interval reaches zero. This is still model agreement; no human has checked a sample yet.
+
+\begin{table}[h]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Agreement between raters: Cohen's $\kappa$, quadratic-weighted for the four load levels. ``Settled'' is the determinacy label the subsets use.}
+\label{tab:cross-agree}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & \tabhead{Opus/Opus} & \tabhead{Opus/GPT} & \tabhead{Opus/Gemini} & \tabhead{GPT/Gemini} \\
+\midrule
+DABStep load & 0.96 & 0.91--0.93 & 0.96--0.97 & 0.91 \\
+DABStep rule-matching & 0.89 & 0.93 & 0.84--0.87 & 0.89 \\
+LiveSQLBench settled (302) & 0.79 & 0.64--0.67 & 0.75 & 0.68 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\caption{Results that were significant in the paper, recomputed on each family's subsets. DABStep rows are hard-task points with 95\% intervals over question shapes; LiveSQLBench rows give intervals over databases where the paper reports one.}
+\label{tab:cross-robust}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}llllll@{}}
+\toprule
+\tabhead{Model} & \tabhead{Contrast} & \tabhead{Paper (Opus)} & \tabhead{GPT alone} & \tabhead{Gemini alone} & \tabhead{GPT and Gemini} \\
+\midrule
+\mLuna{} & \armMws{} vs \armMw{} & $+28.5$ [$+14.2$, $+43.3$] & $+27.6$ [$+13.6$, $+42.0$] & $+24.6$ [$+11.3$, $+38.1$] & $+28.1$ [$+13.9$, $+42.6$] \\
+\mLuna{} & \armTws{} vs \armMws{} & $+3.7$ [$+0.6$, $+7.9$] & $+3.6$ [$+0.6$, $+7.7$] & $+5.7$ [$+2.0$, $+11.0$] & $+3.6$ [$+0.6$, $+7.8$] \\
+\mLuna{} & \armMws{} vs \armMw{}, never read & $+19.2$ [$+8.5$, $+31.9$] & $+18.5$ [$+8.3$, $+30.6$] & $+15.7$ [$+5.9$, $+26.9$] & $+18.8$ [$+8.5$, $+31.2$] \\
+\mQwen{} & \armMws{} vs \armMw{} & $+42.7$ [$+23.6$, $+62.0$] & $+41.5$ [$+22.7$, $+60.0$] & $+38.9$ [$+21.3$, $+56.5$] & $+42.1$ [$+23.2$, $+60.6$] \\
+\mQwen{} & \armT{} vs \armMws{} & $-16.6$ [$-31.6$, $-5.3$] & $-18.5$ [$-33.5$, $-7.0$] & $-17.7$ [$-31.7$, $-6.8$] & $-17.7$ [$-32.6$, $-6.5$] \\
+\mQwen{} & \armC{} vs \armT{} & $+10.1$ [$+3.1$, $+16.7$] & $+11.4$ [$+4.3$, $+18.3$] & $+8.4$ [$-0.2$, $+16.0$] & $+10.7$ [$+4.0$, $+17.4$] \\
+\mQwen{} & \armMws{} vs \armMw{}, never read & $+33.9$ [$+17.7$, $+53.6$] & $+32.7$ [$+16.9$, $+51.4$] & $+30.7$ [$+15.8$, $+47.8$] & $+33.3$ [$+17.3$, $+52.3$] \\
+\mQwen{} & \armT{} vs \armMws{}, never read & $-16.0$ [$-30.8$, $-5.3$] & $-18.3$ [$-33.3$, $-6.8$] & $-17.5$ [$-31.4$, $-6.6$] & $-17.3$ [$-32.0$, $-6.5$] \\
+\midrule
+LiveSQLBench & accuracy, determined $-$ undetermined & $+46.1$, $p{<}10^{-10}$ & $+39.1$, $p{<}10^{-10}$ & $+52.7$, $p{<}10^{-10}$ & $+54.2$, $p{<}10^{-10}$ \\
+LiveSQLBench & gain over \armS{}, determined $-$ undetermined & $+13.2$ [$+4.8$, $+22.4$] & $+11.6$ [$+3.3$, $+19.8$] & $+20.2$ [$+11.7$, $+28.2$] & $+18.7$ [$+9.4$, $+27.6$] \\
+Experiment 2 (55) & accuracy, determined $-$ undetermined & $+46.6$, $p{=}0.0002$ & $+47.8$, $p{=}2{\times}10^{-5}$ & $+50.4$, $p{=}9{\times}10^{-6}$ & $+56.8$, $p{=}3{\times}10^{-6}$ \\
+\bottomrule
+\end{tabular}}
+\end{table*}

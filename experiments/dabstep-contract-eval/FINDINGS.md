@@ -4175,6 +4175,81 @@ Does not survive, or only on one clustering:
 The LiveSQLBench nulls are now bounds. A better author gains at most about
 7 points, and a gold-derived correction transfers at most about 10.
 
+## Cross-family blind ratings (2026-10-23)
+
+The paper's three subsets rest on blind ratings, and every rating came from Opus 5.5 sessions:
+- the 199 DABStep rule-matching tasks;
+- the held-out set, the rule-matching tasks whose transcripts were never read;
+- the LiveSQLBench determined/undetermined split.
+
+One rater each from two other model families re-rated the same items: gpt-6.1-sol and gemini-4-argon, via Copilot CLI 1.0.103 at reasoning effort high.
+
+**Method.**
+- The plan was committed before any rating: `prep/cross-family-ratings/PLAN.md`, 2081a89, corrected in a2f2db6.
+- The harness (47d5ddd) and the analysis (`analysis/cross_family.py`, 7edb136) were committed before any rating was read.
+- Each rater had the Opus raters' packets, rubrics and prompts, with only the paths changed, in 16 sessions per model.
+- Each session ran in a user, mount and PID namespace whose home held only the Copilot install, a Copilot state folder of its own, and its chunk.
+- Determinacy raters could run read-only queries through a socket to the grader's read-only connection.
+- All 32 sessions produced valid output. Four GPT load sessions (c05 to c08) ran at the same time and lost the model connection together: transport errors in Copilot's log, no rating written. Their one rerun, which the plan allows, was valid.
+- The analysis script's LiveSQLBench step first crashed on a single-rater alternative: with one rater as both raters nothing is split, so the three-group variant was empty. It now computes only the plan's comparison, split dropped and by database, through the same gains function.
+- The public labels are in `ratings/cross-family/`, cut the same way as the Opus labels. Output: `uv run python analysis/cross_family.py`, which needs the private rating folders.
+
+**Agreement (plan section A).**
+
+| | Opus r1 / r2 | Opus / GPT | Opus / Gemini | GPT / Gemini |
+|---|---|---|---|---|
+| DABStep load, weighted κ | 0.96 | 0.91 to 0.93 | 0.96 to 0.97 | 0.91 |
+| DABStep rule_matching, κ | 0.89 | 0.93 | 0.84 to 0.87 | 0.89 |
+| LiveSQLBench settled, κ (302) | 0.79 | 0.64 to 0.67 | 0.75 | 0.68 |
+| LiveSQLBench four values (302) | 83% | 68% | 76 to 78% | 67% |
+
+- Across families, agreement on the DABStep labels is as high as within Opus.
+- Determinacy agreement is lower across families (κ 0.64 to 0.75 against 0.79) but still substantial.
+- On LiveSQLBench's rule_matching, which no paper subset uses, Gemini disagrees widely: κ 0.40 against Opus and 0.25 against GPT.
+
+**Subsets (B).**
+- **Rule-matching tasks:**
+  - Opus, the paper's set: 199;
+  - GPT alone: 205;
+  - Gemini alone: 222;
+  - cross-family: 202.
+- **Determined/undetermined/split on LiveSQLBench:**
+  - Opus: 138/132/32;
+  - GPT alone: 176/126;
+  - Gemini alone: 156/146;
+  - cross-family: 142/112/48.
+
+**Results recomputed (C, D).** The test is whether each result keeps its sign and stays significant, using the interval over question shapes (DABStep) or databases (LiveSQLBench).
+
+Of the 11 results significant in the paper:
+- 11 are robust on GPT alone;
+- 11 are robust on the cross-family subsets;
+- 10 are robust on Gemini alone.
+
+The one miss is Qwen's tools step on rule-matching tasks, `contract` against `contract_text`. It is +10.1 [+3.1, +16.7] in the paper and +8.4 [−0.2, +16.0] on Gemini's 222 tasks: the same sign, with the interval just reaching zero. Selected rows:
+
+| result | paper | GPT alone | Gemini alone | cross-family |
+|---|---|---|---|---|
+| luna, second fact (28) | +28.5 [+14.2, +43.3] | +27.6 | +24.6 | +28.1 |
+| luna, representation (30) | +3.7 [+0.6, +7.9] | +3.6 [+0.6, +7.7] | +5.7 [+2.0, +11.0] | +3.6 [+0.6, +7.8] |
+| luna, held out, second fact | +19.2 [+8.5, +31.9] | +18.5 | +15.7 | +18.8 |
+| Qwen, second fact (28Q) | +42.7 [+23.6, +62.0] | +41.5 | +38.9 | +42.1 |
+| Qwen, text against manual (29) | −16.6 [−31.6, −5.3] | −18.5 | −17.7 | −17.7 |
+| Qwen, representation (30Q) | +5.5 [−0.4, +10.4] | +3.1 | +3.0 | +4.5 |
+| LiveSQLBench accuracy, determined − undetermined | +46.1, p = 3e−18 | +39.1 | +52.7 | +54.2 |
+| LiveSQLBench gain in points, determined − undetermined | +13.2 [+4.8, +22.4] | +11.6 [+3.3, +19.8] | +20.2 [+11.7, +28.2] | +18.7 [+9.4, +27.6] |
+| LiveSQLBench gain in log-odds | −0.0 [−0.7, +0.5] | −0.2 | +0.3 | −0.3 |
+| experiment 2's 55, accuracy gap | +46.6, p = 0.0002 | +47.8 | +50.4 | +56.8 |
+
+Results that were not significant in the paper get no claim either way:
+- Qwen's representation step (30Q) stays small: +3.0 to +4.5, with intervals including zero.
+- luna's representation step on never-read tasks is +2.2 in the paper, and significant only on Gemini's subset (+4.5 [+1.1, +9.3]).
+- The log-odds equality on LiveSQLBench holds on every alternative.
+
+**What this does and does not show.**
+- The paper's subsets, and the results computed on them, do not depend on the rater coming from the Claude family.
+- It is still model agreement. A human check of a sample (the packet in `~/data/dce-held-results/human-rating/`) remains the stronger test.
+
 ## What these runs do not show
 
 - **The pre-registered primary comparison was never run.** It names

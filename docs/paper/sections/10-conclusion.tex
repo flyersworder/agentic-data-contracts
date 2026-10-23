@@ -9,13 +9,12 @@ pays where it states something true that the documentation leaves out;
 its author can supply what the documentation or the data determines, and
 a convention only when the gold shares the author's default.
 
-Delivery still matters, for other reasons. Looking a contract up as
-needed is cheaper from twice a database's size, its cost per run rising by
-about a third up to 22 databases against the prompt's elevenfold, and it
-runs where the prompt no longer fits; its log makes a wrong answer
-traceable to the entry that caused it. And no run whose prompt stated the
-forbidden operations, in the tools or as text, corrupted its database
-copy, while 50 runs without the rules did, nearly all on one model.
+Delivery still matters, for other reasons. On the GPT models, looking a
+contract up is cheaper from twice a database's size, and it runs where the
+prompt no longer fits; its log traces a wrong answer to the entry behind
+it. No run whose prompt stated the forbidden operations, in the tools or
+as text, corrupted its database copy, against 50 runs without them,
+nearly all on one model.
 
 \ifextended
 \paragraph{Future work.} The knowledge ladder run together on two models,
@@ -40,8 +39,6 @@ its transcripts, since one graded correct is a solution the benchmark
 keeps private; its rows carry a hash of the gold result, and the analyses
 that use the gold print aggregates only.
 \else
-% The template's PVLDB Artifact Availability block carries the link.
-\paragraph{Future work.} A retrieval arm over the original documentation,
-human raters for determinacy, and a benchmark whose documentation states
-rules once for many tasks.
+% The template's PVLDB Artifact Availability block carries the link;
+% future work is in the extended version only.
 \fi

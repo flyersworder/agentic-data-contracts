@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections import Counter
 from itertools import combinations
@@ -242,7 +243,9 @@ def dabstep(tally: Counter) -> None:
                     )
                 )
             for label, r in rows:
-                key = f"{model} {label.split(' on the ')[0]}"
+                # Strip the never-read count: it differs between alternatives.
+                plain = re.sub(r" on the \d+ never read", ", never read", label)
+                key = f"{model} {plain}"
                 ci = r["clusters"]["shape"]["ci"]
                 if alt == "paper (opus)":
                     ref[key] = r
@@ -267,18 +270,20 @@ def livesqlbench(tally: Counter) -> None:
     print("== B-C. LiveSQLBench determinacy (consensus, split dropped)")
     ref: dict[str, tuple] = {}
     for alt, (first, second) in _alternatives_det().items():
-        gains = cl.determinacy_gains(first, second, score, db_of)
-        r = next(
-            g
-            for label, g, _, unit in gains
-            if label == "consensus, split dropped" and unit == "database"
-        )
+        # The plan's comparison is the consensus with split tasks dropped, by
+        # database; one rater standing in for both has no split tasks, so the
+        # three-group variant clustered.determinacy_gains also builds is empty.
         rated = sorted(set(first) & set(second) & set(db_of))
         know = {
             t: sum(score[m][a][t] for m in kb.MAIN_RUNS for a in kb.KNOWLEDGE_ARMS) / 18
             for t in rated
         }
+        base = {
+            t: sum(score[m]["schema_only"][t] for m in kb.MAIN_RUNS) / 6 for t in rated
+        }
         group = {t: kb.consensus(first[t], second[t]) for t in rated}
+        two = ("determined", "undetermined")
+        r = cl._group_gains(rated, group, know, base, db_of, two)
         det = [know[t] for t in rated if group[t] == "determined"]
         und = [know[t] for t in rated if group[t] == "undetermined"]
         p = mannwhitneyu(det, und, alternative="greater").pvalue

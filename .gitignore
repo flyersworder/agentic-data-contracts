@@ -37,3 +37,6 @@ docs/paper/pvldb.blg
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
+
+# Local secrets (API tokens)
+.env

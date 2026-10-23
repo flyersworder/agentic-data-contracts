@@ -25,8 +25,9 @@ These ratings check robustness. **The paper's subsets stay as registered**: the 
 
 The chunks and packets are the ones the Opus raters had. There are 16 sessions per model:
 - **Procedural load:** `procedural-load/packets/c01.md` to `c10.md`, 703 items (401 DABStep, 302 LiveSQLBench), with `RUBRIC.md` and `manual.md`.
-- **Determinacy, 302 tasks:** the dossiers in `failure-audit/dossiers-blind302/`, split into the five chunks of the original `blind302-r1-c*` files.
+- **Determinacy, 247 tasks:** the dossiers in `failure-audit/dossiers-blind302/` (C001 to C247), split into the five chunks of the original `blind302-r1-c*` files.
 - **Determinacy, 55 tasks:** the experiment 2 tasks in `failure-audit/dossiers-blind/`, as one chunk.
+- Together the 247 and the 55 are the 302 primary LiveSQLBench tasks, as `lsb_kb_clarity.py --all` combines them.
 
 The rubrics' text is unchanged except for three things:
 - file locations;
@@ -74,7 +75,7 @@ For each pair of raters among {Opus r1, Opus r2, GPT, Gemini}:
 - **Determinacy:**
   - Cohen's kappa on *settled* (`kb_clarity` is clear, or `decisive` is false);
   - percent agreement on the four `kb_clarity` values;
-  - for the 302 tasks and the 55 tasks separately.
+  - for all 302 tasks, and for the 55 of experiment 2 alone.
 
 ### B. Alternative subsets
 
@@ -115,3 +116,7 @@ Otherwise it is **not robust** on that alternative, and the paper says so where 
 - One sentence in the threats section states the cross-family agreement and how many results were robust.
 - The rater identities are stated as above.
 - Nothing else in the paper changes on the strength of these ratings.
+
+## Corrections before any rating
+
+- The first version said the 302 determinacy tasks came in five chunks. The five chunks hold 247; with the 55 they make the 302.

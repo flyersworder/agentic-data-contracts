@@ -552,6 +552,30 @@ Those per-task scores are also the only external check on this experiment's
 reconstructed golds, and they found a real one-sided bias in them. See
 [`FINDINGS.md`](FINDINGS.md#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
 
+## What is released, and what is not
+
+* **Result rows**, `results/`: every run the paper uses. Each row records its
+  commit, contract digest, gold-set hash, scorer, model, endpoint, tokens,
+  cost and the post-run integrity check of its database copy.
+* **DABStep golds are in those rows in plain text.** DABStep withholds its
+  test answers; ours are rebuilt by `dce.prepare` from the leaderboard's
+  public submissions, so anyone can recompute them. The validated leaderboard
+  is closed to new entries ahead of DABStep-v2. Do not use the rows to tune a
+  leaderboard submission.
+* **LiveSQLBench rows carry only a hash of the gold result.** Its gold SQL,
+  gold results, test cases and task-to-KB mapping are the benchmark's private
+  material and are not here; the analyses that need them read
+  `~/data/livesqlbench` and print aggregates only.
+* **Blind ratings**, `ratings/` (written by `analysis/export_ratings.py`): the
+  DABStep procedural-load ratings whole, which define the 199 rule-matching
+  tasks and the held-out set, and the LiveSQLBench determinacy ratings cut to
+  their labels. The raters' notes, the failure audits and the metric reviews
+  quote the LiveSQLBench gold and stay private.
+* **Transcripts** are release assets, not tracked: one archive per run with
+  SHA-256 digests (`dce.trace.read_trace` reads them). LiveSQLBench
+  transcripts are withheld: a transcript graded correct is a working solution
+  to a task whose solution the benchmark keeps private.
+
 ## Accepted gaps
 
 Known, deliberate, and disclosed rather than fixed:

@@ -64,7 +64,8 @@ kappa on load, kappa on high or not); and the item fields by benchmark.
 
 Ratings and the key are private (the LiveSQLBench side encodes the
 task-to-KB mapping): `$PROCEDURAL_LOAD`, default
-~/data/dce-held-results/procedural-load. Prints aggregates only.
+~/data/dce-held-results/procedural-load. The DABStep side is public in
+`ratings/procedural-load` (`PUBLIC_RATINGS`). Prints aggregates only.
 
 Run:  uv run python analysis/procedural_load.py
 """
@@ -90,6 +91,9 @@ RATINGS = Path(
         "PROCEDURAL_LOAD", Path.home() / "data/dce-held-results/procedural-load"
     )
 )
+#: The DABStep side alone, released in the repository (`export_ratings.py`):
+#: enough for every analysis that needs only the rule-matching subset.
+PUBLIC_RATINGS = ROOT / "ratings/procedural-load"
 PERMUTATIONS = 100_000
 SEED = 2026
 HIGH = 2.0

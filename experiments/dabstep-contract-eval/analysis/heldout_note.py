@@ -93,8 +93,8 @@ def main() -> None:
     import procedural_load as pl
     from contract_text import _sign, rule_matching
 
-    first = pl.read_ratings(pl.RATINGS, "r1")["dabstep"]
-    second = pl.read_ratings(pl.RATINGS, "r2")["dabstep"]
+    first = pl.read_ratings(pl.PUBLIC_RATINGS, "r1")["dabstep"]
+    second = pl.read_ratings(pl.PUBLIC_RATINGS, "r2")["dabstep"]
     luna5 = RUNS["gpt-6-luna"]["exp5"]
     rm = rule_matching(first, second) & {
         str(r["task_id"]) for r in _rows(luna5, 1) if r["arm"] == "contract"

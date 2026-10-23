@@ -23,9 +23,10 @@ repeats, the three knowledge arms (18 runs a task). Confound check: if
 undetermined tasks were merely harder, the KB's own gain (knowledge arms
 minus schema_only, per task) would not depend on the group.
 
-Prints aggregates only. Inputs outside the repository (`$LSB_AUDIT`, default
-~/data/dce-held-results/failure-audit): the two raters' files, the key from
-anonymous id to task, and the hard set's dossier index.
+Prints aggregates only. Inputs (`$LSB_AUDIT`, default `ratings/lsb-determinacy`,
+the public labels `export_ratings.py` cuts from the private
+~/data/dce-held-results/failure-audit, which gives the same output): the
+raters' labels, the key from anonymous id to task, and the hard set's ids.
 
 Run:  uv run python analysis/lsb_kb_clarity.py [--all]
 """
@@ -46,9 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dce.stats import load  # noqa: E402
 
-AUDIT = Path(
-    os.environ.get("LSB_AUDIT", Path.home() / "data/dce-held-results/failure-audit")
-)
+AUDIT = Path(os.environ.get("LSB_AUDIT", ROOT / "ratings/lsb-determinacy"))
 ARMS = ("manual_prompt", "contract", "contract_opus", "contract_authored")
 
 

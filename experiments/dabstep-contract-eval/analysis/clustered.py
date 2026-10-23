@@ -335,8 +335,8 @@ def _rule_matching() -> set[str]:
     import procedural_load as pl
     from contract_text import rule_matching
 
-    first = pl.read_ratings(pl.RATINGS, "r1")["dabstep"]
-    second = pl.read_ratings(pl.RATINGS, "r2")["dabstep"]
+    first = pl.read_ratings(pl.PUBLIC_RATINGS, "r1")["dabstep"]
+    second = pl.read_ratings(pl.PUBLIC_RATINGS, "r2")["dabstep"]
     return rule_matching(first, second)
 
 

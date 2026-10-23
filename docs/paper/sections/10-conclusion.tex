@@ -26,18 +26,19 @@ and padding from one warehouse; and a validator that can state ``a filter
 on this list column must accept the empty-list wildcard''.
 
 \section*{Artifact Availability}
-% DECISION(author): push or archive (Zenodo) the branch; release the
-% rule-matching task ids; gold-redistribution policy; k=3 transcripts.
 
 The library, the harness, every contract and compiler, the analysis
-scripts, the run commits and the raw result rows are tracked at
-\url{https://github.com/flyersworder/agentic-data-contracts}. Every row
-records its commit, contract digest, gold-set hash, scorer, model,
-endpoint, token counts, cost and a post-run integrity check of its
-database copy. The transcripts of the four single runs are attached to
-the release tagged \texttt{dabstep-eval-2026-09}, with SHA-256 digests.
-LiveSQLBench's private gold, results and task mapping are not
-redistributed; analyses that use them print aggregates only.
+scripts, the blind ratings, the run commits and the raw result rows are
+tracked at \url{https://github.com/flyersworder/agentic-data-contracts}.
+Every row records its commit, contract digest, gold-set hash, scorer,
+model, endpoint, token counts, cost and a post-run integrity check of its
+database copy. The transcripts of every DABStep and constructed-question
+run are attached to the releases tagged \texttt{dabstep-eval-2026-09}
+and \texttt{dabstep-eval-2026-10}, with SHA-256 digests. LiveSQLBench's
+private gold, test cases and task mapping are not redistributed, nor are
+its transcripts, since one graded correct is a solution the benchmark
+keeps private; its rows carry a hash of the gold result, and the analyses
+that use the gold print aggregates only.
 \else
 % The template's PVLDB Artifact Availability block carries the link.
 \paragraph{Future work.} A retrieval arm over the original documentation,

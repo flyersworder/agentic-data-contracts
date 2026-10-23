@@ -90,8 +90,8 @@ def main() -> None:
     parser.add_argument("--model", choices=sorted(FILES), default="luna")
     model = parser.parse_args().model
     results = ROOT / "results"
-    first = pl.read_ratings(pl.RATINGS, "r1")["dabstep"]
-    second = pl.read_ratings(pl.RATINGS, "r2")["dabstep"]
+    first = pl.read_ratings(pl.PUBLIC_RATINGS, "r1")["dabstep"]
+    second = pl.read_ratings(pl.PUBLIC_RATINGS, "r2")["dabstep"]
     views = {
         "end-to-end": scores(results, FILES[model], ARMS),
         "official": scores(results, FILES[model], ARMS, e2e=False),

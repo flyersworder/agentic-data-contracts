@@ -107,8 +107,8 @@ def main() -> None:
     text_label, tools_label, tools_kind = PREDICTIONS[model]
     score = scores(model)
     tasks = set(score["contract"])
-    first = pl.read_ratings(pl.RATINGS, "r1")["dabstep"]
-    second = pl.read_ratings(pl.RATINGS, "r2")["dabstep"]
+    first = pl.read_ratings(pl.PUBLIC_RATINGS, "r1")["dabstep"]
+    second = pl.read_ratings(pl.PUBLIC_RATINGS, "r2")["dabstep"]
     rm = rule_matching(first, second) & tasks
     acc = {}
     for label, among in (("rule-matching", rm), ("rest", tasks - rm), ("all", tasks)):

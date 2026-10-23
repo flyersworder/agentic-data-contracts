@@ -13,20 +13,23 @@ figure.
 The sharper question is whether the leniency is arm-neutral. If it is, it
 moves levels and not contrasts. That is checkable from a proxy. Every one of
 the 19 failed exact string match against the reconstructed gold and was
-rescued by the scorer's tolerance, so exact-match failure among
-locally-correct rows upper-bounds an arm's exposure
+rescued by the scorer's tolerance. Assuming the remaining lenient
+gradings behave alike, exact-match failure among locally-correct rows
+measures an arm's exposure
 (\texttt{analysis/leniency.py}; exact match strips whitespace and Markdown
 bold and nothing else, deliberately not the benchmark normaliser, which is
 the tolerance being measured). On the hard split, where all 19 disagreements
 lie, the flag has perfect recall at 33 flags, so a flag converts to a real
-error at $19/33 = 0.576$.
+error at $19/33 = 0.576$. The proxy sees only the scorer's tolerance: an
+answer that matches a wrong reconstructed gold exactly is invisible to it,
+and the official grading of \appref{app:golds} is the only check on that.
 
 \begin{table}[htbp]
 \centering
 \caption{Exposure to scorer leniency: the share of each arm's correct
 hard-split answers that required more than exact match against the
 reconstructed gold (exp.), and the accuracy that follows from correcting it
-(corr.). An upper bound.}
+(corr.). An estimate, under the assumptions in the text.}
 \label{tab:leniency}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -60,8 +63,10 @@ also makes \mSON{}'s corrected \armM{} figure of 18.2\% the least safe
 extrapolation in the analysis, applying a conversion rate measured on
 \armC{} and \mGLM{} to the arm and model furthest from it; read it as a
 direction, not a second measurement. The honest summary is not that the
-leniency favours either side, but that its effect on every contrast is under
-3~pp and no conclusion in the paper turns on 3~pp.
+leniency favours either side, but that its estimated effect on every
+contrast is under 3~pp. That leaves the knowledge contrasts standing; the
+smaller effects, the representation's 3.7 and 5.5 points and the compile's
+3.4-point residual, are of the same size and are read as provisional.
 
 The correction's weakness is that it applies a conversion rate calibrated
 on one arm to the others. The second submission tests exactly that.
@@ -73,6 +78,6 @@ measured bias between about $1.8$ and $4.1$~pp would have been equally
 consistent. The transfer assumption survives its first test rather than
 being confirmed by it, and it is still the only instrument bounding the
 fourteen of sixteen arm~$\times$~model cells we do not submit. Two limits
-survive: the flag is an upper bound, so true corrections are at or below
-the table's, and transfer across \emph{models} remains untested, which is
+survive: the conversion rate carries that interval into every corrected
+cell, and transfer across \emph{models} remains untested, which is
 where the estimator does most of its work.

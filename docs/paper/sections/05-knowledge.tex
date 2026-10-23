@@ -39,8 +39,7 @@ instruction to look things up before writing SQL, its table allow-list
 and its operation rules, and empties every description and SQL definition
 (Section~\ref{sec:hollow}). Table~\ref{tab:decomposition} gives the
 hard-task accuracy of all four arms on six models: two panels repeated
-three times, and four single runs. (\mLuna{}, the
-seventh model, did not run the hollow arm.)
+three times, and four single runs. (\mLuna{} did not run the hollow arm.)
 
 \textbf{The knowledge step is large and certain on every model that ran
 it.} Restoring
@@ -50,7 +49,7 @@ shapes $+32$ to $+66$, 23 shapes to 5) and 34.5 to 43.8 on \mQwen{}
 depending on the scoring view (189 tasks to 10 and to 8; over shapes, from
 $+24$ at the lowest). On the four single runs it adds 26.2 to 35.8 points.
 It is the fee procedure that it adds: on the 294 hard tasks that concern
-fees the step is $+57.6$ points on \mSol{}; on the other 38 it is $-8.8$
+fees the step is $+57.6$ on \mSol{}; on the other 38 it is $-8.8$
 on \mSol{} and $-0.9$ on \mQwen{} (end-to-end), and on the easy tasks $+13$
 and $+12$.
 
@@ -69,8 +68,7 @@ nothing is available, and searches harder; on \mGLM{} and \mSON{} \armH{}
 burns more reasoning than any other arm (\appref{app:efficiency}). What every run agrees on is the
 ordering of the two steps. \textbf{The knowledge step dominates the
 scaffolding step on all six models}, and the sceptical reading that the
-contract helps by narrowing the tables, imposing a procedure or slowing
-the agent down predicts the opposite.
+contract helps by narrowing tables, imposing a procedure or slowing the agent predicts the opposite.
 
 The manual pasted into the prompt carries the same domain, and it helps
 too: \armM{} beats \armS{} by 21.6 hard-task points on \mSol{} (112 tasks

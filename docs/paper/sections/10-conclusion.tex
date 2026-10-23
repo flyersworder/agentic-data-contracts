@@ -17,6 +17,7 @@ traceable to the entry that caused it. And no run whose prompt stated the
 forbidden operations, in the tools or as text, corrupted its database
 copy, while 50 runs without the rules did, nearly all on one model.
 
+\ifextended
 \paragraph{Future work.} The knowledge ladder run together on two models,
 with a retrieval arm over the original documentation; human raters on a
 sample of the determinacy labels; a second benchmark whose documentation
@@ -37,3 +38,9 @@ database copy. The transcripts of the four single runs are attached to
 the release tagged \texttt{dabstep-eval-2026-09}, with SHA-256 digests.
 LiveSQLBench's private gold, results and task mapping are not
 redistributed; analyses that use them print aggregates only.
+\else
+% The template's PVLDB Artifact Availability block carries the link.
+\paragraph{Future work.} A retrieval arm over the original documentation,
+human raters for determinacy, and a benchmark whose documentation states
+rules once for many tasks.
+\fi

@@ -1,9 +1,19 @@
-% Submission driver: acmart sigconf, no appendix. Shares every section file
-% with main.tex; only the class, the top matter and the appendix switch
-% differ. Build with `make pvldb.pdf`.
+% Submission driver: the official PVLDB Vol. 20 template, no appendix.
+% acmart.cls (v2.19), pvldb.sty and ACM-Reference-Format.bst are vendored
+% unmodified from github.com/vldbproceedings/VLDB-Template at 39c95f5; the
+% guidelines make deviating from them grounds for desk rejection. Shares
+% every section file with main.tex; only the class, the top matter and the
+% appendix switch differ. Build with `make pvldb.pdf`.
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[sigconf,nonacm]{acmart}
-\settopmatter{printacmref=false}
+
+%%% VLDB block start %%%
+\usepackage{pvldb}
+%%% VLDB block end %%%
+
+\renewcommand\vldbdoi{XX.XX/XXX.XX}
+\renewcommand\vldbpages{XXX-XXX}
+\renewcommand\vldbavailabilityurl{https://github.com/flyersworder/agentic-data-contracts}
 
 \usepackage{array}
 \usepackage{listings}
@@ -16,7 +26,8 @@
 \extendedfalse
 \input{preamble}
 
-\title{Which Part of the Context Layer Does the Work?}
+% The category tag is required at review and dropped at camera-ready.
+\title[Which Part of the Context Layer Does the Work?]{Which Part of the Context Layer Does the Work? [Experiment, Analysis \& Benchmark]}
 \subtitle{Separating Knowledge from Delivery in Text-to-SQL Agents, on Two Benchmarks}
 \author{Qing Ye}
 \affiliation{\institution{Independent Researcher}\country{}}
@@ -30,6 +41,10 @@
 \end{abstract}
 
 \maketitle
+
+%%% VLDB block start %%%
+\vldbtopmatter
+%%% VLDB block end %%%
 
 \input{sections/01-intro}
 \input{sections/02-background}

@@ -1702,6 +1702,44 @@ So "with the facts stated alike, the contract's form adds to them" stands on
 Qwen. On luna it rests largely on the tasks whose transcripts suggested the
 note.
 
+### Tools with the facts stated alike: predictions (41)-(42Q)
+
+Experiment 5 found the governed tools ahead of the same contract pasted as
+text by 10.1 points on Qwen's rule-matching tasks, and level on luna's. Both
+arms carried the contract's original wording, which Qwen read as one rule
+per transaction in about half its runs; experiment 5c then lifted Qwen's text
+arm by 18.9 points with the two notes. So the +10.1 may be the wording, not
+the route. Two reviews of the paper asked exactly this.
+
+Experiment 5d tests it. `contract_noted` is `contract`, the governed arm,
+plus `DATA_NOTE` and `SUM_NOTE` after its prompt, word for word and under the
+headings `contract_text_noted` and `manual_summed` have them. Against
+`contract_text_noted` it states the same facts in the same words and differs
+only in the contract's route. `contract`, `contract_text_noted` and
+`contract_noted` run together in each repeat, gpt-6-luna then Qwen 3.8, k=3,
+`--retry-pass`; the two older arms are rerun so every test pairs within a
+run, and their earlier files (experiments 5 and 5c) serve as a drift check
+(`analysis/governed_noted.py --model luna|qwen`). Primary subset and measure
+as experiments 5 and 5c.
+
+- **(41)** gpt-6-luna and **(41Q)** Qwen 3.8: `contract_noted` and
+  `contract_text_noted` tie on the rule-matching tasks: within 5 points and
+  two-sided p >= 0.10.
+- **(42Q)** Qwen 3.8: `contract_noted` beats `contract` there, one-sided
+  p < 0.05: the notes repair the governed arm as they repaired the text.
+- **(42)** gpt-6-luna: `contract_noted` and `contract` tie there.
+
+Fixed before the run, how the outcomes read:
+- (41Q) holding means Qwen's +10.1 for the tools was the original wording,
+  not the route.
+- (41Q) failing with the governed arm ahead means the lookup adds to the
+  facts on Qwen even when they are stated alike: a delivery effect, and a
+  model-dependent one if (41) holds.
+- Failing with the text ahead means the route costs Qwen accuracy once the
+  facts are plain.
+
+Results: pending.
+
 ### Gaps the documentation leaves open: predictions (32)-(36)
 
 Experiments 4 to 5c held the knowledge fixed and varied its delivery. The

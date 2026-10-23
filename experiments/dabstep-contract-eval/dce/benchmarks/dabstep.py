@@ -11,6 +11,7 @@ commands in README.md and FINDINGS.md keep working.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 from pathlib import Path
@@ -81,6 +82,11 @@ ARMS: tuple[str, ...] = (
 #: `total_transaction_fees` speaks of "the fee rule that matches" a
 #: transaction. With the notes in both, the two arms state the facts alike and
 #: differ only in the form of the rest.
+#:
+#: `contract_noted` is `contract`, the governed arm, plus the same two notes
+#: after its prompt (experiment 5d). Against `contract_text_noted` it states
+#: the same facts in the same words and differs only in the contract's route:
+#: looked up through the governed tools, or pasted as text.
 COMPILED_ARMS: tuple[str, ...] = (
     "contract_compiled",
     "contract_compiled_opus",
@@ -93,6 +99,7 @@ EXTRA_ARMS: tuple[str, ...] = (
     "contract_text",
     "manual_summed",
     "contract_text_noted",
+    "contract_noted",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -127,6 +134,9 @@ SUM_NOTE = (
     "matches adds nothing."
 )
 
+#: The two notes as the noted arms append them, under their headings.
+NOTES_TAIL = f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
+
 #: Introduces the contract files in `contract_text`. Fixed before the arm's
 #: first run.
 CONTRACT_TEXT_NOTE = (
@@ -138,7 +148,13 @@ CONTRACT_TEXT_NOTE = (
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
 #: session and the governed-tool counters.
 GOVERNED_ARMS: frozenset[str] = frozenset(
-    {"contract", "contract_hollow", "contract_uninterpreted", *COMPILED_ARMS}
+    {
+        "contract",
+        "contract_hollow",
+        "contract_uninterpreted",
+        "contract_noted",
+        *COMPILED_ARMS,
+    }
 )
 
 BASE_PROMPT = (
@@ -172,8 +188,14 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         )
         prompt = f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
         if arm == "contract_text_noted":
-            prompt += f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
+            prompt += NOTES_TAIL
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
+
+    if arm == "contract_noted":
+        setup = governed_arm(BASE_PROMPT, db_path, load_contract())
+        return dataclasses.replace(
+            setup, system_prompt=setup.system_prompt + NOTES_TAIL
+        )
 
     if arm in GOVERNED_ARMS:
         # IDENTICAL EXCEPT FOR THE CONTRACT OBJECT. The procedural sentence

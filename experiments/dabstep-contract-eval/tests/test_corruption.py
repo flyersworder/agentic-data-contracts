@@ -10,6 +10,7 @@ def test_the_governed_arms_are_the_contract_arms_behind_the_governed_tools():
     assert corruption.governed("contract")
     assert corruption.governed("contract_hollow")
     assert corruption.governed("contract_compiled_opus_joins")
+    assert corruption.governed("contract_noted")
     assert not corruption.governed("contract_text")
     assert not corruption.governed("contract_text_noted")
     assert not corruption.governed("manual_prompt")

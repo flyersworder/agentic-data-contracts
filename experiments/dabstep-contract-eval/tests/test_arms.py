@@ -65,6 +65,7 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_text",
         "manual_summed",
         "contract_text_noted",
+        "contract_noted",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -139,6 +140,35 @@ def test_contract_text_noted_and_manual_summed_end_alike(db):
     tail = f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
     assert summed.endswith(tail)
     assert noted.endswith(tail)
+
+
+def test_contract_noted_is_the_governed_contract_plus_both_notes(db):
+    """Experiment 5d: the notes contract_text_noted adds, in the same words,
+    under the same headings, after the governed contract's prompt. Against
+    contract_text_noted only the contract's route differs: the same facts,
+    stated alike, looked up or pasted."""
+    governed = build_arm("contract", db, DOCS)
+    noted = build_arm("contract_noted", db, DOCS)
+    assert noted.system_prompt == (
+        f"{governed.system_prompt}\n\n## Data note\n\n{DATA_NOTE}"
+        f"\n\n## Fee note\n\n{SUM_NOTE}"
+    )
+    assert [t.name for t in noted.tools] == [t.name for t in governed.tools]
+    assert noted.session is not None
+
+
+def test_contract_noted_ends_like_the_other_noted_arms(db):
+    tail = f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
+    for arm in ("contract_noted", "contract_text_noted", "manual_summed"):
+        assert build_arm(arm, db, DOCS).system_prompt.endswith(tail)
+
+
+def test_contract_noted_is_governed_and_carries_the_contract_digest():
+    from dce.benchmarks.dabstep import GOVERNED_ARMS, arm_digest
+    from dce.frozen import digest
+
+    assert "contract_noted" in GOVERNED_ARMS
+    assert arm_digest("contract_noted") == digest()
 
 
 def test_contract_text_carries_the_contract_digest():

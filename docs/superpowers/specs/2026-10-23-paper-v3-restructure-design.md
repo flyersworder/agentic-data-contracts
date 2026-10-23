@@ -1,62 +1,90 @@
 # Paper v3: missing data semantics, not delivery
 
-**Status.** Revision 2, after a review round on revision 1 (822d7cf). The
-earlier review rounds:
-- **Round 1, on the PVLDB version.** A fresh Opus 5.5 reader and gpt-6.1-sol,
-  through Copilot CLI with the artifact, both returned major revision at
-  confidence 4 of 5. gpt-6.1-sol recomputed 24 numbers from the committed
-  rows: 20 match, 1 matches in part, 2 need private data, and 1 was a
-  wording error, fixed in 9316226.
-- **Round 2, on revision 1 of this spec.** gpt-6.1-sol and gemini-4-argon
-  through Copilot CLI, and a fresh Opus 5.5 reader, each with the artifact.
-  The verdicts were "needs rework", "ready with changes" and "ready with
-  changes". All three found the same fault: the thesis and the draft
-  abstract re-introduced the over-claims the claims table removed. The
-  reviews are kept outside the repository, in
-  `~/.cache/review-sandbox/review5/`.
+**Status.** This is revision 3. The earlier rounds:
+- **Round 1** reviewed the PVLDB version. Two reviews, both major revision.
+- **Round 2** reviewed revision 1 of this spec. Three reviews: "needs
+  rework", "ready with changes" and "ready with changes". All three found
+  that the thesis and the abstract re-introduced the over-claims the claims
+  table removed.
+- **Round 3** was a calibration review of revision 2. gpt-6.1-sol and
+  gemini-4-argon ran through Copilot CLI and a fresh Opus 5.5 reader ran on
+  its own, each with the artifact. All three said "nearly calibrated":
+  - the abstract and thesis still dismissed delivery ahead of experiment 5d;
+  - the framing of 5d was wrong;
+  - the hollow ablation and Qwen's two-fact result were under-claimed;
+  - two statements were factually wrong.
 
-This revision restructures the PVLDB version around one finding, states
-every number with the scope it was measured on, and adds one small run,
-experiment 5d. Nothing is deleted from the extended version.
+  Revision 3 makes those changes. Numbers that only one reviewer reported
+  were re-checked against the rows before use: sol's subset shares, Qwen's
+  prompt fit and the range of rater pairings.
+
+The reviews are kept outside the repository, in
+`~/.cache/review-sandbox/review{5,6}/`.
+
+## Calibration rules
+
+These apply to every sentence of both builds.
+1. **Scope.** Every number carries its scope: models, task subset,
+   scoring view, and which arms ran together.
+2. **Prefer "no detectable difference" to "tie".** A registered tie is a
+   point estimate within 5 points plus non-rejection, not equivalence. The
+   one exception is a registered equivalence result: the scale experiment's
+   (37) met its 5-point margin.
+3. **Delivery claims stay conditional.** No sentence dismisses delivery or
+   bounds it. The plan and the abstract keep the delivery clause open until
+   experiment 5d is analysed, and then state what it shows.
+4. **Strong results are stated plainly.** The hollow ablation, the held-out
+   lift, Qwen's two-fact result, the cross-family robustness and the
+   governance counts survive their checks, and are not hedged as if they
+   had not.
+5. **Each Qwen claim names its view.** The views are official, or
+   official plus final-paragraph recovery; the arms reorder between them.
 
 ## The thesis
 
-> On DABStep, most of the context layer's apparent advantage over the
+> On DABStep, most of the contract's apparent advantage over the pasted
 > documentation is two pieces of data semantics the documentation omits:
-> - a wildcard stored as an empty list;
-> - how the fees of several matching rules aggregate.
->
-> Supplied in prose, they recover most of the contract's lead on luna and
-> Qwen, also on 165 tasks outside the transcript-inspection set. With the
-> facts held equal, the remaining effects of representation and route are
-> small, model- and task-dependent, and of either sign, and LiveSQLBench's
-> prompt-versus-tools comparison ties. Lookup's case is operational: it
-> keeps working past the context window, and it logs which definitions
-> were consulted.
-
-The exp5d result is pending. Once it is in, the delivery sentence states
-it, whichever way it falls.
+> a wildcard stored as an empty list, and how the fees of several matching
+> rules aggregate. Removing the contract's knowledge while keeping its tools
+> costs 26 to 50 hard-task points on six models. Stating the two semantics
+> in prose recovers most of the contract's lead on GPT-6 luna, and all of it
+> on Qwen 3.8 with final-paragraph recovery (on the official view the
+> contract keeps a 6-point lead on the rule-matching tasks). A
+> six-model control and a held-out check support it. With the facts held
+> equal, the contract's representation still leads on the rule-matching
+> tasks; whether looking the contract up adds to the same text is
+> experiment 5d's question; on LiveSQLBench the route makes no detectable
+> difference.
 
 ## The storyline
 
 1. **The problem.** Context-layer gains are reported with/without. That
-   comparison confounds *what is documented* with *how it is delivered*,
-   so it can't tell a team whether to invest in writing the semantics down
-   or in the delivery machinery: lookup tools, governed access, retrieval,
-   progressive disclosure.
-2. **The protocol.** A data contract makes the semantics explicit and
-   separable from the tools, so each can be varied with the other held
-   fixed:
-   - the hollow contract keeps the tools and empties the knowledge;
-   - facts can be added as notes in identical words;
-   - the same contract can be pasted into the prompt or put behind the
-     tools.
-
-   This is why the instrument is a contract and not any structured
-   document (review B, W8).
-3. **The finding.** On DABStep the contract beats the pasted manual by 20
-   to 23 points on the two repeated panels, which looks like a delivery win.
-   It is mostly two omitted data semantics:
+   comparison confounds what a layer documents with how it delivers it.
+2. **The protocol.** The protocol needs knowledge that can be emptied,
+   given extra facts in identical words, and delivered by two routes. A
+   data contract is a convenient instrument for that, because it keeps
+   explicit semantics separate from the tools that enforce and serve them.
+   It is not the only possible instrument. Which parts ran on which test
+   bed:
+   - **DABStep:** all three parts.
+   - **The constructed questions:** notes and routes (experiment 4b).
+   - **LiveSQLBench:** routes only.
+3. **The control.** Emptying the contract's descriptions and SQL while
+   keeping its tools, instruction and rules costs 26 to 50 points on
+   DABStep's hard tasks.
+   - **Scope:** six models; the knowledge step exceeds the scaffolding step
+     on every one. On the repeated panels it survives clustering over
+     question shapes: sol +50.0 [+32.1, +66.2].
+   - **Where it sits:** nearly all of it is in the fee procedure. On sol it
+     is +57.6 on the fee tasks and -8.8 on the 38 others.
+   - **The empty scaffolding:** -9 to +15, and at most +0.2 on the two
+     repeated panels.
+   - **What it measures:** knowledge given the scaffolding, not "all
+     knowledge versus none". Names, types and rules remain.
+4. **The finding.** The contract leads the pasted manual on the hard tasks:
+   by 19.9 on sol and 22.7 (official) or 23.2 on Qwen, on the two repeated
+   panels, and by 42.9 on luna. This looks like a delivery win. It is mostly
+   two omitted data semantics:
    - **a sentinel encoding.** The manual says null means "applies to all";
      the data stores that as an empty list in 720 of 1,000 rules for
      `account_type`.
@@ -64,241 +92,369 @@ it, whichever way it falls.
      payment, and their fees sum. The manual defines one rule's fee and is
      silent on overlap.
 
-   Stated in prose, they recover most of the gap on luna and Qwen,
-   including on the 165 rule-matching tasks outside the
-   transcript-inspection set (+19.2 and +33.9 points). On gpt-6-sol only
-   the first was tested; it recovers 77%.
-4. **Delivery with the knowledge held equal.** It is measured on luna and
-   Qwen, mostly on the rule-matching subset.
+   Stated in prose:
+   - **On luna** they recover most of the lead.
+   - **On Qwen** the prose with both facts *outscores* the governed
+     contract with final-paragraph recovery: 86.1 against 79.6 on the
+     rule-matching tasks, and 80.0 against 67.7 over all 401. On the
+     official view the contract keeps the lead on the rule-matching tasks,
+     51.6 against 45.6, and trails over all 401, 51.0 against 54.4. These
+     are co-run, in experiment 5.
+   - **Plain beats unplain.** The prose with both facts beats the contract's
+     own text by 16.6 points on Qwen ((29Q)), robust to clustering and to
+     every rater family. Experiment 5c then lifts the contract's text by
+     18.9 when the notes are added. How plainly the semantics are stated
+     matters, not only whether they are present.
+   - **The held-out lift.** The second fact, `SUM_NOTE`, was written after
+     reading 34 tasks' transcripts. On the 165 rule-matching tasks outside
+     that set it lifts the one-fact prose by +19.2 points on luna and +33.9
+     on Qwen, with shape intervals [+8.5, +31.9] and [+17.7, +53.6]. It
+     holds under every rater family. Excluding the 34 removes tasks the
+     comparator failed twice, so the selection biases the lift down; the
+     third repeat alone gives +20.6. Exploratory and cross-run, the
+     recovery of the whole lead on those 165 is about 104% on luna and
+     126% (end-to-end) or 76% (official) on Qwen.
+   - **Sol.** Only the first fact was tested. It recovers 77% of the gap
+     over all 401 tasks (shape interval 0.16 to 1.01), but 112% on the
+     tasks outside rule matching and **8% on the 199 rule-matching tasks**.
+     Sol's rule-matching gap, where the second fact acts, is untested.
+5. **Delivery with the facts held equal.** This was measured on luna and
+   Qwen on DABStep. Sol's knowledge-equal evidence is on the constructed
+   questions and the scale experiment.
    - **Form** (the contract's text against prose, both with the notes):
-     +3.7 and +5.5 on the rule-matching tasks, a package of format, SQL
-     definitions and repetition. It is provisional: it does not clear zero
-     under question-shape clustering on the held-out tasks, and on luna it
-     rests largely on the 34 inspected tasks. On the other 202 tasks it is
-     +9.5 on luna and -5.3 on Qwen.
-   - **Route** (tools against the same text): experiment 5d replaces the
-     confounded +10.1 with the facts stated alike. Experiment 5 gave -0.7
-     on luna and +10.1 on Qwen, both against the original wording; on the
-     other tasks +5.1 and -6.9.
-   - **A second benchmark.** On LiveSQLBench, the same compiled knowledge in
-     the prompt or behind the tools ties: 36.8 against 35.9 on luna, 37.7
-     against 37.7 on Qwen.
-   - The summary is "of either sign, by model and task family"; no range
-     is offered as a bound.
-5. **What the contract's knowledge is worth, and where it comes from
-   (secondary).**
-   - **The ablation.** Emptying the contract costs 26 to 50 points on
-     DABStep's hard tasks, on the six models that ran it (luna did not),
-     nearly all of it on the fee procedure. It is the corroborating control,
-     not the headline. The empty scaffolding is worth -9 to +15, and at most
-     +0.2 on the two repeated panels.
-   - **Data inspection.** It grounds instance-verifiable encodings:
-     - the stronger compile found the empty-list wildcard;
-     - the gaps experiment recovered 6 of 6 settled gaps and 6 of 9 split
-       ones (12 of 15 under the recorded ruling, 9 of 15 otherwise).
+     - **Rule-matching tasks:** the contract's text leads, +3.7 on luna
+       ([+0.6, +7.9] over shapes, robust to every rater family) and +5.5
+       on Qwen ([-0.4, +10.4]; it excludes zero over families only). This
+       is the direction the run fixed in advance.
+     - **Why provisional:**
+       - it is a package of format, SQL definitions and repetition;
+       - neither model's effect clears shape clustering on the 165 held-out
+         tasks;
+       - on luna it rests largely on the 34 inspected tasks;
+       - it is close to the 2.8-point drift between identical arms;
+       - under exact-match scoring luna's +3.7 falls to about +1.8
+         (p about 0.08). The sensitivity analysis reports this.
+     - **The other 202 tasks:** +9.6 on luna (51 tasks to 14); -5.3 on
+       Qwen, not significant.
+   - **Route** (governed delivery against the same text). Experiment 5's
+     contrast is knowledge-equal by construction: the same contract, both
+     arms with its original wording.
+     - **Experiment 5:** -0.7 on luna and +10.1 on Qwen on the
+       rule-matching tasks. Qwen's is registered prediction (27); its shape
+       interval excludes zero, its shape sign test does not, and it crosses
+       zero on Gemini's subset. On the rest the route gives +5.1 on luna
+       and -6.9 on Qwen, neither surviving clustering.
+     - **Experiment 5d** asks whether that holds once the two notes are in
+       both prompts. It tests governed delivery of the rest of the
+       contract, with the deciding facts pasted in both arms. It does not
+       test whether the facts themselves reach the agent better by lookup.
+       It reports shape intervals beside its registered tests.
+   - **Other route contrasts point the same way:**
+     - **4b's constructed questions:** authored contract by two routes,
+       +0.5 (2 tasks to 0); `contract_text` against `manual_noted` -1.4;
+       knowledge share 1.03 [0.98, 1.35]. Five gaps, so the clusters are
+       few.
+     - **LiveSQLBench:** compiled knowledge in the prompt or behind the
+       tools, 36.8 against 35.9 on luna (22 tasks to 25) and 37.7 against
+       37.7 on Qwen (22 to 24). There is no detectable difference;
+       prediction (3) had the tools ahead and failed. Both arms sit at a
+       knowledge-limited level of about 37%.
+   - **Summary:** form estimates are positive on the rule-matching tasks of
+     both models. The other contrasts are unresolved and vary by model and
+     task family. No range is offered as a bound.
+6. **Where the knowledge comes from (secondary).**
+   - **Data inspection.** It grounds instance-verifiable encodings. The
+     stronger compile found the empty-list wildcard. Its gain over the
+     first compile, 47.3 to 76.6 against the original's 80.0, is the Opus
+     compiler together with join-capable SQL; without joins it scored
+     47.4. In the gaps experiment the sessions with data recovered:
+     - 6 of 6 draws on the two settled gaps;
+     - 6 of 9 draws on the three split gaps (3 of 9 under the alternative
+       ruling; 12 of 15 or 9 of 15 in all);
+     - 0 of 3 draws on the one convention gap. Every session chose the
+       lowest rule id where the gold uses the most specific.
 
-     It did not recover a convention the data cannot reveal: 0 of 3, and
-     every session chose the lowest rule id for precedence. The summing
-     convention in the original contract cannot be credited to data
-     inspection (provenance).
-   - **LiveSQLBench as a benchmark property.** By two gold-aware model
-     raters (kappa 0.79, cross-family checked), the KB leaves a
-     result-changing choice open on 132 of 302 primary tasks. On 55 tasks of
-     three databases, one model and the authors we tried, there was no
-     detectable gain from a better author. This is an observation, not a
-     bound.
-6. **Operational trade-offs (short).** These come from 60 constructed
-   questions that name their metric, near ceiling, with padding from other
-   databases:
-   - **Accuracy:** pasting up to 4x (about 92k tokens) costs no accuracy.
-   - **Cost against the contract's YAML pasted in:** at 4x, lookup is 1.7
-     times cheaper on luna and 2.4 on sol.
-   - **Cost against the prose KB pasted in at 4x:** about 1.1 times
-     cheaper; on Qwen's output-metered billing the prose prompt costs more.
-   - **Beyond the window:** lookup keeps working where the prompt doesn't
-     fit, as on Qwen at 8x and at all 22 databases.
-   - **The consultation log:** a syntactic inclusion check of the consulted
-     expression in the submitted SQL, not provenance.
-   - **Governance:** no observed persistent mutation where the rules were
-     stated, confounded and mostly Qwen's.
+     The no-data control recovered none of five. What the author recovered,
+     and what they got wrong, travelled through prose notes and through the
+     contract alike.
+   - **Provenance.** The independent compile emitted one row per matching
+     pair, but left the aggregation open. The original contract's summing
+     matches the gold's default join-and-sum, and is not credited to data
+     inspection.
+   - **LiveSQLBench determinacy.** Two gold-aware model raters (kappa
+     0.79) find that the KB leaves a result-changing choice open on 132 of
+     302 primary tasks; the count ranges from 112 to 146 across the four
+     rater pairings. No human checked them.
+     - **Accuracy split:** knowledge arms solve about 60% of the tasks the
+       KB settles and 14% of those it leaves open, under every rater
+       family. Schema-only accuracy differs as well (38% against 4%), so
+       this locates where accuracy is, not a differential effect of
+       knowledge.
+     - **Knowledge still helps there:** +15.6 on luna and +14.1 on Qwen,
+       with database intervals excluding zero.
+   - **Better authors.** On 55 tasks of three databases, on luna, there was
+     no detectable gain: the Opus compile +1.8 [-3.0, +7.3], the whole
+     author -1.8 [-9.1, +5.5].
+   - **The oracle.** Task-specific corrections lift the training tasks by
+     about 21 points and do not transfer to the held-out tasks; the
+     intervals exclude a transfer above about 10 points. The rows are
+     private.
+   - **The constructed procedures.** Complete prose suffices there: every
+     knowledge arm scores 95.6 to 100%. That ceiling means they cannot rank
+     representations or procedure types.
+7. **Operational trade-offs.** These come from 60 constructed questions that
+   name their metric, near ceiling, padded with other databases:
+   - **Accuracy:** pasting the contract's YAML at 4x (about 92k tokens) met
+     the registered 5-point equivalence margin, losing 3 of 540 runs.
+   - **Cost at 4x against the YAML pasted in:** lookup is 1.7 times cheaper
+     on luna and 2.4 on sol.
+   - **Cost at 4x against the prose KB pasted in:** about 1.1 times
+     cheaper. On Qwen's output-metered billing the YAML prompt is cheaper
+     than lookup and the prose prompt dearer.
+   - **At 1x:** the prompt is cheaper on the GPT models.
+   - **Beyond the window:** lookup keeps working where *pasting the YAML*
+     does not fit. Qwen's YAML stops fitting from 8x; the prose KB fits
+     even at all 22 databases (about 99k tokens), but its accuracy there
+     was not run.
+   - **The consultation log:** a log of consulted definitions and a
+     syntactic check that the consulted expression appears in the
+     submitted SQL. It is not provenance.
+   - **Governance**, from the DABStep runs, not the 60 questions: no
+     persistent mutation in any of 29,356 runs whose prompt stated the
+     rules, against 50 of 21,790 that did not. On Qwen, 0 of 3,609 text-arm
+     runs that stated the rules without enforcement, against 44 of 8,421,
+     p = 2e-7. This is an association, confounded with knowledge and
+     workflow; the validator never blocked a write.
 
-**Takeaway for practitioners.** Before crediting a context layer's
-machinery, check that the comparison holds the semantics equal. Write down
-the semantics a reader could misread:
-- wildcard encodings;
-- what happens when several rules match;
-- units;
-- `NULL`s.
-
-Check them against the data. Choose the delivery for the operational
-reasons above, not for accuracy.
+**Takeaway for practitioners.**
+1. Before crediting a context layer's machinery, check that the comparison
+   holds the semantics equal.
+2. Write down the semantics a reader could misread: wildcard encodings,
+   what happens when several rules match, units, `NULL`s. Check them
+   against the data.
+3. Where accuracy is comparable on your models and tasks, choose the
+   delivery for cost, capacity and the consultation log. Lookup's capacity
+   advantage is over pasting a verbose YAML; a prose KB is several times
+   smaller.
 
 ## Contributions
 
 1. **The finding.** On DABStep, an apparent delivery advantage of a context
-   layer is mostly two omitted data semantics, confirmed outside the
-   inspection set. It cautions anyone comparing context layers with
-   documentation, including DABStep leaderboard claims.
-2. **A knowledge-equal protocol.** The hollow control, facts as identical
-   notes, and the same text by two routes, read as conditional contrasts
-   and not an additive decomposition. It is applied on two benchmarks; on
-   LiveSQLBench, the route ties.
-3. **Benchmark findings.**
+   layer is mostly two omitted data semantics. It is supported by a
+   six-model knowledge control (26 to 50 points) and a held-out lift, on
+   luna and Qwen. A DABStep comparison of context layers should check
+   whether each layer states these two semantics.
+2. **A knowledge-equal protocol.** It combines the hollow control, facts
+   as identical notes, and the same knowledge by two routes, read as
+   conditional contrasts and not an additive decomposition. On DABStep all
+   three parts were applied; on the constructed questions, notes and
+   routes; on LiveSQLBench, routes.
+3. **Benchmark properties.**
    - DABStep's manual omits both semantics.
    - Its scorer ignores sign.
-   - The reconstructed golds, against the official grader, run 3.0 to 5.7
-     points lenient.
-   - LiveSQLBench's grader strips `DISTINCT`.
-   - LiveSQLBench's KB, by gold-aware raters, leaves 132 of 302 tasks open.
-4. **The artifact.** Harness, contracts, predictions, rows, and the
-   transcripts on Zenodo. Its limits are stated: the LiveSQLBench
-   transcripts are not released, and 208 DABStep rows have no transcript.
+   - By gold-aware model raters, LiveSQLBench's KB leaves 132 of 302
+     primary tasks open (112 to 146 across rater pairings).
+   - LiveSQLBench's grader strips `DISTINCT`. Each arm moves by under 2
+     points and no outcome changes; it is documented as a property.
+4. **The artifact:**
+   - the harness, the contracts and the result rows;
+   - 53 earlier predictions plus 4 for experiment 5d, each fixed in a
+     commit before its run, with one timing exception, and 20 of the 53
+     failed;
+   - the transcripts on Zenodo.
 
-Authoring, scale and cost, and governance are secondary analyses, not
-contributions.
+   Its limits: the LiveSQLBench transcripts are not released, and 208 rows
+   of the constructed-question runs (`exp4-sol-r3` and three `exp6` runs)
+   have no transcript.
 
-**Not claimed.** The paper does not claim:
-- that contracts beat documentation retrieval;
-- that the findings hold beyond the fee-rule procedure;
+The gold reconstruction's validation is method, in section 4, not a
+benchmark finding. Its leniency is 3.0 to 5.7 points on GLM's two submitted
+arms on the hard split. The official grader confirms the contract-versus-
+manual contrast for GLM: +33.1 points, 137 tasks to 12. Authoring, scale
+and cost, and governance are secondary analyses.
+
+## Not claimed
+
+The paper does not claim:
+- that contracts beat documentation retrieval: no retrieval arm was run;
+- that DABStep's two-fact attribution and its delivery effects generalise
+  to other procedures. The LiveSQLBench knowledge gains and the
+  constructed-question results are separate evidence;
 - that the scale result tests context rot;
-- that any delivery effect is bounded;
+- that any delivery effect is bounded, or that delivery never affects
+  accuracy: (27) held, and 5d is pending;
 - that what a layer can add is bounded by what the documentation and data
-  determine.
+  determine;
+- that the summing convention is recoverable from the documentation or the
+  data;
+- that the two-fact and knowledge-equal results hold on sol or on the
+  single-run models;
+- that any reported tie is an equivalence, except (37);
+- that the model-rated labels (rule-matching, determinacy, load) match human
+  judgement;
+- that the absolute accuracies compare with the official leaderboard: the
+  golds are reconstructed;
+- that stated rules cause the absence of mutations, or that enforcement was
+  tested;
+- that the consultation log certifies provenance or correctness;
+- that another system's reported gain, such as the 72 points, is
+  attributable to these two semantics;
+- that retrieval is needed whenever a contract does not fit: a prose KB of
+  the same knowledge can;
+- that the hollow step shows tools are worthless: empty tools can mislead.
 
-## Experiment 5d (added; decided 2026-10-23)
+## Experiment 5d (running; decided 2026-10-23)
 
 - **What it adds.** `contract_noted` is the governed contract plus the two
   notes, in identical words, after its prompt. It runs together with
   `contract` and `contract_text_noted` on luna and Qwen, k=3, at about $15.
-- **Registered predictions.** (41) and (41Q) are a route tie against
-  `contract_text_noted`; (42Q) is the notes lifting Qwen's governed arm;
-  (42) is a luna tie with `contract`. They are fixed in FINDINGS and in
-  `analysis/governed_noted.py`, at run commit 9cb3643 (tag `exp5d-run`).
-- **What it answers.** Review A's Q4: whether Qwen's +10.1 lookup advantage
-  survives once the facts are stated alike. It is the paper's only
-  comparison that holds the facts equal and varies only the route.
+- **Registered predictions** (41), (41Q), (42) and (42Q). They are fixed in
+  FINDINGS and in `analysis/governed_noted.py`, at run commit 9cb3643 (tag
+  `exp5d-run`).
+- **What it measures.** Whether governed delivery of the rest of the
+  contract adds to, or subtracts from, the same contract pasted as text,
+  once the deciding facts are stated plainly in both prompts.
+- **How the result reads:**
+  - a "tie" is non-rejection;
+  - failing with the governed arm ahead is a route effect under clarified
+    wording;
+  - neither outcome by itself proves that the earlier +10.1 was "the
+    wording".
+- **Analysis to add before reading the rows:** shape-clustered intervals
+  beside the sign tests.
 
 ## Decisions
 
 1. **No sol co-run.** Completing the 2x2 on gpt-6-sol, about $170-210, is
-   not run. The reason is budget and scope: the paper's claims stop at the
-   models the comparisons ran on. That was not the reason given in
-   revision 1. Its arguments ("a tie is likely"; "it touches no
-   verdict-driving weakness") were wrong, as all three round-2 reviewers
-   said.
-   - Every knowledge-equal delivery claim says "on luna and Qwen" up to
-     the abstract.
-   - Sol's evidence is the panel, the hollow ablation and the one-fact
-     result, in its own rows.
-   - Table 5 (the ladder) shows co-run blocks per model. The route
-     comparison gets its own small table.
+   not run, for budget and scope. Revision 1's reasons were wrong, as round
+   2 said.
+   - Every claim about DABStep's two-fact attribution and its form and route
+     contrasts names "luna and Qwen", up to the abstract.
+   - Sol's evidence stays in its own rows: the panel, the hollow ablation,
+     the one-fact result with its subset split, and the constructed and
+     scale experiments.
+   - Table 5 (the ladder) shows co-run blocks per model; the route
+     comparisons get their own small table.
 2. **The preprint.** The paper stands on its own:
    - no correction note, and no "an earlier version";
    - the extended version is the new arXiv version built from `main.tex`;
-   - the PVLDB argument must not need it;
-   - appendix J is reworded as the single-run models' analysis, with no
-     history.
-3. **Small effects.** The form and route effects are reported with a
-   sensitivity analysis under exact-match scoring (`analysis/leniency.py`'s
-   flag): the effect recomputed with every lenient-only "correct" counted
-   wrong. Appendix C's transfer estimator is no longer used as a bound on
-   later experiments.
+   - the PVLDB argument does not need it;
+   - appendix J is reworded as the single-run models' analysis.
+
+   The arXiv comments field of the new version states that it supersedes
+   v1's claims. That is metadata, not paper text.
+3. **Small effects.** The form and route effects are reported with an
+   exact-match sensitivity. For Qwen it is reported separately for the
+   full message and for the recovered final paragraph, so that leniency is
+   not mixed with final-paragraph recovery. Appendix C's transfer estimator
+   is no longer a bound on later experiments.
 
 ## Claims, before and after
 
 | Now | After |
 |---|---|
-| "determinability as the bound on what any layer or author can add" (contribution 3, and section 7's bold claims, its "has nothing to hold there" and "no author can recover the gold's choice", and the conclusion) | Removed as a contribution. A rated benchmark property (132 of 302, gold-aware raters), plus "no detectable gain from the authors we tried on 55 tasks". No bound wording anywhere. |
+| "determinability as the bound on what any layer or author can add" (contribution 3, section 7's bold claims, "has nothing to hold there", "no author can recover the gold's choice", the conclusion) | Removed. A rated benchmark property with its range, the 60/14 split with its confound, and "no detectable gain from the authors we tried on 55 tasks" |
 | "the tools alone are worth -9 to +15" | "the empty scaffolding is worth -9 to +15 (at most +0.2 on the repeated panels)" |
-| "The contract beats the manual by 20 to 23" | "on the two repeated panels" (13.7 to 44.6 on the single runs; 42.9 on luna's hard tasks) |
-| "recover most of the gap" | "on luna and Qwen"; on sol, one fact, 77% |
-| "165 tasks nobody inspected" | "165 rule-matching tasks outside the transcript-inspection set" |
-| Representation "about 4 to 6 points" | A package effect, provisional; the luna held-out caveat; the other 202 tasks' values |
-| Lookups "help on some fee families"; Qwen +10.1 | Experiment 5d's facts-alike route test; the +10.1 labelled as against the original wording |
-| "a few points", "0 to 10", "an order smaller" | "of either sign, by model and task family"; no bound |
-| "with 53 predictions committed before the results they predict" | "later experiments fixed 53 numbered predictions before their runs; the repeated panels fixed none; one subgroup plan followed aggregate results" |
+| "The contract beats the manual by 20 to 23" | "by 19.9 and 22.7/23.2 hard-task points on the two repeated panels, and 42.9 on luna" |
+| "recover most of the gap" | "most on luna; on Qwen all of it with final-paragraph recovery, while on the official view the contract keeps 6 points on the rule-matching tasks; on sol only one fact, 77% over all tasks and 8% on the rule-matching ones" |
+| "165 tasks nobody inspected" | "the second fact's lift on the 165 rule-matching tasks outside the transcript-inspection set" |
+| Representation "about 4 to 6 points" | "the contract's text leads on the rule-matching tasks, +3.7 and +5.5; a package; provisional" with the caveats of storyline item 5 |
+| Lookups "help on some fee families"; Qwen +10.1 | "a registered, knowledge-equal route effect under the original wording"; experiment 5d reported beside it |
+| "a few points", "0 to 10", "an order smaller", "small", "of either sign" | "form positive on the rule-matching tasks; the other contrasts unresolved and model- and task-dependent" |
+| "ties" (LiveSQLBench, (29), 5d) | "no detectable difference" with the counts; "equivalent" only for (37) |
+| "with 53 predictions committed before the results they predict" | "53 earlier predictions and 4 for experiment 5d were fixed in commits before their runs; one, (6), followed two repeats' totals; the repeated panels fixed none" |
 | 29 held | "23 directional, 6 non-rejected ties, 1 equivalence, 3 partial, 20 failed"; (32) also fails under the 9-of-15 ruling |
 | "end-to-end" view | "official plus final-paragraph recovery", defined where it is first used |
 | "Do not expect a format, a retrieval loop or a stronger model to supply..." | "Delivery does not establish which undocumented convention is intended" |
-| "past about twice that, look definitions up" | The sampled levels (1x cheaper as a prompt, 2x and 4x cheaper as lookup on the GPT models), the pricing, and the prose-arm comparison |
-| "Runs that state the rules do not write" | "No observed persistent mutation where the rules were stated"; confounded; 44 of the 50 are Qwen's |
+| "past about twice that, look definitions up" | The sampled levels, the pricing, and the YAML-versus-prose comparators |
+| "and runs where the prompt no longer fits" | "where pasting the YAML no longer fits; the prose KB of the same knowledge still fits" |
+| "Runs that state the rules do not write" | "No observed persistent mutation where the rules were stated", with the counts; confounded |
 | "records which knowledge each answer used", "traces a wrong answer to the entry behind it" | "a consultation log and a syntactic inclusion check" (sections 1, 8 and 10) |
-| "a convention only when the gold uses the default idiom" (abstract, section 7.4, conclusion) | Removed. Data inspection grounds encodings; no session recovered a pure convention; the original contract's summing is not credited to inspection |
-| "a contract four times a database's size costs the prompt no accuracy" | "pasting a KB padded to four times its size, about 92k tokens, cost no accuracy on 60 near-ceiling questions" |
-| "90% of the way from the first compile" | Defined in place as (Opus - Sonnet) / (original - Sonnet), in the same luna run: 47.3 to 76.6 against 80.0 |
+| "a convention only when the gold uses the default idiom" | Removed; see storyline item 6 |
+| "a contract four times a database's size costs the prompt no accuracy" | "pasting the contract's YAML at 4x, about 92k tokens, met the registered 5-point equivalence margin (3 of 540 runs lost)" |
+| "90% of the way from the first compile" | "(Opus - Sonnet) / (original - Sonnet) = 90%, in the same luna run: 47.3 to 76.6 against 80.0; compiler and joins together" |
 | "The natural reading, and the one an earlier version gave" | State the delivery hypothesis and test it |
-| Provenance threat | The independent compile emitted one row per matching pair but left the aggregation open; the robust claim is "the manual omits these semantics and they matter" |
-| "A compiler that checks its definitions against the data adds what the data settles"; "large and certain" | Scoped to one compiler on DABStep; "large and consistent across the six models" |
-| "selection does not inflate it overall"; the held-out set "understates" it | Report the exclusion rule and the third-repeat check, with no guarantee language |
-| Title "...in Text-to-SQL Agents" | Open decision 1 |
+| Provenance threat | As in storyline item 6 |
+| "A compiler that checks its definitions against the data adds what the data settles"; "large and certain" | Scoped to one compiler on DABStep; "large, on all six models, and robust to clustering" |
+| "selection does not inflate it overall"; the held-out set "understates" it | The exclusion rule and its mechanism (it removes tasks the comparator failed twice), plus the third-repeat check (+20.6) |
+| "6 of 6 settled gaps, 6 of 9 split" | "draws", with the gap counts (two settled, three split, one convention) |
+| "the reconstructed golds run 3.0-5.7 points lenient" as a benchmark finding | Method validation in section 4, scoped to GLM's two submitted arms; the +33.1 official contrast beside it |
 
 ## PVLDB outline (12 pages)
 
-The page estimates are rounded. Now 12.2 (the build ends on page 12); the
-target is 11.9, which leaves 0.1 for slack. The added material is counted.
+Pages are rounded. The build now ends on page 12 (12.2 estimated); the
+target is 11.9.
 
 | § | Content | Now -> target |
 |---|---|---|
-| 1 Intro | The with/without problem; the fee example as data semantics; the finding; the protocol; secondary results in one paragraph; contributions as above; the practitioner bullets reworded. The three-part bundle (what bought the 72 points) becomes two parts, knowledge and delivery | 1.3 -> 1.2 |
-| 2 Background | Trimmed. Retrieval positioned: we attribute content and compare two routes, we do not rank against documentation retrieval. CHESS's component split; Buneman et al. on provenance versus a consultation log | 1.0 -> 0.8 |
-| 3 Instrument | Contract, tools, hollow contract. The authoring paths go to section 7, in 3 sentences | 1.2 -> 0.8 |
-| 4 Design | Benchmarks. The gold reconstruction, its official-grader check and the contract timeline (09:56 / 10:34 / 11:37). The 199-task rule-matching subset: the raters, and that it was chosen after (18) failed. One merged arm-and-experiment table, in place of tables 1 and 2. Models. Registration facts as in the claims table. Scoring views defined. Clustering primary over question shapes | 2.7 -> 2.2 |
-| 5 The finding | The panel gap; fact one; fact two with the held-out set (from section 6) | 0.6 -> 1.3 |
-| 6 Delivery at equal knowledge | Form (provisional, with the sensitivity); route (experiment 5d); the LiveSQLBench prompt-versus-tools tie; the co-run ladder table per model | 1.6 -> 1.5 |
-| 7 The knowledge, and where it comes from | The hollow ablation (from section 5); data inspection: compile and gaps; LiveSQLBench determinacy as a benchmark property; the author result in 2 sentences, the oracle in 1 | 1.7 -> 1.8 |
-| 8 Operational trade-offs | Cost and scale with the prose arm and the regime; the consultation log; governance in one paragraph | 1.0 -> 0.9 |
+| 1 Intro | The with/without problem; the fee example as data semantics; the control and the finding; the protocol; one paragraph of secondary results; the contributions; the practitioner bullets | 1.3 -> 1.2 |
+| 2 Background | Trimmed. Retrieval positioned: we attribute content and compare routes, we do not rank against documentation retrieval. CHESS's component split. Buneman et al. on provenance versus a consultation log | 1.0 -> 0.8 |
+| 3 Instrument | Contract, tools, hollow contract. The authoring paths move to section 7, in 3 sentences | 1.2 -> 0.8 |
+| 4 Design | Benchmarks. The gold reconstruction with its official-grader check (+33.1 for GLM) and leniency (3.0 to 5.7). The contract timeline (09:56 / 10:34 / 11:37). The 199-task rule-matching subset: its raters, and that it was chosen after (18) failed. One merged arm-and-experiment table. Models. Registration. Scoring views defined. Clustering over question shapes is primary | 2.7 -> 2.2 |
+| 5 Knowledge and the two semantics | The hollow control; the panel gaps; fact one, with sol's subset split; fact two; (29Q); the held-out lift | 0.6 -> 1.4 |
+| 6 Delivery at equal knowledge | Form with its caveats and sensitivity; route (experiment 5, experiment 5d, 4b, LiveSQLBench); the co-run ladder per model | 1.6 -> 1.5 |
+| 7 Where the knowledge comes from | Data inspection (compile, gaps); provenance; LiveSQLBench determinacy with its range and split; better authors; oracle; constructed-procedure sufficiency in 1 sentence | 1.7 -> 1.7 |
+| 8 Operational trade-offs | Cost and capacity against both comparators, the regime, the consultation log, the governance counts | 1.0 -> 0.9 |
 | 9 Threats | Adds, from extended-only: selection, ceilings, provenance, ties, scoring views, model raters | 0.8 -> 1.1 |
 | 10 Conclusion | | 0.3 -> 0.3 |
 
 To the extended version only, with one sentence each in PVLDB:
-- **5.3, the pre-computed layer.** It is a coverage diagnostic, so PVLDB
-  makes no comparative claim about executable semantic layers.
-- **6.5, the constructed procedures.** One sentence: near ceiling, so they
-  test neither form nor procedure type. The subset definition moves to
-  section 4.
-- **The LiveSQLBench oracle.** One sentence, with no conditional claim.
-- **The scale engineering.** The regime conditions stay in section 8.
+- **5.3, the pre-computed layer.** A coverage diagnostic; PVLDB makes no
+  comparative claim about executable semantic layers.
+- **The details of 6.5.** The subset definition moves to section 4, and
+  the sufficiency sentence to section 7.
+- **The oracle details.** Section 7 keeps the result and its interval.
+- **The scale engineering.** Section 8 keeps the regime conditions.
 
-## Abstract (draft, to be finished after experiment 5d)
+## Abstract (draft; the 5d clause is a placeholder)
 
-> Context layers, curated documentation an analytics agent consults at
-> query time, are credited with large accuracy gains, but a with/without
-> comparison confounds what the layer documents with how it delivers it.
-> We hold one fixed while varying the other, using a data contract that can
-> be emptied, pasted or looked up. On DABStep, most of the contract's
-> 20-point lead over the pasted manual is two pieces of data semantics the
-> manual omits: an empty list that means "all", and fees that add up when
-> several rules match. Stated in prose, they recover most of the lead on
-> two models, also on tasks outside the inspected set. With the facts held
-> equal, representation and route move accuracy by a few points either way,
-> depending on model and task, and on LiveSQLBench the route ties. Looking
-> definitions up keeps working past the context window and logs what was
-> consulted. Knowing the semantics, not delivering them, is what the
-> measured gain bought.
+> Context-layer evaluations compare an analytics agent with and without
+> curated documentation, which confounds what the layer documents with how
+> it delivers it. We vary one with the other held fixed, using a data
+> contract that can be emptied, pasted into the prompt or looked up. On
+> DABStep, emptying the contract while keeping its tools costs 26 to 50
+> hard-task points on six models. Its lead over the pasted manual, 20 to 43
+> points, is mostly two data semantics the manual omits: an empty list that
+> means "all", and fees that add up when several rules match. Stated in
+> prose, they recover most of the lead on GPT-6 luna and all of it on Qwen
+> 3.8; the second lifts accuracy by 19 and 34 points on tasks outside the
+> inspected set. With the facts equal, the contract's representation still
+> leads on rule-matching tasks (+3.7 and +5.5, provisional), and
+> [experiment 5d]. On LiveSQLBench the route makes no detectable difference.
+> Lookup also works where pasting the contract would not fit, and logs what
+> was consulted.
 
-The draft is about 150 words. The route clause changes with experiment 5d.
+About 160 words. "All of it on Qwen" is with final-paragraph recovery;
+section 5 gives the official view, where the contract keeps 6 points on
+the rule-matching tasks. If that reads as too strong for an abstract, use
+"most of it on both".
 
 ## Open decisions
 
 1. **The title.** The current title is "Which Part of the Context Layer
-   Does the Work?", and the "...in Text-to-SQL Agents" part generalises
-   (review B). Options:
-   - keep it and scope it in the abstract;
-   - "Missing Semantics or Better Delivery? Attributing Context-Layer Gains
-     in a Text-to-SQL Benchmark" (gpt-6.1-sol's suggestion).
-
-   This is the author's call.
+   Does the Work?". The reviewers disagree. Two would scope it, for example
+   "Missing Semantics or Better Delivery? Attributing Context-Layer Gains in
+   a Text-to-SQL Benchmark". One says the claims carry the scope and the
+   title can stay. This is the author's call.
 
 ## Order of work
 
-1. Experiment 5d runs; the analysis and FINDINGS follow.
-2. The exact-match sensitivity for the form and route effects.
-3. The claims table, applied across sections 1 and 5 to 10, appendices C, I
-   and J, the captions and the figure labels.
-4. The restructure: section 4 (gold, timeline, subset, registration,
-   merged table), the new section 5, sections 6 and 7, and the moves.
-5. Abstract and intro last.
-6. Both builds, the PVLDB content ending by page 12. Every number touched is
-   checked against FINDINGS or the rows, and every remaining pointer to the
-   extended version is checked for a missing premise.
-7. A review round, then copy edits; the AI disclosure goes in then.
+1. Add the shape-clustered intervals to `analysis/governed_noted.py`
+   before reading the 5d rows.
+2. Experiment 5d completes; copy down, verify, commit; analysis and
+   FINDINGS. Fill the abstract's and thesis's 5d clause from what it shows.
+3. The exact-match sensitivity for form and route, both Qwen variants.
+4. The claims table applied across sections 1 and 5 to 10, appendices C,
+   I, J and K, the captions and the figure labels.
+5. The restructure:
+   - section 4: gold, timeline, subset, registration, the merged table;
+   - section 5, new;
+   - sections 6 and 7;
+   - the moves.
+6. Abstract and intro last.
+7. Both builds, the PVLDB content ending by page 12.
+   - Check every number touched against FINDINGS or the rows.
+   - Check every remaining pointer to the extended version for a missing
+     premise.
+8. A review round on the paper, then copy edits; the AI disclosure goes in
+   then.

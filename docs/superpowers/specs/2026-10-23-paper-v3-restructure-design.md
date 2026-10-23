@@ -429,13 +429,15 @@ section 5 gives the official view, where the contract keeps 6 points on
 the rule-matching tasks. If that reads as too strong for an abstract, use
 "most of it on both".
 
-## Open decisions
+## Decided: the title (2026-10-23)
 
-1. **The title.** The current title is "Which Part of the Context Layer
-   Does the Work?". The reviewers disagree. Two would scope it, for example
-   "Missing Semantics or Better Delivery? Attributing Context-Layer Gains in
-   a Text-to-SQL Benchmark". One says the claims carry the scope and the
-   title can stay. This is the author's call.
+The title is narrowed slightly: "Which Part of the Context Layer Does the
+Work? Separating Data Semantics from Delivery on Two Text-to-SQL
+Benchmarks". The question stays, since it is also the preprint's title.
+The subtitle names the paper's framing (data semantics) and its scope (two
+benchmarks, not text-to-SQL agents in general). Both builds use it. The
+`extended` entry in refs.bib keeps the v1 title until the new arXiv version
+is posted.
 
 ## Order of work
 

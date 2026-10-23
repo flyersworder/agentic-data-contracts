@@ -31,9 +31,11 @@ scripts, the blind ratings, the run commits and the raw result rows are
 tracked at \url{https://github.com/flyersworder/agentic-data-contracts}.
 Every row records its commit, contract digest, gold-set hash, scorer,
 model, endpoint, token counts, cost and a post-run integrity check of its
-database copy. The transcripts of every DABStep and constructed-question
-run are attached to the releases tagged \texttt{dabstep-eval-2026-09}
-and \texttt{dabstep-eval-2026-10}, with SHA-256 digests. LiveSQLBench's
+database copy. The transcripts of the DABStep and constructed-question
+runs are attached to the releases tagged \texttt{dabstep-eval-2026-09}
+and \texttt{dabstep-eval-2026-10}, with SHA-256 digests; 208 of the later
+runs' 57{,}834 rows have none, because a pod restart lost the transcripts
+written before it, and the release lists them. LiveSQLBench's
 private gold, test cases and task mapping are not redistributed, nor are
 its transcripts, since one graded correct is a solution the benchmark
 keeps private; its rows carry a hash of the gold result, and the analyses

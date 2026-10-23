@@ -349,73 +349,52 @@ def _one_repeat(rows: list[dict]) -> dict[str, Counter[str]]:
     return score
 
 
-def two_facts(clusterings: dict[str, dict[str, str]]) -> None:
+def two_facts_contrasts(
+    model: str, rated: set[str], clusterings: dict[str, dict[str, str]]
+) -> tuple[int, int, list[tuple[str, dict]]]:
+    """Experiments 5 and 5c on one model, with `rated` as the rule-matching
+    set: the rule-matching and other counts, and each labelled contrast."""
     import contract_noted as cn
     import contract_text as ct
     import heldout_note as hn
 
     luna5 = hn.RUNS["gpt-6-luna"]["exp5"]
+    label28, label30 = {"luna": ("(28)", "(30)"), "qwen": ("(28Q)", "(30Q)")}[model]
+    s5 = ct.scores(model)
+    s5c = cn.scores(ROOT / "results", cn.FILES[model], cn.ARMS)
+    tasks = set(s5["contract"])
+    rm = rated & tasks
+    rest = tasks - rm
+    seen = hn.inspected(hn._rows(luna5, 1), hn._rows(luna5, 2), among=rm)
+    rows = (
+        (f"{label28} manual_summed vs manual_resolved", s5, "manual_summed",
+         "manual_resolved", rm),
+        ("(29) contract_text vs manual_summed", s5, "contract_text",
+         "manual_summed", rm),
+        (f"{label30} contract_text_noted vs manual_summed", s5c,
+         "contract_text_noted", "manual_summed", rm),
+        (f"{label30} on the {len(rm - seen)} never read", s5c,
+         "contract_text_noted", "manual_summed", rm - seen),
+        ("tools: contract vs contract_text, rule-matching", s5, "contract",
+         "contract_text", rm),
+        ("tools: contract vs contract_text, other", s5, "contract",
+         "contract_text", rest),
+    )  # fmt: skip
+    out = [
+        (label, contrast(score[a], score[b], among, runs=3, clusterings=clusterings))
+        for label, score, a, b, among in rows
+    ]
+    return len(rm), len(rest), out
+
+
+def two_facts(clusterings: dict[str, dict[str, str]]) -> None:
     rated = _rule_matching()
     print("== the two facts (experiments 5, 5b, 5c), end-to-end strict")
-    for model, label28, label30 in (
-        ("luna", "(28)", "(30)"),
-        ("qwen", "(28Q)", "(30Q)"),
-    ):
-        s5 = ct.scores(model)
-        s5c = cn.scores(ROOT / "results", cn.FILES[model], cn.ARMS)
-        tasks = set(s5["contract"])
-        rm = rated & tasks
-        rest = tasks - rm
-        seen = hn.inspected(hn._rows(luna5, 1), hn._rows(luna5, 2), among=rm)
-        print(f"-- {model}: {len(rm)} rule-matching, {len(rest)} other")
-        for label, score, a, b, among in (
-            (
-                f"{label28} manual_summed vs manual_resolved",
-                s5,
-                "manual_summed",
-                "manual_resolved",
-                rm,
-            ),
-            (
-                "(29) contract_text vs manual_summed",
-                s5,
-                "contract_text",
-                "manual_summed",
-                rm,
-            ),
-            (
-                f"{label30} contract_text_noted vs manual_summed",
-                s5c,
-                "contract_text_noted",
-                "manual_summed",
-                rm,
-            ),
-            (
-                f"{label30} on the {len(rm - seen)} never read",
-                s5c,
-                "contract_text_noted",
-                "manual_summed",
-                rm - seen,
-            ),
-            (
-                "tools: contract vs contract_text, rule-matching",
-                s5,
-                "contract",
-                "contract_text",
-                rm,
-            ),
-            (
-                "tools: contract vs contract_text, other",
-                s5,
-                "contract",
-                "contract_text",
-                rest,
-            ),
-        ):
-            report(
-                label,
-                contrast(score[a], score[b], among, runs=3, clusterings=clusterings),
-            )
+    for model in ("luna", "qwen"):
+        n_rm, n_rest, contrasts = two_facts_contrasts(model, rated, clusterings)
+        print(f"-- {model}: {n_rm} rule-matching, {n_rest} other")
+        for label, r in contrasts:
+            report(label, r)
     selection(clusterings, rated)
 
 
@@ -572,6 +551,44 @@ def _gains_report(label: str, r: dict, groups: tuple[str, ...], cluster: str) ->
     )
 
 
+def determinacy_gains(
+    first: Mapping[str, dict],
+    second: Mapping[str, dict],
+    score: Mapping[str, Mapping[str, Mapping[str, int]]],
+    db_of: Mapping[str, str],
+) -> list[tuple[str, dict, tuple[str, ...], str]]:
+    """The knowledge arms' gain over schema_only by determinacy group, for two
+    raters' determinacy labels: (label, gains, groups, interval unit)."""
+    import lsb_kb_clarity as kb
+
+    rated = sorted(set(first) & set(second) & set(db_of))
+    know = {
+        t: sum(score[m][a][t] for m in kb.MAIN_RUNS for a in kb.KNOWLEDGE_ARMS) / 18
+        for t in rated
+    }
+    base = {t: sum(score[m]["schema_only"][t] for m in kb.MAIN_RUNS) / 6 for t in rated}
+    two = ("determined", "undetermined")
+    three = ("determined", "split", "undetermined")
+    consensus = {t: kb.consensus(first[t], second[t]) for t in rated}
+    out = []
+    for label, group, groups in (
+        ("consensus, split dropped", consensus, two),
+        ("consensus, split as the middle group", consensus, three),
+        ("first rater alone", {t: two[not kb.settled(first[t])] for t in rated}, two),
+        ("second rater alone", {t: two[not kb.settled(second[t])] for t in rated}, two),
+    ):
+        for cluster, cluster_of in (("task", None), ("database", db_of)):
+            out.append(
+                (
+                    label,
+                    _group_gains(rated, group, know, base, cluster_of, groups),
+                    groups,
+                    cluster,
+                )
+            )
+    return out
+
+
 def livesqlbench() -> None:
     import lsb_corrected as lc
     import lsb_kb_clarity as kb
@@ -595,32 +612,12 @@ def livesqlbench() -> None:
         )
 
     first, second = kb.all_ratings()
-    rated = sorted(set(first) & set(second) & set(tasks))
-    know = {
-        t: sum(score[m][a][t] for m in kb.MAIN_RUNS for a in kb.KNOWLEDGE_ARMS) / 18
-        for t in rated
-    }
-    base = {t: sum(score[m]["schema_only"][t] for m in kb.MAIN_RUNS) / 6 for t in rated}
     print(
         "-- determinacy: the knowledge arms (both models, 18 runs a task) "
         "against schema_only (6)"
     )
-    two = ("determined", "undetermined")
-    three = ("determined", "split", "undetermined")
-    consensus = {t: kb.consensus(first[t], second[t]) for t in rated}
-    for label, group, groups in (
-        ("consensus, split dropped", consensus, two),
-        ("consensus, split as the middle group", consensus, three),
-        ("first rater alone", {t: two[not kb.settled(first[t])] for t in rated}, two),
-        ("second rater alone", {t: two[not kb.settled(second[t])] for t in rated}, two),
-    ):
-        for cluster, cluster_of in (("task", None), ("database", db_of)):
-            _gains_report(
-                label,
-                _group_gains(rated, group, know, base, cluster_of, groups),
-                groups,
-                cluster,
-            )
+    for label, r, groups, cluster in determinacy_gains(first, second, score, db_of):
+        _gains_report(label, r, groups, cluster)
 
     print("-- experiment 2 (55 tasks, 3 databases), gpt-6-luna")
     exp = sa.EXPERIMENTS["livesqlbench"]

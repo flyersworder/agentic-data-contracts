@@ -15,10 +15,12 @@ HERE = Path(__file__).resolve().parents[1] / "prep" / "cross-family-ratings"
 
 
 def _load(name: str):
-    spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
+    # A distinct module name: prep/procedures4b has its own `rate`.
+    qualified = f"cross_family_{name}"
+    spec = importlib.util.spec_from_file_location(qualified, HERE / f"{name}.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module  # dataclasses look their module up here
+    sys.modules[qualified] = module  # dataclasses look their module up here
     spec.loader.exec_module(module)
     return module
 
